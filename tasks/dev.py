@@ -54,7 +54,7 @@ def bootstrap(context: Context, api_url: str = "http://localhost:8000/graphql") 
                 "ingress_class": "traefik",
                 "dedicated_ingress": {"implementation": "traefik", "type": "ingress"},
                 "runtime_class": "default",
-                "standard_storage": {"storage_class": "standard"},
+                "standard_storage": {"storage_class": "local-path"},
             },
         },
     )

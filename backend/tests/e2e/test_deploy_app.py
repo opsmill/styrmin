@@ -15,9 +15,9 @@ from tests.e2e.conftest import (
 async def test_deploy_simple_app(
     styrmin_resources: dict,
     deployed_simple_app: dict,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> None:
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
     namespace = deployed_simple_app["namespace"]
 
     # Find the simple-app service via kr8s
@@ -63,14 +63,14 @@ async def test_upgrade_simple_app(
     styrmin_resources: dict,
     deployed_simple_app: dict,
     simple_app_image_v2: str,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> None:
     from styrmin_sdk import StyrminClient
     from styrmin_sdk.exceptions import StyrminError
 
     client: StyrminClient = styrmin_resources["client"]
     deployment_id = deployed_simple_app["deployment_id"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
     namespace = deployed_simple_app["namespace"]
 
     # Trigger upgrade to version 0.2.0

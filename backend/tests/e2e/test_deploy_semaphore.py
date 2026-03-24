@@ -12,9 +12,9 @@ from tests.e2e.conftest import (
 async def test_deploy_semaphore(
     load_semaphore: dict,
     deployed_semaphore: dict,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> None:
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
     namespace = deployed_semaphore["namespace"]
 
     # Find the semaphore service via kr8s

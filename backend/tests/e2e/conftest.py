@@ -125,13 +125,13 @@ def _dump_namespace_logs(kubeconfig: str, namespace: str) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _dump_k8s_logs_on_failure(request, kind_cluster):
+def _dump_k8s_logs_on_failure(request, vcluster):
     yield
     rep_call = getattr(request.node, "rep_call", None)
     if rep_call is None or not rep_call.failed:
         return
 
-    kubeconfig = kind_cluster["kubeconfig_path"]
+    kubeconfig = vcluster["kubeconfig_path"]
 
     # Discover all namespaces starting with "styrmin"
     ns_result = subprocess.run(
@@ -147,46 +147,6 @@ def _dump_k8s_logs_on_failure(request, kind_cluster):
 
     for namespace in sorted(namespaces):
         _dump_namespace_logs(kubeconfig, namespace)
-
-
-# External images required by the Styrmin helm chart and its subcharts.
-# Pre-pulling and loading these avoids re-downloading on every test run.
-STYRMIN_DEPENDENCY_IMAGES = [
-    "busybox:1.36",  # task-worker init container
-    "bitnamilegacy/postgresql:17.6.0-debian-12-r4",  # main database
-    "prefecthq/prefect:3.6.13-python3.11",  # Prefect server
-    "prefecthq/prefect:3.6.13-python3.11-kubernetes",  # Prefect worker (agent)
-    "fluxcd/helm-controller:v1.1.0",  # agent subchart
-    "fluxcd/source-controller:v1.4.0",  # agent subchart
-    "minio/minio:RELEASE.2025-09-07T16-13-09Z",  # MinIO for Velero storage
-    "velero/velero:v1.15.2",  # Velero backup controller
-    "bitnamilegacy/kubectl:1.33",  # Required by Velero CRD installer
-    "velero/velero-plugin-for-aws:v1.11.1",  # Velero AWS/S3 plugin
-    "velero/velero-restore-helper:v1.15.2",  # Velero restore helper
-    # db-test images (Bitnami subcharts)
-    "bitnami/mariadb:latest",  # MariaDB for db-test driver
-    "bitnami/mongodb:latest",  # MongoDB for db-test driver
-    # Semaphore images
-    "semaphoreui/semaphore:v2.16.47",  # Semaphore UI
-    "traefik:v3.0.1",  # Traefik ingress controller for dedicated ingress
-    # Infrahub images
-    "registry.opsmill.io/opsmill/infrahub-enterprise:1.6.0",  # Infrahub
-    "neo4j:2025.03.0",
-    "bitnamilegacy/postgresql:14.13.0",
-    "bitnamilegacy/rabbitmq:3.13.3-debian-12-r0",
-    "bitnamilegacy/redis:7.2.5-debian-12-r0",
-]
-
-
-def _get_docker_platform() -> str:
-    """Get the Docker daemon's OS/Arch (e.g. ``linux/amd64``)."""
-    result = subprocess.run(
-        ["docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
 
 
 async def _wait_for_service_ready(
@@ -247,44 +207,19 @@ async def _wait_for_http(
 
 
 # ---------------------------------------------------------------------------
-# Fixture: cloud_provider_kind (T033)
-# ---------------------------------------------------------------------------
-@pytest.fixture(scope="session")
-def cloud_provider_kind(kind_cluster: dict):
-    """Start cloud-provider-kind for LoadBalancer support in Kind.
-
-    Runs the process for the duration of the session and terminates on teardown.
-    """
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
-    env = {**os.environ, "KUBECONFIG": kubeconfig_path}
-    proc = subprocess.Popen(
-        ["cloud-provider-kind"],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    # Give it a moment to start
-    time.sleep(2)
-    yield proc
-    proc.terminate()
-    proc.wait(timeout=10)
-
-
-# ---------------------------------------------------------------------------
 # Fixture: chart_server
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
 async def chart_server(
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> AsyncGenerator[str, None]:
-    """Build and deploy a Helm chart HTTP server in the kind cluster.
+    """Build and deploy a Helm chart HTTP server in the vcluster.
 
     Packages the simple-app helm chart and serves it via HTTP with an
     ``index.yaml`` so that Flux CD can fetch it as a standard Helm repository.
     """
-    cluster_name = kind_cluster["cluster_name"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
-    api: kubeclient.ApiClient = kind_cluster["api"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    api: kubeclient.ApiClient = vcluster["api"]
 
     # Build chart-server Docker image (context is PROJECT_ROOT for COPY paths)
     subprocess.run(
@@ -296,19 +231,6 @@ async def chart_server(
             "-f",
             str(FIXTURES_DIR / "chart-server" / "Dockerfile"),
             str(PROJECT_ROOT),
-        ],
-        check=True,
-    )
-
-    # Load image into kind cluster
-    subprocess.run(
-        [
-            "kind",
-            "load",
-            "docker-image",
-            "chart-server:latest",
-            "--name",
-            cluster_name,
         ],
         check=True,
     )
@@ -347,13 +269,12 @@ async def chart_server(
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
 async def git_server(
-    kind_cluster: dict,
+    vcluster: dict,
     tmp_path_factory: pytest.TempPathFactory,
     chart_server: str,
 ) -> AsyncGenerator[dict[str, str], None]:
-    cluster_name = kind_cluster["cluster_name"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
-    api: kubeclient.ApiClient = kind_cluster["api"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    api: kubeclient.ApiClient = vcluster["api"]
 
     # Build git-daemon Docker image
     subprocess.run(
@@ -363,19 +284,6 @@ async def git_server(
             "-t",
             "git-daemon:latest",
             str(FIXTURES_DIR / "git-server"),
-        ],
-        check=True,
-    )
-
-    # Load image into kind cluster
-    subprocess.run(
-        [
-            "kind",
-            "load",
-            "docker-image",
-            "git-daemon:latest",
-            "--name",
-            cluster_name,
         ],
         check=True,
     )
@@ -471,64 +379,19 @@ async def git_server(
 
 
 # ---------------------------------------------------------------------------
-# Fixture: styrmin_images
-# ---------------------------------------------------------------------------
-@pytest.fixture(scope="session")
-def styrmin_images(kind_cluster: dict) -> None:
-    """Pull all external dependency images and load them into the kind cluster.
-
-    Uses ``docker save --platform | kind load image-archive`` instead of
-    ``kind load docker-image`` to work around issues with the containerd
-    image storage backend.
-    """
-    cluster_name = kind_cluster["cluster_name"]
-
-    for image in STYRMIN_DEPENDENCY_IMAGES:
-        subprocess.run(["docker", "pull", image], check=True)
-        save_proc = subprocess.Popen(
-            ["docker", "save", "--platform", _get_docker_platform(), image],
-            stdout=subprocess.PIPE,
-        )
-        subprocess.run(
-            ["kind", "load", "image-archive", "--name", cluster_name, "/dev/stdin"],
-            stdin=save_proc.stdout,
-            check=True,
-        )
-        save_proc.wait()
-        if save_proc.returncode != 0:
-            msg = f"docker save failed for {image}"
-            raise RuntimeError(msg)
-
-
-# ---------------------------------------------------------------------------
 # Fixture: styrmin_deployment
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
 async def styrmin_deployment(
-    kind_cluster: dict,
-    styrmin_images: None,
+    vcluster: dict,
 ) -> AsyncGenerator[str, None]:
-    cluster_name = kind_cluster["cluster_name"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
-    api: kubeclient.ApiClient = kind_cluster["api"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    api: kubeclient.ApiClient = vcluster["api"]
 
     # Build styrmin image via docker compose
     subprocess.run(
         ["docker", "compose", "build"],
         cwd=str(PROJECT_ROOT),
-        check=True,
-    )
-
-    # Load styrmin image into kind
-    subprocess.run(
-        [
-            "kind",
-            "load",
-            "docker-image",
-            "styrmin:latest",
-            "--name",
-            cluster_name,
-        ],
         check=True,
     )
 
@@ -631,7 +494,7 @@ async def styrmin_resources(
                     "type": "ingress",
                 },
                 "runtime_class": "default",
-                "standard_storage": {"storage_class": "standard"},
+                "standard_storage": {"storage_class": "local-path"},
             },
         )
 
@@ -675,9 +538,7 @@ async def styrmin_resources(
 # Fixture: simple_app_image
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
-def simple_app_image(kind_cluster: dict) -> str:
-    cluster_name = kind_cluster["cluster_name"]
-
+def simple_app_image() -> str:
     # Build simple-app Docker image
     subprocess.run(
         [
@@ -699,19 +560,6 @@ def simple_app_image(kind_cluster: dict) -> str:
         check=True,
     )
 
-    # Load into kind cluster
-    subprocess.run(
-        [
-            "kind",
-            "load",
-            "docker-image",
-            "simple-app:0.1.0",
-            "--name",
-            cluster_name,
-        ],
-        check=True,
-    )
-
     return "simple-app:0.1.0"
 
 
@@ -719,9 +567,7 @@ def simple_app_image(kind_cluster: dict) -> str:
 # Fixture: simple_app_image_v2
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
-def simple_app_image_v2(kind_cluster: dict) -> str:
-    cluster_name = kind_cluster["cluster_name"]
-
+def simple_app_image_v2() -> str:
     # Build simple-app Docker image for version 0.2.0
     subprocess.run(
         [
@@ -745,19 +591,6 @@ def simple_app_image_v2(kind_cluster: dict) -> str:
         check=True,
     )
 
-    # Load into kind cluster
-    subprocess.run(
-        [
-            "kind",
-            "load",
-            "docker-image",
-            "simple-app:0.2.0",
-            "--name",
-            cluster_name,
-        ],
-        check=True,
-    )
-
     return "simple-app:0.2.0"
 
 
@@ -767,10 +600,10 @@ def simple_app_image_v2(kind_cluster: dict) -> str:
 @pytest.fixture(scope="session")
 async def velero_ready(
     styrmin_deployment: str,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> None:
     """Wait for Velero deployment + Node Agent DaemonSet to be ready."""
-    api: kubeclient.ApiClient = kind_cluster["api"]
+    api: kubeclient.ApiClient = vcluster["api"]
     core_api = kubeclient.CoreV1Api(api)
 
     # Wait for Velero server pod to be ready
@@ -791,7 +624,7 @@ async def velero_ready(
 async def deployed_simple_app(
     styrmin_resources: dict,
     simple_app_image: str,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> dict:
     """Deploy simple-app and return deployment info for reuse by tests."""
     from styrmin_sdk import StyrminClient
@@ -799,7 +632,7 @@ async def deployed_simple_app(
 
     client: StyrminClient = styrmin_resources["client"]
     environment_id = styrmin_resources["environment_id"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Deploy the simple-app
     task = await client.deployments.create(
@@ -865,14 +698,14 @@ async def load_infrahub(
 @pytest.fixture(scope="session")
 async def deployed_infrahub_app(
     load_infrahub: dict,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> dict:
     """Deploy infrahub and return deployment info for reuse by tests."""
     from styrmin_sdk.exceptions import StyrminError
 
     client: StyrminClient = load_infrahub["client"]
     environment_id = load_infrahub["environment_id"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     task = await client.deployments.create(
         driver="infrahub", version="1.6.0", environment_id=environment_id
@@ -934,14 +767,14 @@ async def load_semaphore(
 @pytest.fixture(scope="session")
 async def deployed_semaphore(
     load_semaphore: dict,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> dict:
     """Deploy Semaphore and return deployment info for reuse by tests."""
     from styrmin_sdk.exceptions import StyrminError
 
     client: StyrminClient = load_semaphore["client"]
     environment_id = load_semaphore["environment_id"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     task = await client.deployments.create(
         name="semaphore",
@@ -984,9 +817,7 @@ async def deployed_semaphore(
 # Fixture: db_test_image
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
-def db_test_image(kind_cluster: dict) -> str:
-    cluster_name = kind_cluster["cluster_name"]
-
+def db_test_image() -> str:
     # Build db-test Docker image
     subprocess.run(
         [
@@ -999,19 +830,6 @@ def db_test_image(kind_cluster: dict) -> str:
                 PROJECT_ROOT / "driver" / "examples" / "db-test" / "src" / "Dockerfile"
             ),
             str(PROJECT_ROOT / "driver" / "examples" / "db-test" / "src"),
-        ],
-        check=True,
-    )
-
-    # Load into kind cluster
-    subprocess.run(
-        [
-            "kind",
-            "load",
-            "docker-image",
-            "db-test:0.1.0",
-            "--name",
-            cluster_name,
         ],
         check=True,
     )
@@ -1046,14 +864,14 @@ async def load_db_test(
 async def deployed_db_test(
     load_db_test: dict,
     db_test_image: str,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> dict:
     """Deploy db-test and return deployment info for reuse by tests."""
     from styrmin_sdk.exceptions import StyrminError
 
     client: StyrminClient = load_db_test["client"]
     environment_id = load_db_test["environment_id"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     task = await client.deployments.create(
         driver="db-test", version="0.1.0", environment_id=environment_id

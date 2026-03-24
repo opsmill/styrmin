@@ -120,13 +120,13 @@ async def test_backup_and_restore_lifecycle(
     styrmin_resources: dict,
     velero_ready: None,
     deployed_simple_app: dict,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> None:
     """Full lifecycle: write data -> backup -> modify -> restore -> verify."""
     client: StyrminClient = styrmin_resources["client"]
     instance_id = deployed_simple_app["instance_id"]
     namespace = deployed_simple_app["namespace"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     assert instance_id is not None, "Deployment should have an instance_id"
 
@@ -214,13 +214,13 @@ async def test_infrahub_backup_and_restore_lifecycle(
     load_infrahub: dict,
     velero_ready: None,
     deployed_infrahub_app: dict,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> None:
     """Full lifecycle: create data -> backup -> modify -> restore -> verify (Infrahub)."""
     client: StyrminClient = load_infrahub["client"]
     instance_id = deployed_infrahub_app["instance_id"]
     namespace = deployed_infrahub_app["namespace"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     assert instance_id is not None, "Deployment should have an instance_id"
 

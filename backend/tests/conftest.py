@@ -115,32 +115,31 @@ async def fake_kubernetes(
 
 
 @pytest.fixture(scope="session")
-async def kind_cluster(
+async def vcluster(
     request: pytest.FixtureRequest, tmp_path_factory
 ) -> AsyncGenerator[dict, None]:
-    """Create a Kind cluster and yield connection details."""
-    kubeconfig_path = str(tmp_path_factory.mktemp("kind") / "kubeconfig")
+    """Create a vCluster (vind) cluster and yield connection details."""
+    kubeconfig_path = str(tmp_path_factory.mktemp("vcluster") / "kubeconfig")
     cluster_name = f"pytest-{uuid.uuid4()}"
 
     def teardown():
-        subprocess.run(
-            ["kind", "delete", "cluster", "--name", cluster_name], check=True
-        )
+        subprocess.run(["vcluster", "delete", cluster_name], check=True)
 
     request.addfinalizer(teardown)
 
     subprocess.run(
-        [
-            "kind",
-            "create",
-            "cluster",
-            "--kubeconfig",
-            kubeconfig_path,
-            "--name",
-            cluster_name,
-        ],
+        ["vcluster", "create", cluster_name, "--connect=false"],
         check=True,
     )
+
+    # Export kubeconfig from vcluster
+    result = subprocess.run(
+        ["vcluster", "connect", cluster_name, "--print"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    Path(kubeconfig_path).write_text(result.stdout)
 
     await kubeconfig.load_kube_config(config_file=kubeconfig_path)
     async with kubeclient.ApiClient() as api:
@@ -153,9 +152,9 @@ async def kind_cluster(
 
 @pytest.fixture(scope="session")
 async def real_kubernetes(
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> AsyncGenerator[kubeclient.ApiClient, None]:
-    api: kubeclient.ApiClient = kind_cluster["api"]
+    api: kubeclient.ApiClient = vcluster["api"]
 
     await load_crds_from_path(
         kubernetes=api,

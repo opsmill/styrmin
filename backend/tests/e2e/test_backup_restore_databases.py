@@ -61,13 +61,13 @@ async def test_mariadb_mongodb_backup_and_restore_lifecycle(
     load_db_test: dict,
     velero_ready: None,
     deployed_db_test: dict,
-    kind_cluster: dict,
+    vcluster: dict,
 ) -> None:
     """Full lifecycle: write data -> backup -> modify -> restore -> verify for MariaDB + MongoDB."""
     client: StyrminClient = load_db_test["client"]
     instance_id = deployed_db_test["instance_id"]
     namespace = deployed_db_test["namespace"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     assert instance_id is not None, "Deployment should have an instance_id"
 
