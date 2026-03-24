@@ -18,7 +18,7 @@ spec:
       containers:
         - name: chart-server
           image: chart-server:latest
-          imagePullPolicy: Never
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
               protocol: TCP

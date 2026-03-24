@@ -24,14 +24,13 @@ from kr8s.asyncio.objects import Service as AsyncService
 async def test_deploy_with_dedicated_ingress(
     styrmin_resources: dict,
     simple_app_image: str,
-    cloud_provider_kind,
-    kind_cluster: dict,
+    vcluster: dict,
 ):
     """T035: With dedicated_ingress, Traefik pod runs, app uses annotation-based routing
     (not ingressClassName), and the internal ingress deployment is NOT visible via SDK."""
     client: StyrminClient = styrmin_resources["client"]
     environment_id = styrmin_resources["environment_id"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Deploy simple-app
     task = await client.deployments.create(
@@ -94,12 +93,11 @@ async def test_deploy_with_dedicated_ingress(
 async def test_deploy_without_dedicated_ingress(
     styrmin_resources: dict,
     simple_app_image: str,
-    cloud_provider_kind,
-    kind_cluster: dict,
+    vcluster: dict,
 ):
     """T036: Without dedicated_ingress, no Traefik controller is deployed."""
     client: StyrminClient = styrmin_resources["client"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Create a cluster and environment WITHOUT dedicated_ingress
     cluster = await client.clusters.create(
@@ -155,13 +153,12 @@ async def test_deploy_without_dedicated_ingress(
 async def test_second_app_reuses_ingress_controller(
     styrmin_resources: dict,
     simple_app_image: str,
-    cloud_provider_kind,
-    kind_cluster: dict,
+    vcluster: dict,
 ):
     """T037: Second app in the same environment reuses the existing ingress controller."""
     client: StyrminClient = styrmin_resources["client"]
     environment_id = styrmin_resources["environment_id"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Count Traefik pods before deploying second app
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
@@ -218,13 +215,12 @@ async def test_second_app_reuses_ingress_controller(
 async def test_traffic_routes_through_dedicated_ingress(
     styrmin_resources: dict,
     deployed_simple_app: dict,
-    cloud_provider_kind,
-    kind_cluster: dict,
+    vcluster: dict,
 ):
     """T038: Send HTTP request through Traefik LB and verify 200 response."""
     import httpx
 
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Get the Traefik service external IP (provisioned by cloud-provider-kind)
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
@@ -268,19 +264,18 @@ async def test_traffic_routes_through_dedicated_ingress(
             assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
         except httpx.ConnectError:
             pytest.skip(
-                "Could not connect to Traefik LB — cloud-provider-kind may not be available"
+                "Could not connect to Traefik LB — LoadBalancer may not be available"
             )
 
 
 async def test_toggle_dedicated_ingress_on_off(
     styrmin_resources: dict,
     simple_app_image: str,
-    cloud_provider_kind,
-    kind_cluster: dict,
+    vcluster: dict,
 ):
     """T038a: Enable dedicated_ingress, deploy, then disable — verify provisioning and deprovisioning."""
     client: StyrminClient = styrmin_resources["client"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Create a fresh cluster with dedicated_ingress
     cluster = await client.clusters.create(

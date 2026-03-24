@@ -272,17 +272,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - uses: helm/kind-action@v1
-        with:
-          install_only: true
+      - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
+      - name: Set vCluster Docker driver
+        run: vcluster use driver docker
       - uses: azure/setup-helm@v4
       - uses: azure/setup-kubectl@v4
-      - name: Install cloud-provider-kind
-        run: |
-          curl -Lo cloud-provider-kind.tar.gz https://github.com/kubernetes-sigs/cloud-provider-kind/releases/download/v0.10.0/cloud-provider-kind_0.10.0_linux_amd64.tar.gz
-          tar xf cloud-provider-kind.tar.gz
-          mv cloud-provider-kind /usr/local/bin/
-          rm cloud-provider-kind.tar.gz
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync --all-packages

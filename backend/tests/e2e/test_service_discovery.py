@@ -20,15 +20,14 @@ from tests.e2e.conftest import _wait_for_http
 async def test_service_discovery_between_apps(
     styrmin_resources: dict,  # type: ignore[type-arg]
     simple_app_image: str,
-    cloud_provider_kind,
-    kind_cluster: dict,  # type: ignore[type-arg]
+    vcluster: dict,  # type: ignore[type-arg]
 ) -> None:
     """Deploy two simple-app instances and verify they can discover each other via DNS."""
     from styrmin_sdk import StyrminClient
 
     client: StyrminClient = styrmin_resources["client"]
     environment_id = styrmin_resources["environment_id"]
-    kubeconfig_path = kind_cluster["kubeconfig_path"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Deploy first instance with service name override "intent"
     intent_task = await client.deployments.create(

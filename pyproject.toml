@@ -294,6 +294,6 @@ filterwarnings = [
     "ignore:Can't sort tables for DROP.*:sqlalchemy.exc.SAWarning",
 ]
 markers = [
-    "e2e: end-to-end tests requiring a Kind cluster and external dependencies",
+    "e2e: end-to-end tests requiring a vCluster and external dependencies",
     "ci: e2e tests included in the CI pipeline",
 ]

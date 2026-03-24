@@ -6,7 +6,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 
-KIND_CLUSTER_NAME = "styrmin"
+VCLUSTER_NAME = "styrmin"
 KUBERNETES_ROOT_NAMESPACE = "styrmin"
 MAIN_DIRECTORY_PATH = Path(__file__).parent.parent
 TASKS_DIRECTORY_PATH = Path(__file__).parent
