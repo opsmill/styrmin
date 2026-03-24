@@ -1,0 +1,49 @@
+meta {
+  name: Deploy simple-app
+  type: graphql
+  seq: 9
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  mutation Deploy(
+    $version: String!
+    $name: String!
+    $environmentId: UUID!
+    $config: JSON
+  ) {
+    deploy(
+      version: $version
+      name: $name
+      environmentId: $environmentId
+      config: $config
+    ) {
+      id
+      type
+      status
+      message
+      deploymentId
+    }
+  }
+
+}
+
+body:graphql:vars {
+  {
+    "name": "simple-app",
+    "version": "0.1.0",
+    "environmentId": "{{environment_id}}",
+    "config": {
+      "version": "latest"
+    }
+  }
+}
+
+vars:post-response {
+  deployment_id: res.body.data.deploy.deploymentId
+}

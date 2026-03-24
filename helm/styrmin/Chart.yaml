@@ -1,0 +1,43 @@
+apiVersion: v2
+name: styrmin
+description: Helm chart for Styrmin deployment orchestration platform
+
+# Application chart for deploying Styrmin with all its components
+type: application
+
+# Chart version - increment on changes to chart/templates
+version: 0.1.0
+
+# Application version being deployed
+appVersion: "0.1.0"
+
+keywords:
+  - styrmin
+  - deployment
+  - orchestration
+  - kubernetes
+  - prefect
+
+home: https://github.com/opsmill/styrmin
+
+maintainers:
+  - name: OpsMill
+    url: https://opsmill.io
+
+dependencies:
+  - name: postgresql
+    version: "16.7.27"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: prefect-server
+    version: "2026.1.23034724"
+    repository: "https://prefecthq.github.io/prefect-helm"
+    condition: prefect-server.enabled
+  - name: styrmin-agent
+    version: "0.1.0"
+    repository: "file://../agent"
+    condition: agent.enabled
+  - name: velero
+    version: "8.3.0"
+    repository: "https://vmware-tanzu.github.io/helm-charts"
+    condition: velero.enabled

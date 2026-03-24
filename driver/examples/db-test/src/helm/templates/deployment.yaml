@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "db-test.fullname" . }}
+  labels:
+    {{- include "db-test.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "db-test.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "db-test.labels" . | nindent 8 }}
+    spec:
+      initContainers:
+        - name: wait-for-mariadb
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -w 1 -z {{ include "db-test.mariadb.fullname" . }} 3306; do
+                echo "Waiting for MariaDB..."
+                sleep 2
+              done
+          securityContext:
+            runAsNonRoot: false
+        - name: wait-for-mongodb
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -w 1 -z {{ include "db-test.mongodb.fullname" . }} 27017; do
+                echo "Waiting for MongoDB..."
+                sleep 2
+              done
+          securityContext:
+            runAsNonRoot: false
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ include "db-test.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: MARIADB_HOST
+              value: {{ include "db-test.mariadb.fullname" . }}
+            - name: MARIADB_PORT
+              value: "3306"
+            - name: MARIADB_USER
+              value: {{ .Values.mariadb.auth.username | quote }}
+            - name: MARIADB_PASSWORD
+              value: {{ .Values.mariadb.auth.password | quote }}
+            - name: MARIADB_DATABASE
+              value: {{ .Values.mariadb.auth.database | quote }}
+            - name: MONGODB_URL
+              value: "mongodb://{{ .Values.mongodb.auth.rootUser }}:{{ .Values.mongodb.auth.rootPassword }}@{{ include "db-test.mongodb.fullname" . }}:27017/testdb?authSource=admin"
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

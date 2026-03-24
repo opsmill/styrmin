@@ -1,0 +1,23 @@
+---
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: infrahub
+  version: "0.1"
+spec:
+  info:
+    icon: xxxx
+    description: Next generation source of truth for infrastructure management
+    authors: [fatih, jeremy]
+    license: Apache-2.0
+    links:
+      - link: Homepage
+        url: 'https://www.opsmill.com/'
+      - link: Documentation
+        url: 'https://docs.infrahub.app'
+      - link: Github
+        url: 'https://github.com/opsmill/infrahub'
+  helm:
+    main:
+      location: oci://registry.opsmill.io/opsmill/chart/infrahub
+      version: 2.3.*

@@ -1,0 +1,20 @@
+[project]
+name = "styrmin-backend"
+version = "0.1.0"
+description = "Styrmin backend services and CLI"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+styrmin = "styrmin_backend.cli:app"
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/**.py" = [
+    "S101", # Use of assert detected
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["styrmin_backend"]
+namespaces = false  # to disable scanning PEP 420 namespaces (true by default)

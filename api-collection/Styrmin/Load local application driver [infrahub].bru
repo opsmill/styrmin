@@ -1,0 +1,54 @@
+meta {
+  name: Load local application driver [infrahub]
+  type: graphql
+  seq: 6
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  mutation LoadLocalApplicationDriverVersion($path: String!) {
+    loadLocalApplicationDriverVersion(path: $path) {
+      id
+      applicationDriverId
+      version
+      supportedVersions
+      sourceType
+      sourcePath
+      components
+      componentConfigs {
+        id
+        name
+        config
+      }
+      actions {
+        image
+        name
+        location
+      }
+      helmChart {
+        id
+        name
+        version
+        repository
+        valueTemplate
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {"path": "/styrmin/drivers/infrahub"}
+}
+
+vars:pre-request {
+  api_url: http://localhost:8000/graphql
+}
+
+vars:post-response {
+  application_id: res.body.data.loadLocalApplicationDriverVersion.id
+}

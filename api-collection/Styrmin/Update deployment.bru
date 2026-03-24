@@ -1,0 +1,44 @@
+meta {
+  name: Update deployment
+  type: graphql
+  seq: 6
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  mutation UpdateDeployment(
+    $deploymentId: UUID! 
+    $config: JSON!
+  ) {
+    updateDeployment(
+      deploymentId: $deploymentId
+      config: $config
+    ) {
+      id
+      type
+      status
+      message
+      deploymentId
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "deploymentId": "{{deployment_id}}",
+    "config": {
+      "fqdn_suffix": "updated.styrmin.com",
+      "ingress_class": "traefik",
+      "dedicated_ingress": "traefik",
+      "runtime_class": "test-updated",
+      "standard_storage": {
+        "storage_class": "standard"
+      }
+    }
+  }
+}

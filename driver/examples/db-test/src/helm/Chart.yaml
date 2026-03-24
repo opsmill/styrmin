@@ -1,0 +1,15 @@
+---
+apiVersion: v2
+name: db-test
+description: Test application with MariaDB and MongoDB for backup testing
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: mariadb
+    version: 25.0.5
+    repository: "https://charts.bitnami.com/bitnami"
+  - name: mongodb
+    version: 18.6.19
+    repository: "https://charts.bitnami.com/bitnami"

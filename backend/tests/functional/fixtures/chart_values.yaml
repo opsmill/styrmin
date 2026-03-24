@@ -1,0 +1,400 @@
+    fullnameOverride: cloud
+    global:
+      imagePullPolicy: Always
+      infrahubRepository: opsmill/infrahub-enterprise
+      infrahubTag: 1.1.4
+    infrahubDemoData:
+      enabled: false
+    infrahubGit:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                opsmill.io/managed: "true"
+            topologyKey: kubernetes.io/hostname
+      infrahubGit:
+        env:
+          INFRAHUB_BROKER_ADDRESS: cloud-message-queue
+          INFRAHUB_BROKER_DRIVER: rabbitmq
+          INFRAHUB_BROKER_PORT: 5672
+          INFRAHUB_CACHE_ADDRESS: cloud-cache-master
+          INFRAHUB_CACHE_DRIVER: redis
+          INFRAHUB_CACHE_PORT: 6379
+          INFRAHUB_DB_ADDRESS: cloud-neo4j
+          INFRAHUB_TIMEOUT: 60
+          INFRAHUB_TRACE_ENABLE: false
+          INFRAHUB_TRACE_EXPORTER_ENDPOINT: https://tracing-prod.tailc018d.ts.net/grpc_traces
+          INFRAHUB_TRACE_EXPORTER_TYPE: otlp
+          INFRAHUB_TRACE_INSECURE: false
+          OTEL_RESOURCE_ATTRIBUTES: infrahub.deployment_id=preview-stable
+        securityContext:
+          allowPrivilegeEscalation: false
+      persistence:
+        accessMode: ReadWriteOnce
+        enabled: true
+        storageClassName: standard
+      podAnnotations:
+        backup.velero.io/backup-volumes: git-data
+      podSecurityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      replicas: "1"
+      tolerations:
+      - effect: NoExecute
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+        tolerationSeconds: 60
+      - effect: NoExecute
+        key: node.kubernetes.io/unreachable
+        operator: Exists
+        tolerationSeconds: 60
+    infrahubServer:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                opsmill.io/managed: "true"
+            topologyKey: kubernetes.io/hostname
+      infrahubServer:
+        args:
+        - gunicorn
+        - --config
+        - /source/community/backend/infrahub/serve/gunicorn_config.py
+        - -w
+        - "4"
+        - --forwarded-allow-ips
+        - '*'
+        - --logger-class
+        - infrahub.serve.log.GunicornLogger
+        - infrahub_enterprise.server:app
+        env:
+          INFRAHUB_BROKER_ADDRESS: cloud-message-queue
+          INFRAHUB_BROKER_DRIVER: rabbitmq
+          INFRAHUB_BROKER_PORT: 5672
+          INFRAHUB_CACHE_ADDRESS: cloud-cache-master
+          INFRAHUB_CACHE_DRIVER: redis
+          INFRAHUB_CACHE_PORT: 6379
+          INFRAHUB_DB_ADDRESS: cloud-neo4j
+          INFRAHUB_TRACE_ENABLE: false
+          INFRAHUB_TRACE_EXPORTER_ENDPOINT: https://tracing-prod.tailc018d.ts.net/grpc_traces
+          INFRAHUB_TRACE_EXPORTER_TYPE: otlp
+          INFRAHUB_TRACE_INSECURE: false
+          INFRAHUB_WORKFLOW_DEFAULT_WORKER_TYPE: infrahubentasync
+          OTEL_RESOURCE_ATTRIBUTES: infrahub.deployment_id=preview-stable
+          PREFECT_API_URL: http://cloud-task-manager:4200/api
+        securityContext:
+          allowPrivilegeEscalation: false
+      ingress:
+        annotations:
+          external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+          external-dns.alpha.kubernetes.io/hostname: cloud-1807cb0e-de70-8959-1362-c51a15753541-infrahub.infrahub.live
+          kubernetes.io/ingress.class: traefik
+          tailscale.com/tags: tag:k8s-prod-infrahub-preview
+          traefik.ingress.kubernetes.io/router.entrypoints: websecure
+          traefik.ingress.kubernetes.io/router.middlewares: cloud-1807cb0e-de70-8959-1362-c51a15753541-acl@kubernetescrd
+        enabled: true
+        extraHosts:
+        - hostname: demo.infrahub.app
+        extraTls:
+        - hosts:
+          - cloud-1807cb0e-de70-8959-1362-c51a15753541-infrahub.infrahub.live
+          - demo.infrahub.app
+        hostname: cloud-1807cb0e-de70-8959-1362-c51a15753541-infrahub.infrahub.live
+      persistence:
+        accessMode: ReadWriteOnce
+        enabled: true
+        storageClassName: standard
+      podAnnotations:
+        backup.velero.io/backup-volumes: infrahub-server-storage-data
+      podSecurityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      replicas: "1"
+      tolerations:
+      - effect: NoExecute
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+        tolerationSeconds: 60
+      - effect: NoExecute
+        key: node.kubernetes.io/unreachable
+        operator: Exists
+        tolerationSeconds: 60
+    infrahubTaskWorker:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                opsmill.io/managed: "true"
+            topologyKey: kubernetes.io/hostname
+      infrahubTaskWorker:
+        args:
+        - prefect
+        - worker
+        - start
+        - --type
+        - infrahubentasync
+        - --pool
+        - infrahub-worker
+        - --with-healthcheck
+        env:
+          INFRAHUB_API_TOKEN: 1808d2da-777e-7296-d0ed-c5191bad67f3
+          INFRAHUB_BROKER_ADDRESS: cloud-message-queue
+          INFRAHUB_BROKER_DRIVER: rabbitmq
+          INFRAHUB_BROKER_PORT: 5672
+          INFRAHUB_CACHE_ADDRESS: cloud-cache-master
+          INFRAHUB_CACHE_DRIVER: redis
+          INFRAHUB_CACHE_PORT: 6379
+          INFRAHUB_DB_ADDRESS: cloud-neo4j
+          INFRAHUB_TIMEOUT: 60
+          INFRAHUB_TRACE_ENABLE: false
+          INFRAHUB_TRACE_EXPORTER_ENDPOINT: https://tracing-prod.tailc018d.ts.net/grpc_traces
+          INFRAHUB_TRACE_EXPORTER_TYPE: otlp
+          INFRAHUB_TRACE_INSECURE: false
+          OTEL_RESOURCE_ATTRIBUTES: infrahub.deployment_id=preview-stable
+          PREFECT_API_URL: http://cloud-task-manager:4200/api
+        securityContext:
+          allowPrivilegeEscalation: false
+      persistence:
+        accessMode: ReadWriteOnce
+        enabled: true
+        storageClassName: standard
+      podAnnotations:
+        backup.velero.io/backup-volumes: git-data
+      podSecurityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      replicas: "1"
+      tolerations:
+      - effect: NoExecute
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+        tolerationSeconds: 60
+      - effect: NoExecute
+        key: node.kubernetes.io/unreachable
+        operator: Exists
+        tolerationSeconds: 60
+    nats:
+      enabled: false
+    neo4j:
+      additionalVolumeMounts:
+      - mountPath: /velero
+        name: velero
+      additionalVolumes:
+      - emptyDir:
+          sizeLimit: 1Gi
+        name: velero
+      config:
+        server.backup.enabled: "true"
+      disableLookups: true
+      fullnameOverride: cloud-neo4j
+      image:
+        customImage: neo4j:5.20.0-enterprise
+      neo4j:
+        acceptLicenseAgreement: "yes"
+        edition: enterprise
+        labels:
+          opsmill.io/managed: "true"
+        resources:
+          limits:
+            cpu: 1024
+            memory: 1Ti
+      podSpec:
+        annotations:
+          backup.velero.io/backup-volumes: velero
+          pre.hook.backup.velero.io/command: '["/bin/bash", "-c", "rm -rf /velero/*
+            && neo4j-admin database backup --type FULL --to-path /velero/ neo4j"]'
+          pre.hook.backup.velero.io/timeout: 30m
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                opsmill.io/managed: "true"
+            namespaceSelector: {}
+            topologyKey: kubernetes.io/hostname
+        terminationGracePeriodSeconds: 90
+        tolerations:
+        - effect: NoExecute
+          key: node.kubernetes.io/not-ready
+          operator: Exists
+          tolerationSeconds: 60
+        - effect: NoExecute
+          key: node.kubernetes.io/unreachable
+          operator: Exists
+          tolerationSeconds: 60
+        - effect: NoSchedule
+          key: sandbox.gke.io/runtime
+          operator: Equal
+          value: gvisor
+      services:
+        admin:
+          enabled: true
+      volumes:
+        data:
+          dynamic:
+            requests:
+              storage: 500Gi
+            storageClassName: standard
+          mode: dynamic
+    nfs-server-provisioner:
+      enabled: false
+    prefect-server:
+      enabled: true
+      fullnameOverride: cloud-task-manager
+      postgresql:
+        architecture: standalone
+        auth:
+          database: prefect
+          password: prefect-opsmill
+          username: prefect
+        commonLabels:
+          opsmill.io/db: "true"
+        enabled: true
+        fullnameOverride: cloud-postgresql
+        image:
+          tag: 14.13.0
+        primary:
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    opsmill.io/managed: "true"
+                topologyKey: kubernetes.io/hostname
+          extraVolumeMounts:
+          - mountPath: /velero
+            name: velero
+          extraVolumes:
+          - emptyDir:
+              sizeLimit: 1Gi
+            name: velero
+          persistence:
+            enabled: true
+            storageClass: standard
+          podAnnotations:
+            backup.velero.io/backup-volumes: velero
+            pre.hook.backup.velero.io/command: '["/bin/bash", "-c", "PGPASSWORD=$POSTGRES_PASSWORD
+              pg_dump -U prefect -d prefect -h 127.0.0.1 > /velero/backup.sql"]'
+            pre.hook.backup.velero.io/timeout: 30m
+          resources:
+            limits:
+              cpu: 1024
+              memory: 1Ti
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          tolerations:
+          - effect: NoExecute
+            key: node.kubernetes.io/not-ready
+            operator: Exists
+            tolerationSeconds: 60
+          - effect: NoExecute
+            key: node.kubernetes.io/unreachable
+            operator: Exists
+            tolerationSeconds: 60
+          - effect: NoSchedule
+            key: sandbox.gke.io/runtime
+            operator: Equal
+            value: gvisor
+      server:
+        affinity:
+          podAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  opsmill.io/managed: "true"
+              topologyKey: kubernetes.io/hostname
+        env:
+        - name: PREFECT_SERVER_ANALYTICS_ENABLED
+          value: "false"
+        resources:
+          limits:
+            cpu: "1024"
+            memory: 1Ti
+          requests:
+            cpu: 500m
+            memory: 512Mi
+        tolerations:
+        - effect: NoExecute
+          key: node.kubernetes.io/not-ready
+          operator: Exists
+          tolerationSeconds: 60
+        - effect: NoExecute
+          key: node.kubernetes.io/unreachable
+          operator: Exists
+          tolerationSeconds: 60
+        - effect: NoSchedule
+          key: sandbox.gke.io/runtime
+          operator: Equal
+          value: gvisor
+    rabbitmq:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                opsmill.io/managed: "true"
+            topologyKey: kubernetes.io/hostname
+      enabled: true
+      fullnameOverride: cloud-message-queue
+      resources:
+        limits:
+          cpu: 1024
+          memory: 1Ti
+        requests:
+          cpu: 100m
+          memory: 512Mi
+      startupProbe:
+        enabled: true
+      tolerations:
+      - effect: NoExecute
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+        tolerationSeconds: 60
+      - effect: NoExecute
+        key: node.kubernetes.io/unreachable
+        operator: Exists
+        tolerationSeconds: 60
+      - effect: NoSchedule
+        key: sandbox.gke.io/runtime
+        operator: Equal
+        value: gvisor
+    redis:
+      enabled: true
+      fullnameOverride: cloud-cache
+      master:
+        affinity:
+          podAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  opsmill.io/managed: "true"
+              topologyKey: kubernetes.io/hostname
+        resources:
+          limits:
+            cpu: 1024
+            memory: 1Ti
+          requests:
+            cpu: 100m
+            memory: 512Mi
+        tolerations:
+        - effect: NoExecute
+          key: node.kubernetes.io/not-ready
+          operator: Exists
+          tolerationSeconds: 60
+        - effect: NoExecute
+          key: node.kubernetes.io/unreachable
+          operator: Exists
+          tolerationSeconds: 60
+        - effect: NoSchedule
+          key: sandbox.gke.io/runtime
+          operator: Equal
+          value: gvisor

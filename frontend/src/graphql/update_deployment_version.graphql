@@ -1,0 +1,17 @@
+mutation UpdateDeploymentVersion(
+  $deploymentId: UUID!
+  $version: String!
+  $parameters: JSON
+) {
+  updateDeploymentVersion(
+    deploymentId: $deploymentId
+    version: $version
+    parameters: $parameters
+  ) {
+    id
+    type
+    status
+    message
+    deploymentId
+  }
+}

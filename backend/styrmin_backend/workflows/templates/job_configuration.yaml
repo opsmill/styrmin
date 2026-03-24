@@ -1,0 +1,31 @@
+---
+env: "{{ env }}"
+name: "{{ name }}"
+labels: "{{ labels }}"
+command: "{{ command }}"
+namespace: "{{ namespace }}"
+stream_output: "{{ stream_output }}"
+cluster_config: "{{ cluster_config }}"
+job_watch_timeout_seconds: "{{ job_watch_timeout_seconds }}"
+pod_watch_timeout_seconds: "{{ pod_watch_timeout_seconds }}"
+job_manifest:
+  apiVersion: batch/v1
+  kind: Job
+  metadata:
+    labels: "{{ labels }}"
+    namespace: "{{ namespace }}"
+    generateName: "{{ name }}-"
+  spec:
+    ttlSecondsAfterFinished: "{{ finished_job_ttl }}"
+    template:
+      spec:
+        parallelism: 1
+        completions: 1
+        restartPolicy: Never
+        serviceAccountName: "{{ service_account_name }}"
+        containers:
+          - name: prefect-job
+            env: "{{ env }}"
+            image: "{{ image }}"
+            imagePullPolicy: "{{ image_pull_policy }}"
+            args: "{{ command }}"

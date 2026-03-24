@@ -1,0 +1,20 @@
+---
+extends: default
+
+ignore: |
+  /.venv/
+  /node_modules/
+  /frontend/
+  /backend/tests/**/fixtures/
+  **/*.j2.yaml
+  /helm/**/*.yaml
+  /.claude/worktrees/
+  /driver/examples/simple-app/src/helm/
+  /driver/examples/db-test/src/helm/templates/
+
+
+rules:
+  line-length:
+    max: 200
+  truthy:
+    check-keys: false

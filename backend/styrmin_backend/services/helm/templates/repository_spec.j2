@@ -1,0 +1,8 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: {{ repository_reference }} # symbolic ref
+spec:
+  interval: 60m0s
+  type: {{ repository_type }}
+  url: {{ url }} # url of the helm repository

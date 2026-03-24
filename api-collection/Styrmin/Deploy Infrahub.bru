@@ -1,0 +1,55 @@
+meta {
+  name: Deploy Infrahub
+  type: graphql
+  seq: 8
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  mutation Deploy(
+    $version: String!
+    $name: String!
+    $environmentId: UUID!
+    $config: JSON
+  ) {
+    deploy(
+      version: $version
+      name: $name
+      environmentId: $environmentId
+      config: $config
+    ) {
+      id
+      type
+      status
+      message
+      deploymentId
+    }
+  }
+
+}
+
+body:graphql:vars {
+  {
+    "name": "infrahub",
+    "version": "1.7.3",
+    "environmentId": "{{environment_id}}",
+    "config": {
+      "fqdn_suffix": "styrmin.com",
+      "ingress_class": "traefik",
+      "dedicated_ingress": "traefik",
+      "runtime_class": "test",
+      "standard_storage": {
+        "storage_class": "standard"
+      }
+    }
+  }
+}
+
+vars:post-response {
+  deployment_id: res.body.data.deploy.deploymentId
+}

@@ -1,0 +1,87 @@
+meta {
+  name: Run Job
+  type: graphql
+  seq: 17
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  mutation RunJob(
+    $deploymentId: UUID!
+    $commands: [String!]!
+    $image: String!
+    $env: JSON!
+  ) {
+    runJob(
+      deploymentId: $deploymentId
+      commands: $commands
+      image: $image
+      env: $env
+    ) {
+      id
+      type
+      status
+      message
+      deploymentId
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "deploymentId": "{{deployment_id}}",
+    "commands": [
+      "echo",
+      "test"
+    ],
+    "image": "registry.opsmill.io/opsmill/infrahub-enterprise:1.2",
+    "env": [
+      {
+        "name": "INFRAHUB_DB_ADDRESS",
+        "value": "cloud-neo4j"
+      },
+      {
+        "name": "INFRAHUB_BROKER_ADDRESS",
+        "value": "cloud-message-queue"
+      },
+      {
+        "name": "INFRAHUB_CACHE_ADDRESS",
+        "value": "cloud-cache-master"
+      },
+      {
+        "name": "INFRAHUB_API_TOKEN",
+        "value": "06438eb2-8019-4776-878c-0941b1f1d1ec"
+      },
+      {
+        "name": "INFRAHUB_TIMEOUT",
+        "value": "20"
+      },
+      {
+        "name": "INFRAHUB_GIT_REPOSITORIES_DIRECTORY",
+        "value": "/opt/infrahub/git"
+      },
+      {
+        "name": "INFRAHUB_SCHEMA_STRICT_MODE",
+        "value": "false"
+      },
+      {
+        "name": "PREFECT_API_URL",
+        "value": "http://cloud-task-manager:4200/api"
+      },
+      {
+        "name": "PREFECT_API_DATABASE_CONNECTION_URL",
+        "valueFrom": {
+          "secretKeyRef": {
+            "key": "connection-string",
+            "name": "cloud-task-manager-postgresql-connection"
+          }
+        }
+      }
+    ]
+  }
+}

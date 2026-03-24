@@ -1,0 +1,19 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: {{ release_reference }} # symbolic ref
+spec:
+  interval: 1h
+  timeout: 5m
+  chartRef:
+    kind: HelmChart
+    name: {{ chart_reference }}
+    namespace: styrmin # TODO: replace with dynamic value
+  releaseName: {{ release_reference }}
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values: {{ chart_values }}

@@ -1,0 +1,11 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmChart
+metadata:
+  name: {{ chart_reference }}
+spec:
+  chart: {{ chart_name }}
+  interval: 60m0s
+  sourceRef:
+    kind: HelmRepository
+    name: {{ repository_reference }}
+  version: {{ chart_version }}

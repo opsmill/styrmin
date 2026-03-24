@@ -1,0 +1,25 @@
+query GetDeployment($deploymentId: UUID!) {
+  deployment(deploymentId: $deploymentId) {
+    id
+    name
+    status
+    config
+    parameters
+    applicationVersion
+    applicationDriverVersionId
+    environmentId
+    applicationInstance {
+      id
+      name
+      status
+      applicationVersion
+      applicationDriverVersionId
+      deploymentId
+    }
+    components {
+      id
+      name
+      enabled
+    }
+  }
+}

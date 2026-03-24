@@ -1,0 +1,10 @@
+mutation UnassignBackupStorageLocation($environmentId: UUID!) {
+  unassignBackupStorageLocation(environmentId: $environmentId) {
+    id
+    name
+    backupStorageLocation {
+      id
+      name
+    }
+  }
+}

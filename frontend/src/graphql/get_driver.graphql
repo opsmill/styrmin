@@ -1,0 +1,41 @@
+query GetDriver($applicationDriverId: UUID!) {
+  applicationDriver(applicationDriverId: $applicationDriverId) {
+    id
+    name
+    versions {
+      id
+      version
+      supportedVersions
+      sourceType
+      sourceRepository
+      sourceBranch
+      sourcePath
+      components
+      parameters {
+        name
+        label
+        kind
+        default
+        values
+      }
+      componentConfigs {
+        id
+        name
+        config
+      }
+      helmChart {
+        id
+        name
+        version
+        repository
+        valueTemplate
+      }
+      actions {
+        id
+        name
+        description
+        location
+      }
+    }
+  }
+}

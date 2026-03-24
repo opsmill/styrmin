@@ -1,0 +1,41 @@
+meta {
+  name: Get deployment
+  type: graphql
+  seq: 7
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  query GetDeployment($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+      id
+      name
+      status
+      config
+      applicationVersion
+      applicationDriverVersionId
+      environmentId
+      applicationInstance {
+        id
+        status
+      }
+      components {
+        id
+        name
+        enabled
+      }
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+    "deploymentId": "{{deployment_id}}"
+  }
+}

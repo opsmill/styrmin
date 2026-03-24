@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "styrmin.server.fullname" . }}
+  labels:
+    {{- include "styrmin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "styrmin.server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "styrmin.labels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "styrmin.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: styrmin-server
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "styrmin.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - styrmin
+            - server
+            - start
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "styrmin.configMapName" . }}
+          env:
+            # Database credentials
+            - name: STYRMIN_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "styrmin.secretName" . }}
+                  key: db-username
+            - name: STYRMIN_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "styrmin.secretName" . }}
+                  key: db-password
+            - name: STYRMIN_DB_URL
+              value: {{ include "styrmin.postgresql.url" . | quote }}
+            # Driver token
+            - name: STYRMIN_DRIVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "styrmin.secretName" . }}
+                  key: driver-token
+            # Agent source token
+            - name: STYRMIN_AGENT_SOURCE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "styrmin.secretName" . }}
+                  key: agent-source-token
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,55 @@
+fullnameOverride: "styrmin-traefik"
+instanceLabelOverride: "styrmin-traefik"
+image:
+  tag: v3.0.1
+ingressClass:
+  enabled: false
+  name: traefik
+  isDefaultClass: false
+globalArguments: "" # disable anonymous telemetry
+additionalArguments:
+  - "--providers.kubernetesingress.labelselector=styrmin/environment_id={{ labels.environment_id }}"
+rbac:
+  enabled: true
+  namespaced: false
+providers:
+  kubernetesIngress:
+    disableIngressClassLookup: true
+deployment:
+  replicas: 1
+  podLabels:
+    styrmin/role: ingress-controller
+#hostNetwork: true
+updateStrategy:
+  rollingUpdate:
+    maxUnavailable: 1
+#securityContext:
+#  allowPrivilegeEscalation: true
+#   capabilities:
+#     add:
+#       - NET_BIND_SERVICE
+#podSecurityContext:
+#  runAsUser: 0
+#  runAsGroup: 0
+#  runAsNonRoot: false
+service:
+{% if instance.config.dedicated_ingress.service.annotations is mapping %}
+  annotations:
+{% for key, value in instance.config.dedicated_ingress.service.annotations.items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
+{% endif %}
+  type: LoadBalancer
+{% if instance.config.dedicated_ingress.service.load_balancer_ip %}
+  loadBalancerIP: "{{ instance.config.dedicated_ingress.service.load_balancer_ip }}"
+{% endif %}
+{% if instance.config.dedicated_ingress.service.external_traffic_policy %}
+  externalTrafficPolicy: "{{ instance.config.dedicated_ingress.service.external_traffic_policy }}"
+{% endif %}
+#ports:
+#  websecure:
+#    forwardedHeaders:
+#      insecure: true
+#    port: 443
+#    containerPort: 443
+#    hostPort: 443

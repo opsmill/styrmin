@@ -1,0 +1,14 @@
+query ListBackups($instanceId: UUID!, $status: String) {
+    backups(instanceId: $instanceId, status: $status) {
+        id
+        name
+        status
+        instanceId
+        errorMessage
+        startedAt
+        completedAt
+        sizeBytes
+        createdOn
+        updatedOn
+    }
+}

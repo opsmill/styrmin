@@ -1,0 +1,31 @@
+meta {
+  name: Get tasks
+  type: graphql
+  seq: 13
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  query {
+    tasks {
+      id
+      type
+      status
+      message
+      deploymentId
+    }
+  }
+  
+  
+}
+
+body:graphql:vars {
+  {
+    "taskId": "{{task_id}}"
+  }
+}

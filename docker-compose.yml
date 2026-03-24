@@ -1,0 +1,113 @@
+---
+
+x-task-manager-config:
+  INFRAHUB_TASKMANAGER_DB_USER: ${INFRAHUB_TASKMANAGER_DB_USER:-postgres}
+  INFRAHUB_TASKMANAGER_DB_PASSWORD: ${INFRAHUB_TASKMANAGER_DB_PASSWORD:-postgres}
+  INFRAHUB_TASKMANAGER_DB_DATABASE: ${INFRAHUB_TASKMANAGER_DB_DATABASE:-prefect}
+
+services:
+  task-worker:
+    depends_on:
+      server:
+        condition: service_healthy
+    image: styrmin:latest
+    build:
+      dockerfile: docker/Dockerfile
+    command: ["prefect", "worker", "start", "--pool", "styrmin-work-pool"]
+    environment:
+      PREFECT_API_URL: http://task-manager:4200/api
+      STYRMIN_URL_API: http://server:8000
+      STYRMIN_URL_GRAPHQL_K8S: http://host.docker.internal:8000/graphql
+      STYRMIN_URL_GRAPHQL: http://server:8000/graphql
+      STYRMIN_DB_NAME: /source/data/styrmin.db
+    volumes:
+      - ./backend:/source/backend
+      - ./driver/examples:/styrmin/drivers:ro
+      - styrmin_db:/source/data
+
+  k8s-agent:
+    image: styrmin:latest
+    build:
+      dockerfile: docker/Dockerfile
+    command: ["prefect", "worker", "start", "--pool", "user-work-pool"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PREFECT_API_URL: http://localhost:4200/api
+      STYRMIN_URL_GRAPHQL_K8S: http://localhost:8000/graphql
+      STYRMIN_URL_GRAPHQL: http://localhost:8000/graphql
+      STYRMIN_K8S_CONFIG_MODE: kubeconfig
+      KUBECONFIG: /root/.kube/config
+    volumes:
+      - ${KUBECONFIG:-~/.kube/config}:/root/.kube/config:ro
+      - ./backend:/source/backend
+      - ./driver/examples:/styrmin/drivers:ro
+
+  server:
+    image: styrmin:latest
+    build:
+      dockerfile: docker/Dockerfile
+    command: ["fastapi", "dev", "--host", "0.0.0.0", "backend/styrmin_backend/server/app.py"]
+    depends_on:
+      task-manager:
+        condition: service_healthy
+    environment:
+      PREFECT_API_URL: http://task-manager:4200/api
+      STYRMIN_LOG_LEVEL: DEBUG
+      STYRMIN_DRIVER_TOKEN: ${STYRMIN_DRIVER_TOKEN}
+      STYRMIN_AGENT_SOURCE_TOKEN: ${STYRMIN_AGENT_SOURCE_TOKEN}
+      STYRMIN_AGENT_SOURCE_BRANCH: ${STYRMIN_AGENT_SOURCE_BRANCH}
+      STYRMIN_URL_GRAPHQL_K8S: http://host.docker.internal:8000/graphql
+      STYRMIN_URL_GRAPHQL: http://server:8000/graphql
+      STYRMIN_DB_NAME: /source/data/styrmin.db
+
+    healthcheck:
+      test: curl --fail http://localhost:8000/graphql || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    ports:
+      - 8000:8000
+    volumes:
+      - ./backend:/source/backend
+      - ./driver/examples:/styrmin/drivers:ro
+      - styrmin_db:/source/data
+
+  task-manager:
+    image: "${TASK_MANAGER_DOCKER_IMAGE:-prefecthq/prefect:3.6.13-python3.12}"
+    command: prefect server start --host 0.0.0.0 --ui
+    restart: unless-stopped
+    depends_on:
+      task-manager-db:
+        condition: service_healthy
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: >-
+        postgresql+asyncpg://${INFRAHUB_TASKMANAGER_DB_USER:-postgres}:${INFRAHUB_TASKMANAGER_DB_PASSWORD:-postgres}@task-manager-db:5432/${INFRAHUB_TASKMANAGER_DB_DATABASE:-prefect}
+    healthcheck:
+      test: /usr/local/bin/httpx http://localhost:4200/api/health || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    ports:
+      - 4200:4200
+
+  task-manager-db:
+    image: "${POSTGRES_DOCKER_IMAGE:-postgres:16-alpine}"
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${INFRAHUB_TASKMANAGER_DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${INFRAHUB_TASKMANAGER_DB_PASSWORD:-postgres}
+      - POSTGRES_DB=${INFRAHUB_TASKMANAGER_DB_DATABASE:-prefect}
+    volumes:
+      - workflow_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  styrmin_db:
+  workflow_db:

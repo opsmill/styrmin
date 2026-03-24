@@ -1,0 +1,11 @@
+query ListEnvironments {
+    environments {
+        id
+        name
+        config
+        cluster {
+            id
+            name
+        }
+    }
+}

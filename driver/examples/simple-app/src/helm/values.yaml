@@ -1,0 +1,102 @@
+replicaCount: 1
+
+image:
+  registry: ""
+  repository: simple-app
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+
+securityContext:
+  allowPrivilegeEscalation: false
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  hosts:
+    - host: simple-app.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 1
+  periodSeconds: 1
+  timeoutSeconds: 1
+  failureThreshold: 60
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 1
+  periodSeconds: 1
+  timeoutSeconds: 1
+  failureThreshold: 60
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -- Database configuration
+database:
+  name: simple_app
+  host: ""
+  port: 5432
+  username: ""
+  password: ""
+
+# -- Secret configuration
+secrets:
+  existingSecret: ""
+
+# -- Bitnami PostgreSQL subchart
+postgresql:
+  enabled: true
+  image:
+    repository: bitnamilegacy/postgresql
+  auth:
+    username: simple-app
+    password: simple-app-password
+    database: simple_app
+  primary:
+    readinessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    # -- Resource configuration for PostgreSQL primary
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits: {}
+    persistence:
+      enabled: true
+      size: 1Gi

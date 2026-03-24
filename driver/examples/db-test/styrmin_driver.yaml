@@ -1,0 +1,45 @@
+---
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: db-test
+spec:
+  version: "1"
+  supported_versions: ">=0.1,<1.0"
+  info:
+    description: Test application with MariaDB and MongoDB for backup testing
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: db-test
+      version: 0.1.0
+
+  components:
+    server:
+      identifier:
+        label:
+          app.kubernetes.io/name: db-test
+
+    mariadb:
+      identifier:
+        label:
+          app.kubernetes.io/name: mariadb
+      backup:
+        enabled: true
+        kind: mariadb
+
+    mongodb:
+      identifier:
+        label:
+          app.kubernetes.io/component: mongodb
+      backup:
+        enabled: true
+        kind: mongodb
+
+  services:
+    - name: db-test
+      kind: http
+      scope: internal
+      port: 8000
+      component: server

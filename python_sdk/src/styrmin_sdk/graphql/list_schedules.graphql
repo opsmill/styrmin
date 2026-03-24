@@ -1,0 +1,15 @@
+query ListBackupSchedules($deploymentId: UUID!) {
+    backupSchedules(deploymentId: $deploymentId) {
+        id
+        name
+        enabled
+        cronExpression
+        retentionCount
+        deploymentId
+        lastBackupAt
+        nextBackupAt
+        prefectDeploymentId
+        createdOn
+        updatedOn
+    }
+}

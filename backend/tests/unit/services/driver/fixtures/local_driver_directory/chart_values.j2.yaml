@@ -1,0 +1,167 @@
+spec:
+  values:
+    global:
+      infrahubTag: {{ app.version }}
+      imagePullPolicy: Always
+    infrahub:
+      persistence:
+        enabled: true
+        accessMode: ReadWriteOnce
+        storageClassName: {{ app.dependencies.standard_storage.class_name }}
+      ingress:
+        enabled: true
+        hostname: {{ app.services.infrahub.url }}
+        extraHosts: {{ app.services.infrahub.extra_hosts }}
+        extraTls:
+          - hosts: {{ app.services.infrahub.extra_hosts }}
+      server:
+        env:
+          INFRAHUB_TRACE_ENABLE: false
+          INFRAHUB_TRACE_INSECURE: false
+          INFRAHUB_TRACE_EXPORTER_TYPE: otlp
+          INFRAHUB_TRACE_EXPORTER_ENDPOINT: {{ platform.services.observability_logs.url }}
+          OTEL_RESOURCE_ATTRIBUTES: infrahub.deployment_id=preview-stable
+          INFRAHUB_DB_ADDRESS: cloud-neo4j
+          INFRAHUB_BROKER_ADDRESS: cloud-message-queue
+          INFRAHUB_BROKER_DRIVER: rabbitmq
+          INFRAHUB_BROKER_PORT: 5672
+          INFRAHUB_CACHE_ADDRESS: cloud-cache-master
+          INFRAHUB_CACHE_DRIVER: redis
+          INFRAHUB_CACHE_PORT: 6379
+          PREFECT_API_URL: "http://cloud-task-manager:4200/api"
+        args:
+          - gunicorn
+          - --config
+          - /source/backend/infrahub/serve/gunicorn_config.py
+          - -w
+          - "4"
+          - --forwarded-allow-ips
+          - "*"
+          - --logger-class
+          - infrahub.serve.log.GunicornLogger
+          - infrahub.server:app
+    infrahubGit:
+      persistence:
+        enabled: true
+        accessMode: ReadWriteOnce
+        storageClassName: {{ app.dependencies.standard_storage.class_name }}
+      infrahubGit:
+        env:
+          INFRAHUB_TRACE_ENABLE: false
+          INFRAHUB_TRACE_INSECURE: false
+          INFRAHUB_TRACE_EXPORTER_TYPE: otlp
+          INFRAHUB_TRACE_EXPORTER_ENDPOINT: {{ platform.services.observability_logs.url }}
+          OTEL_RESOURCE_ATTRIBUTES: infrahub.deployment_id=preview-stable
+          INFRAHUB_DB_ADDRESS: cloud-neo4j
+          INFRAHUB_BROKER_ADDRESS: cloud-message-queue
+          INFRAHUB_BROKER_DRIVER: rabbitmq
+          INFRAHUB_BROKER_PORT: 5672
+          INFRAHUB_CACHE_ADDRESS: cloud-cache-master
+          INFRAHUB_CACHE_DRIVER: redis
+          INFRAHUB_CACHE_PORT: 6379
+          INFRAHUB_TIMEOUT: 60
+    infrahubTaskWorker:
+      persistence:
+        enabled: true
+        accessMode: ReadWriteOnce
+        storageClassName: {{ app.dependencies.standard_storage.class_name }}
+      infrahubTaskWorker:
+        env:
+          INFRAHUB_TRACE_ENABLE: false
+          INFRAHUB_TRACE_INSECURE: false
+          INFRAHUB_TRACE_EXPORTER_TYPE: otlp
+          INFRAHUB_TRACE_EXPORTER_ENDPOINT: {{ platform.services.observability_logs.url }}
+          INFRAHUB_DB_ADDRESS: cloud-neo4j
+          INFRAHUB_BROKER_ADDRESS: cloud-message-queue
+          INFRAHUB_BROKER_DRIVER: rabbitmq
+          INFRAHUB_BROKER_PORT: 5672
+          INFRAHUB_CACHE_ADDRESS: cloud-cache-master
+          INFRAHUB_CACHE_DRIVER: redis
+          INFRAHUB_CACHE_PORT: 6379
+          INFRAHUB_TIMEOUT: 60
+          PREFECT_API_URL: "http://cloud-task-manager:4200/api"
+    nfs-server-provisioner:
+      enabled: false
+    neo4j:
+      fullnameOverride: "cloud-neo4j"
+      image:
+        customImage: {{ app.components.database.image }}
+      disableLookups: true
+      {{ node_selector }}
+      neo4j:
+        edition: enterprise
+        acceptLicenseAgreement: "yes"
+        resources:
+          limits:
+            cpu: 1024 # unlimited
+            memory: "1Ti" # unlimited
+        labels:
+          opsmill.io/managed: "true"
+      services:
+        admin:
+          enabled: true
+      config:
+        server.backup.enabled: "true"
+      volumes:
+        data:
+          mode: dynamic
+          dynamic:
+            storageClassName: {{ app.dependencies.fast_storage.class_name }}
+            requests:
+              storage: {{ app.dependencies.fast_storage.spec.size }}
+    nats:
+      enabled: false
+    rabbitmq:
+      enabled: true
+      resources:
+        limits:
+          cpu: 1024 # unlimited
+          memory: "1Ti" # unlimited
+        requests:
+          cpu: 100m
+          memory: 512Mi
+    redis:
+      enabled: true
+      fullnameOverride: "cloud-cache"  # Move to extra
+      master:
+        resources:
+          limits:
+            cpu: 1024 # unlimited
+            memory: "1Ti" # unlimited
+          requests:
+            cpu: 100m
+            memory: 512Mi
+    prefect-server:
+      enabled: true
+      fullnameOverride: "cloud-task-manager"
+      server:
+        env:
+          - name: PREFECT_SERVER_ANALYTICS_ENABLED
+            value: "{{ app.parameters.optout_telemetry }}"
+        resources:
+          limits:
+            cpu: "1024" # unlimited
+            memory: "1Ti" # unlimited
+          requests:
+            cpu: 500m
+            memory: 512Mi
+      postgresql:
+        enabled: true
+        # fullnameOverride: "cloud-postgresql" 
+        architecture: standalone
+        image:
+          tag: 14.13.0
+        auth:
+          username: {{ app.dependencies.postgres.username }}
+          password: {{ app.dependencies.postgres.password }}
+          database: {{ app.dependencies.postgres.database }}
+        primary:
+          persistence:
+            enabled: true
+          resources:
+            limits:
+              cpu: 1024 # unlimited
+              memory: "1Ti" # unlimited
+            requests:
+              cpu: 100m
+              memory: 128Mi

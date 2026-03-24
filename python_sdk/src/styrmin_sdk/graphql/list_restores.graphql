@@ -1,0 +1,15 @@
+query ListRestores($backupId: UUID!, $status: String) {
+    restores(backupId: $backupId, status: $status) {
+        id
+        name
+        status
+        backupId
+        targetNamespace
+        targetInstanceId
+        errorMessage
+        startedAt
+        completedAt
+        createdOn
+        updatedOn
+    }
+}

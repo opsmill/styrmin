@@ -1,0 +1,3 @@
+mutation DeleteBackup($backupId: UUID!) {
+    deleteBackup(backupId: $backupId)
+}

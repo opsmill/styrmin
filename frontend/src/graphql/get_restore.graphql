@@ -1,0 +1,19 @@
+query GetRestore($restoreId: UUID!) {
+  restore(restoreId: $restoreId) {
+    id
+    name
+    status
+    createdOn
+    startedAt
+    completedAt
+    targetNamespace
+    errorMessage
+    backupId
+    targetInstanceId
+    componentStatuses {
+      componentName
+      status
+      errorMessage
+    }
+  }
+}

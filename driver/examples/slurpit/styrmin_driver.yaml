@@ -1,0 +1,88 @@
+---
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: slurpit
+spec:
+  version: "1"
+  supported_versions: ">=1.3,<1.4"
+  info:
+    description: Network discovery and inventory management platform
+    authors: [opsmill]
+    license: Apache-2.0
+    links:
+      - link: Homepage
+        url: 'https://slurpit.io/'
+      - link: Source
+        url: 'https://gitlab.com/slurpit.io/images'
+  helm:
+    main:
+      location: oci://registry.opsmill.io/external/slurpit
+      version: "1.3.6"
+
+  parameters:
+    - name: timezone
+      label: "Timezone"
+      kind: string
+      default: "Europe/Amsterdam"
+    - name: scanner_pool_size
+      label: "Scanner pool size"
+      kind: integer
+      default: 16
+    - name: scraper_pool_size
+      label: "Scraper pool size"
+      kind: integer
+      default: 16
+    - name: mariadb_storage_size
+      label: "MariaDB storage size (Gi)"
+      kind: integer
+      default: 8
+    - name: mongodb_storage_size
+      label: "MongoDB storage size (Gi)"
+      kind: integer
+      default: 16
+    - name: portal_storage_size
+      label: "Portal storage size (Gi)"
+      kind: integer
+      default: 8
+    - name: warehouse_storage_size
+      label: "Warehouse storage size (Gi)"
+      kind: integer
+      default: 16
+
+  components:
+    portal:
+      identifier:
+        label:
+          app.kubernetes.io/component: portal
+
+    warehouse:
+      identifier:
+        label:
+          app.kubernetes.io/component: warehouse
+
+    scanner:
+      identifier:
+        label:
+          app.kubernetes.io/component: scanner
+
+    scraper:
+      identifier:
+        label:
+          app.kubernetes.io/component: scraper
+
+    mariadb:
+      identifier:
+        label:
+          app.kubernetes.io/component: mariadb
+      backup:
+        enabled: true
+        kind: mariadb
+
+    mongodb:
+      identifier:
+        label:
+          app.kubernetes.io/component: mongodb
+      backup:
+        enabled: true
+        kind: mongodb

@@ -1,0 +1,17 @@
+query ListRestores($backupId: UUID!, $status: String) {
+  restores(backupId: $backupId, status: $status) {
+    id
+    name
+    status
+    createdOn
+    startedAt
+    completedAt
+    targetNamespace
+    errorMessage
+    componentStatuses {
+      componentName
+      status
+      errorMessage
+    }
+  }
+}

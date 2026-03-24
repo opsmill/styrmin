@@ -1,0 +1,299 @@
+[project]
+name = "styrmin-mvp"
+version = "0.1.0"
+description = "Deployment orchestration platform for Kubernetes applications"
+authors = [{name = "OpsMill", email = "info@opsmill.com"}]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.21.0",
+    "styrmin-backend",
+    "fast-depends>=2.4.12",
+    "fastapi[standard]>=0.119.0",
+    "gunicorn>=23.0.0",
+    "kubernetes-asyncio>=33.3.0",
+    "prefect[github]==3.6.13",
+    "pydantic-settings>=2.12.0",
+    "sqlmodel>=0.0.31",
+    "strawberry-graphql>=0.288.4",
+    "uvicorn>=0.40.0",
+    "dulwich>=0.25.2",
+    "prefect-kubernetes>=0.5.3",
+    "loguru>=0.7.3",
+    "coolname>=2.2.0",
+    "deepdiff>=8.6.1",
+    "rich>=14.2.0",
+    "cyclopts>=3.0.0",
+]
+
+
+[dependency-groups]
+dev = [
+    "infrahub-sdk>=0.16",
+    "invoke>=2.2.0",
+    "kr8s>=0.17",
+    "kubernetes-asyncio>=33.3.0",
+    "mypy>=1.19.1",
+    "pytest>=9",
+    "pytest-asyncio>=1.3.0",
+    "pytest-mock>=3.14.0",
+    "pytest-opentelemetry>=0.8",
+    "pytest-xdist>=3.6.1",
+    "opentelemetry-exporter-otlp>=1.25",
+    "ruff>=0.14.14",
+    "testcontainers>=4.14.0",
+    "types-jsonschema>=4.23.0.20241208",
+    "types-pyyaml>=6.0.12.20241230",
+    "types-requests>=2.32.0.20250306",
+    "types-toml>=0.10.8.20240310",
+    "yamllint>=1.35.1",
+    "rumdl>=0.1.50",
+    "ariadne-codegen>=0.14",
+    "ty>=0.0.24",
+]
+
+[tool.ty]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[[tool.ty.overrides]]
+include = ["tasks/**"]
+
+[tool.ty.overrides.rules]
+unused-type-ignore-comment = "ignore" # Clashes with mypy's type ignore comments
+invalid-argument-type = "ignore" # TODO: fix violations
+unresolved-attribute = "ignore" # TODO: fix violations
+
+[[tool.ty.overrides]]
+include = ["backend/**"]
+
+[tool.ty.overrides.rules]
+unused-type-ignore-comment = "ignore" # Clashes with mypy's type ignore comments
+invalid-argument-type = "ignore" # TODO: fix violations
+invalid-assignment = "ignore" # TODO: fix violations
+invalid-await = "ignore" # TODO: fix violations
+invalid-method-override = "ignore" # TODO: fix violations
+invalid-newtype = "ignore" # TODO: fix violations
+invalid-type-form = "ignore" # TODO: fix violations
+missing-argument = "ignore" # TODO: fix violations
+unknown-argument = "ignore" # TODO: fix violations
+unresolved-attribute = "ignore" # TODO: fix violations
+unsupported-operator = "ignore" # TODO: fix violations
+
+[[tool.ty.overrides]]
+include = ["cli/**"]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore" # TODO: fix violations
+
+[[tool.ty.overrides]]
+include = ["driver/**"]
+
+[tool.ty.overrides.rules]
+unused-type-ignore-comment = "ignore" # Clashes with mypy's type ignore comments
+unresolved-import = "ignore" # TODO: fix violations
+
+[[tool.ty.overrides]]
+include = ["python_sdk/**"]
+
+[tool.ty.overrides.rules]
+unused-type-ignore-comment = "ignore" # Clashes with mypy's type ignore comments
+invalid-argument-type = "ignore" # TODO: fix violations
+invalid-assignment = "ignore" # TODO: fix violations
+invalid-type-form = "ignore" # TODO: fix violations
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+styrmin-backend = { path = "backend", editable = true }
+styrmin-sdk = { workspace = true }
+
+[tool.uv.workspace]
+members = ["cli", "styrmin-backend", "python_sdk"]
+
+[tool.mypy]
+pretty = true
+ignore_missing_imports = true
+disallow_untyped_defs = true
+plugins = ["strawberry.ext.mypy_plugin"]
+
+[[tool.mypy.overrides]]
+module = "infrahub_sdk.ctl.check"
+disable_error_code = ["call-overload"]
+
+[[tool.mypy.overrides]]
+module = "infrahub_sdk.ctl.generator"
+disable_error_code = ["attr-defined"]
+
+[[tool.mypy.overrides]]
+module = "infrahub_sdk.ctl.schema"
+disable_error_code = ["arg-type", "attr-defined", "misc", "union-attr"]
+
+[[tool.mypy.overrides]]
+module = "infrahub_sdk.utils"
+disable_error_code = ["arg-type", "attr-defined", "return-value", "union-attr"]
+
+[[tool.mypy.overrides]]
+module = "styrmin_sdk.graphql._generated.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+
+[tool.ruff]
+line-length = 120
+
+exclude = [
+    ".git",
+    ".tox",
+    ".venv",
+    "env",
+    "_build",
+    "build",
+    "dist",
+    "examples",
+    "_generated",
+]
+
+
+[tool.ruff.lint]
+preview = true
+
+task-tags = ["FIXME", "TODO", "XXX"]
+
+select = ["ALL"]
+
+ignore = [
+    "D",      # pydocstyle
+    "DOC",    # pydoclint
+    "CPY",    # flake8-copyright
+    "T201",   # use of `print`
+    "ISC",    # flake8-implicit-str-concat
+    "COM812", # missing-trailing-comma
+
+    ##################################################################################################
+    # Rules below needs to be Investigated                                                           #
+    ##################################################################################################
+    "PT",     # flake8-pytest-style
+    "ERA",    # eradicate commented-out code
+    "SLF001", # flake8-self
+    "EM",     # flake8-errmsg
+    "TRY",    # tryceratops
+    "TD",     # flake8-todos
+    "FIX",    # flake8-fixme
+    "FBT",    # flake8-boolean-trap
+    "G",      # flake8-logging-format
+    "RSE",    # flake8-raise
+    "A",      # flake8-builtins
+
+    ##################################################################################################
+    # The ignored rules below should be removed once the code has been updated, they are included    #
+    # like this so that we can reactivate them one by one. Alternatively ignored after further       #
+    # investigation if they are deemed to not make sense.                                            #
+    ##################################################################################################
+    "B008",    # Do not perform function call `typer.Option` in argument defaults; instead, perform the call within the function, or read the default from a module-level singleton variable
+    "B904",    # Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+    "INP001",  # File declares a package, but is nested under an implicit namespace package.
+    "PERF401", # Use a list comprehension to create a transformed list
+    "PLR0913", # Too many arguments in function definition
+    "PLR2004", # Magic value used in comparison
+    "PLW0603", # Using the global statement to update `SETTINGS` is discouraged
+    "PTH100",  # `os.path.abspath()` should be replaced by `Path.resolve()`
+    "RET504",  # Unnecessary assignment to `data` before `return` statement
+    "S701",    # By default, jinja2 sets `autoescape` to `False`. Consider using `autoescape=True`
+    "SIM102",  # Use a single `if` statement instead of nested `if` statements
+    "SIM105",  # Use `contextlib.suppress(KeyError)` instead of `try`-`except`-`pass`
+    "TC003",   # Move standard library import `collections.abc.Iterable` into a type-checking block
+    "UP031",   # Use format specifiers instead of percent format
+]
+
+
+#https://docs.astral.sh/ruff/formatter/black/
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+known-first-party = ["infrahub_sdk", "infrahub_ctl"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 150
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+
+[tool.ruff.lint.per-file-ignores]
+"*/tests/**/*.py" = [
+    "PLR2004", # Magic value used in comparison
+    "S101",    # Use of assert detected
+    "S105",    # Possible hardcoded password assigned to variable
+    "S106",    # Possible hardcoded password assigned to argument
+    "ARG001",  # Unused function argument
+    "ARG002",  # Unused method argument
+
+    ##################################################################################################
+    # Review and change the below later                                                              #
+    ##################################################################################################
+    "ANN001", # Missing type annotation for function argument
+    "ANN201", # ANN201 Missing return type annotation for public function
+    "ANN202", # Missing return type annotation for private function
+    "ANN204", # Missing return type annotation for special method
+]
+"tasks/__init__.py" = [
+    "RUF067", # __init__ module should only contain docstrings and re-exports (Invoke tasks pattern)
+]
+
+
+[tool.ariadne-codegen]
+schema_path = "schema.graphql"
+queries_path = "python_sdk/src/styrmin_sdk/graphql"
+target_package_name = "_generated"
+target_package_path = "python_sdk/src/styrmin_sdk/graphql/"
+async_client = true
+convert_to_snake_case = true
+
+[tool.ariadne-codegen.scalars.UUID]
+type = "uuid.UUID"
+
+[tool.ariadne-codegen.scalars.JSON]
+type = "typing.Any"
+
+[tool.ariadne-codegen.scalars.DateTime]
+type = "datetime.datetime"
+
+[tool.rumdl]
+exclude = [".venv", "node_modules", "dev", ".claude", "specs", ".github/agents"]
+disable = [
+    "MD013",  # Line length
+    "MD033",  # Inline HTML
+    "MD041",  # First line in a file should be a top-level heading
+    "MD057",  # Missing or broken relative links
+    "MD060",  # Code blocks should have a language specified
+]
+
+[tool.rumdl.MD024]
+siblings_only = true
+
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "session"
+asyncio_mode = "auto"
+# addopts = "-vs --cov-report term-missing --cov-report xml --dist loadscope --junitxml=pytest-junit.xml"
+filterwarnings = [
+    # Third-party library deprecation warnings we can't fix directly
+    "ignore:The @wait_container_is_ready decorator is deprecated:DeprecationWarning",
+    "ignore:Passing a class to strawberry.scalar.*:DeprecationWarning",
+    # SQLAlchemy warning about circular foreign key dependencies in test teardown
+    "ignore:Can't sort tables for DROP.*:sqlalchemy.exc.SAWarning",
+]
+markers = [
+    "e2e: end-to-end tests requiring a Kind cluster and external dependencies",
+    "ci: e2e tests included in the CI pipeline",
+]

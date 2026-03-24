@@ -1,0 +1,30 @@
+meta {
+  name: Stop Components
+  type: graphql
+  seq: 15
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  mutation StopComponents($deploymentId: UUID!, $components: [String!]!) {
+    stopComponents(deploymentId: $deploymentId, components: $components) {
+      id
+      type
+      status
+      message
+      deploymentId
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "deploymentId": "{{deployment_id}}",
+    "components": ["server", "task-worker"]
+  }
+}

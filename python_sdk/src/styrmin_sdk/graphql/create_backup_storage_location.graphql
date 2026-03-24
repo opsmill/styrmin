@@ -1,0 +1,32 @@
+mutation CreateBackupStorageLocation(
+    $name: String!
+    $endpoint: String!
+    $bucket: String!
+    $region: String!
+    $accessKeyId: String!
+    $secretAccessKey: String!
+) {
+    createBackupStorageLocation(
+        name: $name
+        endpoint: $endpoint
+        bucket: $bucket
+        region: $region
+        accessKeyId: $accessKeyId
+        secretAccessKey: $secretAccessKey
+    ) {
+        ... on BackupStorageLocation {
+            id
+            name
+            endpoint
+            bucket
+            region
+            createdOn
+            updatedOn
+            environmentCount
+        }
+        ... on BackupStorageLocationAlreadyExists {
+            message
+            existingId
+        }
+    }
+}

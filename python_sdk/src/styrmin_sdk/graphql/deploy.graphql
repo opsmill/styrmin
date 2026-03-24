@@ -1,0 +1,9 @@
+mutation Deploy($driver: String!, $version: String!, $environmentId: UUID!, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
+    deploy(driver: $driver, version: $version, environmentId: $environmentId, name: $name, config: $config, parameters: $parameters, serviceNameOverrides: $serviceNameOverrides) {
+        id
+        type
+        status
+        message
+        deploymentId
+    }
+}

@@ -1,0 +1,4 @@
+---
+# Invalid YAML file with syntax errors
+fail: [1, 2
+

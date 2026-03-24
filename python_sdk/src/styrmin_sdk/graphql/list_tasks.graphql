@@ -1,0 +1,9 @@
+query ListTasks {
+    tasks {
+        id
+        type
+        status
+        message
+        deploymentId
+    }
+}

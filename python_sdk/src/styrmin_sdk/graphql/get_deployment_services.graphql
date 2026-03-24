@@ -1,0 +1,12 @@
+query GetDeploymentServices($deploymentId: UUID!) {
+  deploymentServices(deploymentId: $deploymentId) {
+    id
+    driverServiceName
+    resolvedName
+    kind
+    scope
+    port
+    component
+    deploymentId
+  }
+}

@@ -1,0 +1,40 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-server
+  labels:
+    app: git-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: git-server
+  template:
+    metadata:
+      labels:
+        app: git-server
+    spec:
+      containers:
+        - name: git-daemon
+          image: git-daemon:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 9418
+              protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-server
+  labels:
+    app: git-server
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9418
+      targetPort: 9418
+      protocol: TCP
+      name: git
+  selector:
+    app: git-server

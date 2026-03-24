@@ -1,0 +1,34 @@
+mutation UpdateBackupStorageLocation(
+    $backupStorageLocationId: UUID!
+    $name: String
+    $endpoint: String
+    $bucket: String
+    $region: String
+    $accessKeyId: String
+    $secretAccessKey: String
+) {
+    updateBackupStorageLocation(
+        backupStorageLocationId: $backupStorageLocationId
+        name: $name
+        endpoint: $endpoint
+        bucket: $bucket
+        region: $region
+        accessKeyId: $accessKeyId
+        secretAccessKey: $secretAccessKey
+    ) {
+        ... on BackupStorageLocation {
+            id
+            name
+            endpoint
+            bucket
+            region
+            createdOn
+            updatedOn
+            environmentCount
+        }
+        ... on BackupStorageLocationNotFound {
+            message
+            backupStorageLocationId
+        }
+    }
+}

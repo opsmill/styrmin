@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Styrmin",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

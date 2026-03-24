@@ -1,0 +1,3 @@
+mutation DeleteEnvironment($environmentId: UUID!) {
+    deleteEnvironment(environmentId: $environmentId)
+}

@@ -1,0 +1,12 @@
+query GetBackupStorageLocation($backupStorageLocationId: UUID!) {
+  backupStorageLocation(backupStorageLocationId: $backupStorageLocationId) {
+    id
+    name
+    endpoint
+    bucket
+    region
+    createdOn
+    updatedOn
+    environmentCount
+  }
+}

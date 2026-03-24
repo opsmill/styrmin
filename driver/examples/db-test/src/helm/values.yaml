@@ -1,0 +1,90 @@
+---
+replicaCount: 1
+
+image:
+  registry: ""
+  repository: db-test
+  pullPolicy: IfNotPresent
+  tag: ""
+
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 1
+  periodSeconds: 1
+  timeoutSeconds: 1
+  failureThreshold: 60
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 1
+  periodSeconds: 1
+  timeoutSeconds: 1
+  failureThreshold: 60
+
+# -- MariaDB subchart configuration (bitnami/mariadb)
+mariadb:
+  auth:
+    database: testdb
+    username: testuser
+    password: test-password
+    rootPassword: root-password
+  primary:
+    readinessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    persistence:
+      size: 1Gi
+      storageClass: ""
+    extraVolumes:
+      - name: backup
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: backup
+        mountPath: /backup
+    extraEnvVars:
+      - name: MARIADB_PASSWORD
+        value: test-password
+
+# -- MongoDB subchart configuration (bitnami/mongodb)
+mongodb:
+  architecture: standalone
+  readinessProbe:
+    initialDelaySeconds: 1
+    periodSeconds: 1
+    timeoutSeconds: 1
+    failureThreshold: 60
+  auth:
+    enabled: true
+    rootUser: testuser
+    rootPassword: test-mongo-password
+  persistence:
+    size: 1Gi
+    storageClass: ""
+  extraVolumes:
+    - name: backup
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: backup
+      mountPath: /backup
+  extraEnvVars:
+    - name: MONGO_INITDB_ROOT_USERNAME
+      value: testuser
+    - name: MONGO_INITDB_ROOT_PASSWORD
+      value: test-mongo-password

@@ -1,0 +1,130 @@
+"""Tests for the configuration management commands."""
+
+import pytest
+from pydantic import BaseModel, ValidationError
+from pytest_mock import MockerFixture
+
+from styrmin_backend.cli.config_cmd import config_app
+
+
+def test_config_show_help(capsys: pytest.CaptureFixture[str]) -> None:
+    """Test that config show --help shows expected options."""
+    with pytest.raises(SystemExit) as exc_info:
+        config_app(["show", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "--format" in output
+
+
+def test_config_validate_help(capsys: pytest.CaptureFixture[str]) -> None:
+    """Test that config validate --help shows expected options."""
+    with pytest.raises(SystemExit) as exc_info:
+        config_app(["validate", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "CONFIG-FILE" in output or "config-file" in output.lower()
+
+
+def test_config_show_outputs_toml_by_default(
+    capsys: pytest.CaptureFixture[str], mocker: MockerFixture
+) -> None:
+    """Test that config show outputs TOML format by default."""
+    # Mock config.SETTINGS
+    mock_config = mocker.patch("styrmin_backend.cli.config_cmd.config")
+    mock_config.SETTINGS.initialized = True
+    mock_config.SETTINGS.active_settings.model_dump.return_value = {
+        "database": {"db_type": "sqlite", "db_name": "test.db"}
+    }
+
+    # Cyclopts calls sys.exit(0) after successful command
+    with pytest.raises(SystemExit) as exc_info:
+        config_app(["show"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+
+    # TOML format should have key = value pairs
+    assert "db_type" in output
+    assert "sqlite" in output
+
+
+def test_config_show_json_format(
+    capsys: pytest.CaptureFixture[str], mocker: MockerFixture
+) -> None:
+    """Test that config show --format json outputs JSON."""
+    # Mock config.SETTINGS
+    mock_config = mocker.patch("styrmin_backend.cli.config_cmd.config")
+    mock_config.SETTINGS.initialized = True
+    mock_config.SETTINGS.active_settings.model_dump.return_value = {
+        "database": {"db_type": "sqlite"}
+    }
+
+    with pytest.raises(SystemExit) as exc_info:
+        config_app(["show", "--format", "json"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+
+    # JSON format should have braces
+    assert "{" in output
+    assert "}" in output
+    assert '"database"' in output
+
+
+def test_config_validate_valid_file(
+    capsys: pytest.CaptureFixture[str], mocker: MockerFixture
+) -> None:
+    """Test that config validate returns exit code 0 for valid config."""
+    # Mock config.load to succeed
+    mock_config = mocker.patch("styrmin_backend.cli.config_cmd.config")
+
+    with pytest.raises(SystemExit) as exc_info:
+        config_app(["validate", "styrmin.toml"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+
+    mock_config.load.assert_called_once_with(config_file_name="styrmin.toml")
+    assert "Configuration is valid" in output
+
+
+def test_config_validate_invalid_file(
+    capsys: pytest.CaptureFixture[str], mocker: MockerFixture
+) -> None:
+    """Test that config validate returns exit code 2 for invalid config."""
+
+    # Create a real ValidationError using a pydantic model
+    class TestModel(BaseModel):
+        db_type: int  # Wrong type to force error
+
+    # Create a real ValidationError
+    with pytest.raises(ValidationError) as validation_exc:
+        TestModel(db_type="not_an_int")  # type: ignore[arg-type]
+
+    mock_config = mocker.patch("styrmin_backend.cli.config_cmd.config")
+    mock_config.load.side_effect = validation_exc.value
+
+    with pytest.raises(SystemExit) as exit_exc:
+        config_app(["validate", "invalid.toml"])
+
+    assert exit_exc.value.code == 2
+    output = capsys.readouterr().out
+    assert "not valid" in output
+
+
+def test_config_validate_file_not_found(
+    capsys: pytest.CaptureFixture[str], mocker: MockerFixture
+) -> None:
+    """Test that config validate returns exit code 2 for missing file."""
+    # Mock config.load to raise FileNotFoundError
+    mock_config = mocker.patch("styrmin_backend.cli.config_cmd.config")
+    mock_config.load.side_effect = FileNotFoundError("File not found")
+
+    with pytest.raises(SystemExit) as exc_info:
+        config_app(["validate", "missing.toml"])
+
+    assert exc_info.value.code == 2
+    output = capsys.readouterr().out
+    assert "not found" in output

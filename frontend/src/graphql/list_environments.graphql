@@ -1,0 +1,22 @@
+query ListEnvironments {
+  environments {
+    id
+    name
+    config
+    cluster {
+      id
+      name
+    }
+    deployments {
+      id
+      name
+      status
+      applicationVersion
+      components {
+        id
+        name
+        enabled
+      }
+    }
+  }
+}

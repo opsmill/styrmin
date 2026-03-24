@@ -1,0 +1,11 @@
+mutation CreateEnvironment($name: String!, $clusterId: UUID!, $config: JSON) {
+    createEnvironment(name: $name, clusterId: $clusterId, config: $config) {
+        id
+        name
+        config
+        cluster {
+            id
+            name
+        }
+    }
+}

@@ -1,0 +1,16 @@
+mutation AssignBackupStorageLocation(
+  $environmentId: UUID!
+  $backupStorageLocationId: UUID!
+) {
+  assignBackupStorageLocation(
+    environmentId: $environmentId
+    backupStorageLocationId: $backupStorageLocationId
+  ) {
+    id
+    name
+    backupStorageLocation {
+      id
+      name
+    }
+  }
+}

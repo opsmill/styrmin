@@ -1,0 +1,24 @@
+---
+apiVersion: "styrmin.io/v1"
+kind: ActionDefinition
+metadata:
+  package: infrahub
+spec:
+  actions:
+    - name: upgrade
+      hook: upgrade
+      mode: core
+      description: Upgrade Infrahub
+      location: "actions.py::upgrade"
+
+    - name: pre_setup
+      hook: setup
+      mode: pre
+      description: Initial Setup of Infrahub
+      location: "actions.py::pre_setup"
+
+    - name: post_setup
+      hook: setup
+      mode: post
+      description: Initial Setup of Infrahub
+      location: "actions.py::post_setup"

@@ -1,0 +1,71 @@
+fullnameOverride: styrmin-semaphore
+
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  repository: "{{ parameters.docker_image }}"
+  tag: "v{{ app.version }}"
+  pullPolicy: IfNotPresent
+
+general:
+  additionalPythonPackages:
+    - infrahub-sdk
+
+database:
+  type: postgres
+  host: styrmin-postgresql
+  port: 5432
+  name: semaphore
+  username: semaphore
+  password: semaphore-password
+  options:
+    sslmode: disable
+
+admin:
+  create: true
+  username: admin
+  password: admin-password
+  email: admin@styrmin.local
+
+ingress:
+  enabled: true
+  className: "{{ instance.config.ingress_class }}"
+  hosts:
+    - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: "{{ services.semaphore.host | to_fqdn_label }}-{{ environment.name | to_fqdn_label }}.{{ instance.config.fqdn_suffix }}"
+      paths:
+        - path: /
+          pathType: Prefix
+
+persistence:
+  enabled: true
+  size: 1Gi
+
+postgresql:
+  enabled: true
+  fullnameOverride: styrmin-postgresql
+  image:
+    registry: ""
+    repository: bitnamilegacy/postgresql
+    tag: 17.6.0-debian-12-r4
+  auth:
+    username: semaphore
+    password: semaphore-password
+    database: semaphore
+  metrics:
+    enabled: false
+  primary:
+    persistence:
+      enabled: true
+      size: 1Gi
+    extraVolumes:
+      - name: backup
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: backup
+        mountPath: /backup

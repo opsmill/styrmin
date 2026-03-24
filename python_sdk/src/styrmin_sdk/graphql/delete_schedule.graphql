@@ -1,0 +1,3 @@
+mutation DeleteBackupSchedule($scheduleId: UUID!) {
+    deleteBackupSchedule(scheduleId: $scheduleId)
+}

@@ -1,0 +1,36 @@
+meta {
+  name: Update deployment version
+  type: graphql
+  seq: 18
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  mutation UpdateDeploymentVersion(
+    $deploymentId: UUID! 
+    $version: String!
+  ) {
+    updateDeploymentVersion(
+      deploymentId: $deploymentId
+      version: $version
+    ) {
+      id
+      type
+      status
+      message
+      deploymentId
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "deploymentId": "{{deployment_id}}",
+    "version": "1.2"
+  }
+}

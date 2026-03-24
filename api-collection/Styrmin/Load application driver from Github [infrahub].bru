@@ -1,0 +1,49 @@
+meta {
+  name: Load application driver from Github [infrahub]
+  type: graphql
+  seq: 5
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  mutation CreateApplicationDriverVersion($repositoryUrl: String!, $branch: String!) {
+    loadRemoteApplicationDriverVersion(repositoryUrl: $repositoryUrl, branch: $branch) {
+      id
+      applicationDriverId
+      version
+      supportedVersions
+      components
+      componentConfigs {
+        id
+        name
+        config
+      }
+      actions {
+        image
+        name
+        location
+      }
+      helmChart {
+        id
+        name
+        version
+        repository
+        valueTemplate
+      }
+    }
+  }
+
+}
+
+body:graphql:vars {
+  {"repositoryUrl": "https://github.com/opsmill/styrmin-mvp-driver.git", "branch": "develop"}
+}
+
+vars:post-response {
+  application_id: res.body.data.loadRemoteApplicationDriverVersion.id
+}

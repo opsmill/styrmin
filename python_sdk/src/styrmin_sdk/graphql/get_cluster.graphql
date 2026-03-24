@@ -1,0 +1,7 @@
+query GetCluster($clusterId: UUID!) {
+    cluster(clusterId: $clusterId) {
+        id
+        name
+        config
+    }
+}

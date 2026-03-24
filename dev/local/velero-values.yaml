@@ -1,0 +1,83 @@
+---
+# Velero configuration for local Kind development
+# Uses MinIO as S3-compatible backup storage
+#
+# Installed directly from the Velero Helm chart (not as a subchart of styrmin).
+# Usage: invoke cluster.velero
+
+image:
+  pullPolicy: IfNotPresent
+
+kubectl:
+  image:
+    repository: bitnamilegacy/kubectl
+    tag: 1.33
+
+initContainers:
+  - name: velero-plugin-for-aws
+    image: "velero/velero-plugin-for-aws:v1.11.1"
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - name: plugins
+        mountPath: /target
+
+configuration:
+  backupStorageLocation:
+    - name: default
+      provider: aws
+      bucket: velero
+      config:
+        region: minio
+        s3ForcePathStyle: true
+        s3Url: "http://minio.styrmin.svc:9000"
+  volumeSnapshotLocation:
+    - name: default
+      provider: dummy
+
+deployNodeAgent: true
+snapshotsEnabled: false
+
+credentials:
+  secretContents:
+    cloud: |
+      [default]
+      aws_access_key_id = minioadmin
+      aws_secret_access_key = minioadmin
+
+configMaps:
+  velero-restore-pvc-patch:
+    labels: {}
+    data:
+      resource-patch.yaml: |
+        version: v1
+        resourceModifierRules:
+        - conditions:
+            groupResource: persistentvolumeclaims
+          patches:
+          - operation: remove
+            path: "/spec/volumeName"
+  fs-restore-action-config:
+    labels:
+      velero.io/plugin-config: ""
+      velero.io/pod-volume-restore: RestoreItemAction
+    data:
+      secCtx: |
+        capabilities:
+          drop: []
+          add: []
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsUser: 0
+        runAsGroup: 0
+        runAsNonRoot: false
+
+nodeAgent:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi

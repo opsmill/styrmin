@@ -1,0 +1,51 @@
+meta {
+  name: Load local application driver [simple app]
+  type: graphql
+  seq: 7
+}
+
+post {
+  url: {{api_url}}
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  mutation LoadLocalApplicationDriverVersion($path: String!) {
+    loadLocalApplicationDriverVersion(path: $path) {
+      id
+      applicationDriverId
+      version
+      supportedVersions
+      sourceType
+      sourcePath
+      components
+      componentConfigs {
+        id
+        name
+        config
+      }
+      actions {
+        image
+        name
+        location
+      }
+      helmChart {
+        id
+        name
+        version
+        repository
+        valueTemplate
+      }
+    }
+  }
+
+}
+
+body:graphql:vars {
+  {"path": "/styrmin/drivers/simple-app"}
+}
+
+vars:post-response {
+  application_id: res.body.data.loadLocalApplicationDriverVersion.id
+}

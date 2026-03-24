@@ -1,0 +1,11 @@
+query GetEnvironment($environmentId: UUID!) {
+    environment(environmentId: $environmentId) {
+        id
+        name
+        config
+        cluster {
+            id
+            name
+        }
+    }
+}

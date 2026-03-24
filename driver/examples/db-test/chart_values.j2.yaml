@@ -1,0 +1,48 @@
+fullnameOverride: styrmin-db-test
+
+image:
+  repository: db-test
+  tag: "{{ app.version }}"
+
+mariadb:
+  fullnameOverride: styrmin-db-test-mariadb
+  auth:
+    database: testdb
+    username: testuser
+    password: test-password
+    rootPassword: root-password
+  primary:
+    persistence:
+      size: 1Gi
+      storageClass: "{{ instance.config.standard_storage.storage_class }}"
+    extraVolumes:
+      - name: backup
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: backup
+        mountPath: /backup
+    extraEnvVars:
+      - name: MARIADB_PASSWORD
+        value: test-password
+
+mongodb:
+  fullnameOverride: styrmin-db-test-mongodb
+  architecture: standalone
+  auth:
+    enabled: true
+    rootUser: testuser
+    rootPassword: test-mongo-password
+  persistence:
+    size: 1Gi
+    storageClass: "{{ instance.config.standard_storage.storage_class }}"
+  extraVolumes:
+    - name: backup
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: backup
+      mountPath: /backup
+  extraEnvVars:
+    - name: MONGO_INITDB_ROOT_USERNAME
+      value: testuser
+    - name: MONGO_INITDB_ROOT_PASSWORD
+      value: test-mongo-password

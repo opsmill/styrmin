@@ -1,0 +1,35 @@
+fullnameOverride: styrmin-simple-app
+
+image:
+  repository: simple-app
+  tag: "{{ app.version }}"
+
+ingress:
+  enabled: true
+  className: "{{ instance.config.ingress_class }}"
+  hosts:
+    - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
+      paths:
+        - path: /
+          pathType: Prefix
+
+database:
+  host: styrmin-postgresql
+
+postgresql:
+  enabled: true
+  fullnameOverride: styrmin-postgresql
+  auth:
+    username: simple-app
+    password: simple-app-password
+    database: simple_app
+  primary:
+    persistence:
+      enabled: true
+      size: 1Gi
+    extraVolumes:
+      - name: backup
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: backup
+        mountPath: /backup

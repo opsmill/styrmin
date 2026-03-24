@@ -1,0 +1,26 @@
+mutation LoadRemoteApplicationDriverVersion($repositoryUrl: String!, $branch: String!) {
+    loadRemoteApplicationDriverVersion(repositoryUrl: $repositoryUrl, branch: $branch) {
+        id
+        applicationDriverId
+        version
+        supportedVersions
+        components
+        componentConfigs {
+            id
+            name
+            config
+        }
+        actions {
+            name
+            location
+            image
+        }
+        helmChart {
+            id
+            name
+            version
+            repository
+            valueTemplate
+        }
+    }
+}

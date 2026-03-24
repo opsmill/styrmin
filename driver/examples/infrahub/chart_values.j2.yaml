@@ -1,0 +1,98 @@
+---
+fullnameOverride: styrmin-infrahub
+global:
+  infrahubTag: "{{ app.version }}"
+infrahubDemoData:
+  enabled: false
+infrahubServer:
+  ingress:
+    enabled: true
+    hostname: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
+    extraHosts:
+      - name: "{{ services.infrahub.host | to_fqdn_label }}-{{ environment.name | to_fqdn_label }}.{{ instance.config.fqdn_suffix }}"
+        path: /
+  infrahubServer:
+    env:
+      PREFECT_API_URL: "http://styrmin-task-manager:4200/api"
+      INFRAHUB_WORKFLOW_ADDRESS: styrmin-task-manager
+  persistence:
+    accessMode: ReadWriteOnce
+    enabled: true
+    storageClassName: "{{ instance.config.standard_storage.storage_class }}"
+  replicas: "{{ parameters.replicas_server }}"
+infrahubTaskWorker:
+  infrahubTaskWorker:
+    env:
+      PREFECT_API_URL: "http://styrmin-task-manager:4200/api"
+      INFRAHUB_WORKFLOW_ADDRESS: styrmin-task-manager
+  replicas: "{{ parameters.replicas_task_worker }}"
+nats:
+  enabled: false
+neo4j:
+  additionalVolumeMounts:
+    - mountPath: /backup
+      name: backup
+  additionalVolumes:
+    - emptyDir: {}
+      name: backup
+  config:
+    server.backup.enabled: "true"
+  disableLookups: true
+  fullnameOverride: styrmin-database
+  services:
+    admin:
+      enabled: true
+  volumes:
+    data:
+      dynamic:
+        requests:
+          storage: "{{ parameters.database_storage_size }}Gi"
+        storageClassName: "{{ instance.config.standard_storage.storage_class }}"
+      mode: dynamic
+nfs-server-provisioner:
+  enabled: false
+prefect-server:
+  enabled: true
+  fullnameOverride: styrmin-task-manager
+  postgresql:
+    architecture: standalone
+    auth:
+      database: prefect
+      password: prefect-opsmill
+      username: prefect
+    enabled: true
+    fullnameOverride: styrmin-postgresql
+    image:
+      tag: 14.13.0
+    primary:
+      persistence:
+        enabled: true
+        storageClass: "{{ instance.config.standard_storage.storage_class }}"
+      extraVolumes:
+        - name: backup
+          emptyDir: {}
+      extraVolumeMounts:
+        - name: backup
+          mountPath: /backup
+    env:
+    - name: PREFECT_SERVER_ANALYTICS_ENABLED
+      value: "{{ parameters.enable_analytics }}"
+rabbitmq:
+  enabled: true
+  fullnameOverride: styrmin-message-queue
+  auth:
+    erlangCookie: styrmin-infrahub-supersecret
+  startupProbe:
+    enabled: true
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 20
+  readinessProbe:
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 20
+  resourcesPreset: none
+redis:
+  enabled: true
+  fullnameOverride: styrmin-cache
+  resourcesPreset: none

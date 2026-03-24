@@ -1,0 +1,38 @@
+---
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: simple-app
+spec:
+  version: "1"
+  supported_versions: ">=0.1,<1.0"
+  info:
+    description: Simple 3-tier FastAPI application with PostgreSQL
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: simple-app
+      version: 0.1.0
+
+  components:
+    server:
+      identifier:
+        label:
+          app.kubernetes.io/name: simple-app
+
+    database:
+      identifier:
+        label:
+          app.kubernetes.io/name: postgresql
+      backup:
+        enabled: true
+        kind: postgres
+        database_name: simple_app
+
+  services:
+    - name: simple-app
+      kind: http
+      scope: internal
+      port: 8000
+      component: server

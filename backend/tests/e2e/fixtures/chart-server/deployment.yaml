@@ -1,0 +1,40 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chart-server
+  labels:
+    app: chart-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chart-server
+  template:
+    metadata:
+      labels:
+        app: chart-server
+    spec:
+      containers:
+        - name: chart-server
+          image: chart-server:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chart-server
+  labels:
+    app: chart-server
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: chart-server

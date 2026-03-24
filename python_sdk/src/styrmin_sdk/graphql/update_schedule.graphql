@@ -1,0 +1,27 @@
+mutation UpdateBackupSchedule(
+    $scheduleId: UUID!,
+    $name: String,
+    $cronExpression: String,
+    $retentionCount: Int,
+    $enabled: Boolean
+) {
+    updateBackupSchedule(
+        scheduleId: $scheduleId,
+        name: $name,
+        cronExpression: $cronExpression,
+        retentionCount: $retentionCount,
+        enabled: $enabled
+    ) {
+        id
+        name
+        enabled
+        cronExpression
+        retentionCount
+        deploymentId
+        lastBackupAt
+        nextBackupAt
+        prefectDeploymentId
+        createdOn
+        updatedOn
+    }
+}

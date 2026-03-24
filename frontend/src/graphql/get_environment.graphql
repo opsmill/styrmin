@@ -1,0 +1,31 @@
+query GetEnvironment($environmentId: UUID!) {
+  environment(environmentId: $environmentId) {
+    id
+    name
+    config
+    cluster {
+      id
+      name
+    }
+    backupStorageLocation {
+      id
+      name
+    }
+    deployments {
+      id
+      name
+      status
+      applicationVersion
+      applicationDriverVersionId
+      components {
+        id
+        name
+        enabled
+      }
+      applicationInstance {
+        id
+        status
+      }
+    }
+  }
+}

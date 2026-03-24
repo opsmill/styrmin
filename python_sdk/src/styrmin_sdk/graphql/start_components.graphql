@@ -1,0 +1,9 @@
+mutation StartComponents($deploymentId: UUID!, $components: [String!]!) {
+    startComponents(deploymentId: $deploymentId, components: $components) {
+        id
+        status
+        type
+        deploymentId
+        message
+    }
+}

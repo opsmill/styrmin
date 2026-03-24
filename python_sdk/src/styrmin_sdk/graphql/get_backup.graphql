@@ -1,0 +1,14 @@
+query GetBackup($backupId: UUID!) {
+    backup(backupId: $backupId) {
+        id
+        name
+        status
+        instanceId
+        errorMessage
+        startedAt
+        completedAt
+        sizeBytes
+        createdOn
+        updatedOn
+    }
+}

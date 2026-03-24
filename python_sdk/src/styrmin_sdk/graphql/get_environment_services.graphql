@@ -1,0 +1,12 @@
+query GetEnvironmentServices($environmentId: UUID!) {
+  environmentServices(environmentId: $environmentId) {
+    id
+    driverServiceName
+    resolvedName
+    kind
+    scope
+    port
+    component
+    deploymentId
+  }
+}

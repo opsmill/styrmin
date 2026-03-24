@@ -1,0 +1,19 @@
+---
+# Helm values for the DigitalOcean demo deployment.
+# Region: ams3 — update s3Url and region if deploying to a different region.
+
+# --- Styrmin image ---
+image:
+  registry: registry.opsmill.io/opsmill
+  tag: latest
+
+# --- Ingress ---
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: traefik
+  hosts:
+    - host: demo.styrmin.app
+      paths:
+        - path: /
+          pathType: Prefix

@@ -1,0 +1,26 @@
+mutation LoadLocalApplicationDriverVersion($path: String!) {
+    loadLocalApplicationDriverVersion(path: $path) {
+        id
+        applicationDriverId
+        version
+        supportedVersions
+        components
+        componentConfigs {
+            id
+            name
+            config
+        }
+        actions {
+            name
+            location
+            image
+        }
+        helmChart {
+            id
+            name
+            version
+            repository
+            valueTemplate
+        }
+    }
+}

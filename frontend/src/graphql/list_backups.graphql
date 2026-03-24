@@ -1,0 +1,11 @@
+query ListBackups($instanceId: UUID!) {
+  backups(instanceId: $instanceId) {
+    id
+    name
+    status
+    createdOn
+    completedAt
+    sizeBytes
+    errorMessage
+  }
+}

@@ -1,0 +1,40 @@
+image:
+  tag: latest
+  pullPolicy: IfNotPresent
+
+taskWorkerQuerySeconds: 1
+
+styrmin-agent:
+  prefect-worker:
+    worker:
+      config:
+        queryInterval: 1
+
+postgresql:
+  primary:
+    readinessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+
+livenessProbe:
+  initialDelaySeconds: 1
+  periodSeconds: 1
+  timeoutSeconds: 1
+  failureThreshold: 60
+
+readinessProbe:
+  initialDelaySeconds: 1
+  periodSeconds: 1
+  timeoutSeconds: 1
+  failureThreshold: 60
+
+velero:
+  enabled: true
+  upgradeCRDs: false
+  backupsEnabled: false
+  credentials:
+    useSecret: false
+  image:
+    pullPolicy: IfNotPresent

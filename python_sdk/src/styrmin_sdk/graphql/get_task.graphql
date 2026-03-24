@@ -1,0 +1,9 @@
+query GetTask($taskId: UUID!) {
+    task(taskId: $taskId) {
+        id
+        type
+        status
+        message
+        deploymentId
+    }
+}
