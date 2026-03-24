@@ -1,0 +1,97 @@
+## The LibreNMS chart uses {{ .Release.Name }} (not the fullname helper) for
+## inter-service references (DB_HOST, REDIS_HOST, RRDCACHED_SERVER).
+## Therefore subchart fullnameOverrides MUST follow the
+## <release_reference>-<subchart> pattern to match those references.
+fullnameOverride: {{ instance.release_reference }}
+
+global:
+  security:
+    allowInsecureImages: true
+
+librenms:
+  image:
+    repository: librenms/librenms
+    tag: "{{ app.version }}"
+    pullPolicy: IfNotPresent
+
+  timezone: UTC
+
+  configuration: |
+    $config['distributed_poller_group']          = '0';
+    $config['distributed_poller']                = true;
+
+  frontend:
+    replicas: {{ parameters.replicas_frontend }}
+    readinessProbe:
+      httpGet:
+        path: /login
+        port: 8000
+      initialDelaySeconds: 30
+      periodSeconds: 60
+      timeoutSeconds: 10
+
+  poller:
+    replicas: {{ parameters.replicas_poller }}
+
+  rrdcached:
+    image:
+      repository: crazymax/rrdcached
+      tag: 1.8.0
+      pullPolicy: IfNotPresent
+    persistence:
+      enabled: true
+      journal:
+        size: 1Gi
+        storageClassName: "{{ cluster.config.storage_class }}"
+      rrdcached:
+        size: "{{ parameters.storage_size }}"
+        storageClassName: "{{ cluster.config.storage_class }}"
+    envs:
+      - name: WRITE_JITTER
+        value: "1800"
+      - name: WRITE_TIMEOUT
+        value: "1800"
+
+ingress:
+  enabled: true
+  className: "{{ instance.config.ingress_class }}"
+  hosts:
+    - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
+      paths:
+        - path: /
+          pathType: Prefix
+
+mysql:
+  enabled: true
+  fullnameOverride: {{ instance.release_reference }}-mysql
+  image:
+    repository: bitnamilegacy/mysql
+  auth:
+    username: librenms
+    password: librenms-password
+    database: librenms
+  primary:
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClassName: "{{ cluster.config.storage_class }}"
+    extraVolumes:
+      - name: backup
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: backup
+        mountPath: /backup
+
+redis:
+  enabled: true
+  fullnameOverride: {{ instance.release_reference }}-redis
+  image:
+    repository: bitnamilegacy/redis
+  auth:
+    enabled: false
+    sentinel: false
+  sentinel:
+    enabled: false
+  master:
+    disableCommands: []
+  architecture: standalone

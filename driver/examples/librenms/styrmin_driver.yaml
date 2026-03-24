@@ -1,0 +1,55 @@
+---
+apiVersion: "styrmin.app/v1"
+kind: ApplicationDriver
+metadata:
+  name: librenms
+spec:
+  version: "1"
+  supported_versions: ">=26.0,<27.0"
+  info:
+    description: LibreNMS is an autodiscovering PHP/MySQL-based network monitoring system
+    authors: [opsmill]
+    license: GPL-3.0
+    links:
+      - link: Homepage
+        url: 'https://www.librenms.org/'
+      - link: Documentation
+        url: 'https://docs.librenms.org/'
+  helm:
+    main:
+      location: https://www.librenms.org/helm-charts/librenms
+      version: 7.2.0
+
+  parameters:
+    - name: replicas_frontend
+      label: "Number of frontend replicas"
+      kind: integer
+      default: 1
+    - name: replicas_poller
+      label: "Number of poller replicas"
+      kind: integer
+      default: 2
+    - name: storage_size
+      label: "Storage size"
+      kind: string
+      default: "10Gi"
+
+  components:
+    frontend:
+      identifier:
+        label:
+          app.kubernetes.io/instance: frontend
+
+    rrdcached:
+      identifier:
+        label:
+          app.kubernetes.io/instance: rrdcached
+
+    database:
+      identifier:
+        label:
+          app.kubernetes.io/name: mysql
+      # backup:
+      #   enabled: true
+      #   kind: disk
+      #   volume: /backup
