@@ -41,6 +41,7 @@ export type ApplicationDriver = {
 export type ApplicationDriverVersion = {
   __typename?: 'ApplicationDriverVersion';
   actions: Array<Action>;
+  applicationDriver: ApplicationDriver;
   applicationDriverId: Scalars['UUID']['output'];
   componentConfigs: Array<ComponentConfig>;
   components?: Maybe<Scalars['JSON']['output']>;
@@ -59,6 +60,7 @@ export type ApplicationDriverVersion = {
 
 export type ApplicationInstance = {
   __typename?: 'ApplicationInstance';
+  applicationDriverVersion: ApplicationDriverVersion;
   applicationDriverVersionId: Scalars['UUID']['output'];
   applicationVersion: Scalars['String']['output'];
   deploymentId: Scalars['UUID']['output'];
@@ -74,6 +76,7 @@ export type Backup = {
   createdOn: Scalars['DateTime']['output'];
   errorMessage?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
+  instance: ApplicationInstance;
   instanceId: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
   sizeBytes?: Maybe<Scalars['Int']['output']>;
@@ -86,6 +89,7 @@ export type BackupSchedule = {
   __typename?: 'BackupSchedule';
   createdOn: Scalars['DateTime']['output'];
   cronExpression: Scalars['String']['output'];
+  deployment: Deployment;
   deploymentId: Scalars['UUID']['output'];
   enabled: Scalars['Boolean']['output'];
   id: Scalars['UUID']['output'];
@@ -195,12 +199,14 @@ export type DeployedService = {
 
 export type Deployment = {
   __typename?: 'Deployment';
+  applicationDriverVersion: ApplicationDriverVersion;
   applicationDriverVersionId: Scalars['UUID']['output'];
   applicationInstance?: Maybe<ApplicationInstance>;
   applicationVersion: Scalars['String']['output'];
   components: Array<Component>;
   config: Scalars['JSON']['output'];
   deployedServices: Array<DeployedService>;
+  environment: Environment;
   environmentId: Scalars['UUID']['output'];
   id: Scalars['UUID']['output'];
   internal: Scalars['Boolean']['output'];
@@ -531,6 +537,7 @@ export type QueryTaskArgs = {
 
 export type Restore = {
   __typename?: 'Restore';
+  backup: Backup;
   backupId: Scalars['UUID']['output'];
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   componentStatuses?: Maybe<Array<ComponentRestoreStatus>>;
@@ -561,6 +568,7 @@ export type ServiceNameOverride = {
 
 export type Task = {
   __typename?: 'Task';
+  deployment?: Maybe<Deployment>;
   deploymentId?: Maybe<Scalars['UUID']['output']>;
   id: Scalars['UUID']['output'];
   message?: Maybe<Scalars['String']['output']>;

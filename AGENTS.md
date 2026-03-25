@@ -142,7 +142,6 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 - Python 3.12+, Strawberry GraphQL, SQLModel, SQLAlchemy (async), Pydantic, Pydantic-settings >=2.12.0 (001-graphql-nested-resolvers, 001-migrate-cli-cyclopts)
 - Cyclopts >=3.0.0, Rich >=13.0.0, styrmin-sdk (local) (001-migrate-cli-cyclopts)
 - PostgreSQL via SQLModel/SQLAlchemy (no schema changes — relationships already exist) (001-graphql-nested-resolvers)
-
 - TypeScript 5.9.3, React 19.2.4, Node 22 + Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI, React Router 7, React Hook Form 7 (058-frontend-testing)
 
 ## Recent Changes
