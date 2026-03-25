@@ -9,6 +9,7 @@ ignore: |
   **/*.j2.yaml
   /helm/**/*.yaml
   /.claude/worktrees/
+  /.specify/extensions/
   /driver/examples/simple-app/src/helm/
   /driver/examples/db-test/src/helm/templates/
 
