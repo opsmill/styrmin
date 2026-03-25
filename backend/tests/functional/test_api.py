@@ -19,6 +19,15 @@ from .helpers import (
     delete_environment_query,
     ok_query,
     callback_mutation,
+    get_deployment_with_environment_query,
+    get_deployment_with_adv_query,
+    get_deployment_backward_compat_query,
+    get_deployment_with_adv_and_driver_query,
+    get_backup_with_instance_adv_query,
+    get_task_with_deployment_query,
+    get_backup_schedule_with_deployment_query,
+    get_backup_with_instance_query,
+    get_restore_with_backup_query,
 )
 
 
@@ -528,3 +537,330 @@ async def test_internal_graphql_endpoint_returns_404(client: AsyncClient):
     # 404 when no frontend dist exists, 405 when SPA static files are mounted
     # (StaticFiles only handles GET/HEAD, so POST returns Method Not Allowed)
     assert response.status_code in (404, 405)
+
+
+# --- Helper to create shared test data for nested resolver tests ---
+
+
+async def _create_resolver_test_data(session: AsyncSession) -> dict:
+    """Insert all entities needed for nested resolver tests, return their IDs."""
+    from styrmin_backend.db.models import (
+        ApplicationDriver as ApplicationDriverModel,
+        ApplicationDriverVersion as ApplicationDriverVersionModel,
+        ApplicationInstance as ApplicationInstanceModel,
+        Backup as BackupModel,
+        BackupSchedule as BackupScheduleModel,
+        BackupStatus,
+        Cluster as ClusterModel,
+        Deployment as DeploymentModel,
+        DeploymentStatus,
+        Environment as EnvironmentModel,
+        HelmChart as HelmChartModel,
+        HelmRepository as HelmRepositoryModel,
+        InstanceStatus,
+        Restore as RestoreModel,
+        RestoreStatus,
+        Task as TaskModel,
+        TaskStatus,
+        TaskType,
+    )
+
+    cluster = ClusterModel(name="resolver-test-cluster")
+    session.add(cluster)
+    await session.flush()
+
+    env = EnvironmentModel(name="resolver-test-env", cluster_id=cluster.id)
+    session.add(env)
+    await session.flush()
+
+    helm_repo = HelmRepositoryModel(url="https://charts.example.com")
+    session.add(helm_repo)
+    await session.flush()
+
+    helm_chart = HelmChartModel(
+        name="test-chart",
+        version="1.0.0",
+        values_template="",
+        repository_id=helm_repo.id,
+    )
+    session.add(helm_chart)
+    await session.flush()
+
+    app_driver = ApplicationDriverModel(name="resolver-test-driver")
+    session.add(app_driver)
+    await session.flush()
+
+    adv = ApplicationDriverVersionModel(
+        application_driver_id=app_driver.id,
+        version="2.0.0",
+        application_supported_versions=">=1.0.0",
+        source_repository="https://github.com/example/repo",
+        helm_chart_id=helm_chart.id,
+    )
+    session.add(adv)
+    await session.flush()
+
+    deployment = DeploymentModel(
+        name="resolver-test-deployment",
+        application_version="1.0.0",
+        status=DeploymentStatus.RUNNING,
+        application_driver_version_id=adv.id,
+        environment_id=env.id,
+    )
+    session.add(deployment)
+    await session.flush()
+
+    app_instance = ApplicationInstanceModel(
+        name="resolver-test-instance",
+        application_version="1.0.0",
+        status=InstanceStatus.RUNNING,
+        deployment_id=deployment.id,
+        application_driver_version_id=adv.id,
+        context=None,
+    )
+    session.add(app_instance)
+    await session.flush()
+
+    task = TaskModel(
+        status=TaskStatus.PENDING,
+        type=TaskType.CREATE_INSTANCE,
+        deployment_id=deployment.id,
+    )
+    session.add(task)
+    await session.flush()
+
+    schedule = BackupScheduleModel(
+        name="resolver-test-schedule",
+        cron_expression="0 0 * * *",
+        deployment_id=deployment.id,
+    )
+    session.add(schedule)
+    await session.flush()
+
+    backup = BackupModel(
+        name="resolver-test-backup",
+        status=BackupStatus.COMPLETED,
+        instance_id=app_instance.id,
+    )
+    session.add(backup)
+    await session.flush()
+
+    restore = RestoreModel(
+        name="resolver-test-restore",
+        status=RestoreStatus.COMPLETED,
+        target_namespace="default",
+        backup_id=backup.id,
+    )
+    session.add(restore)
+    await session.flush()
+
+    await session.commit()
+
+    return {
+        "cluster_id": str(cluster.id),
+        "environment_id": str(env.id),
+        "environment_name": env.name,
+        "app_driver_id": str(app_driver.id),
+        "app_driver_name": app_driver.name,
+        "adv_id": str(adv.id),
+        "adv_version": adv.version,
+        "deployment_id": str(deployment.id),
+        "deployment_name": deployment.name,
+        "instance_id": str(app_instance.id),
+        "instance_name": app_instance.name,
+        "task_id": str(task.id),
+        "schedule_id": str(schedule.id),
+        "schedule_name": schedule.name,
+        "backup_id": str(backup.id),
+        "backup_name": backup.name,
+        "restore_id": str(restore.id),
+        "restore_name": restore.name,
+    }
+
+
+# --- Nested resolver tests ---
+
+
+@pytest.mark.asyncio
+async def test_deployment_environment_resolver(
+    client: AsyncClient, session: AsyncSession
+):
+    """Verify Deployment.environment returns the related environment object."""
+    data = await _create_resolver_test_data(session)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": get_deployment_with_environment_query,
+            "variables": {"deploymentId": data["deployment_id"]},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["deployment"]
+    assert result["environmentId"] == data["environment_id"]
+    assert result["environment"]["id"] == data["environment_id"]
+    assert result["environment"]["name"] == data["environment_name"]
+
+
+@pytest.mark.asyncio
+async def test_deployment_adv_resolver(client: AsyncClient, session: AsyncSession):
+    """Verify Deployment.applicationDriverVersion returns the related ADV object."""
+    data = await _create_resolver_test_data(session)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": get_deployment_with_adv_query,
+            "variables": {"deploymentId": data["deployment_id"]},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["deployment"]
+    assert result["applicationDriverVersionId"] == data["adv_id"]
+    assert result["applicationDriverVersion"]["id"] == data["adv_id"]
+    assert result["applicationDriverVersion"]["version"] == data["adv_version"]
+
+
+@pytest.mark.asyncio
+async def test_deployment_backward_compat(client: AsyncClient, session: AsyncSession):
+    """Verify existing *Id fields still work unchanged."""
+    data = await _create_resolver_test_data(session)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": get_deployment_backward_compat_query,
+            "variables": {"deploymentId": data["deployment_id"]},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["deployment"]
+    assert result["environmentId"] == data["environment_id"]
+    assert result["applicationDriverVersionId"] == data["adv_id"]
+
+
+@pytest.mark.asyncio
+async def test_adv_application_driver_resolver(
+    client: AsyncClient, session: AsyncSession
+):
+    """Verify ApplicationDriverVersion.applicationDriver returns the parent driver."""
+    data = await _create_resolver_test_data(session)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": get_deployment_with_adv_and_driver_query,
+            "variables": {"deploymentId": data["deployment_id"]},
+        },
+    )
+
+    assert response.status_code == 200
+    adv = response.json()["data"]["deployment"]["applicationDriverVersion"]
+    assert adv["applicationDriver"]["id"] == data["app_driver_id"]
+    assert adv["applicationDriver"]["name"] == data["app_driver_name"]
+
+
+@pytest.mark.asyncio
+async def test_app_instance_adv_resolver(client: AsyncClient, session: AsyncSession):
+    """Verify ApplicationInstance.applicationDriverVersion returns the ADV object."""
+    data = await _create_resolver_test_data(session)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": get_backup_with_instance_adv_query,
+            "variables": {"backupId": data["backup_id"]},
+        },
+    )
+
+    assert response.status_code == 200
+    instance = response.json()["data"]["backup"]["instance"]
+    assert instance is not None
+    assert instance["id"] == data["instance_id"]
+    assert instance["applicationDriverVersion"]["id"] == data["adv_id"]
+    assert instance["applicationDriverVersion"]["version"] == data["adv_version"]
+
+
+@pytest.mark.asyncio
+async def test_task_deployment_resolver(client: AsyncClient, session: AsyncSession):
+    """Verify Task.deployment returns the related deployment object."""
+    data = await _create_resolver_test_data(session)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": get_task_with_deployment_query,
+            "variables": {"taskId": data["task_id"]},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["task"]
+    assert result["deploymentId"] == data["deployment_id"]
+    assert result["deployment"]["id"] == data["deployment_id"]
+    assert result["deployment"]["name"] == data["deployment_name"]
+
+
+@pytest.mark.asyncio
+async def test_backup_schedule_deployment_resolver(
+    client: AsyncClient, session: AsyncSession
+):
+    """Verify BackupSchedule.deployment returns the related deployment object."""
+    data = await _create_resolver_test_data(session)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": get_backup_schedule_with_deployment_query,
+            "variables": {"scheduleId": data["schedule_id"]},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["backupSchedule"]
+    assert result["deploymentId"] == data["deployment_id"]
+    assert result["deployment"]["id"] == data["deployment_id"]
+    assert result["deployment"]["name"] == data["deployment_name"]
+
+
+@pytest.mark.asyncio
+async def test_backup_instance_resolver(client: AsyncClient, session: AsyncSession):
+    """Verify Backup.instance returns the related ApplicationInstance object."""
+    data = await _create_resolver_test_data(session)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": get_backup_with_instance_query,
+            "variables": {"backupId": data["backup_id"]},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["backup"]
+    assert result["instanceId"] == data["instance_id"]
+    assert result["instance"]["id"] == data["instance_id"]
+    assert result["instance"]["name"] == data["instance_name"]
+
+
+@pytest.mark.asyncio
+async def test_restore_backup_resolver(client: AsyncClient, session: AsyncSession):
+    """Verify Restore.backup returns the related Backup object."""
+    data = await _create_resolver_test_data(session)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": get_restore_with_backup_query,
+            "variables": {"restoreId": data["restore_id"]},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["restore"]
+    assert result["backupId"] == data["backup_id"]
+    assert result["backup"]["id"] == data["backup_id"]
+    assert result["backup"]["name"] == data["backup_name"]

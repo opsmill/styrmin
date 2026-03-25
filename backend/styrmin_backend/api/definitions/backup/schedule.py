@@ -5,6 +5,7 @@ from uuid import UUID
 
 import strawberry
 
+from styrmin_backend.api.definitions.deployment.model import Deployment
 from styrmin_backend.db.models import BackupSchedule as BackupScheduleModel
 
 
@@ -21,6 +22,16 @@ class BackupSchedule:
     deployment_id: UUID
     created_on: datetime
     updated_on: datetime | None = None
+
+    @strawberry.field
+    async def deployment(self, info: strawberry.Info) -> Deployment:
+        uow = info.context["uow"]
+        async with uow:
+            entity = await uow.deployments.find(self.deployment_id)
+            if entity is None:
+                msg = f"Deployment {self.deployment_id} not found"
+                raise ValueError(msg)
+            return Deployment.from_instance(entity)
 
     @classmethod
     def from_instance(cls, instance: BackupScheduleModel) -> BackupSchedule:

@@ -1,0 +1,142 @@
+# GraphQL Schema Additions for Nested Object Resolvers
+# These fields are ADDED to existing types (additive, non-breaking changes)
+
+# --- Deployment type additions ---
+# extend type Deployment {
+#   environment: Environment!
+#   applicationDriverVersion: ApplicationDriverVersion!
+# }
+
+# --- ApplicationDriverVersion type additions ---
+# extend type ApplicationDriverVersion {
+#   applicationDriver: ApplicationDriver!
+# }
+
+# --- ApplicationInstance type additions ---
+# extend type ApplicationInstance {
+#   applicationDriverVersion: ApplicationDriverVersion!
+# }
+
+# --- Task type additions ---
+# extend type Task {
+#   deployment: Deployment
+# }
+
+# --- BackupSchedule type additions ---
+# extend type BackupSchedule {
+#   deployment: Deployment!
+# }
+
+# --- Backup type additions ---
+# extend type Backup {
+#   instance: ApplicationInstance!
+# }
+
+# --- Restore type additions ---
+# extend type Restore {
+#   backup: Backup!
+# }
+
+
+# Expected resulting types (relevant fields only):
+
+type Deployment {
+  id: UUID!
+  name: String!
+  status: String!
+  config: JSON!
+  parameters: JSON!
+  applicationVersion: String!
+  applicationDriverVersionId: UUID!          # Existing - preserved
+  environmentId: UUID!                        # Existing - preserved
+  internal: Boolean!
+  applicationInstance: ApplicationInstance
+  components: [Component!]!
+  deployedServices: [DeployedService!]!
+  environment: Environment!                   # NEW
+  applicationDriverVersion: ApplicationDriverVersion!  # NEW
+}
+
+type ApplicationDriverVersion {
+  id: UUID!
+  applicationDriverId: UUID!                  # Existing - preserved
+  version: String!
+  supportedVersions: String!
+  defaultVersion: String
+  sourceType: String!
+  sourceRepository: String!
+  sourceBranch: String
+  sourcePath: String
+  components: JSON
+  services: [ServiceDefinition!]!
+  parameters: [ParameterDefinition!]!
+  componentConfigs: [ComponentConfig!]!
+  helmChart: HelmChart!
+  actions: [Action!]!
+  applicationDriver: ApplicationDriver!       # NEW
+}
+
+type ApplicationInstance {
+  id: UUID!
+  name: String!
+  status: String!
+  applicationVersion: String!
+  applicationDriverVersionId: UUID!           # Existing - preserved
+  deploymentId: UUID!
+  applicationDriverVersion: ApplicationDriverVersion!  # NEW
+}
+
+type Task {
+  id: UUID!
+  type: String!
+  status: String!
+  message: String
+  deploymentId: UUID                          # Existing - preserved (nullable)
+  deployment: Deployment                      # NEW (nullable)
+}
+
+type BackupSchedule {
+  id: UUID!
+  name: String!
+  enabled: Boolean!
+  cronExpression: String!
+  lastBackupAt: DateTime
+  nextBackupAt: DateTime
+  retentionCount: Int!
+  prefectDeploymentId: UUID
+  deploymentId: UUID!                         # Existing - preserved
+  createdOn: DateTime!
+  updatedOn: DateTime
+  deployment: Deployment!                     # NEW
+}
+
+type Backup {
+  id: UUID!
+  name: String!
+  status: String!
+  createdOn: DateTime!
+  updatedOn: DateTime
+  startedAt: DateTime
+  completedAt: DateTime
+  sizeBytes: Int
+  errorMessage: String
+  instanceId: UUID!                           # Existing - preserved
+  componentStatuses: [ComponentBackupStatus!]
+  instance: ApplicationInstance!              # NEW
+}
+
+type Restore {
+  id: UUID!
+  name: String!
+  status: String!
+  createdOn: DateTime!
+  updatedOn: DateTime
+  startedAt: DateTime
+  completedAt: DateTime
+  targetNamespace: String!
+  errorMessage: String
+  backupId: UUID!                             # Existing - preserved
+  targetInstanceId: UUID
+  componentStatuses: [ComponentRestoreStatus!]
+  backup: Backup!                             # NEW
+}

@@ -23,6 +23,7 @@ type ApplicationDriverVersion {
   sourceBranch: String
   sourcePath: String
   components: JSON
+  applicationDriver: ApplicationDriver!
   services: [ServiceDefinition!]!
   parameters: [ParameterDefinition!]!
   componentConfigs: [ComponentConfig!]!
@@ -37,6 +38,7 @@ type ApplicationInstance {
   applicationVersion: String!
   applicationDriverVersionId: UUID!
   deploymentId: UUID!
+  applicationDriverVersion: ApplicationDriverVersion!
 }
 
 type Backup {
@@ -50,6 +52,7 @@ type Backup {
   sizeBytes: Int
   errorMessage: String
   instanceId: UUID!
+  instance: ApplicationInstance!
   componentStatuses: [ComponentBackupStatus!]
 }
 
@@ -65,6 +68,7 @@ type BackupSchedule {
   deploymentId: UUID!
   createdOn: DateTime!
   updatedOn: DateTime
+  deployment: Deployment!
 }
 
 type BackupStorageLocation {
@@ -166,6 +170,8 @@ type Deployment {
   internal: Boolean!
   applicationInstance: ApplicationInstance
   components: [Component!]!
+  environment: Environment!
+  applicationDriverVersion: ApplicationDriverVersion!
   deployedServices: [DeployedService!]!
 }
 
@@ -261,6 +267,7 @@ type Restore {
   errorMessage: String
   backupId: UUID!
   targetInstanceId: UUID
+  backup: Backup!
   componentStatuses: [ComponentRestoreStatus!]
 }
 
@@ -283,6 +290,7 @@ type Task {
   status: String!
   message: String
   deploymentId: UUID
+  deployment: Deployment
 }
 
 scalar UUID

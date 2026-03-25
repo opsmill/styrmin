@@ -78,6 +78,10 @@ class ApplicationDriverVersion:
     instance: strawberry.Private[ApplicationDriverVersionModel]
 
     @strawberry.field
+    def application_driver(self) -> ApplicationDriver:
+        return ApplicationDriver.from_instance(self.instance.application_driver)
+
+    @strawberry.field
     def services(self) -> list[ServiceDefinitionType]:
         raw = self.instance.services
         if not raw:

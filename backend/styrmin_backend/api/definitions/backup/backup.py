@@ -5,6 +5,9 @@ from uuid import UUID
 
 import strawberry
 
+from styrmin_backend.api.definitions.deployment.model import (
+    ApplicationInstance as ApplicationInstanceType,
+)
 from styrmin_backend.db.models import Backup as BackupModel
 
 
@@ -29,11 +32,21 @@ class Backup:
     error_message: str | None = None
     instance_id: UUID
 
-    instance: strawberry.Private[BackupModel]
+    db_model: strawberry.Private[BackupModel]
+
+    @strawberry.field
+    async def instance(self, info: strawberry.Info) -> ApplicationInstanceType:
+        uow = info.context["uow"]
+        async with uow:
+            db_instance = await uow.application_instances.get(self.instance_id)
+            if db_instance is None:
+                msg = f"ApplicationInstance {self.instance_id} not found"
+                raise ValueError(msg)
+            return ApplicationInstanceType.from_instance(db_instance)
 
     @strawberry.field
     def component_statuses(self) -> list[ComponentBackupStatus] | None:
-        statuses = self.instance.component_statuses
+        statuses = self.db_model.component_statuses
         if not statuses:
             return None
         return [
@@ -59,5 +72,5 @@ class Backup:
             size_bytes=instance.size_bytes,
             error_message=instance.error_message,
             instance_id=instance.instance_id,
-            instance=instance,
+            db_model=instance,
         )

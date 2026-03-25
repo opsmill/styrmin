@@ -52,6 +52,10 @@ from styrmin_backend.repository.helm_repository import (
     HelmRepositoryRepository,
     SQLModelHelmRepositoryRepository,
 )
+from styrmin_backend.repository.application_instance import (
+    ApplicationInstanceRepository,
+    SQLModelApplicationInstanceRepository,
+)
 from styrmin_backend.repository.restore import (
     RestoreRepository,
     SQLModelRestoreRepository,
@@ -73,7 +77,7 @@ class UnitOfWork(ABC):
     component_configs: ComponentConfigRepository
     application_drivers: ApplicationDriverRepository
     application_driver_versions: ApplicationDriverVersionRepository
-    # instances: ApplicationInstanceRepository
+    application_instances: ApplicationInstanceRepository
     actions: ActionRepository
     utilities: UtilityRepository
     tasks: TaskRepository
@@ -114,7 +118,7 @@ class SqlModelUnitOfWork(UnitOfWork):
     component_configs: SQLModelComponentConfigRepository
     application_drivers: SQLModelApplicationDriverRepository
     application_driver_versions: SQLModelApplicationDriverVersionRepository
-    # instances: SQLModelApplicationInstanceRepository
+    application_instances: SQLModelApplicationInstanceRepository
     actions: SQLModelActionRepository
     utilities: SQLModelUtilityRepository
     tasks: SQLModelTaskRepository
@@ -142,7 +146,9 @@ class SqlModelUnitOfWork(UnitOfWork):
         self.application_driver_versions = SQLModelApplicationDriverVersionRepository(
             session=self.session
         )
-        # self.instances = SQLModelApplicationInstanceRepository(session=self.session)
+        self.application_instances = SQLModelApplicationInstanceRepository(
+            session=self.session
+        )
         self.actions = SQLModelActionRepository(session=self.session)
         self.utilities = SQLModelUtilityRepository(session=self.session)
         self.tasks = SQLModelTaskRepository(session=self.session)

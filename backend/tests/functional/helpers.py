@@ -120,3 +120,132 @@ update_deployment_version_mutation = """
         }
     }
 """
+
+# --- Nested resolver test queries ---
+
+get_deployment_with_environment_query = """
+    query GetDeployment($deploymentId: UUID!) {
+        deployment(deploymentId: $deploymentId) {
+            id
+            name
+            environmentId
+            environment {
+                id
+                name
+            }
+        }
+    }
+"""
+
+get_deployment_with_adv_query = """
+    query GetDeployment($deploymentId: UUID!) {
+        deployment(deploymentId: $deploymentId) {
+            id
+            name
+            applicationDriverVersionId
+            applicationDriverVersion {
+                id
+                version
+                applicationDriverId
+            }
+        }
+    }
+"""
+
+get_deployment_backward_compat_query = """
+    query GetDeployment($deploymentId: UUID!) {
+        deployment(deploymentId: $deploymentId) {
+            id
+            name
+            environmentId
+            applicationDriverVersionId
+        }
+    }
+"""
+
+get_deployment_with_adv_and_driver_query = """
+    query GetDeployment($deploymentId: UUID!) {
+        deployment(deploymentId: $deploymentId) {
+            id
+            applicationDriverVersion {
+                id
+                version
+                applicationDriver {
+                    id
+                    name
+                }
+            }
+        }
+    }
+"""
+
+get_backup_with_instance_adv_query = """
+    query GetBackup($backupId: UUID!) {
+        backup(backupId: $backupId) {
+            id
+            instance {
+                id
+                name
+                applicationDriverVersion {
+                    id
+                    version
+                }
+            }
+        }
+    }
+"""
+
+get_task_with_deployment_query = """
+    query GetTask($taskId: UUID!) {
+        task(taskId: $taskId) {
+            id
+            deploymentId
+            deployment {
+                id
+                name
+            }
+        }
+    }
+"""
+
+get_backup_schedule_with_deployment_query = """
+    query GetBackupSchedule($scheduleId: UUID!) {
+        backupSchedule(scheduleId: $scheduleId) {
+            id
+            name
+            deploymentId
+            deployment {
+                id
+                name
+            }
+        }
+    }
+"""
+
+get_backup_with_instance_query = """
+    query GetBackup($backupId: UUID!) {
+        backup(backupId: $backupId) {
+            id
+            name
+            instanceId
+            instance {
+                id
+                name
+            }
+        }
+    }
+"""
+
+get_restore_with_backup_query = """
+    query GetRestore($restoreId: UUID!) {
+        restore(restoreId: $restoreId) {
+            id
+            name
+            backupId
+            backup {
+                id
+                name
+            }
+        }
+    }
+"""
