@@ -1,3 +1,5 @@
+import os
+
 from invoke import Context, task
 
 from .utils import KUBERNETES_ROOT_NAMESPACE, MAIN_DIRECTORY_PATH, VCLUSTER_NAME, print_header
@@ -9,21 +11,24 @@ DEV_LOCAL_DIR = MAIN_DIRECTORY_PATH / "dev" / "local"
 def delete(context: Context) -> None:
     """Delete the vCluster."""
     print_header(f"Deleting the {VCLUSTER_NAME} cluster...")
-    context.run(f"vcluster delete {VCLUSTER_NAME}", pty=True)
+    config_flag = f" --config {vcluster_dir}" if (vcluster_dir := os.environ.get("VCLUSTER_DIR")) else ""
+    context.run(f"vcluster delete {VCLUSTER_NAME} {config_flag}", pty=True)
 
 
 @task
 def create(context: Context) -> None:
     """Create the vCluster."""
     print_header(f"Creating the {VCLUSTER_NAME} cluster...")
-    context.run(f"vcluster create {VCLUSTER_NAME} --connect=false", pty=True)
+    config_flag = f" --config {vcluster_dir}" if (vcluster_dir := os.environ.get("VCLUSTER_DIR")) else ""
+    context.run(f"vcluster create {VCLUSTER_NAME} --driver=docker --connect=false{config_flag}", pty=True)
 
 
 @task
 def connect(context: Context) -> None:
     """Connect to the vCluster and export kubeconfig."""
     print_header(f"Connecting to the {VCLUSTER_NAME} cluster...")
-    context.run(f"vcluster connect {VCLUSTER_NAME}", pty=True)
+    config_flag = f" --config {vcluster_dir}" if (vcluster_dir := os.environ.get("VCLUSTER_DIR")) else ""
+    context.run(f"vcluster connect {VCLUSTER_NAME} --driver=docker{config_flag}", pty=True)
 
 
 @task
