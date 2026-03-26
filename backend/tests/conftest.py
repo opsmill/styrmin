@@ -1,3 +1,4 @@
+import os
 import subprocess
 import uuid
 from pathlib import Path
@@ -122,19 +123,34 @@ async def vcluster(
     kubeconfig_path = str(tmp_path_factory.mktemp("vcluster") / "kubeconfig")
     cluster_name = f"pytest-{uuid.uuid4()}"
 
+    vcluster_dir = os.environ.get("VCLUSTER_DIR")
+
     def teardown():
-        subprocess.run(["vcluster", "delete", cluster_name], check=True)
+        delete_cmd = ["vcluster", "delete", cluster_name, "--driver=docker"]
+        if vcluster_dir:
+            delete_cmd.extend(["--config", vcluster_dir])
+        subprocess.run(delete_cmd, check=True)
 
     request.addfinalizer(teardown)
 
-    subprocess.run(
-        ["vcluster", "create", cluster_name, "--connect=false"],
-        check=True,
-    )
+    create_cmd = [
+        "vcluster",
+        "create",
+        cluster_name,
+        "--connect=false",
+        "--driver=docker",
+    ]
+
+    if vcluster_dir:
+        create_cmd.extend(["--config", vcluster_dir])
+    subprocess.run(create_cmd, check=True)
 
     # Export kubeconfig from vcluster
+    connect_cmd = ["vcluster", "connect", cluster_name, "--print", "--driver=docker"]
+    if vcluster_dir:
+        connect_cmd.extend(["--config", vcluster_dir])
     result = subprocess.run(
-        ["vcluster", "connect", cluster_name, "--print"],
+        connect_cmd,
         capture_output=True,
         text=True,
         check=True,

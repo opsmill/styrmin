@@ -273,8 +273,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
-      - name: Set vCluster Docker driver
-        run: vcluster use driver docker
       - uses: azure/setup-helm@v4
       - uses: azure/setup-kubectl@v4
       - name: Install uv
@@ -282,6 +280,10 @@ jobs:
       - run: uv sync --all-packages
       - name: Install tini
         run: apt-get update && apt-get install -y tini
+      - name: "Set environment variables"
+        run: |
+          RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
+          echo "VCLUSTER_DIR=/var/lib/github/${RUNNER_NAME}/_temp/.vcluster/config.json" >> $GITHUB_ENV
       - name: Enable E2E tracing
         if: inputs.enable-e2e-tracing == true
         run: |
