@@ -128,6 +128,30 @@ async def create(...) -> None: ...
 async def list_clusters() -> None: ...
 ```
 
+## Lazy Loading
+
+Register sub-apps using Cyclopts lazy loading so the root CLI module only imports `cyclopts`, not every command module and its transitive dependencies. This keeps `--help`, `--version`, and shell completion fast.
+
+### Pattern
+
+```python
+# Root app (cli_commands.py / app.py)
+app.command("mypackage.commands.clusters:clusters_app", name="clusters")
+```
+
+The string `"mypackage.commands.clusters:clusters_app"` is resolved only when the `clusters` subcommand is actually invoked. The `name=` parameter sets the CLI command name before the module is imported.
+
+### Rules
+
+- **Always provide `name=`** — this registers the subcommand name so it appears in parent `--help` output.
+- **Do not pass `help=` or other kwargs** — when the lazy target is an `App` instance, Cyclopts reads `help` from the `App()` declaration in the command module. Passing kwargs raises `ValueError`.
+- **Do not change command modules** — each module still creates its own `App()` and registers commands with `@app.command` as usual.
+
+### Caveats
+
+- Import errors in a lazy module surface at execution time (when the subcommand runs), not at CLI startup.
+- Group validators defined only inside a lazy module won't apply until the module is resolved.
+
 ## Defaults
 
 Specify defaults at the function signature level, not inside `Parameter()`. Cyclopts displays defaults in `--help` automatically.

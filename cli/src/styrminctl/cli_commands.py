@@ -2,22 +2,14 @@ from importlib.metadata import version
 
 from cyclopts import App
 
-from styrminctl.commands.backup_storage_locations import backup_storage_locations_app
-from styrminctl.commands.backups import backups_app
-from styrminctl.commands.clusters import clusters_app
-from styrminctl.commands.deployments import deployments_app
-from styrminctl.commands.drivers import drivers_app
-from styrminctl.commands.environments import environments_app
-from styrminctl.commands.tasks import tasks_app
-
 app = App(name="styrminctl", help="Styrmin client CLI.", version=version("cli"))
 
-app.command(clusters_app)
-app.command(environments_app)
-app.command(drivers_app)
-app.command(deployments_app)
-app.command(backups_app)
-app.command(backup_storage_locations_app)
-app.command(tasks_app)
+app.command("styrminctl.commands.clusters:clusters_app", name="clusters")
+app.command("styrminctl.commands.environments:environments_app", name="environments")
+app.command("styrminctl.commands.drivers:drivers_app", name="drivers")
+app.command("styrminctl.commands.deployments:deployments_app", name="deployments")
+app.command("styrminctl.commands.backups:backups_app", name="backups")
+app.command("styrminctl.commands.backup_storage_locations:backup_storage_locations_app", name="backup-locations")
+app.command("styrminctl.commands.tasks:tasks_app", name="tasks")
 
 app.register_install_completion_command()
