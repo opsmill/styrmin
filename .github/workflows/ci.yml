@@ -48,6 +48,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync --all-packages
@@ -68,6 +72,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync
@@ -99,6 +107,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync --all-packages
@@ -117,6 +129,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync --all-packages
@@ -131,6 +147,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync
@@ -209,6 +229,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync --all-packages
@@ -258,6 +282,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync --all-packages
@@ -275,6 +303,10 @@ jobs:
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
       - uses: azure/setup-helm@v4
       - uses: azure/setup-kubectl@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync --all-packages
