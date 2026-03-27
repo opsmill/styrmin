@@ -2,52 +2,46 @@
 
 from __future__ import annotations
 
-import typer
-from styrmin_sdk import StyrminClient
+from typing import Annotated
+
+from cyclopts import App, Parameter
 from styrmin_sdk.exceptions import StyrminError
 
-from styrminctl.async_typer import AsyncTyper as Typer
-from styrminctl.config import SETTINGS
+from styrminctl import client
 from styrminctl.output import console, parse_json_argument, print_error, print_success, print_table
+from styrminctl.types import ClusterId
 
-app = Typer()
-
-
-def _get_client() -> StyrminClient:
-    return StyrminClient(
-        server_address=SETTINGS.server_address,
-        timeout=SETTINGS.timeout,
-        headers=SETTINGS.additional_headers,
-    )
+clusters_app = App(name="clusters", help="Manage clusters.")
 
 
-@app.command()
+@clusters_app.command
 async def create(
-    name: str = typer.Argument(..., help="Name of the cluster"),
-    config: str | None = typer.Option(None, "--config", "-c", help="JSON config (inline string or @filepath)"),
+    name: Annotated[str, Parameter(help="Name of the cluster.")],
+    *,
+    config: Annotated[str | None, Parameter(help="JSON config (inline or @filepath).")] = None,
 ) -> None:
     """Create a new cluster."""
     parsed_config = parse_json_argument(config)
 
-    async with _get_client() as client:
+    async with client.get_client() as sdk:
         try:
-            cluster = await client.clusters.create(name=name, config=parsed_config)
+            cluster = await sdk.clusters.create(name=name, config=parsed_config)
         except StyrminError as e:
             print_error(str(e))
-            raise typer.Exit(code=1) from e
+            raise SystemExit(1) from e
 
     print_success(f"Cluster '{cluster.name}' created (id: {cluster.id})")
 
 
-@app.command(name="list")
+@clusters_app.command(name="list")
 async def list_clusters() -> None:
     """List all clusters."""
-    async with _get_client() as client:
+    async with client.get_client() as sdk:
         try:
-            clusters = await client.clusters.list()
+            clusters = await sdk.clusters.list()
         except StyrminError as e:
             print_error(str(e))
-            raise typer.Exit(code=1) from e
+            raise SystemExit(1) from e
 
     if not clusters:
         console.print("No clusters found.")
@@ -57,32 +51,28 @@ async def list_clusters() -> None:
     print_table(rows, columns=["id", "name", "config"], title="Clusters")
 
 
-@app.command()
-async def get(
-    cluster_id: str = typer.Argument(..., help="UUID of the cluster"),
-) -> None:
+@clusters_app.command
+async def get(cluster_id: ClusterId) -> None:
     """Get a cluster by ID."""
-    async with _get_client() as client:
+    async with client.get_client() as sdk:
         try:
-            cluster = await client.clusters.get(cluster_id)
+            cluster = await sdk.clusters.get(cluster_id)
         except StyrminError as e:
             print_error(str(e))
-            raise typer.Exit(code=1) from e
+            raise SystemExit(1) from e
 
     row = {"id": str(cluster.id), "name": cluster.name, "config": str(cluster.config) if cluster.config else ""}
     print_table([row], columns=["id", "name", "config"], title="Cluster")
 
 
-@app.command()
-async def delete(
-    cluster_id: str = typer.Argument(..., help="UUID of the cluster to delete"),
-) -> None:
+@clusters_app.command
+async def delete(cluster_id: ClusterId) -> None:
     """Delete a cluster."""
-    async with _get_client() as client:
+    async with client.get_client() as sdk:
         try:
-            await client.clusters.delete(cluster_id)
+            await sdk.clusters.delete(cluster_id)
         except StyrminError as e:
             print_error(str(e))
-            raise typer.Exit(code=1) from e
+            raise SystemExit(1) from e
 
     print_success("Cluster deleted.")

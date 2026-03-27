@@ -2,6 +2,9 @@
 
 ## Active Technologies
 
+- Python 3.12+ + Cyclopts >=3.0.0 (already in project), Rich >=13.0.0, Pydantic-settings >=2.12.0, styrmin-sdk (local) (001-migrate-cli-cyclopts)
+- N/A (CLI is a thin client over GraphQL API) (001-migrate-cli-cyclopts)
+
 - TypeScript 5.9.3, React 19.2.4, Node 22 + Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI, React Router 7, React Hook Form 7 (058-frontend-testing)
 
 ## Recent Changes

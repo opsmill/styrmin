@@ -2,34 +2,25 @@
 
 from __future__ import annotations
 
-import typer
-from styrmin_sdk import StyrminClient
+from cyclopts import App
 from styrmin_sdk.exceptions import StyrminError
 
-from styrminctl.async_typer import AsyncTyper as Typer
-from styrminctl.config import SETTINGS
+from styrminctl import client
 from styrminctl.output import console, print_error, print_table
+from styrminctl.types import TaskId
 
-app = Typer()
-
-
-def _get_client() -> StyrminClient:
-    return StyrminClient(
-        server_address=SETTINGS.server_address,
-        timeout=SETTINGS.timeout,
-        headers=SETTINGS.additional_headers,
-    )
+tasks_app = App(name="tasks", help="View tasks.")
 
 
-@app.command(name="list")
+@tasks_app.command(name="list")
 async def list_tasks() -> None:
     """List all tasks."""
-    async with _get_client() as client:
+    async with client.get_client() as sdk:
         try:
-            tasks = await client.tasks.list()
+            tasks = await sdk.tasks.list()
         except StyrminError as e:
             print_error(str(e))
-            raise typer.Exit(code=1) from e
+            raise SystemExit(1) from e
 
     if not tasks:
         console.print("No tasks found.")
@@ -48,17 +39,15 @@ async def list_tasks() -> None:
     print_table(rows, columns=["id", "type", "status", "message", "deploymentId"], title="Tasks")
 
 
-@app.command()
-async def get(
-    task_id: str = typer.Argument(..., help="UUID of the task"),
-) -> None:
+@tasks_app.command
+async def get(task_id: TaskId) -> None:
     """Get a task by ID."""
-    async with _get_client() as client:
+    async with client.get_client() as sdk:
         try:
-            task = await client.tasks.get(task_id)
+            task = await sdk.tasks.get(task_id)
         except StyrminError as e:
             print_error(str(e))
-            raise typer.Exit(code=1) from e
+            raise SystemExit(1) from e
 
     row = {
         "id": str(task.id),
