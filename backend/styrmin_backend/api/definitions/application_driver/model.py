@@ -12,12 +12,14 @@ from styrmin_backend.api.definitions.helm_chart.model import HelmChart
 from styrmin_backend.api.definitions.service.model import (
     ServiceDefinition as ServiceDefinitionType,
 )
+from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.api.scalars import JSON
 from styrmin_backend.db.models import ApplicationDriver as ApplicationDriverModel
 from styrmin_backend.db.models import (
     ApplicationDriverVersion as ApplicationDriverVersionModel,
 )
 from styrmin_backend.domain.models import ComponentConfig as DomainComponentConfig
+from styrmin_backend.services.exceptions import ApplicationDriverNotFoundError
 
 # FIXME: Support domain models serialization instead
 
@@ -78,8 +80,14 @@ class ApplicationDriverVersion:
     instance: strawberry.Private[ApplicationDriverVersionModel]
 
     @strawberry.field
-    def application_driver(self) -> ApplicationDriver:
-        return ApplicationDriver.from_instance(self.instance.application_driver)
+    async def application_driver(self, info: strawberry.Info) -> ApplicationDriver:
+        return await resolve_related(
+            info,
+            "application_drivers",
+            self.application_driver_id,
+            ApplicationDriver,
+            ApplicationDriverNotFoundError,
+        )
 
     @strawberry.field
     def services(self) -> list[ServiceDefinitionType]:

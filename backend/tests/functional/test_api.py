@@ -539,10 +539,11 @@ async def test_internal_graphql_endpoint_returns_404(client: AsyncClient):
     assert response.status_code in (404, 405)
 
 
-# --- Helper to create shared test data for nested resolver tests ---
+# --- Shared fixture for nested resolver tests ---
 
 
-async def _create_resolver_test_data(session: AsyncSession) -> dict:
+@pytest.fixture(name="resolver_data")
+async def resolver_data_fixture(session: AsyncSession) -> dict:
     """Insert all entities needed for nested resolver tests, return their IDs."""
     from styrmin_backend.db.models import (
         ApplicationDriver as ApplicationDriverModel,
@@ -683,184 +684,177 @@ async def _create_resolver_test_data(session: AsyncSession) -> dict:
 
 @pytest.mark.asyncio
 async def test_deployment_environment_resolver(
-    client: AsyncClient, session: AsyncSession
+    client: AsyncClient, resolver_data: dict
 ):
     """Verify Deployment.environment returns the related environment object."""
-    data = await _create_resolver_test_data(session)
-
     response = await client.post(
         "/graphql",
         json={
             "query": get_deployment_with_environment_query,
-            "variables": {"deploymentId": data["deployment_id"]},
+            "variables": {"deploymentId": resolver_data["deployment_id"]},
         },
     )
 
     assert response.status_code == 200
+    assert "errors" not in response.json()
     result = response.json()["data"]["deployment"]
-    assert result["environmentId"] == data["environment_id"]
-    assert result["environment"]["id"] == data["environment_id"]
-    assert result["environment"]["name"] == data["environment_name"]
+    assert result["environmentId"] == resolver_data["environment_id"]
+    assert result["environment"]["id"] == resolver_data["environment_id"]
+    assert result["environment"]["name"] == resolver_data["environment_name"]
 
 
 @pytest.mark.asyncio
-async def test_deployment_adv_resolver(client: AsyncClient, session: AsyncSession):
+async def test_deployment_adv_resolver(client: AsyncClient, resolver_data: dict):
     """Verify Deployment.applicationDriverVersion returns the related ADV object."""
-    data = await _create_resolver_test_data(session)
-
     response = await client.post(
         "/graphql",
         json={
             "query": get_deployment_with_adv_query,
-            "variables": {"deploymentId": data["deployment_id"]},
+            "variables": {"deploymentId": resolver_data["deployment_id"]},
         },
     )
 
     assert response.status_code == 200
+    assert "errors" not in response.json()
     result = response.json()["data"]["deployment"]
-    assert result["applicationDriverVersionId"] == data["adv_id"]
-    assert result["applicationDriverVersion"]["id"] == data["adv_id"]
-    assert result["applicationDriverVersion"]["version"] == data["adv_version"]
+    assert result["applicationDriverVersionId"] == resolver_data["adv_id"]
+    assert result["applicationDriverVersion"]["id"] == resolver_data["adv_id"]
+    assert result["applicationDriverVersion"]["version"] == resolver_data["adv_version"]
 
 
 @pytest.mark.asyncio
-async def test_deployment_backward_compat(client: AsyncClient, session: AsyncSession):
+async def test_deployment_backward_compat(client: AsyncClient, resolver_data: dict):
     """Verify existing *Id fields still work unchanged."""
-    data = await _create_resolver_test_data(session)
-
     response = await client.post(
         "/graphql",
         json={
             "query": get_deployment_backward_compat_query,
-            "variables": {"deploymentId": data["deployment_id"]},
+            "variables": {"deploymentId": resolver_data["deployment_id"]},
         },
     )
 
     assert response.status_code == 200
+    assert "errors" not in response.json()
     result = response.json()["data"]["deployment"]
-    assert result["environmentId"] == data["environment_id"]
-    assert result["applicationDriverVersionId"] == data["adv_id"]
+    assert result["environmentId"] == resolver_data["environment_id"]
+    assert result["applicationDriverVersionId"] == resolver_data["adv_id"]
 
 
 @pytest.mark.asyncio
 async def test_adv_application_driver_resolver(
-    client: AsyncClient, session: AsyncSession
+    client: AsyncClient, resolver_data: dict
 ):
     """Verify ApplicationDriverVersion.applicationDriver returns the parent driver."""
-    data = await _create_resolver_test_data(session)
-
     response = await client.post(
         "/graphql",
         json={
             "query": get_deployment_with_adv_and_driver_query,
-            "variables": {"deploymentId": data["deployment_id"]},
+            "variables": {"deploymentId": resolver_data["deployment_id"]},
         },
     )
 
     assert response.status_code == 200
+    assert "errors" not in response.json()
     adv = response.json()["data"]["deployment"]["applicationDriverVersion"]
-    assert adv["applicationDriver"]["id"] == data["app_driver_id"]
-    assert adv["applicationDriver"]["name"] == data["app_driver_name"]
+    assert adv["applicationDriver"]["id"] == resolver_data["app_driver_id"]
+    assert adv["applicationDriver"]["name"] == resolver_data["app_driver_name"]
 
 
 @pytest.mark.asyncio
-async def test_app_instance_adv_resolver(client: AsyncClient, session: AsyncSession):
+async def test_app_instance_adv_resolver(client: AsyncClient, resolver_data: dict):
     """Verify ApplicationInstance.applicationDriverVersion returns the ADV object."""
-    data = await _create_resolver_test_data(session)
-
     response = await client.post(
         "/graphql",
         json={
             "query": get_backup_with_instance_adv_query,
-            "variables": {"backupId": data["backup_id"]},
+            "variables": {"backupId": resolver_data["backup_id"]},
         },
     )
 
     assert response.status_code == 200
+    assert "errors" not in response.json()
     instance = response.json()["data"]["backup"]["instance"]
     assert instance is not None
-    assert instance["id"] == data["instance_id"]
-    assert instance["applicationDriverVersion"]["id"] == data["adv_id"]
-    assert instance["applicationDriverVersion"]["version"] == data["adv_version"]
+    assert instance["id"] == resolver_data["instance_id"]
+    assert instance["applicationDriverVersion"]["id"] == resolver_data["adv_id"]
+    assert (
+        instance["applicationDriverVersion"]["version"] == resolver_data["adv_version"]
+    )
 
 
 @pytest.mark.asyncio
-async def test_task_deployment_resolver(client: AsyncClient, session: AsyncSession):
+async def test_task_deployment_resolver(client: AsyncClient, resolver_data: dict):
     """Verify Task.deployment returns the related deployment object."""
-    data = await _create_resolver_test_data(session)
-
     response = await client.post(
         "/graphql",
         json={
             "query": get_task_with_deployment_query,
-            "variables": {"taskId": data["task_id"]},
+            "variables": {"taskId": resolver_data["task_id"]},
         },
     )
 
     assert response.status_code == 200
+    assert "errors" not in response.json()
     result = response.json()["data"]["task"]
-    assert result["deploymentId"] == data["deployment_id"]
-    assert result["deployment"]["id"] == data["deployment_id"]
-    assert result["deployment"]["name"] == data["deployment_name"]
+    assert result["deploymentId"] == resolver_data["deployment_id"]
+    assert result["deployment"]["id"] == resolver_data["deployment_id"]
+    assert result["deployment"]["name"] == resolver_data["deployment_name"]
 
 
 @pytest.mark.asyncio
 async def test_backup_schedule_deployment_resolver(
-    client: AsyncClient, session: AsyncSession
+    client: AsyncClient, resolver_data: dict
 ):
     """Verify BackupSchedule.deployment returns the related deployment object."""
-    data = await _create_resolver_test_data(session)
-
     response = await client.post(
         "/graphql",
         json={
             "query": get_backup_schedule_with_deployment_query,
-            "variables": {"scheduleId": data["schedule_id"]},
+            "variables": {"scheduleId": resolver_data["schedule_id"]},
         },
     )
 
     assert response.status_code == 200
+    assert "errors" not in response.json()
     result = response.json()["data"]["backupSchedule"]
-    assert result["deploymentId"] == data["deployment_id"]
-    assert result["deployment"]["id"] == data["deployment_id"]
-    assert result["deployment"]["name"] == data["deployment_name"]
+    assert result["deploymentId"] == resolver_data["deployment_id"]
+    assert result["deployment"]["id"] == resolver_data["deployment_id"]
+    assert result["deployment"]["name"] == resolver_data["deployment_name"]
 
 
 @pytest.mark.asyncio
-async def test_backup_instance_resolver(client: AsyncClient, session: AsyncSession):
+async def test_backup_instance_resolver(client: AsyncClient, resolver_data: dict):
     """Verify Backup.instance returns the related ApplicationInstance object."""
-    data = await _create_resolver_test_data(session)
-
     response = await client.post(
         "/graphql",
         json={
             "query": get_backup_with_instance_query,
-            "variables": {"backupId": data["backup_id"]},
+            "variables": {"backupId": resolver_data["backup_id"]},
         },
     )
 
     assert response.status_code == 200
+    assert "errors" not in response.json()
     result = response.json()["data"]["backup"]
-    assert result["instanceId"] == data["instance_id"]
-    assert result["instance"]["id"] == data["instance_id"]
-    assert result["instance"]["name"] == data["instance_name"]
+    assert result["instanceId"] == resolver_data["instance_id"]
+    assert result["instance"]["id"] == resolver_data["instance_id"]
+    assert result["instance"]["name"] == resolver_data["instance_name"]
 
 
 @pytest.mark.asyncio
-async def test_restore_backup_resolver(client: AsyncClient, session: AsyncSession):
+async def test_restore_backup_resolver(client: AsyncClient, resolver_data: dict):
     """Verify Restore.backup returns the related Backup object."""
-    data = await _create_resolver_test_data(session)
-
     response = await client.post(
         "/graphql",
         json={
             "query": get_restore_with_backup_query,
-            "variables": {"restoreId": data["restore_id"]},
+            "variables": {"restoreId": resolver_data["restore_id"]},
         },
     )
 
     assert response.status_code == 200
+    assert "errors" not in response.json()
     result = response.json()["data"]["restore"]
-    assert result["backupId"] == data["backup_id"]
-    assert result["backup"]["id"] == data["backup_id"]
-    assert result["backup"]["name"] == data["backup_name"]
+    assert result["backupId"] == resolver_data["backup_id"]
+    assert result["backup"]["id"] == resolver_data["backup_id"]
+    assert result["backup"]["name"] == resolver_data["backup_name"]

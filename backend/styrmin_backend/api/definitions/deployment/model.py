@@ -11,6 +11,7 @@ from styrmin_backend.api.definitions.application_driver.model import (
 from styrmin_backend.api.definitions.service.model import (
     DeployedService as DeployedServiceType,
 )
+from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.api.scalars import JSON
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import (
@@ -18,6 +19,10 @@ from styrmin_backend.domain.models import (
 )
 from styrmin_backend.domain.models import (
     Instance as ApplicationInstanceEntity,
+)
+from styrmin_backend.services.exceptions import (
+    ApplicationDriverVersionNotFoundError,
+    EnvironmentNotFoundError,
 )
 
 if TYPE_CHECKING:
@@ -54,15 +59,13 @@ class ApplicationInstance:
     async def application_driver_version(
         self, info: strawberry.Info
     ) -> ApplicationDriverVersion:
-        uow = info.context["uow"]
-        async with uow:
-            entity = await uow.application_driver_versions.get(
-                self.application_driver_version_id
-            )
-            if entity is None:
-                msg = f"ApplicationDriverVersion {self.application_driver_version_id} not found"
-                raise ValueError(msg)
-            return ApplicationDriverVersion.from_instance(entity)
+        return await resolve_related(
+            info,
+            "application_driver_versions",
+            self.application_driver_version_id,
+            ApplicationDriverVersion,
+            ApplicationDriverVersionNotFoundError,
+        )
 
     @classmethod
     def from_instance(cls, instance: ApplicationInstanceEntity) -> ApplicationInstance:
@@ -112,27 +115,25 @@ class Deployment:
     ]:
         from styrmin_backend.api.definitions.environment.model import Environment
 
-        uow = info.context["uow"]
-        async with uow:
-            entity = await uow.environments.get(self.environment_id)
-            if entity is None:
-                msg = f"Environment {self.environment_id} not found"
-                raise ValueError(msg)
-            return Environment.from_instance(entity)
+        return await resolve_related(
+            info,
+            "environments",
+            self.environment_id,
+            Environment,
+            EnvironmentNotFoundError,
+        )
 
     @strawberry.field
     async def application_driver_version(
         self, info: strawberry.Info
     ) -> ApplicationDriverVersion:
-        uow = info.context["uow"]
-        async with uow:
-            entity = await uow.application_driver_versions.get(
-                self.application_driver_version_id
-            )
-            if entity is None:
-                msg = f"ApplicationDriverVersion {self.application_driver_version_id} not found"
-                raise ValueError(msg)
-            return ApplicationDriverVersion.from_instance(entity)
+        return await resolve_related(
+            info,
+            "application_driver_versions",
+            self.application_driver_version_id,
+            ApplicationDriverVersion,
+            ApplicationDriverVersionNotFoundError,
+        )
 
     @strawberry.field
     async def deployed_services(

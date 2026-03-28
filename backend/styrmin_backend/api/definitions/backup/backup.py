@@ -8,7 +8,9 @@ import strawberry
 from styrmin_backend.api.definitions.deployment.model import (
     ApplicationInstance as ApplicationInstanceType,
 )
+from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.db.models import Backup as BackupModel
+from styrmin_backend.services.exceptions import InstanceNotFoundError
 
 
 @strawberry.type
@@ -36,13 +38,13 @@ class Backup:
 
     @strawberry.field
     async def instance(self, info: strawberry.Info) -> ApplicationInstanceType:
-        uow = info.context["uow"]
-        async with uow:
-            db_instance = await uow.application_instances.get(self.instance_id)
-            if db_instance is None:
-                msg = f"ApplicationInstance {self.instance_id} not found"
-                raise ValueError(msg)
-            return ApplicationInstanceType.from_instance(db_instance)
+        return await resolve_related(
+            info,
+            "application_instances",
+            self.instance_id,
+            ApplicationInstanceType,
+            InstanceNotFoundError,
+        )
 
     @strawberry.field
     def component_statuses(self) -> list[ComponentBackupStatus] | None:

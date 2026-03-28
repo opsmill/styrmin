@@ -87,6 +87,13 @@ class ChartValuesTemplateRenderingError(ServiceError):
     default_message = "Chart values template rendering failed"
 
 
+class ApplicationDriverVersionNotFoundError(ServiceError):
+    """The application driver version was not found."""
+
+    error_code = "NOT_FOUND"
+    default_message = "Application driver version not found"
+
+
 class ApplicationDriverVersionAlreadyExistsError(ServiceError):
     """The application already exists."""
 
