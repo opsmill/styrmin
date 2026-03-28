@@ -5,7 +5,10 @@ from uuid import UUID
 
 import strawberry
 
+from styrmin_backend.api.definitions.backup.backup import Backup
+from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.db.models import Restore as RestoreModel
+from styrmin_backend.services.exceptions import BackupNotFoundError
 
 
 @strawberry.type
@@ -30,6 +33,16 @@ class Restore:
     target_instance_id: UUID | None = None
 
     instance: strawberry.Private[RestoreModel]
+
+    @strawberry.field
+    async def backup(self, info: strawberry.Info) -> Backup:
+        return await resolve_related(
+            info,
+            "backups",
+            self.backup_id,
+            Backup,
+            BackupNotFoundError,
+        )
 
     @strawberry.field
     def component_statuses(self) -> list[ComponentRestoreStatus] | None:

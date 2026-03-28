@@ -4,7 +4,10 @@ from uuid import UUID
 
 import strawberry
 
+from styrmin_backend.api.definitions.deployment.model import Deployment
+from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.domain.models import Task as TaskEntity
+from styrmin_backend.services.exceptions import DeploymentNotFoundError
 
 
 @strawberry.type
@@ -16,6 +19,19 @@ class Task:
     deployment_id: UUID | None = None
 
     instance: strawberry.Private[TaskEntity]
+
+    @strawberry.field
+    async def deployment(self, info: strawberry.Info) -> Deployment | None:
+        if self.deployment_id is None:
+            return None
+        return await resolve_related(
+            info,
+            "deployments",
+            self.deployment_id,
+            Deployment,
+            DeploymentNotFoundError,
+            method="find",
+        )
 
     @classmethod
     def from_instance(cls, instance: TaskEntity) -> Task:

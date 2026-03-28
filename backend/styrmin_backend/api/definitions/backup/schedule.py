@@ -5,7 +5,10 @@ from uuid import UUID
 
 import strawberry
 
+from styrmin_backend.api.definitions.deployment.model import Deployment
+from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.db.models import BackupSchedule as BackupScheduleModel
+from styrmin_backend.services.exceptions import DeploymentNotFoundError
 
 
 @strawberry.type
@@ -21,6 +24,17 @@ class BackupSchedule:
     deployment_id: UUID
     created_on: datetime
     updated_on: datetime | None = None
+
+    @strawberry.field
+    async def deployment(self, info: strawberry.Info) -> Deployment:
+        return await resolve_related(
+            info,
+            "deployments",
+            self.deployment_id,
+            Deployment,
+            DeploymentNotFoundError,
+            method="find",
+        )
 
     @classmethod
     def from_instance(cls, instance: BackupScheduleModel) -> BackupSchedule:
