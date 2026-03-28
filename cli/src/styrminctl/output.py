@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import typer
 from rich.console import Console
 from rich.table import Table
+from styrmin_sdk.exceptions import StyrminError
 
 console = Console()
 
@@ -23,7 +25,7 @@ def parse_json_argument(value: str | None) -> Any | None:  # noqa: ANN401
         Parsed JSON as a Python object, or None.
 
     Raises:
-        typer.BadParameter: If the JSON is invalid or file cannot be read.
+        ValueError: If the JSON is invalid or file cannot be read.
     """
     if value is None:
         return None
@@ -31,16 +33,16 @@ def parse_json_argument(value: str | None) -> Any | None:  # noqa: ANN401
     if value.startswith("@"):
         file_path = Path(value[1:])
         if not file_path.exists():
-            raise typer.BadParameter(f"Config file not found: {file_path}")
+            raise ValueError(f"Config file not found: {file_path}")
         try:
             return json.loads(file_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
-            raise typer.BadParameter(f"Invalid JSON in file {file_path}: {e}") from e
+            raise ValueError(f"Invalid JSON in file {file_path}: {e}") from e
 
     try:
         return json.loads(value)
     except json.JSONDecodeError as e:
-        raise typer.BadParameter(f"Invalid JSON: {e}") from e
+        raise ValueError(f"Invalid JSON: {e}") from e
 
 
 def print_table(rows: list[dict[str, Any]], columns: list[str], title: str = "") -> None:
@@ -61,3 +63,13 @@ def print_error(message: str) -> None:
 def print_success(message: str) -> None:
     """Print a success message in green."""
     console.print(f"[green]Success:[/green] {message}")
+
+
+@contextmanager
+def styrmin_error_handler() -> Generator[None]:
+    """Catch StyrminError and ValueError, print a friendly message, and exit."""
+    try:
+        yield
+    except (StyrminError, ValueError) as e:
+        print_error(str(e))
+        raise SystemExit(1) from e

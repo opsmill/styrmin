@@ -2,69 +2,50 @@
 
 from __future__ import annotations
 
-import typer
-from styrmin_sdk import StyrminClient
-from styrmin_sdk.exceptions import StyrminError
+from typing import Annotated
 
-from styrminctl.async_typer import AsyncTyper as Typer
-from styrminctl.config import SETTINGS
-from styrminctl.output import console, print_error, print_success, print_table
+from cyclopts import App, Parameter
 
-app = Typer()
+from styrminctl import client
+from styrminctl.output import console, print_error, print_success, print_table, styrmin_error_handler
+from styrminctl.types import BackupId, InstanceId, MaxWait, OptionalInstanceId, PollInterval, RestoreId
 
-
-def _get_client() -> StyrminClient:
-    return StyrminClient(
-        server_address=SETTINGS.server_address,
-        timeout=SETTINGS.timeout,
-        headers=SETTINGS.additional_headers,
-    )
+backups_app = App(name="backups", help="Manage backups and restores.")
 
 
-@app.command()
+@backups_app.command
 async def create(
-    instance_id: str = typer.Argument(..., help="UUID of the application instance to back up"),
-    name: str | None = typer.Option(None, "--name", "-n", help="Optional backup name"),
-    wait: bool = typer.Option(False, "--wait", "-w", help="Wait for backup to complete"),
-    max_wait: float = typer.Option(300, "--timeout", help="Max seconds to wait (with --wait)"),
-    interval: float = typer.Option(5, "--interval", help="Poll interval in seconds (with --wait)"),
+    instance_id: InstanceId,
+    *,
+    name: Annotated[str | None, Parameter(help="Optional backup name.")] = None,
+    wait: Annotated[bool, Parameter(help="Wait for backup to complete.")] = False,
+    max_wait: MaxWait = 300,
+    interval: PollInterval = 5,
 ) -> None:
     """Create a backup of an application instance."""
-    async with _get_client() as client:
-        try:
-            backup = await client.backups.create_backup(instance_id=instance_id, name=name)
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            backup = await sdk.backups.create_backup(instance_id=instance_id, name=name)
 
-        print_success(f"Backup '{backup.name}' created (id: {backup.id}, status: {backup.status})")
+            print_success(f"Backup '{backup.name}' created (id: {backup.id}, status: {backup.status})")
 
-        if wait:
-            console.print("Waiting for backup to complete...")
-            try:
-                backup = await client.backups.wait_for_backup(backup.id, max_wait=max_wait, interval=interval)
-            except StyrminError as e:
-                print_error(str(e))
-                raise typer.Exit(code=1) from e
+            if wait:
+                console.print("Waiting for backup to complete...")
+                backup = await sdk.backups.wait_for_backup(backup.id, max_wait=max_wait, interval=interval)
 
-            if backup.status == "completed":
-                print_success(f"Backup completed (size: {backup.size_bytes or 'unknown'} bytes)")
-            else:
-                print_error(f"Backup {backup.status}: {backup.error_message or 'unknown error'}")
-                raise typer.Exit(code=1)
+                if backup.status == "completed":
+                    print_success(f"Backup completed (size: {backup.size_bytes or 'unknown'} bytes)")
+                else:
+                    print_error(f"Backup {backup.status}: {backup.error_message or 'unknown error'}")
+                    raise SystemExit(1)
 
 
-@app.command()
-async def get(
-    backup_id: str = typer.Argument(..., help="UUID of the backup"),
-) -> None:
+@backups_app.command
+async def get(backup_id: BackupId) -> None:
     """Get backup details."""
-    async with _get_client() as client:
-        try:
-            backup = await client.backups.get_backup(backup_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            backup = await sdk.backups.get_backup(backup_id)
 
     console.print(f"  ID: {backup.id}")
     console.print(f"  Name: {backup.name}")
@@ -77,18 +58,16 @@ async def get(
         console.print(f"  Error: {backup.error_message}")
 
 
-@app.command(name="list")
+@backups_app.command(name="list")
 async def list_backups(
-    instance_id: str = typer.Argument(..., help="UUID of the application instance"),
-    status: str | None = typer.Option(None, "--status", "-s", help="Filter by status"),
+    instance_id: InstanceId,
+    *,
+    status: Annotated[str | None, Parameter(help="Filter by status.")] = None,
 ) -> None:
     """List backups for an application instance."""
-    async with _get_client() as client:
-        try:
-            backups = await client.backups.list_backups(instance_id=instance_id, status=status)
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            backups = await sdk.backups.list_backups(instance_id=instance_id, status=status)
 
     if not backups:
         console.print("No backups found.")
@@ -108,73 +87,54 @@ async def list_backups(
     print_table(rows, columns=["id", "name", "status", "started_at", "completed_at", "size_bytes"], title="Backups")
 
 
-@app.command()
-async def delete(
-    backup_id: str = typer.Argument(..., help="UUID of the backup to delete"),
-) -> None:
+@backups_app.command
+async def delete(backup_id: BackupId) -> None:
     """Delete a backup and all associated restores."""
-    async with _get_client() as client:
-        try:
-            await client.backups.delete_backup(backup_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            await sdk.backups.delete_backup(backup_id)
 
     print_success(f"Backup '{backup_id}' deleted")
 
 
-@app.command()
+@backups_app.command
 async def restore(
-    backup_id: str = typer.Argument(..., help="UUID of the backup to restore from"),
+    backup_id: BackupId,
     *,
-    target_namespace: str = typer.Option(..., "--target-namespace", "-t", help="Target Kubernetes namespace"),
-    target_instance_id: str | None = typer.Option(
-        None, "--target-instance-id", help="UUID of the target application instance"
-    ),
-    wait: bool = typer.Option(False, "--wait", "-w", help="Wait for restore to complete"),
-    max_wait: float = typer.Option(300, "--timeout", help="Max seconds to wait (with --wait)"),
-    interval: float = typer.Option(5, "--interval", help="Poll interval in seconds (with --wait)"),
+    target_namespace: Annotated[str, Parameter(help="Target Kubernetes namespace.")],
+    target_instance_id: OptionalInstanceId = None,
+    wait: Annotated[bool, Parameter(help="Wait for restore to complete.")] = False,
+    max_wait: MaxWait = 300,
+    interval: PollInterval = 5,
 ) -> None:
     """Restore from a backup."""
-    async with _get_client() as client:
-        try:
-            rst = await client.backups.create_restore(
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            rst = await sdk.backups.create_restore(
                 backup_id=backup_id,
                 target_namespace=target_namespace,
                 target_instance_id=target_instance_id,
             )
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
 
-        print_success(f"Restore '{rst.name}' created (id: {rst.id}, status: {rst.status})")
+            print_success(f"Restore '{rst.name}' created (id: {rst.id}, status: {rst.status})")
 
-        if wait:
-            console.print("Waiting for restore to complete...")
-            try:
-                rst = await client.backups.wait_for_restore(rst.id, max_wait=max_wait, interval=interval)
-            except StyrminError as e:
-                print_error(str(e))
-                raise typer.Exit(code=1) from e
+            if wait:
+                console.print("Waiting for restore to complete...")
+                rst = await sdk.backups.wait_for_restore(rst.id, max_wait=max_wait, interval=interval)
 
-            if rst.status == "completed":
-                print_success("Restore completed")
-            else:
-                print_error(f"Restore {rst.status}: {rst.error_message or 'unknown error'}")
-                raise typer.Exit(code=1)
+                if rst.status == "completed":
+                    print_success("Restore completed")
+                else:
+                    print_error(f"Restore {rst.status}: {rst.error_message or 'unknown error'}")
+                    raise SystemExit(1)
 
 
-@app.command(name="restore-get")
-async def restore_get(
-    restore_id: str = typer.Argument(..., help="UUID of the restore operation"),
-) -> None:
+@backups_app.command(name="restore-get")
+async def restore_get(restore_id: RestoreId) -> None:
     """Get restore operation details."""
-    async with _get_client() as client:
-        try:
-            rst = await client.backups.get_restore(restore_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            rst = await sdk.backups.get_restore(restore_id)
 
     console.print(f"  ID: {rst.id}")
     console.print(f"  Name: {rst.name}")
@@ -188,18 +148,16 @@ async def restore_get(
         console.print(f"  Error: {rst.error_message}")
 
 
-@app.command(name="restore-list")
+@backups_app.command(name="restore-list")
 async def restore_list(
-    backup_id: str = typer.Argument(..., help="UUID of the backup"),
-    status: str | None = typer.Option(None, "--status", "-s", help="Filter by status"),
+    backup_id: BackupId,
+    *,
+    status: Annotated[str | None, Parameter(help="Filter by status.")] = None,
 ) -> None:
     """List restore operations for a backup."""
-    async with _get_client() as client:
-        try:
-            restores = await client.backups.list_restores(backup_id=backup_id, status=status)
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            restores = await sdk.backups.list_restores(backup_id=backup_id, status=status)
 
     if not restores:
         console.print("No restores found.")

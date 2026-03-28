@@ -2,53 +2,39 @@
 
 from __future__ import annotations
 
-import typer
-from styrmin_sdk import StyrminClient
-from styrmin_sdk.exceptions import StyrminError
+from typing import Annotated
 
-from styrminctl.async_typer import AsyncTyper as Typer
-from styrminctl.config import SETTINGS
-from styrminctl.output import console, parse_json_argument, print_error, print_success, print_table
+from cyclopts import App, Parameter
 
-app = Typer()
+from styrminctl import client
+from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
+from styrminctl.types import ClusterId, EnvironmentId
 
-
-def _get_client() -> StyrminClient:
-    return StyrminClient(
-        server_address=SETTINGS.server_address,
-        timeout=SETTINGS.timeout,
-        headers=SETTINGS.additional_headers,
-    )
+environments_app = App(name="environments", help="Manage environments.")
 
 
-@app.command()
+@environments_app.command
 async def create(
-    name: str = typer.Argument(..., help="Name of the environment"),
-    cluster_id: str = typer.Argument(..., help="UUID of the parent cluster"),
-    config: str | None = typer.Option(None, "--config", "-c", help="JSON config (inline string or @filepath)"),
+    name: Annotated[str, Parameter(help="Name of the environment.")],
+    cluster_id: ClusterId,
+    *,
+    config: Annotated[str | None, Parameter(help="JSON config (inline or @filepath).")] = None,
 ) -> None:
     """Create a new environment in a cluster."""
-    parsed_config = parse_json_argument(config)
-
-    async with _get_client() as client:
-        try:
-            env = await client.environments.create(name=name, cluster_id=cluster_id, config=parsed_config)
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        parsed_config = parse_json_argument(config)
+        async with client.get_client() as sdk:
+            env = await sdk.environments.create(name=name, cluster_id=cluster_id, config=parsed_config)
 
     print_success(f"Environment '{env.name}' created in cluster '{env.cluster.name}' (id: {env.id})")
 
 
-@app.command(name="list")
+@environments_app.command(name="list")
 async def list_environments() -> None:
     """List all environments."""
-    async with _get_client() as client:
-        try:
-            environments = await client.environments.list()
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            environments = await sdk.environments.list()
 
     if not environments:
         console.print("No environments found.")
@@ -66,17 +52,12 @@ async def list_environments() -> None:
     print_table(rows, columns=["id", "name", "cluster", "config"], title="Environments")
 
 
-@app.command()
-async def get(
-    environment_id: str = typer.Argument(..., help="UUID of the environment"),
-) -> None:
+@environments_app.command
+async def get(environment_id: EnvironmentId) -> None:
     """Get an environment by ID."""
-    async with _get_client() as client:
-        try:
-            env = await client.environments.get(environment_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            env = await sdk.environments.get(environment_id)
 
     row = {
         "id": str(env.id),
@@ -87,16 +68,11 @@ async def get(
     print_table([row], columns=["id", "name", "cluster", "config"], title="Environment")
 
 
-@app.command()
-async def delete(
-    environment_id: str = typer.Argument(..., help="UUID of the environment to delete"),
-) -> None:
+@environments_app.command
+async def delete(environment_id: EnvironmentId) -> None:
     """Delete an environment."""
-    async with _get_client() as client:
-        try:
-            await client.environments.delete(environment_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise typer.Exit(code=1) from e
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            await sdk.environments.delete(environment_id)
 
     print_success("Environment deleted.")

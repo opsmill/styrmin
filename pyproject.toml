@@ -249,6 +249,9 @@ max-complexity = 10
 "tasks/__init__.py" = [
     "RUF067", # __init__ module should only contain docstrings and re-exports (Invoke tasks pattern)
 ]
+"cli/src/styrminctl/commands/*.py" = [
+    "TC001", # Type aliases from types.py are used at runtime by Cyclopts for parameter resolution
+]
 
 
 [tool.ariadne-codegen]
