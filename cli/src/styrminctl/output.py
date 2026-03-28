@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from rich.console import Console
 from rich.table import Table
+from styrmin_sdk.exceptions import StyrminError
 
 console = Console()
 
@@ -60,3 +63,13 @@ def print_error(message: str) -> None:
 def print_success(message: str) -> None:
     """Print a success message in green."""
     console.print(f"[green]Success:[/green] {message}")
+
+
+@contextmanager
+def styrmin_error_handler() -> Generator[None]:
+    """Catch StyrminError and ValueError, print a friendly message, and exit."""
+    try:
+        yield
+    except (StyrminError, ValueError) as e:
+        print_error(str(e))
+        raise SystemExit(1) from e

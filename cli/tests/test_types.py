@@ -31,6 +31,10 @@ def test_validate_uuid_none_passes() -> None:
     validate_uuid(str, None)
 
 
+def test_validate_positive_none_passes() -> None:
+    validate_positive(float, None)
+
+
 def test_validate_positive_valid() -> None:
     validate_positive(float, 5.0)
 
@@ -43,6 +47,10 @@ def test_validate_positive_zero_raises() -> None:
 def test_validate_positive_negative_raises() -> None:
     with pytest.raises(ValueError, match="must be positive"):
         validate_positive(float, -1)
+
+
+def test_validate_directory_exists_none_passes() -> None:
+    validate_directory_exists(str, None)
 
 
 def test_validate_directory_exists_valid(tmp_path: Path) -> None:

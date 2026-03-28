@@ -5,10 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated
 
 from cyclopts import App, Parameter
-from styrmin_sdk.exceptions import StyrminError
 
 from styrminctl import client
-from styrminctl.output import console, print_error, print_success, print_table
+from styrminctl.output import console, print_success, print_table, styrmin_error_handler
 from styrminctl.types import validate_directory_exists
 
 if TYPE_CHECKING:
@@ -42,12 +41,9 @@ def _print_version_details(version: Any) -> None:  # noqa: ANN401
 @drivers_app.command
 async def create(name: Annotated[str, Parameter(help="Name of the application driver.")]) -> None:
     """Create a new application driver."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             driver = await sdk.drivers.create(name=name)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success(f"Application driver '{driver.name}' created (id: {driver.id})")
     if driver.versions:
@@ -63,12 +59,9 @@ async def load_version(
     branch: Annotated[str, Parameter(help="Git branch to load from.")],
 ) -> None:
     """Load an application driver version from a remote git repository."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             version = await sdk.drivers.load_version(repository_url=repository_url, branch=branch)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     _print_version_details(version)
 
@@ -80,11 +73,8 @@ async def load_local_version(
     ],
 ) -> None:
     """Load an application driver version from a local directory."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             version = await sdk.drivers.load_local_version(path=path)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     _print_version_details(version)

@@ -21,12 +21,16 @@ def validate_uuid(_type: Any, value: Any) -> None:  # noqa: ANN401
 
 def validate_positive(_type: Any, value: Any) -> None:  # noqa: ANN401
     """Validate that a numeric value is positive (> 0)."""
+    if value is None:
+        return
     if value <= 0:
         raise ValueError(f"Value must be positive, got {value}")
 
 
 def validate_directory_exists(_type: Any, value: Any) -> None:  # noqa: ANN401
     """Validate that a path points to an existing directory."""
+    if value is None:
+        return
     path = Path(value)
     if not path.is_dir():
         if not path.exists():
@@ -35,6 +39,8 @@ def validate_directory_exists(_type: Any, value: Any) -> None:  # noqa: ANN401
 
 
 # --- UUID type aliases ---
+# NOTE: These aliases bake Parameter(help=...) into the type. If a call site
+# needs different help text, use a standalone Annotated type there instead.
 
 ClusterId = Annotated[str, Parameter(help="UUID of the cluster.", validator=validate_uuid)]
 EnvironmentId = Annotated[str, Parameter(help="UUID of the environment.", validator=validate_uuid)]
@@ -44,6 +50,12 @@ BackupId = Annotated[str, Parameter(help="UUID of the backup.", validator=valida
 BslId = Annotated[str, Parameter(help="UUID of the backup storage location.", validator=validate_uuid)]
 RestoreId = Annotated[str, Parameter(help="UUID of the restore operation.", validator=validate_uuid)]
 InstanceId = Annotated[str, Parameter(help="UUID of the application instance.", validator=validate_uuid)]
+
+# --- Optional UUID type aliases ---
+
+OptionalInstanceId = Annotated[
+    str | None, Parameter(help="UUID of the target application instance.", validator=validate_uuid)
+]
 
 # --- Numeric type aliases ---
 

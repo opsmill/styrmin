@@ -5,10 +5,9 @@ from __future__ import annotations
 from typing import Annotated
 
 from cyclopts import App, Parameter
-from styrmin_sdk.exceptions import StyrminError
 
 from styrminctl import client
-from styrminctl.output import console, print_error, print_success, print_table
+from styrminctl.output import console, print_success, print_table, styrmin_error_handler
 from styrminctl.types import BslId, EnvironmentId
 
 backup_storage_locations_app = App(name="backup-locations", help="Manage backup storage locations.")
@@ -25,8 +24,8 @@ async def create(
     secret_access_key: Annotated[str, Parameter(help="S3 secret access key.")],
 ) -> None:
     """Create a new backup storage location."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             bsl = await sdk.backup_storage_locations.create(
                 name=name,
                 endpoint=endpoint,
@@ -35,9 +34,6 @@ async def create(
                 access_key_id=access_key_id,
                 secret_access_key=secret_access_key,
             )
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success(f"Backup storage location '{bsl.name}' created (id: {bsl.id})")
 
@@ -45,12 +41,9 @@ async def create(
 @backup_storage_locations_app.command(name="list")
 async def list_bsls() -> None:
     """List all backup storage locations."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             bsls = await sdk.backup_storage_locations.list()
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     if not bsls:
         console.print("No backup storage locations found.")
@@ -75,12 +68,9 @@ async def list_bsls() -> None:
 @backup_storage_locations_app.command
 async def get(bsl_id: BslId) -> None:
     """Get a backup storage location by ID."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             bsl = await sdk.backup_storage_locations.get(bsl_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     row = {
         "id": str(bsl.id),
@@ -98,12 +88,9 @@ async def get(bsl_id: BslId) -> None:
 @backup_storage_locations_app.command
 async def delete(bsl_id: BslId) -> None:
     """Delete a backup storage location."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             await sdk.backup_storage_locations.delete(bsl_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success("Backup storage location deleted.")
 
@@ -111,12 +98,9 @@ async def delete(bsl_id: BslId) -> None:
 @backup_storage_locations_app.command
 async def assign(environment_id: EnvironmentId, bsl_id: BslId) -> None:
     """Assign a backup storage location to an environment."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             await sdk.backup_storage_locations.assign(environment_id, bsl_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success("Backup storage location assigned to environment.")
 
@@ -124,11 +108,8 @@ async def assign(environment_id: EnvironmentId, bsl_id: BslId) -> None:
 @backup_storage_locations_app.command
 async def unassign(environment_id: EnvironmentId) -> None:
     """Remove the backup storage location assignment from an environment."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             await sdk.backup_storage_locations.unassign(environment_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success("Backup storage location unassigned from environment.")

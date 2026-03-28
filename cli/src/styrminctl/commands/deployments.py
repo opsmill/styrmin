@@ -5,10 +5,9 @@ from __future__ import annotations
 from typing import Annotated
 
 from cyclopts import App, Parameter
-from styrmin_sdk.exceptions import StyrminError
 
 from styrminctl import client
-from styrminctl.output import console, parse_json_argument, print_error, print_success, print_table
+from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
 from styrminctl.types import DeploymentId, EnvironmentId
 
 deployments_app = App(name="deployments", help="Manage deployments.")
@@ -24,16 +23,12 @@ async def create(
     config: Annotated[str | None, Parameter(help="JSON config (inline or @filepath).")] = None,
 ) -> None:
     """Create a new deployment (deploy an application)."""
-    parsed_config = parse_json_argument(config)
-
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        parsed_config = parse_json_argument(config)
+        async with client.get_client() as sdk:
             task = await sdk.deployments.create(
                 driver=driver, version=version, environment_id=environment_id, name=name, config=parsed_config
             )
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success(f"Deployment in progress (deployment: {task.deployment_id}, task: {task.id})")
     console.print(f"  Status: {task.status}")
@@ -42,12 +37,9 @@ async def create(
 @deployments_app.command
 async def get(deployment_id: DeploymentId) -> None:
     """Get a deployment by ID."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             deployment = await sdk.deployments.get(deployment_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     console.print(f"  ID: {deployment.id}")
     console.print(f"  Name: {deployment.name}")
@@ -73,14 +65,10 @@ async def update(
     config: Annotated[str, Parameter(help="JSON config (inline or @filepath).")],
 ) -> None:
     """Update a deployment's configuration."""
-    parsed_config = parse_json_argument(config)
-
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        parsed_config = parse_json_argument(config)
+        async with client.get_client() as sdk:
             task = await sdk.deployments.update(deployment_id, config=parsed_config)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success(f"Deployment update in progress (task: {task.id})")
     console.print(f"  Status: {task.status}")
@@ -92,12 +80,9 @@ async def update_version(
     version: Annotated[str, Parameter(help="New application version.")],
 ) -> None:
     """Update a deployment's application version (internal API)."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             task = await sdk.deployments.update_version(deployment_id, version=version)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success(f"Version update in progress (task: {task.id})")
     console.print(f"  Status: {task.status}")
@@ -110,12 +95,9 @@ async def start_components(
     component: Annotated[list[str], Parameter(help="Component name (repeat for multiple).")],
 ) -> None:
     """Start components of a deployment (internal API)."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             task = await sdk.deployments.start_components(deployment_id, components=component)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success(f"Components starting (task: {task.id})")
     console.print(f"  Status: {task.status}")
@@ -128,12 +110,9 @@ async def stop_components(
     component: Annotated[list[str], Parameter(help="Component name (repeat for multiple).")],
 ) -> None:
     """Stop components of a deployment (internal API)."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             task = await sdk.deployments.stop_components(deployment_id, components=component)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success(f"Components stopping (task: {task.id})")
     console.print(f"  Status: {task.status}")
@@ -148,14 +127,10 @@ async def run_job(
     env: Annotated[str, Parameter(help="Environment variables as JSON (inline or @filepath).")],
 ) -> None:
     """Run a job on a deployment (internal API)."""
-    parsed_env = parse_json_argument(env)
-
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        parsed_env = parse_json_argument(env)
+        async with client.get_client() as sdk:
             task = await sdk.deployments.run_job(deployment_id, image=image, commands=command, env=parsed_env)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     print_success(f"Job running (task: {task.id})")
     console.print(f"  Status: {task.status}")
@@ -164,11 +139,8 @@ async def run_job(
 @deployments_app.command
 async def context(deployment_id: DeploymentId) -> None:
     """Get the context of a deployment."""
-    async with client.get_client() as sdk:
-        try:
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
             ctx = await sdk.deployments.get_context(deployment_id)
-        except StyrminError as e:
-            print_error(str(e))
-            raise SystemExit(1) from e
 
     console.print_json(data=ctx.context)
