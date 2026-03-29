@@ -139,6 +139,8 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 
 ## Active Technologies
 
+- Python 3.12+ (backend), TypeScript 5.9.3 (frontend) + Strawberry GraphQL, SQLModel, Pydantic (backend); React 19, urql, React Hook Form, Zod, Radix UI (frontend) (002-single-cluster-limit)
+- PostgreSQL via SQLModel/SQLAlchemy (async) — no schema/migration changes (002-single-cluster-limit)
 - Python 3.12+, Strawberry GraphQL, SQLModel, SQLAlchemy (async), Pydantic, Pydantic-settings >=2.12.0 (001-graphql-nested-resolvers, 001-migrate-cli-cyclopts)
 - Cyclopts >=3.0.0, Rich >=13.0.0, styrmin-sdk (local) (001-migrate-cli-cyclopts)
 - PostgreSQL via SQLModel/SQLAlchemy (no schema changes — relationships already exist) (001-graphql-nested-resolvers)

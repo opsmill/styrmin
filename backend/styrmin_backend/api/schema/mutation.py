@@ -85,10 +85,10 @@ from styrmin_backend.workflows.models import PrefectAction
 class Mutation:
     @strawberry.mutation
     async def create_cluster(
-        self, name: str, info: strawberry.Info, config: JSON | None = None
+        self, info: strawberry.Info, name: str = "default", config: JSON | None = None
     ) -> Cluster | None:
         uow = info.context["uow"]
-        cluster = await create_cluster(name=name, config=config, uow=uow)
+        cluster = await create_cluster(uow=uow, name=name, config=config)
         return Cluster.from_instance(cluster)
 
     @strawberry.mutation

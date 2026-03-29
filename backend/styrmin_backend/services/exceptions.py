@@ -45,6 +45,13 @@ class ApplicationDriverNotFoundError(ServiceError):
     default_message = "Application driver not found"
 
 
+class ClusterLimitReachedError(ServiceError):
+    """The maximum number of clusters has been reached."""
+
+    error_code = "CLUSTER_LIMIT_REACHED"
+    default_message = "Only one cluster is allowed. Delete the existing cluster before creating a new one."
+
+
 class ClusterAlreadyExistsError(ServiceError):
     """The cluster already exists."""
 

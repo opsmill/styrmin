@@ -84,7 +84,7 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
   } = useForm<CreateClusterValues>({
     resolver: zodResolver(createClusterSchema),
     defaultValues: {
-      name: "",
+      name: "default",
       ingress_class: "",
       fqdn_suffix: "",
       runtime_class: "",

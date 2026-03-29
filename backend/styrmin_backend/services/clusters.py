@@ -10,6 +10,7 @@ from styrmin_backend.context.validators import validate_cluster_config
 from styrmin_backend.db.models import Cluster
 from styrmin_backend.services.exceptions import (
     ClusterAlreadyExistsError,
+    ClusterLimitReachedError,
     ClusterNotFoundError,
     InvalidContextError,
 )
@@ -20,14 +21,19 @@ if TYPE_CHECKING:
 
 
 async def create_cluster(
-    name: str, uow: UnitOfWork, config: dict | None = None
+    uow: UnitOfWork, name: str = "default", config: dict | None = None
 ) -> Cluster:
     """Create a cluster with the given name.
 
     Raises:
+        ClusterLimitReachedError: If a cluster already exists.
         InvalidContextError: If the cluster context is invalid.
     """
     async with uow:
+        existing_clusters = await uow.clusters.get_all()
+        if existing_clusters:
+            raise ClusterLimitReachedError()
+
         cluster = await uow.clusters.get_by_name(name)
         if cluster:
             raise ClusterAlreadyExistsError("A cluster with this name already exists.")

@@ -304,7 +304,7 @@ export type MutationCreateBackupStorageLocationArgs = {
 
 export type MutationCreateClusterArgs = {
   config?: InputMaybe<Scalars['JSON']['input']>;
-  name: Scalars['String']['input'];
+  name?: Scalars['String']['input'];
 };
 
 

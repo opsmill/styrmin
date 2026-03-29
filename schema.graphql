@@ -196,7 +196,7 @@ type HelmChart {
 scalar JSON
 
 type Mutation {
-  createCluster(name: String!, config: JSON = null): Cluster
+  createCluster(name: String! = "default", config: JSON = null): Cluster
   deleteCluster(clusterId: UUID!): String
   createEnvironment(name: String!, clusterId: UUID!, config: JSON = null): Environment
   deleteEnvironment(environmentId: UUID!): String

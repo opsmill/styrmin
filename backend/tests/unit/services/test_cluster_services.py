@@ -10,7 +10,7 @@ from styrmin_backend.services.clusters import (
     get_clusters,
 )
 from styrmin_backend.services.exceptions import (
-    ClusterAlreadyExistsError,
+    ClusterLimitReachedError,
     ClusterNotFoundError,
     InvalidContextError,
 )
@@ -33,10 +33,10 @@ async def test_create_cluster(
     assert cluster.config["runtime_class"] == "default"
 
 
-async def test_create_cluster_with_already_existing_name(
+async def test_create_cluster_with_already_existing_cluster(
     uow: FakeUnitOfWork, fake_cluster: Cluster
 ):
-    with pytest.raises(ClusterAlreadyExistsError):
+    with pytest.raises(ClusterLimitReachedError):
         await create_cluster(name=fake_cluster.name, uow=uow)
     assert not uow.committed
 
@@ -124,3 +124,31 @@ async def test_delete_cluster_that_does_not_exist(uow: FakeUnitOfWork):
     with pytest.raises(ClusterNotFoundError):
         await delete_cluster(cluster_id=uuid4(), uow=uow)
     assert not uow.committed
+
+
+async def test_create_cluster_raises_error_when_cluster_exists(
+    uow: FakeUnitOfWork, fake_cluster: Cluster
+):
+    with pytest.raises(ClusterLimitReachedError):
+        await create_cluster(name="another_cluster", uow=uow)
+    assert not uow.committed
+
+
+async def test_create_cluster_uses_default_name(
+    uow: FakeUnitOfWork, fake_cluster_repository: FakeClusterRepository
+):
+    cluster = await create_cluster(uow=uow)
+
+    assert cluster.name == "default"
+    assert len(fake_cluster_repository.models) == 1
+    assert uow.committed
+
+
+async def test_create_cluster_after_delete_succeeds(
+    uow: FakeUnitOfWork, fake_cluster: Cluster
+):
+    await delete_cluster(cluster_id=fake_cluster.id, uow=uow)
+
+    cluster = await create_cluster(name="new_cluster", uow=uow)
+
+    assert cluster.name == "new_cluster"
