@@ -56,7 +56,7 @@ styrmin_backend/api/
 
 | Mutation | Description | Return Type |
 |----------|-------------|-------------|
-| `create_cluster(name, config?)` | Create a new cluster | `ClusterCreated \| ClusterAlreadyExists \| ClusterCreationFailed` |
+| `create_cluster(name="default", config?)` | Create a cluster (only one allowed) | `ClusterCreated \| ClusterLimitReached \| ClusterCreationFailed` |
 | `delete_cluster(cluster_id)` | Delete a cluster | `ClusterDeleted \| ClusterNotFound` |
 | `create_environment(name, cluster_id, config?)` | Create environment in cluster | `EnvironmentCreated \| EnvironmentAlreadyExists \| EnvironmentCreationFailed` |
 | `delete_environment(environment_id)` | Delete an environment | `EnvironmentDeleted \| EnvironmentNotFound` |

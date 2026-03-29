@@ -86,11 +86,11 @@ async def some_operation(uow: UnitOfWork) -> Result:
 
 ### Clusters Service (`clusters.py`)
 
-Manages Kubernetes cluster definitions.
+Manages Kubernetes cluster definitions. Only one cluster may exist at a time.
 
 | Function | Description |
 |----------|-------------|
-| `create_cluster(name, config, uow)` | Create a new cluster with optional configuration |
+| `create_cluster(uow, name="default", config=None)` | Create a cluster (raises `ClusterLimitReachedError` if one already exists) |
 | `get_cluster(cluster_id, uow)` | Retrieve cluster by ID |
 | `get_clusters(uow)` | List all clusters |
 | `delete_cluster(cluster_id, uow)` | Delete a cluster |
