@@ -33,48 +33,45 @@ export default function SettingsPage() {
     <PageLayout title="Settings" breadcrumbs={[{ label: "Settings" }]}>
       <section>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Clusters</h2>
-          <CreateClusterDialog onCreated={refresh} />
+          <h2 className="text-lg font-semibold">Cluster</h2>
+          {data && data.clusters.length === 0 && (
+            <CreateClusterDialog onCreated={refresh} />
+          )}
         </div>
 
-        {fetching && <LoadingState message="Loading clusters..." />}
+        {fetching && <LoadingState message="Loading cluster..." />}
 
         {error && <ErrorState message={error.message} onRetry={refresh} />}
 
         {data && data.clusters.length === 0 && (
           <EmptyState
-            title="No clusters"
-            description="No clusters have been configured yet. Create one to get started."
+            title="No cluster"
+            description="No cluster has been configured yet. Create one to get started."
           />
         )}
 
         {data && data.clusters.length > 0 && (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {data.clusters.map((cluster) => (
-              <Link
-                key={cluster.id}
-                to={`/settings/clusters/${cluster.id}`}
-                className="block"
-              >
-                <Card className="cursor-pointer hover:border-primary/50 transition-colors">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Database className="h-4 w-4" />
-                      {cluster.name}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-xs text-muted-foreground font-mono">
-                      {cluster.id}
-                    </p>
-                    {cluster.config && (
-                      <ConfigSummary config={cluster.config} />
-                    )}
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
+          <Link
+            to={`/settings/clusters/${data.clusters[0].id}`}
+            className="block max-w-xl"
+          >
+            <Card className="cursor-pointer hover:border-primary/50 transition-colors">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Database className="h-4 w-4" />
+                  {data.clusters[0].name}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground font-mono">
+                  {data.clusters[0].id}
+                </p>
+                {data.clusters[0].config && (
+                  <ConfigSummary config={data.clusters[0].config} />
+                )}
+              </CardContent>
+            </Card>
+          </Link>
         )}
       </section>
     </PageLayout>
