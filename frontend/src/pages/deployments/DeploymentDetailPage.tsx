@@ -756,13 +756,7 @@ function DetailRow({
   );
 }
 
-function FqdnRow({
-  label,
-  value,
-}: {
-  label: string;
-  value?: string | null;
-}) {
+function FqdnRow({ label, value }: { label: string; value?: string | null }) {
   return (
     <div className="flex items-center gap-2 text-sm">
       <span className="text-muted-foreground w-40 shrink-0">{label}</span>

@@ -1,13 +1,14 @@
 """Unit tests for DeployedService FQDN resolver fields."""
 
+from typing import Any
 from uuid import uuid4
 
 from styrmin_backend.api.definitions.service.model import DeployedService
 from styrmin_backend.db.models import DeployedService as DeployedServiceModel
 
 
-def _make_db_service(**overrides: object) -> DeployedServiceModel:
-    defaults = {
+def _make_db_service(**overrides: Any) -> DeployedServiceModel:
+    defaults: dict[str, Any] = {
         "id": uuid4(),
         "driver_service_name": "web",
         "resolved_name": "web-svc",
