@@ -8,7 +8,7 @@ ingress:
   enabled: true
   className: "{{ instance.config.ingress_class }}"
   hosts:
-    - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
+    - host: "{{ services.simple-app.primary_fqdn }}"
       paths:
         - path: /
           pathType: Prefix

@@ -45,6 +45,7 @@ import {
   ArrowUpCircle,
   ChevronRight,
   EllipsisVertical,
+  Globe,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -308,6 +309,47 @@ export default function DeploymentDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {deployment.deployedServices.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Globe className="h-4 w-4" />
+                Services ({deployment.deployedServices.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {deployment.deployedServices.map((service) => (
+                  <div
+                    key={service.id}
+                    className="border rounded-md p-3 space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">
+                        {service.driverServiceName}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">{service.kind}</Badge>
+                        <Badge variant="secondary">:{service.port}</Badge>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <FqdnRow
+                        label="Primary FQDN"
+                        value={service.primaryFqdn}
+                      />
+                      <FqdnRow
+                        label="Human-readable FQDN"
+                        value={service.humanReadableFqdn}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {deployment.config && Object.keys(deployment.config).length > 0 && (
           <Card>
@@ -710,6 +752,27 @@ function DetailRow({
     <div className="flex items-center gap-2">
       <span className="text-sm text-muted-foreground w-40">{label}</span>
       <span className={`text-sm ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function FqdnRow({
+  label,
+  value,
+}: {
+  label: string;
+  value?: string | null;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span className="text-muted-foreground w-40 shrink-0">{label}</span>
+      {value ? (
+        <span className="font-mono text-xs truncate" title={value}>
+          {value}
+        </span>
+      ) : (
+        <span className="text-muted-foreground italic">Not configured</span>
+      )}
     </div>
   );
 }

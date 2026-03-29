@@ -15,6 +15,10 @@ from styrmin_backend.context.models.input import (
     UtilityInput,
     UtilityKindInput,
 )
+from styrmin_backend.context.fqdn import (
+    compute_human_readable_fqdn,
+    compute_primary_fqdn,
+)
 from styrmin_backend.context.models.services import ServiceReference
 from styrmin_backend.context.resolvers import resolve_global_context
 from styrmin_backend.domain.models import Deployment
@@ -126,6 +130,10 @@ async def generate_context_from_deployment(
         context = resolve_global_context(context_input=context_input)
 
         # Build services context from deployed services in the environment
+        fqdn_suffix = context.instance.config.fqdn_suffix
+        app_name = application_driver.name
+        env_name = environment.name
+
         deployed_services = await uow.deployed_services.get_by_environment_id(
             deployment.environment_id
         )
@@ -136,6 +144,12 @@ async def generate_context_from_deployment(
                 host=svc.resolved_name,
                 port=svc.port,
                 kind=svc.kind,
+                primary_fqdn=compute_primary_fqdn(
+                    app_name, str(deployment.id), fqdn_suffix
+                ),
+                human_readable_fqdn=compute_human_readable_fqdn(
+                    svc.resolved_name, env_name, fqdn_suffix
+                ),
             )
             services_dict[svc.driver_service_name] = ref.model_dump()
             deployed_services_list.append(

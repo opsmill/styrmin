@@ -21,5 +21,14 @@ query GetDeployment($deploymentId: UUID!) {
       name
       enabled
     }
+    deployedServices {
+      id
+      driverServiceName
+      resolvedName
+      kind
+      port
+      primaryFqdn
+      humanReadableFqdn
+    }
   }
 }

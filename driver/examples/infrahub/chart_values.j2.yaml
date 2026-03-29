@@ -7,9 +7,9 @@ infrahubDemoData:
 infrahubServer:
   ingress:
     enabled: true
-    hostname: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
+    hostname: "{{ services.infrahub.primary_fqdn }}"
     extraHosts:
-      - name: "{{ services.infrahub.host | to_fqdn_label }}-{{ environment.name | to_fqdn_label }}.{{ instance.config.fqdn_suffix }}"
+      - name: "{{ services.infrahub.human_readable_fqdn }}"
         path: /
   infrahubServer:
     env:

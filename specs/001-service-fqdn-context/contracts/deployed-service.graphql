@@ -1,0 +1,59 @@
+# GraphQL Contract Change: DeployedService
+#
+# This file documents the schema addition to the DeployedService type.
+# The actual schema.graphql is auto-generated — do not edit manually.
+# After implementing, regenerate with:
+#   uv run styrmin export graphql-schema schema.graphql
+#   uv run invoke generate
+
+# --- BEFORE ---
+# type DeployedService {
+#   id: UUID!
+#   driverServiceName: String!
+#   resolvedName: String!
+#   kind: String!
+#   scope: String!
+#   port: Int!
+#   component: String!
+#   deploymentId: UUID!
+# }
+
+# --- AFTER ---
+# type DeployedService {
+#   id: UUID!
+#   driverServiceName: String!
+#   resolvedName: String!
+#   kind: String!
+#   scope: String!
+#   port: Int!
+#   component: String!
+#   deploymentId: UUID!
+#   primaryFqdn: String          # NEW: UUID-based FQDN (nullable when suffix unconfigured)
+#   humanReadableFqdn: String    # NEW: Environment-name-based FQDN (nullable when suffix unconfigured)
+# }
+
+# --- QUERY USAGE ---
+# Existing queries that fetch deployedServices will automatically include
+# the new fields when requested. Example:
+#
+# query GetDeployment($id: UUID!) {
+#   deployment(deploymentId: $id) {
+#     id
+#     name
+#     deployedServices {
+#       id
+#       driverServiceName
+#       resolvedName
+#       kind
+#       scope
+#       port
+#       component
+#       primaryFqdn          # NEW
+#       humanReadableFqdn    # NEW
+#     }
+#   }
+# }
+#
+# Both new fields are nullable (String, not String!).
+# They return null when fqdn_suffix is not configured in the deployment's
+# resolved config hierarchy.
