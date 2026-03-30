@@ -203,6 +203,15 @@ styrmin:
     # -- Database password (use existingSecret for production)
     password: ""
 
+  # Agent poll configuration (for Prefect task retries)
+  agentPoll:
+    # -- Number of retries for polling tasks
+    retries: 60
+    # -- Delay between retries in seconds
+    retryDelaySeconds: 10
+    # -- Interval for polling deployment status in seconds
+    interval: 10
+
   # Workflow/Prefect configuration
   workflow:
     # -- Enable Prefect workflow integration

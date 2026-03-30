@@ -31,6 +31,11 @@ data:
   STYRMIN_DB_HOST: {{ include "styrmin.postgresql.host" . | quote }}
   STYRMIN_DB_PORT: {{ .Values.styrmin.database.port | quote }}
   
+  # Agent poll configuration
+  STYRMIN_AGENT_POLL_RETRIES: {{ .Values.styrmin.agentPoll.retries | quote }}
+  STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS: {{ .Values.styrmin.agentPoll.retryDelaySeconds | quote }}
+  STYRMIN_AGENT_POLL_INTERVAL: {{ .Values.styrmin.agentPoll.interval | quote }}
+
   # Agent source configuration
   STYRMIN_AGENT_SOURCE_REPOSITORY: {{ .Values.styrmin.agentSource.repository | quote }}
   STYRMIN_AGENT_SOURCE_BRANCH: {{ .Values.styrmin.agentSource.branch | quote }}
