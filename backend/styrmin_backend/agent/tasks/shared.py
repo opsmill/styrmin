@@ -23,6 +23,10 @@ from styrmin_backend.services.helm.renderer import (
 from styrmin_backend.services.utils import get_helm_repository_type
 from styrmin_backend import config
 
+POLL_RETRIES = int(os.environ.get("STYRMIN_AGENT_POLL_RETRIES", "60"))
+POLL_RETRY_DELAY_SECONDS = int(os.environ.get("STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS", "10"))
+POLL_INTERVAL = int(os.environ.get("STYRMIN_AGENT_POLL_INTERVAL", "10"))
+
 
 @task
 async def get_context(instance_id: UUID) -> GlobalContext:
@@ -145,7 +149,7 @@ async def apply_helm_release(
     )
 
 
-@task(retries=60, retry_delay_seconds=10)
+@task(retries=POLL_RETRIES, retry_delay_seconds=POLL_RETRY_DELAY_SECONDS)
 async def poll_helm_release_status(namespace: str, reference: str) -> State:
     if not config.SETTINGS.initialized:
         config.SETTINGS.initialize()
@@ -193,8 +197,8 @@ async def poll_helm_release_status(namespace: str, reference: str) -> State:
 
 @task(
     task_run_name="Poll Kubernetes deployments status: {namespace}",
-    retries=60,
-    retry_delay_seconds=10,
+    retries=POLL_RETRIES,
+    retry_delay_seconds=POLL_RETRY_DELAY_SECONDS,
 )
 async def poll_kubernetes_deployments_status(namespace: str) -> None:
     """Check the status of all deployments in the instance namespace.
@@ -242,8 +246,8 @@ async def poll_kubernetes_deployments_status(namespace: str) -> None:
 
 @task(
     task_run_name="Poll Kubernetes statefulsets status: {namespace}",
-    retries=60,
-    retry_delay_seconds=10,
+    retries=POLL_RETRIES,
+    retry_delay_seconds=POLL_RETRY_DELAY_SECONDS,
 )
 async def poll_kubernetes_stateful_sets_status(namespace: str) -> None:
     """Check the status of all statefulsets in the instance namespace.

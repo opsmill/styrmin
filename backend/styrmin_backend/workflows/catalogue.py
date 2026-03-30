@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterable
 
@@ -107,6 +108,16 @@ class PrefectCatalogue:
             job_template_variables["properties"]["env"]["default"][
                 "STYRMIN_URL_GRAPHQL"
             ] = config.SETTINGS.url.graphql_k8s
+
+        # Forward agent poll settings to K8s jobs
+        poll_env_vars = {
+            "STYRMIN_AGENT_POLL_RETRIES": os.environ.get("STYRMIN_AGENT_POLL_RETRIES", ""),
+            "STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS": os.environ.get("STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS", ""),
+            "STYRMIN_AGENT_POLL_INTERVAL": os.environ.get("STYRMIN_AGENT_POLL_INTERVAL", ""),
+        }
+        for key, value in poll_env_vars.items():
+            if value:
+                job_template_variables["properties"]["env"]["default"][key] = value
 
         # Initialize the User work pool
         self.add_work_pool(

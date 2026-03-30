@@ -23,6 +23,7 @@ from prefect.runtime import flow_run as flow_run_ctx
 from prefect.variables import Variable
 
 from styrmin_backend import config
+from styrmin_backend.agent.tasks.shared import POLL_INTERVAL, POLL_RETRY_DELAY_SECONDS
 from styrmin_backend.agent.service.kubernetes.resources.builders.backup import (
     build_velero_backup,
     build_velero_restore,
@@ -125,6 +126,7 @@ async def execute_velero_backup_flow(
             name=velero_backup_name,
             namespace=velero_namespace,
             timeout=timeout,
+            interval=POLL_RETRY_DELAY_SECONDS,
         )
 
         # Store result for cross-worker retrieval via Prefect Variable
@@ -202,7 +204,7 @@ async def execute_velero_restore_flow(
 
         # Poll until the namespace is gone (404) or timeout
         ns_timeout = 300
-        poll_interval = 5
+        poll_interval = POLL_RETRY_DELAY_SECONDS
         elapsed = 0
         while elapsed < ns_timeout:
             try:
@@ -229,6 +231,7 @@ async def execute_velero_restore_flow(
             name=velero_restore_name,
             namespace=velero_namespace,
             timeout=timeout,
+            interval=POLL_RETRY_DELAY_SECONDS,
         )
 
         # Store result for cross-worker retrieval via Prefect Variable
@@ -352,7 +355,7 @@ async def execute_backup_workflow(
                 "velero_namespace": velero_namespace,
                 "timeout": timeout,
             },
-            poll_interval=10,
+            poll_interval=POLL_INTERVAL,
         )
 
         # Read result from the USER flow
@@ -507,7 +510,7 @@ async def execute_restore_workflow(
                 "target_namespace": target_namespace,
                 "timeout": timeout,
             },
-            poll_interval=10,
+            poll_interval=POLL_INTERVAL,
         )
 
         # Read result from the USER flow

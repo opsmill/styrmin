@@ -4,11 +4,18 @@ image:
 
 taskWorkerQuerySeconds: 1
 
+styrmin:
+  agentPoll:
+    retryDelaySeconds: 1
+    interval: 1
+
 styrmin-agent:
   prefect-worker:
     worker:
       config:
         queryInterval: 1
+      extraEnvVarsCMs:
+        - styrmin-config
 
 postgresql:
   primary:
