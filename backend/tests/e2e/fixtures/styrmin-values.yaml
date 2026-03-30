@@ -12,6 +12,11 @@ styrmin-agent:
 
 postgresql:
   primary:
+    livenessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
     readinessProbe:
       initialDelaySeconds: 1
       periodSeconds: 1
@@ -30,6 +35,18 @@ readinessProbe:
   timeoutSeconds: 1
   failureThreshold: 60
 
+prefect-server:
+  server:
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until python -c "import socket; s=socket.create_connection(('styrmin-postgresql', 5432), timeout=2); s.close()"; do
+          echo "Waiting for PostgreSQL to be ready..."
+          sleep 1
+        done
+        prefect server start --host 0.0.0.0
+
 velero:
   enabled: true
   upgradeCRDs: false
@@ -38,3 +55,15 @@ velero:
     useSecret: false
   image:
     pullPolicy: IfNotPresent
+
+  livenessProbe:
+    initialDelaySeconds: 1
+    periodSeconds: 1
+    timeoutSeconds: 1
+    failureThreshold: 60
+
+  readinessProbe:
+    initialDelaySeconds: 1
+    periodSeconds: 1
+    timeoutSeconds: 1
+    failureThreshold: 60
