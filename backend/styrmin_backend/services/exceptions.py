@@ -322,6 +322,13 @@ class BackupScheduleAlreadyExistsError(ServiceError):
         return {"existing_schedule_id": self.existing_schedule_id}
 
 
+class AmbiguousIdentifierError(ServiceError):
+    """Both or neither identifier was provided for a resource lookup."""
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "Provide either an ID or a name, not both"
+
+
 class BackupStorageLocationNotFoundError(ServiceError):
     """The backup storage location was not found."""
 

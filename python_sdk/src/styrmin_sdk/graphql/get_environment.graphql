@@ -1,5 +1,5 @@
-query GetEnvironment($environmentId: UUID!) {
-    environment(environmentId: $environmentId) {
+query GetEnvironment($environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String) {
+    environment(environmentId: $environmentId, environmentName: $environmentName, clusterId: $clusterId, clusterName: $clusterName) {
         id
         name
         config

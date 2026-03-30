@@ -11,8 +11,18 @@ from styrmin_sdk.resources._base import BaseResource, JsonValue
 
 
 class EnvironmentResource(BaseResource):
-    async def create(self, name: str, cluster_id: str | UUID, config: JsonValue | None = None) -> Environment:
-        variables: dict[str, Any] = {"name": name, "clusterId": str(cluster_id)}
+    async def create(
+        self,
+        name: str,
+        cluster_id: str | UUID | None = None,
+        cluster_name: str | None = None,
+        config: JsonValue | None = None,
+    ) -> Environment:
+        variables: dict[str, Any] = {"name": name}
+        if cluster_id is not None:
+            variables["clusterId"] = str(cluster_id)
+        if cluster_name is not None:
+            variables["clusterName"] = cluster_name
         if config is not None:
             variables["config"] = config
 
@@ -25,11 +35,41 @@ class EnvironmentResource(BaseResource):
         self._check_graphql_errors(result)
         return [Environment.model_validate(e) for e in result["data"].get("environments", [])]
 
-    async def get(self, environment_id: str | UUID) -> Environment:
-        result = await self._transport.execute(load_query("get_environment"), {"environmentId": str(environment_id)})
+    async def get(
+        self,
+        environment_id: str | UUID | None = None,
+        environment_name: str | None = None,
+        cluster_id: str | UUID | None = None,
+        cluster_name: str | None = None,
+    ) -> Environment:
+        variables: dict[str, Any] = {}
+        if environment_id is not None:
+            variables["environmentId"] = str(environment_id)
+        if environment_name is not None:
+            variables["environmentName"] = environment_name
+        if cluster_id is not None:
+            variables["clusterId"] = str(cluster_id)
+        if cluster_name is not None:
+            variables["clusterName"] = cluster_name
+        result = await self._transport.execute(load_query("get_environment"), variables)
         self._check_graphql_errors(result)
         return Environment.model_validate(result["data"]["environment"])
 
-    async def delete(self, environment_id: str | UUID) -> None:
-        result = await self._transport.execute(load_query("delete_environment"), {"environmentId": str(environment_id)})
+    async def delete(
+        self,
+        environment_id: str | UUID | None = None,
+        environment_name: str | None = None,
+        cluster_id: str | UUID | None = None,
+        cluster_name: str | None = None,
+    ) -> None:
+        variables: dict[str, Any] = {}
+        if environment_id is not None:
+            variables["environmentId"] = str(environment_id)
+        if environment_name is not None:
+            variables["environmentName"] = environment_name
+        if cluster_id is not None:
+            variables["clusterId"] = str(cluster_id)
+        if cluster_name is not None:
+            variables["clusterName"] = cluster_name
+        result = await self._transport.execute(load_query("delete_environment"), variables)
         self._check_graphql_errors(result)

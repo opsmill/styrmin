@@ -197,9 +197,9 @@ scalar JSON
 
 type Mutation {
   createCluster(name: String! = "default", config: JSON = null): Cluster
-  deleteCluster(clusterId: UUID!): String
-  createEnvironment(name: String!, clusterId: UUID!, config: JSON = null): Environment
-  deleteEnvironment(environmentId: UUID!): String
+  deleteCluster(clusterId: UUID = null, clusterName: String = null): String
+  createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment
+  deleteEnvironment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): String
   createBackupStorageLocation(name: String!, endpoint: String!, bucket: String!, region: String!, accessKeyId: String!, secretAccessKey: String!): CreateBackupStorageLocationResult!
   updateBackupStorageLocation(backupStorageLocationId: UUID!, name: String = null, endpoint: String = null, bucket: String = null, region: String = null, accessKeyId: String = null, secretAccessKey: String = null): UpdateBackupStorageLocationResult!
   deleteBackupStorageLocation(backupStorageLocationId: UUID!): DeleteBackupStorageLocationResult!
@@ -207,7 +207,7 @@ type Mutation {
   unassignBackupStorageLocation(environmentId: UUID!): Environment
   loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion
   loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!): ApplicationDriverVersion
-  deploy(driver: String!, environmentId: UUID!, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task
+  deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task
   updateDeployment(deploymentId: UUID!, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task
   createBackup(instanceId: UUID!, name: String = null): Backup
   deleteBackup(backupId: UUID!): String
@@ -232,13 +232,13 @@ type ParameterDefinition {
 
 type Query {
   clusters: [Cluster!]!
-  cluster(clusterId: UUID!): Cluster
+  cluster(clusterId: UUID = null, clusterName: String = null): Cluster
   backupStorageLocations: [BackupStorageLocation!]!
   backupStorageLocation(backupStorageLocationId: UUID!): BackupStorageLocation
   task(taskId: UUID!): Task
   tasks: [Task!]!
   environments: [Environment!]!
-  environment(environmentId: UUID!): Environment
+  environment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): Environment
   deployment(deploymentId: UUID!): Deployment
   backup(backupId: UUID!): Backup
   backups(instanceId: UUID!, status: String = null): [Backup!]!

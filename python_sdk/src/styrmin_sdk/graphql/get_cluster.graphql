@@ -1,5 +1,5 @@
-query GetCluster($clusterId: UUID!) {
-    cluster(clusterId: $clusterId) {
+query GetCluster($clusterId: UUID, $clusterName: String) {
+    cluster(clusterId: $clusterId, clusterName: $clusterName) {
         id
         name
         config

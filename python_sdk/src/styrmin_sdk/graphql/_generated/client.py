@@ -187,13 +187,19 @@ class Client(AsyncBaseClient):
     async def create_environment(
         self,
         name: str,
-        cluster_id: UUID,
+        cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
+        cluster_name: Union[Optional[str], UnsetType] = UNSET,
         config: Union[Optional[Any], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> CreateEnvironment:
         query = gql("""
-            mutation CreateEnvironment($name: String!, $clusterId: UUID!, $config: JSON) {
-              createEnvironment(name: $name, clusterId: $clusterId, config: $config) {
+            mutation CreateEnvironment($name: String!, $clusterId: UUID, $clusterName: String, $config: JSON) {
+              createEnvironment(
+                name: $name
+                clusterId: $clusterId
+                clusterName: $clusterName
+                config: $config
+              ) {
                 id
                 name
                 config
@@ -207,6 +213,7 @@ class Client(AsyncBaseClient):
         variables: dict[str, object] = {
             "name": name,
             "clusterId": cluster_id,
+            "clusterName": cluster_name,
             "config": config,
         }
         response = await self.execute(
@@ -347,13 +354,21 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return DeleteBackupStorageLocation.model_validate(data)
 
-    async def delete_cluster(self, cluster_id: UUID, **kwargs: Any) -> DeleteCluster:
+    async def delete_cluster(
+        self,
+        cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
+        cluster_name: Union[Optional[str], UnsetType] = UNSET,
+        **kwargs: Any,
+    ) -> DeleteCluster:
         query = gql("""
-            mutation DeleteCluster($clusterId: UUID!) {
-              deleteCluster(clusterId: $clusterId)
+            mutation DeleteCluster($clusterId: UUID, $clusterName: String) {
+              deleteCluster(clusterId: $clusterId, clusterName: $clusterName)
             }
             """)
-        variables: dict[str, object] = {"clusterId": cluster_id}
+        variables: dict[str, object] = {
+            "clusterId": cluster_id,
+            "clusterName": cluster_name,
+        }
         response = await self.execute(
             query=query, operation_name="DeleteCluster", variables=variables, **kwargs
         )
@@ -361,14 +376,29 @@ class Client(AsyncBaseClient):
         return DeleteCluster.model_validate(data)
 
     async def delete_environment(
-        self, environment_id: UUID, **kwargs: Any
+        self,
+        environment_id: Union[Optional[UUID], UnsetType] = UNSET,
+        environment_name: Union[Optional[str], UnsetType] = UNSET,
+        cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
+        cluster_name: Union[Optional[str], UnsetType] = UNSET,
+        **kwargs: Any,
     ) -> DeleteEnvironment:
         query = gql("""
-            mutation DeleteEnvironment($environmentId: UUID!) {
-              deleteEnvironment(environmentId: $environmentId)
+            mutation DeleteEnvironment($environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String) {
+              deleteEnvironment(
+                environmentId: $environmentId
+                environmentName: $environmentName
+                clusterId: $clusterId
+                clusterName: $clusterName
+              )
             }
             """)
-        variables: dict[str, object] = {"environmentId": environment_id}
+        variables: dict[str, object] = {
+            "environmentId": environment_id,
+            "environmentName": environment_name,
+            "clusterId": cluster_id,
+            "clusterName": cluster_name,
+        }
         response = await self.execute(
             query=query,
             operation_name="DeleteEnvironment",
@@ -399,8 +429,11 @@ class Client(AsyncBaseClient):
     async def deploy(
         self,
         driver: str,
-        version: str,
-        environment_id: UUID,
+        version: Union[Optional[str], UnsetType] = UNSET,
+        environment_id: Union[Optional[UUID], UnsetType] = UNSET,
+        environment_name: Union[Optional[str], UnsetType] = UNSET,
+        cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
+        cluster_name: Union[Optional[str], UnsetType] = UNSET,
         name: Union[Optional[str], UnsetType] = UNSET,
         config: Union[Optional[Any], UnsetType] = UNSET,
         parameters: Union[Optional[Any], UnsetType] = UNSET,
@@ -410,11 +443,14 @@ class Client(AsyncBaseClient):
         **kwargs: Any,
     ) -> Deploy:
         query = gql("""
-            mutation Deploy($driver: String!, $version: String!, $environmentId: UUID!, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
+            mutation Deploy($driver: String!, $version: String, $environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
               deploy(
                 driver: $driver
                 version: $version
                 environmentId: $environmentId
+                environmentName: $environmentName
+                clusterId: $clusterId
+                clusterName: $clusterName
                 name: $name
                 config: $config
                 parameters: $parameters
@@ -432,6 +468,9 @@ class Client(AsyncBaseClient):
             "driver": driver,
             "version": version,
             "environmentId": environment_id,
+            "environmentName": environment_name,
+            "clusterId": cluster_id,
+            "clusterName": cluster_name,
             "name": name,
             "config": config,
             "parameters": parameters,
@@ -496,17 +535,25 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetBackupStorageLocation.model_validate(data)
 
-    async def get_cluster(self, cluster_id: UUID, **kwargs: Any) -> GetCluster:
+    async def get_cluster(
+        self,
+        cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
+        cluster_name: Union[Optional[str], UnsetType] = UNSET,
+        **kwargs: Any,
+    ) -> GetCluster:
         query = gql("""
-            query GetCluster($clusterId: UUID!) {
-              cluster(clusterId: $clusterId) {
+            query GetCluster($clusterId: UUID, $clusterName: String) {
+              cluster(clusterId: $clusterId, clusterName: $clusterName) {
                 id
                 name
                 config
               }
             }
             """)
-        variables: dict[str, object] = {"clusterId": cluster_id}
+        variables: dict[str, object] = {
+            "clusterId": cluster_id,
+            "clusterName": cluster_name,
+        }
         response = await self.execute(
             query=query, operation_name="GetCluster", variables=variables, **kwargs
         )
@@ -571,11 +618,21 @@ class Client(AsyncBaseClient):
         return GetDeploymentServices.model_validate(data)
 
     async def get_environment(
-        self, environment_id: UUID, **kwargs: Any
+        self,
+        environment_id: Union[Optional[UUID], UnsetType] = UNSET,
+        environment_name: Union[Optional[str], UnsetType] = UNSET,
+        cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
+        cluster_name: Union[Optional[str], UnsetType] = UNSET,
+        **kwargs: Any,
     ) -> GetEnvironment:
         query = gql("""
-            query GetEnvironment($environmentId: UUID!) {
-              environment(environmentId: $environmentId) {
+            query GetEnvironment($environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String) {
+              environment(
+                environmentId: $environmentId
+                environmentName: $environmentName
+                clusterId: $clusterId
+                clusterName: $clusterName
+              ) {
                 id
                 name
                 config
@@ -586,7 +643,12 @@ class Client(AsyncBaseClient):
               }
             }
             """)
-        variables: dict[str, object] = {"environmentId": environment_id}
+        variables: dict[str, object] = {
+            "environmentId": environment_id,
+            "environmentName": environment_name,
+            "clusterId": cluster_id,
+            "clusterName": cluster_name,
+        }
         response = await self.execute(
             query=query, operation_name="GetEnvironment", variables=variables, **kwargs
         )

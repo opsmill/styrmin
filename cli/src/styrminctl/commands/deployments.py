@@ -8,7 +8,7 @@ from cyclopts import App, Parameter
 
 from styrminctl import client
 from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
-from styrminctl.types import DeploymentId, EnvironmentId
+from styrminctl.types import ClusterContextId, ClusterContextName, DeploymentId, EnvironmentName, OptionalEnvironmentId
 
 deployments_app = App(name="deployments", help="Manage deployments.")
 
@@ -17,17 +17,34 @@ deployments_app = App(name="deployments", help="Manage deployments.")
 async def create(
     driver: Annotated[str, Parameter(help="Application driver name.")],
     version: Annotated[str, Parameter(help="Application version to deploy.")],
-    environment_id: EnvironmentId,
+    environment: EnvironmentName = None,
     *,
+    id: OptionalEnvironmentId = None,
+    cluster: ClusterContextName = "default",
+    cluster_id: ClusterContextId = None,
     name: Annotated[str | None, Parameter(help="Custom deployment name (auto-generated if omitted).")] = None,
     config: Annotated[str | None, Parameter(help="JSON config (inline or @filepath).")] = None,
 ) -> None:
     """Create a new deployment (deploy an application)."""
+    if environment and id:
+        raise ValueError("Provide either an environment name or --id, not both")
+    if not environment and not id:
+        raise ValueError("Either an environment name or --id is required")
+    if cluster_id and cluster != "default":
+        raise ValueError("Provide either --cluster or --cluster-id, not both")
+
     with styrmin_error_handler():
         parsed_config = parse_json_argument(config)
         async with client.get_client() as sdk:
             task = await sdk.deployments.create(
-                driver=driver, version=version, environment_id=environment_id, name=name, config=parsed_config
+                driver=driver,
+                version=version,
+                environment_id=id,
+                environment_name=environment,
+                cluster_id=cluster_id,
+                cluster_name=cluster if not cluster_id and not id else None,
+                name=name,
+                config=parsed_config,
             )
 
     print_success(f"Deployment in progress (deployment: {task.deployment_id}, task: {task.id})")

@@ -17,8 +17,11 @@ class DeploymentResource(BaseResource):
         self,
         driver: str,
         version: str,
-        environment_id: str | UUID,
+        environment_id: str | UUID | None = None,
         *,
+        environment_name: str | None = None,
+        cluster_id: str | UUID | None = None,
+        cluster_name: str | None = None,
         name: str | None = None,
         config: JsonValue | None = None,
         parameters: JsonValue | None = None,
@@ -27,8 +30,15 @@ class DeploymentResource(BaseResource):
         variables: dict[str, Any] = {
             "driver": driver,
             "version": version,
-            "environmentId": str(environment_id),
         }
+        if environment_id is not None:
+            variables["environmentId"] = str(environment_id)
+        if environment_name is not None:
+            variables["environmentName"] = environment_name
+        if cluster_id is not None:
+            variables["clusterId"] = str(cluster_id)
+        if cluster_name is not None:
+            variables["clusterName"] = cluster_name
         if name is not None:
             variables["name"] = name
         if config is not None:

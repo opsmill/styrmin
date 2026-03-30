@@ -8,7 +8,7 @@ from cyclopts import App, Parameter
 
 from styrminctl import client
 from styrminctl.output import console, print_success, print_table, styrmin_error_handler
-from styrminctl.types import BslId, EnvironmentId
+from styrminctl.types import BslId, ClusterContextId, ClusterContextName, EnvironmentName, OptionalEnvironmentId
 
 backup_storage_locations_app = App(name="backup-locations", help="Manage backup storage locations.")
 
@@ -96,20 +96,65 @@ async def delete(bsl_id: BslId) -> None:
 
 
 @backup_storage_locations_app.command
-async def assign(environment_id: EnvironmentId, bsl_id: BslId) -> None:
+async def assign(
+    environment_name: EnvironmentName = None,
+    bsl_id: BslId = "",
+    *,
+    id: OptionalEnvironmentId = None,
+    cluster: ClusterContextName = "default",
+    cluster_id: ClusterContextId = None,
+) -> None:
     """Assign a backup storage location to an environment."""
+    if environment_name and id:
+        raise ValueError("Provide either a name or --id, not both")
+    if not environment_name and not id:
+        raise ValueError("Either an environment name or --id is required")
+    if cluster_id and cluster != "default":
+        raise ValueError("Provide either --cluster or --cluster-id, not both")
+
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            await sdk.backup_storage_locations.assign(environment_id, bsl_id)
+            if id:
+                resolved_id = id
+            else:
+                env = await sdk.environments.get(
+                    environment_name=environment_name,
+                    cluster_id=cluster_id,
+                    cluster_name=cluster if not cluster_id else None,
+                )
+                resolved_id = str(env.id)
+            await sdk.backup_storage_locations.assign(resolved_id, bsl_id)
 
     print_success("Backup storage location assigned to environment.")
 
 
 @backup_storage_locations_app.command
-async def unassign(environment_id: EnvironmentId) -> None:
+async def unassign(
+    environment_name: EnvironmentName = None,
+    *,
+    id: OptionalEnvironmentId = None,
+    cluster: ClusterContextName = "default",
+    cluster_id: ClusterContextId = None,
+) -> None:
     """Remove the backup storage location assignment from an environment."""
+    if environment_name and id:
+        raise ValueError("Provide either a name or --id, not both")
+    if not environment_name and not id:
+        raise ValueError("Either an environment name or --id is required")
+    if cluster_id and cluster != "default":
+        raise ValueError("Provide either --cluster or --cluster-id, not both")
+
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            await sdk.backup_storage_locations.unassign(environment_id)
+            if id:
+                resolved_id = id
+            else:
+                env = await sdk.environments.get(
+                    environment_name=environment_name,
+                    cluster_id=cluster_id,
+                    cluster_name=cluster if not cluster_id else None,
+                )
+                resolved_id = str(env.id)
+            await sdk.backup_storage_locations.unassign(resolved_id)
 
     print_success("Backup storage location unassigned from environment.")

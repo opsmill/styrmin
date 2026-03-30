@@ -309,7 +309,8 @@ export type MutationCreateClusterArgs = {
 
 
 export type MutationCreateEnvironmentArgs = {
-  clusterId: Scalars['UUID']['input'];
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  clusterName?: InputMaybe<Scalars['String']['input']>;
   config?: InputMaybe<Scalars['JSON']['input']>;
   name: Scalars['String']['input'];
 };
@@ -338,19 +339,26 @@ export type MutationDeleteBackupStorageLocationArgs = {
 
 
 export type MutationDeleteClusterArgs = {
-  clusterId: Scalars['UUID']['input'];
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  clusterName?: InputMaybe<Scalars['String']['input']>;
 };
 
 
 export type MutationDeleteEnvironmentArgs = {
-  environmentId: Scalars['UUID']['input'];
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  clusterName?: InputMaybe<Scalars['String']['input']>;
+  environmentId?: InputMaybe<Scalars['UUID']['input']>;
+  environmentName?: InputMaybe<Scalars['String']['input']>;
 };
 
 
 export type MutationDeployArgs = {
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  clusterName?: InputMaybe<Scalars['String']['input']>;
   config?: InputMaybe<Scalars['JSON']['input']>;
   driver: Scalars['String']['input'];
-  environmentId: Scalars['UUID']['input'];
+  environmentId?: InputMaybe<Scalars['UUID']['input']>;
+  environmentName?: InputMaybe<Scalars['String']['input']>;
   name?: InputMaybe<Scalars['String']['input']>;
   parameters?: InputMaybe<Scalars['JSON']['input']>;
   serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride>>;
@@ -496,7 +504,8 @@ export type QueryBackupsArgs = {
 
 
 export type QueryClusterArgs = {
-  clusterId: Scalars['UUID']['input'];
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  clusterName?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -511,7 +520,10 @@ export type QueryDeploymentServicesArgs = {
 
 
 export type QueryEnvironmentArgs = {
-  environmentId: Scalars['UUID']['input'];
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  clusterName?: InputMaybe<Scalars['String']['input']>;
+  environmentId?: InputMaybe<Scalars['UUID']['input']>;
+  environmentName?: InputMaybe<Scalars['String']['input']>;
 };
 
 

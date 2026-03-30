@@ -18,6 +18,12 @@ class EnvironmentRepository(BaseRepository[Environment], ABC):
     async def get_by_name(self, name: str) -> Environment | None:
         raise NotImplementedError()
 
+    @abstractmethod
+    async def get_by_name_in_cluster(
+        self, name: str, cluster_id: UUID
+    ) -> Environment | None:
+        raise NotImplementedError()
+
 
 class SQLModelEnvironmentRepository(
     BaseSQLModelRepository[Environment], EnvironmentRepository
@@ -58,6 +64,21 @@ class SQLModelEnvironmentRepository(
         statement = (
             select(self.model_class)
             .where(self.model_class.name == name)
+            .options(*self._eager_load_options())
+        )
+        result = await self.session.exec(statement)
+        return result.first()
+
+    async def get_by_name_in_cluster(
+        self, name: str, cluster_id: UUID
+    ) -> Environment | None:
+        """Get an environment by its name within a specific cluster."""
+        statement = (
+            select(self.model_class)
+            .where(
+                self.model_class.name == name,
+                self.model_class.cluster_id == cluster_id,
+            )
             .options(*self._eager_load_options())
         )
         result = await self.session.exec(statement)
