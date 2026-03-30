@@ -13,6 +13,10 @@ from styrmin_backend.api.definitions.service.model import (
 )
 from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.api.scalars import JSON
+from styrmin_backend.context.fqdn import (
+    compute_human_readable_fqdn,
+    compute_primary_fqdn,
+)
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import (
     Deployment as DeploymentEntity,
@@ -142,7 +146,43 @@ class Deployment:
         uow = info.context["uow"]
         async with uow:
             services = await uow.deployed_services.get_by_deployment_id(self.id)
-            return [DeployedServiceType.from_instance(s) for s in services]
+
+            # Resolve config hierarchy to get fqdn_suffix
+            environment = await uow.environments.get(self.instance.environment_id)
+            fqdn_suffix: str | None = None
+            environment_name: str = ""
+            app_name: str = ""
+
+            if environment is not None:
+                cluster_config = (
+                    environment.cluster.config if environment.cluster else {}
+                )
+                resolved = {
+                    **(cluster_config or {}),
+                    **(environment.config or {}),
+                    **(self.instance.config or {}),
+                }
+                fqdn_suffix = resolved.get("fqdn_suffix")
+                environment_name = environment.name
+
+            driver_version = await uow.application_driver_versions.get(
+                self.instance.application_driver_version_id
+            )
+            if driver_version is not None:
+                app_name = driver_version.application_driver.name
+
+            return [
+                DeployedServiceType.from_instance(
+                    s,
+                    primary_fqdn=compute_primary_fqdn(
+                        app_name, str(self.id), fqdn_suffix
+                    ),
+                    human_readable_fqdn=compute_human_readable_fqdn(
+                        s.resolved_name, environment_name, fqdn_suffix
+                    ),
+                )
+                for s in services
+            ]
 
     @classmethod
     def from_instance(cls, instance: DeploymentEntity) -> Deployment:

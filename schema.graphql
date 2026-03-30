@@ -155,6 +155,8 @@ type DeployedService {
   scope: String!
   port: Int!
   component: String!
+  primaryFqdn: String
+  humanReadableFqdn: String
   deploymentId: UUID!
 }
 

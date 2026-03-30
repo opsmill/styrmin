@@ -33,11 +33,11 @@ ingress:
   enabled: true
   className: "{{ instance.config.ingress_class }}"
   hosts:
-    - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
+    - host: "{{ services.semaphore.primary_fqdn }}"
       paths:
         - path: /
           pathType: Prefix
-    - host: "{{ services.semaphore.host | to_fqdn_label }}-{{ environment.name | to_fqdn_label }}.{{ instance.config.fqdn_suffix }}"
+    - host: "{{ services.semaphore.human_readable_fqdn }}"
       paths:
         - path: /
           pathType: Prefix

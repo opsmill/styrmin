@@ -1,5 +1,3 @@
-import re
-
 import jinja2
 from prefect import task
 from yaml import YAMLError, safe_load
@@ -32,18 +30,10 @@ from styrmin_backend.agent.service.kubernetes.resources.utilities.base import (
     Utility,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
+from styrmin_backend.context.fqdn import to_fqdn_label
 from styrmin_backend.context.models.contexts import GlobalContext
 
 from .base import build_minimal_helm_release
-
-
-def to_fqdn_label(value: str) -> str:
-    """Sanitize a string into a valid DNS label for use in FQDNs."""
-    value = value.lower()
-    value = re.sub(r"[^a-z0-9-]", "-", value)
-    value = re.sub(r"-{2,}", "-", value)
-    value = value.strip("-")
-    return value[:63]
 
 
 def split_string(value: str, separator: str | None = None) -> list[str]:

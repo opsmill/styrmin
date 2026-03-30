@@ -14,6 +14,8 @@ class ServiceReference(BaseModel):
     host: str
     port: int
     kind: str
+    primary_fqdn: str | None = None
+    human_readable_fqdn: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

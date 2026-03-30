@@ -78,13 +78,13 @@ portal:
     PORTAL_WAREHOUSE_TOKEN: styrmin-slurpit-pw-token
     PORTAL_WAREHOUSE_CALLBACK_TOKEN: styrmin-slurpit-pwcb-token
     PORTAL_SAFEKEY: styrmin-slurpit-safekey
-    PORTAL_BASE_URL: "http://{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
+    PORTAL_BASE_URL: "http://{{ services.slurpit.primary_fqdn }}"
 
 ingress:
   enabled: true
   className: "{{ instance.config.ingress_class }}"
   hosts:
-    - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
+    - host: "{{ services.slurpit.primary_fqdn }}"
       paths:
         - path: /
           pathType: Prefix
