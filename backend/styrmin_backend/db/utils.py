@@ -1,5 +1,8 @@
+import asyncio
 from collections.abc import AsyncGenerator
 
+from loguru import logger
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -52,6 +55,37 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Get an async database session."""
     async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
         yield session
+
+
+async def wait_for_database(max_retries: int = 10, retry_interval: float = 1.0) -> None:
+    """Wait for the database to become available.
+
+    Retries a simple ping query until the database responds or retries are exhausted.
+    This prevents CrashLoopBackOff on fresh Kubernetes installs where the database
+    container may not be ready when the application starts.
+    """
+    engine = get_async_engine()
+    last_exception: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            logger.info("Database is ready")
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_exception = exc
+            logger.warning(
+                "Database not ready (attempt {}/{}): {}",
+                attempt,
+                max_retries,
+                exc,
+            )
+            if attempt < max_retries:
+                await asyncio.sleep(retry_interval)
+
+    msg = f"Database not available after {max_retries} retries"
+    raise ConnectionError(msg) from last_exception
 
 
 async def init_db() -> None:
