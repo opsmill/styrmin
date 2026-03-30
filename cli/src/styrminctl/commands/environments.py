@@ -22,16 +22,16 @@ async def create(
     config: Annotated[str | None, Parameter(help="JSON config (inline or @filepath).")] = None,
 ) -> None:
     """Create a new environment in a cluster."""
-    if cluster_id and cluster != "default":
-        raise ValueError("Provide either --cluster or --cluster-id, not both")
-
     with styrmin_error_handler():
+        if cluster_id is not None and cluster != "default":
+            raise ValueError("Provide either --cluster or --cluster-id, not both")
+
         parsed_config = parse_json_argument(config)
         async with client.get_client() as sdk:
             env = await sdk.environments.create(
                 name=name,
                 cluster_id=cluster_id,
-                cluster_name=cluster if not cluster_id else None,
+                cluster_name=cluster if cluster_id is None else None,
                 config=parsed_config,
             )
 
@@ -70,22 +70,22 @@ async def get(
     cluster_id: ClusterContextId = None,
 ) -> None:
     """Get an environment by name or ID."""
-    if name and id:
-        raise ValueError("Provide either a name or --id, not both")
-    if not name and not id:
-        raise ValueError("Either a name or --id is required")
-    if cluster_id and cluster != "default":
-        raise ValueError("Provide either --cluster or --cluster-id, not both")
-
     with styrmin_error_handler():
+        if name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if name is None and id is None:
+            raise ValueError("Either a name or --id is required")
+        if cluster_id is not None and cluster != "default":
+            raise ValueError("Provide either --cluster or --cluster-id, not both")
+
         async with client.get_client() as sdk:
-            if id:
+            if id is not None:
                 env = await sdk.environments.get(environment_id=id)
             else:
                 env = await sdk.environments.get(
                     environment_name=name,
                     cluster_id=cluster_id,
-                    cluster_name=cluster if not cluster_id else None,
+                    cluster_name=cluster if cluster_id is None else None,
                 )
 
     row = {
@@ -106,22 +106,22 @@ async def delete(
     cluster_id: ClusterContextId = None,
 ) -> None:
     """Delete an environment by name or ID."""
-    if name and id:
-        raise ValueError("Provide either a name or --id, not both")
-    if not name and not id:
-        raise ValueError("Either a name or --id is required")
-    if cluster_id and cluster != "default":
-        raise ValueError("Provide either --cluster or --cluster-id, not both")
-
     with styrmin_error_handler():
+        if name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if name is None and id is None:
+            raise ValueError("Either a name or --id is required")
+        if cluster_id is not None and cluster != "default":
+            raise ValueError("Provide either --cluster or --cluster-id, not both")
+
         async with client.get_client() as sdk:
-            if id:
+            if id is not None:
                 await sdk.environments.delete(environment_id=id)
             else:
                 await sdk.environments.delete(
                     environment_name=name,
                     cluster_id=cluster_id,
-                    cluster_name=cluster if not cluster_id else None,
+                    cluster_name=cluster if cluster_id is None else None,
                 )
 
     print_success("Environment deleted.")

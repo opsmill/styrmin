@@ -69,15 +69,19 @@ async def resolve_cluster(
         raise AmbiguousIdentifierError(
             "Provide either cluster_id or cluster_name, not both"
         )
-    if cluster_id is not None:
-        cluster = await uow.clusters.get(cluster_id)
-    elif cluster_name is not None:
-        cluster = await uow.clusters.get_by_name(cluster_name)
-    else:
-        raise AmbiguousIdentifierError("Either cluster_id or cluster_name is required")
-    if cluster is None:
-        raise ClusterNotFoundError()
-    return cluster
+    async with uow:
+        if cluster_id is not None:
+            cluster = await uow.clusters.get(cluster_id)
+        elif cluster_name is not None:
+            cluster = await uow.clusters.get_by_name(cluster_name)
+        else:
+            raise AmbiguousIdentifierError(
+                "Either cluster_id or cluster_name is required"
+            )
+        if cluster is None:
+            identifier = cluster_id if cluster_id is not None else repr(cluster_name)
+            raise ClusterNotFoundError(f"Cluster not found: {identifier}")
+        return cluster
 
 
 async def get_cluster(cluster_id: UUID, uow: UnitOfWork) -> Cluster:

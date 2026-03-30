@@ -105,22 +105,22 @@ async def assign(
     cluster_id: ClusterContextId = None,
 ) -> None:
     """Assign a backup storage location to an environment."""
-    if environment_name and id:
-        raise ValueError("Provide either a name or --id, not both")
-    if not environment_name and not id:
-        raise ValueError("Either an environment name or --id is required")
-    if cluster_id and cluster != "default":
-        raise ValueError("Provide either --cluster or --cluster-id, not both")
-
     with styrmin_error_handler():
+        if environment_name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if environment_name is None and id is None:
+            raise ValueError("Either an environment name or --id is required")
+        if cluster_id is not None and cluster != "default":
+            raise ValueError("Provide either --cluster or --cluster-id, not both")
+
         async with client.get_client() as sdk:
-            if id:
+            if id is not None:
                 resolved_id = id
             else:
                 env = await sdk.environments.get(
                     environment_name=environment_name,
                     cluster_id=cluster_id,
-                    cluster_name=cluster if not cluster_id else None,
+                    cluster_name=cluster if cluster_id is None else None,
                 )
                 resolved_id = str(env.id)
             await sdk.backup_storage_locations.assign(resolved_id, bsl_id)
@@ -137,22 +137,22 @@ async def unassign(
     cluster_id: ClusterContextId = None,
 ) -> None:
     """Remove the backup storage location assignment from an environment."""
-    if environment_name and id:
-        raise ValueError("Provide either a name or --id, not both")
-    if not environment_name and not id:
-        raise ValueError("Either an environment name or --id is required")
-    if cluster_id and cluster != "default":
-        raise ValueError("Provide either --cluster or --cluster-id, not both")
-
     with styrmin_error_handler():
+        if environment_name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if environment_name is None and id is None:
+            raise ValueError("Either an environment name or --id is required")
+        if cluster_id is not None and cluster != "default":
+            raise ValueError("Provide either --cluster or --cluster-id, not both")
+
         async with client.get_client() as sdk:
-            if id:
+            if id is not None:
                 resolved_id = id
             else:
                 env = await sdk.environments.get(
                     environment_name=environment_name,
                     cluster_id=cluster_id,
-                    cluster_name=cluster if not cluster_id else None,
+                    cluster_name=cluster if cluster_id is None else None,
                 )
                 resolved_id = str(env.id)
             await sdk.backup_storage_locations.unassign(resolved_id)

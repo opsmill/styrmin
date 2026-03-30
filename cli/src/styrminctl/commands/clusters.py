@@ -50,12 +50,12 @@ async def get(
     id: OptionalClusterId = None,
 ) -> None:
     """Get a cluster by name or ID."""
-    if name and id:
-        raise ValueError("Provide either a name or --id, not both")
-    if not name and not id:
-        raise ValueError("Either a name or --id is required")
-
     with styrmin_error_handler():
+        if name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if name is None and id is None:
+            raise ValueError("Either a name or --id is required")
+
         async with client.get_client() as sdk:
             cluster = await sdk.clusters.get(cluster_id=id, cluster_name=name)
 
@@ -70,12 +70,12 @@ async def delete(
     id: OptionalClusterId = None,
 ) -> None:
     """Delete a cluster by name or ID."""
-    if name and id:
-        raise ValueError("Provide either a name or --id, not both")
-    if not name and not id:
-        raise ValueError("Either a name or --id is required")
-
     with styrmin_error_handler():
+        if name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if name is None and id is None:
+            raise ValueError("Either a name or --id is required")
+
         async with client.get_client() as sdk:
             await sdk.clusters.delete(cluster_id=id, cluster_name=name)
 

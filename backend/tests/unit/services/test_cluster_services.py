@@ -8,8 +8,10 @@ from styrmin_backend.services.clusters import (
     delete_cluster,
     get_cluster,
     get_clusters,
+    resolve_cluster,
 )
 from styrmin_backend.services.exceptions import (
+    AmbiguousIdentifierError,
     ClusterLimitReachedError,
     ClusterNotFoundError,
     InvalidContextError,
@@ -152,3 +154,42 @@ async def test_create_cluster_after_delete_succeeds(
     cluster = await create_cluster(name="new_cluster", uow=uow)
 
     assert cluster.name == "new_cluster"
+
+
+# --- resolve_cluster tests ---
+
+
+async def test_resolve_cluster_by_id(uow: FakeUnitOfWork, fake_cluster: Cluster):
+    cluster = await resolve_cluster(uow, cluster_id=fake_cluster.id)
+    assert cluster.id == fake_cluster.id
+    assert cluster.name == fake_cluster.name
+
+
+async def test_resolve_cluster_by_name(uow: FakeUnitOfWork, fake_cluster: Cluster):
+    cluster = await resolve_cluster(uow, cluster_name=fake_cluster.name)
+    assert cluster.id == fake_cluster.id
+    assert cluster.name == fake_cluster.name
+
+
+async def test_resolve_cluster_raises_when_both_provided(
+    uow: FakeUnitOfWork, fake_cluster: Cluster
+):
+    with pytest.raises(AmbiguousIdentifierError, match="not both"):
+        await resolve_cluster(
+            uow, cluster_id=fake_cluster.id, cluster_name=fake_cluster.name
+        )
+
+
+async def test_resolve_cluster_raises_when_neither_provided(uow: FakeUnitOfWork):
+    with pytest.raises(AmbiguousIdentifierError, match="required"):
+        await resolve_cluster(uow)
+
+
+async def test_resolve_cluster_not_found_by_id(uow: FakeUnitOfWork):
+    with pytest.raises(ClusterNotFoundError):
+        await resolve_cluster(uow, cluster_id=uuid4())
+
+
+async def test_resolve_cluster_not_found_by_name(uow: FakeUnitOfWork):
+    with pytest.raises(ClusterNotFoundError):
+        await resolve_cluster(uow, cluster_name="nonexistent")

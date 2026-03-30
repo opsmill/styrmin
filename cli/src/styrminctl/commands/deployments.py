@@ -26,14 +26,14 @@ async def create(
     config: Annotated[str | None, Parameter(help="JSON config (inline or @filepath).")] = None,
 ) -> None:
     """Create a new deployment (deploy an application)."""
-    if environment and id:
-        raise ValueError("Provide either an environment name or --id, not both")
-    if not environment and not id:
-        raise ValueError("Either an environment name or --id is required")
-    if cluster_id and cluster != "default":
-        raise ValueError("Provide either --cluster or --cluster-id, not both")
-
     with styrmin_error_handler():
+        if environment is not None and id is not None:
+            raise ValueError("Provide either an environment name or --id, not both")
+        if environment is None and id is None:
+            raise ValueError("Either an environment name or --id is required")
+        if cluster_id is not None and cluster != "default":
+            raise ValueError("Provide either --cluster or --cluster-id, not both")
+
         parsed_config = parse_json_argument(config)
         async with client.get_client() as sdk:
             task = await sdk.deployments.create(
@@ -42,7 +42,7 @@ async def create(
                 environment_id=id,
                 environment_name=environment,
                 cluster_id=cluster_id,
-                cluster_name=cluster if not cluster_id and not id else None,
+                cluster_name=cluster if cluster_id is None and id is None else None,
                 name=name,
                 config=parsed_config,
             )
