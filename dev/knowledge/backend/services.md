@@ -91,6 +91,7 @@ Manages Kubernetes cluster definitions. Only one cluster may exist at a time.
 | Function | Description |
 |----------|-------------|
 | `create_cluster(uow, name="default", config=None)` | Create a cluster (raises `ClusterLimitReachedError` if one already exists) |
+| `resolve_cluster(uow, cluster_id?, cluster_name?)` | Resolve cluster by ID or name (exactly one required) |
 | `get_cluster(cluster_id, uow)` | Retrieve cluster by ID |
 | `get_clusters(uow)` | List all clusters |
 | `delete_cluster(cluster_id, uow)` | Delete a cluster |
@@ -101,7 +102,8 @@ Manages environments within clusters.
 
 | Function | Description |
 |----------|-------------|
-| `create_environment(name, cluster_id, config, uow)` | Create environment in cluster |
+| `resolve_environment(uow, environment_id?, environment_name?, cluster_id?, cluster_name?)` | Resolve environment by ID or name with cluster context |
+| `create_environment(name, cluster_id, config, uow)` | Create environment in cluster (name unique per cluster) |
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
 | `delete_environment(environment_id, uow)` | Delete an environment |
