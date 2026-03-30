@@ -74,6 +74,18 @@ prefect-server:
       extraVolumeMounts:
         - name: backup
           mountPath: /backup
+      startupProbe:
+        enabled: true
+        initialDelaySeconds: 1
+        periodSeconds: 1
+        timeoutSeconds: 1
+        failureThreshold: 120
+      readinessProbe:
+        initialDelaySeconds: 1
+        periodSeconds: 1
+        timeoutSeconds: 1
+        failureThreshold: 120
+      resourcesPreset: none
     env:
     - name: PREFECT_SERVER_ANALYTICS_ENABLED
       value: "{{ parameters.enable_analytics }}"
@@ -84,15 +96,29 @@ rabbitmq:
     erlangCookie: styrmin-infrahub-supersecret
   startupProbe:
     enabled: true
-    periodSeconds: 5
-    timeoutSeconds: 5
-    failureThreshold: 20
+    initialDelaySeconds: 1
+    periodSeconds: 1
+    timeoutSeconds: 1
+    failureThreshold: 120
   readinessProbe:
-    periodSeconds: 5
-    timeoutSeconds: 5
-    failureThreshold: 20
+    initialDelaySeconds: 1
+    periodSeconds: 1
+    timeoutSeconds: 1
+    failureThreshold: 120
   resourcesPreset: none
 redis:
   enabled: true
   fullnameOverride: styrmin-cache
-  resourcesPreset: none
+  master:
+    startupProbe:
+      enabled: true
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 120
+    readinessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 120
+    resourcesPreset: none
