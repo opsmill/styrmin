@@ -24,6 +24,16 @@ postgresql:
     password: simple-app-password
     database: simple_app
   primary:
+    livenessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    readinessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
     persistence:
       enabled: true
       size: 1Gi

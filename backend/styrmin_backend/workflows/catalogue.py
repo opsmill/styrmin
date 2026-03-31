@@ -111,9 +111,15 @@ class PrefectCatalogue:
 
         # Forward agent poll settings to K8s jobs
         poll_env_vars = {
-            "STYRMIN_AGENT_POLL_RETRIES": os.environ.get("STYRMIN_AGENT_POLL_RETRIES", ""),
-            "STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS": os.environ.get("STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS", ""),
-            "STYRMIN_AGENT_POLL_INTERVAL": os.environ.get("STYRMIN_AGENT_POLL_INTERVAL", ""),
+            "STYRMIN_AGENT_POLL_RETRIES": os.environ.get(
+                "STYRMIN_AGENT_POLL_RETRIES", ""
+            ),
+            "STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS": os.environ.get(
+                "STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS", ""
+            ),
+            "STYRMIN_AGENT_POLL_INTERVAL": os.environ.get(
+                "STYRMIN_AGENT_POLL_INTERVAL", ""
+            ),
         }
         for key, value in poll_env_vars.items():
             if value:
