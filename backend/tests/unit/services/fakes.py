@@ -101,6 +101,14 @@ class FakeEnvironmentRepository(FakeRepository[Environment], EnvironmentReposito
                 return environment
         return None
 
+    async def get_by_name_in_cluster(
+        self, name: str, cluster_id: UUID
+    ) -> Environment | None:
+        for environment in self.models:
+            if environment.name == name and environment.cluster_id == cluster_id:
+                return environment
+        return None
+
 
 class FakeHelmRepositoryRepository(
     FakeRepository[HelmRepository], HelmRepositoryRepository

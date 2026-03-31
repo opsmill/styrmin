@@ -1,0 +1,82 @@
+# GraphQL Schema Changes for Name-Based Resource Lookup
+# This file documents the planned schema changes (not a runnable schema).
+# The actual schema.graphql is auto-generated from Strawberry type definitions.
+
+# ============================================================================
+# QUERIES - Add optional name parameters
+# ============================================================================
+
+# Before: cluster(clusterId: UUID!): Cluster
+# After:
+type Query {
+  cluster(
+    clusterId: UUID = null
+    clusterName: String = null
+  ): Cluster
+
+  # Before: environment(environmentId: UUID!): Environment
+  # After:
+  environment(
+    environmentId: UUID = null
+    environmentName: String = null
+    clusterId: UUID = null
+    clusterName: String = null
+  ): Environment
+}
+
+# ============================================================================
+# MUTATIONS - Add optional name parameters
+# ============================================================================
+
+type Mutation {
+  # createCluster - unchanged (already accepts name for creation)
+
+  # Before: deleteCluster(clusterId: UUID!): String
+  # After:
+  deleteCluster(
+    clusterId: UUID = null
+    clusterName: String = null
+  ): String
+
+  # Before: createEnvironment(name: String!, clusterId: UUID!, config: JSON = null): Environment
+  # After:
+  createEnvironment(
+    name: String!
+    clusterId: UUID = null
+    clusterName: String = null
+    config: JSON = null
+  ): Environment
+
+  # Before: deleteEnvironment(environmentId: UUID!): String
+  # After:
+  deleteEnvironment(
+    environmentId: UUID = null
+    environmentName: String = null
+    clusterId: UUID = null
+    clusterName: String = null
+  ): String
+
+  # Before: deploy(..., environmentId: UUID!, ...): Task
+  # After:
+  deploy(
+    driver: String!
+    environmentId: UUID = null
+    environmentName: String = null
+    clusterId: UUID = null
+    clusterName: String = null
+    version: String = null
+    name: String = null
+    config: JSON = null
+    parameters: JSON = null
+    serviceNameOverrides: [ServiceNameOverrideInput!] = null
+  ): Task
+}
+
+# ============================================================================
+# ERROR HANDLING
+# ============================================================================
+
+# Validation errors (both provided, neither provided, missing cluster context)
+# are returned via the existing StructuredErrorExtension with:
+#   extensions.code = "VALIDATION_ERROR"
+#   message = descriptive error message

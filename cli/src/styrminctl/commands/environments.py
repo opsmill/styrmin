@@ -8,7 +8,7 @@ from cyclopts import App, Parameter
 
 from styrminctl import client
 from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
-from styrminctl.types import ClusterId, EnvironmentId
+from styrminctl.types import ClusterContextId, ClusterContextName, EnvironmentName, OptionalEnvironmentId
 
 environments_app = App(name="environments", help="Manage environments.")
 
@@ -16,15 +16,24 @@ environments_app = App(name="environments", help="Manage environments.")
 @environments_app.command
 async def create(
     name: Annotated[str, Parameter(help="Name of the environment.")],
-    cluster_id: ClusterId,
     *,
+    cluster: ClusterContextName = "default",
+    cluster_id: ClusterContextId = None,
     config: Annotated[str | None, Parameter(help="JSON config (inline or @filepath).")] = None,
 ) -> None:
     """Create a new environment in a cluster."""
     with styrmin_error_handler():
+        if cluster_id is not None and cluster != "default":
+            raise ValueError("Provide either --cluster or --cluster-id, not both")
+
         parsed_config = parse_json_argument(config)
         async with client.get_client() as sdk:
-            env = await sdk.environments.create(name=name, cluster_id=cluster_id, config=parsed_config)
+            env = await sdk.environments.create(
+                name=name,
+                cluster_id=cluster_id,
+                cluster_name=cluster if cluster_id is None else None,
+                config=parsed_config,
+            )
 
     print_success(f"Environment '{env.name}' created in cluster '{env.cluster.name}' (id: {env.id})")
 
@@ -53,11 +62,31 @@ async def list_environments() -> None:
 
 
 @environments_app.command
-async def get(environment_id: EnvironmentId) -> None:
-    """Get an environment by ID."""
+async def get(
+    name: EnvironmentName = None,
+    *,
+    id: OptionalEnvironmentId = None,
+    cluster: ClusterContextName = "default",
+    cluster_id: ClusterContextId = None,
+) -> None:
+    """Get an environment by name or ID."""
     with styrmin_error_handler():
+        if name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if name is None and id is None:
+            raise ValueError("Either a name or --id is required")
+        if cluster_id is not None and cluster != "default":
+            raise ValueError("Provide either --cluster or --cluster-id, not both")
+
         async with client.get_client() as sdk:
-            env = await sdk.environments.get(environment_id)
+            if id is not None:
+                env = await sdk.environments.get(environment_id=id)
+            else:
+                env = await sdk.environments.get(
+                    environment_name=name,
+                    cluster_id=cluster_id,
+                    cluster_name=cluster if cluster_id is None else None,
+                )
 
     row = {
         "id": str(env.id),
@@ -69,10 +98,30 @@ async def get(environment_id: EnvironmentId) -> None:
 
 
 @environments_app.command
-async def delete(environment_id: EnvironmentId) -> None:
-    """Delete an environment."""
+async def delete(
+    name: EnvironmentName = None,
+    *,
+    id: OptionalEnvironmentId = None,
+    cluster: ClusterContextName = "default",
+    cluster_id: ClusterContextId = None,
+) -> None:
+    """Delete an environment by name or ID."""
     with styrmin_error_handler():
+        if name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if name is None and id is None:
+            raise ValueError("Either a name or --id is required")
+        if cluster_id is not None and cluster != "default":
+            raise ValueError("Provide either --cluster or --cluster-id, not both")
+
         async with client.get_client() as sdk:
-            await sdk.environments.delete(environment_id)
+            if id is not None:
+                await sdk.environments.delete(environment_id=id)
+            else:
+                await sdk.environments.delete(
+                    environment_name=name,
+                    cluster_id=cluster_id,
+                    cluster_name=cluster if cluster_id is None else None,
+                )
 
     print_success("Environment deleted.")

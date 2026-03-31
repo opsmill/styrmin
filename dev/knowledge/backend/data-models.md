@@ -64,7 +64,9 @@ class Cluster(StyrminModel, table=True):
 
 ```python
 class Environment(StyrminModel, table=True):
-    name: str = Field(unique=True)
+    __table_args__ = (UniqueConstraint("name", "cluster_id"),)
+
+    name: str  # Unique per cluster (not globally)
     config: dict | None = Field(sa_column=Column(JSON))
 
     cluster_id: UUID = Field(foreign_key="cluster.id")

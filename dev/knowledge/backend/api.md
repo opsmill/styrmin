@@ -45,9 +45,9 @@ styrmin_backend/api/
 | Query | Description | Return Type |
 |-------|-------------|-------------|
 | `clusters` | Get all clusters | `[Cluster]` |
-| `cluster(cluster_id)` | Get cluster by ID | `Cluster \| ClusterNotFound` |
+| `cluster(cluster_id?, cluster_name?)` | Get cluster by ID or name | `Cluster \| ClusterNotFound` |
 | `environments` | Get all environments | `[Environment]` |
-| `environment(environment_id)` | Get environment by ID | `Environment \| EnvironmentNotFound` |
+| `environment(environment_id?, environment_name?, cluster_id?, cluster_name?)` | Get environment by ID or name (with cluster context) | `Environment \| EnvironmentNotFound` |
 | `deployment(deployment_id)` | Get deployment by ID (async) | `Deployment \| DeploymentNotFound` |
 | `tasks` | Get all tasks | `[Task]` |
 | `task(task_id)` | Get task by ID | `Task \| TaskNotFound` |
@@ -57,12 +57,12 @@ styrmin_backend/api/
 | Mutation | Description | Return Type |
 |----------|-------------|-------------|
 | `create_cluster(name="default", config?)` | Create a cluster (only one allowed) | `ClusterCreated \| ClusterLimitReached \| ClusterCreationFailed` |
-| `delete_cluster(cluster_id)` | Delete a cluster | `ClusterDeleted \| ClusterNotFound` |
-| `create_environment(name, cluster_id, config?)` | Create environment in cluster | `EnvironmentCreated \| EnvironmentAlreadyExists \| EnvironmentCreationFailed` |
-| `delete_environment(environment_id)` | Delete an environment | `EnvironmentDeleted \| EnvironmentNotFound` |
+| `delete_cluster(cluster_id?, cluster_name?)` | Delete a cluster by ID or name | `ClusterDeleted \| ClusterNotFound` |
+| `create_environment(name, cluster_id?, cluster_name?, config?)` | Create environment in cluster (by ID or name) | `EnvironmentCreated \| EnvironmentAlreadyExists \| EnvironmentCreationFailed` |
+| `delete_environment(environment_id?, environment_name?, cluster_id?, cluster_name?)` | Delete an environment by ID or name | `EnvironmentDeleted \| EnvironmentNotFound` |
 | `create_application_driver(name)` | Create application driver (async) | `ApplicationDriverCreated \| ApplicationDriverCreationFailed` |
 | `load_remote_application_driver_version(repository_url, branch)` | Load driver from Git (async) | `ApplicationDriverVersionCreated \| ApplicationDriverVersionCreationFailed` |
-| `deploy(version, name, environment_id, config?)` | Deploy application (async) | `DeploymentInProgress \| DeploymentFailed` |
+| `deploy(driver, version?, environment_id?, environment_name?, cluster_id?, cluster_name?, name?, config?)` | Deploy application (async) | `DeploymentInProgress \| DeploymentFailed` |
 | `update_deployment(deployment_id, config)` | Update deployment config (async) | `DeploymentUpdateInProgress \| DeploymentUpdateFailed` |
 
 ## Internal API

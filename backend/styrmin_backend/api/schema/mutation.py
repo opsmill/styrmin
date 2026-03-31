@@ -46,13 +46,21 @@ from styrmin_backend.services.backup_storage_locations import (
     unassign_backup_storage_location as unassign_bsl_service,
     update_backup_storage_location as update_bsl_service,
 )
-from styrmin_backend.services.clusters import create_cluster, delete_cluster
+from styrmin_backend.services.clusters import (
+    create_cluster,
+    delete_cluster,
+    resolve_cluster,
+)
 from styrmin_backend.services.deployment import (
     deploy_application,
     update_deployment,
     update_deployment_version,
 )
-from styrmin_backend.services.environments import create_environment, delete_environment
+from styrmin_backend.services.environments import (
+    create_environment,
+    delete_environment,
+    resolve_environment,
+)
 from styrmin_backend.services.backup.scheduler import (
     create_backup_schedule as create_backup_schedule_service,
     delete_backup_schedule as delete_backup_schedule_service,
@@ -93,32 +101,54 @@ class Mutation:
 
     @strawberry.mutation
     async def delete_cluster(
-        self, cluster_id: UUID, info: strawberry.Info
+        self,
+        info: strawberry.Info,
+        cluster_id: UUID | None = None,
+        cluster_name: str | None = None,
     ) -> str | None:
         uow = info.context["uow"]
-        await delete_cluster(cluster_id=cluster_id, uow=uow)
+        cluster = await resolve_cluster(
+            uow, cluster_id=cluster_id, cluster_name=cluster_name
+        )
+        await delete_cluster(cluster_id=cluster.id, uow=uow)
         return "Cluster deleted"
 
     @strawberry.mutation
     async def create_environment(
         self,
         name: str,
-        cluster_id: UUID,
         info: strawberry.Info,
+        cluster_id: UUID | None = None,
+        cluster_name: str | None = None,
         config: JSON | None = None,
     ) -> Environment | None:
         uow = info.context["uow"]
+        cluster = await resolve_cluster(
+            uow, cluster_id=cluster_id, cluster_name=cluster_name
+        )
         environment = await create_environment(
-            name=name, cluster_id=cluster_id, config=config, uow=uow
+            name=name, cluster_id=cluster.id, config=config, uow=uow
         )
         return Environment.from_instance(environment)
 
     @strawberry.mutation
     async def delete_environment(
-        self, environment_id: UUID, info: strawberry.Info
+        self,
+        info: strawberry.Info,
+        environment_id: UUID | None = None,
+        environment_name: str | None = None,
+        cluster_id: UUID | None = None,
+        cluster_name: str | None = None,
     ) -> str | None:
         uow = info.context["uow"]
-        await delete_environment(environment_id=environment_id, uow=uow)
+        environment = await resolve_environment(
+            uow,
+            environment_id=environment_id,
+            environment_name=environment_name,
+            cluster_id=cluster_id,
+            cluster_name=cluster_name,
+        )
+        await delete_environment(environment_id=environment.id, uow=uow)
         return "Environment deleted"
 
     @strawberry.mutation
@@ -395,8 +425,11 @@ class Mutation:
     async def deploy(
         self,
         driver: str,
-        environment_id: UUID,
         info: strawberry.Info,
+        environment_id: UUID | None = None,
+        environment_name: str | None = None,
+        cluster_id: UUID | None = None,
+        cluster_name: str | None = None,
         version: str | None = None,
         name: str | None = None,
         config: JSON | None = None,
@@ -405,6 +438,13 @@ class Mutation:
     ) -> Task | None:
         """Deploy an application in an environment."""
         uow = info.context["uow"]
+        environment = await resolve_environment(
+            uow,
+            environment_id=environment_id,
+            environment_name=environment_name,
+            cluster_id=cluster_id,
+            cluster_name=cluster_name,
+        )
         overrides_dict = (
             {o.driver_service_name: o.override_name for o in service_name_overrides}
             if service_name_overrides
@@ -413,7 +453,7 @@ class Mutation:
         task = await deploy_application(
             driver_name=driver,
             version=version,
-            environment_id=environment_id,
+            environment_id=environment.id,
             deployment_config=config,
             deployment_parameters=parameters,
             deployment_name=name,

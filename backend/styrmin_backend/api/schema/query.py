@@ -45,9 +45,12 @@ from styrmin_backend.services.backup_storage_locations import (
     get_backup_storage_location,
     get_backup_storage_locations,
 )
-from styrmin_backend.services.clusters import get_cluster, get_clusters
+from styrmin_backend.services.clusters import get_clusters, resolve_cluster
 from styrmin_backend.services.deployment import get_deployment
-from styrmin_backend.services.environments import get_environment, get_environments
+from styrmin_backend.services.environments import (
+    get_environments,
+    resolve_environment,
+)
 from styrmin_backend.services.tasks import get_task, get_tasks
 
 
@@ -60,9 +63,16 @@ class Query:
         return [Cluster.from_instance(cluster) for cluster in clusters]
 
     @strawberry.field
-    async def cluster(self, cluster_id: UUID, info: strawberry.Info) -> Cluster | None:
+    async def cluster(
+        self,
+        info: strawberry.Info,
+        cluster_id: UUID | None = None,
+        cluster_name: str | None = None,
+    ) -> Cluster | None:
         uow = info.context["uow"]
-        cluster = await get_cluster(cluster_id=cluster_id, uow=uow)
+        cluster = await resolve_cluster(
+            uow, cluster_id=cluster_id, cluster_name=cluster_name
+        )
         return Cluster.from_instance(cluster)
 
     @strawberry.field
@@ -103,10 +113,21 @@ class Query:
 
     @strawberry.field
     async def environment(
-        self, environment_id: UUID, info: strawberry.Info
+        self,
+        info: strawberry.Info,
+        environment_id: UUID | None = None,
+        environment_name: str | None = None,
+        cluster_id: UUID | None = None,
+        cluster_name: str | None = None,
     ) -> Environment | None:
         uow = info.context["uow"]
-        environment = await get_environment(environment_id=environment_id, uow=uow)
+        environment = await resolve_environment(
+            uow,
+            environment_id=environment_id,
+            environment_name=environment_name,
+            cluster_id=cluster_id,
+            cluster_name=cluster_name,
+        )
         return Environment.from_instance(environment)
 
     @strawberry.field

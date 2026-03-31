@@ -9,6 +9,7 @@ from styrmin_backend.context.exceptions import InvalidClusterContextError
 from styrmin_backend.context.validators import validate_cluster_config
 from styrmin_backend.db.models import Cluster
 from styrmin_backend.services.exceptions import (
+    AmbiguousIdentifierError,
     ClusterAlreadyExistsError,
     ClusterLimitReachedError,
     ClusterNotFoundError,
@@ -56,6 +57,31 @@ async def create_cluster(
         returned_cluster = await uow.clusters.get_by_name(name)
         assert returned_cluster is not None, "Cluster should be created successfully"
         return returned_cluster
+
+
+async def resolve_cluster(
+    uow: UnitOfWork,
+    cluster_id: UUID | None = None,
+    cluster_name: str | None = None,
+) -> Cluster:
+    """Resolve a cluster by ID or name. Exactly one must be provided."""
+    if cluster_id is not None and cluster_name is not None:
+        raise AmbiguousIdentifierError(
+            "Provide either cluster_id or cluster_name, not both"
+        )
+    async with uow:
+        if cluster_id is not None:
+            cluster = await uow.clusters.get(cluster_id)
+        elif cluster_name is not None:
+            cluster = await uow.clusters.get_by_name(cluster_name)
+        else:
+            raise AmbiguousIdentifierError(
+                "Either cluster_id or cluster_name is required"
+            )
+        if cluster is None:
+            identifier = cluster_id if cluster_id is not None else repr(cluster_name)
+            raise ClusterNotFoundError(f"Cluster not found: {identifier}")
+        return cluster
 
 
 async def get_cluster(cluster_id: UUID, uow: UnitOfWork) -> Cluster:

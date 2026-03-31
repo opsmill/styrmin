@@ -52,7 +52,9 @@ class BackupStorageLocation(StyrminModel, table=True):
 
 # Note: Requires repository
 class Environment(StyrminModel, table=True):
-    name: str = Field(unique=True)
+    __table_args__ = (UniqueConstraint("name", "cluster_id"),)
+
+    name: str
     config: dict | None = Field(default=None, sa_column=Column(JSON))
 
     cluster_id: UUID = Field(foreign_key="cluster.id")

@@ -38,6 +38,33 @@ def validate_directory_exists(_type: Any, value: Any) -> None:  # noqa: ANN401
         raise ValueError(f"Path is not a directory: {value!r}")
 
 
+# --- Name-based type aliases (positional arguments) ---
+
+ClusterName = Annotated[str | None, Parameter(help="Name of the cluster.")]
+EnvironmentName = Annotated[str | None, Parameter(help="Name of the environment.")]
+
+# --- Optional ID flags (--id for backward-compatible UUID access) ---
+
+OptionalClusterId = Annotated[
+    str | None,
+    Parameter(name="--id", help="UUID of the cluster.", validator=validate_uuid),
+]
+OptionalEnvironmentId = Annotated[
+    str | None,
+    Parameter(name="--id", help="UUID of the environment.", validator=validate_uuid),
+]
+
+# --- Cluster context flags for environment commands ---
+
+ClusterContextName = Annotated[
+    str,
+    Parameter(name="--cluster", help="Cluster name (default: 'default')."),
+]
+ClusterContextId = Annotated[
+    str | None,
+    Parameter(name="--cluster-id", help="UUID of the cluster.", validator=validate_uuid),
+]
+
 # --- UUID type aliases ---
 # NOTE: These aliases bake Parameter(help=...) into the type. If a call site
 # needs different help text, use a standalone Annotated type there instead.

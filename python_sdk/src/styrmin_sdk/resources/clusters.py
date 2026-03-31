@@ -25,11 +25,29 @@ class ClusterResource(BaseResource):
         self._check_graphql_errors(result)
         return [Cluster.model_validate(c) for c in result["data"].get("clusters", [])]
 
-    async def get(self, cluster_id: str | UUID) -> Cluster:
-        result = await self._transport.execute(load_query("get_cluster"), {"clusterId": str(cluster_id)})
+    async def get(
+        self,
+        cluster_id: str | UUID | None = None,
+        cluster_name: str | None = None,
+    ) -> Cluster:
+        variables: dict[str, Any] = {}
+        if cluster_id is not None:
+            variables["clusterId"] = str(cluster_id)
+        if cluster_name is not None:
+            variables["clusterName"] = cluster_name
+        result = await self._transport.execute(load_query("get_cluster"), variables)
         self._check_graphql_errors(result)
         return Cluster.model_validate(result["data"]["cluster"])
 
-    async def delete(self, cluster_id: str | UUID) -> None:
-        result = await self._transport.execute(load_query("delete_cluster"), {"clusterId": str(cluster_id)})
+    async def delete(
+        self,
+        cluster_id: str | UUID | None = None,
+        cluster_name: str | None = None,
+    ) -> None:
+        variables: dict[str, Any] = {}
+        if cluster_id is not None:
+            variables["clusterId"] = str(cluster_id)
+        if cluster_name is not None:
+            variables["clusterName"] = cluster_name
+        result = await self._transport.execute(load_query("delete_cluster"), variables)
         self._check_graphql_errors(result)

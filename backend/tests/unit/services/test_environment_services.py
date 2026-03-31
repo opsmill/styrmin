@@ -3,13 +3,17 @@ from uuid import uuid4
 import pytest
 
 from styrmin_backend.db.models import Cluster
+from styrmin_backend.db.models import Environment
 from styrmin_backend.services.environments import (
     create_environment,
     delete_environment,
     get_environment,
     get_environments,
+    resolve_environment,
 )
 from styrmin_backend.services.exceptions import (
+    AmbiguousIdentifierError,
+    ClusterNotFoundError,
     EnvironmentAlreadyExistsError,
     EnvironmentNotFoundError,
     InvalidContextError,
@@ -157,3 +161,121 @@ async def test_delete_environment_that_does_not_exist(
     with pytest.raises(EnvironmentNotFoundError):
         await delete_environment(environment_id=fake_cluster.id, uow=uow)
     assert not uow.committed
+
+
+# --- resolve_environment tests ---
+
+
+async def test_resolve_environment_by_id(
+    uow: FakeUnitOfWork,
+    fake_cluster: Cluster,
+    fake_environment_repository: FakeEnvironmentRepository,
+):
+    env = await fake_environment_repository.create(
+        Environment(name="staging", cluster_id=fake_cluster.id)
+    )
+
+    result = await resolve_environment(uow, environment_id=env.id)
+    assert result.id == env.id
+    assert result.name == "staging"
+
+
+async def test_resolve_environment_by_name_and_cluster_name(
+    uow: FakeUnitOfWork,
+    fake_cluster: Cluster,
+    fake_environment_repository: FakeEnvironmentRepository,
+):
+    env = await fake_environment_repository.create(
+        Environment(name="staging", cluster_id=fake_cluster.id)
+    )
+
+    result = await resolve_environment(
+        uow, environment_name="staging", cluster_name=fake_cluster.name
+    )
+    assert result.id == env.id
+
+
+async def test_resolve_environment_by_name_and_cluster_id(
+    uow: FakeUnitOfWork,
+    fake_cluster: Cluster,
+    fake_environment_repository: FakeEnvironmentRepository,
+):
+    env = await fake_environment_repository.create(
+        Environment(name="staging", cluster_id=fake_cluster.id)
+    )
+
+    result = await resolve_environment(
+        uow, environment_name="staging", cluster_id=fake_cluster.id
+    )
+    assert result.id == env.id
+
+
+async def test_resolve_environment_raises_when_both_id_and_name(
+    uow: FakeUnitOfWork,
+    fake_cluster: Cluster,
+    fake_environment_repository: FakeEnvironmentRepository,
+):
+    env = await fake_environment_repository.create(
+        Environment(name="staging", cluster_id=fake_cluster.id)
+    )
+
+    with pytest.raises(AmbiguousIdentifierError, match="not both"):
+        await resolve_environment(
+            uow, environment_id=env.id, environment_name="staging"
+        )
+
+
+async def test_resolve_environment_raises_when_neither(uow: FakeUnitOfWork):
+    with pytest.raises(AmbiguousIdentifierError, match="required"):
+        await resolve_environment(uow)
+
+
+async def test_resolve_environment_not_found_by_id(uow: FakeUnitOfWork):
+    with pytest.raises(EnvironmentNotFoundError):
+        await resolve_environment(uow, environment_id=uuid4())
+
+
+async def test_resolve_environment_not_found_by_name(
+    uow: FakeUnitOfWork, fake_cluster: Cluster
+):
+    with pytest.raises(EnvironmentNotFoundError):
+        await resolve_environment(
+            uow, environment_name="nonexistent", cluster_name=fake_cluster.name
+        )
+
+
+async def test_resolve_environment_name_requires_cluster_context(
+    uow: FakeUnitOfWork,
+):
+    with pytest.raises(AmbiguousIdentifierError, match="required"):
+        await resolve_environment(uow, environment_name="staging")
+
+
+async def test_resolve_environment_name_with_nonexistent_cluster(
+    uow: FakeUnitOfWork,
+):
+    with pytest.raises(ClusterNotFoundError):
+        await resolve_environment(
+            uow, environment_name="staging", cluster_name="nonexistent"
+        )
+
+
+# --- per-cluster uniqueness tests ---
+
+
+async def test_create_environment_same_name_different_cluster_succeeds(
+    uow: FakeUnitOfWork,
+    fake_cluster: Cluster,
+    fake_environment_repository: FakeEnvironmentRepository,
+):
+    from tests.unit.services.fakes import FakeClusterRepository
+
+    cluster_repo: FakeClusterRepository = uow.clusters  # type: ignore[assignment]
+    cluster2 = await cluster_repo.create(Cluster(name="other_cluster"))
+
+    env1 = await create_environment(name="staging", cluster_id=fake_cluster.id, uow=uow)
+    env2 = await create_environment(name="staging", cluster_id=cluster2.id, uow=uow)
+
+    assert env1.name == env2.name
+    assert env1.cluster_id != env2.cluster_id
+    assert len(fake_environment_repository.models) == 2

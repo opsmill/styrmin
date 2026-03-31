@@ -8,7 +8,7 @@ from cyclopts import App, Parameter
 
 from styrminctl import client
 from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
-from styrminctl.types import ClusterId
+from styrminctl.types import ClusterName, OptionalClusterId
 
 clusters_app = App(name="clusters", help="Manage clusters.")
 
@@ -44,21 +44,39 @@ async def list_clusters() -> None:
 
 
 @clusters_app.command
-async def get(cluster_id: ClusterId) -> None:
-    """Get a cluster by ID."""
+async def get(
+    name: ClusterName = None,
+    *,
+    id: OptionalClusterId = None,
+) -> None:
+    """Get a cluster by name or ID."""
     with styrmin_error_handler():
+        if name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if name is None and id is None:
+            raise ValueError("Either a name or --id is required")
+
         async with client.get_client() as sdk:
-            cluster = await sdk.clusters.get(cluster_id)
+            cluster = await sdk.clusters.get(cluster_id=id, cluster_name=name)
 
     row = {"id": str(cluster.id), "name": cluster.name, "config": str(cluster.config) if cluster.config else ""}
     print_table([row], columns=["id", "name", "config"], title="Cluster")
 
 
 @clusters_app.command
-async def delete(cluster_id: ClusterId) -> None:
-    """Delete a cluster."""
+async def delete(
+    name: ClusterName = None,
+    *,
+    id: OptionalClusterId = None,
+) -> None:
+    """Delete a cluster by name or ID."""
     with styrmin_error_handler():
+        if name is not None and id is not None:
+            raise ValueError("Provide either a name or --id, not both")
+        if name is None and id is None:
+            raise ValueError("Either a name or --id is required")
+
         async with client.get_client() as sdk:
-            await sdk.clusters.delete(cluster_id)
+            await sdk.clusters.delete(cluster_id=id, cluster_name=name)
 
     print_success("Cluster deleted.")
