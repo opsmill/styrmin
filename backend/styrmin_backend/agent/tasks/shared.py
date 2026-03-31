@@ -24,7 +24,9 @@ from styrmin_backend.services.utils import get_helm_repository_type
 from styrmin_backend import config
 
 POLL_RETRIES = int(os.environ.get("STYRMIN_AGENT_POLL_RETRIES", "60"))
-POLL_RETRY_DELAY_SECONDS = int(os.environ.get("STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS", "10"))
+POLL_RETRY_DELAY_SECONDS = int(
+    os.environ.get("STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS", "10")
+)
 POLL_INTERVAL = int(os.environ.get("STYRMIN_AGENT_POLL_INTERVAL", "10"))
 
 

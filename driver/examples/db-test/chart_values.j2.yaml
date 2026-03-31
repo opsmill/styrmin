@@ -12,6 +12,16 @@ mariadb:
     password: test-password
     rootPassword: root-password
   primary:
+    livenessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    readinessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
     persistence:
       size: 1Gi
       storageClass: "{{ instance.config.standard_storage.storage_class }}"
@@ -28,6 +38,16 @@ mariadb:
 mongodb:
   fullnameOverride: styrmin-db-test-mongodb
   architecture: standalone
+  livenessProbe:
+    initialDelaySeconds: 1
+    periodSeconds: 1
+    timeoutSeconds: 1
+    failureThreshold: 60
+  readinessProbe:
+    initialDelaySeconds: 1
+    periodSeconds: 1
+    timeoutSeconds: 1
+    failureThreshold: 60
   auth:
     enabled: true
     rootUser: testuser
