@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link } from "@tanstack/react-router";
 import { useListBackupStorageLocationsQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
@@ -62,7 +62,11 @@ export default function BackupStorageLocationListPage() {
       {data && data.backupStorageLocations.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {data.backupStorageLocations.map((bsl) => (
-            <Link key={bsl.id} to={`/backup-storage-locations/${bsl.id}`}>
+            <Link
+              key={bsl.id}
+              to="/backup-storage-locations/$id"
+              params={{ id: bsl.id }}
+            >
               <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">

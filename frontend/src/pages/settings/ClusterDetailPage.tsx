@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router";
+import { useParams, Link } from "@tanstack/react-router";
 import { useGetClusterQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
@@ -14,10 +14,9 @@ function formatDate(iso: string): string {
 }
 
 export default function ClusterDetailPage() {
-  const { clusterId } = useParams();
+  const { clusterId } = useParams({ from: "/settings/clusters/$clusterId" });
   const [{ data, fetching, error }, reexecute] = useGetClusterQuery({
-    variables: { clusterId: clusterId! },
-    pause: !clusterId,
+    variables: { clusterId },
   });
 
   const cluster = data?.cluster;
@@ -101,7 +100,8 @@ export default function ClusterDetailPage() {
                   >
                     <td className="px-4 py-3 text-sm">
                       <Link
-                        to={`/environments/${env.id}`}
+                        to="/environments/$environmentId"
+                        params={{ environmentId: env.id }}
                         className="font-medium hover:underline"
                       >
                         {env.name}

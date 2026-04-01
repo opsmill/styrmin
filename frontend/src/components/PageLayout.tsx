@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import type { ReactNode } from "react";

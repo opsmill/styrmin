@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from "react-router";
+import { useParams, useNavigate } from "@tanstack/react-router";
 import {
   useGetBackupStorageLocationQuery,
   useDeleteBackupStorageLocationMutation,
@@ -32,12 +32,11 @@ const updateCredentialsSchema = z.object({
 type UpdateCredentialsValues = z.infer<typeof updateCredentialsSchema>;
 
 export default function BackupStorageLocationDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams({ from: "/backup-storage-locations/$id" });
   const navigate = useNavigate();
   const [{ data, fetching, error }, reexecute] =
     useGetBackupStorageLocationQuery({
-      variables: { backupStorageLocationId: id! },
-      pause: !id,
+      variables: { backupStorageLocationId: id },
     });
   const [, executeDelete] = useDeleteBackupStorageLocationMutation();
   const [, executeUpdate] = useUpdateBackupStorageLocationMutation();
@@ -57,18 +56,16 @@ export default function BackupStorageLocationDetailPage() {
   });
 
   const handleDelete = async () => {
-    if (!id) return;
     setDeleteError(null);
     const result = await executeDelete({ backupStorageLocationId: id });
     if (result.error) {
       setDeleteError(result.error.message);
       return;
     }
-    navigate("/backup-storage-locations");
+    navigate({ to: "/backup-storage-locations" });
   };
 
   const onCredentialsSubmit = async (values: UpdateCredentialsValues) => {
-    if (!id) return;
     setCredentialsError(null);
     const result = await executeUpdate({
       backupStorageLocationId: id,
