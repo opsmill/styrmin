@@ -1,4 +1,4 @@
-import { useParams, Link, useNavigate } from "react-router";
+import { useParams, Link, useNavigate } from "@tanstack/react-router";
 import {
   useGetEnvironmentQuery,
   useListBackupStorageLocationsQuery,
@@ -26,11 +26,12 @@ import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 
 export default function EnvironmentDetailPage() {
-  const { environmentId } = useParams();
+  const { environmentId } = useParams({
+    from: "/environments/$environmentId",
+  });
   const navigate = useNavigate();
   const [{ data, fetching, error }, reexecute] = useGetEnvironmentQuery({
-    variables: { environmentId: environmentId! },
-    pause: !environmentId,
+    variables: { environmentId },
   });
 
   const [{ data: bslData }] = useListBackupStorageLocationsQuery();
@@ -40,7 +41,6 @@ export default function EnvironmentDetailPage() {
   const environment = data?.environment;
 
   const handleBslChange = async (value: string) => {
-    if (!environmentId) return;
     if (value === "__none__") {
       await executeUnassign({ environmentId });
     } else {
@@ -84,7 +84,12 @@ export default function EnvironmentDetailPage() {
             onRefreshNow={autoRefresh.refreshNow}
           />
           <Button
-            onClick={() => navigate(`/environments/${environmentId}/deploy`)}
+            onClick={() =>
+              navigate({
+                to: "/environments/$environmentId/deploy",
+                params: { environmentId },
+              })
+            }
           >
             <Plus className="h-4 w-4" />
             Deploy
@@ -139,7 +144,12 @@ export default function EnvironmentDetailPage() {
           title="No deployments"
           description="No applications have been deployed to this environment yet."
           actionLabel="Deploy an application"
-          onAction={() => navigate(`/environments/${environmentId}/deploy`)}
+          onAction={() =>
+            navigate({
+              to: "/environments/$environmentId/deploy",
+              params: { environmentId },
+            })
+          }
         />
       ) : (
         <div className="rounded-md border">
@@ -168,7 +178,11 @@ export default function EnvironmentDetailPage() {
                 >
                   <td className="px-4 py-3 text-sm">
                     <Link
-                      to={`/environments/${environmentId}/deployments/${deployment.id}`}
+                      to="/environments/$environmentId/deployments/$deploymentId"
+                      params={{
+                        environmentId,
+                        deploymentId: deployment.id,
+                      }}
                       className="font-medium hover:underline"
                     >
                       {deployment.name}

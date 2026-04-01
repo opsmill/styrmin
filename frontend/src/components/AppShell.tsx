@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, Outlet, useLocation } from "react-router";
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
   Server,
   Package,
@@ -31,15 +31,15 @@ export function AppShell() {
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem(STORAGE_KEY) === "true";
   });
-  const location = useLocation();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(collapsed));
   }, [collapsed]);
 
   function isActive(href: string, exact: boolean) {
-    if (exact) return location.pathname === href;
-    return location.pathname.startsWith(href);
+    if (exact) return pathname === href;
+    return pathname.startsWith(href);
   }
 
   function renderNavLink(item: (typeof navItems)[number]) {

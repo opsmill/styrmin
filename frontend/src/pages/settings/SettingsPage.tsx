@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link } from "@tanstack/react-router";
 import { useListClustersQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
@@ -52,7 +52,8 @@ export default function SettingsPage() {
 
         {data && data.clusters.length > 0 && (
           <Link
-            to={`/settings/clusters/${data.clusters[0].id}`}
+            to="/settings/clusters/$clusterId"
+            params={{ clusterId: data.clusters[0].id }}
             className="block max-w-xl"
           >
             <Card className="cursor-pointer hover:border-primary/50 transition-colors">

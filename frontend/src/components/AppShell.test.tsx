@@ -32,21 +32,21 @@ describe("AppShell", () => {
     vi.clearAllMocks();
   });
 
-  it("renders navigation links", () => {
-    render(<AppShell />);
+  it("renders navigation links", async () => {
+    await render(<AppShell />);
     expect(screen.getByText("Environments")).toBeInTheDocument();
     expect(screen.getByText("Drivers")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 
-  it("renders the Styrmin brand name", () => {
-    render(<AppShell />);
+  it("renders the Styrmin brand name", async () => {
+    await render(<AppShell />);
     expect(screen.getByText("Styrmin")).toBeInTheDocument();
   });
 
   it("hides labels and brand when sidebar is collapsed", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    await render(<AppShell />);
 
     await user.click(screen.getByText("Collapse"));
 

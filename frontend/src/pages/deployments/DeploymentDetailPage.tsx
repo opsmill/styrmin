@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router";
+import { useParams } from "@tanstack/react-router";
 import {
   useGetDeploymentQuery,
   useCreateBackupMutation,
@@ -53,10 +53,11 @@ import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 
 export default function DeploymentDetailPage() {
-  const { environmentId, deploymentId } = useParams();
+  const { environmentId, deploymentId } = useParams({
+    from: "/environments/$environmentId/deployments/$deploymentId",
+  });
   const [{ data, fetching, error }, reexecute] = useGetDeploymentQuery({
-    variables: { deploymentId: deploymentId! },
-    pause: !deploymentId,
+    variables: { deploymentId },
   });
 
   const deployment = data?.deployment;
@@ -150,7 +151,7 @@ export default function DeploymentDetailPage() {
   async function handleUpgrade() {
     setUpgradeError(null);
     const result = await updateVersion({
-      deploymentId: deploymentId!,
+      deploymentId,
       version: newVersion,
     });
     if (result.error) {

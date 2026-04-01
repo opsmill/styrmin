@@ -18,8 +18,8 @@ describe("AutoRefreshIndicator", () => {
     defaultProps = makeDefaultProps();
   });
 
-  it("renders refresh button", () => {
-    render(<AutoRefreshIndicator {...defaultProps} />);
+  it("renders refresh button", async () => {
+    await render(<AutoRefreshIndicator {...defaultProps} />);
     expect(
       screen.getByRole("button", { name: "Refresh now" }),
     ).toBeInTheDocument();
@@ -28,7 +28,7 @@ describe("AutoRefreshIndicator", () => {
   it("calls onRefreshNow when refresh button is clicked", async () => {
     const user = userEvent.setup();
     const onRefreshNow = vi.fn();
-    render(
+    await render(
       <AutoRefreshIndicator {...defaultProps} onRefreshNow={onRefreshNow} />,
     );
 
@@ -36,20 +36,20 @@ describe("AutoRefreshIndicator", () => {
     expect(onRefreshNow).toHaveBeenCalledOnce();
   });
 
-  it("shows 'Auto' when enabled", () => {
-    render(<AutoRefreshIndicator {...defaultProps} enabled={true} />);
+  it("shows 'Auto' when enabled", async () => {
+    await render(<AutoRefreshIndicator {...defaultProps} enabled={true} />);
     expect(screen.getByText("Auto")).toBeInTheDocument();
   });
 
-  it("shows 'Paused' when disabled", () => {
-    render(<AutoRefreshIndicator {...defaultProps} enabled={false} />);
+  it("shows 'Paused' when disabled", async () => {
+    await render(<AutoRefreshIndicator {...defaultProps} enabled={false} />);
     expect(screen.getByText("Paused")).toBeInTheDocument();
   });
 
   it("calls onToggle with false when disabling", async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
-    render(
+    await render(
       <AutoRefreshIndicator
         {...defaultProps}
         enabled={true}
@@ -61,14 +61,18 @@ describe("AutoRefreshIndicator", () => {
     expect(onToggle).toHaveBeenCalledWith(false);
   });
 
-  it("shows time ago when lastRefreshedAt is provided", () => {
+  it("shows time ago when lastRefreshedAt is provided", async () => {
     const recent = new Date(Date.now() - 30000);
-    render(<AutoRefreshIndicator {...defaultProps} lastRefreshedAt={recent} />);
+    await render(
+      <AutoRefreshIndicator {...defaultProps} lastRefreshedAt={recent} />,
+    );
     expect(screen.getByText("30s ago")).toBeInTheDocument();
   });
 
-  it("does not show time ago when lastRefreshedAt is null", () => {
-    render(<AutoRefreshIndicator {...defaultProps} lastRefreshedAt={null} />);
+  it("does not show time ago when lastRefreshedAt is null", async () => {
+    await render(
+      <AutoRefreshIndicator {...defaultProps} lastRefreshedAt={null} />,
+    );
     expect(screen.queryByText(/ago/)).toBeNull();
   });
 });

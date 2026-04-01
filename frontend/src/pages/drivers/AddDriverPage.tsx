@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
@@ -56,9 +56,13 @@ export default function AddDriverPage() {
       return;
     }
     if (result.data?.loadLocalApplicationDriverVersion) {
-      navigate(
-        `/drivers/${result.data.loadLocalApplicationDriverVersion.applicationDriverId}`,
-      );
+      navigate({
+        to: "/drivers/$driverId",
+        params: {
+          driverId:
+            result.data.loadLocalApplicationDriverVersion.applicationDriverId,
+        },
+      });
     }
   };
 
@@ -73,9 +77,13 @@ export default function AddDriverPage() {
       return;
     }
     if (result.data?.loadRemoteApplicationDriverVersion) {
-      navigate(
-        `/drivers/${result.data.loadRemoteApplicationDriverVersion.applicationDriverId}`,
-      );
+      navigate({
+        to: "/drivers/$driverId",
+        params: {
+          driverId:
+            result.data.loadRemoteApplicationDriverVersion.applicationDriverId,
+        },
+      });
     }
   };
 
@@ -136,7 +144,7 @@ export default function AddDriverPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => navigate("/drivers")}
+                onClick={() => navigate({ to: "/drivers" })}
               >
                 Cancel
               </Button>
@@ -180,7 +188,7 @@ export default function AddDriverPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => navigate("/drivers")}
+                onClick={() => navigate({ to: "/drivers" })}
               >
                 Cancel
               </Button>

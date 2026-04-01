@@ -1,4 +1,4 @@
-import { useParams, useNavigate, Link } from "react-router";
+import { useParams, useNavigate, Link } from "@tanstack/react-router";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
@@ -42,7 +42,9 @@ type DriverVersion = NonNullable<
 >[number]["versions"][number];
 
 export default function DeployFormPage() {
-  const { environmentId } = useParams();
+  const { environmentId } = useParams({
+    from: "/environments/$environmentId/deploy",
+  });
   const navigate = useNavigate();
   const [{ data: driversData, fetching, error: driversError }] =
     useListApplicationDriversQuery();
@@ -105,7 +107,7 @@ export default function DeployFormPage() {
       driver: selectedVersion!.driverName,
       name: values.name,
       version: values.applicationVersion || null,
-      environmentId: environmentId!,
+      environmentId,
       parameters: Object.keys(dynamicParams).length > 0 ? dynamicParams : null,
     });
 
@@ -154,14 +156,23 @@ export default function DeployFormPage() {
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                onClick={() => navigate(`/environments/${environmentId}`)}
+                onClick={() =>
+                  navigate({
+                    to: "/environments/$environmentId",
+                    params: { environmentId },
+                  })
+                }
               >
                 Back to Environment
               </Button>
               {taskResult.deploymentId && (
                 <Button asChild>
                   <Link
-                    to={`/environments/${environmentId}/deployments/${taskResult.deploymentId}`}
+                    to="/environments/$environmentId/deployments/$deploymentId"
+                    params={{
+                      environmentId,
+                      deploymentId: taskResult.deploymentId,
+                    }}
                   >
                     View Deployment
                   </Link>
@@ -292,7 +303,12 @@ export default function DeployFormPage() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => navigate(`/environments/${environmentId}`)}
+            onClick={() =>
+              navigate({
+                to: "/environments/$environmentId",
+                params: { environmentId },
+              })
+            }
           >
             Cancel
           </Button>

@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from "react-router";
+import { useParams, useNavigate } from "@tanstack/react-router";
 import { useGetDriverQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
@@ -17,11 +17,10 @@ import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 
 export default function DriverDetailPage() {
-  const { driverId } = useParams();
+  const { driverId } = useParams({ from: "/drivers/$driverId" });
   const navigate = useNavigate();
   const [{ data, fetching, error }, reexecute] = useGetDriverQuery({
-    variables: { applicationDriverId: driverId! },
-    pause: !driverId,
+    variables: { applicationDriverId: driverId },
   });
 
   const driver = data?.applicationDriver;
@@ -60,7 +59,7 @@ export default function DriverDetailPage() {
             lastRefreshedAt={autoRefresh.lastRefreshedAt}
             onRefreshNow={autoRefresh.refreshNow}
           />
-          <Button onClick={() => navigate("/drivers/add")}>
+          <Button onClick={() => navigate({ to: "/drivers/add" })}>
             <Plus className="h-4 w-4" />
             Add Version
           </Button>

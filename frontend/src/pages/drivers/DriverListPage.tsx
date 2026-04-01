@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useListDriversQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
@@ -37,7 +37,7 @@ export default function DriverListPage() {
             lastRefreshedAt={autoRefresh.lastRefreshedAt}
             onRefreshNow={autoRefresh.refreshNow}
           />
-          <Button onClick={() => navigate("/drivers/add")}>
+          <Button onClick={() => navigate({ to: "/drivers/add" })}>
             <Plus className="h-4 w-4" />
             Add Driver
           </Button>
@@ -58,7 +58,7 @@ export default function DriverListPage() {
           title="No drivers"
           description="No application drivers have been installed yet."
           actionLabel="Add a driver"
-          onAction={() => navigate("/drivers/add")}
+          onAction={() => navigate({ to: "/drivers/add" })}
         />
       )}
 
@@ -67,7 +67,11 @@ export default function DriverListPage() {
           {data.applicationDrivers.map((driver) => {
             const latestVersion = driver.versions[0];
             return (
-              <Link key={driver.id} to={`/drivers/${driver.id}`}>
+              <Link
+                key={driver.id}
+                to="/drivers/$driverId"
+                params={{ driverId: driver.id }}
+              >
                 <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">

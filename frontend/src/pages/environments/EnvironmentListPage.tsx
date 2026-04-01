@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link } from "@tanstack/react-router";
 import { useListEnvironmentsQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
@@ -60,7 +60,11 @@ export default function EnvironmentListPage() {
       {data && data.environments.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {data.environments.map((env) => (
-            <Link key={env.id} to={`/environments/${env.id}`}>
+            <Link
+              key={env.id}
+              to="/environments/$environmentId"
+              params={{ environmentId: env.id }}
+            >
               <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
