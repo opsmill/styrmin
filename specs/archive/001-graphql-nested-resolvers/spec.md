@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-graphql-nested-resolvers`
 **Created**: 2026-03-25
-**Status**: Draft
+**Status**: Extracted
 **Input**: [GitHub Issue #25](https://github.com/opsmill/styrmin/issues/25)
 
 ## User Scenarios & Testing *(mandatory)*
