@@ -4,7 +4,7 @@ React 19 single-page application with TypeScript, Vite, and urql (GraphQL client
 
 ## Tech Stack
 
-- **Framework:** React 19, React Router 7, TypeScript 5.9
+- **Framework:** React 19, TanStack Router, TypeScript 5.9
 - **Build:** Vite 8, pnpm
 - **Styling:** Tailwind CSS 4, Radix UI primitives, class-variance-authority
 - **GraphQL:** urql 5, graphql-codegen (auto-generated types in `src/generated/`)
@@ -23,6 +23,9 @@ frontend/
 │   │   ├── drivers/      # Driver list, detail, add
 │   │   ├── environments/ # Environment list, detail, create dialog
 │   │   └── settings/     # Settings, cluster detail, create cluster dialog
+│   ├── routes/           # TanStack Router route definitions (code-based)
+│   ├── routeTree.ts      # Assembled route tree (all routes as children of root)
+│   ├── router.ts         # Router instance + type registration (declare module)
 │   ├── hooks/            # Custom React hooks (useAutoRefresh)
 │   ├── lib/              # Utility functions (cn)
 │   ├── graphql/          # .graphql operation files
@@ -80,8 +83,8 @@ pnpm test:watch           # Run in watch mode (development)
 import { render, screen } from "@/test/utils";
 import { MyComponent } from "./MyComponent";
 
-it("renders the title", () => {
-  render(<MyComponent title="Hello" />);
+it("renders the title", async () => {
+  await render(<MyComponent title="Hello" />);
   expect(screen.getByText("Hello")).toBeInTheDocument();
 });
 ```
@@ -107,7 +110,7 @@ import { render, screen, userEvent } from "@/test/utils";
 it("calls handler on click", async () => {
   const user = userEvent.setup();
   const onClick = vi.fn();
-  render(<Button onClick={onClick}>Click</Button>);
+  await render(<Button onClick={onClick}>Click</Button>);
   await user.click(screen.getByRole("button", { name: "Click" }));
   expect(onClick).toHaveBeenCalledOnce();
 });
@@ -117,4 +120,4 @@ it("calls handler on click", async () => {
 
 - **localStorage:** Use `vi.stubGlobal("localStorage", mockStorage)` — jsdom does not fully implement Storage
 - **Timers:** Use `vi.useFakeTimers()` / `vi.advanceTimersByTime()` for interval-based hooks
-- **GraphQL:** Components using urql hooks need a mock provider — the custom `render` in `@/test/utils` provides a `MemoryRouter` wrapper; extend it for urql mocking as needed
+- **GraphQL:** Components using urql hooks need a mock provider — the custom `render` in `@/test/utils` provides a TanStack Router wrapper; extend it for urql mocking as needed
