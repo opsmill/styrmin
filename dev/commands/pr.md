@@ -165,10 +165,12 @@ Omit this section if no docs were changed.]
 Don't just open the PR and walk away. Watch CI, especially linters — they frequently catch issues. Fix them proactively.
 </thinking>
 
-1. After PR creation, monitor GitHub Actions:
+1. After PR creation, wait for the CI to start and monitor GitHub Actions (check every 30-60 seconds):
    ```bash
    gh run list --branch <branch-name> --limit 5
    ```
+   The CI can take a few mins to start. If nothing has started after 5 mins, there might be an issue with the CI itself, investigate if the PR itself could have introduced some changes to the CI
+
 2. Wait for at least all **linter jobs** to complete (check every 30-60 seconds)
 3. If any jobs fail:
    - Read failure logs:
