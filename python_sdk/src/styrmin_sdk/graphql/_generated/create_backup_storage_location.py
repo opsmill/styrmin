@@ -2,7 +2,7 @@
 # Source: python_sdk/src/styrmin_sdk/graphql
 
 from datetime import datetime
-from typing import Literal, Optional, Union
+from typing import Optional
 from uuid import UUID
 
 from pydantic import Field
@@ -11,16 +11,12 @@ from .base_model import BaseModel
 
 
 class CreateBackupStorageLocation(BaseModel):
-    create_backup_storage_location: Union[
-        "CreateBackupStorageLocationCreateBackupStorageLocationBackupStorageLocation",
-        "CreateBackupStorageLocationCreateBackupStorageLocationBackupStorageLocationAlreadyExists",
-    ] = Field(alias="createBackupStorageLocation", discriminator="typename__")
+    create_backup_storage_location: Optional[
+        "CreateBackupStorageLocationCreateBackupStorageLocation"
+    ] = Field(alias="createBackupStorageLocation")
 
 
-class CreateBackupStorageLocationCreateBackupStorageLocationBackupStorageLocation(
-    BaseModel
-):
-    typename__: Literal["BackupStorageLocation"] = Field(alias="__typename")
+class CreateBackupStorageLocationCreateBackupStorageLocation(BaseModel):
     id: UUID
     name: str
     endpoint: str
@@ -29,16 +25,6 @@ class CreateBackupStorageLocationCreateBackupStorageLocationBackupStorageLocatio
     created_on: datetime = Field(alias="createdOn")
     updated_on: Optional[datetime] = Field(alias="updatedOn")
     environment_count: int = Field(alias="environmentCount")
-
-
-class CreateBackupStorageLocationCreateBackupStorageLocationBackupStorageLocationAlreadyExists(
-    BaseModel
-):
-    typename__: Literal["BackupStorageLocationAlreadyExists"] = Field(
-        alias="__typename"
-    )
-    message: str
-    existing_id: UUID = Field(alias="existingId")
 
 
 CreateBackupStorageLocation.model_rebuild()

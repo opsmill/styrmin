@@ -130,21 +130,14 @@ class Client(AsyncBaseClient):
                 accessKeyId: $accessKeyId
                 secretAccessKey: $secretAccessKey
               ) {
-                __typename
-                ... on BackupStorageLocation {
-                  id
-                  name
-                  endpoint
-                  bucket
-                  region
-                  createdOn
-                  updatedOn
-                  environmentCount
-                }
-                ... on BackupStorageLocationAlreadyExists {
-                  message
-                  existingId
-                }
+                id
+                name
+                endpoint
+                bucket
+                region
+                createdOn
+                updatedOn
+                environmentCount
               }
             }
             """)
@@ -330,16 +323,7 @@ class Client(AsyncBaseClient):
     ) -> DeleteBackupStorageLocation:
         query = gql("""
             mutation DeleteBackupStorageLocation($backupStorageLocationId: UUID!) {
-              deleteBackupStorageLocation(backupStorageLocationId: $backupStorageLocationId) {
-                __typename
-                ... on DeleteSuccess {
-                  success
-                }
-                ... on BackupStorageLocationInUse {
-                  message
-                  environmentNames
-                }
-              }
+              deleteBackupStorageLocation(backupStorageLocationId: $backupStorageLocationId)
             }
             """)
         variables: dict[str, object] = {
@@ -1147,21 +1131,14 @@ class Client(AsyncBaseClient):
                 accessKeyId: $accessKeyId
                 secretAccessKey: $secretAccessKey
               ) {
-                __typename
-                ... on BackupStorageLocation {
-                  id
-                  name
-                  endpoint
-                  bucket
-                  region
-                  createdOn
-                  updatedOn
-                  environmentCount
-                }
-                ... on BackupStorageLocationNotFound {
-                  message
-                  backupStorageLocationId
-                }
+                id
+                name
+                endpoint
+                bucket
+                region
+                createdOn
+                updatedOn
+                environmentCount
               }
             }
             """)

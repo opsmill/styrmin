@@ -1,13 +1,5 @@
 mutation DeleteBackupStorageLocation($backupStorageLocationId: UUID!) {
   deleteBackupStorageLocation(
     backupStorageLocationId: $backupStorageLocationId
-  ) {
-    ... on DeleteSuccess {
-      success
-    }
-    ... on BackupStorageLocationInUse {
-      message
-      environmentNames
-    }
-  }
+  )
 }

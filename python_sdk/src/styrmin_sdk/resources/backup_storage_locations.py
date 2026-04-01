@@ -6,11 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from styrmin_sdk._queries import load_query
-from styrmin_sdk.exceptions import (
-    BackupStorageLocationAlreadyExistsError,
-    BackupStorageLocationInUseError,
-    BackupStorageLocationNotFoundError,
-)
+from styrmin_sdk.exceptions import ResourceNotFoundError
 from styrmin_sdk.models.backup_storage_location import BackupStorageLocation
 from styrmin_sdk.resources._base import BaseResource
 
@@ -36,11 +32,7 @@ class BackupStorageLocationResource(BaseResource):
         }
         result = await self._transport.execute(load_query("create_backup_storage_location"), variables)
         self._check_graphql_errors(result)
-        data = result["data"]["createBackupStorageLocation"]
-        typename = data.get("__typename", "")
-        if typename == "BackupStorageLocationAlreadyExists":
-            raise BackupStorageLocationAlreadyExistsError(data["message"], typename, existing_id=data["existingId"])
-        return BackupStorageLocation.model_validate(data)
+        return BackupStorageLocation.model_validate(result["data"]["createBackupStorageLocation"])
 
     async def list(self) -> list[BackupStorageLocation]:
         result = await self._transport.execute(load_query("list_backup_storage_locations"))
@@ -55,9 +47,9 @@ class BackupStorageLocationResource(BaseResource):
         self._check_graphql_errors(result)
         data = result["data"]["backupStorageLocation"]
         if data is None:
-            raise BackupStorageLocationNotFoundError(
+            raise ResourceNotFoundError(
                 f"Backup storage location {bsl_id} not found",
-                "BackupStorageLocationNotFound",
+                "NOT_FOUND",
             )
         return BackupStorageLocation.model_validate(data)
 
@@ -90,31 +82,20 @@ class BackupStorageLocationResource(BaseResource):
 
         result = await self._transport.execute(load_query("update_backup_storage_location"), variables)
         self._check_graphql_errors(result)
-        data = result["data"]["updateBackupStorageLocation"]
-        typename = data.get("__typename", "")
-        if typename == "BackupStorageLocationNotFound":
-            raise BackupStorageLocationNotFoundError(data["message"], typename)
-        return BackupStorageLocation.model_validate(data)
+        return BackupStorageLocation.model_validate(result["data"]["updateBackupStorageLocation"])
 
     async def delete(self, bsl_id: str | UUID) -> bool:
         """Delete a BSL. Returns True on success.
 
-        Raises BackupStorageLocationInUseError if environments reference it.
+        Raises OperationFailedError if the BSL is in use by environments.
+        Raises ResourceNotFoundError if the BSL does not exist.
         """
         result = await self._transport.execute(
             load_query("delete_backup_storage_location"),
             {"backupStorageLocationId": str(bsl_id)},
         )
         self._check_graphql_errors(result)
-        data = result["data"]["deleteBackupStorageLocation"]
-        typename = data.get("__typename", "")
-        if typename == "BackupStorageLocationInUse":
-            raise BackupStorageLocationInUseError(
-                data["message"],
-                typename,
-                environment_names=data["environmentNames"],
-            )
-        return data.get("success", False)
+        return True
 
     async def assign(
         self,

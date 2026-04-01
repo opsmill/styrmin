@@ -14,19 +14,13 @@ mutation CreateBackupStorageLocation(
         accessKeyId: $accessKeyId
         secretAccessKey: $secretAccessKey
     ) {
-        ... on BackupStorageLocation {
-            id
-            name
-            endpoint
-            bucket
-            region
-            createdOn
-            updatedOn
-            environmentCount
-        }
-        ... on BackupStorageLocationAlreadyExists {
-            message
-            existingId
-        }
+        id
+        name
+        endpoint
+        bucket
+        region
+        createdOn
+        updatedOn
+        environmentCount
     }
 }

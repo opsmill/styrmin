@@ -99,24 +99,26 @@ Every resolver receives the `UnitOfWork` via `info.context["uow"]`.
 
 ## Response Patterns
 
-The API uses union types for responses, allowing typed error handling:
+Mutations return the resource type directly (nullable) and let service-layer
+exceptions propagate. The `StructuredErrorExtension` (see `api/errors.py`)
+catches any `ServiceError` and converts it into a GraphQL error with a
+structured `extensions.code` field (e.g. `NOT_FOUND`, `ALREADY_EXISTS`,
+`IN_USE`). Additional metadata from `ServiceError.error_metadata` is merged
+into the extensions object.
 
 ```python
-# Example response union
-GetClusterResponse = Annotated[
-    Cluster | ClusterNotFound,
-    strawberry.union("GetClusterResponse")
-]
-
-# In resolver
-@strawberry.field
-def cluster(self, cluster_id: UUID, info: strawberry.Info) -> GetClusterResponse:
-    try:
-        cluster = get_cluster(cluster_id=cluster_id, uow=uow)
-    except ClusterNotFoundError:
-        return ClusterNotFound()
+# Mutation — return the resource directly, let exceptions propagate
+@strawberry.mutation
+async def create_cluster(
+    self, info: strawberry.Info, name: str = "default"
+) -> Cluster | None:
+    uow = info.context["uow"]
+    cluster = await create_cluster(uow=uow, name=name)
     return Cluster.from_instance(cluster)
 ```
+
+On the client side, errors arrive as standard GraphQL errors with
+`extensions.code` for programmatic handling.
 
 ## GraphQL Types
 

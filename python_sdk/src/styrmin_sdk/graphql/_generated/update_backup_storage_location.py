@@ -2,7 +2,7 @@
 # Source: python_sdk/src/styrmin_sdk/graphql
 
 from datetime import datetime
-from typing import Literal, Optional, Union
+from typing import Optional
 from uuid import UUID
 
 from pydantic import Field
@@ -11,16 +11,12 @@ from .base_model import BaseModel
 
 
 class UpdateBackupStorageLocation(BaseModel):
-    update_backup_storage_location: Union[
-        "UpdateBackupStorageLocationUpdateBackupStorageLocationBackupStorageLocation",
-        "UpdateBackupStorageLocationUpdateBackupStorageLocationBackupStorageLocationNotFound",
-    ] = Field(alias="updateBackupStorageLocation", discriminator="typename__")
+    update_backup_storage_location: Optional[
+        "UpdateBackupStorageLocationUpdateBackupStorageLocation"
+    ] = Field(alias="updateBackupStorageLocation")
 
 
-class UpdateBackupStorageLocationUpdateBackupStorageLocationBackupStorageLocation(
-    BaseModel
-):
-    typename__: Literal["BackupStorageLocation"] = Field(alias="__typename")
+class UpdateBackupStorageLocationUpdateBackupStorageLocation(BaseModel):
     id: UUID
     name: str
     endpoint: str
@@ -29,14 +25,6 @@ class UpdateBackupStorageLocationUpdateBackupStorageLocationBackupStorageLocatio
     created_on: datetime = Field(alias="createdOn")
     updated_on: Optional[datetime] = Field(alias="updatedOn")
     environment_count: int = Field(alias="environmentCount")
-
-
-class UpdateBackupStorageLocationUpdateBackupStorageLocationBackupStorageLocationNotFound(
-    BaseModel
-):
-    typename__: Literal["BackupStorageLocationNotFound"] = Field(alias="__typename")
-    message: str
-    backup_storage_location_id: UUID = Field(alias="backupStorageLocationId")
 
 
 UpdateBackupStorageLocation.model_rebuild()
