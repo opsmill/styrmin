@@ -62,14 +62,6 @@ export function CreateBackupStorageLocationDialog({
       return;
     }
 
-    const data = result.data?.createBackupStorageLocation;
-    if (data && "__typename" in data) {
-      if (data.__typename === "BackupStorageLocationAlreadyExists") {
-        setSubmitError(data.message);
-        return;
-      }
-    }
-
     reset();
     setSubmitError(null);
     setOpen(false);

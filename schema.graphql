@@ -82,21 +82,6 @@ type BackupStorageLocation {
   environmentCount: Int!
 }
 
-type BackupStorageLocationAlreadyExists {
-  message: String!
-  existingId: UUID!
-}
-
-type BackupStorageLocationInUse {
-  message: String!
-  environmentNames: [String!]!
-}
-
-type BackupStorageLocationNotFound {
-  message: String!
-  backupStorageLocationId: UUID!
-}
-
 type CallbackResponse {
   message: String!
   success: Boolean!
@@ -136,16 +121,8 @@ type ComponentRestoreStatus {
   errorMessage: String
 }
 
-union CreateBackupStorageLocationResult = BackupStorageLocation | BackupStorageLocationAlreadyExists
-
 """Date with time (isoformat)"""
 scalar DateTime
-
-union DeleteBackupStorageLocationResult = DeleteSuccess | BackupStorageLocationInUse
-
-type DeleteSuccess {
-  success: Boolean!
-}
 
 type DeployedService {
   id: UUID!
@@ -202,9 +179,9 @@ type Mutation {
   deleteCluster(clusterId: UUID = null, clusterName: String = null): String
   createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment
   deleteEnvironment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): String
-  createBackupStorageLocation(name: String!, endpoint: String!, bucket: String!, region: String!, accessKeyId: String!, secretAccessKey: String!): CreateBackupStorageLocationResult!
-  updateBackupStorageLocation(backupStorageLocationId: UUID!, name: String = null, endpoint: String = null, bucket: String = null, region: String = null, accessKeyId: String = null, secretAccessKey: String = null): UpdateBackupStorageLocationResult!
-  deleteBackupStorageLocation(backupStorageLocationId: UUID!): DeleteBackupStorageLocationResult!
+  createBackupStorageLocation(name: String!, endpoint: String!, bucket: String!, region: String!, accessKeyId: String!, secretAccessKey: String!): BackupStorageLocation
+  updateBackupStorageLocation(backupStorageLocationId: UUID!, name: String = null, endpoint: String = null, bucket: String = null, region: String = null, accessKeyId: String = null, secretAccessKey: String = null): BackupStorageLocation
+  deleteBackupStorageLocation(backupStorageLocationId: UUID!): String
   assignBackupStorageLocation(environmentId: UUID!, backupStorageLocationId: UUID!): Environment
   unassignBackupStorageLocation(environmentId: UUID!): Environment
   loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion
@@ -296,5 +273,3 @@ type Task {
 }
 
 scalar UUID
-
-union UpdateBackupStorageLocationResult = BackupStorageLocation | BackupStorageLocationNotFound

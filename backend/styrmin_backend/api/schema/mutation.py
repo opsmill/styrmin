@@ -21,13 +21,6 @@ from styrmin_backend.api.definitions.application_driver.model import (
 )
 from styrmin_backend.api.definitions.backup_storage_location.model import (
     BackupStorageLocation as BackupStorageLocationType,
-    BackupStorageLocationAlreadyExists,
-    BackupStorageLocationInUse,
-    BackupStorageLocationNotFound,
-    CreateBackupStorageLocationResult,
-    DeleteBackupStorageLocationResult,
-    DeleteSuccess,
-    UpdateBackupStorageLocationResult,
 )
 from styrmin_backend.api.definitions.callback.model import CallbackResponse
 from styrmin_backend.api.definitions.cluster.model import Cluster
@@ -73,9 +66,6 @@ from styrmin_backend.services.backup.service import (
 )
 from styrmin_backend.services.deployment import get_deployment
 from styrmin_backend.services.exceptions import (
-    BackupStorageLocationAlreadyExistsError,
-    BackupStorageLocationInUseError,
-    BackupStorageLocationNotFoundError,
     InternalDeploymentError,
     TaskNotFoundError,
 )
@@ -161,27 +151,18 @@ class Mutation:
         access_key_id: str,
         secret_access_key: str,
         info: strawberry.Info,
-    ) -> CreateBackupStorageLocationResult:  # type: ignore[valid-type]
+    ) -> BackupStorageLocationType | None:
         uow = info.context["uow"]
-        try:
-            bsl = await create_bsl_service(
-                name=name,
-                endpoint=endpoint,
-                bucket=bucket,
-                region=region,
-                access_key_id=access_key_id,
-                secret_access_key=secret_access_key,
-                uow=uow,
-            )
-            return BackupStorageLocationType.from_instance(bsl)
-        except BackupStorageLocationAlreadyExistsError:
-            existing = None
-            async with uow:
-                existing = await uow.backup_storage_locations.get_by_name(name)
-            return BackupStorageLocationAlreadyExists(
-                message=f"A backup storage location with name '{name}' already exists.",
-                existing_id=existing.id if existing else UUID(int=0),
-            )
+        bsl = await create_bsl_service(
+            name=name,
+            endpoint=endpoint,
+            bucket=bucket,
+            region=region,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            uow=uow,
+        )
+        return BackupStorageLocationType.from_instance(bsl)
 
     @strawberry.mutation
     async def update_backup_storage_location(
@@ -194,70 +175,54 @@ class Mutation:
         region: str | None = None,
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
-    ) -> UpdateBackupStorageLocationResult:  # type: ignore[valid-type]
+    ) -> BackupStorageLocationType | None:
         uow = info.context["uow"]
-        try:
-            bsl = await update_bsl_service(
-                backup_storage_location_id=backup_storage_location_id,
-                uow=uow,
-                name=name,
-                endpoint=endpoint,
-                bucket=bucket,
-                region=region,
-                access_key_id=access_key_id,
-                secret_access_key=secret_access_key,
-            )
+        bsl = await update_bsl_service(
+            backup_storage_location_id=backup_storage_location_id,
+            uow=uow,
+            name=name,
+            endpoint=endpoint,
+            bucket=bucket,
+            region=region,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+        )
 
-            # Sync credentials to all clusters where this BSL is deployed
-            credentials_changed = (
-                access_key_id is not None or secret_access_key is not None
-            )
-            if credentials_changed and bsl.environments:
-                try:
-                    cluster_ids = {env.cluster_id for env in bsl.environments}
-                    prefect_manager = get_manager()
-                    for _cluster_id in cluster_ids:
-                        await prefect_manager.run_action(
-                            action=PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS,
-                            parameters={
-                                "bsl_name": bsl.name,
-                                "namespace": "styrmin",
-                                "access_key_id": bsl.access_key_id,
-                                "secret_access_key": bsl.secret_access_key,
-                            },
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        f"Failed to dispatch BSL credentials update workflow for BSL {backup_storage_location_id}",
-                        exc_info=exc,
+        # Sync credentials to all clusters where this BSL is deployed
+        credentials_changed = access_key_id is not None or secret_access_key is not None
+        if credentials_changed and bsl.environments:
+            try:
+                cluster_ids = {env.cluster_id for env in bsl.environments}
+                prefect_manager = get_manager()
+                for _cluster_id in cluster_ids:
+                    await prefect_manager.run_action(
+                        action=PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS,
+                        parameters={
+                            "bsl_name": bsl.name,
+                            "namespace": "styrmin",
+                            "access_key_id": bsl.access_key_id,
+                            "secret_access_key": bsl.secret_access_key,
+                        },
                     )
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to dispatch BSL credentials update workflow for BSL {backup_storage_location_id}",
+                    exc_info=exc,
+                )
 
-            return BackupStorageLocationType.from_instance(bsl)
-        except BackupStorageLocationNotFoundError:
-            return BackupStorageLocationNotFound(
-                message=f"Backup storage location with id {backup_storage_location_id} not found.",
-                backup_storage_location_id=backup_storage_location_id,
-            )
+        return BackupStorageLocationType.from_instance(bsl)
 
     @strawberry.mutation
     async def delete_backup_storage_location(
         self,
         backup_storage_location_id: UUID,
         info: strawberry.Info,
-    ) -> DeleteBackupStorageLocationResult:  # type: ignore[valid-type]
+    ) -> str | None:
         uow = info.context["uow"]
-        try:
-            await delete_bsl_service(
-                backup_storage_location_id=backup_storage_location_id, uow=uow
-            )
-            return DeleteSuccess(success=True)
-        except BackupStorageLocationNotFoundError:
-            return DeleteSuccess(success=False)
-        except BackupStorageLocationInUseError as exc:
-            return BackupStorageLocationInUse(
-                message=str(exc),
-                environment_names=exc.environment_names,
-            )
+        await delete_bsl_service(
+            backup_storage_location_id=backup_storage_location_id, uow=uow
+        )
+        return "Backup storage location deleted"
 
     @strawberry.mutation
     async def assign_backup_storage_location(

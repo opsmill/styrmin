@@ -113,24 +113,6 @@ export type BackupStorageLocation = {
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };
 
-export type BackupStorageLocationAlreadyExists = {
-  __typename?: 'BackupStorageLocationAlreadyExists';
-  existingId: Scalars['UUID']['output'];
-  message: Scalars['String']['output'];
-};
-
-export type BackupStorageLocationInUse = {
-  __typename?: 'BackupStorageLocationInUse';
-  environmentNames: Array<Scalars['String']['output']>;
-  message: Scalars['String']['output'];
-};
-
-export type BackupStorageLocationNotFound = {
-  __typename?: 'BackupStorageLocationNotFound';
-  backupStorageLocationId: Scalars['UUID']['output'];
-  message: Scalars['String']['output'];
-};
-
 export type CallbackResponse = {
   __typename?: 'CallbackResponse';
   message: Scalars['String']['output'];
@@ -174,15 +156,6 @@ export type ComponentRestoreStatus = {
   componentName: Scalars['String']['output'];
   errorMessage?: Maybe<Scalars['String']['output']>;
   status: Scalars['String']['output'];
-};
-
-export type CreateBackupStorageLocationResult = BackupStorageLocation | BackupStorageLocationAlreadyExists;
-
-export type DeleteBackupStorageLocationResult = BackupStorageLocationInUse | DeleteSuccess;
-
-export type DeleteSuccess = {
-  __typename?: 'DeleteSuccess';
-  success: Scalars['Boolean']['output'];
 };
 
 export type DeployedService = {
@@ -242,13 +215,13 @@ export type Mutation = {
   callback: CallbackResponse;
   createBackup?: Maybe<Backup>;
   createBackupSchedule?: Maybe<BackupSchedule>;
-  createBackupStorageLocation: CreateBackupStorageLocationResult;
+  createBackupStorageLocation?: Maybe<BackupStorageLocation>;
   createCluster?: Maybe<Cluster>;
   createEnvironment?: Maybe<Environment>;
   createRestore?: Maybe<Restore>;
   deleteBackup?: Maybe<Scalars['String']['output']>;
   deleteBackupSchedule?: Maybe<Scalars['String']['output']>;
-  deleteBackupStorageLocation: DeleteBackupStorageLocationResult;
+  deleteBackupStorageLocation?: Maybe<Scalars['String']['output']>;
   deleteCluster?: Maybe<Scalars['String']['output']>;
   deleteEnvironment?: Maybe<Scalars['String']['output']>;
   deploy?: Maybe<Task>;
@@ -259,7 +232,7 @@ export type Mutation = {
   stopComponents?: Maybe<Task>;
   unassignBackupStorageLocation?: Maybe<Environment>;
   updateBackupSchedule?: Maybe<BackupSchedule>;
-  updateBackupStorageLocation: UpdateBackupStorageLocationResult;
+  updateBackupStorageLocation?: Maybe<BackupStorageLocation>;
   updateDeployment?: Maybe<Task>;
   updateDeploymentVersion?: Maybe<Task>;
 };
@@ -590,8 +563,6 @@ export type Task = {
   type: Scalars['String']['output'];
 };
 
-export type UpdateBackupStorageLocationResult = BackupStorageLocation | BackupStorageLocationNotFound;
-
 export type AssignBackupStorageLocationMutationVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
   backupStorageLocationId: Scalars['UUID']['input'];
@@ -618,10 +589,7 @@ export type CreateBackupStorageLocationMutationVariables = Exact<{
 }>;
 
 
-export type CreateBackupStorageLocationMutation = { __typename?: 'Mutation', createBackupStorageLocation:
-    | { __typename?: 'BackupStorageLocation', id: string, name: string, endpoint: string, bucket: string, region: string, createdOn: any, updatedOn?: any | null, environmentCount: number }
-    | { __typename?: 'BackupStorageLocationAlreadyExists', message: string, existingId: string }
-   };
+export type CreateBackupStorageLocationMutation = { __typename?: 'Mutation', createBackupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string, endpoint: string, bucket: string, region: string, createdOn: any, updatedOn?: any | null, environmentCount: number } | null };
 
 export type CreateClusterMutationVariables = Exact<{
   name: Scalars['String']['input'];
@@ -661,10 +629,7 @@ export type DeleteBackupStorageLocationMutationVariables = Exact<{
 }>;
 
 
-export type DeleteBackupStorageLocationMutation = { __typename?: 'Mutation', deleteBackupStorageLocation:
-    | { __typename?: 'BackupStorageLocationInUse', message: string, environmentNames: Array<string> }
-    | { __typename?: 'DeleteSuccess', success: boolean }
-   };
+export type DeleteBackupStorageLocationMutation = { __typename?: 'Mutation', deleteBackupStorageLocation?: string | null };
 
 export type DeployMutationVariables = Exact<{
   version?: InputMaybe<Scalars['String']['input']>;
@@ -800,10 +765,7 @@ export type UpdateBackupStorageLocationMutationVariables = Exact<{
 }>;
 
 
-export type UpdateBackupStorageLocationMutation = { __typename?: 'Mutation', updateBackupStorageLocation:
-    | { __typename?: 'BackupStorageLocation', id: string, name: string, endpoint: string, bucket: string, region: string, createdOn: any, updatedOn?: any | null, environmentCount: number }
-    | { __typename?: 'BackupStorageLocationNotFound', message: string, backupStorageLocationId: string }
-   };
+export type UpdateBackupStorageLocationMutation = { __typename?: 'Mutation', updateBackupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string, endpoint: string, bucket: string, region: string, createdOn: any, updatedOn?: any | null, environmentCount: number } | null };
 
 export type UpdateDeploymentVersionMutationVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -858,20 +820,14 @@ export const CreateBackupStorageLocationDocument = gql`
     accessKeyId: $accessKeyId
     secretAccessKey: $secretAccessKey
   ) {
-    ... on BackupStorageLocation {
-      id
-      name
-      endpoint
-      bucket
-      region
-      createdOn
-      updatedOn
-      environmentCount
-    }
-    ... on BackupStorageLocationAlreadyExists {
-      message
-      existingId
-    }
+    id
+    name
+    endpoint
+    bucket
+    region
+    createdOn
+    updatedOn
+    environmentCount
   }
 }
     `;
@@ -942,15 +898,7 @@ export function useDeleteBackupMutation() {
 };
 export const DeleteBackupStorageLocationDocument = gql`
     mutation DeleteBackupStorageLocation($backupStorageLocationId: UUID!) {
-  deleteBackupStorageLocation(backupStorageLocationId: $backupStorageLocationId) {
-    ... on DeleteSuccess {
-      success
-    }
-    ... on BackupStorageLocationInUse {
-      message
-      environmentNames
-    }
-  }
+  deleteBackupStorageLocation(backupStorageLocationId: $backupStorageLocationId)
 }
     `;
 
@@ -1380,20 +1328,14 @@ export const UpdateBackupStorageLocationDocument = gql`
     accessKeyId: $accessKeyId
     secretAccessKey: $secretAccessKey
   ) {
-    ... on BackupStorageLocation {
-      id
-      name
-      endpoint
-      bucket
-      region
-      createdOn
-      updatedOn
-      environmentCount
-    }
-    ... on BackupStorageLocationNotFound {
-      message
-      backupStorageLocationId
-    }
+    id
+    name
+    endpoint
+    bucket
+    region
+    createdOn
+    updatedOn
+    environmentCount
   }
 }
     `;

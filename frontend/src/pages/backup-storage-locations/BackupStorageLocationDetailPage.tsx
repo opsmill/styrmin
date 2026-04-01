@@ -64,13 +64,6 @@ export default function BackupStorageLocationDetailPage() {
       setDeleteError(result.error.message);
       return;
     }
-    const data = result.data?.deleteBackupStorageLocation;
-    if (data && "__typename" in data) {
-      if (data.__typename === "BackupStorageLocationInUse") {
-        setDeleteError(data.message);
-        return;
-      }
-    }
     navigate("/backup-storage-locations");
   };
 
