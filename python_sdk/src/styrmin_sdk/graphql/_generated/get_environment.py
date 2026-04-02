@@ -15,6 +15,7 @@ class GetEnvironmentEnvironment(BaseModel):
     id: UUID
     name: str
     config: Any
+    capabilities: Any
     cluster: "GetEnvironmentEnvironmentCluster"
 
 

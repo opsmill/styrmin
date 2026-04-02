@@ -15,3 +15,4 @@ class Cluster(BaseModel):
     id: UUID
     name: str
     config: Any | None = None
+    capabilities: Any | None = None

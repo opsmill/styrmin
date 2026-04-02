@@ -22,4 +22,5 @@ class Environment(BaseModel):
     id: UUID
     name: str
     config: Any | None = None
+    capabilities: Any | None = None
     cluster: ClusterRef

@@ -3,5 +3,6 @@ query GetCluster($clusterId: UUID, $clusterName: String) {
         id
         name
         config
+        capabilities
     }
 }

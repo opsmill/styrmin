@@ -30,7 +30,17 @@ async def test_deploy_with_dedicated_ingress(
     (not ingressClassName), and the internal ingress deployment is NOT visible via SDK."""
     client: StyrminClient = styrmin_resources["client"]
     environment_id = styrmin_resources["environment_id"]
+    cluster_id = styrmin_resources["cluster_id"]
     kubeconfig_path = vcluster["kubeconfig_path"]
+
+    # Verify cluster exposes ingress capability (cluster has dedicated_ingress + fqdn_suffix)
+    cluster = await client.clusters.get(cluster_id=cluster_id)
+    assert cluster.capabilities is not None, "Cluster should have capabilities"
+    assert "ingress" in cluster.capabilities, "Cluster should have ingress capability"
+    assert "external" in cluster.capabilities["ingress"], "Cluster should have external ingress"
+    assert cluster.capabilities["ingress"]["external"]["fqdn_suffix"] == "styrmin.com", (
+        "Cluster ingress fqdn_suffix should be 'styrmin.com'"
+    )
 
     # Deploy simple-app
     task = await client.deployments.create(
