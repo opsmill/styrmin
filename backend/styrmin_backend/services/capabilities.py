@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from loguru import logger
+from pydantic import ValidationError
+
 from styrmin_backend.context.models.capabilities import (
     BackupCapabilityDetail,
     Capabilities,
@@ -25,7 +28,7 @@ from styrmin_backend.db.models import Cluster, Environment
 def _derive_ingress(
     config: ClusterConfig | EnvironmentConfig,
 ) -> dict[str, IngressCapabilityDetail] | None:
-    """Derive ingress capability from config if both ingress and fqdn_suffix are present."""
+    """Derive ingress capability if an ingress controller (ingress_class or dedicated_ingress) and fqdn_suffix are both present."""
     has_ingress = (
         config.ingress_class is not None or config.dedicated_ingress is not None
     )
@@ -52,7 +55,11 @@ def compute_cluster_capabilities(cluster: Cluster) -> dict[str, Any] | None:
     """
     try:
         config = ClusterConfig.model_validate(cluster.config or {})
-    except Exception:
+    except ValidationError:
+        logger.warning(
+            "Invalid cluster config for '{}', skipping capability derivation",
+            cluster.name,
+        )
         return None
 
     capabilities = Capabilities()
@@ -79,7 +86,11 @@ def compute_environment_capabilities(environment: Environment) -> dict[str, Any]
     """
     try:
         config = EnvironmentConfig.model_validate(environment.config or {})
-    except Exception:
+    except ValidationError:
+        logger.warning(
+            "Invalid environment config for '{}', skipping capability derivation",
+            environment.name,
+        )
         return None
 
     capabilities = Capabilities()

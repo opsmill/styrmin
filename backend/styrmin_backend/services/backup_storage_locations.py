@@ -88,6 +88,8 @@ async def update_backup_storage_location(
                 f"Backup storage location with id {backup_storage_location_id} not found."
             )
 
+        name_changed = name is not None and name != bsl.name
+
         if name is not None:
             bsl.name = name
         if endpoint is not None:
@@ -100,6 +102,11 @@ async def update_backup_storage_location(
             bsl.access_key_id = access_key_id
         if secret_access_key is not None:
             bsl.secret_access_key = secret_access_key
+
+        # BSL name is stored in capabilities as storage_location — refresh linked environments
+        if name_changed:
+            for env in bsl.environments:
+                env.capabilities = compute_environment_capabilities(env)
 
         await uow.commit()
         updated = await uow.backup_storage_locations.get(backup_storage_location_id)
