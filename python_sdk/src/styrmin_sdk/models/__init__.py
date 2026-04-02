@@ -1,26 +1,54 @@
 """Styrmin SDK response models."""
 
-from styrmin_sdk.models.backup import Backup, BackupSchedule, Restore
-from styrmin_sdk.models.cluster import Cluster
-from styrmin_sdk.models.context import Context
-from styrmin_sdk.models.deployment import ApplicationInstance, Component, Deployment
-from styrmin_sdk.models.driver import (
-    Action,
-    ApplicationDriver,
-    ApplicationDriverVersion,
-    ComponentConfig,
-    HelmChart,
+from styrmin_sdk.graphql._generated.get_backup import GetBackupBackup as Backup
+from styrmin_sdk.graphql._generated.get_backup_schedule import (
+    GetBackupScheduleBackupSchedule as BackupSchedule,
 )
-from styrmin_sdk.models.environment import ClusterRef, Environment
-from styrmin_sdk.models.task import Task
+from styrmin_sdk.graphql._generated.get_backup_storage_location import (
+    GetBackupStorageLocationBackupStorageLocation as BackupStorageLocation,
+)
+from styrmin_sdk.graphql._generated.get_cluster import GetClusterCluster as Cluster
+from styrmin_sdk.graphql._generated.get_deployment import (
+    GetDeploymentDeployment as Deployment,
+)
+from styrmin_sdk.graphql._generated.get_deployment import (
+    GetDeploymentDeploymentApplicationInstance as ApplicationInstance,
+)
+from styrmin_sdk.graphql._generated.get_deployment import (
+    GetDeploymentDeploymentComponents as Component,
+)
+from styrmin_sdk.graphql._generated.get_environment import (
+    GetEnvironmentEnvironment as Environment,
+)
+from styrmin_sdk.graphql._generated.get_environment import (
+    GetEnvironmentEnvironmentCluster as ClusterRef,
+)
+from styrmin_sdk.graphql._generated.get_restore import GetRestoreRestore as Restore
+from styrmin_sdk.graphql._generated.get_task import GetTaskTask as Task
+from styrmin_sdk.graphql._generated.load_remote_application_driver_version import (
+    LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion as ApplicationDriverVersion,
+)
+from styrmin_sdk.graphql._generated.load_remote_application_driver_version import (
+    LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionActions as Action,
+)
+from styrmin_sdk.graphql._generated.load_remote_application_driver_version import (
+    LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs as ComponentConfig,
+)
+from styrmin_sdk.graphql._generated.load_remote_application_driver_version import (
+    LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart as HelmChart,
+)
+from styrmin_sdk.models.context import Context
+from styrmin_sdk.models.driver import ApplicationDriver, ApplicationDriverVersionSummary
 
 __all__ = [
     "Action",
     "ApplicationDriver",
     "ApplicationDriverVersion",
+    "ApplicationDriverVersionSummary",
     "ApplicationInstance",
     "Backup",
     "BackupSchedule",
+    "BackupStorageLocation",
     "Cluster",
     "ClusterRef",
     "Component",

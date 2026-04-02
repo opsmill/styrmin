@@ -6,9 +6,17 @@ from typing import Any
 from uuid import UUID
 
 from styrmin_sdk._queries import load_query
+from styrmin_sdk.graphql._generated.deploy import Deploy, DeployDeploy
+from styrmin_sdk.graphql._generated.get_deployment import GetDeployment, GetDeploymentDeployment
+from styrmin_sdk.graphql._generated.run_job import RunJob, RunJobRunJob
+from styrmin_sdk.graphql._generated.start_components import StartComponents, StartComponentsStartComponents
+from styrmin_sdk.graphql._generated.stop_components import StopComponents, StopComponentsStopComponents
+from styrmin_sdk.graphql._generated.update_deployment import UpdateDeployment, UpdateDeploymentUpdateDeployment
+from styrmin_sdk.graphql._generated.update_deployment_version import (
+    UpdateDeploymentVersion,
+    UpdateDeploymentVersionUpdateDeploymentVersion,
+)
 from styrmin_sdk.models.context import Context
-from styrmin_sdk.models.deployment import Deployment
-from styrmin_sdk.models.task import Task
 from styrmin_sdk.resources._base import BaseResource, JsonValue
 
 
@@ -26,7 +34,7 @@ class DeploymentResource(BaseResource):
         config: JsonValue | None = None,
         parameters: JsonValue | None = None,
         service_name_overrides: list[dict[str, str]] | None = None,
-    ) -> Task:
+    ) -> DeployDeploy:
         variables: dict[str, Any] = {
             "driver": driver,
             "version": version,
@@ -50,12 +58,12 @@ class DeploymentResource(BaseResource):
 
         result = await self._transport.execute(load_query("deploy"), variables)
         self._check_graphql_errors(result)
-        return Task.model_validate(result["data"]["deploy"])
+        return self._parse(Deploy, result["data"], "deploy")
 
-    async def get(self, deployment_id: str | UUID) -> Deployment:
+    async def get(self, deployment_id: str | UUID) -> GetDeploymentDeployment:
         result = await self._transport.execute(load_query("get_deployment"), {"deploymentId": str(deployment_id)})
         self._check_graphql_errors(result)
-        return Deployment.model_validate(result["data"]["deployment"])
+        return self._parse(GetDeployment, result["data"], "deployment")
 
     async def update(
         self,
@@ -65,7 +73,7 @@ class DeploymentResource(BaseResource):
         config: JsonValue | None = None,
         parameters: JsonValue | None = None,
         service_name_overrides: list[dict[str, str]] | None = None,
-    ) -> Task:
+    ) -> UpdateDeploymentUpdateDeployment:
         variables: dict[str, Any] = {"deploymentId": str(deployment_id)}
         if name is not None:
             variables["name"] = name
@@ -80,31 +88,35 @@ class DeploymentResource(BaseResource):
             variables,
         )
         self._check_graphql_errors(result)
-        return Task.model_validate(result["data"]["updateDeployment"])
+        return self._parse(UpdateDeployment, result["data"], "update_deployment")
 
-    async def update_version(self, deployment_id: str | UUID, version: str) -> Task:
+    async def update_version(
+        self, deployment_id: str | UUID, version: str
+    ) -> UpdateDeploymentVersionUpdateDeploymentVersion:
         result = await self._transport.execute(
             load_query("update_version"),
             {"deploymentId": str(deployment_id), "version": version},
         )
         self._check_graphql_errors(result)
-        return Task.model_validate(result["data"]["updateDeploymentVersion"])
+        return self._parse(UpdateDeploymentVersion, result["data"], "update_deployment_version")
 
-    async def start_components(self, deployment_id: str | UUID, components: list[str]) -> Task:
+    async def start_components(
+        self, deployment_id: str | UUID, components: list[str]
+    ) -> StartComponentsStartComponents:
         result = await self._transport.execute(
             load_query("start_components"),
             {"deploymentId": str(deployment_id), "components": components},
         )
         self._check_graphql_errors(result)
-        return Task.model_validate(result["data"]["startComponents"])
+        return self._parse(StartComponents, result["data"], "start_components")
 
-    async def stop_components(self, deployment_id: str | UUID, components: list[str]) -> Task:
+    async def stop_components(self, deployment_id: str | UUID, components: list[str]) -> StopComponentsStopComponents:
         result = await self._transport.execute(
             load_query("stop_components"),
             {"deploymentId": str(deployment_id), "components": components},
         )
         self._check_graphql_errors(result)
-        return Task.model_validate(result["data"]["stopComponents"])
+        return self._parse(StopComponents, result["data"], "stop_components")
 
     async def run_job(
         self,
@@ -112,7 +124,7 @@ class DeploymentResource(BaseResource):
         image: str,
         commands: list[str],
         env: JsonValue,
-    ) -> Task:
+    ) -> RunJobRunJob:
         result = await self._transport.execute(
             load_query("run_job"),
             {
@@ -123,7 +135,7 @@ class DeploymentResource(BaseResource):
             },
         )
         self._check_graphql_errors(result)
-        return Task.model_validate(result["data"]["runJob"])
+        return self._parse(RunJob, result["data"], "run_job")
 
     async def get_context(self, deployment_id: str | UUID) -> Context:
         data = await self._transport.get(f"/deployments/{deployment_id}/context")

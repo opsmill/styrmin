@@ -139,6 +139,7 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 
 ## Active Technologies
 
+- Python 3.12+ + Pydantic v2, ariadne-codegen (build-time), httpx (Transport) (003-sdk-typed-bindings)
 - TypeScript 5.9.3, React 19.2.4, Node 22 + `@tanstack/react-router` (new), urql 5.0.1, Radix UI, React Hook Form 7, Zod 4 (001-tanstack-router-migration)
 - N/A (frontend-only change) (001-tanstack-router-migration)
 - Python 3.12+ (backend, SDK, CLI) + Strawberry GraphQL, SQLModel, SQLAlchemy (async), Pydantic, Cyclopts (CLI), httpx (SDK transport) (001-graphql-name-lookup)

@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from styrmin_sdk.exceptions import OperationFailedError, ResourceNotFoundError
-from styrmin_sdk.models.backup import Backup, BackupSchedule, Restore
 
 if TYPE_CHECKING:
     from styrmin_sdk.client import StyrminClient
@@ -35,7 +34,6 @@ class TestBackupResource:
         }
 
         backup = await client.backups.create_backup(instance_id="00000000-0000-0000-0000-000000000010")
-        assert isinstance(backup, Backup)
         assert backup.name == "test-backup"
         assert backup.status == "pending"
 
@@ -79,7 +77,6 @@ class TestBackupResource:
         }
 
         backup = await client.backups.get_backup("00000000-0000-0000-0000-000000000001")
-        assert isinstance(backup, Backup)
         assert backup.status == "completed"
         assert backup.size_bytes == 1024
 
@@ -152,7 +149,6 @@ class TestBackupResource:
             backup_id="00000000-0000-0000-0000-000000000001",
             target_namespace="styrmin-ns",
         )
-        assert isinstance(restore, Restore)
         assert restore.status == "pending"
         assert restore.target_namespace == "styrmin-ns"
 
@@ -178,7 +174,6 @@ class TestBackupResource:
         }
 
         restore = await client.backups.get_restore("00000000-0000-0000-0000-000000000020")
-        assert isinstance(restore, Restore)
         assert restore.status == "completed"
 
 
@@ -209,7 +204,6 @@ class TestScheduleResource:
             name="daily-backup",
             cron_expression="0 2 * * *",
         )
-        assert isinstance(schedule, BackupSchedule)
         assert schedule.name == "daily-backup"
         assert schedule.cron_expression == "0 2 * * *"
 
@@ -235,7 +229,6 @@ class TestScheduleResource:
         }
 
         schedule = await client.schedules.get("00000000-0000-0000-0000-000000000030")
-        assert isinstance(schedule, BackupSchedule)
         assert schedule.name == "daily-backup"
 
     @staticmethod

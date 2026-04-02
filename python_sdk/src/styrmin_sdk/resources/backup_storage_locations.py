@@ -7,7 +7,22 @@ from uuid import UUID
 
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import ResourceNotFoundError
-from styrmin_sdk.models.backup_storage_location import BackupStorageLocation
+from styrmin_sdk.graphql._generated.create_backup_storage_location import (
+    CreateBackupStorageLocation,
+    CreateBackupStorageLocationCreateBackupStorageLocation,
+)
+from styrmin_sdk.graphql._generated.get_backup_storage_location import (
+    GetBackupStorageLocation,
+    GetBackupStorageLocationBackupStorageLocation,
+)
+from styrmin_sdk.graphql._generated.list_backup_storage_locations import (
+    ListBackupStorageLocations,
+    ListBackupStorageLocationsBackupStorageLocations,
+)
+from styrmin_sdk.graphql._generated.update_backup_storage_location import (
+    UpdateBackupStorageLocation,
+    UpdateBackupStorageLocationUpdateBackupStorageLocation,
+)
 from styrmin_sdk.resources._base import BaseResource
 
 
@@ -21,7 +36,7 @@ class BackupStorageLocationResource(BaseResource):
         region: str,
         access_key_id: str,
         secret_access_key: str,
-    ) -> BackupStorageLocation:
+    ) -> CreateBackupStorageLocationCreateBackupStorageLocation:
         variables: dict[str, Any] = {
             "name": name,
             "endpoint": endpoint,
@@ -32,26 +47,27 @@ class BackupStorageLocationResource(BaseResource):
         }
         result = await self._transport.execute(load_query("create_backup_storage_location"), variables)
         self._check_graphql_errors(result)
-        return BackupStorageLocation.model_validate(result["data"]["createBackupStorageLocation"])
+        return self._parse(CreateBackupStorageLocation, result["data"], "create_backup_storage_location")
 
-    async def list(self) -> list[BackupStorageLocation]:
+    async def list(self) -> list[ListBackupStorageLocationsBackupStorageLocations]:
         result = await self._transport.execute(load_query("list_backup_storage_locations"))
         self._check_graphql_errors(result)
-        return [BackupStorageLocation.model_validate(b) for b in result["data"].get("backupStorageLocations", [])]
+        data = ListBackupStorageLocations.model_validate(result["data"])
+        return data.backup_storage_locations or []
 
-    async def get(self, bsl_id: str | UUID) -> BackupStorageLocation:
+    async def get(self, bsl_id: str | UUID) -> GetBackupStorageLocationBackupStorageLocation:
         result = await self._transport.execute(
             load_query("get_backup_storage_location"),
             {"backupStorageLocationId": str(bsl_id)},
         )
         self._check_graphql_errors(result)
-        data = result["data"]["backupStorageLocation"]
-        if data is None:
+        data = GetBackupStorageLocation.model_validate(result["data"])
+        if data.backup_storage_location is None:
             raise ResourceNotFoundError(
                 f"Backup storage location {bsl_id} not found",
                 "NOT_FOUND",
             )
-        return BackupStorageLocation.model_validate(data)
+        return data.backup_storage_location
 
     async def update(
         self,
@@ -63,7 +79,7 @@ class BackupStorageLocationResource(BaseResource):
         region: str | None = None,
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
-    ) -> BackupStorageLocation:
+    ) -> UpdateBackupStorageLocationUpdateBackupStorageLocation:
         variables: dict[str, Any] = {
             "backupStorageLocationId": str(bsl_id),
         }
@@ -82,7 +98,7 @@ class BackupStorageLocationResource(BaseResource):
 
         result = await self._transport.execute(load_query("update_backup_storage_location"), variables)
         self._check_graphql_errors(result)
-        return BackupStorageLocation.model_validate(result["data"]["updateBackupStorageLocation"])
+        return self._parse(UpdateBackupStorageLocation, result["data"], "update_backup_storage_location")
 
     async def delete(self, bsl_id: str | UUID) -> bool:
         """Delete a BSL. Returns True on success.

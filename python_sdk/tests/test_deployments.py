@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from styrmin_sdk import Deployment, OperationFailedError, ResourceNotFoundError, StyrminClient, Task
+from styrmin_sdk import OperationFailedError, ResourceNotFoundError, StyrminClient
 
 
 async def test_create_deployment_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -27,7 +27,6 @@ async def test_create_deployment_success(client: StyrminClient, mock_transport: 
         environment_id="22222222-3333-4444-5555-666666666666",
     )
 
-    assert isinstance(task, Task)
     assert str(task.deployment_id) == "11111111-2222-3333-4444-555555555555"
     assert task.status == "pending"
 
@@ -63,7 +62,6 @@ async def test_get_deployment_success(client: StyrminClient, mock_transport: Asy
 
     deployment = await client.deployments.get("11111111-2222-3333-4444-555555555555")
 
-    assert isinstance(deployment, Deployment)
     assert deployment.status == "deployed"
     assert deployment.application_version == "1.0.0"
     assert deployment.application_instance is not None
@@ -96,4 +94,4 @@ async def test_update_deployment_success(client: StyrminClient, mock_transport: 
     }
 
     task = await client.deployments.update("11111111-2222-3333-4444-555555555555", config={"replicas": 3})
-    assert isinstance(task, Task)
+    assert task.status == "pending"
