@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from styrmin_sdk import Cluster, ResourceAlreadyExistsError, ResourceNotFoundError, StyrminClient
+from styrmin_sdk import ResourceAlreadyExistsError, ResourceNotFoundError, StyrminClient
 
 
 async def test_create_cluster_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -21,7 +21,6 @@ async def test_create_cluster_success(client: StyrminClient, mock_transport: Asy
 
     cluster = await client.clusters.create(name="test-cluster", config={"key": "value"})
 
-    assert isinstance(cluster, Cluster)
     assert cluster.name == "test-cluster"
     assert str(cluster.id) == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     assert cluster.config == {"key": "value"}
@@ -74,7 +73,6 @@ async def test_get_cluster_success(client: StyrminClient, mock_transport: AsyncM
 
     cluster = await client.clusters.get("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
-    assert isinstance(cluster, Cluster)
     assert cluster.name == "test-cluster"
 
 

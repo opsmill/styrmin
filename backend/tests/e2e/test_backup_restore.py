@@ -139,9 +139,9 @@ async def test_backup_and_restore_lifecycle(
             pre_backup_count = resp.json()["counter"]  # 6
 
     # 2. Create backup via SDK, wait for completion
-    backup = await client.backups.create_backup(instance_id=instance_id)
-    assert backup.status == "pending"
-    backup = await client.backups.wait_for_backup(backup.id, max_wait=180)
+    created_backup = await client.backups.create_backup(instance_id=instance_id)
+    assert created_backup.status == "pending"
+    backup = await client.backups.wait_for_backup(created_backup.id, max_wait=180)
     assert backup.status == "completed"
 
     # 2b. Verify backup targets the assigned BSL
@@ -158,11 +158,11 @@ async def test_backup_and_restore_lifecycle(
                 await http_client.get(f"http://localhost:{port}/count", timeout=10)
 
     # 4. Restore from backup via SDK (same namespace, existingResourcePolicy=update)
-    restore = await client.backups.create_restore(
+    created_restore = await client.backups.create_restore(
         backup_id=backup.id, target_namespace=namespace
     )
-    assert restore.status == "pending"
-    restore = await client.backups.wait_for_restore(restore.id, max_wait=300)
+    assert created_restore.status == "pending"
+    restore = await client.backups.wait_for_restore(created_restore.id, max_wait=300)
     assert restore.status == "completed"
 
     # 5. Wait for pods to recover, verify data restored
@@ -240,9 +240,9 @@ async def test_infrahub_backup_and_restore_lifecycle(
         assert retrieved.name.value == tag_name
 
     # 2. Create backup via Styrmin SDK, wait for completion
-    backup = await client.backups.create_backup(instance_id=instance_id)
-    assert backup.status == "pending"
-    backup = await client.backups.wait_for_backup(backup.id, max_wait=300)
+    created_backup = await client.backups.create_backup(instance_id=instance_id)
+    assert created_backup.status == "pending"
+    backup = await client.backups.wait_for_backup(created_backup.id, max_wait=300)
     assert backup.status == "completed"
 
     # 2b. Verify backup targets the assigned BSL
@@ -267,11 +267,11 @@ async def test_infrahub_backup_and_restore_lifecycle(
         assert all(t.name.value != tag_name for t in tags)
 
     # 4. Restore from backup
-    restore = await client.backups.create_restore(
+    created_restore = await client.backups.create_restore(
         backup_id=backup.id, target_namespace=namespace
     )
-    assert restore.status == "pending"
-    restore = await client.backups.wait_for_restore(restore.id, max_wait=600)
+    assert created_restore.status == "pending"
+    restore = await client.backups.wait_for_restore(created_restore.id, max_wait=600)
     assert restore.status == "completed"
 
     # 5. Wait for pods to recover after restore
