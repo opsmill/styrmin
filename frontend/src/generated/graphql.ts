@@ -121,6 +121,7 @@ export type CallbackResponse = {
 
 export type Cluster = {
   __typename?: 'Cluster';
+  capabilities: Scalars['JSON']['output'];
   config: Scalars['JSON']['output'];
   createdOn: Scalars['DateTime']['output'];
   environments: Array<Environment>;
@@ -193,6 +194,7 @@ export type Deployment = {
 export type Environment = {
   __typename?: 'Environment';
   backupStorageLocation?: Maybe<BackupStorageLocation>;
+  capabilities: Scalars['JSON']['output'];
   cluster: Cluster;
   config: Scalars['JSON']['output'];
   deployments: Array<Deployment>;

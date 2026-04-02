@@ -8,6 +8,7 @@ from uuid import UUID
 from styrmin_backend.context.exceptions import InvalidClusterContextError
 from styrmin_backend.context.validators import validate_cluster_config
 from styrmin_backend.db.models import Cluster
+from styrmin_backend.services.capabilities import compute_cluster_capabilities
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
     ClusterAlreadyExistsError,
@@ -52,7 +53,9 @@ async def create_cluster(
         except InvalidClusterContextError as e:
             raise InvalidContextError() from e
 
-        await uow.clusters.create(Cluster(name=name, config=config))
+        cluster = Cluster(name=name, config=config)
+        cluster.capabilities = compute_cluster_capabilities(cluster)
+        await uow.clusters.create(cluster)
         await uow.commit()
         returned_cluster = await uow.clusters.get_by_name(name)
         assert returned_cluster is not None, "Cluster should be created successfully"

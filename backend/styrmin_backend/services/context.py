@@ -129,6 +129,10 @@ async def generate_context_from_deployment(
 
         context = resolve_global_context(context_input=context_input)
 
+        # Populate capabilities from persisted data
+        context.cluster.capabilities = cluster.capabilities or {}
+        context.environment.capabilities = environment.capabilities or {}
+
         # Build services context from deployed services in the environment
         fqdn_suffix = context.instance.config.fqdn_suffix
         app_name = application_driver.name

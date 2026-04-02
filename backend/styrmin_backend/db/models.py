@@ -32,6 +32,7 @@ class StyrminModel(SQLModel):
 class Cluster(StyrminModel, table=True):
     name: str = Field(unique=True)
     config: dict | None = Field(default=None, sa_column=Column(JSON))
+    capabilities: dict | None = Field(default=None, sa_column=Column(JSON))
 
     environments: list["Environment"] = Relationship(back_populates="cluster")
 
@@ -56,6 +57,7 @@ class Environment(StyrminModel, table=True):
 
     name: str
     config: dict | None = Field(default=None, sa_column=Column(JSON))
+    capabilities: dict | None = Field(default=None, sa_column=Column(JSON))
 
     cluster_id: UUID = Field(foreign_key="cluster.id")
     cluster: Cluster = Relationship(back_populates="environments")

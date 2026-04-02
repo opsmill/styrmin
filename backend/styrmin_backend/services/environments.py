@@ -8,6 +8,7 @@ from uuid import UUID
 from styrmin_backend.context.exceptions import InvalidEnvironmentContextError
 from styrmin_backend.context.validators import validate_environment_config
 from styrmin_backend.db.models import Environment
+from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.clusters import resolve_cluster
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
@@ -86,9 +87,9 @@ async def create_environment(
         except InvalidEnvironmentContextError as e:
             raise InvalidContextError from e
 
-        await uow.environments.create(
-            Environment(name=name, cluster_id=cluster_id, config=config)
-        )
+        environment = Environment(name=name, cluster_id=cluster_id, config=config)
+        environment.capabilities = compute_environment_capabilities(environment)
+        await uow.environments.create(environment)
         await uow.commit()
         returned_environment = await uow.environments.get_by_name_in_cluster(
             name, cluster_id

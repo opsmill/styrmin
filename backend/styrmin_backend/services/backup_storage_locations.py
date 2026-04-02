@@ -146,6 +146,13 @@ async def assign_backup_storage_location(
             )
 
         environment.backup_storage_location_id = backup_storage_location_id
+        environment.backup_storage_location = bsl
+        # Recompute capabilities with the new BSL assignment
+        from styrmin_backend.services.capabilities import (
+            compute_environment_capabilities,
+        )
+
+        environment.capabilities = compute_environment_capabilities(environment)
         await uow.commit()
 
 
@@ -163,4 +170,11 @@ async def unassign_backup_storage_location(
             )
 
         environment.backup_storage_location_id = None
+        environment.backup_storage_location = None
+        # Recompute capabilities without the BSL assignment
+        from styrmin_backend.services.capabilities import (
+            compute_environment_capabilities,
+        )
+
+        environment.capabilities = compute_environment_capabilities(environment)
         await uow.commit()
