@@ -131,6 +131,7 @@ type Cluster {
   id: UUID!
   name: String!
   config: JSON
+  capabilities: JSON
   environments: [Environment!]!
   createdOn: DateTime
   updatedOn: DateTime
@@ -144,6 +145,7 @@ type Environment {
   id: UUID!
   name: String!
   config: JSON
+  capabilities: JSON
   clusterId: UUID!
   deployments: [Deployment!]!
 }

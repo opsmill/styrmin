@@ -56,6 +56,7 @@ class StyrminModel(SQLModel):
 class Cluster(StyrminModel, table=True):
     name: str = Field(unique=True)
     config: dict | None = Field(sa_column=Column(JSON))
+    capabilities: dict | None = Field(sa_column=Column(JSON))  # Computed, hierarchical
 
     environments: list["Environment"]  # Relationship
 ```
@@ -68,6 +69,7 @@ class Environment(StyrminModel, table=True):
 
     name: str  # Unique per cluster (not globally)
     config: dict | None = Field(sa_column=Column(JSON))
+    capabilities: dict | None = Field(sa_column=Column(JSON))  # Computed, environment-scoped
 
     cluster_id: UUID = Field(foreign_key="cluster.id")
     cluster: Cluster  # Relationship
@@ -343,9 +345,11 @@ class GlobalContext(BaseModel):
 ```text
 GlobalContext
 ├── ClusterContext
-│   └── config: ClusterConfig
+│   ├── config: ClusterConfig
+│   └── capabilities: dict[str, Any]
 ├── EnvironmentContext
-│   └── config: EnvironmentConfig
+│   ├── config: EnvironmentConfig
+│   └── capabilities: dict[str, Any]
 ├── DeploymentContext
 │   └── config: DeploymentConfig
 ├── InstanceContext
