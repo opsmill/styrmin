@@ -36,6 +36,7 @@ class ClusterContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     config: ClusterConfig
+    capabilities: dict[str, Any] = Field(default_factory=dict)
 
 
 class EnvironmentContext(BaseModel):
@@ -46,12 +47,14 @@ class EnvironmentContext(BaseModel):
     Attributes:
         name (str): The environment name.
         config (EnvironmentConfig): The environment configuration.
+        capabilities (dict): Hierarchical capability declarations for this environment.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
     config: EnvironmentConfig
+    capabilities: dict[str, Any] = Field(default_factory=dict)
 
 
 class DeploymentContext(BaseModel):

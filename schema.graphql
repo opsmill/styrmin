@@ -91,6 +91,7 @@ type Cluster {
   id: UUID!
   name: String!
   config: JSON!
+  capabilities: JSON!
   createdOn: DateTime!
   updatedOn: DateTime
   environments: [Environment!]!
@@ -158,6 +159,7 @@ type Environment {
   id: UUID!
   name: String!
   config: JSON!
+  capabilities: JSON!
   cluster: Cluster!
   backupStorageLocation: BackupStorageLocation
   deployments: [Deployment!]!
