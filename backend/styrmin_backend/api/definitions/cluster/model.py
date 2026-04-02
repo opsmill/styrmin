@@ -18,6 +18,7 @@ class Cluster:
     id: UUID
     name: str
     config: JSON
+    capabilities: JSON
     created_on: datetime
     updated_on: datetime | None = None
 
@@ -43,6 +44,7 @@ class Cluster:
             name=instance.name,
             instance=instance,
             config=instance.config,
+            capabilities=instance.capabilities,
             created_on=instance.created_on,  # type: ignore[arg-type]
             updated_on=instance.updated_on,
         )

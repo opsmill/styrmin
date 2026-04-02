@@ -6,10 +6,12 @@ from typing import Sequence
 from uuid import UUID
 
 from styrmin_backend.db.models import BackupStorageLocation
+from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.exceptions import (
     BackupStorageLocationAlreadyExistsError,
     BackupStorageLocationInUseError,
     BackupStorageLocationNotFoundError,
+    EnvironmentNotFoundError,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
@@ -86,6 +88,8 @@ async def update_backup_storage_location(
                 f"Backup storage location with id {backup_storage_location_id} not found."
             )
 
+        name_changed = name is not None and name != bsl.name
+
         if name is not None:
             bsl.name = name
         if endpoint is not None:
@@ -98,6 +102,11 @@ async def update_backup_storage_location(
             bsl.access_key_id = access_key_id
         if secret_access_key is not None:
             bsl.secret_access_key = secret_access_key
+
+        # BSL name is stored in capabilities as storage_location — refresh linked environments
+        if name_changed:
+            for env in bsl.environments:
+                env.capabilities = compute_environment_capabilities(env)
 
         await uow.commit()
         updated = await uow.backup_storage_locations.get(backup_storage_location_id)
@@ -137,8 +146,6 @@ async def assign_backup_storage_location(
                 f"Backup storage location with id {backup_storage_location_id} not found."
             )
 
-        from styrmin_backend.services.exceptions import EnvironmentNotFoundError
-
         environment = await uow.environments.get(environment_id)
         if environment is None:
             raise EnvironmentNotFoundError(
@@ -146,6 +153,8 @@ async def assign_backup_storage_location(
             )
 
         environment.backup_storage_location_id = backup_storage_location_id
+        environment.backup_storage_location = bsl
+        environment.capabilities = compute_environment_capabilities(environment)
         await uow.commit()
 
 
@@ -154,8 +163,6 @@ async def unassign_backup_storage_location(
 ) -> None:
     """Remove the backup storage location assignment from an environment."""
     async with uow:
-        from styrmin_backend.services.exceptions import EnvironmentNotFoundError
-
         environment = await uow.environments.get(environment_id)
         if environment is None:
             raise EnvironmentNotFoundError(
@@ -163,4 +170,6 @@ async def unassign_backup_storage_location(
             )
 
         environment.backup_storage_location_id = None
+        environment.backup_storage_location = None
+        environment.capabilities = compute_environment_capabilities(environment)
         await uow.commit()

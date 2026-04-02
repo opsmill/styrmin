@@ -1,0 +1,111 @@
+# Capability Declarations - GraphQL Contract
+#
+# Capabilities are exposed as JSON scalars on Cluster and Environment types,
+# following the same pattern as the existing `config` field.
+# This preserves extensibility — new capability categories don't require
+# GraphQL schema changes.
+
+# --- Existing types, extended with capabilities field ---
+
+# type Cluster {
+#   id: UUID!
+#   name: String!
+#   config: JSON
+#   capabilities: JSON          # NEW — hierarchical capability structure
+#   createdOn: DateTime!
+#   updatedOn: DateTime
+#   environments: [Environment!]!
+# }
+
+# type Environment {
+#   id: UUID!
+#   name: String!
+#   config: JSON
+#   capabilities: JSON          # NEW — environment-scoped capability structure
+#   cluster: Cluster!
+#   backupStorageLocation: BackupStorageLocation
+#   deployments: [Deployment!]!
+# }
+
+# --- Example queries ---
+
+# Query cluster capabilities
+query GetClusterCapabilities($clusterId: UUID, $clusterName: String) {
+  cluster(clusterId: $clusterId, clusterName: $clusterName) {
+    id
+    name
+    capabilities
+  }
+}
+
+# Query environment capabilities
+query GetEnvironmentCapabilities(
+  $environmentId: UUID
+  $environmentName: String
+  $clusterId: UUID
+  $clusterName: String
+) {
+  environment(
+    environmentId: $environmentId
+    environmentName: $environmentName
+    clusterId: $clusterId
+    clusterName: $clusterName
+  ) {
+    id
+    name
+    capabilities
+    cluster {
+      name
+      capabilities
+    }
+  }
+}
+
+# --- Expected response shapes ---
+
+# GetClusterCapabilities response example:
+# {
+#   "data": {
+#     "cluster": {
+#       "id": "...",
+#       "name": "default",
+#       "capabilities": {
+#         "storage": {
+#           "standard": { "storage_class": "standard" }
+#         },
+#         "ingress": {
+#           "external": { "ingress_class": "traefik", "fqdn_suffix": "apps.example.com" }
+#         }
+#       }
+#     }
+#   }
+# }
+
+# GetEnvironmentCapabilities response example:
+# {
+#   "data": {
+#     "environment": {
+#       "id": "...",
+#       "name": "production",
+#       "capabilities": {
+#         "storage": {
+#           "standard": { "storage_class": "standard" }
+#         },
+#         "backup": {
+#           "velero": { "storage_location": "main-backup" }
+#         }
+#       },
+#       "cluster": {
+#         "name": "default",
+#         "capabilities": {
+#           "storage": {
+#             "standard": { "storage_class": "standard" }
+#           },
+#           "ingress": {
+#             "external": { "ingress_class": "traefik", "fqdn_suffix": "apps.example.com" }
+#           }
+#         }
+#       }
+#     }
+#   }
+# }

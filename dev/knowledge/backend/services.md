@@ -90,7 +90,7 @@ Manages Kubernetes cluster definitions. Only one cluster may exist at a time.
 
 | Function | Description |
 |----------|-------------|
-| `create_cluster(uow, name="default", config=None)` | Create a cluster (raises `ClusterLimitReachedError` if one already exists) |
+| `create_cluster(uow, name="default", config=None)` | Create a cluster (raises `ClusterLimitReachedError` if one already exists). Computes and persists capabilities. |
 | `resolve_cluster(uow, cluster_id?, cluster_name?)` | Resolve cluster by ID or name (exactly one required) |
 | `get_cluster(cluster_id, uow)` | Retrieve cluster by ID |
 | `get_clusters(uow)` | List all clusters |
@@ -103,10 +103,21 @@ Manages environments within clusters.
 | Function | Description |
 |----------|-------------|
 | `resolve_environment(uow, environment_id?, environment_name?, cluster_id?, cluster_name?)` | Resolve environment by ID or name with cluster context |
-| `create_environment(name, cluster_id, config, uow)` | Create environment in cluster (name unique per cluster) |
+| `create_environment(name, cluster_id, config, uow)` | Create environment in cluster (name unique per cluster). Computes and persists capabilities. |
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
 | `delete_environment(environment_id, uow)` | Delete an environment |
+
+### Capabilities Service (`capabilities.py`)
+
+Derives hierarchical capabilities from cluster/environment configuration. Capabilities are persisted as JSON and recalculated on relevant config changes.
+
+| Function | Description |
+|----------|-------------|
+| `compute_cluster_capabilities(cluster)` | Compute capabilities from cluster config (storage, ingress) |
+| `compute_environment_capabilities(environment)` | Compute capabilities from environment config and BSL (backup, ingress) |
+
+Called automatically by cluster/environment creation and BSL assign/unassign operations.
 
 ### Deployment Service (`deployment.py`)
 

@@ -66,6 +66,7 @@ class Environment:
     id: UUID
     name: str
     config: JSON
+    capabilities: JSON
 
     instance: strawberry.Private[EnvironmentModel]
 
@@ -109,4 +110,5 @@ class Environment:
             name=instance.name,
             instance=instance,
             config=instance.config,
+            capabilities=instance.capabilities,
         )
