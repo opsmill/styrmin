@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-migrate-cli-cyclopts`
 **Created**: 2026-03-25
-**Status**: Draft
+**Status**: Extracted
 **Input**: GitHub Issue [opsmill/styrmin#8](https://github.com/opsmill/styrmin/issues/8) — Migrate styrminctl CLI from Typer to Cyclopts
 
 ## User Scenarios & Testing *(mandatory)*

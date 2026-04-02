@@ -136,6 +136,47 @@ raise InvalidContextError() from e
 - Inject context via `info: strawberry.Info` parameter
 - All GraphQL operations must be in `.graphql` files (see CLAUDE.md)
 
+### Nested Resolvers
+
+<!-- Extracted from specs/001-graphql-nested-resolvers on 2026-04-01 -->
+
+When adding a nested object field to a GraphQL type, choose the resolver pattern based on whether the relationship is already eager-loaded:
+
+- **Async UoW resolver** (preferred for new fields): Fetch via `info.context["uow"]`. Only executes when the field is requested. Use when the repository does not eager-load the relationship.
+- **Sync resolver**: Access `self.instance.relationship` directly. Use only when the repository already eager-loads the relationship via `selectinload`.
+
+**Nullability**: Match the resolver return type to the FK nullability in the database model. Non-nullable FK → non-nullable return. Nullable FK → nullable return.
+
+**Error handling**: Non-nullable resolvers must raise an exception (e.g., `ValueError`) if the entity is not found — this surfaces as a GraphQL field error. Nullable resolvers return `None` when the FK is null (skip the DB query).
+
+```python
+# Async UoW resolver (non-nullable)
+@strawberry.field
+async def environment(self, info: strawberry.Info) -> Environment:
+    uow = info.context["uow"]
+    entity = await uow.environments.get(self.instance.environment_id)
+    if entity is None:
+        msg = f"Environment {self.instance.environment_id} not found"
+        raise ValueError(msg)
+    return Environment.from_instance(entity)
+
+# Async UoW resolver (nullable)
+@strawberry.field
+async def deployment(self, info: strawberry.Info) -> Deployment | None:
+    if self.instance.deployment_id is None:
+        return None
+    uow = info.context["uow"]
+    entity = await uow.deployments.get(self.instance.deployment_id)
+    return Deployment.from_instance(entity) if entity else None
+
+# Sync resolver (relationship already eager-loaded)
+@strawberry.field
+def application_driver(self) -> ApplicationDriver:
+    return ApplicationDriver.from_instance(self.instance.application_driver)
+```
+
+**Circular imports**: Use `strawberry.lazy()` with `Annotated` only when circular imports actually occur. Prefer standard imports when possible.
+
 ## Prefect Flows & Tasks
 
 - `@task` for individual async operations

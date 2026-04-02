@@ -183,6 +183,29 @@ type Task {
 
 **TaskType**: `DEPLOYMENT`, `CREATE_INSTANCE`, `DELETE_INSTANCE`, `UPDATE_INSTANCE`, `UPGRADE_INSTANCE`, `STOP_COMPONENTS`, `START_COMPONENTS`, `RUN_JOB`
 
+## Nested Object Resolvers
+
+<!-- Extracted from specs/001-graphql-nested-resolvers on 2026-04-01 -->
+
+GraphQL types expose nested object fields that allow clients to traverse entity relationships in a single query, eliminating follow-up requests. Each nested field resolves the related entity on demand.
+
+### Available Nested Relationships
+
+| Parent Type | Field | Return Type | Nullable | Notes |
+|-------------|-------|-------------|----------|-------|
+| `Deployment` | `environment` | `Environment` | No | Via `environment_id` FK |
+| `Deployment` | `applicationDriverVersion` | `ApplicationDriverVersion` | No | Via `application_driver_version_id` FK |
+| `ApplicationDriverVersion` | `applicationDriver` | `ApplicationDriver` | No | Sync resolver (eager-loaded) |
+| `ApplicationInstance` | `applicationDriverVersion` | `ApplicationDriverVersion` | No | Via `application_driver_version_id` FK |
+| `Task` | `deployment` | `Deployment` | Yes | `deployment_id` may be null |
+| `BackupSchedule` | `deployment` | `Deployment` | No | Via `deployment_id` FK |
+| `Backup` | `instance` | `ApplicationInstance` | No | Via `instance_id` FK |
+| `Restore` | `backup` | `Backup` | No | Via `backup_id` FK |
+
+All existing `*Id` scalar fields are preserved alongside the new nested object fields for backward compatibility.
+
+Clients can chain nested fields for deep traversal (e.g., `restore → backup → instance → applicationDriverVersion → applicationDriver`). No depth limit is enforced.
+
 ## Custom Scalars
 
 **JSON** (`api/scalars.py`) - Allows passing arbitrary JSON objects for configuration.

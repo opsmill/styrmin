@@ -37,7 +37,12 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 ## Current Guidelines
 
 - [backend/python.md](guidelines/backend/python.md) - Python coding standards, tooling, patterns
+- [cyclopts.md](guidelines/cyclopts.md) - Cyclopts CLI conventions: parameters, validators, type aliases, lazy loading
 - [markdown.md](guidelines/markdown.md) - Markdown conventions and document structure
+
+## Current ADRs
+
+- [adr-001-migrate-cli-typer-to-cyclopts.md](adr/adr-001-migrate-cli-typer-to-cyclopts.md) - Migrate styrminctl from Typer to Cyclopts for performance, native async, and framework unification
 
 ## Current Knowledge
 
