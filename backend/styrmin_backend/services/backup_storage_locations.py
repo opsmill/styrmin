@@ -6,10 +6,12 @@ from typing import Sequence
 from uuid import UUID
 
 from styrmin_backend.db.models import BackupStorageLocation
+from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.exceptions import (
     BackupStorageLocationAlreadyExistsError,
     BackupStorageLocationInUseError,
     BackupStorageLocationNotFoundError,
+    EnvironmentNotFoundError,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
@@ -137,8 +139,6 @@ async def assign_backup_storage_location(
                 f"Backup storage location with id {backup_storage_location_id} not found."
             )
 
-        from styrmin_backend.services.exceptions import EnvironmentNotFoundError
-
         environment = await uow.environments.get(environment_id)
         if environment is None:
             raise EnvironmentNotFoundError(
@@ -147,11 +147,6 @@ async def assign_backup_storage_location(
 
         environment.backup_storage_location_id = backup_storage_location_id
         environment.backup_storage_location = bsl
-        # Recompute capabilities with the new BSL assignment
-        from styrmin_backend.services.capabilities import (
-            compute_environment_capabilities,
-        )
-
         environment.capabilities = compute_environment_capabilities(environment)
         await uow.commit()
 
@@ -161,8 +156,6 @@ async def unassign_backup_storage_location(
 ) -> None:
     """Remove the backup storage location assignment from an environment."""
     async with uow:
-        from styrmin_backend.services.exceptions import EnvironmentNotFoundError
-
         environment = await uow.environments.get(environment_id)
         if environment is None:
             raise EnvironmentNotFoundError(
@@ -171,10 +164,5 @@ async def unassign_backup_storage_location(
 
         environment.backup_storage_location_id = None
         environment.backup_storage_location = None
-        # Recompute capabilities without the BSL assignment
-        from styrmin_backend.services.capabilities import (
-            compute_environment_capabilities,
-        )
-
         environment.capabilities = compute_environment_capabilities(environment)
         await uow.commit()

@@ -15,12 +15,35 @@ from styrmin_backend.context.models.capabilities import (
     StorageCapabilityDetail,
     capabilities_to_dict,
 )
-from styrmin_backend.context.models.config import ClusterConfig, EnvironmentConfig
-from styrmin_backend.context.validators import (
-    validate_cluster_config,
-    validate_environment_config,
+from styrmin_backend.context.models.config import (
+    BaseConfigSection,
+    ClusterConfig,
+    EnvironmentConfig,
 )
 from styrmin_backend.db.models import Cluster, Environment
+
+
+def _derive_ingress(
+    config: BaseConfigSection,
+) -> dict[str, IngressCapabilityDetail] | None:
+    """Derive ingress capability from config if both ingress and fqdn_suffix are present."""
+    has_ingress = (
+        config.ingress_class is not None or config.dedicated_ingress is not None
+    )
+    if not has_ingress or config.fqdn_suffix is None:
+        return None
+
+    effective_class = config.ingress_class or (
+        config.dedicated_ingress.implementation
+        if config.dedicated_ingress
+        else "unknown"
+    )
+    return {
+        "external": IngressCapabilityDetail(
+            ingress_class=effective_class,
+            fqdn_suffix=config.fqdn_suffix,
+        ),
+    }
 
 
 def compute_cluster_capabilities(cluster: Cluster) -> dict[str, Any] | None:
@@ -28,18 +51,13 @@ def compute_cluster_capabilities(cluster: Cluster) -> dict[str, Any] | None:
 
     Returns a dict suitable for JSON storage, or None if no capabilities.
     """
-    config_dict = cluster.config or {}
-
-    # Validate and parse config into typed model
     try:
-        validate_cluster_config(config_dict)
-        config = ClusterConfig.model_validate(config_dict)
+        config = ClusterConfig.model_validate(cluster.config or {})
     except Exception:
         return None
 
     capabilities = Capabilities()
 
-    # Storage capability: derived from standard_storage
     if config.standard_storage is not None:
         capabilities.storage = {
             "standard": StorageCapabilityDetail(
@@ -47,21 +65,7 @@ def compute_cluster_capabilities(cluster: Cluster) -> dict[str, Any] | None:
             ),
         }
 
-    # Ingress capability: requires both ingress_class (or dedicated_ingress) and fqdn_suffix
-    ingress_class = config.ingress_class
-    has_ingress = ingress_class is not None or config.dedicated_ingress is not None
-    if has_ingress and config.fqdn_suffix is not None:
-        effective_ingress_class = ingress_class or (
-            config.dedicated_ingress.implementation
-            if config.dedicated_ingress
-            else "unknown"
-        )
-        capabilities.ingress = {
-            "external": IngressCapabilityDetail(
-                ingress_class=effective_ingress_class,
-                fqdn_suffix=config.fqdn_suffix,
-            ),
-        }
+    capabilities.ingress = _derive_ingress(config)
 
     return capabilities_to_dict(capabilities)
 
@@ -74,18 +78,13 @@ def compute_environment_capabilities(environment: Environment) -> dict[str, Any]
 
     Returns a dict suitable for JSON storage, or None if no capabilities.
     """
-    config_dict = environment.config or {}
-
-    # Validate and parse config into typed model
     try:
-        validate_environment_config(config_dict)
-        config = EnvironmentConfig.model_validate(config_dict)
+        config = EnvironmentConfig.model_validate(environment.config or {})
     except Exception:
         return None
 
     capabilities = Capabilities()
 
-    # Backup capability: derived from backup_storage_location assignment
     if environment.backup_storage_location is not None:
         capabilities.backup = {
             "velero": BackupCapabilityDetail(
@@ -93,20 +92,6 @@ def compute_environment_capabilities(environment: Environment) -> dict[str, Any]
             ),
         }
 
-    # Ingress capability: requires both ingress_class (or dedicated_ingress) and fqdn_suffix
-    ingress_class = config.ingress_class
-    has_ingress = ingress_class is not None or config.dedicated_ingress is not None
-    if has_ingress and config.fqdn_suffix is not None:
-        effective_ingress_class = ingress_class or (
-            config.dedicated_ingress.implementation
-            if config.dedicated_ingress
-            else "unknown"
-        )
-        capabilities.ingress = {
-            "external": IngressCapabilityDetail(
-                ingress_class=effective_ingress_class,
-                fqdn_suffix=config.fqdn_suffix,
-            ),
-        }
+    capabilities.ingress = _derive_ingress(config)
 
     return capabilities_to_dict(capabilities)
