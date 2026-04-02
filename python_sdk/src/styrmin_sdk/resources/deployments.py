@@ -58,12 +58,12 @@ class DeploymentResource(BaseResource):
 
         result = await self._transport.execute(load_query("deploy"), variables)
         self._check_graphql_errors(result)
-        return self._parse(Deploy, result["data"], "deploy")
+        return self._parse(Deploy, result["data"], "deploy", DeployDeploy)
 
     async def get(self, deployment_id: str | UUID) -> GetDeploymentDeployment:
         result = await self._transport.execute(load_query("get_deployment"), {"deploymentId": str(deployment_id)})
         self._check_graphql_errors(result)
-        return self._parse(GetDeployment, result["data"], "deployment")
+        return self._parse(GetDeployment, result["data"], "deployment", GetDeploymentDeployment)
 
     async def update(
         self,
@@ -88,7 +88,7 @@ class DeploymentResource(BaseResource):
             variables,
         )
         self._check_graphql_errors(result)
-        return self._parse(UpdateDeployment, result["data"], "update_deployment")
+        return self._parse(UpdateDeployment, result["data"], "update_deployment", UpdateDeploymentUpdateDeployment)
 
     async def update_version(
         self, deployment_id: str | UUID, version: str
@@ -98,7 +98,12 @@ class DeploymentResource(BaseResource):
             {"deploymentId": str(deployment_id), "version": version},
         )
         self._check_graphql_errors(result)
-        return self._parse(UpdateDeploymentVersion, result["data"], "update_deployment_version")
+        return self._parse(
+            UpdateDeploymentVersion,
+            result["data"],
+            "update_deployment_version",
+            UpdateDeploymentVersionUpdateDeploymentVersion,
+        )
 
     async def start_components(
         self, deployment_id: str | UUID, components: list[str]
@@ -108,7 +113,7 @@ class DeploymentResource(BaseResource):
             {"deploymentId": str(deployment_id), "components": components},
         )
         self._check_graphql_errors(result)
-        return self._parse(StartComponents, result["data"], "start_components")
+        return self._parse(StartComponents, result["data"], "start_components", StartComponentsStartComponents)
 
     async def stop_components(self, deployment_id: str | UUID, components: list[str]) -> StopComponentsStopComponents:
         result = await self._transport.execute(
@@ -116,7 +121,7 @@ class DeploymentResource(BaseResource):
             {"deploymentId": str(deployment_id), "components": components},
         )
         self._check_graphql_errors(result)
-        return self._parse(StopComponents, result["data"], "stop_components")
+        return self._parse(StopComponents, result["data"], "stop_components", StopComponentsStopComponents)
 
     async def run_job(
         self,
@@ -135,7 +140,7 @@ class DeploymentResource(BaseResource):
             },
         )
         self._check_graphql_errors(result)
-        return self._parse(RunJob, result["data"], "run_job")
+        return self._parse(RunJob, result["data"], "run_job", RunJobRunJob)
 
     async def get_context(self, deployment_id: str | UUID) -> Context:
         data = await self._transport.get(f"/deployments/{deployment_id}/context")

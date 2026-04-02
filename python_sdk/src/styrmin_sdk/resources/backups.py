@@ -28,12 +28,12 @@ class BackupResource(BaseResource):
 
         result = await self._transport.execute(load_query("create_backup"), variables)
         self._check_graphql_errors(result)
-        return self._parse(CreateBackup, result["data"], "create_backup")
+        return self._parse(CreateBackup, result["data"], "create_backup", CreateBackupCreateBackup)
 
     async def get_backup(self, backup_id: str | UUID) -> GetBackupBackup:
         result = await self._transport.execute(load_query("get_backup"), {"backupId": str(backup_id)})
         self._check_graphql_errors(result)
-        return self._parse(GetBackup, result["data"], "backup")
+        return self._parse(GetBackup, result["data"], "backup", GetBackupBackup)
 
     async def list_backups(
         self,
@@ -68,12 +68,12 @@ class BackupResource(BaseResource):
 
         result = await self._transport.execute(load_query("create_restore"), variables)
         self._check_graphql_errors(result)
-        return self._parse(CreateRestore, result["data"], "create_restore")
+        return self._parse(CreateRestore, result["data"], "create_restore", CreateRestoreCreateRestore)
 
     async def get_restore(self, restore_id: str | UUID) -> GetRestoreRestore:
         result = await self._transport.execute(load_query("get_restore"), {"restoreId": str(restore_id)})
         self._check_graphql_errors(result)
-        return self._parse(GetRestore, result["data"], "restore")
+        return self._parse(GetRestore, result["data"], "restore", GetRestoreRestore)
 
     async def list_restores(
         self,

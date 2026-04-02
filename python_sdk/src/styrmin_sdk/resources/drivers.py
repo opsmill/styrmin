@@ -23,7 +23,12 @@ class DriverResource(BaseResource):
             {"repositoryUrl": repository_url, "branch": branch},
         )
         self._check_graphql_errors(result)
-        return self._parse(LoadRemoteApplicationDriverVersion, result["data"], "load_remote_application_driver_version")
+        return self._parse(
+            LoadRemoteApplicationDriverVersion,
+            result["data"],
+            "load_remote_application_driver_version",
+            LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion,
+        )
 
     async def load_local_version(self, path: str) -> LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersion:
         result = await self._transport.execute(
@@ -31,4 +36,9 @@ class DriverResource(BaseResource):
             {"path": path},
         )
         self._check_graphql_errors(result)
-        return self._parse(LoadLocalApplicationDriverVersion, result["data"], "load_local_application_driver_version")
+        return self._parse(
+            LoadLocalApplicationDriverVersion,
+            result["data"],
+            "load_local_application_driver_version",
+            LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersion,
+        )

@@ -38,12 +38,14 @@ class ScheduleResource(BaseResource):
 
         result = await self._transport.execute(load_query("create_schedule"), variables)
         self._check_graphql_errors(result)
-        return self._parse(CreateBackupSchedule, result["data"], "create_backup_schedule")
+        return self._parse(
+            CreateBackupSchedule, result["data"], "create_backup_schedule", CreateBackupScheduleCreateBackupSchedule
+        )
 
     async def get(self, schedule_id: str | UUID) -> GetBackupScheduleBackupSchedule:
         result = await self._transport.execute(load_query("get_schedule"), {"scheduleId": str(schedule_id)})
         self._check_graphql_errors(result)
-        return self._parse(GetBackupSchedule, result["data"], "backup_schedule")
+        return self._parse(GetBackupSchedule, result["data"], "backup_schedule", GetBackupScheduleBackupSchedule)
 
     async def list(self, deployment_id: str | UUID) -> list[ListBackupSchedulesBackupSchedules]:
         result = await self._transport.execute(load_query("list_schedules"), {"deploymentId": str(deployment_id)})
@@ -71,7 +73,9 @@ class ScheduleResource(BaseResource):
 
         result = await self._transport.execute(load_query("update_schedule"), variables)
         self._check_graphql_errors(result)
-        return self._parse(UpdateBackupSchedule, result["data"], "update_backup_schedule")
+        return self._parse(
+            UpdateBackupSchedule, result["data"], "update_backup_schedule", UpdateBackupScheduleUpdateBackupSchedule
+        )
 
     async def delete(self, schedule_id: str | UUID) -> None:
         result = await self._transport.execute(load_query("delete_schedule"), {"scheduleId": str(schedule_id)})

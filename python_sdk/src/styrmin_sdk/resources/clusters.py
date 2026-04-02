@@ -20,7 +20,7 @@ class ClusterResource(BaseResource):
 
         result = await self._transport.execute(load_query("create_cluster"), variables)
         self._check_graphql_errors(result)
-        return self._parse(CreateCluster, result["data"], "create_cluster")
+        return self._parse(CreateCluster, result["data"], "create_cluster", CreateClusterCreateCluster)
 
     async def list(self) -> list[ListClustersClusters]:
         result = await self._transport.execute(load_query("list_clusters"))
@@ -40,7 +40,7 @@ class ClusterResource(BaseResource):
             variables["clusterName"] = cluster_name
         result = await self._transport.execute(load_query("get_cluster"), variables)
         self._check_graphql_errors(result)
-        return self._parse(GetCluster, result["data"], "cluster")
+        return self._parse(GetCluster, result["data"], "cluster", GetClusterCluster)
 
     async def delete(
         self,

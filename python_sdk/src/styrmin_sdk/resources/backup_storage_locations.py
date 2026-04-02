@@ -47,7 +47,12 @@ class BackupStorageLocationResource(BaseResource):
         }
         result = await self._transport.execute(load_query("create_backup_storage_location"), variables)
         self._check_graphql_errors(result)
-        return self._parse(CreateBackupStorageLocation, result["data"], "create_backup_storage_location")
+        return self._parse(
+            CreateBackupStorageLocation,
+            result["data"],
+            "create_backup_storage_location",
+            CreateBackupStorageLocationCreateBackupStorageLocation,
+        )
 
     async def list(self) -> list[ListBackupStorageLocationsBackupStorageLocations]:
         result = await self._transport.execute(load_query("list_backup_storage_locations"))
@@ -98,7 +103,12 @@ class BackupStorageLocationResource(BaseResource):
 
         result = await self._transport.execute(load_query("update_backup_storage_location"), variables)
         self._check_graphql_errors(result)
-        return self._parse(UpdateBackupStorageLocation, result["data"], "update_backup_storage_location")
+        return self._parse(
+            UpdateBackupStorageLocation,
+            result["data"],
+            "update_backup_storage_location",
+            UpdateBackupStorageLocationUpdateBackupStorageLocation,
+        )
 
     async def delete(self, bsl_id: str | UUID) -> bool:
         """Delete a BSL. Returns True on success.

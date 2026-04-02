@@ -33,7 +33,7 @@ class EnvironmentResource(BaseResource):
 
         result = await self._transport.execute(load_query("create_environment"), variables)
         self._check_graphql_errors(result)
-        return self._parse(CreateEnvironment, result["data"], "create_environment")
+        return self._parse(CreateEnvironment, result["data"], "create_environment", CreateEnvironmentCreateEnvironment)
 
     async def list(self) -> list[ListEnvironmentsEnvironments]:
         result = await self._transport.execute(load_query("list_environments"))
@@ -59,7 +59,7 @@ class EnvironmentResource(BaseResource):
             variables["clusterName"] = cluster_name
         result = await self._transport.execute(load_query("get_environment"), variables)
         self._check_graphql_errors(result)
-        return self._parse(GetEnvironment, result["data"], "environment")
+        return self._parse(GetEnvironment, result["data"], "environment", GetEnvironmentEnvironment)
 
     async def delete(
         self,

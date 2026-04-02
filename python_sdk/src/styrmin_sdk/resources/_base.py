@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
+
+from pydantic import BaseModel
 
 from styrmin_sdk.exceptions import OperationFailedError, ResourceAlreadyExistsError, ResourceNotFoundError
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
-
     from styrmin_sdk._transport import Transport
 
 type JsonValue = dict[str, JsonValue] | list[JsonValue] | str | int | float | bool | None
+
+_T = TypeVar("_T", bound=BaseModel)
 
 
 @dataclass
@@ -20,7 +22,7 @@ class BaseResource:
     _transport: Transport = field(repr=False)
 
     @staticmethod
-    def _parse(outer_type: type[BaseModel], data: dict[str, Any], field_name: str) -> Any:  # noqa: ANN401
+    def _parse(outer_type: type[BaseModel], data: dict[str, Any], field_name: str, inner_type: type[_T]) -> _T:
         """Validate data with the generated outer wrapper type and extract the inner field.
 
         The generated outer types have Optional inner fields (because GraphQL allows
@@ -28,9 +30,9 @@ class BaseResource:
         """
         validated = outer_type.model_validate(data)
         result = getattr(validated, field_name)
-        if result is None:
-            msg = f"Expected non-null '{field_name}' in {outer_type.__name__}"
-            raise ValueError(msg)
+        if not isinstance(result, inner_type):
+            msg = f"Expected '{inner_type.__name__}' for '{field_name}' in {outer_type.__name__}, got {type(result).__name__}"
+            raise TypeError(msg)
         return result
 
     @staticmethod

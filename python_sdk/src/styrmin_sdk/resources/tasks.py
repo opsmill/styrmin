@@ -20,4 +20,4 @@ class TaskResource(BaseResource):
     async def get(self, task_id: str | UUID) -> GetTaskTask:
         result = await self._transport.execute(load_query("get_task"), {"taskId": str(task_id)})
         self._check_graphql_errors(result)
-        return self._parse(GetTask, result["data"], "task")
+        return self._parse(GetTask, result["data"], "task", GetTaskTask)
