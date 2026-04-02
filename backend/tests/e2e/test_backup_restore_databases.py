@@ -93,9 +93,9 @@ async def test_mariadb_mongodb_backup_and_restore_lifecycle(
             pre_backup_mongodb = mongodb_resp.json()["counter"]  # 6
 
     # 2. Create backup via SDK, wait for completion
-    backup = await client.backups.create_backup(instance_id=instance_id)
-    assert backup.status == "pending"
-    backup = await client.backups.wait_for_backup(backup.id, max_wait=300)
+    created_backup = await client.backups.create_backup(instance_id=instance_id)
+    assert created_backup.status == "pending"
+    backup = await client.backups.wait_for_backup(created_backup.id, max_wait=300)
     assert backup.status == "completed"
 
     # 3. Write more data (counters go higher)
@@ -110,11 +110,11 @@ async def test_mariadb_mongodb_backup_and_restore_lifecycle(
                 )
 
     # 4. Restore from backup via SDK (same namespace, existingResourcePolicy=update)
-    restore = await client.backups.create_restore(
+    created_restore = await client.backups.create_restore(
         backup_id=backup.id, target_namespace=namespace
     )
-    assert restore.status == "pending"
-    restore = await client.backups.wait_for_restore(restore.id, max_wait=300)
+    assert created_restore.status == "pending"
+    restore = await client.backups.wait_for_restore(created_restore.id, max_wait=300)
     assert restore.status == "completed"
 
     # 5. Wait for pods to recover, verify data restored
