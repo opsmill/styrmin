@@ -531,6 +531,7 @@ class Client(AsyncBaseClient):
                 id
                 name
                 config
+                capabilities
               }
             }
             """)
@@ -620,6 +621,7 @@ class Client(AsyncBaseClient):
                 id
                 name
                 config
+                capabilities
                 cluster {
                   id
                   name

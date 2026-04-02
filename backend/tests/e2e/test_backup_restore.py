@@ -134,11 +134,16 @@ async def test_backup_and_restore_lifecycle(
     # Verify environment exposes backup capability (BSL was assigned in styrmin_resources)
     environment = await client.environments.get(environment_id=environment_id)
     assert environment.capabilities is not None, "Environment should have capabilities"
-    assert "backup" in environment.capabilities, "Environment should have backup capability"
-    assert "velero" in environment.capabilities["backup"], "Environment should have velero backup provider"
-    assert environment.capabilities["backup"]["velero"]["storage_location"] == styrmin_resources["bsl_name"], (
-        f"Backup storage_location should be '{styrmin_resources['bsl_name']}'"
+    assert "backup" in environment.capabilities, (
+        "Environment should have backup capability"
     )
+    assert "velero" in environment.capabilities["backup"], (
+        "Environment should have velero backup provider"
+    )
+    assert (
+        environment.capabilities["backup"]["velero"]["storage_location"]
+        == styrmin_resources["bsl_name"]
+    ), f"Backup storage_location should be '{styrmin_resources['bsl_name']}'"
 
     # 1. Write test data (increment counter N times)
     async with portforward_simple_app(kubeconfig_path, namespace) as port:
