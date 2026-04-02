@@ -37,10 +37,12 @@ async def test_deploy_with_dedicated_ingress(
     cluster = await client.clusters.get(cluster_id=cluster_id)
     assert cluster.capabilities is not None, "Cluster should have capabilities"
     assert "ingress" in cluster.capabilities, "Cluster should have ingress capability"
-    assert "external" in cluster.capabilities["ingress"], "Cluster should have external ingress"
-    assert cluster.capabilities["ingress"]["external"]["fqdn_suffix"] == "styrmin.com", (
-        "Cluster ingress fqdn_suffix should be 'styrmin.com'"
+    assert "external" in cluster.capabilities["ingress"], (
+        "Cluster should have external ingress"
     )
+    assert (
+        cluster.capabilities["ingress"]["external"]["fqdn_suffix"] == "styrmin.com"
+    ), "Cluster ingress fqdn_suffix should be 'styrmin.com'"
 
     # Deploy simple-app
     task = await client.deployments.create(
