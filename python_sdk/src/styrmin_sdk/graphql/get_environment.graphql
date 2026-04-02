@@ -3,6 +3,7 @@ query GetEnvironment($environmentId: UUID, $environmentName: String, $clusterId:
         id
         name
         config
+        capabilities
         cluster {
             id
             name

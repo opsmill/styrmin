@@ -16,7 +16,6 @@ from styrmin_backend.context.models.capabilities import (
     capabilities_to_dict,
 )
 from styrmin_backend.context.models.config import (
-    BaseConfigSection,
     ClusterConfig,
     EnvironmentConfig,
 )
@@ -24,7 +23,7 @@ from styrmin_backend.db.models import Cluster, Environment
 
 
 def _derive_ingress(
-    config: BaseConfigSection,
+    config: ClusterConfig | EnvironmentConfig,
 ) -> dict[str, IngressCapabilityDetail] | None:
     """Derive ingress capability from config if both ingress and fqdn_suffix are present."""
     has_ingress = (

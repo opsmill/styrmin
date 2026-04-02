@@ -15,6 +15,7 @@ class GetClusterCluster(BaseModel):
     id: UUID
     name: str
     config: Any
+    capabilities: Any
 
 
 GetCluster.model_rebuild()
