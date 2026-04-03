@@ -160,3 +160,55 @@ jobs:
         run: |
           cosign sign --yes \
             "${{ vars.HARBOR_HOST }}/opsmill/styrmin@${{ needs.merge.outputs.digest }}"
+
+  sbom:
+    needs: merge
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.1
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0.24.0
+
+      - name: Login to Harbor
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ vars.HARBOR_HOST }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Generate SBOM (SPDX)
+        run: |
+          syft \
+            "${{ vars.HARBOR_HOST }}/opsmill/styrmin@${{ needs.merge.outputs.digest }}" \
+            --output spdx-json=styrmin-sbom.spdx.json
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          syft \
+            "${{ vars.HARBOR_HOST }}/opsmill/styrmin@${{ needs.merge.outputs.digest }}" \
+            --output cyclonedx-json=styrmin-sbom.cdx.json
+
+      - name: Attest SBOM (SPDX)
+        run: |
+          cosign attest --yes \
+            --type spdxjson \
+            --predicate styrmin-sbom.spdx.json \
+            "${{ vars.HARBOR_HOST }}/opsmill/styrmin@${{ needs.merge.outputs.digest }}"
+
+      - name: Attest SBOM (CycloneDX)
+        run: |
+          cosign attest --yes \
+            --type cyclonedx \
+            --predicate styrmin-sbom.cdx.json \
+            "${{ vars.HARBOR_HOST }}/opsmill/styrmin@${{ needs.merge.outputs.digest }}"
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: |
+            styrmin-sbom.spdx.json
+            styrmin-sbom.cdx.json
+          retention-days: 90
