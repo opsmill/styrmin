@@ -109,6 +109,6 @@ class Environment:
             id=instance.id,
             name=instance.name,
             instance=instance,
-            config=instance.config,
-            capabilities=instance.capabilities,
+            config=instance.config or {},
+            capabilities=instance.capabilities or {},
         )

@@ -252,7 +252,7 @@ async def test_infrahub_backup_and_restore_lifecycle(
 
         # Verify the tag exists
         retrieved = await infrahub_client.get(kind="BuiltinTag", name__value=tag_name)
-        assert retrieved.name.value == tag_name
+        assert retrieved.name.value == tag_name  # type: ignore[union-attr]
 
     # 2. Create backup via Styrmin SDK, wait for completion
     created_backup = await client.backups.create_backup(instance_id=instance_id)
@@ -279,7 +279,7 @@ async def test_infrahub_backup_and_restore_lifecycle(
 
         # Verify the tag is gone
         tags = await infrahub_client.all(kind="BuiltinTag")
-        assert all(t.name.value != tag_name for t in tags)
+        assert all(t.name.value != tag_name for t in tags)  # type: ignore[union-attr]
 
     # 4. Restore from backup
     created_restore = await client.backups.create_restore(
@@ -300,7 +300,7 @@ async def test_infrahub_backup_and_restore_lifecycle(
         restored_tag = await infrahub_client.get(
             kind="BuiltinTag", name__value=tag_name
         )
-        assert restored_tag.name.value == tag_name
+        assert restored_tag.name.value == tag_name  # type: ignore[union-attr]
 
     # 7. Delete backup and verify deletion
     await client.backups.delete_backup(backup.id)
