@@ -36,11 +36,9 @@ def workflow_executor_mock(mocker):
     def get_fake_workflow_executor() -> StyrminWorkflowExecutor:
         return workflow_mock
 
-    dependency_provider.dependency_overrides[get_workflow_executor] = (
-        get_fake_workflow_executor
-    )
+    dependency_provider.override(get_workflow_executor, get_fake_workflow_executor)
     yield workflow_mock
-    dependency_provider.dependency_overrides.clear()
+    dependency_provider.clear()
 
 
 @pytest.fixture
@@ -50,9 +48,9 @@ def prefect_manager_mock(mocker):
     def get_fake_manager(catalogue=None, workflow_executor=None) -> PrefectManager:
         return manager_mock
 
-    dependency_provider.dependency_overrides[get_manager] = get_fake_manager
+    dependency_provider.override(get_manager, get_fake_manager)
     yield manager_mock
-    dependency_provider.dependency_overrides.clear()
+    dependency_provider.clear()
 
 
 @pytest.fixture
