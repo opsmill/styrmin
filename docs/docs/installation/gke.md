@@ -4,15 +4,15 @@ sidebar_position: 3
 description: Install Styrmin on Google Kubernetes Engine (GKE).
 ---
 
-# Google GKE
+## Google GKE
 
 This guide walks through installing Styrmin on a Google Kubernetes Engine (GKE) cluster.
 
 Before you begin, ensure you have completed the [common prerequisites](./prerequisites.md).
 
-## GKE-Specific Prerequisites
+### GKE-Specific Prerequisites
 
-### Google Cloud CLI
+#### Google Cloud CLI
 
 Install the `gcloud` CLI following the [official documentation](https://cloud.google.com/sdk/docs/install).
 
@@ -23,7 +23,7 @@ gcloud version
 gcloud auth login
 ```
 
-### GCP Project
+#### GCP Project
 
 You need a GCP project with billing enabled. Set your project:
 
@@ -31,7 +31,7 @@ You need a GCP project with billing enabled. Set your project:
 gcloud config set project YOUR_PROJECT_ID
 ```
 
-### Required APIs
+#### Required APIs
 
 Enable the necessary Google Cloud APIs:
 
@@ -40,7 +40,7 @@ gcloud services enable container.googleapis.com
 gcloud services enable compute.googleapis.com
 ```
 
-## Create a GKE Cluster
+### Create a GKE Cluster
 
 If you do not already have a GKE cluster, create one:
 
@@ -63,7 +63,7 @@ gcloud container clusters describe styrmin-cluster \
   --format="value(status)"
 ```
 
-## Configure kubectl
+### Configure kubectl
 
 Fetch credentials for your GKE cluster so `kubectl` can connect to it:
 
@@ -80,11 +80,11 @@ kubectl get nodes
 
 You should see your three nodes in `Ready` status.
 
-## Install an Ingress Controller
+### Install an Ingress Controller
 
 GKE provides a built-in ingress controller through the GCE Ingress. However, for consistency with Styrmin's defaults, NGINX Ingress is recommended.
 
-### Option A: NGINX Ingress via Helm (Recommended)
+#### Option A: NGINX Ingress via Helm (Recommended)
 
 ```bash
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
@@ -105,19 +105,19 @@ kubectl get svc ingress-nginx-controller \
 
 Note the `EXTERNAL-IP` value -- you will need it to configure DNS or access Styrmin.
 
-### Option B: GKE Built-in GCE Ingress
+#### Option B: GKE Built-in GCE Ingress
 
 If you prefer the native GCE Ingress, no additional installation is needed. GKE automatically provisions a Google Cloud Load Balancer when you create an `Ingress` resource with the `kubernetes.io/ingress.class: gce` annotation. Adjust your Styrmin Helm values accordingly if you choose this option.
 
-## Install Styrmin
+### Install Styrmin
 
-### Create the Namespace
+#### Create the Namespace
 
 ```bash
 kubectl create namespace styrmin
 ```
 
-### Prepare Helm Values
+#### Prepare Helm Values
 
 Create a `values.yaml` file with your configuration:
 
@@ -143,7 +143,7 @@ ingress:
 
 Replace `styrmin.example.com` with your actual domain. If you are not using TLS, remove the `tls` and `cert-manager` sections.
 
-### Install the Chart
+#### Install the Chart
 
 ```bash
 helm install styrmin oci://registry.opsmill.io/opsmill/chart/styrmin \
@@ -154,9 +154,9 @@ helm install styrmin oci://registry.opsmill.io/opsmill/chart/styrmin \
 
 The `--wait` flag ensures the command blocks until all resources are ready.
 
-## Verify Installation
+### Verify Installation
 
-### Check Pod Status
+#### Check Pod Status
 
 All pods should be in `Running` status:
 
@@ -166,20 +166,20 @@ kubectl get pods --namespace styrmin
 
 Expected output (pod names will vary):
 
-```
+```text
 NAME                                READY   STATUS    RESTARTS   AGE
 styrmin-backend-5d4f7b8c9-xk2lp    1/1     Running   0          2m
 styrmin-frontend-7f6a9d3e1-mv8qr   1/1     Running   0          2m
 styrmin-postgresql-0                1/1     Running   0          2m
 ```
 
-### Check Services
+#### Check Services
 
 ```bash
 kubectl get svc --namespace styrmin
 ```
 
-### Check Ingress
+#### Check Ingress
 
 Verify the ingress resource has been created and assigned an address:
 
@@ -187,11 +187,11 @@ Verify the ingress resource has been created and assigned an address:
 kubectl get ingress --namespace styrmin
 ```
 
-### Access the UI
+#### Access the UI
 
 If you configured a domain, point your DNS record to the ingress external IP and open your browser to:
 
-```
+```text
 https://styrmin.example.com
 ```
 
@@ -203,9 +203,9 @@ kubectl port-forward svc/styrmin-frontend 8080:80 --namespace styrmin
 
 Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
-## Troubleshooting
+### Troubleshooting
 
-### Pods Not Starting
+#### Pods Not Starting
 
 Check pod events for errors:
 
@@ -213,7 +213,7 @@ Check pod events for errors:
 kubectl describe pod -l app.kubernetes.io/instance=styrmin --namespace styrmin
 ```
 
-### Ingress Not Getting an External IP
+#### Ingress Not Getting an External IP
 
 Verify the ingress controller is running:
 
@@ -223,7 +223,7 @@ kubectl get pods --namespace ingress-nginx
 
 If using GCE Ingress, check that the backend services are healthy in the Google Cloud Console under **Network services > Load balancing**.
 
-### Insufficient Permissions
+#### Insufficient Permissions
 
 If you encounter RBAC errors, ensure your GCP user has the `container.admin` role:
 
@@ -233,7 +233,7 @@ gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
   --role="roles/container.admin"
 ```
 
-## Next Steps
+### Next Steps
 
 - Learn about [Application Drivers](../drivers/what-is-a-driver.md) to deploy your first application
 - Read the [Platform Overview](../getting-started/overview.md) for a deeper understanding of Styrmin's concepts

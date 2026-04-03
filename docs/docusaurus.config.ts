@@ -14,15 +14,7 @@ const config: Config = {
   url: 'https://opsmill.github.io',
   baseUrl: '/styrmin/',
 
-  organizationName: 'opsmill',
-  projectName: 'styrmin',
-
   onBrokenLinks: 'throw',
-
-  i18n: {
-    defaultLocale: 'en',
-    locales: ['en'],
-  },
 
   presets: [
     [
@@ -31,7 +23,6 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           editUrl: 'https://github.com/opsmill/styrmin/tree/develop/docs/',
-          routeBasePath: 'docs',
         },
         blog: false,
         theme: {
@@ -54,7 +45,7 @@ const config: Config = {
   ],
 
   themeConfig: {
-    image: 'img/styrmin-social-card.png',
+    image: 'img/docusaurus-social-card.jpg',
     colorMode: {
       respectPrefersColorScheme: true,
     },

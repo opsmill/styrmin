@@ -4,20 +4,20 @@ sidebar_position: 4
 description: A complete Application Driver example explained step by step.
 ---
 
-# Example Walkthrough: Simple App Driver
+## Example Walkthrough: Simple App Driver
 
 This walkthrough explains a complete, working Application Driver — the `simple-app` driver that deploys a 3-tier FastAPI application with PostgreSQL.
 
-## Directory Structure
+### Directory Structure
 
-```
+```text
 simple-app/
 ├── driver.styrmin.yml    # Driver specification (includes action declarations)
 ├── values.j2.yml         # Helm values template
 └── actions.py            # Action implementations
 ```
 
-## File 1: `driver.styrmin.yml`
+### File 1: `driver.styrmin.yml`
 
 ```yaml
 ---
@@ -79,7 +79,7 @@ spec:
       location: "actions.py::post_setup"
 ```
 
-### What this defines
+#### What this defines
 
 - **`metadata.name: simple-app`** — The driver is uniquely identified as "simple-app"
 - **`spec.version: "1"`** — This is version 1 of the driver
@@ -95,7 +95,7 @@ spec:
   - `pre_setup` — Runs before initial deployment
   - `post_setup` — Runs after initial deployment
 
-## File 2: `values.j2.yml`
+### File 2: `values.j2.yml`
 
 ```yaml
 fullnameOverride: styrmin-simple-app
@@ -145,7 +145,7 @@ postgresql:
         mountPath: /backup
 ```
 
-### What this does
+#### What this does
 
 - **`fullnameOverride: styrmin-simple-app`** — Sets the Kubernetes resource name prefix. This is required to avoid name-length issues.
 - **`image.tag: "{{ app.version }}"`** — Dynamically sets the container image tag to match the deployed application version.
@@ -154,7 +154,7 @@ postgresql:
 - **`database.host: styrmin-postgresql`** — References the PostgreSQL subchart by its `fullnameOverride`. This is critical — the hostname must match exactly.
 - **`postgresql.fullnameOverride: styrmin-postgresql`** — Sets the PostgreSQL service name. The `database.host` value above references this.
 
-## File 3: `actions.py`
+### File 3: `actions.py`
 
 ```python
 from styrmin_backend.actions import (
@@ -206,7 +206,7 @@ def post_setup(context: GlobalContext):
     logger.info("Executing simple-app post-setup...")
 ```
 
-### How the upgrade works
+#### How the upgrade works
 
 The `upgrade` function demonstrates a typical zero-downtime upgrade pattern:
 
@@ -218,7 +218,7 @@ The `upgrade` function demonstrates a typical zero-downtime upgrade pattern:
 
 The `pre_setup` and `post_setup` functions are placeholders in this example — they log messages but don't perform additional operations. In a real driver, these might initialize databases, create API keys, or configure external services.
 
-## Summary
+### Summary
 
 This driver demonstrates all the key features of Application Drivers:
 

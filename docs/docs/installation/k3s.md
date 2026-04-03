@@ -4,11 +4,11 @@ sidebar_position: 5
 description: Install Styrmin on k3s, a lightweight Kubernetes distribution.
 ---
 
-# Install Styrmin on k3s
+## Install Styrmin on k3s
 
 k3s is the fastest way to get a Kubernetes cluster running. This guide walks you through installing k3s on a single Linux node and deploying Styrmin on top of it.
 
-## Prerequisites
+### Prerequisites
 
 - A Linux host (x86_64 or arm64) with at least **4 CPU cores** and **8 GB of RAM**
 - Root or `sudo` access
@@ -17,7 +17,7 @@ k3s is the fastest way to get a Kubernetes cluster running. This guide walks you
 
 Ensure `helm` is installed on the host. See the [Prerequisites](./prerequisites.md) page for installation instructions.
 
-## Install k3s
+### Install k3s
 
 Install k3s as a single-node cluster. The command below disables the built-in Traefik ingress controller so we can install NGINX Ingress instead:
 
@@ -33,7 +33,7 @@ sudo k3s kubectl get nodes
 
 You should see your node with status `Ready`.
 
-## Configure kubectl
+### Configure kubectl
 
 k3s writes its kubeconfig to `/etc/rancher/k3s/k3s.yaml`. Export it so `kubectl` and `helm` can find it:
 
@@ -55,7 +55,7 @@ kubectl cluster-info
 kubectl get nodes
 ```
 
-## Install an Ingress Controller
+### Install an Ingress Controller
 
 Since we disabled Traefik, install the NGINX Ingress Controller via Helm:
 
@@ -78,7 +78,7 @@ kubectl wait --namespace ingress-nginx \
   --timeout=120s
 ```
 
-## Install Styrmin
+### Install Styrmin
 
 Create a dedicated namespace and install the Styrmin Helm chart:
 
@@ -112,7 +112,7 @@ helm install styrmin oci://registry.opsmill.io/opsmill/chart/styrmin \
 Replace `styrmin.local` with your actual hostname or IP address. For local testing you can add an entry to `/etc/hosts` pointing `styrmin.local` to your node's IP.
 :::
 
-## Verify Installation
+### Verify Installation
 
 Check that all pods are running:
 
@@ -136,7 +136,7 @@ kubectl get ingress -n styrmin
 
 Once everything is healthy, open the Styrmin UI in your browser at `http://styrmin.local` (or whatever hostname you configured).
 
-## Next Steps
+### Next Steps
 
 - Learn about [Application Drivers](../drivers/what-is-a-driver.md) to deploy your first application
 - Read the [Platform Overview](../getting-started/overview.md) for a deeper understanding of Styrmin's concepts

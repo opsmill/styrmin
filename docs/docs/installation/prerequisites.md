@@ -4,11 +4,11 @@ sidebar_position: 1
 description: Common prerequisites for installing Styrmin on any Kubernetes platform.
 ---
 
-# Prerequisites
+## Prerequisites
 
 Before installing Styrmin, ensure your environment meets the following requirements.
 
-## Required Tools
+### Required Tools
 
 | Tool | Minimum Version | Purpose |
 |------|----------------|---------|
@@ -16,7 +16,7 @@ Before installing Styrmin, ensure your environment meets the following requireme
 | `helm` | v3.12+ | Helm chart installation |
 | Kubernetes cluster | v1.28+ | Target deployment platform |
 
-### kubectl
+#### kubectl
 
 Install `kubectl` following the [official Kubernetes documentation](https://kubernetes.io/docs/tasks/tools/).
 
@@ -26,7 +26,7 @@ Verify your installation:
 kubectl version --client
 ```
 
-### Helm
+#### Helm
 
 Install Helm v3 following the [official Helm documentation](https://helm.sh/docs/intro/install/).
 
@@ -36,9 +36,9 @@ Verify your installation:
 helm version
 ```
 
-## Cluster Requirements
+### Cluster Requirements
 
-### Minimum Resources
+#### Minimum Resources
 
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
@@ -46,13 +46,13 @@ helm version
 | Memory | 8 GB | 16 GB |
 | Storage | 20 GB | 50 GB |
 
-### Required Cluster Features
+#### Required Cluster Features
 
 - **Ingress controller** — An ingress controller must be installed and configured (e.g., NGINX Ingress, Traefik, AWS ALB Controller)
 - **Storage class** — At least one storage class must be available for persistent volumes
 - **DNS resolution** — CoreDNS or equivalent must be running for in-cluster service discovery
 
-### Network Access
+#### Network Access
 
 The cluster must have outbound internet access to:
 
@@ -60,7 +60,7 @@ The cluster must have outbound internet access to:
 - Download Helm charts from chart repositories
 - Clone driver repositories from Git
 
-## Cluster Access
+### Cluster Access
 
 You must have cluster-admin access or equivalent permissions to:
 
@@ -76,7 +76,7 @@ kubectl auth can-i create namespaces --all-namespaces
 # Expected output: yes
 ```
 
-## Next Steps
+### Next Steps
 
 Once your prerequisites are met, follow the installation guide for your Kubernetes platform:
 

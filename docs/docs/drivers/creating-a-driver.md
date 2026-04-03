@@ -4,17 +4,17 @@ sidebar_position: 2
 description: Step-by-step guide to creating a new Application Driver for Styrmin.
 ---
 
-# Creating a Driver
+## Creating a Driver
 
 This guide walks you through creating an Application Driver from scratch. By the end, you'll have a fully functional driver that can deploy an application through Styrmin.
 
-## Prerequisites
+### Prerequisites
 
 - A running Styrmin instance (see [Installation guides](../category/installation))
 - A Helm chart for the application you want to deploy
 - Basic familiarity with YAML and Jinja2 templates
 
-## Step 1: Create the Driver Directory
+### Step 1: Create the Driver Directory
 
 Create a new directory for your driver:
 
@@ -23,7 +23,7 @@ mkdir my-app-driver
 cd my-app-driver
 ```
 
-## Step 2: Write the Driver Specification
+### Step 2: Write the Driver Specification
 
 Create `driver.styrmin.yml` — the single specification file that defines everything about your driver:
 
@@ -57,7 +57,7 @@ spec:
       component: server
 ```
 
-### Key Fields
+#### Key Fields
 
 - **`metadata.name`** — Unique name for your driver
 - **`spec.version`** — Version of the driver itself (not the application)
@@ -67,7 +67,7 @@ spec:
 - **`spec.components`** — Define the manageable parts of your application
 - **`spec.services`** — Declare network services the application exposes
 
-## Step 3: Define Services
+### Step 3: Define Services
 
 Services declare network endpoints so Styrmin can compute FQDNs for ingress and service discovery:
 
@@ -82,7 +82,7 @@ services:
 
 The computed FQDNs are available in your values template as `{{ services['my-app'].primary_fqdn }}`.
 
-## Step 4: Define Parameters (Optional)
+### Step 4: Define Parameters (Optional)
 
 Parameters allow users to customize deployments without modifying the driver:
 
@@ -102,7 +102,7 @@ Supported parameter types: `string`, `integer`, `boolean`, `enum`. For `enum`, p
 
 Parameters are available in your values template as `{{ parameters.docker_image }}`.
 
-## Step 5: Create the Values Template
+### Step 5: Create the Values Template
 
 Create `values.j2.yml` — a Jinja2 template that generates Helm values:
 
@@ -131,7 +131,7 @@ resources:
     memory: 2Gi
 ```
 
-### Important: `fullnameOverride`
+#### Important: `fullnameOverride`
 
 Every values template **must** set `fullnameOverride` using the pattern `styrmin-<name>`. This prevents Kubernetes resource name conflicts caused by Helm's default naming, which combines the release name with the chart name and can exceed the 63-character limit.
 
@@ -146,7 +146,7 @@ redis:
   fullnameOverride: styrmin-redis
 ```
 
-### Available Template Variables
+#### Available Template Variables
 
 The template has access to these context variables:
 
@@ -163,7 +163,7 @@ The template has access to these context variables:
 
 See the [Specification Reference](./specification.md#context-variables) for the complete list.
 
-## Step 6: Add Lifecycle Actions (Optional)
+### Step 6: Add Lifecycle Actions (Optional)
 
 If your application needs custom logic during setup or upgrades, declare actions inline in `driver.styrmin.yml`:
 
@@ -214,7 +214,7 @@ async def upgrade(context: GlobalContext, target_version: str):
     logger.info("Upgrade complete.")
 ```
 
-### Hooks and Modes
+#### Hooks and Modes
 
 | Hook | When it runs |
 |------|-------------|
@@ -227,7 +227,7 @@ async def upgrade(context: GlobalContext, target_version: str):
 | `core` | Replaces the default operation |
 | `post` | After the core operation |
 
-## Step 7: Register the Driver
+### Step 7: Register the Driver
 
 Load your driver into Styrmin by pointing it at your driver's Git repository:
 
@@ -237,16 +237,16 @@ styrmin driver load --repo https://github.com/my-org/my-app-driver --branch main
 
 Styrmin will clone the repository, validate the driver specification, and register it for use.
 
-## Final Directory Structure
+### Final Directory Structure
 
-```
+```text
 my-app-driver/
 ├── driver.styrmin.yml    # Driver specification (includes action declarations)
 ├── values.j2.yml         # Helm values template
 └── actions.py            # Action implementations (optional)
 ```
 
-## Next Steps
+### Next Steps
 
 - Review the [Specification Reference](./specification.md) for all available fields
 - See a [complete example](./example-walkthrough.md) of a working driver

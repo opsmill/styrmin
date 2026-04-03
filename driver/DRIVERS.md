@@ -58,7 +58,7 @@ spec:
   parameters:              # Optional configurable parameters
     - name: <string>
       label: <string>
-      kind: <string>       # string, integer, float, boolean
+      kind: <string>       # string, integer, boolean, enum
       default: <any>
   services:                # Optional service definitions
     - name: <string>
@@ -190,6 +190,9 @@ The template receives a context object with the following structure:
 | `instance.release_reference` | `str` | Helm release name |
 | `instance.deployment_id` | `UUID` | Unique deployment identifier |
 | `instance.config.*` | various | Resolved configuration (merged from cluster, environment, deployment) |
+| `parameters.*` | various | User-provided parameter values (e.g., `parameters.docker_image`) |
+| `services['<name>'].primary_fqdn` | `str` | Primary FQDN for a named service |
+| `services['<name>'].human_readable_fqdn` | `str` | Human-readable FQDN for display |
 
 ### Naming Convention (`fullnameOverride`)
 
@@ -310,24 +313,24 @@ Actions are implemented as Python functions decorated with Prefect's `@flow` dec
 ```python
 from styrmin_backend.actions import stop_components, start_components, execute_commands, GlobalContext
 from prefect import flow, get_run_logger
-from uuid import UUID
 
 @flow
-async def upgrade(deployment_id: UUID, target_version: str):
+async def upgrade(context: GlobalContext, target_version: str):
     logger = get_run_logger()
     logger.info("Executing upgrade...")
 
     # Stop components before upgrade
-    await stop_components(components=["server", "task-worker"], deployment_id=deployment_id)
+    await stop_components(components=["server", "task-worker"], context=context)
 
     # Run migration commands
     await execute_commands(
         ["sh", "-c", "infrahub db migrate && infrahub db update-core-schema"],
         image=f"opsmill/infrahub:{target_version}",
+        context=context,
     )
 
     # Restart components
-    await start_components(components=["server", "task-worker"], deployment_id=deployment_id)
+    await start_components(components=["server", "task-worker"], context=context)
 
 @flow
 def pre_setup(context: GlobalContext):
@@ -375,13 +378,22 @@ await start_components(components: list[str], context: GlobalContext) -> None
 Executes shell commands as a Kubernetes job.
 
 ```python
-await execute_commands(commands: list[str], context: GlobalContext) -> None
+await execute_commands(
+    commands: list[str],
+    image: str,
+    context: GlobalContext,
+    env_from_component: str | None = None,
+    labels_from_component: str | None = None,
+) -> None
 ```
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `commands` | `list[str]` | Commands to execute (passed to container) |
+| `image` | `str` | Container image to use for the job |
 | `context` | `GlobalContext` | The global context object |
+| `env_from_component` | `str \| None` | Copy environment variables from this component |
+| `labels_from_component` | `str \| None` | Copy labels from this component |
 
 ## Components
 

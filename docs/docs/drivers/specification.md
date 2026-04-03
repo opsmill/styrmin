@@ -4,15 +4,15 @@ sidebar_position: 3
 description: Complete reference for all Application Driver fields, versioning, and lifecycle.
 ---
 
-# Driver Specification Reference
+## Driver Specification Reference
 
 This page documents all fields available in Application Driver files.
 
-## Driver Specification (`driver.styrmin.yml`)
+### Driver Specification (`driver.styrmin.yml`)
 
 The specification file defines the driver metadata, supported versions, Helm chart location, component definitions, service declarations, parameters, and actions — all in a single file.
 
-### Schema
+#### Schema
 
 ```yaml
 apiVersion: "styrmin.io/v1"
@@ -63,7 +63,7 @@ spec:
       image: <string>          # Optional container image
 ```
 
-### Required Fields
+#### Required Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -75,7 +75,7 @@ spec:
 | `spec.helm.main.location` | string | Helm chart location — OCI or HTTP URL |
 | `spec.helm.main.version` | string | Helm chart version |
 
-### Optional Fields
+#### Optional Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -92,11 +92,11 @@ spec:
 
 ---
 
-## Helm Values Template (`values.j2.yml`)
+### Helm Values Template (`values.j2.yml`)
 
 A Jinja2 template that generates Helm values for the deployment. The template receives a rich context object at render time.
 
-### Context Variables
+#### Context Variables
 
 | Variable | Type | Description |
 |----------|------|-------------|
@@ -121,7 +121,7 @@ A Jinja2 template that generates Helm values for the deployment. The template re
 | `services['<name>'].primary_fqdn` | `str` | Primary FQDN for a named service |
 | `services['<name>'].human_readable_fqdn` | `str` | Human-readable FQDN for display |
 
-### `fullnameOverride` Convention
+#### `fullnameOverride` Convention
 
 Every `values.j2.yml` **must** set `fullnameOverride` for the main chart and all subcharts:
 
@@ -151,11 +151,11 @@ env:
 
 ---
 
-## Components
+### Components
 
 Components define the independently manageable parts of an application. Each component must have a label selector that matches Kubernetes resources.
 
-### Schema
+#### Schema
 
 ```yaml
 components:
@@ -174,14 +174,14 @@ components:
       credentials_secret: <string>  # Kubernetes secret name (optional)
 ```
 
-### How Components Work
+#### How Components Work
 
 1. The `identifier.label` is used to select Kubernetes resources (Deployments, StatefulSets, etc.)
 2. `stop_components` scales down matching resources to zero replicas
 3. `start_components` scales them back up to the original replica count
 4. Component names in action primitives must match the names in the driver spec
 
-### Example
+#### Example
 
 ```yaml
 components:
@@ -204,7 +204,7 @@ components:
       database_name: my_app
 ```
 
-### Backup Configuration
+#### Backup Configuration
 
 Components can declare backup configurations. The `kind` field determines the backup strategy:
 
@@ -219,11 +219,11 @@ Components can declare backup configurations. The `kind` field determines the ba
 
 ---
 
-## Parameters
+### Parameters
 
 Parameters allow drivers to declare typed configuration values that users provide when deploying an application. Parameters are accessible in the values template via `{{ parameters.<name> }}`.
 
-### Schema
+#### Schema
 
 ```yaml
 parameters:
@@ -234,7 +234,7 @@ parameters:
     values: [<string>]         # Allowed values (required for enum kind only)
 ```
 
-### Supported Types
+#### Supported Types
 
 | Kind | Type | Notes |
 |------|------|-------|
@@ -243,7 +243,7 @@ parameters:
 | `boolean` | `bool` | Strict boolean type |
 | `enum` | `str` | Requires a non-empty `values` list; default must be in the list |
 
-### Example
+#### Example
 
 ```yaml
 parameters:
@@ -266,7 +266,7 @@ parameters:
     values: ["debug", "info", "warning", "error"]
 ```
 
-### Validation Rules
+#### Validation Rules
 
 - Parameter names must be unique within a driver
 - For `enum` kind, the `values` list must be non-empty
@@ -276,11 +276,11 @@ parameters:
 
 ---
 
-## Services
+### Services
 
 Services define network endpoints exposed by the application. Styrmin uses service definitions to compute FQDNs for ingress and service discovery.
 
-### Schema
+#### Schema
 
 ```yaml
 services:
@@ -291,14 +291,14 @@ services:
     component: <string>        # Associated component name (required)
 ```
 
-### Validation Rules
+#### Validation Rules
 
 - Service names must be unique within a driver
 - Service names must be valid DNS labels (lowercase alphanumeric and hyphens, max 63 characters)
 - The `component` field must reference a component defined in the driver
 - Port must be in the range 1-65535
 
-### Template Access
+#### Template Access
 
 The `services` context variable in templates provides access to computed FQDNs:
 
@@ -310,16 +310,17 @@ ingress:
 ```
 
 Each service exposes:
+
 - `primary_fqdn` — Primary FQDN for the service
 - `human_readable_fqdn` — Human-readable FQDN for display purposes
 
 ---
 
-## Actions
+### Actions
 
 Actions define custom logic that executes during application lifecycle events. Actions are declared inline in `driver.styrmin.yml` under `spec.actions` and implemented in `actions.py`.
 
-### Action Declaration
+#### Action Declaration
 
 ```yaml
 spec:
@@ -333,14 +334,14 @@ spec:
       image: <string>          # Optional container image
 ```
 
-### Hooks
+#### Hooks
 
 | Hook | Description |
 |------|-------------|
 | `setup` | Runs during initial application deployment |
 | `upgrade` | Runs during application version upgrades |
 
-### Modes
+#### Modes
 
 | Mode | Description |
 |------|-------------|
@@ -348,11 +349,11 @@ spec:
 | `core` | Replaces the default operation |
 | `post` | Runs after the core operation |
 
-### Action Primitives
+#### Action Primitives
 
 These functions are available in action implementations:
 
-#### `stop_components`
+##### `stop_components`
 
 Scales down specified components to zero replicas.
 
@@ -360,7 +361,7 @@ Scales down specified components to zero replicas.
 await stop_components(components: list[str], context: GlobalContext) -> None
 ```
 
-#### `start_components`
+##### `start_components`
 
 Scales up specified components to their original replica count.
 
@@ -368,7 +369,7 @@ Scales up specified components to their original replica count.
 await start_components(components: list[str], context: GlobalContext) -> None
 ```
 
-#### `execute_commands`
+##### `execute_commands`
 
 Runs commands in a Kubernetes job.
 
@@ -382,7 +383,7 @@ await execute_commands(
 ) -> None
 ```
 
-#### `upgrade_deployment_version`
+##### `upgrade_deployment_version`
 
 Updates the deployment to target a new application version.
 
@@ -390,7 +391,7 @@ Updates the deployment to target a new application version.
 await upgrade_deployment_version(target_version: str, context: GlobalContext) -> None
 ```
 
-#### `get_component_images`
+##### `get_component_images`
 
 Retrieves container images used by a component.
 
@@ -400,7 +401,7 @@ await get_component_images(component: str, context: GlobalContext) -> list[str]
 
 ---
 
-## Driver Loading
+### Driver Loading
 
 When Styrmin loads a driver from a Git repository, it:
 

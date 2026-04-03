@@ -224,7 +224,6 @@ at `specs/007-graphql-propagation-tests/plan.md`.
 
 - TypeScript (Docusaurus config), Markdown/MDX (content), Node.js 22+ + Docusaurus v3, `@easyops-ci/docusaurus-search-local`, pnpm (003-docs-site)
 - N/A (static site, no database) (003-docs-site)
-
 - TypeScript 5.9.3, Node 22 + React 19.2.4, `@tanstack/react-form` (new), `@tanstack/zod-form-adapter` (new), Zod 4.3.6, Radix UI, `@tanstack/react-query` v5 (001-tanstack-form-migration)
 - Python 3.14+ + Pydantic v2, PyYAML, Jinja2, Prefect (001-consolidate-driver-format)
 - Filesystem and Git (driver sources) — no database changes (001-consolidate-driver-format)

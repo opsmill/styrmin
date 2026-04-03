@@ -41,8 +41,7 @@ function HomepageHeader() {
           </Link>
           <Link
             className="button button--secondary button--lg"
-            to="/docs/category/installation"
-            style={{marginLeft: '1rem'}}>
+            to="/docs/category/installation">
             Install Styrmin
           </Link>
         </div>
@@ -61,8 +60,8 @@ export default function Home(): ReactNode {
         <section style={{padding: '2rem 0'}}>
           <div className="container">
             <div className="row">
-              {features.map((feature, idx) => (
-                <div key={idx} className="col col--4">
+              {features.map((feature) => (
+                <div key={feature.title} className="col col--4">
                   <div className="text--center padding-horiz--md" style={{padding: '1rem'}}>
                     <Heading as="h3">{feature.title}</Heading>
                     <p>{feature.description}</p>

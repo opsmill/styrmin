@@ -4,11 +4,11 @@ sidebar_position: 1
 description: Understand Application Drivers and their role in Styrmin deployments.
 ---
 
-# What is an Application Driver?
+## What is an Application Driver?
 
 An **Application Driver** is a versioned deployment specification that tells Styrmin everything it needs to know to deploy, configure, and manage an application on Kubernetes.
 
-## The Problem Drivers Solve
+### The Problem Drivers Solve
 
 Deploying applications on Kubernetes typically requires:
 
@@ -19,7 +19,7 @@ Deploying applications on Kubernetes typically requires:
 
 Application Drivers solve these problems by packaging all deployment logic into a single, versioned, reusable unit.
 
-## What's Inside a Driver
+### What's Inside a Driver
 
 A driver is a directory containing these files:
 
@@ -31,7 +31,7 @@ A driver is a directory containing these files:
 
 > \* Required if actions are declared in `driver.styrmin.yml`.
 
-## How Drivers Work
+### How Drivers Work
 
 When you deploy an application through Styrmin, the driver:
 
@@ -41,33 +41,33 @@ When you deploy an application through Styrmin, the driver:
 4. **Exposes services** — Service definitions declare network endpoints, and Styrmin computes FQDNs for ingress and service discovery
 5. **Executes lifecycle actions** — Optional hooks run custom logic during setup and upgrade workflows (e.g., database migrations, component restarts)
 
-## Key Concepts
+### Key Concepts
 
-### Declarative Specification
+#### Declarative Specification
 
 Drivers are declarative — you define _what_ should be deployed, and Styrmin figures out _how_. The platform compares desired state (from the driver) with current state (in the cluster) and reconciles any differences.
 
-### Version Compatibility
+#### Version Compatibility
 
 Each driver declares which application versions it supports using semver ranges (e.g., `>=1.1.5,<=1.2.0`). This ensures that a driver is only used with compatible application versions.
 
-### Dynamic Configuration
+#### Dynamic Configuration
 
 The Helm values template has access to rich context including cluster configuration, environment settings, deployment overrides, and user-provided parameters. This means the same driver can deploy an application differently across environments without duplication.
 
-### Parameters
+#### Parameters
 
 Drivers can declare typed configuration parameters (string, integer, boolean, enum) that users provide when deploying an application. Parameters are accessible in the values template via `{{ parameters.param_name }}`, enabling user customization without modifying the driver itself.
 
-### Service Discovery
+#### Service Discovery
 
 Drivers declare the network services an application exposes (HTTP, HTTPS, TCP, UDP). Styrmin uses these declarations to compute FQDNs automatically, which are then available in the values template for ingress and service-to-service configuration.
 
-### Component Management
+#### Component Management
 
 Components define the parts of an application that can be independently started, stopped, or scaled. Components can also declare backup configurations for data protection. During upgrades, Styrmin can stop specific components, run migrations, and restart them — all orchestrated by the driver's actions.
 
-## Next Steps
+### Next Steps
 
 - [Create a new driver](./creating-a-driver.md) — Step-by-step guide to building your first driver
 - [Specification reference](./specification.md) — Complete reference for all driver fields
