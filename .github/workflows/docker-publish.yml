@@ -32,12 +32,11 @@ permissions:
   id-token: write
   packages: write
 
-concurrency:
-  group: docker-publish-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build:
+    concurrency:
+      group: docker-build-${{ github.ref }}-${{ matrix.platform }}
+      cancel-in-progress: true
     strategy:
       fail-fast: true
       matrix:
@@ -45,7 +44,7 @@ jobs:
           - platform: linux/amd64
             runner: ubuntu-24.04
           - platform: linux/arm64
-            runner: ubuntu-24.04-arm64
+            runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
