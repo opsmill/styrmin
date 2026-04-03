@@ -134,7 +134,7 @@ jobs:
         run: |
           digest=$(docker buildx imagetools inspect \
             $(jq -cr '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            --format '{{.Manifest.Digest}}')
+            --format '{{.Digest}}')
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   sign:
