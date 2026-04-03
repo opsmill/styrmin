@@ -8,6 +8,7 @@ ignore: |
   /backend/tests/**/fixtures/
   **/*.j2.yaml
   **/*.j2.yml
+  /specs/
   /helm/**/*.yaml
   /.claude/worktrees/
   /.specify/extensions/

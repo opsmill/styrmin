@@ -7,8 +7,6 @@ from styrmin_backend.services.driver.deserializers import (
     get_deserializer,
 )
 from styrmin_backend.services.driver.exceptions import (
-    AmbiguousDriverFormatError,
-    DeprecatedDriverFormatError,
     DeserializationError,
     DriverDefinitionError,
     DriverLoadingError,
@@ -31,9 +29,6 @@ from styrmin_backend.services.driver.validators import (
     build_user_actions_validator,
     get_validator,
 )
-
-# Old format filenames for deprecation detection
-_OLD_FILENAMES = ("styrmin_driver.yaml", "actions.yaml", "chart_values.j2.yaml")
 
 
 class DriverLoader:
@@ -66,9 +61,6 @@ class DriverLoader:
             # Set the directory map to point to the cloned repository
             directory_map = self.directory_map_model(root_path=driver_dir)
 
-            # Check for format conflicts before loading
-            _check_driver_format(driver_dir, directory_map)
-
             # Load the resource files
             driver_spec = get_resource_file_loader(directory_map.driver_spec).load()
             values_template = get_resource_file_loader(
@@ -92,27 +84,6 @@ class DriverLoader:
                 if isinstance(values_template, str)
                 else "",
             )
-
-
-def _check_driver_format(driver_dir: Path, directory_map: DriverDirectory) -> None:
-    """Check for old-format files and raise appropriate errors.
-
-    Args:
-        driver_dir: The root path of the driver directory.
-        directory_map: The directory map with new-format file paths.
-
-    Raises:
-        AmbiguousDriverFormatError: If both old and new format files exist.
-        DeprecatedDriverFormatError: If only old format files exist.
-    """
-    new_spec_exists = directory_map.driver_spec.path.exists()
-    old_files_found = [f for f in _OLD_FILENAMES if (driver_dir / f).exists()]
-
-    if new_spec_exists and old_files_found:
-        raise AmbiguousDriverFormatError(conflicting_files=old_files_found)
-
-    if not new_spec_exists and old_files_found:
-        raise DeprecatedDriverFormatError(old_files=old_files_found)
 
 
 class ResourceFileLoader:

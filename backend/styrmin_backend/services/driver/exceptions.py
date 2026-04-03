@@ -34,39 +34,3 @@ class DriverLoadingError(DriverError):
 
 class MissingDriverSpecificationError(DriverError):
     """A piece of driver data is missing."""
-
-
-class DeprecatedDriverFormatError(DriverError):
-    """The driver directory uses a deprecated file format."""
-
-    error_code = "DEPRECATED_FORMAT"
-    default_message = "Driver uses deprecated file format"
-
-    def __init__(self, old_files: list[str], message: str = "") -> None:
-        self.old_files = old_files
-        if not message:
-            files_str = ", ".join(old_files)
-            message = (
-                f"Driver directory contains deprecated files: {files_str}. "
-                "Migrate to the new format: driver.styrmin.yml + values.j2.yml"
-            )
-        super().__init__(message)
-
-
-class AmbiguousDriverFormatError(DriverError):
-    """The driver directory contains both old and new format files."""
-
-    error_code = "AMBIGUOUS_FORMAT"
-    default_message = "Driver directory contains both old and new format files"
-
-    def __init__(self, conflicting_files: list[str], message: str = "") -> None:
-        self.conflicting_files = conflicting_files
-        if not message:
-            files_str = ", ".join(conflicting_files)
-            message = (
-                f"Driver directory contains conflicting files: {files_str}. "
-                "Remove old format files (styrmin_driver.yaml, actions.yaml, "
-                "chart_values.j2.yaml) and use only the new format "
-                "(driver.styrmin.yml, values.j2.yml)."
-            )
-        super().__init__(message)
