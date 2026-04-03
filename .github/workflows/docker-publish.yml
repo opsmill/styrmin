@@ -158,7 +158,7 @@ jobs:
 
       - name: Sign manifest
         run: |
-          cosign sign --yes --recursive \
+          cosign sign --yes --recursive --new-bundle-format=false --use-signing-config=false \
             "${{ vars.HARBOR_HOST }}/opsmill/styrmin@${{ needs.merge.outputs.digest }}"
 
   sbom:
