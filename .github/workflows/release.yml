@@ -106,6 +106,7 @@ jobs:
           uv version "$NEW_VERSION"
           yq -i ".version = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
           yq -i ".appVersion = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
+          yq -i "(.dependencies[] | select(.name == \"styrmin-agent\")).version = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
           yq -i ".version = \"$NEW_VERSION\"" helm/agent/Chart.yaml
 
           echo "Updated pyproject.toml:"
