@@ -1,5 +1,5 @@
-import gql from 'graphql-tag';
-import * as Urql from 'urql';
+import { useMutation, useQuery, type UseMutationOptions, type UseQueryOptions } from '@tanstack/react-query';
+import { graphqlFetcher } from '../lib/graphql-fetcher';
 export type Maybe<T> = T | null;
 export type InputMaybe<T> = Maybe<T>;
 export type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
@@ -7,7 +7,6 @@ export type MakeOptional<T, K extends keyof T> = Omit<T, K> & { [SubKey in K]?: 
 export type MakeMaybe<T, K extends keyof T> = Omit<T, K> & { [SubKey in K]: Maybe<T[SubKey]> };
 export type MakeEmpty<T extends { [key: string]: unknown }, K extends keyof T> = { [_ in K]?: never };
 export type Incremental<T> = T | { [P in keyof T]?: P extends ' $fragmentName' | '__typename' ? T[P] : never };
-export type Omit<T, K extends keyof T> = Pick<T, Exclude<keyof T, K>>;
 /** All built-in and custom scalars, mapped to their actual values */
 export type Scalars = {
   ID: { input: string; output: string; }
@@ -779,7 +778,8 @@ export type UpdateDeploymentVersionMutationVariables = Exact<{
 export type UpdateDeploymentVersionMutation = { __typename?: 'Mutation', updateDeploymentVersion?: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, deploymentId?: string | null } | null };
 
 
-export const AssignBackupStorageLocationDocument = gql`
+
+export const AssignBackupStorageLocationDocument = `
     mutation AssignBackupStorageLocation($environmentId: UUID!, $backupStorageLocationId: UUID!) {
   assignBackupStorageLocation(
     environmentId: $environmentId
@@ -795,10 +795,20 @@ export const AssignBackupStorageLocationDocument = gql`
 }
     `;
 
-export function useAssignBackupStorageLocationMutation() {
-  return Urql.useMutation<AssignBackupStorageLocationMutation, AssignBackupStorageLocationMutationVariables>(AssignBackupStorageLocationDocument);
-};
-export const CreateBackupDocument = gql`
+export const useAssignBackupStorageLocationMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<AssignBackupStorageLocationMutation, TError, AssignBackupStorageLocationMutationVariables, TContext>) => {
+    
+    return useMutation<AssignBackupStorageLocationMutation, TError, AssignBackupStorageLocationMutationVariables, TContext>(
+      {
+    mutationKey: ['AssignBackupStorageLocation'],
+    mutationFn: (variables?: AssignBackupStorageLocationMutationVariables) => graphqlFetcher<AssignBackupStorageLocationMutation, AssignBackupStorageLocationMutationVariables>(AssignBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const CreateBackupDocument = `
     mutation CreateBackup($instanceId: UUID!, $name: String) {
   createBackup(instanceId: $instanceId, name: $name) {
     id
@@ -809,10 +819,20 @@ export const CreateBackupDocument = gql`
 }
     `;
 
-export function useCreateBackupMutation() {
-  return Urql.useMutation<CreateBackupMutation, CreateBackupMutationVariables>(CreateBackupDocument);
-};
-export const CreateBackupStorageLocationDocument = gql`
+export const useCreateBackupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateBackupMutation, TError, CreateBackupMutationVariables, TContext>) => {
+    
+    return useMutation<CreateBackupMutation, TError, CreateBackupMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateBackup'],
+    mutationFn: (variables?: CreateBackupMutationVariables) => graphqlFetcher<CreateBackupMutation, CreateBackupMutationVariables>(CreateBackupDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const CreateBackupStorageLocationDocument = `
     mutation CreateBackupStorageLocation($name: String!, $endpoint: String!, $bucket: String!, $region: String!, $accessKeyId: String!, $secretAccessKey: String!) {
   createBackupStorageLocation(
     name: $name
@@ -834,10 +854,20 @@ export const CreateBackupStorageLocationDocument = gql`
 }
     `;
 
-export function useCreateBackupStorageLocationMutation() {
-  return Urql.useMutation<CreateBackupStorageLocationMutation, CreateBackupStorageLocationMutationVariables>(CreateBackupStorageLocationDocument);
-};
-export const CreateClusterDocument = gql`
+export const useCreateBackupStorageLocationMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateBackupStorageLocationMutation, TError, CreateBackupStorageLocationMutationVariables, TContext>) => {
+    
+    return useMutation<CreateBackupStorageLocationMutation, TError, CreateBackupStorageLocationMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateBackupStorageLocation'],
+    mutationFn: (variables?: CreateBackupStorageLocationMutationVariables) => graphqlFetcher<CreateBackupStorageLocationMutation, CreateBackupStorageLocationMutationVariables>(CreateBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const CreateClusterDocument = `
     mutation CreateCluster($name: String!, $config: JSON) {
   createCluster(name: $name, config: $config) {
     id
@@ -847,10 +877,20 @@ export const CreateClusterDocument = gql`
 }
     `;
 
-export function useCreateClusterMutation() {
-  return Urql.useMutation<CreateClusterMutation, CreateClusterMutationVariables>(CreateClusterDocument);
-};
-export const CreateEnvironmentDocument = gql`
+export const useCreateClusterMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateClusterMutation, TError, CreateClusterMutationVariables, TContext>) => {
+    
+    return useMutation<CreateClusterMutation, TError, CreateClusterMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateCluster'],
+    mutationFn: (variables?: CreateClusterMutationVariables) => graphqlFetcher<CreateClusterMutation, CreateClusterMutationVariables>(CreateClusterDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const CreateEnvironmentDocument = `
     mutation CreateEnvironment($name: String!, $clusterId: UUID!, $config: JSON) {
   createEnvironment(name: $name, clusterId: $clusterId, config: $config) {
     id
@@ -864,10 +904,20 @@ export const CreateEnvironmentDocument = gql`
 }
     `;
 
-export function useCreateEnvironmentMutation() {
-  return Urql.useMutation<CreateEnvironmentMutation, CreateEnvironmentMutationVariables>(CreateEnvironmentDocument);
-};
-export const CreateRestoreDocument = gql`
+export const useCreateEnvironmentMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateEnvironmentMutation, TError, CreateEnvironmentMutationVariables, TContext>) => {
+    
+    return useMutation<CreateEnvironmentMutation, TError, CreateEnvironmentMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateEnvironment'],
+    mutationFn: (variables?: CreateEnvironmentMutationVariables) => graphqlFetcher<CreateEnvironmentMutation, CreateEnvironmentMutationVariables>(CreateEnvironmentDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const CreateRestoreDocument = `
     mutation CreateRestore($backupId: UUID!, $targetNamespace: String!, $targetInstanceId: UUID) {
   createRestore(
     backupId: $backupId
@@ -886,28 +936,58 @@ export const CreateRestoreDocument = gql`
 }
     `;
 
-export function useCreateRestoreMutation() {
-  return Urql.useMutation<CreateRestoreMutation, CreateRestoreMutationVariables>(CreateRestoreDocument);
-};
-export const DeleteBackupDocument = gql`
+export const useCreateRestoreMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateRestoreMutation, TError, CreateRestoreMutationVariables, TContext>) => {
+    
+    return useMutation<CreateRestoreMutation, TError, CreateRestoreMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateRestore'],
+    mutationFn: (variables?: CreateRestoreMutationVariables) => graphqlFetcher<CreateRestoreMutation, CreateRestoreMutationVariables>(CreateRestoreDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const DeleteBackupDocument = `
     mutation DeleteBackup($backupId: UUID!) {
   deleteBackup(backupId: $backupId)
 }
     `;
 
-export function useDeleteBackupMutation() {
-  return Urql.useMutation<DeleteBackupMutation, DeleteBackupMutationVariables>(DeleteBackupDocument);
-};
-export const DeleteBackupStorageLocationDocument = gql`
+export const useDeleteBackupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeleteBackupMutation, TError, DeleteBackupMutationVariables, TContext>) => {
+    
+    return useMutation<DeleteBackupMutation, TError, DeleteBackupMutationVariables, TContext>(
+      {
+    mutationKey: ['DeleteBackup'],
+    mutationFn: (variables?: DeleteBackupMutationVariables) => graphqlFetcher<DeleteBackupMutation, DeleteBackupMutationVariables>(DeleteBackupDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const DeleteBackupStorageLocationDocument = `
     mutation DeleteBackupStorageLocation($backupStorageLocationId: UUID!) {
   deleteBackupStorageLocation(backupStorageLocationId: $backupStorageLocationId)
 }
     `;
 
-export function useDeleteBackupStorageLocationMutation() {
-  return Urql.useMutation<DeleteBackupStorageLocationMutation, DeleteBackupStorageLocationMutationVariables>(DeleteBackupStorageLocationDocument);
-};
-export const DeployDocument = gql`
+export const useDeleteBackupStorageLocationMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeleteBackupStorageLocationMutation, TError, DeleteBackupStorageLocationMutationVariables, TContext>) => {
+    
+    return useMutation<DeleteBackupStorageLocationMutation, TError, DeleteBackupStorageLocationMutationVariables, TContext>(
+      {
+    mutationKey: ['DeleteBackupStorageLocation'],
+    mutationFn: (variables?: DeleteBackupStorageLocationMutationVariables) => graphqlFetcher<DeleteBackupStorageLocationMutation, DeleteBackupStorageLocationMutationVariables>(DeleteBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const DeployDocument = `
     mutation Deploy($version: String, $driver: String!, $name: String, $environmentId: UUID!, $config: JSON, $parameters: JSON) {
   deploy(
     version: $version
@@ -926,10 +1006,20 @@ export const DeployDocument = gql`
 }
     `;
 
-export function useDeployMutation() {
-  return Urql.useMutation<DeployMutation, DeployMutationVariables>(DeployDocument);
-};
-export const GetBackupStorageLocationDocument = gql`
+export const useDeployMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeployMutation, TError, DeployMutationVariables, TContext>) => {
+    
+    return useMutation<DeployMutation, TError, DeployMutationVariables, TContext>(
+      {
+    mutationKey: ['Deploy'],
+    mutationFn: (variables?: DeployMutationVariables) => graphqlFetcher<DeployMutation, DeployMutationVariables>(DeployDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const GetBackupStorageLocationDocument = `
     query GetBackupStorageLocation($backupStorageLocationId: UUID!) {
   backupStorageLocation(backupStorageLocationId: $backupStorageLocationId) {
     id
@@ -944,10 +1034,25 @@ export const GetBackupStorageLocationDocument = gql`
 }
     `;
 
-export function useGetBackupStorageLocationQuery(options: Omit<Urql.UseQueryArgs<GetBackupStorageLocationQueryVariables>, 'query'>) {
-  return Urql.useQuery<GetBackupStorageLocationQuery, GetBackupStorageLocationQueryVariables>({ query: GetBackupStorageLocationDocument, ...options });
-};
-export const GetClusterDocument = gql`
+export const useGetBackupStorageLocationQuery = <
+      TData = GetBackupStorageLocationQuery,
+      TError = Error
+    >(
+      variables: GetBackupStorageLocationQueryVariables,
+      options?: Omit<UseQueryOptions<GetBackupStorageLocationQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetBackupStorageLocationQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetBackupStorageLocationQuery, TError, TData>(
+      {
+    queryKey: ['GetBackupStorageLocation', variables],
+    queryFn: graphqlFetcher<GetBackupStorageLocationQuery, GetBackupStorageLocationQueryVariables>(GetBackupStorageLocationDocument, variables),
+    ...options
+  }
+    )};
+
+useGetBackupStorageLocationQuery.getKey = (variables: GetBackupStorageLocationQueryVariables) => ['GetBackupStorageLocation', variables];
+
+export const GetClusterDocument = `
     query GetCluster($clusterId: UUID!) {
   cluster(clusterId: $clusterId) {
     id
@@ -963,10 +1068,25 @@ export const GetClusterDocument = gql`
 }
     `;
 
-export function useGetClusterQuery(options: Omit<Urql.UseQueryArgs<GetClusterQueryVariables>, 'query'>) {
-  return Urql.useQuery<GetClusterQuery, GetClusterQueryVariables>({ query: GetClusterDocument, ...options });
-};
-export const GetDeploymentDocument = gql`
+export const useGetClusterQuery = <
+      TData = GetClusterQuery,
+      TError = Error
+    >(
+      variables: GetClusterQueryVariables,
+      options?: Omit<UseQueryOptions<GetClusterQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetClusterQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetClusterQuery, TError, TData>(
+      {
+    queryKey: ['GetCluster', variables],
+    queryFn: graphqlFetcher<GetClusterQuery, GetClusterQueryVariables>(GetClusterDocument, variables),
+    ...options
+  }
+    )};
+
+useGetClusterQuery.getKey = (variables: GetClusterQueryVariables) => ['GetCluster', variables];
+
+export const GetDeploymentDocument = `
     query GetDeployment($deploymentId: UUID!) {
   deployment(deploymentId: $deploymentId) {
     id
@@ -1003,10 +1123,25 @@ export const GetDeploymentDocument = gql`
 }
     `;
 
-export function useGetDeploymentQuery(options: Omit<Urql.UseQueryArgs<GetDeploymentQueryVariables>, 'query'>) {
-  return Urql.useQuery<GetDeploymentQuery, GetDeploymentQueryVariables>({ query: GetDeploymentDocument, ...options });
-};
-export const GetDriverDocument = gql`
+export const useGetDeploymentQuery = <
+      TData = GetDeploymentQuery,
+      TError = Error
+    >(
+      variables: GetDeploymentQueryVariables,
+      options?: Omit<UseQueryOptions<GetDeploymentQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetDeploymentQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetDeploymentQuery, TError, TData>(
+      {
+    queryKey: ['GetDeployment', variables],
+    queryFn: graphqlFetcher<GetDeploymentQuery, GetDeploymentQueryVariables>(GetDeploymentDocument, variables),
+    ...options
+  }
+    )};
+
+useGetDeploymentQuery.getKey = (variables: GetDeploymentQueryVariables) => ['GetDeployment', variables];
+
+export const GetDriverDocument = `
     query GetDriver($applicationDriverId: UUID!) {
   applicationDriver(applicationDriverId: $applicationDriverId) {
     id
@@ -1050,10 +1185,25 @@ export const GetDriverDocument = gql`
 }
     `;
 
-export function useGetDriverQuery(options: Omit<Urql.UseQueryArgs<GetDriverQueryVariables>, 'query'>) {
-  return Urql.useQuery<GetDriverQuery, GetDriverQueryVariables>({ query: GetDriverDocument, ...options });
-};
-export const GetEnvironmentDocument = gql`
+export const useGetDriverQuery = <
+      TData = GetDriverQuery,
+      TError = Error
+    >(
+      variables: GetDriverQueryVariables,
+      options?: Omit<UseQueryOptions<GetDriverQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetDriverQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetDriverQuery, TError, TData>(
+      {
+    queryKey: ['GetDriver', variables],
+    queryFn: graphqlFetcher<GetDriverQuery, GetDriverQueryVariables>(GetDriverDocument, variables),
+    ...options
+  }
+    )};
+
+useGetDriverQuery.getKey = (variables: GetDriverQueryVariables) => ['GetDriver', variables];
+
+export const GetEnvironmentDocument = `
     query GetEnvironment($environmentId: UUID!) {
   environment(environmentId: $environmentId) {
     id
@@ -1087,10 +1237,25 @@ export const GetEnvironmentDocument = gql`
 }
     `;
 
-export function useGetEnvironmentQuery(options: Omit<Urql.UseQueryArgs<GetEnvironmentQueryVariables>, 'query'>) {
-  return Urql.useQuery<GetEnvironmentQuery, GetEnvironmentQueryVariables>({ query: GetEnvironmentDocument, ...options });
-};
-export const GetRestoreDocument = gql`
+export const useGetEnvironmentQuery = <
+      TData = GetEnvironmentQuery,
+      TError = Error
+    >(
+      variables: GetEnvironmentQueryVariables,
+      options?: Omit<UseQueryOptions<GetEnvironmentQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetEnvironmentQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetEnvironmentQuery, TError, TData>(
+      {
+    queryKey: ['GetEnvironment', variables],
+    queryFn: graphqlFetcher<GetEnvironmentQuery, GetEnvironmentQueryVariables>(GetEnvironmentDocument, variables),
+    ...options
+  }
+    )};
+
+useGetEnvironmentQuery.getKey = (variables: GetEnvironmentQueryVariables) => ['GetEnvironment', variables];
+
+export const GetRestoreDocument = `
     query GetRestore($restoreId: UUID!) {
   restore(restoreId: $restoreId) {
     id
@@ -1112,10 +1277,25 @@ export const GetRestoreDocument = gql`
 }
     `;
 
-export function useGetRestoreQuery(options: Omit<Urql.UseQueryArgs<GetRestoreQueryVariables>, 'query'>) {
-  return Urql.useQuery<GetRestoreQuery, GetRestoreQueryVariables>({ query: GetRestoreDocument, ...options });
-};
-export const GetTaskDocument = gql`
+export const useGetRestoreQuery = <
+      TData = GetRestoreQuery,
+      TError = Error
+    >(
+      variables: GetRestoreQueryVariables,
+      options?: Omit<UseQueryOptions<GetRestoreQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetRestoreQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetRestoreQuery, TError, TData>(
+      {
+    queryKey: ['GetRestore', variables],
+    queryFn: graphqlFetcher<GetRestoreQuery, GetRestoreQueryVariables>(GetRestoreDocument, variables),
+    ...options
+  }
+    )};
+
+useGetRestoreQuery.getKey = (variables: GetRestoreQueryVariables) => ['GetRestore', variables];
+
+export const GetTaskDocument = `
     query GetTask($taskId: UUID!) {
   task(taskId: $taskId) {
     id
@@ -1127,10 +1307,25 @@ export const GetTaskDocument = gql`
 }
     `;
 
-export function useGetTaskQuery(options: Omit<Urql.UseQueryArgs<GetTaskQueryVariables>, 'query'>) {
-  return Urql.useQuery<GetTaskQuery, GetTaskQueryVariables>({ query: GetTaskDocument, ...options });
-};
-export const ListApplicationDriversDocument = gql`
+export const useGetTaskQuery = <
+      TData = GetTaskQuery,
+      TError = Error
+    >(
+      variables: GetTaskQueryVariables,
+      options?: Omit<UseQueryOptions<GetTaskQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetTaskQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetTaskQuery, TError, TData>(
+      {
+    queryKey: ['GetTask', variables],
+    queryFn: graphqlFetcher<GetTaskQuery, GetTaskQueryVariables>(GetTaskDocument, variables),
+    ...options
+  }
+    )};
+
+useGetTaskQuery.getKey = (variables: GetTaskQueryVariables) => ['GetTask', variables];
+
+export const ListApplicationDriversDocument = `
     query ListApplicationDrivers {
   applicationDrivers {
     id
@@ -1152,10 +1347,25 @@ export const ListApplicationDriversDocument = gql`
 }
     `;
 
-export function useListApplicationDriversQuery(options?: Omit<Urql.UseQueryArgs<ListApplicationDriversQueryVariables>, 'query'>) {
-  return Urql.useQuery<ListApplicationDriversQuery, ListApplicationDriversQueryVariables>({ query: ListApplicationDriversDocument, ...options });
-};
-export const ListBackupStorageLocationsDocument = gql`
+export const useListApplicationDriversQuery = <
+      TData = ListApplicationDriversQuery,
+      TError = Error
+    >(
+      variables?: ListApplicationDriversQueryVariables,
+      options?: Omit<UseQueryOptions<ListApplicationDriversQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListApplicationDriversQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListApplicationDriversQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['ListApplicationDrivers'] : ['ListApplicationDrivers', variables],
+    queryFn: graphqlFetcher<ListApplicationDriversQuery, ListApplicationDriversQueryVariables>(ListApplicationDriversDocument, variables),
+    ...options
+  }
+    )};
+
+useListApplicationDriversQuery.getKey = (variables?: ListApplicationDriversQueryVariables) => variables === undefined ? ['ListApplicationDrivers'] : ['ListApplicationDrivers', variables];
+
+export const ListBackupStorageLocationsDocument = `
     query ListBackupStorageLocations {
   backupStorageLocations {
     id
@@ -1170,10 +1380,25 @@ export const ListBackupStorageLocationsDocument = gql`
 }
     `;
 
-export function useListBackupStorageLocationsQuery(options?: Omit<Urql.UseQueryArgs<ListBackupStorageLocationsQueryVariables>, 'query'>) {
-  return Urql.useQuery<ListBackupStorageLocationsQuery, ListBackupStorageLocationsQueryVariables>({ query: ListBackupStorageLocationsDocument, ...options });
-};
-export const ListBackupsDocument = gql`
+export const useListBackupStorageLocationsQuery = <
+      TData = ListBackupStorageLocationsQuery,
+      TError = Error
+    >(
+      variables?: ListBackupStorageLocationsQueryVariables,
+      options?: Omit<UseQueryOptions<ListBackupStorageLocationsQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListBackupStorageLocationsQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListBackupStorageLocationsQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['ListBackupStorageLocations'] : ['ListBackupStorageLocations', variables],
+    queryFn: graphqlFetcher<ListBackupStorageLocationsQuery, ListBackupStorageLocationsQueryVariables>(ListBackupStorageLocationsDocument, variables),
+    ...options
+  }
+    )};
+
+useListBackupStorageLocationsQuery.getKey = (variables?: ListBackupStorageLocationsQueryVariables) => variables === undefined ? ['ListBackupStorageLocations'] : ['ListBackupStorageLocations', variables];
+
+export const ListBackupsDocument = `
     query ListBackups($instanceId: UUID!) {
   backups(instanceId: $instanceId) {
     id
@@ -1187,10 +1412,25 @@ export const ListBackupsDocument = gql`
 }
     `;
 
-export function useListBackupsQuery(options: Omit<Urql.UseQueryArgs<ListBackupsQueryVariables>, 'query'>) {
-  return Urql.useQuery<ListBackupsQuery, ListBackupsQueryVariables>({ query: ListBackupsDocument, ...options });
-};
-export const ListClustersDocument = gql`
+export const useListBackupsQuery = <
+      TData = ListBackupsQuery,
+      TError = Error
+    >(
+      variables: ListBackupsQueryVariables,
+      options?: Omit<UseQueryOptions<ListBackupsQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListBackupsQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListBackupsQuery, TError, TData>(
+      {
+    queryKey: ['ListBackups', variables],
+    queryFn: graphqlFetcher<ListBackupsQuery, ListBackupsQueryVariables>(ListBackupsDocument, variables),
+    ...options
+  }
+    )};
+
+useListBackupsQuery.getKey = (variables: ListBackupsQueryVariables) => ['ListBackups', variables];
+
+export const ListClustersDocument = `
     query ListClusters {
   clusters {
     id
@@ -1200,10 +1440,25 @@ export const ListClustersDocument = gql`
 }
     `;
 
-export function useListClustersQuery(options?: Omit<Urql.UseQueryArgs<ListClustersQueryVariables>, 'query'>) {
-  return Urql.useQuery<ListClustersQuery, ListClustersQueryVariables>({ query: ListClustersDocument, ...options });
-};
-export const ListDriversDocument = gql`
+export const useListClustersQuery = <
+      TData = ListClustersQuery,
+      TError = Error
+    >(
+      variables?: ListClustersQueryVariables,
+      options?: Omit<UseQueryOptions<ListClustersQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListClustersQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListClustersQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['ListClusters'] : ['ListClusters', variables],
+    queryFn: graphqlFetcher<ListClustersQuery, ListClustersQueryVariables>(ListClustersDocument, variables),
+    ...options
+  }
+    )};
+
+useListClustersQuery.getKey = (variables?: ListClustersQueryVariables) => variables === undefined ? ['ListClusters'] : ['ListClusters', variables];
+
+export const ListDriversDocument = `
     query ListDrivers {
   applicationDrivers {
     id
@@ -1220,10 +1475,25 @@ export const ListDriversDocument = gql`
 }
     `;
 
-export function useListDriversQuery(options?: Omit<Urql.UseQueryArgs<ListDriversQueryVariables>, 'query'>) {
-  return Urql.useQuery<ListDriversQuery, ListDriversQueryVariables>({ query: ListDriversDocument, ...options });
-};
-export const ListEnvironmentsDocument = gql`
+export const useListDriversQuery = <
+      TData = ListDriversQuery,
+      TError = Error
+    >(
+      variables?: ListDriversQueryVariables,
+      options?: Omit<UseQueryOptions<ListDriversQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListDriversQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListDriversQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['ListDrivers'] : ['ListDrivers', variables],
+    queryFn: graphqlFetcher<ListDriversQuery, ListDriversQueryVariables>(ListDriversDocument, variables),
+    ...options
+  }
+    )};
+
+useListDriversQuery.getKey = (variables?: ListDriversQueryVariables) => variables === undefined ? ['ListDrivers'] : ['ListDrivers', variables];
+
+export const ListEnvironmentsDocument = `
     query ListEnvironments {
   environments {
     id
@@ -1248,10 +1518,25 @@ export const ListEnvironmentsDocument = gql`
 }
     `;
 
-export function useListEnvironmentsQuery(options?: Omit<Urql.UseQueryArgs<ListEnvironmentsQueryVariables>, 'query'>) {
-  return Urql.useQuery<ListEnvironmentsQuery, ListEnvironmentsQueryVariables>({ query: ListEnvironmentsDocument, ...options });
-};
-export const ListRestoresDocument = gql`
+export const useListEnvironmentsQuery = <
+      TData = ListEnvironmentsQuery,
+      TError = Error
+    >(
+      variables?: ListEnvironmentsQueryVariables,
+      options?: Omit<UseQueryOptions<ListEnvironmentsQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListEnvironmentsQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListEnvironmentsQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['ListEnvironments'] : ['ListEnvironments', variables],
+    queryFn: graphqlFetcher<ListEnvironmentsQuery, ListEnvironmentsQueryVariables>(ListEnvironmentsDocument, variables),
+    ...options
+  }
+    )};
+
+useListEnvironmentsQuery.getKey = (variables?: ListEnvironmentsQueryVariables) => variables === undefined ? ['ListEnvironments'] : ['ListEnvironments', variables];
+
+export const ListRestoresDocument = `
     query ListRestores($backupId: UUID!, $status: String) {
   restores(backupId: $backupId, status: $status) {
     id
@@ -1271,10 +1556,25 @@ export const ListRestoresDocument = gql`
 }
     `;
 
-export function useListRestoresQuery(options: Omit<Urql.UseQueryArgs<ListRestoresQueryVariables>, 'query'>) {
-  return Urql.useQuery<ListRestoresQuery, ListRestoresQueryVariables>({ query: ListRestoresDocument, ...options });
-};
-export const LoadLocalDriverDocument = gql`
+export const useListRestoresQuery = <
+      TData = ListRestoresQuery,
+      TError = Error
+    >(
+      variables: ListRestoresQueryVariables,
+      options?: Omit<UseQueryOptions<ListRestoresQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListRestoresQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListRestoresQuery, TError, TData>(
+      {
+    queryKey: ['ListRestores', variables],
+    queryFn: graphqlFetcher<ListRestoresQuery, ListRestoresQueryVariables>(ListRestoresDocument, variables),
+    ...options
+  }
+    )};
+
+useListRestoresQuery.getKey = (variables: ListRestoresQueryVariables) => ['ListRestores', variables];
+
+export const LoadLocalDriverDocument = `
     mutation LoadLocalDriver($path: String!) {
   loadLocalApplicationDriverVersion(path: $path) {
     id
@@ -1284,10 +1584,20 @@ export const LoadLocalDriverDocument = gql`
 }
     `;
 
-export function useLoadLocalDriverMutation() {
-  return Urql.useMutation<LoadLocalDriverMutation, LoadLocalDriverMutationVariables>(LoadLocalDriverDocument);
-};
-export const LoadRemoteDriverDocument = gql`
+export const useLoadLocalDriverMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<LoadLocalDriverMutation, TError, LoadLocalDriverMutationVariables, TContext>) => {
+    
+    return useMutation<LoadLocalDriverMutation, TError, LoadLocalDriverMutationVariables, TContext>(
+      {
+    mutationKey: ['LoadLocalDriver'],
+    mutationFn: (variables?: LoadLocalDriverMutationVariables) => graphqlFetcher<LoadLocalDriverMutation, LoadLocalDriverMutationVariables>(LoadLocalDriverDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const LoadRemoteDriverDocument = `
     mutation LoadRemoteDriver($repositoryUrl: String!, $branch: String!) {
   loadRemoteApplicationDriverVersion(
     repositoryUrl: $repositoryUrl
@@ -1300,10 +1610,20 @@ export const LoadRemoteDriverDocument = gql`
 }
     `;
 
-export function useLoadRemoteDriverMutation() {
-  return Urql.useMutation<LoadRemoteDriverMutation, LoadRemoteDriverMutationVariables>(LoadRemoteDriverDocument);
-};
-export const UnassignBackupStorageLocationDocument = gql`
+export const useLoadRemoteDriverMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<LoadRemoteDriverMutation, TError, LoadRemoteDriverMutationVariables, TContext>) => {
+    
+    return useMutation<LoadRemoteDriverMutation, TError, LoadRemoteDriverMutationVariables, TContext>(
+      {
+    mutationKey: ['LoadRemoteDriver'],
+    mutationFn: (variables?: LoadRemoteDriverMutationVariables) => graphqlFetcher<LoadRemoteDriverMutation, LoadRemoteDriverMutationVariables>(LoadRemoteDriverDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UnassignBackupStorageLocationDocument = `
     mutation UnassignBackupStorageLocation($environmentId: UUID!) {
   unassignBackupStorageLocation(environmentId: $environmentId) {
     id
@@ -1316,10 +1636,20 @@ export const UnassignBackupStorageLocationDocument = gql`
 }
     `;
 
-export function useUnassignBackupStorageLocationMutation() {
-  return Urql.useMutation<UnassignBackupStorageLocationMutation, UnassignBackupStorageLocationMutationVariables>(UnassignBackupStorageLocationDocument);
-};
-export const UpdateBackupStorageLocationDocument = gql`
+export const useUnassignBackupStorageLocationMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UnassignBackupStorageLocationMutation, TError, UnassignBackupStorageLocationMutationVariables, TContext>) => {
+    
+    return useMutation<UnassignBackupStorageLocationMutation, TError, UnassignBackupStorageLocationMutationVariables, TContext>(
+      {
+    mutationKey: ['UnassignBackupStorageLocation'],
+    mutationFn: (variables?: UnassignBackupStorageLocationMutationVariables) => graphqlFetcher<UnassignBackupStorageLocationMutation, UnassignBackupStorageLocationMutationVariables>(UnassignBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateBackupStorageLocationDocument = `
     mutation UpdateBackupStorageLocation($backupStorageLocationId: UUID!, $name: String, $endpoint: String, $bucket: String, $region: String, $accessKeyId: String, $secretAccessKey: String) {
   updateBackupStorageLocation(
     backupStorageLocationId: $backupStorageLocationId
@@ -1342,10 +1672,20 @@ export const UpdateBackupStorageLocationDocument = gql`
 }
     `;
 
-export function useUpdateBackupStorageLocationMutation() {
-  return Urql.useMutation<UpdateBackupStorageLocationMutation, UpdateBackupStorageLocationMutationVariables>(UpdateBackupStorageLocationDocument);
-};
-export const UpdateDeploymentVersionDocument = gql`
+export const useUpdateBackupStorageLocationMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateBackupStorageLocationMutation, TError, UpdateBackupStorageLocationMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateBackupStorageLocationMutation, TError, UpdateBackupStorageLocationMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateBackupStorageLocation'],
+    mutationFn: (variables?: UpdateBackupStorageLocationMutationVariables) => graphqlFetcher<UpdateBackupStorageLocationMutation, UpdateBackupStorageLocationMutationVariables>(UpdateBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateDeploymentVersionDocument = `
     mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!, $parameters: JSON) {
   updateDeploymentVersion(
     deploymentId: $deploymentId
@@ -1361,6 +1701,15 @@ export const UpdateDeploymentVersionDocument = gql`
 }
     `;
 
-export function useUpdateDeploymentVersionMutation() {
-  return Urql.useMutation<UpdateDeploymentVersionMutation, UpdateDeploymentVersionMutationVariables>(UpdateDeploymentVersionDocument);
-};
+export const useUpdateDeploymentVersionMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateDeploymentVersionMutation, TError, UpdateDeploymentVersionMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateDeploymentVersionMutation, TError, UpdateDeploymentVersionMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateDeploymentVersion'],
+    mutationFn: (variables?: UpdateDeploymentVersionMutationVariables) => graphqlFetcher<UpdateDeploymentVersionMutation, UpdateDeploymentVersionMutationVariables>(UpdateDeploymentVersionDocument, variables)(),
+    ...options
+  }
+    )};

@@ -5,6 +5,7 @@ import {
   useListClustersQuery,
   useCreateEnvironmentMutation,
 } from "@/generated/graphql";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -77,9 +78,10 @@ export function CreateEnvironmentDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [{ data: clustersData, fetching: clustersFetching }] =
+  const { data: clustersData, isLoading: clustersFetching } =
     useListClustersQuery();
-  const [, executeCreate] = useCreateEnvironmentMutation();
+  const createEnvironmentMutation = useCreateEnvironmentMutation();
+  const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
@@ -109,23 +111,22 @@ export function CreateEnvironmentDialog({
   const onSubmit = async (values: CreateEnvironmentValues) => {
     setSubmitError(null);
     const config = buildEnvironmentConfig(values);
-    const result = await executeCreate({
-      name: values.name,
-      clusterId: values.clusterId,
-      config: config ?? null,
-    });
-
-    if (result.error) {
-      setSubmitError(result.error.message);
-      return;
-    }
-
-    if (result.data?.createEnvironment) {
-      reset();
-      setAdvancedOpen(false);
-      setSubmitError(null);
-      setOpen(false);
-      onCreated();
+    try {
+      const data = await createEnvironmentMutation.mutateAsync({
+        name: values.name,
+        clusterId: values.clusterId,
+        config: config ?? null,
+      });
+      if (data.createEnvironment) {
+        queryClient.invalidateQueries({ queryKey: ["ListEnvironments"] });
+        reset();
+        setAdvancedOpen(false);
+        setSubmitError(null);
+        setOpen(false);
+        onCreated();
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Unknown error");
     }
   };
 

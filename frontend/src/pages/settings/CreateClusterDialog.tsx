@@ -2,6 +2,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
 import { useCreateClusterMutation } from "@/generated/graphql";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -71,7 +72,8 @@ function buildClusterConfig(
 export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [, executeCreate] = useCreateClusterMutation();
+  const createClusterMutation = useCreateClusterMutation();
+  const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
@@ -102,22 +104,21 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
   const onSubmit = async (values: CreateClusterValues) => {
     setSubmitError(null);
     const config = buildClusterConfig(values);
-    const result = await executeCreate({
-      name: values.name,
-      config: config ?? null,
-    });
-
-    if (result.error) {
-      setSubmitError(result.error.message);
-      return;
-    }
-
-    if (result.data?.createCluster) {
-      reset();
-      setAdvancedOpen(false);
-      setSubmitError(null);
-      setOpen(false);
-      onCreated();
+    try {
+      const data = await createClusterMutation.mutateAsync({
+        name: values.name,
+        config: config ?? null,
+      });
+      if (data.createCluster) {
+        queryClient.invalidateQueries({ queryKey: ["ListClusters"] });
+        reset();
+        setAdvancedOpen(false);
+        setSubmitError(null);
+        setOpen(false);
+        onCreated();
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Unknown error");
     }
   };
 

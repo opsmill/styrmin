@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, Link } from "@tanstack/react-router";
 import { useGetClusterQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
@@ -6,7 +7,6 @@ import { ErrorState } from "@/components/ErrorState";
 import { EmptyState } from "@/components/EmptyState";
 import { ConfigSection } from "@/components/ConfigSection";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 
 function formatDate(iso: string): string {
@@ -15,25 +15,18 @@ function formatDate(iso: string): string {
 
 export default function ClusterDetailPage() {
   const { clusterId } = useParams({ from: "/settings/clusters/$clusterId" });
-  const [{ data, fetching, error }, reexecute] = useGetClusterQuery({
-    variables: { clusterId },
-  });
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const { data, isLoading, error, refetch, dataUpdatedAt } = useGetClusterQuery(
+    { clusterId },
+    { refetchInterval: autoRefreshEnabled ? 10_000 : false },
+  );
 
   const cluster = data?.cluster;
 
-  const autoRefresh = useAutoRefresh({
-    onRefresh: () => reexecute({ requestPolicy: "network-only" }),
-  });
-
-  if (fetching) return <LoadingState message="Loading cluster..." />;
+  if (isLoading) return <LoadingState message="Loading cluster..." />;
 
   if (error) {
-    return (
-      <ErrorState
-        message={error.message}
-        onRetry={() => reexecute({ requestPolicy: "network-only" })}
-      />
-    );
+    return <ErrorState message={error.message} onRetry={() => refetch()} />;
   }
 
   if (!cluster) {
@@ -49,10 +42,10 @@ export default function ClusterDetailPage() {
       ]}
       actions={
         <AutoRefreshIndicator
-          enabled={autoRefresh.enabled}
-          onToggle={autoRefresh.setEnabled}
-          lastRefreshedAt={autoRefresh.lastRefreshedAt}
-          onRefreshNow={autoRefresh.refreshNow}
+          enabled={autoRefreshEnabled}
+          onToggle={setAutoRefreshEnabled}
+          lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
+          onRefreshNow={() => refetch()}
         />
       }
     >

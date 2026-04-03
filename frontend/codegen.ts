@@ -8,10 +8,17 @@ const config: CodegenConfig = {
       plugins: [
         "typescript",
         "typescript-operations",
-        "typescript-urql",
+        "typescript-react-query",
       ],
       config: {
-        withHooks: true,
+        reactQueryVersion: 5,
+        fetcher: {
+          func: "../lib/graphql-fetcher#graphqlFetcher",
+        },
+        exposeQueryKeys: true,
+        exposeFetcher: false,
+        addSuspenseQuery: false,
+        errorType: "Error",
         scalars: {
           UUID: "string",
           JSON: "Record<string, unknown>",

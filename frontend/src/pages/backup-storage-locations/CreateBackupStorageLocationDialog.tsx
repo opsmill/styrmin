@@ -2,6 +2,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
 import { useCreateBackupStorageLocationMutation } from "@/generated/graphql";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,7 +34,8 @@ export function CreateBackupStorageLocationDialog({
   onCreated: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [, executeCreate] = useCreateBackupStorageLocationMutation();
+  const createBslMutation = useCreateBackupStorageLocationMutation();
+  const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
@@ -55,17 +57,18 @@ export function CreateBackupStorageLocationDialog({
 
   const onSubmit = async (values: CreateBslValues) => {
     setSubmitError(null);
-    const result = await executeCreate(values);
-
-    if (result.error) {
-      setSubmitError(result.error.message);
-      return;
+    try {
+      await createBslMutation.mutateAsync(values);
+      queryClient.invalidateQueries({
+        queryKey: ["ListBackupStorageLocations"],
+      });
+      reset();
+      setSubmitError(null);
+      setOpen(false);
+      onCreated();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Unknown error");
     }
-
-    reset();
-    setSubmitError(null);
-    setOpen(false);
-    onCreated();
   };
 
   const handleOpenChange = (nextOpen: boolean) => {

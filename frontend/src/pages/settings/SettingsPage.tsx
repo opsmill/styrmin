@@ -25,9 +25,11 @@ function ConfigSummary({ config }: { config: Record<string, unknown> }) {
 }
 
 export default function SettingsPage() {
-  const [{ data, fetching, error }, reexecute] = useListClustersQuery();
+  const { data, isLoading, error, refetch } = useListClustersQuery();
 
-  const refresh = () => reexecute({ requestPolicy: "network-only" });
+  const refresh = () => {
+    refetch();
+  };
 
   return (
     <PageLayout title="Settings" breadcrumbs={[{ label: "Settings" }]}>
@@ -39,7 +41,7 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {fetching && <LoadingState message="Loading cluster..." />}
+        {isLoading && <LoadingState message="Loading cluster..." />}
 
         {error && <ErrorState message={error.message} onRetry={refresh} />}
 

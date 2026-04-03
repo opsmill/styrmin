@@ -7,6 +7,7 @@ import {
   useDeployMutation,
 } from "@/generated/graphql";
 import type { ListApplicationDriversQuery } from "@/generated/graphql";
+import { useQueryClient } from "@tanstack/react-query";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -46,9 +47,13 @@ export default function DeployFormPage() {
     from: "/environments/$environmentId/deploy",
   });
   const navigate = useNavigate();
-  const [{ data: driversData, fetching, error: driversError }] =
-    useListApplicationDriversQuery();
-  const [, executeDeploy] = useDeployMutation();
+  const {
+    data: driversData,
+    isLoading,
+    error: driversError,
+  } = useListApplicationDriversQuery();
+  const deployMutation = useDeployMutation();
+  const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [taskResult, setTaskResult] = useState<{
     id: string;
@@ -103,25 +108,25 @@ export default function DeployFormPage() {
 
   const onSubmit = async (values: DeployFormValues) => {
     setSubmitError(null);
-    const result = await executeDeploy({
-      driver: selectedVersion!.driverName,
-      name: values.name,
-      version: values.applicationVersion || null,
-      environmentId,
-      parameters: Object.keys(dynamicParams).length > 0 ? dynamicParams : null,
-    });
-
-    if (result.error) {
-      setSubmitError(result.error.message);
-      return;
-    }
-
-    if (result.data?.deploy) {
-      setTaskResult(result.data.deploy);
+    try {
+      const data = await deployMutation.mutateAsync({
+        driver: selectedVersion!.driverName,
+        name: values.name,
+        version: values.applicationVersion || null,
+        environmentId,
+        parameters:
+          Object.keys(dynamicParams).length > 0 ? dynamicParams : null,
+      });
+      queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
+      if (data.deploy) {
+        setTaskResult(data.deploy);
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Unknown error");
     }
   };
 
-  if (fetching) return <LoadingState message="Loading drivers..." />;
+  if (isLoading) return <LoadingState message="Loading drivers..." />;
 
   if (driversError) {
     return <ErrorState message={driversError.message} />;

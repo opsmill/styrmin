@@ -6,6 +6,7 @@ import {
   useLoadLocalDriverMutation,
   useLoadRemoteDriverMutation,
 } from "@/generated/graphql";
+import { useQueryClient } from "@tanstack/react-query";
 import { PageLayout } from "@/components/PageLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,8 +33,9 @@ export default function AddDriverPage() {
   const navigate = useNavigate();
   const [sourceType, setSourceType] = useState<SourceType>("local");
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [, executeLoadLocal] = useLoadLocalDriverMutation();
-  const [, executeLoadRemote] = useLoadRemoteDriverMutation();
+  const loadLocalMutation = useLoadLocalDriverMutation();
+  const loadRemoteMutation = useLoadRemoteDriverMutation();
+  const queryClient = useQueryClient();
 
   const localForm = useForm<LocalFormValues>({
     resolver: zodResolver(localSchema),
@@ -50,40 +52,42 @@ export default function AddDriverPage() {
 
   const onSubmitLocal = async (values: LocalFormValues) => {
     setSubmitError(null);
-    const result = await executeLoadLocal({ path: values.path });
-    if (result.error) {
-      setSubmitError(result.error.message);
-      return;
-    }
-    if (result.data?.loadLocalApplicationDriverVersion) {
-      navigate({
-        to: "/drivers/$driverId",
-        params: {
-          driverId:
-            result.data.loadLocalApplicationDriverVersion.applicationDriverId,
-        },
-      });
+    try {
+      const data = await loadLocalMutation.mutateAsync({ path: values.path });
+      queryClient.invalidateQueries({ queryKey: ["ListDrivers"] });
+      if (data.loadLocalApplicationDriverVersion) {
+        navigate({
+          to: "/drivers/$driverId",
+          params: {
+            driverId:
+              data.loadLocalApplicationDriverVersion.applicationDriverId,
+          },
+        });
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Unknown error");
     }
   };
 
   const onSubmitRemote = async (values: RemoteFormValues) => {
     setSubmitError(null);
-    const result = await executeLoadRemote({
-      repositoryUrl: values.repositoryUrl,
-      branch: values.branch,
-    });
-    if (result.error) {
-      setSubmitError(result.error.message);
-      return;
-    }
-    if (result.data?.loadRemoteApplicationDriverVersion) {
-      navigate({
-        to: "/drivers/$driverId",
-        params: {
-          driverId:
-            result.data.loadRemoteApplicationDriverVersion.applicationDriverId,
-        },
+    try {
+      const data = await loadRemoteMutation.mutateAsync({
+        repositoryUrl: values.repositoryUrl,
+        branch: values.branch,
       });
+      queryClient.invalidateQueries({ queryKey: ["ListDrivers"] });
+      if (data.loadRemoteApplicationDriverVersion) {
+        navigate({
+          to: "/drivers/$driverId",
+          params: {
+            driverId:
+              data.loadRemoteApplicationDriverVersion.applicationDriverId,
+          },
+        });
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Unknown error");
     }
   };
 
