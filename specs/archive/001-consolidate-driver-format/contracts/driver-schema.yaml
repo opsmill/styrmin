@@ -1,0 +1,143 @@
+# Consolidated Driver Schema Contract
+# This defines the expected structure of driver.styrmin.yml
+#
+# This is not a JSON Schema — it documents the contract between
+# driver authors and the Styrmin loader pipeline.
+
+document:
+  description: >
+    A single YAML document defining an Application Driver.
+    Replaces the previous styrmin_driver.yaml + actions.yaml two-file format.
+  filename: driver.styrmin.yml
+  format: YAML
+
+required_fields:
+  apiVersion:
+    type: string
+    value: "styrmin.io/v1"
+    description: API version, must be "styrmin.io/v1"
+  kind:
+    type: string
+    value: ApplicationDriver
+    description: Resource kind, must be "ApplicationDriver"
+  metadata:
+    type: object
+    required:
+      name:
+        type: string
+        description: Unique driver identifier
+  spec:
+    type: object
+    required:
+      version:
+        type: string
+        description: Driver spec version
+      supported_versions:
+        type: string
+        description: Semver range of supported application versions
+      helm:
+        type: object
+        description: Helm chart configuration
+        required:
+          main:
+            type: object
+            required:
+              location:
+                type: string
+                description: Helm chart location (name or OCI registry URL)
+              version:
+                type: string
+                description: Helm chart version
+      components:
+        type: object
+        description: Map of component names to component definitions
+        value_schema:
+          identifier:
+            type: object
+            required:
+              label:
+                type: object
+                description: Kubernetes label selectors
+          backup:
+            type: object
+            optional: true
+            fields:
+              enabled: { type: boolean }
+              kind: { type: string, enum: [disk, mariadb, mongodb, postgres, neo4j, action] }
+              database_name: { type: string, optional: true }
+    optional:
+      default_version:
+        type: string
+        description: Default application version
+      info:
+        type: object
+        fields:
+          description: { type: string }
+          authors: { type: "list[string]" }
+          license: { type: string }
+          icon: { type: string }
+          links: { type: "list[{link: string, url: string}]" }
+      parameters:
+        type: list
+        items:
+          name: { type: string, required: true }
+          label: { type: string }
+          kind: { type: string, enum: [string, integer, float, boolean] }
+          default: { type: any }
+      services:
+        type: list
+        items:
+          name: { type: string, required: true }
+          kind: { type: string, required: true }
+          scope: { type: string }
+          port: { type: integer }
+          component: { type: string }
+      actions:
+        type: list
+        description: >
+          Action declarations (previously in actions.yaml).
+          If present, actions.py must exist in the driver directory.
+        items:
+          name: { type: string, required: true }
+          hook: { type: string, enum: [setup, upgrade], required: true }
+          mode: { type: string, required: true }
+          description: { type: string }
+          location: { type: string, pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]*\\.py::[a-z_][a-zA-Z0-9_]+$", required: true }
+          parameters:
+            type: list
+            optional: true
+            items:
+              name: { type: string }
+              kind: { type: string, enum: [string, integer, float, boolean] }
+              mandatory: { type: boolean }
+          image: { type: string, optional: true }
+
+companion_files:
+  values_template:
+    filename: values.j2.yml
+    format: "Jinja2-templated YAML"
+    required: false
+    description: >
+      Helm values template. Renamed from chart_values.j2.yaml.
+      Processed through Jinja2 with deployment context variables.
+  actions_code:
+    filename: actions.py
+    format: Python
+    required: "Only when spec.actions is non-empty"
+    description: >
+      Python module containing Prefect flow implementations
+      referenced by spec.actions[].location.
+
+error_conditions:
+  deprecated_format:
+    trigger: "Old filenames found (styrmin_driver.yaml, actions.yaml, chart_values.j2.yaml) without new filenames"
+    error: DeprecatedDriverFormatError
+    message_includes: "List of old files found, migration instructions"
+  ambiguous_format:
+    trigger: "Both old and new filenames exist in the same directory"
+    error: AmbiguousDriverFormatError
+    message_includes: "List of conflicting files"
+  missing_actions_code:
+    trigger: "spec.actions is non-empty but actions.py does not exist"
+    error: ValidationError
+    message_includes: "actions.py required when actions are declared"

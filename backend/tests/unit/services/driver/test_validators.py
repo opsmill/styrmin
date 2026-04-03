@@ -21,7 +21,6 @@ from styrmin_backend.services.driver.validators import (
     [
         (Role.DRIVER_SPEC, NoneType),
         (Role.VALUES_TEMPLATE, JinjaTemplateValidator),
-        (Role.ACTIONS_SPEC, NoneType),
     ],
 )
 def test_validator_factory(syntax, expected_validator):
@@ -39,10 +38,7 @@ def test_validator_factory_with_invalid_syntax():
 def test_jinja_template_validator():
     """Test the Jinja template validator."""
     spec_path = (
-        Path(__file__).parent
-        / "fixtures"
-        / "local_driver_directory"
-        / "chart_values.j2.yaml"
+        Path(__file__).parent / "fixtures" / "local_driver_directory" / "values.j2.yml"
     )
     with open(spec_path) as f:
         data = f.read()

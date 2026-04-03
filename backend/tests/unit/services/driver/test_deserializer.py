@@ -6,14 +6,12 @@ import pytest
 import yaml
 
 from styrmin_backend.services.driver.deserializers import (
-    ActionsSpecDeserializer,
     DriverSpecDeserializer,
     get_deserializer,
 )
 from styrmin_backend.services.driver.exceptions import (
     DeserializationError,
 )
-from styrmin_backend.services.driver.models.resources.actions import ActionsSpec
 from styrmin_backend.services.driver.models.resources.driver import DriverSpec
 from styrmin_backend.services.driver.models.structure.resource import Role
 
@@ -40,16 +38,7 @@ def driver_spec():
         Path(__file__).parent
         / "fixtures"
         / "local_driver_directory"
-        / "styrmin_driver.yaml"
-    )
-    with open(spec_path) as f:
-        return yaml.safe_load(f)
-
-
-@pytest.fixture
-def actions_spec():
-    spec_path = (
-        Path(__file__).parent / "fixtures" / "local_driver_directory" / "actions.yaml"
+        / "driver.styrmin.yml"
     )
     with open(spec_path) as f:
         return yaml.safe_load(f)
@@ -59,7 +48,6 @@ def actions_spec():
     "role, expected_deserializer",
     [
         (Role.DRIVER_SPEC, DriverSpecDeserializer),
-        (Role.ACTIONS_SPEC, ActionsSpecDeserializer),
         (Role.VALUES_TEMPLATE, NoneType),
         (Role.ACTIONS_CODE, NoneType),
     ],
@@ -83,6 +71,40 @@ def test_deserialize_valid_driver_spec(driver_spec):
     data = deserializer.deserialize(data=driver_spec)
 
     assert isinstance(data, DriverSpec)
+
+
+def test_deserialize_valid_driver_spec_with_actions(driver_spec):
+    """Test that embedded actions are correctly deserialized."""
+
+    deserializer = DriverSpecDeserializer()
+    data = deserializer.deserialize(data=driver_spec)
+
+    assert isinstance(data, DriverSpec)
+    assert len(data.spec.actions) == 2
+    assert data.spec.actions[0].name == "update_password"
+    assert data.spec.actions[0].hook.value == "upgrade"
+    assert data.spec.actions[1].name == "setup"
+    assert data.spec.actions[1].hook.value == "setup"
+
+
+def test_deserialize_driver_spec_without_actions():
+    """Test that a driver spec without actions deserializes correctly."""
+    spec_data = {
+        "apiVersion": "styrmin.io/v1",
+        "kind": "ApplicationDriver",
+        "metadata": {"name": "no-actions"},
+        "spec": {
+            "version": "1",
+            "supported_versions": ">=1.0,<2.0",
+            "info": {"description": "Test driver"},
+            "helm": {"main": {"location": "test-chart", "version": "1.0.0"}},
+        },
+    }
+    deserializer = DriverSpecDeserializer()
+    data = deserializer.deserialize(data=spec_data)
+
+    assert isinstance(data, DriverSpec)
+    assert data.spec.actions == []
 
 
 @pytest.mark.parametrize(
@@ -110,39 +132,3 @@ def test_deserialize_invalid_driver_spec(path, value, driver_spec):
     deserializer = DriverSpecDeserializer()
     with pytest.raises(DeserializationError):
         deserializer.deserialize(data=driver_spec)
-
-
-def test_deserialize_valid_actions_spec(actions_spec):
-    """Test the deserialization of a valid actions specification."""
-
-    deserializer = ActionsSpecDeserializer()
-    data = deserializer.deserialize(data=actions_spec)
-
-    assert isinstance(data, ActionsSpec)
-
-
-@pytest.mark.parametrize(
-    "path,value",
-    [
-        ("apiVersion", "wrong"),
-        ("kind", "wrong"),
-        ("metadata.package", 123),
-        ("spec.actions", 123),
-        ("spec.actions.0.name", 123),
-        ("spec.actions.0.location", 123),
-        ("spec.actions.0.description", 123),
-        ("spec.actions.0.parameters", 123),
-        ("spec.actions.0.parameters.0.name", 123),
-        ("spec.actions.0.parameters.0.kind", 123),
-        ("spec.actions.0.parameters.0.mandatory", 123),
-    ],
-)
-def test_deserialize_invalid_actions_spec(path, value, actions_spec):
-    """Test the deserialization of an invalid actions specification."""
-
-    # Change the value of the specified path
-    path = set_value(obj=actions_spec, path=path, value=value)
-
-    deserializer = ActionsSpecDeserializer()
-    with pytest.raises(DeserializationError):
-        deserializer.deserialize(data=actions_spec)

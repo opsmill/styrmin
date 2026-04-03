@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 from styrmin_backend.services.driver.loaders import (
     DriverLoader,
     get_local_driver_loader,

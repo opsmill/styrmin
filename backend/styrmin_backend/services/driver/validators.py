@@ -9,7 +9,6 @@ from styrmin_backend.services.driver.exceptions import (
 )
 from styrmin_backend.services.driver.models.resources.actions import (
     ActionDefinition,
-    ActionsSpec,
 )
 from styrmin_backend.services.driver.models.resources.backup import (
     BackupKind,
@@ -212,7 +211,7 @@ class BackupConfigValidator(Validator):
 def validate_driver_backup_configs(
     backup_configs: dict[str, ComponentBackupConfig],
     component_volumes: dict[str, list[str]] | None = None,
-    actions_spec: ActionsSpec | None = None,
+    actions: list[ActionDefinition] | None = None,
 ) -> None:
     """Validate backup configurations against the driver definition.
 
@@ -221,14 +220,14 @@ def validate_driver_backup_configs(
     Args:
         backup_configs: Mapping of component name to ComponentBackupConfig.
         component_volumes: Mapping of component name to available volume names.
-        actions_spec: The actions spec, used to extract hook names for action backups.
+        actions: List of action definitions, used to extract hook names for action backups.
 
     Raises:
         ValidationError: If any backup configuration is invalid.
     """
     action_hooks: set[str] = set()
-    if actions_spec is not None:
-        action_hooks = {action.name for action in actions_spec.spec.actions}
+    if actions is not None:
+        action_hooks = {action.name for action in actions}
 
     validator = BackupConfigValidator(
         component_volumes=component_volumes,
@@ -237,17 +236,18 @@ def validate_driver_backup_configs(
     validator.validate(backup_configs)
 
 
-def build_user_actions_validator(actions_spec: ActionsSpec) -> UserActionsValidator:
+def build_user_actions_validator(
+    actions: list[ActionDefinition],
+) -> UserActionsValidator:
     """Build a user actions validator.
 
     Args:
-        entrypoints (ActionDefinition): The entrypoints.
+        actions: The action definitions with entrypoints.
 
     Returns:
         UserActionsValidator: The user actions validator.
     """
-    entrypoints = actions_spec.spec.actions
-    return UserActionsValidator(entrypoints=entrypoints)
+    return UserActionsValidator(entrypoints=actions)
 
 
 def get_validator(role: Role) -> Validator | None:
@@ -260,7 +260,7 @@ def get_validator(role: Role) -> Validator | None:
         Validator: The validator.
     """
     match role:
-        case Role.DRIVER_SPEC | Role.ACTIONS_SPEC:
+        case Role.DRIVER_SPEC:
             # For this role, the validation is indissociable from the deserialization
             return None
         case Role.VALUES_TEMPLATE:

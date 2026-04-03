@@ -136,8 +136,8 @@ async def load_application_driver_from_object(
             )
 
             builder = ActionsWorkflowBuilder(source=driver_object.source)
-            if driver_object.actions_spec is not None:
-                for action in driver_object.actions_spec.spec.actions:
+            if driver_object.driver_spec.spec.actions:
+                for action in driver_object.driver_spec.spec.actions:
                     workflow = builder.build_user_action_workflow_definition(
                         action=action
                     )
@@ -216,8 +216,8 @@ async def load_application_driver_from_object(
                 )
 
         # Create actions
-        if driver_object.actions_spec:
-            for action in driver_object.actions_spec.spec.actions:
+        if driver_object.driver_spec.spec.actions:
+            for action in driver_object.driver_spec.spec.actions:
                 await uow.actions.create(
                     Action(
                         application_driver_version_id=application_driver_version.id,

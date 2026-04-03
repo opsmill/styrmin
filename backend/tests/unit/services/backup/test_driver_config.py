@@ -33,18 +33,14 @@ def _make_config(**kwargs) -> ComponentBackupConfig:
     return ComponentBackupConfig(**kwargs)
 
 
-def _make_actions_spec_with_hooks(hook_names: list[str]):  # type: ignore[no-untyped-def]
-    """Build a minimal ActionsSpec-like object that exposes the given action names."""
-    from styrmin_backend.services.driver.models.resources._shared import Kind
+def _make_actions_list(hook_names: list[str]) -> list:
+    """Build a list of ActionDefinition objects with the given action names."""
     from styrmin_backend.services.driver.models.resources.actions import (
         ActionDefinition,
-        ActionsSpec,
         HookKind,
-        Metadata,
-        Spec,
     )
 
-    actions = [
+    return [
         ActionDefinition(
             name=name,
             location=f"actions.py::{name}",
@@ -54,12 +50,6 @@ def _make_actions_spec_with_hooks(hook_names: list[str]):  # type: ignore[no-unt
         )
         for name in hook_names
     ]
-    return ActionsSpec(
-        apiVersion="styrmin.io/v1",
-        kind=Kind.ActionDefinition,
-        metadata=Metadata(package="test-pkg"),
-        spec=Spec(actions=actions),
-    )
 
 
 # ===========================================================================
@@ -299,19 +289,19 @@ class TestInvalidCredentialsSecret:
 class TestValidateDriverBackupConfigs:
     """Test the top-level validate_driver_backup_configs convenience function."""
 
-    def test_passes_action_hooks_from_actions_spec(self) -> None:
-        actions_spec = _make_actions_spec_with_hooks(["backup", "restore"])
+    def test_passes_action_hooks_from_actions(self) -> None:
+        actions = _make_actions_list(["backup", "restore"])
         configs = {
             "custom": _make_config(enabled=True, kind="action"),
         }
         # Should not raise
         validate_driver_backup_configs(
             backup_configs=configs,
-            actions_spec=actions_spec,
+            actions=actions,
         )
 
-    def test_fails_when_actions_spec_missing_hooks(self) -> None:
-        actions_spec = _make_actions_spec_with_hooks(["setup"])
+    def test_fails_when_actions_missing_hooks(self) -> None:
+        actions = _make_actions_list(["setup"])
         configs = {
             "custom": _make_config(enabled=True, kind="action"),
         }
@@ -320,7 +310,7 @@ class TestValidateDriverBackupConfigs:
         ):
             validate_driver_backup_configs(
                 backup_configs=configs,
-                actions_spec=actions_spec,
+                actions=actions,
             )
 
     def test_passes_component_volumes(self) -> None:

@@ -86,3 +86,22 @@ spec:
       backup:
         enabled: true
         kind: mongodb
+
+  actions:
+    - name: upgrade
+      hook: upgrade
+      mode: core
+      description: Upgrade Slurpit
+      location: "actions.py::upgrade"
+
+    - name: pre_setup
+      hook: setup
+      mode: pre
+      description: Pre-setup of Slurpit
+      location: "actions.py::pre_setup"
+
+    - name: post_setup
+      hook: setup
+      mode: post
+      description: Post-setup of Slurpit
+      location: "actions.py::post_setup"

@@ -4,7 +4,7 @@ Driver services allow driver authors to declare network services that their
 application exposes, enabling automatic service discovery between applications
 deployed in the same environment.
 
-Example in styrmin_driver.yaml:
+Example in driver.styrmin.yml:
     ```yaml
     spec:
       services:

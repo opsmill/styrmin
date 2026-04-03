@@ -78,6 +78,7 @@ from pydantic import (
 )
 
 from ._shared import Kind
+from .actions import ActionDefinition
 from .parameters import DriverParameterDefinition, validate_parameter_names_unique
 from .services import ServiceDefinition, validate_service_names_unique
 
@@ -147,6 +148,7 @@ class Specification(BaseModel):
     components: Components | None = None
     parameters: list[DriverParameterDefinition] | None = None
     services: list[ServiceDefinition] | None = None
+    actions: list[ActionDefinition] = Field(default_factory=list)
 
     @field_validator("services", mode="after")
     @classmethod

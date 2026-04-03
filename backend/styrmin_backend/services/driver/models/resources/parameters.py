@@ -3,7 +3,7 @@
 Driver parameters allow driver authors to declare typed configuration knobs
 that users provide when creating or updating deployments.
 
-Example in styrmin_driver.yaml:
+Example in driver.styrmin.yml:
     ```yaml
     spec:
       parameters:

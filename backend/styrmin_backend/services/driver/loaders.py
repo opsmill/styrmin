@@ -15,6 +15,7 @@ from styrmin_backend.services.driver.exceptions import (
     ValidationError,
 )
 from styrmin_backend.services.driver.models.resources import DriverResource
+from styrmin_backend.services.driver.models.resources.driver import DriverSpec
 from styrmin_backend.services.driver.models.structure.directory import DriverDirectory
 from styrmin_backend.services.driver.models.structure.resource import ResourceFile
 from styrmin_backend.services.driver.parsers import Parser, get_parser
@@ -65,18 +66,23 @@ class DriverLoader:
             values_template = get_resource_file_loader(
                 directory_map.values_template
             ).load()
-            actions_spec = get_resource_file_loader(directory_map.actions_spec).load()
-            if actions_spec:
+
+            # Post-deserialization: validate actions against actions.py if present
+            if isinstance(driver_spec, DriverSpec) and driver_spec.spec.actions:
+                validator = build_user_actions_validator(
+                    actions=driver_spec.spec.actions
+                )
                 get_resource_file_loader(
                     resource_file=directory_map.actions_code,
-                    validator=build_user_actions_validator(actions_spec=actions_spec),  # type: ignore[arg-type]
+                    validator=validator,
                 ).load()
 
             return ApplicationDriver(
                 source=self.provider.get_source(),
                 driver_spec=driver_spec,  # type: ignore[arg-type]
-                values_template=values_template,  # type: ignore[arg-type]
-                actions_spec=actions_spec,  # type: ignore[arg-type]
+                values_template=values_template
+                if isinstance(values_template, str)
+                else "",
             )
 
 
