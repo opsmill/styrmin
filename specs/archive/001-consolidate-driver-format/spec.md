@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-consolidate-driver-format`  
 **Created**: 2026-04-02  
-**Status**: Draft  
+**Status**: Extracted  
 **Input**: GitHub Issue #56 — Consolidate driver files into single driver.styrmin.yml
 
 ## User Scenarios & Testing *(mandatory)*

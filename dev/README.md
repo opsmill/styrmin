@@ -44,6 +44,8 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 
 - [adr-001-migrate-cli-typer-to-cyclopts.md](adr/adr-001-migrate-cli-typer-to-cyclopts.md) - Migrate styrminctl from Typer to Cyclopts for performance, native async, and framework unification
 
+- [adr-002-consolidate-driver-single-yaml.md](adr/adr-002-consolidate-driver-single-yaml.md) - Consolidate driver declarative config into single driver.styrmin.yml
+
 ## Current Knowledge
 
 Backend architecture documentation in [knowledge/backend/](knowledge/backend/):
