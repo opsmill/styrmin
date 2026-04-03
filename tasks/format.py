@@ -1,6 +1,12 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from invoke.collection import Collection
-from invoke.context import Context
 from invoke.tasks import task
+
+if TYPE_CHECKING:
+    from invoke.context import Context
 
 from .utils import BACKEND_DIRECTORY, MAIN_DIRECTORY_PATH
 
