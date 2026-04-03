@@ -158,7 +158,7 @@ jobs:
 
       - name: Sign manifest
         run: |
-          cosign sign --yes \
+          cosign sign --yes --recursive \
             "${{ vars.HARBOR_HOST }}/opsmill/styrmin@${{ needs.merge.outputs.digest }}"
 
   sbom:
@@ -192,14 +192,14 @@ jobs:
 
       - name: Attest SBOM (SPDX)
         run: |
-          cosign attest --yes \
+          cosign attest --yes --recursive \
             --type spdxjson \
             --predicate styrmin-sbom.spdx.json \
             "${{ vars.HARBOR_HOST }}/opsmill/styrmin@${{ needs.merge.outputs.digest }}"
 
       - name: Attest SBOM (CycloneDX)
         run: |
-          cosign attest --yes \
+          cosign attest --yes --recursive \
             --type cyclonedx \
             --predicate styrmin-sbom.cdx.json \
             "${{ vars.HARBOR_HOST }}/opsmill/styrmin@${{ needs.merge.outputs.digest }}"
