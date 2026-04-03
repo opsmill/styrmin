@@ -104,6 +104,7 @@ jobs:
           NEW_VERSION: ${{ needs.check-changes.outputs.new_version }}
         run: |
           uv version "$NEW_VERSION"
+          uv lock
           yq -i ".version = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
           yq -i ".appVersion = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
           yq -i "(.dependencies[] | select(.name == \"styrmin-agent\")).version = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
@@ -128,7 +129,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add pyproject.toml helm/styrmin/Chart.yaml helm/agent/Chart.yaml
+          git add pyproject.toml uv.lock helm/styrmin/Chart.yaml helm/agent/Chart.yaml
           git commit -m "chore: release ${TAG} [skip ci]"
           git tag "$TAG"
           git push origin develop
