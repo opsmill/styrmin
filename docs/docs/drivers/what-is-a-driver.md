@@ -25,21 +25,21 @@ A driver is a directory containing these files:
 
 | File | Required | Purpose |
 |------|----------|---------|
-| `styrmin_driver.yaml` | Yes | Main specification — metadata, Helm chart location, components |
-| `chart_values.j2.yaml` | Yes | Jinja2 template that generates Helm values dynamically |
-| `actions.yaml` | No | Lifecycle action definitions (setup, upgrade hooks) |
+| `driver.styrmin.yml` | Yes | Driver specification — metadata, Helm chart, components, services, parameters, and action declarations |
+| `values.j2.yml` | No | Jinja2 template that generates Helm values dynamically |
 | `actions.py` | No* | Python implementation of custom actions |
 
-> \* Required if `actions.yaml` is present.
+> \* Required if actions are declared in `driver.styrmin.yml`.
 
 ## How Drivers Work
 
 When you deploy an application through Styrmin, the driver:
 
 1. **Locates the Helm chart** — The driver specifies which Helm chart to use and its version
-2. **Generates configuration** — The `chart_values.j2.yaml` template produces Helm values using context from the cluster, environment, and deployment settings
+2. **Generates configuration** — The `values.j2.yml` template produces Helm values using context from the cluster, environment, deployment settings, and user-provided parameters
 3. **Manages components** — Components define the independently manageable parts of the application (e.g., server, database, worker)
-4. **Executes lifecycle actions** — Optional hooks run custom logic during setup and upgrade workflows (e.g., database migrations, component restarts)
+4. **Exposes services** — Service definitions declare network endpoints, and Styrmin computes FQDNs for ingress and service discovery
+5. **Executes lifecycle actions** — Optional hooks run custom logic during setup and upgrade workflows (e.g., database migrations, component restarts)
 
 ## Key Concepts
 
@@ -53,11 +53,19 @@ Each driver declares which application versions it supports using semver ranges 
 
 ### Dynamic Configuration
 
-The Helm values template has access to rich context including cluster configuration, environment settings, and deployment overrides. This means the same driver can deploy an application differently across environments without duplication.
+The Helm values template has access to rich context including cluster configuration, environment settings, deployment overrides, and user-provided parameters. This means the same driver can deploy an application differently across environments without duplication.
+
+### Parameters
+
+Drivers can declare typed configuration parameters (string, integer, boolean, enum) that users provide when deploying an application. Parameters are accessible in the values template via `{{ parameters.param_name }}`, enabling user customization without modifying the driver itself.
+
+### Service Discovery
+
+Drivers declare the network services an application exposes (HTTP, HTTPS, TCP, UDP). Styrmin uses these declarations to compute FQDNs automatically, which are then available in the values template for ingress and service-to-service configuration.
 
 ### Component Management
 
-Components define the parts of an application that can be independently started, stopped, or scaled. During upgrades, Styrmin can stop specific components, run migrations, and restart them — all orchestrated by the driver's actions.
+Components define the parts of an application that can be independently started, stopped, or scaled. Components can also declare backup configurations for data protection. During upgrades, Styrmin can stop specific components, run migrations, and restart them — all orchestrated by the driver's actions.
 
 ## Next Steps
 

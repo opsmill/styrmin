@@ -12,13 +12,12 @@ This walkthrough explains a complete, working Application Driver — the `simple
 
 ```
 simple-app/
-├── styrmin_driver.yaml      # Driver specification
-├── chart_values.j2.yaml     # Helm values template
-├── actions.yaml             # Action definitions
-└── actions.py               # Action implementations
+├── driver.styrmin.yml    # Driver specification (includes action declarations)
+├── values.j2.yml         # Helm values template
+└── actions.py            # Action implementations
 ```
 
-## File 1: `styrmin_driver.yaml`
+## File 1: `driver.styrmin.yml`
 
 ```yaml
 ---
@@ -59,6 +58,25 @@ spec:
       scope: internal
       port: 8000
       component: server
+
+  actions:
+    - name: upgrade
+      hook: upgrade
+      mode: core
+      description: Upgrade Simple App
+      location: "actions.py::upgrade"
+
+    - name: pre_setup
+      hook: setup
+      mode: pre
+      description: Pre-setup of Simple App
+      location: "actions.py::pre_setup"
+
+    - name: post_setup
+      hook: setup
+      mode: post
+      description: Post-setup of Simple App
+      location: "actions.py::post_setup"
 ```
 
 ### What this defines
@@ -69,11 +87,15 @@ spec:
 - **`spec.helm.main`** — Points to the `simple-app` Helm chart at version `0.1.0`
 - **Two components:**
   - `server` — The FastAPI application, identified by label `app.kubernetes.io/name: simple-app`
-  - `database` — PostgreSQL, identified by label `app.kubernetes.io/name: postgresql`, with backup enabled
+  - `database` — PostgreSQL, identified by label `app.kubernetes.io/name: postgresql`, with a `postgres` backup configured for the `simple_app` database
 - **One service:**
-  - `simple-app` — An HTTP service on port 8000, associated with the `server` component
+  - `simple-app` — An HTTP service on port 8000, associated with the `server` component. Styrmin computes a FQDN for this service automatically.
+- **Three actions** declared inline:
+  - `upgrade` — Replaces the default upgrade behavior (`core` mode)
+  - `pre_setup` — Runs before initial deployment
+  - `post_setup` — Runs after initial deployment
 
-## File 2: `chart_values.j2.yaml`
+## File 2: `values.j2.yml`
 
 ```yaml
 fullnameOverride: styrmin-simple-app
@@ -132,44 +154,7 @@ postgresql:
 - **`database.host: styrmin-postgresql`** — References the PostgreSQL subchart by its `fullnameOverride`. This is critical — the hostname must match exactly.
 - **`postgresql.fullnameOverride: styrmin-postgresql`** — Sets the PostgreSQL service name. The `database.host` value above references this.
 
-## File 3: `actions.yaml`
-
-```yaml
----
-apiVersion: "styrmin.io/v1"
-kind: ActionDefinition
-metadata:
-  package: simple-app
-spec:
-  actions:
-    - name: upgrade
-      hook: upgrade
-      mode: core
-      description: Upgrade Simple App
-      location: "actions.py::upgrade"
-
-    - name: pre_setup
-      hook: setup
-      mode: pre
-      description: Pre-setup of Simple App
-      location: "actions.py::pre_setup"
-
-    - name: post_setup
-      hook: setup
-      mode: post
-      description: Post-setup of Simple App
-      location: "actions.py::post_setup"
-```
-
-### What this defines
-
-Three lifecycle actions:
-
-1. **`upgrade`** — A `core` action on the `upgrade` hook. This replaces the default upgrade behavior with custom logic.
-2. **`pre_setup`** — A `pre` action on the `setup` hook. Runs before the initial Helm install.
-3. **`post_setup`** — A `post` action on the `setup` hook. Runs after the initial Helm install.
-
-## File 4: `actions.py`
+## File 3: `actions.py`
 
 ```python
 from styrmin_backend.actions import (
@@ -242,8 +227,10 @@ This driver demonstrates all the key features of Application Drivers:
 | Helm chart management | `spec.helm.main` points to the chart |
 | Dynamic configuration | Jinja2 template with `app.version`, `instance.config`, and `services` |
 | Component lifecycle | `server` and `database` components with label selectors |
+| Backup configuration | PostgreSQL backup on `database` component with `kind: postgres` |
 | Service definitions | HTTP service on port 8000 with computed FQDN |
-| Custom upgrade logic | Coordinated stop → migrate → restart workflow |
+| Inline action declarations | Three actions defined directly in `driver.styrmin.yml` |
+| Custom upgrade logic | Coordinated stop → migrate → restart workflow in `actions.py` |
 | `fullnameOverride` convention | Both main chart and PostgreSQL subchart set it |
 
 To create your own driver, start with this example and adapt it to your application's requirements. See the [Creating a Driver](./creating-a-driver.md) guide for a step-by-step approach.

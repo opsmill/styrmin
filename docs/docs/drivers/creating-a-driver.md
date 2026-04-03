@@ -25,7 +25,7 @@ cd my-app-driver
 
 ## Step 2: Write the Driver Specification
 
-Create `styrmin_driver.yaml` — the main specification file:
+Create `driver.styrmin.yml` — the single specification file that defines everything about your driver:
 
 ```yaml
 ---
@@ -49,6 +49,12 @@ spec:
       identifier:
         label:
           app.kubernetes.io/name: my-app
+  services:
+    - name: my-app
+      kind: http
+      scope: internal
+      port: 8000
+      component: server
 ```
 
 ### Key Fields
@@ -59,16 +65,52 @@ spec:
 - **`spec.helm.main.location`** — OCI or HTTP URL to the Helm chart
 - **`spec.helm.main.version`** — Helm chart version to use
 - **`spec.components`** — Define the manageable parts of your application
+- **`spec.services`** — Declare network services the application exposes
 
-## Step 3: Create the Values Template
+## Step 3: Define Services
 
-Create `chart_values.j2.yaml` — a Jinja2 template that generates Helm values:
+Services declare network endpoints so Styrmin can compute FQDNs for ingress and service discovery:
+
+```yaml
+services:
+  - name: my-app
+    kind: http          # http, https, tcp, or udp
+    scope: internal     # internal or external
+    port: 8000
+    component: server   # must reference a defined component
+```
+
+The computed FQDNs are available in your values template as `{{ services['my-app'].primary_fqdn }}`.
+
+## Step 4: Define Parameters (Optional)
+
+Parameters allow users to customize deployments without modifying the driver:
+
+```yaml
+parameters:
+  - name: docker_image
+    kind: string
+    label: "Docker image to use"
+    default: "my-registry.io/my-app"
+  - name: replicas
+    kind: integer
+    label: "Number of replicas"
+    default: 2
+```
+
+Supported parameter types: `string`, `integer`, `boolean`, `enum`. For `enum`, provide a `values` list.
+
+Parameters are available in your values template as `{{ parameters.docker_image }}`.
+
+## Step 5: Create the Values Template
+
+Create `values.j2.yml` — a Jinja2 template that generates Helm values:
 
 ```yaml
 fullnameOverride: styrmin-my-app
 
 image:
-  repository: my-registry.io/my-app
+  repository: "{{ parameters.docker_image }}"
   tag: "{{ app.version }}"
 
 ingress:
@@ -116,21 +158,18 @@ The template has access to these context variables:
 | `cluster.config.ingress_class` | Ingress class name |
 | `instance.namespace` | Kubernetes namespace |
 | `instance.config.*` | Resolved configuration (merged from cluster, environment, deployment) |
+| `parameters.*` | User-provided parameter values |
 | `services['name'].primary_fqdn` | Service FQDN for ingress |
 
 See the [Specification Reference](./specification.md#context-variables) for the complete list.
 
-## Step 4: Add Lifecycle Actions (Optional)
+## Step 6: Add Lifecycle Actions (Optional)
 
-If your application needs custom logic during setup or upgrades, create `actions.yaml`:
+If your application needs custom logic during setup or upgrades, declare actions inline in `driver.styrmin.yml`:
 
 ```yaml
----
-apiVersion: "styrmin.io/v1"
-kind: ActionDefinition
-metadata:
-  package: my-app
 spec:
+  # ... other spec fields ...
   actions:
     - name: upgrade
       hook: upgrade
@@ -188,7 +227,7 @@ async def upgrade(context: GlobalContext, target_version: str):
 | `core` | Replaces the default operation |
 | `post` | After the core operation |
 
-## Step 5: Register the Driver
+## Step 7: Register the Driver
 
 Load your driver into Styrmin by pointing it at your driver's Git repository:
 
@@ -202,10 +241,9 @@ Styrmin will clone the repository, validate the driver specification, and regist
 
 ```
 my-app-driver/
-├── styrmin_driver.yaml      # Driver specification
-├── chart_values.j2.yaml     # Helm values template
-├── actions.yaml             # Action definitions (optional)
-└── actions.py               # Action implementations (optional)
+├── driver.styrmin.yml    # Driver specification (includes action declarations)
+├── values.j2.yml         # Helm values template
+└── actions.py            # Action implementations (optional)
 ```
 
 ## Next Steps
