@@ -4,6 +4,7 @@ import {
   useDeleteBackupStorageLocationMutation,
   useUpdateBackupStorageLocationMutation,
 } from "@/generated/graphql";
+import { useQueryClient } from "@tanstack/react-query";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -34,12 +35,12 @@ type UpdateCredentialsValues = z.infer<typeof updateCredentialsSchema>;
 export default function BackupStorageLocationDetailPage() {
   const { id } = useParams({ from: "/backup-storage-locations/$id" });
   const navigate = useNavigate();
-  const [{ data, fetching, error }, reexecute] =
-    useGetBackupStorageLocationQuery({
-      variables: { backupStorageLocationId: id },
-    });
-  const [, executeDelete] = useDeleteBackupStorageLocationMutation();
-  const [, executeUpdate] = useUpdateBackupStorageLocationMutation();
+  const { data, isLoading, error, refetch } = useGetBackupStorageLocationQuery({
+    backupStorageLocationId: id,
+  });
+  const deleteBslMutation = useDeleteBackupStorageLocationMutation();
+  const updateBslMutation = useUpdateBackupStorageLocationMutation();
+  const queryClient = useQueryClient();
 
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [credentialsOpen, setCredentialsOpen] = useState(false);
@@ -57,28 +58,31 @@ export default function BackupStorageLocationDetailPage() {
 
   const handleDelete = async () => {
     setDeleteError(null);
-    const result = await executeDelete({ backupStorageLocationId: id });
-    if (result.error) {
-      setDeleteError(result.error.message);
-      return;
+    try {
+      await deleteBslMutation.mutateAsync({ backupStorageLocationId: id });
+      queryClient.invalidateQueries({
+        queryKey: ["ListBackupStorageLocations"],
+      });
+      navigate({ to: "/backup-storage-locations" });
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Unknown error");
     }
-    navigate({ to: "/backup-storage-locations" });
   };
 
   const onCredentialsSubmit = async (values: UpdateCredentialsValues) => {
     setCredentialsError(null);
-    const result = await executeUpdate({
-      backupStorageLocationId: id,
-      accessKeyId: values.accessKeyId,
-      secretAccessKey: values.secretAccessKey,
-    });
-    if (result.error) {
-      setCredentialsError(result.error.message);
-      return;
+    try {
+      await updateBslMutation.mutateAsync({
+        backupStorageLocationId: id,
+        accessKeyId: values.accessKeyId,
+        secretAccessKey: values.secretAccessKey,
+      });
+      queryClient.invalidateQueries({ queryKey: ["GetBackupStorageLocation"] });
+      reset();
+      setCredentialsOpen(false);
+    } catch (err) {
+      setCredentialsError(err instanceof Error ? err.message : "Unknown error");
     }
-    reset();
-    setCredentialsOpen(false);
-    reexecute({ requestPolicy: "network-only" });
   };
 
   const bsl = data?.backupStorageLocation;
@@ -161,15 +165,12 @@ export default function BackupStorageLocationDetailPage() {
         </div>
       }
     >
-      {fetching && (
+      {isLoading && (
         <LoadingState message="Loading backup storage location..." />
       )}
 
-      {error && (
-        <ErrorState
-          message={error.message}
-          onRetry={() => reexecute({ requestPolicy: "network-only" })}
-        />
+      {error instanceof Error && (
+        <ErrorState message={error.message} onRetry={() => refetch()} />
       )}
 
       {deleteError && (

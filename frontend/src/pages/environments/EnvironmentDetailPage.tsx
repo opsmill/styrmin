@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, Link, useNavigate } from "@tanstack/react-router";
 import {
   useGetEnvironmentQuery,
@@ -5,6 +6,7 @@ import {
   useAssignBackupStorageLocationMutation,
   useUnassignBackupStorageLocationMutation,
 } from "@/generated/graphql";
+import { useQueryClient } from "@tanstack/react-query";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -22,7 +24,6 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Plus } from "lucide-react";
-import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 
 export default function EnvironmentDetailPage() {
@@ -30,41 +31,40 @@ export default function EnvironmentDetailPage() {
     from: "/environments/$environmentId",
   });
   const navigate = useNavigate();
-  const [{ data, fetching, error }, reexecute] = useGetEnvironmentQuery({
-    variables: { environmentId },
-  });
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const { data, isLoading, error, refetch, dataUpdatedAt } =
+    useGetEnvironmentQuery(
+      { environmentId },
+      { refetchInterval: autoRefreshEnabled ? 10_000 : false },
+    );
 
-  const [{ data: bslData }] = useListBackupStorageLocationsQuery();
-  const [, executeAssign] = useAssignBackupStorageLocationMutation();
-  const [, executeUnassign] = useUnassignBackupStorageLocationMutation();
+  const { data: bslData } = useListBackupStorageLocationsQuery();
+  const assignBslMutation = useAssignBackupStorageLocationMutation();
+  const unassignBslMutation = useUnassignBackupStorageLocationMutation();
+  const queryClient = useQueryClient();
 
   const environment = data?.environment;
 
   const handleBslChange = async (value: string) => {
-    if (value === "__none__") {
-      await executeUnassign({ environmentId });
-    } else {
-      await executeAssign({
-        environmentId,
-        backupStorageLocationId: value,
-      });
+    try {
+      if (value === "__none__") {
+        await unassignBslMutation.mutateAsync({ environmentId });
+      } else {
+        await assignBslMutation.mutateAsync({
+          environmentId,
+          backupStorageLocationId: value,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
+    } catch {
+      // Error handling can be added if needed
     }
-    reexecute({ requestPolicy: "network-only" });
   };
 
-  const autoRefresh = useAutoRefresh({
-    onRefresh: () => reexecute({ requestPolicy: "network-only" }),
-  });
-
-  if (fetching) return <LoadingState message="Loading environment..." />;
+  if (isLoading) return <LoadingState message="Loading environment..." />;
 
   if (error) {
-    return (
-      <ErrorState
-        message={error.message}
-        onRetry={() => reexecute({ requestPolicy: "network-only" })}
-      />
-    );
+    return <ErrorState message={error.message} onRetry={() => refetch()} />;
   }
 
   if (!environment) {
@@ -78,10 +78,10 @@ export default function EnvironmentDetailPage() {
       actions={
         <>
           <AutoRefreshIndicator
-            enabled={autoRefresh.enabled}
-            onToggle={autoRefresh.setEnabled}
-            lastRefreshedAt={autoRefresh.lastRefreshedAt}
-            onRefreshNow={autoRefresh.refreshNow}
+            enabled={autoRefreshEnabled}
+            onToggle={setAutoRefreshEnabled}
+            lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
+            onRefreshNow={() => refetch()}
           />
           <Button
             onClick={() =>

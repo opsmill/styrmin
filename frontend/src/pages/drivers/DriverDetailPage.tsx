@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useGetDriverQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
@@ -13,31 +14,23 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Plus } from "lucide-react";
-import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 
 export default function DriverDetailPage() {
   const { driverId } = useParams({ from: "/drivers/$driverId" });
   const navigate = useNavigate();
-  const [{ data, fetching, error }, reexecute] = useGetDriverQuery({
-    variables: { applicationDriverId: driverId },
-  });
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const { data, isLoading, error, refetch, dataUpdatedAt } = useGetDriverQuery(
+    { applicationDriverId: driverId },
+    { refetchInterval: autoRefreshEnabled ? 10_000 : false },
+  );
 
   const driver = data?.applicationDriver;
 
-  const autoRefresh = useAutoRefresh({
-    onRefresh: () => reexecute({ requestPolicy: "network-only" }),
-  });
-
-  if (fetching) return <LoadingState message="Loading driver..." />;
+  if (isLoading) return <LoadingState message="Loading driver..." />;
 
   if (error) {
-    return (
-      <ErrorState
-        message={error.message}
-        onRetry={() => reexecute({ requestPolicy: "network-only" })}
-      />
-    );
+    return <ErrorState message={error.message} onRetry={() => refetch()} />;
   }
 
   if (!driver) {
@@ -54,10 +47,10 @@ export default function DriverDetailPage() {
       actions={
         <>
           <AutoRefreshIndicator
-            enabled={autoRefresh.enabled}
-            onToggle={autoRefresh.setEnabled}
-            lastRefreshedAt={autoRefresh.lastRefreshedAt}
-            onRefreshNow={autoRefresh.refreshNow}
+            enabled={autoRefreshEnabled}
+            onToggle={setAutoRefreshEnabled}
+            lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
+            onRefreshNow={() => refetch()}
           />
           <Button onClick={() => navigate({ to: "/drivers/add" })}>
             <Plus className="h-4 w-4" />

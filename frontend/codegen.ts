@@ -8,10 +8,17 @@ const config: CodegenConfig = {
       plugins: [
         "typescript",
         "typescript-operations",
-        "typescript-urql",
+        "typescript-react-query",
       ],
       config: {
-        withHooks: true,
+        reactQueryVersion: 5,
+        fetcher: {
+          func: "../lib/graphql-fetcher#graphqlFetcher",
+        },
+        exposeQueryKeys: true,
+        exposeFetcher: false,
+        addSuspenseQuery: false,
+        errorType: "Error",
         scalars: {
           UUID: "string",
           JSON: "Record<string, unknown>",
@@ -20,6 +27,11 @@ const config: CodegenConfig = {
     },
   },
   ignoreNoDocuments: true,
+  hooks: {
+    afterAllFileWrite: [
+      "node -e \"const fs=require('fs');const f='src/generated/graphql.ts';const c=fs.readFileSync(f,'utf8');fs.writeFileSync(f,c.replace('import { useMutation, useQuery, UseMutationOptions, UseQueryOptions }','import { useMutation, useQuery, type UseMutationOptions, type UseQueryOptions }'))\"",
+    ],
+  },
 };
 
 export default config;

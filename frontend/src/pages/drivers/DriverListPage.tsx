@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useListDriversQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
@@ -14,16 +15,15 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { Package, Plus } from "lucide-react";
-import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 
 export default function DriverListPage() {
   const navigate = useNavigate();
-  const [{ data, fetching, error }, reexecute] = useListDriversQuery();
-
-  const autoRefresh = useAutoRefresh({
-    onRefresh: () => reexecute({ requestPolicy: "network-only" }),
-  });
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const { data, isLoading, error, refetch, dataUpdatedAt } =
+    useListDriversQuery(undefined, {
+      refetchInterval: autoRefreshEnabled ? 10_000 : false,
+    });
 
   return (
     <PageLayout
@@ -32,10 +32,10 @@ export default function DriverListPage() {
       actions={
         <>
           <AutoRefreshIndicator
-            enabled={autoRefresh.enabled}
-            onToggle={autoRefresh.setEnabled}
-            lastRefreshedAt={autoRefresh.lastRefreshedAt}
-            onRefreshNow={autoRefresh.refreshNow}
+            enabled={autoRefreshEnabled}
+            onToggle={setAutoRefreshEnabled}
+            lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
+            onRefreshNow={() => refetch()}
           />
           <Button onClick={() => navigate({ to: "/drivers/add" })}>
             <Plus className="h-4 w-4" />
@@ -44,13 +44,10 @@ export default function DriverListPage() {
         </>
       }
     >
-      {fetching && <LoadingState message="Loading drivers..." />}
+      {isLoading && <LoadingState message="Loading drivers..." />}
 
       {error && (
-        <ErrorState
-          message={error.message}
-          onRetry={() => reexecute({ requestPolicy: "network-only" })}
-        />
+        <ErrorState message={error.message} onRetry={() => refetch()} />
       )}
 
       {data && data.applicationDrivers.length === 0 && (

@@ -1,13 +1,13 @@
 # Frontend
 
-React 19 single-page application with TypeScript, Vite, and urql (GraphQL client).
+React 19 single-page application with TypeScript, Vite, and TanStack Query (GraphQL data fetching).
 
 ## Tech Stack
 
 - **Framework:** React 19, TanStack Router, TypeScript 5.9
 - **Build:** Vite 8, pnpm
 - **Styling:** Tailwind CSS 4, Radix UI primitives, class-variance-authority
-- **GraphQL:** urql 5, graphql-codegen (auto-generated types in `src/generated/`)
+- **GraphQL:** TanStack Query 5, graphql-codegen (auto-generated hooks in `src/generated/`)
 - **Forms:** React Hook Form 7, Zod 4
 - **Testing:** Vitest, React Testing Library, jsdom
 
@@ -120,4 +120,4 @@ it("calls handler on click", async () => {
 
 - **localStorage:** Use `vi.stubGlobal("localStorage", mockStorage)` — jsdom does not fully implement Storage
 - **Timers:** Use `vi.useFakeTimers()` / `vi.advanceTimersByTime()` for interval-based hooks
-- **GraphQL:** Components using urql hooks need a mock provider — the custom `render` in `@/test/utils` provides a TanStack Router wrapper; extend it for urql mocking as needed
+- **GraphQL:** The custom `render` in `@/test/utils` provides both TanStack Router and TanStack Query wrappers with retries disabled

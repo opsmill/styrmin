@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useListBackupStorageLocationsQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
@@ -12,17 +13,15 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { HardDrive } from "lucide-react";
-import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { CreateBackupStorageLocationDialog } from "./CreateBackupStorageLocationDialog";
 
 export default function BackupStorageLocationListPage() {
-  const [{ data, fetching, error }, reexecute] =
-    useListBackupStorageLocationsQuery();
-
-  const autoRefresh = useAutoRefresh({
-    onRefresh: () => reexecute({ requestPolicy: "network-only" }),
-  });
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const { data, isLoading, error, refetch, dataUpdatedAt } =
+    useListBackupStorageLocationsQuery(undefined, {
+      refetchInterval: autoRefreshEnabled ? 10_000 : false,
+    });
 
   return (
     <PageLayout
@@ -30,26 +29,21 @@ export default function BackupStorageLocationListPage() {
       actions={
         <div className="flex items-center gap-2">
           <AutoRefreshIndicator
-            enabled={autoRefresh.enabled}
-            onToggle={autoRefresh.setEnabled}
-            lastRefreshedAt={autoRefresh.lastRefreshedAt}
-            onRefreshNow={autoRefresh.refreshNow}
+            enabled={autoRefreshEnabled}
+            onToggle={setAutoRefreshEnabled}
+            lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
+            onRefreshNow={() => refetch()}
           />
-          <CreateBackupStorageLocationDialog
-            onCreated={() => reexecute({ requestPolicy: "network-only" })}
-          />
+          <CreateBackupStorageLocationDialog onCreated={() => refetch()} />
         </div>
       }
     >
-      {fetching && (
+      {isLoading && (
         <LoadingState message="Loading backup storage locations..." />
       )}
 
       {error && (
-        <ErrorState
-          message={error.message}
-          onRetry={() => reexecute({ requestPolicy: "network-only" })}
-        />
+        <ErrorState message={error.message} onRetry={() => refetch()} />
       )}
 
       {data && data.backupStorageLocations.length === 0 && (

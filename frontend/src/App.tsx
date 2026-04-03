@@ -1,12 +1,14 @@
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { RouterProvider } from "@tanstack/react-router";
-import { Provider } from "urql";
-import { client } from "@/lib/urql";
+import { queryClient } from "@/lib/query-client";
 import { router } from "@/router";
 
 export default function App() {
   return (
-    <Provider value={client}>
+    <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
-    </Provider>
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+    </QueryClientProvider>
   );
 }

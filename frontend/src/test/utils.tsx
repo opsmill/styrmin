@@ -13,9 +13,24 @@ import {
   createMemoryHistory,
   RouterProvider,
 } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 interface CustomRenderOptions extends Omit<RenderOptions, "wrapper"> {
   initialLocation?: string;
+}
+
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: Infinity,
+      },
+      mutations: {
+        retry: false,
+      },
+    },
+  });
 }
 
 async function render(ui: ReactElement, options?: CustomRenderOptions) {
@@ -37,7 +52,14 @@ async function render(ui: ReactElement, options?: CustomRenderOptions) {
 
   await router.load();
 
-  return rtlRender(<RouterProvider router={router} />, renderOptions);
+  const queryClient = createTestQueryClient();
+
+  return rtlRender(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+    renderOptions,
+  );
 }
 
 export { render, screen, within, waitFor };

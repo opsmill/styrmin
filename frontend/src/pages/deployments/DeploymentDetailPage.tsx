@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetDeploymentQuery,
   useCreateBackupMutation,
@@ -49,58 +50,55 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
-import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 
 export default function DeploymentDetailPage() {
   const { environmentId, deploymentId } = useParams({
     from: "/environments/$environmentId/deployments/$deploymentId",
   });
-  const [{ data, fetching, error }, reexecute] = useGetDeploymentQuery({
-    variables: { deploymentId },
-  });
+  const queryClient = useQueryClient();
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+
+  const { data, isLoading, error, refetch, dataUpdatedAt } =
+    useGetDeploymentQuery(
+      { deploymentId },
+      { refetchInterval: autoRefreshEnabled ? 10_000 : false },
+    );
 
   const deployment = data?.deployment;
 
   const instanceId = deployment?.applicationInstance?.id;
 
   // Backup mutation
-  const [backupResult, createBackup] = useCreateBackupMutation();
+  const createBackupMutation = useCreateBackupMutation();
   const [backupError, setBackupError] = useState<string | null>(null);
 
   // Restore mutation and state
-  const [restoreResult, createRestore] = useCreateRestoreMutation();
+  const createRestoreMutation = useCreateRestoreMutation();
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [selectedBackupId, setSelectedBackupId] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
 
   // Delete backup state
-  const [, deleteBackup] = useDeleteBackupMutation();
+  const deleteBackupMutation = useDeleteBackupMutation();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBackupId, setDeleteBackupId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Upgrade mutation
-  const [upgradeResult, updateVersion] = useUpdateDeploymentVersionMutation();
+  const updateVersionMutation = useUpdateDeploymentVersionMutation();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
 
   // Backups list
-  const [{ data: backupsData, fetching: backupsFetching }, reexecuteBackups] =
-    useListBackupsQuery({
-      variables: { instanceId: instanceId! },
-      pause: !instanceId,
-    });
-
-  const autoRefresh = useAutoRefresh({
-    onRefresh: () => {
-      reexecute({ requestPolicy: "network-only" });
-      if (instanceId) {
-        reexecuteBackups({ requestPolicy: "network-only" });
-      }
+  const { data: backupsData, isLoading: backupsFetching } = useListBackupsQuery(
+    { instanceId: instanceId! },
+    {
+      enabled: !!instanceId,
+      refetchInterval: autoRefreshEnabled ? 10_000 : false,
     },
-  });
+  );
 
   const selectedBackup = backupsData?.backups?.find(
     (b) => b.id === selectedBackupId,
@@ -112,67 +110,63 @@ export default function DeploymentDetailPage() {
 
   async function handleBackup() {
     setBackupError(null);
-    const result = await createBackup({ instanceId: instanceId! });
-    if (result.error) {
-      setBackupError(result.error.message);
-    } else {
-      reexecuteBackups({ requestPolicy: "network-only" });
+    try {
+      await createBackupMutation.mutateAsync({ instanceId: instanceId! });
+      queryClient.invalidateQueries({ queryKey: ["ListBackups"] });
+    } catch (err) {
+      setBackupError(err instanceof Error ? err.message : "Unknown error");
     }
   }
 
   async function handleRestore() {
     if (!selectedBackupId) return;
     setRestoreError(null);
-    const result = await createRestore({
-      backupId: selectedBackupId,
-      targetNamespace,
-    });
-    if (result.error) {
-      setRestoreError(result.error.message);
-    } else {
+    try {
+      await createRestoreMutation.mutateAsync({
+        backupId: selectedBackupId,
+        targetNamespace,
+      });
+      queryClient.invalidateQueries({ queryKey: ["ListRestores"] });
       setRestoreOpen(false);
       setSelectedBackupId(null);
+    } catch (err) {
+      setRestoreError(err instanceof Error ? err.message : "Unknown error");
     }
   }
 
   async function handleDelete() {
     if (!deleteBackupId) return;
     setDeleteError(null);
-    const result = await deleteBackup({ backupId: deleteBackupId });
-    if (result.error) {
-      setDeleteError(result.error.message);
-    } else {
+    try {
+      await deleteBackupMutation.mutateAsync({ backupId: deleteBackupId });
+      queryClient.invalidateQueries({ queryKey: ["ListBackups"] });
       setDeleteOpen(false);
       setDeleteBackupId(null);
-      reexecuteBackups({ requestPolicy: "network-only" });
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Unknown error");
     }
   }
 
   async function handleUpgrade() {
     setUpgradeError(null);
-    const result = await updateVersion({
-      deploymentId,
-      version: newVersion,
-    });
-    if (result.error) {
-      setUpgradeError(result.error.message);
-    } else {
+    try {
+      await updateVersionMutation.mutateAsync({
+        deploymentId,
+        version: newVersion,
+      });
+      queryClient.invalidateQueries({ queryKey: ["GetDeployment"] });
       setUpgradeOpen(false);
       setNewVersion("");
-      reexecute({ requestPolicy: "network-only" });
+    } catch (err) {
+      setUpgradeError(err instanceof Error ? err.message : "Unknown error");
     }
   }
 
-  if (fetching && !data)
+  if (isLoading && !data)
     return <LoadingState message="Loading deployment..." />;
 
   if (error) {
-    return (
-      <ErrorState
-        message={error.message}
-        onRetry={() => reexecute({ requestPolicy: "network-only" })}
-      />
-    );
+    return <ErrorState message={error.message} onRetry={() => refetch()} />;
   }
 
   if (!deployment) {
@@ -192,19 +186,19 @@ export default function DeploymentDetailPage() {
       actions={
         <>
           <AutoRefreshIndicator
-            enabled={autoRefresh.enabled}
-            onToggle={autoRefresh.setEnabled}
-            lastRefreshedAt={autoRefresh.lastRefreshedAt}
-            onRefreshNow={autoRefresh.refreshNow}
+            enabled={autoRefreshEnabled}
+            onToggle={setAutoRefreshEnabled}
+            lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
+            onRefreshNow={() => refetch()}
           />
           <Button
             variant="outline"
             size="sm"
-            disabled={!instanceId || backupResult.fetching}
+            disabled={!instanceId || createBackupMutation.isPending}
             onClick={handleBackup}
           >
             <Archive className="h-4 w-4" />
-            {backupResult.fetching ? "Backing up…" : "Backup"}
+            {createBackupMutation.isPending ? "Backing up…" : "Backup"}
           </Button>
           <Button
             variant="outline"
@@ -407,7 +401,7 @@ export default function DeploymentDetailPage() {
                         setDeleteError(null);
                         setDeleteOpen(true);
                       }}
-                      autoRefreshEnabled={autoRefresh.enabled}
+                      autoRefreshEnabled={autoRefreshEnabled}
                     />
                   ))}
                 </div>
@@ -463,9 +457,9 @@ export default function DeploymentDetailPage() {
             </Button>
             <Button
               onClick={handleRestore}
-              disabled={!selectedBackupId || restoreResult.fetching}
+              disabled={!selectedBackupId || createRestoreMutation.isPending}
             >
-              {restoreResult.fetching ? "Restoring…" : "Restore"}
+              {createRestoreMutation.isPending ? "Restoring…" : "Restore"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -550,9 +544,9 @@ export default function DeploymentDetailPage() {
             </Button>
             <Button
               onClick={handleUpgrade}
-              disabled={!newVersion.trim() || upgradeResult.fetching}
+              disabled={!newVersion.trim() || updateVersionMutation.isPending}
             >
-              {upgradeResult.fetching ? "Upgrading…" : "Upgrade"}
+              {updateVersionMutation.isPending ? "Upgrading…" : "Upgrade"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -585,26 +579,18 @@ function BackupRow({
   onDelete: (backupId: string) => void;
   autoRefreshEnabled: boolean;
 }) {
-  const [{ data: restoresData }, reexecuteRestores] = useListRestoresQuery({
-    variables: { backupId: backup.id },
-    pause: backup.status !== "completed",
-  });
-
-  // Auto-refresh restores when enabled
-  useAutoRefresh({
-    onRefresh: () => reexecuteRestores({ requestPolicy: "network-only" }),
-    enabled:
-      autoRefreshEnabled &&
-      backup.status === "completed" &&
-      (restoresData?.restores?.some(
-        (r) => r.status === "pending" || r.status === "in_progress",
-      ) ??
-        false),
-  });
+  const { data: restoresData } = useListRestoresQuery(
+    { backupId: backup.id },
+    {
+      enabled: backup.status === "completed",
+      refetchInterval: autoRefreshEnabled ? 10_000 : false,
+    },
+  );
 
   const restores = restoresData?.restores ?? [];
   const hasActiveRestore = restores.some(
-    (r) => r.status === "pending" || r.status === "in_progress",
+    (r: { status: string }) =>
+      r.status === "pending" || r.status === "in_progress",
   );
   const isRestoreDisabled = backup.status !== "completed" || hasActiveRestore;
 

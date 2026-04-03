@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useListEnvironmentsQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
@@ -13,16 +14,15 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { Server } from "lucide-react";
-import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { CreateEnvironmentDialog } from "./CreateEnvironmentDialog";
 
 export default function EnvironmentListPage() {
-  const [{ data, fetching, error }, reexecute] = useListEnvironmentsQuery();
-
-  const autoRefresh = useAutoRefresh({
-    onRefresh: () => reexecute({ requestPolicy: "network-only" }),
-  });
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const { data, isLoading, error, refetch, dataUpdatedAt } =
+    useListEnvironmentsQuery(undefined, {
+      refetchInterval: autoRefreshEnabled ? 10_000 : false,
+    });
 
   return (
     <PageLayout
@@ -30,24 +30,19 @@ export default function EnvironmentListPage() {
       actions={
         <div className="flex items-center gap-2">
           <AutoRefreshIndicator
-            enabled={autoRefresh.enabled}
-            onToggle={autoRefresh.setEnabled}
-            lastRefreshedAt={autoRefresh.lastRefreshedAt}
-            onRefreshNow={autoRefresh.refreshNow}
+            enabled={autoRefreshEnabled}
+            onToggle={setAutoRefreshEnabled}
+            lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
+            onRefreshNow={() => refetch()}
           />
-          <CreateEnvironmentDialog
-            onCreated={() => reexecute({ requestPolicy: "network-only" })}
-          />
+          <CreateEnvironmentDialog onCreated={() => refetch()} />
         </div>
       }
     >
-      {fetching && <LoadingState message="Loading environments..." />}
+      {isLoading && <LoadingState message="Loading environments..." />}
 
       {error && (
-        <ErrorState
-          message={error.message}
-          onRetry={() => reexecute({ requestPolicy: "network-only" })}
-        />
+        <ErrorState message={error.message} onRetry={() => refetch()} />
       )}
 
       {data && data.environments.length === 0 && (
