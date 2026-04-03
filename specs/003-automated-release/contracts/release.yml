@@ -1,0 +1,113 @@
+# Contract: release.yml — Daily Release Orchestrator
+#
+# This document defines the interface contract for the release workflow.
+# It is NOT a runnable workflow — it specifies triggers, inputs, outputs,
+# permissions, and job structure for implementation.
+
+name: Release
+
+# ─── Triggers ───────────────────────────────────────────────────────────
+triggers:
+  schedule:
+    - cron: "0 0 * * *"  # Daily at midnight UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        type: boolean
+        description: "Run without pushing tags, images, or charts"
+        default: false
+
+# ─── Concurrency ────────────────────────────────────────────────────────
+concurrency:
+  group: automated-release
+  cancel-in-progress: false  # Never kill a mid-flight release
+
+# ─── Permissions ────────────────────────────────────────────────────────
+permissions:
+  contents: write   # Push version bump commit + tag
+  actions: write    # Trigger reusable workflows
+
+# ─── Jobs ───────────────────────────────────────────────────────────────
+jobs:
+  # ── Job 1: Check for new commits ──────────────────────────────────────
+  check-changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      has_changes: boolean     # "true" if commits exist since last v* tag
+      current_version: string  # Current version from pyproject.toml (e.g., "0.1.0")
+      new_version: string      # Computed next version (e.g., "0.1.1")
+      last_tag: string         # Latest v* tag (e.g., "v0.1.0"), or "" if none
+    steps:
+      - checkout with fetch-depth 0 (full history for tag comparison)
+      - detect last v* tag
+      - count commits since last tag
+      - if no commits, set has_changes=false and exit
+      - read current version from pyproject.toml
+      - increment patch component
+      - version regression guard (new > latest tag)
+      - output all values
+
+  # ── Job 2: Bump version and create release ────────────────────────────
+  create-release:
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: string  # e.g., "v0.1.1"
+    steps:
+      - checkout develop
+      - update pyproject.toml with new version (sed)
+      - update helm/styrmin/Chart.yaml version + appVersion (yq)
+      - update helm/agent/Chart.yaml version (yq)
+      - configure git user (github-actions[bot])
+      - commit version bump [skip ci]
+      - create and push tag
+      - push commit to develop
+      - create GitHub Release with --generate-notes
+      # On failure of downstream jobs, release is updated to draft
+
+  # ── Job 3: Publish Docker image ──────────────────────────────────────
+  publish-docker:
+    needs: create-release
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      tag: needs.create-release.outputs.tag
+      push: true
+    secrets: inherit
+
+  # ── Job 4: Publish agent Helm chart (must be before styrmin) ─────────
+  publish-helm-agent:
+    needs: create-release
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart: agent
+      publish: true
+      branch: needs.create-release.outputs.tag
+    secrets: inherit
+
+  # ── Job 5: Publish styrmin Helm chart (depends on agent) ─────────────
+  publish-helm-styrmin:
+    needs:
+      - create-release
+      - publish-helm-agent  # agent must be published first (OCI dependency)
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart: styrmin
+      publish: true
+      branch: needs.create-release.outputs.tag
+    secrets: inherit
+
+  # ── Job 6: Finalize release status ──────────────────────────────────
+  finalize:
+    needs:
+      - create-release
+      - publish-docker
+      - publish-helm-agent
+      - publish-helm-styrmin
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - if any publish job failed:
+          mark GitHub Release as draft (gh release edit --draft)
+      - if all publish jobs succeeded:
+          ensure GitHub Release is published (not draft)
