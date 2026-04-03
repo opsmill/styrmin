@@ -1,29 +1,22 @@
 apiVersion: v2
 name: styrmin
 description: Helm chart for Styrmin deployment orchestration platform
-
 # Application chart for deploying Styrmin with all its components
 type: application
-
 # Chart version - increment on changes to chart/templates
-version: 0.1.0
-
+version: 0.1.1
 # Application version being deployed
-appVersion: "0.1.0"
-
+appVersion: "0.1.1"
 keywords:
   - styrmin
   - deployment
   - orchestration
   - kubernetes
   - prefect
-
 home: https://github.com/opsmill/styrmin
-
 maintainers:
   - name: OpsMill
     url: https://opsmill.io
-
 dependencies:
   - name: postgresql
     version: "16.7.27"
