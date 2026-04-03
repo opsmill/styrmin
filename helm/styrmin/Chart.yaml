@@ -4,9 +4,9 @@ description: Helm chart for Styrmin deployment orchestration platform
 # Application chart for deploying Styrmin with all its components
 type: application
 # Chart version - increment on changes to chart/templates
-version: 0.1.1
+version: 0.1.2
 # Application version being deployed
-appVersion: "0.1.1"
+appVersion: "0.1.2"
 keywords:
   - styrmin
   - deployment
