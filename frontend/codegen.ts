@@ -27,6 +27,11 @@ const config: CodegenConfig = {
     },
   },
   ignoreNoDocuments: true,
+  hooks: {
+    afterAllFileWrite: [
+      "node -e \"const fs=require('fs');const f='src/generated/graphql.ts';const c=fs.readFileSync(f,'utf8');fs.writeFileSync(f,c.replace('import { useMutation, useQuery, UseMutationOptions, UseQueryOptions }','import { useMutation, useQuery, type UseMutationOptions, type UseQueryOptions }'))\"",
+    ],
+  },
 };
 
 export default config;
