@@ -25,8 +25,8 @@
 
 **Purpose**: Verify existing infrastructure and ensure prerequisites are in place
 
-- [ ] T001 Verify existing `publish-helm-chart.yml` supports `workflow_call` trigger in `.github/workflows/publish-helm-chart.yml` — confirm it accepts `chart`, `publish`, and `branch` inputs; add `workflow_call` trigger if missing
-- [ ] T002 Verify Harbor credentials (`HARBOR_USERNAME`, `HARBOR_PASSWORD`, `HARBOR_HOST`) are referenced correctly — check existing workflow for secret/variable naming conventions
+- [x] T001 Verify existing `publish-helm-chart.yml` supports `workflow_call` trigger in `.github/workflows/publish-helm-chart.yml` — confirm it accepts `chart`, `publish`, and `branch` inputs; add `workflow_call` trigger if missing
+- [x] T002 Verify Harbor credentials (`HARBOR_USERNAME`, `HARBOR_PASSWORD`, `HARBOR_HOST`) are referenced correctly — check existing workflow for secret/variable naming conventions
 
 ---
 
@@ -36,12 +36,12 @@
 
 **⚠️ CRITICAL**: The `docker-publish.yml` workflow must exist before the release orchestrator can call it
 
-- [ ] T003 Create Docker publish workflow file `.github/workflows/docker-publish.yml` with workflow skeleton: `name`, `on` (workflow_dispatch, workflow_call, push to develop), `permissions` (contents: read, id-token: write, packages: write), and concurrency settings
-- [ ] T004 Add `workflow_dispatch` inputs (`tag`: string required, `push`: boolean default false) and `workflow_call` inputs (same signature) to `.github/workflows/docker-publish.yml`
-- [ ] T005 Add `build` job with matrix strategy to `.github/workflows/docker-publish.yml` — matrix includes `{platform: linux/amd64, runner: ubuntu-24.04}` and `{platform: linux/arm64, runner: ubuntu-24.04-arm64}`, using `runs-on: ${{ matrix.runner }}`; steps: checkout at specified ref, setup Docker Buildx (`docker/setup-buildx-action@v4`), login to Harbor (`docker/login-action@v4`) using `secrets.HARBOR_USERNAME`, `secrets.HARBOR_PASSWORD`, `vars.HARBOR_HOST`
-- [ ] T006 Add per-arch build-and-push step to `build` job in `.github/workflows/docker-publish.yml` — use `docker/build-push-action@v7` with `platforms: ${{ matrix.platform }}`, context `.`, file `docker/Dockerfile`, push by digest only (no tags), GHA cache scoped by platform (`cache-from: type=gha,scope=${{ matrix.platform }}`, `cache-to: type=gha,scope=${{ matrix.platform }},mode=max`), export digest to file and upload as GitHub Actions artifact
-- [ ] T007 Add `merge` job (depends on `build`) to `.github/workflows/docker-publish.yml` — runs on `ubuntu-24.04`, downloads digest artifacts, login to Harbor, compute Docker metadata tags (`docker/metadata-action@v6`) with tag rules: `type=semver,pattern={{version}}` for v* tags, `type=sha` always, `type=raw,value=latest` on develop or v* tag; merge per-arch digests into multi-arch manifest via `docker buildx imagetools create --tag <tags> <digests>`, output manifest digest
-- [ ] T008 Add `sign` job (depends on `merge`) to `.github/workflows/docker-publish.yml` — runs on `ubuntu-24.04`, install cosign (`sigstore/cosign-installer@v4`), sign the merged manifest digest (`cosign sign --yes ${HARBOR_HOST}/opsmill/styrmin@${MANIFEST_DIGEST}`), requires `id-token: write` permission
+- [x] T003 Create Docker publish workflow file `.github/workflows/docker-publish.yml` with workflow skeleton: `name`, `on` (workflow_dispatch, workflow_call, push to develop), `permissions` (contents: read, id-token: write, packages: write), and concurrency settings
+- [x] T004 Add `workflow_dispatch` inputs (`tag`: string required, `push`: boolean default false) and `workflow_call` inputs (same signature) to `.github/workflows/docker-publish.yml`
+- [x] T005 Add `build` job with matrix strategy to `.github/workflows/docker-publish.yml` — matrix includes `{platform: linux/amd64, runner: ubuntu-24.04}` and `{platform: linux/arm64, runner: ubuntu-24.04-arm64}`, using `runs-on: ${{ matrix.runner }}`; steps: checkout at specified ref, setup Docker Buildx (`docker/setup-buildx-action@v4`), login to Harbor (`docker/login-action@v4`) using `secrets.HARBOR_USERNAME`, `secrets.HARBOR_PASSWORD`, `vars.HARBOR_HOST`
+- [x] T006 Add per-arch build-and-push step to `build` job in `.github/workflows/docker-publish.yml` — use `docker/build-push-action@v7` with `platforms: ${{ matrix.platform }}`, context `.`, file `docker/Dockerfile`, push by digest only (no tags), GHA cache scoped by platform (`cache-from: type=gha,scope=${{ matrix.platform }}`, `cache-to: type=gha,scope=${{ matrix.platform }},mode=max`), export digest to file and upload as GitHub Actions artifact
+- [x] T007 Add `merge` job (depends on `build`) to `.github/workflows/docker-publish.yml` — runs on `ubuntu-24.04`, downloads digest artifacts, login to Harbor, compute Docker metadata tags (`docker/metadata-action@v6`) with tag rules: `type=semver,pattern={{version}}` for v* tags, `type=sha` always, `type=raw,value=latest` on develop or v* tag; merge per-arch digests into multi-arch manifest via `docker buildx imagetools create --tag <tags> <digests>`, output manifest digest
+- [x] T008 Add `sign` job (depends on `merge`) to `.github/workflows/docker-publish.yml` — runs on `ubuntu-24.04`, install cosign (`sigstore/cosign-installer@v4`), sign the merged manifest digest (`cosign sign --yes ${HARBOR_HOST}/opsmill/styrmin@${MANIFEST_DIGEST}`), requires `id-token: write` permission
 
 **Checkpoint**: `docker-publish.yml` is complete — builds amd64 (ubuntu-24.04) and arm64 (ubuntu-24.04-arm64) natively, merges into multi-arch manifest, signs manifest. Triggerable via `workflow_dispatch` independently.
 
@@ -55,15 +55,15 @@
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] Create release workflow file `.github/workflows/release.yml` with skeleton: `name: Release`, `on` (schedule cron `0 0 * * *`, workflow_dispatch with `dry_run` boolean input), `concurrency` (group: `automated-release`, cancel-in-progress: false), `permissions` (contents: write, actions: write), `runs-on: ubuntu-24.04` for all jobs
-- [ ] T010 [US1] Add `check-changes` job to `.github/workflows/release.yml` — checkout with `fetch-depth: 0`, detect last `v*` tag via `git describe --tags --match "v*" --abbrev=0`, count commits since last tag via `git rev-list --count`, output `has_changes`, `current_version`, `new_version`, `last_tag`
-- [ ] T011 [US1] Add version reading and patch increment logic to `check-changes` job in `.github/workflows/release.yml` — read version from `pyproject.toml` with `sed`, parse MAJOR.MINOR.PATCH, increment PATCH, set `new_version` output
-- [ ] T012 [US1] Add version regression guard to `check-changes` job in `.github/workflows/release.yml` — compare `new_version` against latest tag using `sort -V`, fail with explicit error if regression detected (FR-016)
-- [ ] T013 [US1] Add `create-release` job to `.github/workflows/release.yml` — runs on `ubuntu-24.04`, depends on `check-changes`, conditional on `has_changes == 'true'`, checkout develop, configure git user as `github-actions[bot]`
-- [ ] T014 [US1] Add version file updates to `create-release` job in `.github/workflows/release.yml` — update `pyproject.toml` version with `sed`, update `helm/styrmin/Chart.yaml` version + appVersion with `yq`, update `helm/agent/Chart.yaml` version with `yq`
-- [ ] T015 [US1] Add commit, tag, and push steps to `create-release` job in `.github/workflows/release.yml` — commit with `[skip ci]` message, create tag `v{new_version}`, push commit to develop, push tag, output `tag`
-- [ ] T016 [US1] Add GitHub Release creation step to `create-release` job in `.github/workflows/release.yml` — use `gh release create` with `--generate-notes` and `--target develop`, pass tag from output (FR-014)
-- [ ] T017 [US1] Add dry_run support to `.github/workflows/release.yml` — when `inputs.dry_run` is true, skip push/tag/release steps but still compute and log what would happen
+- [x] T009 [US1] Create release workflow file `.github/workflows/release.yml` with skeleton: `name: Release`, `on` (schedule cron `0 0 * * *`, workflow_dispatch with `dry_run` boolean input), `concurrency` (group: `automated-release`, cancel-in-progress: false), `permissions` (contents: write, actions: write), `runs-on: ubuntu-24.04` for all jobs
+- [x] T010 [US1] Add `check-changes` job to `.github/workflows/release.yml` — checkout with `fetch-depth: 0`, detect last `v*` tag via `git describe --tags --match "v*" --abbrev=0`, count commits since last tag via `git rev-list --count`, output `has_changes`, `current_version`, `new_version`, `last_tag`
+- [x] T011 [US1] Add version reading and patch increment logic to `check-changes` job in `.github/workflows/release.yml` — read version from `pyproject.toml` with `sed`, parse MAJOR.MINOR.PATCH, increment PATCH, set `new_version` output
+- [x] T012 [US1] Add version regression guard to `check-changes` job in `.github/workflows/release.yml` — compare `new_version` against latest tag using `sort -V`, fail with explicit error if regression detected (FR-016)
+- [x] T013 [US1] Add `create-release` job to `.github/workflows/release.yml` — runs on `ubuntu-24.04`, depends on `check-changes`, conditional on `has_changes == 'true'`, checkout develop, configure git user as `github-actions[bot]`
+- [x] T014 [US1] Add version file updates to `create-release` job in `.github/workflows/release.yml` — update `pyproject.toml` version with `sed`, update `helm/styrmin/Chart.yaml` version + appVersion with `yq`, update `helm/agent/Chart.yaml` version with `yq`
+- [x] T015 [US1] Add commit, tag, and push steps to `create-release` job in `.github/workflows/release.yml` — commit with `[skip ci]` message, create tag `v{new_version}`, push commit to develop, push tag, output `tag`
+- [x] T016 [US1] Add GitHub Release creation step to `create-release` job in `.github/workflows/release.yml` — use `gh release create` with `--generate-notes` and `--target develop`, pass tag from output (FR-014)
+- [x] T017 [US1] Add dry_run support to `.github/workflows/release.yml` — when `inputs.dry_run` is true, skip push/tag/release steps but still compute and log what would happen
 
 **Checkpoint**: User Story 1 is complete — the release workflow can detect changes, bump versions, create tags, and publish GitHub Releases. Testable via `workflow_dispatch`.
 
@@ -77,7 +77,7 @@
 
 ### Implementation for User Story 2
 
-- [ ] T018 [US2] Add `publish-docker` job to `.github/workflows/release.yml` — depends on `create-release`, calls `./.github/workflows/docker-publish.yml` via `uses` with `tag` and `push: true` inputs, `secrets: inherit`
+- [x] T018 [US2] Add `publish-docker` job to `.github/workflows/release.yml` — depends on `create-release`, calls `./.github/workflows/docker-publish.yml` via `uses` with `tag` and `push: true` inputs, `secrets: inherit`
 
 **Checkpoint**: User Story 2 is complete — Docker images are automatically built, pushed, and signed as part of the release pipeline. Also independently triggerable via `workflow_dispatch` on `docker-publish.yml`.
 
@@ -91,8 +91,8 @@
 
 ### Implementation for User Story 3
 
-- [ ] T019 [US3] Add `publish-helm-agent` job to `.github/workflows/release.yml` — depends on `create-release`, calls `./.github/workflows/publish-helm-chart.yml` with `chart: agent`, `publish: true`, `branch: <tag>`, `secrets: inherit`
-- [ ] T020 [US3] Add `publish-helm-styrmin` job to `.github/workflows/release.yml` — depends on `create-release` AND `publish-helm-agent` (agent must be published first due to OCI dependency), calls `./.github/workflows/publish-helm-chart.yml` with `chart: styrmin`, `publish: true`, `branch: <tag>`, `secrets: inherit`
+- [x] T019 [US3] Add `publish-helm-agent` job to `.github/workflows/release.yml` — depends on `create-release`, calls `./.github/workflows/publish-helm-chart.yml` with `chart: agent`, `publish: true`, `branch: <tag>`, `secrets: inherit`
+- [x] T020 [US3] Add `publish-helm-styrmin` job to `.github/workflows/release.yml` — depends on `create-release` AND `publish-helm-agent` (agent must be published first due to OCI dependency), calls `./.github/workflows/publish-helm-chart.yml` with `chart: styrmin`, `publish: true`, `branch: <tag>`, `secrets: inherit`
 
 **Checkpoint**: User Story 3 is complete — both Helm charts are published in the correct order as part of the release pipeline.
 
@@ -106,8 +106,8 @@
 
 ### Implementation for User Story 4
 
-- [ ] T021 [US4] Verify version reading logic in `check-changes` job (`.github/workflows/release.yml`) reads from `pyproject.toml` as source of truth — ensure manual major/minor bumps are picked up correctly (no hardcoded base version)
-- [ ] T022 [US4] Verify version regression guard in `check-changes` job (`.github/workflows/release.yml`) handles major/minor bump scenarios — e.g., manual set to `0.2.0` when last tag is `v0.1.5` should pass, manual set to `0.1.0` when last tag is `v0.1.5` should fail
+- [x] T021 [US4] Verify version reading logic in `check-changes` job (`.github/workflows/release.yml`) reads from `pyproject.toml` as source of truth — ensure manual major/minor bumps are picked up correctly (no hardcoded base version)
+- [x] T022 [US4] Verify version regression guard in `check-changes` job (`.github/workflows/release.yml`) handles major/minor bump scenarios — e.g., manual set to `0.2.0` when last tag is `v0.1.5` should pass, manual set to `0.1.0` when last tag is `v0.1.5` should fail
 
 **Checkpoint**: User Story 4 is complete — manual version control works seamlessly with automated patch releases.
 
@@ -117,10 +117,10 @@
 
 **Purpose**: Finalize release status handling and ensure robustness
 
-- [ ] T023 Add `finalize` job to `.github/workflows/release.yml` — depends on all publish jobs, runs `if: always()`, marks GitHub Release as draft if any publish job failed (`gh release edit --draft`), ensures release is published if all succeeded (FR-015)
-- [ ] T024 Add dry_run guards to publish job calls in `.github/workflows/release.yml` — conditionally skip `publish-docker`, `publish-helm-agent`, and `publish-helm-styrmin` jobs when `inputs.dry_run` is true
-- [ ] T025 Validate `docker-publish.yml` tag matrix against contract in `specs/003-automated-release/contracts/docker-publish.yml` — verify v* tag push produces version+SHA+latest, develop push produces SHA+latest, workflow_dispatch produces SHA only
-- [ ] T026 Run quickstart.md validation — manually trigger full release via `workflow_dispatch` and verify all steps match the documented flow in `specs/003-automated-release/quickstart.md`
+- [x] T023 Add `finalize` job to `.github/workflows/release.yml` — depends on all publish jobs, runs `if: always()`, marks GitHub Release as draft if any publish job failed (`gh release edit --draft`), ensures release is published if all succeeded (FR-015)
+- [x] T024 Add dry_run guards to publish job calls in `.github/workflows/release.yml` — conditionally skip `publish-docker`, `publish-helm-agent`, and `publish-helm-styrmin` jobs when `inputs.dry_run` is true
+- [x] T025 Validate `docker-publish.yml` tag matrix against contract in `specs/003-automated-release/contracts/docker-publish.yml` — verify v* tag push produces version+SHA+latest, develop push produces SHA+latest, workflow_dispatch produces SHA only
+- [x] T026 Run quickstart.md validation — manually trigger full release via `workflow_dispatch` and verify all steps match the documented flow in `specs/003-automated-release/quickstart.md`
 
 ---
 
