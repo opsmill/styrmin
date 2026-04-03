@@ -224,3 +224,22 @@ jobs:
             echo "All publish jobs succeeded — release is published"
             gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
           fi
+
+      - name: Download SBOM artifacts
+        if: needs.publish-docker.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: sbom
+          path: /tmp/sbom
+
+      - name: Attach SBOMs to release
+        if: needs.publish-docker.result == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          gh release upload "$TAG" \
+            /tmp/sbom/styrmin-sbom.spdx.json \
+            /tmp/sbom/styrmin-sbom.cdx.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
