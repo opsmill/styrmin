@@ -21,16 +21,13 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, Trash2, KeyRound } from "lucide-react";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
 
 const updateCredentialsSchema = z.object({
   accessKeyId: z.string().min(1, "Access key ID is required"),
   secretAccessKey: z.string().min(1, "Secret access key is required"),
 });
-
-type UpdateCredentialsValues = z.infer<typeof updateCredentialsSchema>;
 
 export default function BackupStorageLocationDetailPage() {
   const { id } = useParams({ from: "/backup-storage-locations/$id" });
@@ -46,15 +43,33 @@ export default function BackupStorageLocationDetailPage() {
   const [credentialsOpen, setCredentialsOpen] = useState(false);
   const [credentialsError, setCredentialsError] = useState<string | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors: credErrors, isSubmitting: credSubmitting },
-  } = useForm<UpdateCredentialsValues>({
-    resolver: zodResolver(updateCredentialsSchema),
+  const credForm = useForm({
     defaultValues: { accessKeyId: "", secretAccessKey: "" },
+    validators: {
+      onSubmit: updateCredentialsSchema,
+    },
+    onSubmit: async ({ value }) => {
+      setCredentialsError(null);
+      try {
+        await updateBslMutation.mutateAsync({
+          backupStorageLocationId: id,
+          accessKeyId: value.accessKeyId,
+          secretAccessKey: value.secretAccessKey,
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["GetBackupStorageLocation"],
+        });
+        credForm.reset();
+        setCredentialsOpen(false);
+      } catch (err) {
+        setCredentialsError(
+          err instanceof Error ? err.message : "Unknown error",
+        );
+      }
+    },
   });
+
+  const credSubmitting = useStore(credForm.store, (s) => s.isSubmitting);
 
   const handleDelete = async () => {
     setDeleteError(null);
@@ -66,22 +81,6 @@ export default function BackupStorageLocationDetailPage() {
       navigate({ to: "/backup-storage-locations" });
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Unknown error");
-    }
-  };
-
-  const onCredentialsSubmit = async (values: UpdateCredentialsValues) => {
-    setCredentialsError(null);
-    try {
-      await updateBslMutation.mutateAsync({
-        backupStorageLocationId: id,
-        accessKeyId: values.accessKeyId,
-        secretAccessKey: values.secretAccessKey,
-      });
-      queryClient.invalidateQueries({ queryKey: ["GetBackupStorageLocation"] });
-      reset();
-      setCredentialsOpen(false);
-    } catch (err) {
-      setCredentialsError(err instanceof Error ? err.message : "Unknown error");
     }
   };
 
@@ -111,7 +110,11 @@ export default function BackupStorageLocationDetailPage() {
                 <DialogTitle>Update Credentials</DialogTitle>
               </DialogHeader>
               <form
-                onSubmit={handleSubmit(onCredentialsSubmit)}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  credForm.handleSubmit();
+                }}
                 className="space-y-4"
               >
                 {credentialsError && (
@@ -121,28 +124,43 @@ export default function BackupStorageLocationDetailPage() {
                     <AlertDescription>{credentialsError}</AlertDescription>
                   </Alert>
                 )}
-                <div className="space-y-2">
-                  <Label htmlFor="cred-access-key">Access Key ID</Label>
-                  <Input id="cred-access-key" {...register("accessKeyId")} />
-                  {credErrors.accessKeyId && (
-                    <p className="text-sm text-destructive">
-                      {credErrors.accessKeyId.message}
-                    </p>
+                <credForm.Field name="accessKeyId">
+                  {(field) => (
+                    <div className="space-y-2">
+                      <Label htmlFor="cred-access-key">Access Key ID</Label>
+                      <Input
+                        id="cred-access-key"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                      />
+                      {field.state.meta.errors.length > 0 && (
+                        <p className="text-sm text-destructive">
+                          {field.state.meta.errors[0]?.toString()}
+                        </p>
+                      )}
+                    </div>
                   )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="cred-secret-key">Secret Access Key</Label>
-                  <Input
-                    id="cred-secret-key"
-                    type="password"
-                    {...register("secretAccessKey")}
-                  />
-                  {credErrors.secretAccessKey && (
-                    <p className="text-sm text-destructive">
-                      {credErrors.secretAccessKey.message}
-                    </p>
+                </credForm.Field>
+                <credForm.Field name="secretAccessKey">
+                  {(field) => (
+                    <div className="space-y-2">
+                      <Label htmlFor="cred-secret-key">Secret Access Key</Label>
+                      <Input
+                        id="cred-secret-key"
+                        type="password"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                      />
+                      {field.state.meta.errors.length > 0 && (
+                        <p className="text-sm text-destructive">
+                          {field.state.meta.errors[0]?.toString()}
+                        </p>
+                      )}
+                    </div>
                   )}
-                </div>
+                </credForm.Field>
                 <div className="flex justify-end gap-2">
                   <Button
                     type="button"

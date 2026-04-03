@@ -1,5 +1,4 @@
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
 import { useCreateClusterMutation } from "@/generated/graphql";
 import { useQueryClient } from "@tanstack/react-query";
@@ -76,15 +75,7 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
   const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    control,
-    reset,
-    watch,
-    formState: { errors, isSubmitting },
-  } = useForm<CreateClusterValues>({
-    resolver: zodResolver(createClusterSchema),
+  const form = useForm({
     defaultValues: {
       name: "default",
       ingress_class: "",
@@ -96,36 +87,54 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
       standard_storage_enabled: false,
       standard_storage_class: "",
     },
+    validators: {
+      onSubmit: ({ value }) => {
+        const result = createClusterSchema.safeParse(value);
+        if (result.success) return undefined;
+        const fieldErrors: Record<string, string> = {};
+        for (const issue of result.error.issues) {
+          const path = issue.path.join(".");
+          if (path) fieldErrors[path] = issue.message;
+        }
+        return { fields: fieldErrors };
+      },
+    },
+    onSubmit: async ({ value }) => {
+      setSubmitError(null);
+      const config = buildClusterConfig(value);
+      try {
+        const data = await createClusterMutation.mutateAsync({
+          name: value.name,
+          config: config ?? null,
+        });
+        if (data.createCluster) {
+          queryClient.invalidateQueries({ queryKey: ["ListClusters"] });
+          form.reset();
+          setAdvancedOpen(false);
+          setSubmitError(null);
+          setOpen(false);
+          onCreated();
+        }
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
   });
 
-  const dedicatedIngressEnabled = watch("dedicated_ingress_enabled");
-  const standardStorageEnabled = watch("standard_storage_enabled");
-
-  const onSubmit = async (values: CreateClusterValues) => {
-    setSubmitError(null);
-    const config = buildClusterConfig(values);
-    try {
-      const data = await createClusterMutation.mutateAsync({
-        name: values.name,
-        config: config ?? null,
-      });
-      if (data.createCluster) {
-        queryClient.invalidateQueries({ queryKey: ["ListClusters"] });
-        reset();
-        setAdvancedOpen(false);
-        setSubmitError(null);
-        setOpen(false);
-        onCreated();
-      }
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Unknown error");
-    }
-  };
+  const isSubmitting = useStore(form.store, (s) => s.isSubmitting);
+  const dedicatedIngressEnabled = useStore(
+    form.store,
+    (s) => s.values.dedicated_ingress_enabled,
+  );
+  const standardStorageEnabled = useStore(
+    form.store,
+    (s) => s.values.standard_storage_enabled,
+  );
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (!nextOpen) {
-      reset();
+      form.reset();
       setAdvancedOpen(false);
       setSubmitError(null);
     }
@@ -143,7 +152,14 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
         <DialogHeader>
           <DialogTitle>Create Cluster</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            form.handleSubmit();
+          }}
+          className="space-y-4"
+        >
           {submitError && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -152,17 +168,25 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
             </Alert>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="cluster-name">Name</Label>
-            <Input
-              id="cluster-name"
-              placeholder="my-cluster"
-              {...register("name")}
-            />
-            {errors.name && (
-              <p className="text-sm text-destructive">{errors.name.message}</p>
+          <form.Field name="name">
+            {(field) => (
+              <div className="space-y-2">
+                <Label htmlFor="cluster-name">Name</Label>
+                <Input
+                  id="cluster-name"
+                  placeholder="my-cluster"
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  onBlur={field.handleBlur}
+                />
+                {field.state.meta.errors.length > 0 && (
+                  <p className="text-sm text-destructive">
+                    {field.state.meta.errors[0]?.toString()}
+                  </p>
+                )}
+              </div>
             )}
-          </div>
+          </form.Field>
 
           <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
             <CollapsibleTrigger asChild>
@@ -177,46 +201,64 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
               </button>
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-4 pt-3">
-              <div className="space-y-2">
-                <Label htmlFor="cluster-ingress-class">Ingress Class</Label>
-                <Input
-                  id="cluster-ingress-class"
-                  placeholder="e.g. nginx"
-                  {...register("ingress_class")}
-                />
-              </div>
+              <form.Field name="ingress_class">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="cluster-ingress-class">Ingress Class</Label>
+                    <Input
+                      id="cluster-ingress-class"
+                      placeholder="e.g. nginx"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                  </div>
+                )}
+              </form.Field>
 
-              <div className="space-y-2">
-                <Label htmlFor="cluster-fqdn-suffix">FQDN Suffix</Label>
-                <Input
-                  id="cluster-fqdn-suffix"
-                  placeholder="example.com"
-                  {...register("fqdn_suffix")}
-                />
-              </div>
+              <form.Field name="fqdn_suffix">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="cluster-fqdn-suffix">FQDN Suffix</Label>
+                    <Input
+                      id="cluster-fqdn-suffix"
+                      placeholder="example.com"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                  </div>
+                )}
+              </form.Field>
 
-              <div className="space-y-2">
-                <Label htmlFor="cluster-runtime-class">Runtime Class</Label>
-                <Input
-                  id="cluster-runtime-class"
-                  placeholder="e.g. default"
-                  {...register("runtime_class")}
-                />
-              </div>
+              <form.Field name="runtime_class">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="cluster-runtime-class">Runtime Class</Label>
+                    <Input
+                      id="cluster-runtime-class"
+                      placeholder="e.g. default"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                  </div>
+                )}
+              </form.Field>
 
               <div className="space-y-3 rounded-md border p-3">
                 <div className="flex items-center gap-2">
-                  <Controller
-                    name="dedicated_ingress_enabled"
-                    control={control}
-                    render={({ field }) => (
+                  <form.Field name="dedicated_ingress_enabled">
+                    {(field) => (
                       <Checkbox
                         id="cluster-dedicated-ingress"
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
+                        checked={field.state.value}
+                        onCheckedChange={(checked) =>
+                          field.handleChange(checked === true)
+                        }
                       />
                     )}
-                  />
+                  </form.Field>
                   <Label
                     htmlFor="cluster-dedicated-ingress"
                     className="font-medium"
@@ -226,39 +268,53 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                 </div>
                 {dedicatedIngressEnabled && (
                   <div className="space-y-3 ml-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="cluster-di-impl">Implementation</Label>
-                      <Input
-                        id="cluster-di-impl"
-                        placeholder="e.g. traefik"
-                        {...register("dedicated_ingress_implementation")}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="cluster-di-type">Type</Label>
-                      <Input
-                        id="cluster-di-type"
-                        placeholder="e.g. ingress"
-                        {...register("dedicated_ingress_type")}
-                      />
-                    </div>
+                    <form.Field name="dedicated_ingress_implementation">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <Label htmlFor="cluster-di-impl">
+                            Implementation
+                          </Label>
+                          <Input
+                            id="cluster-di-impl"
+                            placeholder="e.g. traefik"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                          />
+                        </div>
+                      )}
+                    </form.Field>
+                    <form.Field name="dedicated_ingress_type">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <Label htmlFor="cluster-di-type">Type</Label>
+                          <Input
+                            id="cluster-di-type"
+                            placeholder="e.g. ingress"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                          />
+                        </div>
+                      )}
+                    </form.Field>
                   </div>
                 )}
               </div>
 
               <div className="space-y-3 rounded-md border p-3">
                 <div className="flex items-center gap-2">
-                  <Controller
-                    name="standard_storage_enabled"
-                    control={control}
-                    render={({ field }) => (
+                  <form.Field name="standard_storage_enabled">
+                    {(field) => (
                       <Checkbox
                         id="cluster-standard-storage"
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
+                        checked={field.state.value}
+                        onCheckedChange={(checked) =>
+                          field.handleChange(checked === true)
+                        }
                       />
                     )}
-                  />
+                  </form.Field>
                   <Label
                     htmlFor="cluster-standard-storage"
                     className="font-medium"
@@ -268,19 +324,25 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                 </div>
                 {standardStorageEnabled && (
                   <div className="space-y-3 ml-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="cluster-sc">Storage Class</Label>
-                      <Input
-                        id="cluster-sc"
-                        placeholder="e.g. ebs-gp3"
-                        {...register("standard_storage_class")}
-                      />
-                      {errors.standard_storage_class && (
-                        <p className="text-sm text-destructive">
-                          {errors.standard_storage_class.message}
-                        </p>
+                    <form.Field name="standard_storage_class">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <Label htmlFor="cluster-sc">Storage Class</Label>
+                          <Input
+                            id="cluster-sc"
+                            placeholder="e.g. ebs-gp3"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                          />
+                          {field.state.meta.errors.length > 0 && (
+                            <p className="text-sm text-destructive">
+                              {field.state.meta.errors[0]?.toString()}
+                            </p>
+                          )}
+                        </div>
                       )}
-                    </div>
+                    </form.Field>
                   </div>
                 )}
               </div>

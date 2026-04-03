@@ -1,6 +1,5 @@
 import { useParams, useNavigate, Link } from "@tanstack/react-router";
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
 import {
   useListApplicationDriversQuery,
@@ -36,8 +35,6 @@ const deployFormSchema = z.object({
   applicationVersion: z.string().optional(),
 });
 
-type DeployFormValues = z.infer<typeof deployFormSchema>;
-
 type DriverVersion = NonNullable<
   ListApplicationDriversQuery["applicationDrivers"]
 >[number]["versions"][number];
@@ -62,23 +59,50 @@ export default function DeployFormPage() {
     deploymentId?: string | null;
   } | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    control,
-    watch,
-    setValue,
-    formState: { errors, isSubmitting },
-  } = useForm<DeployFormValues>({
-    resolver: zodResolver(deployFormSchema),
+  const form = useForm({
     defaultValues: {
       name: "",
       applicationDriverVersionId: "",
       applicationVersion: "",
     },
+    validators: {
+      onSubmit: ({ value }) => {
+        const result = deployFormSchema.safeParse(value);
+        if (result.success) return undefined;
+        const fieldErrors: Record<string, string> = {};
+        for (const issue of result.error.issues) {
+          const path = issue.path.join(".");
+          if (path) fieldErrors[path] = issue.message;
+        }
+        return { fields: fieldErrors };
+      },
+    },
+    onSubmit: async ({ value }) => {
+      setSubmitError(null);
+      try {
+        const data = await deployMutation.mutateAsync({
+          driver: selectedVersion!.driverName,
+          name: value.name,
+          version: value.applicationVersion || null,
+          environmentId,
+          parameters:
+            Object.keys(dynamicParams).length > 0 ? dynamicParams : null,
+        });
+        queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
+        if (data.deploy) {
+          setTaskResult(data.deploy);
+        }
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
   });
 
-  const selectedVersionId = watch("applicationDriverVersionId");
+  const isSubmitting = useStore(form.store, (s) => s.isSubmitting);
+  const selectedVersionId = useStore(
+    form.store,
+    (s) => s.values.applicationDriverVersionId,
+  );
 
   const allVersions = useMemo(() => {
     if (!driversData) return [];
@@ -87,44 +111,21 @@ export default function DeployFormPage() {
     );
   }, [driversData]);
 
-  const selectedVersion = useMemo(
-    () => allVersions.find((v) => v.id === selectedVersionId),
-    [allVersions, selectedVersionId],
-  );
+  const selectedVersion = allVersions.find((v) => v.id === selectedVersionId);
 
   const hasDefaultVersion = Boolean(selectedVersion?.defaultVersion);
 
   useEffect(() => {
     if (selectedVersion?.defaultVersion) {
-      setValue("applicationVersion", selectedVersion.defaultVersion);
+      form.setFieldValue("applicationVersion", selectedVersion.defaultVersion);
     } else {
-      setValue("applicationVersion", "");
+      form.setFieldValue("applicationVersion", "");
     }
-  }, [selectedVersion, setValue]);
+  }, [selectedVersion, form]);
 
   const [dynamicParams, setDynamicParams] = useState<Record<string, unknown>>(
     {},
   );
-
-  const onSubmit = async (values: DeployFormValues) => {
-    setSubmitError(null);
-    try {
-      const data = await deployMutation.mutateAsync({
-        driver: selectedVersion!.driverName,
-        name: values.name,
-        version: values.applicationVersion || null,
-        environmentId,
-        parameters:
-          Object.keys(dynamicParams).length > 0 ? dynamicParams : null,
-      });
-      queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
-      if (data.deploy) {
-        setTaskResult(data.deploy);
-      }
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Unknown error");
-    }
-  };
 
   if (isLoading) return <LoadingState message="Loading drivers..." />;
 
@@ -202,7 +203,11 @@ export default function DeployFormPage() {
       ]}
     >
       <form
-        onSubmit={handleSubmit(onSubmit)}
+        onSubmit={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          form.handleSubmit();
+        }}
         className="max-w-lg mx-auto space-y-6"
       >
         {submitError && (
@@ -213,24 +218,34 @@ export default function DeployFormPage() {
           </Alert>
         )}
 
-        <div className="space-y-2">
-          <Label htmlFor="name">Deployment Name</Label>
-          <Input id="name" placeholder="my-application" {...register("name")} />
-          {errors.name && (
-            <p className="text-sm text-destructive">{errors.name.message}</p>
+        <form.Field name="name">
+          {(field) => (
+            <div className="space-y-2">
+              <Label htmlFor="name">Deployment Name</Label>
+              <Input
+                id="name"
+                placeholder="my-application"
+                value={field.state.value}
+                onChange={(e) => field.handleChange(e.target.value)}
+                onBlur={field.handleBlur}
+              />
+              {field.state.meta.errors.length > 0 && (
+                <p className="text-sm text-destructive">
+                  {field.state.meta.errors[0]?.toString()}
+                </p>
+              )}
+            </div>
           )}
-        </div>
+        </form.Field>
 
-        <div className="space-y-2">
-          <Label htmlFor="driverVersion">Application Driver Version</Label>
-          <Controller
-            name="applicationDriverVersionId"
-            control={control}
-            render={({ field }) => (
+        <form.Field name="applicationDriverVersionId">
+          {(field) => (
+            <div className="space-y-2">
+              <Label htmlFor="driverVersion">Application Driver Version</Label>
               <Select
-                value={field.value}
+                value={field.state.value}
                 onValueChange={(value) => {
-                  field.onChange(value);
+                  field.handleChange(value);
                   setDynamicParams({});
                 }}
               >
@@ -245,42 +260,50 @@ export default function DeployFormPage() {
                   ))}
                 </SelectContent>
               </Select>
-            )}
-          />
-          {errors.applicationDriverVersionId && (
-            <p className="text-sm text-destructive">
-              {errors.applicationDriverVersionId.message}
-            </p>
+              {field.state.meta.errors.length > 0 && (
+                <p className="text-sm text-destructive">
+                  {field.state.meta.errors[0]?.toString()}
+                </p>
+              )}
+            </div>
           )}
-        </div>
+        </form.Field>
 
-        <div className="space-y-2">
-          <Label htmlFor="applicationVersion">
-            Application Version
-            {!hasDefaultVersion && <span className="text-destructive"> *</span>}
-          </Label>
-          <Input
-            id="applicationVersion"
-            placeholder={
-              hasDefaultVersion
-                ? (selectedVersion?.defaultVersion ?? "1.0.0")
-                : "1.0.0"
-            }
-            {...register("applicationVersion")}
-          />
-          {errors.applicationVersion && (
-            <p className="text-sm text-destructive">
-              {errors.applicationVersion.message}
-            </p>
+        <form.Field name="applicationVersion">
+          {(field) => (
+            <div className="space-y-2">
+              <Label htmlFor="applicationVersion">
+                Application Version
+                {!hasDefaultVersion && (
+                  <span className="text-destructive"> *</span>
+                )}
+              </Label>
+              <Input
+                id="applicationVersion"
+                placeholder={
+                  hasDefaultVersion
+                    ? (selectedVersion?.defaultVersion ?? "1.0.0")
+                    : "1.0.0"
+                }
+                value={field.state.value}
+                onChange={(e) => field.handleChange(e.target.value)}
+                onBlur={field.handleBlur}
+              />
+              {field.state.meta.errors.length > 0 && (
+                <p className="text-sm text-destructive">
+                  {field.state.meta.errors[0]?.toString()}
+                </p>
+              )}
+              {selectedVersion?.supportedVersions && (
+                <p className="text-xs text-muted-foreground">
+                  Supported: {selectedVersion.supportedVersions}
+                  {hasDefaultVersion &&
+                    ` (default: ${selectedVersion.defaultVersion})`}
+                </p>
+              )}
+            </div>
           )}
-          {selectedVersion?.supportedVersions && (
-            <p className="text-xs text-muted-foreground">
-              Supported: {selectedVersion.supportedVersions}
-              {hasDefaultVersion &&
-                ` (default: ${selectedVersion.defaultVersion})`}
-            </p>
-          )}
-        </div>
+        </form.Field>
 
         {selectedVersion && selectedVersion.parameters.length > 0 && (
           <div className="space-y-4">

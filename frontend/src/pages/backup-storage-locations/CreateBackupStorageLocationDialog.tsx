@@ -1,5 +1,4 @@
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
 import { useCreateBackupStorageLocationMutation } from "@/generated/graphql";
 import { useQueryClient } from "@tanstack/react-query";
@@ -26,8 +25,6 @@ const createBslSchema = z.object({
   secretAccessKey: z.string().min(1, "Secret access key is required"),
 });
 
-type CreateBslValues = z.infer<typeof createBslSchema>;
-
 export function CreateBackupStorageLocationDialog({
   onCreated,
 }: {
@@ -38,13 +35,7 @@ export function CreateBackupStorageLocationDialog({
   const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<CreateBslValues>({
-    resolver: zodResolver(createBslSchema),
+  const form = useForm({
     defaultValues: {
       name: "",
       endpoint: "",
@@ -53,28 +44,32 @@ export function CreateBackupStorageLocationDialog({
       accessKeyId: "",
       secretAccessKey: "",
     },
+    validators: {
+      onSubmit: createBslSchema,
+    },
+    onSubmit: async ({ value }) => {
+      setSubmitError(null);
+      try {
+        await createBslMutation.mutateAsync(value);
+        queryClient.invalidateQueries({
+          queryKey: ["ListBackupStorageLocations"],
+        });
+        form.reset();
+        setSubmitError(null);
+        setOpen(false);
+        onCreated();
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
   });
 
-  const onSubmit = async (values: CreateBslValues) => {
-    setSubmitError(null);
-    try {
-      await createBslMutation.mutateAsync(values);
-      queryClient.invalidateQueries({
-        queryKey: ["ListBackupStorageLocations"],
-      });
-      reset();
-      setSubmitError(null);
-      setOpen(false);
-      onCreated();
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Unknown error");
-    }
-  };
+  const isSubmitting = useStore(form.store, (s) => s.isSubmitting);
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (!nextOpen) {
-      reset();
+      form.reset();
       setSubmitError(null);
     }
   };
@@ -91,7 +86,14 @@ export function CreateBackupStorageLocationDialog({
         <DialogHeader>
           <DialogTitle>Create Backup Storage Location</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            form.handleSubmit();
+          }}
+          className="space-y-4"
+        >
           {submitError && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -100,90 +102,128 @@ export function CreateBackupStorageLocationDialog({
             </Alert>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="bsl-name">Name</Label>
-            <Input
-              id="bsl-name"
-              placeholder="my-backup-location"
-              {...register("name")}
-            />
-            {errors.name && (
-              <p className="text-sm text-destructive">{errors.name.message}</p>
+          <form.Field name="name">
+            {(field) => (
+              <div className="space-y-2">
+                <Label htmlFor="bsl-name">Name</Label>
+                <Input
+                  id="bsl-name"
+                  placeholder="my-backup-location"
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  onBlur={field.handleBlur}
+                />
+                {field.state.meta.errors.length > 0 && (
+                  <p className="text-sm text-destructive">
+                    {field.state.meta.errors[0]?.toString()}
+                  </p>
+                )}
+              </div>
             )}
-          </div>
+          </form.Field>
 
-          <div className="space-y-2">
-            <Label htmlFor="bsl-endpoint">S3 Endpoint</Label>
-            <Input
-              id="bsl-endpoint"
-              placeholder="https://s3.amazonaws.com"
-              {...register("endpoint")}
-            />
-            {errors.endpoint && (
-              <p className="text-sm text-destructive">
-                {errors.endpoint.message}
-              </p>
+          <form.Field name="endpoint">
+            {(field) => (
+              <div className="space-y-2">
+                <Label htmlFor="bsl-endpoint">S3 Endpoint</Label>
+                <Input
+                  id="bsl-endpoint"
+                  placeholder="https://s3.amazonaws.com"
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  onBlur={field.handleBlur}
+                />
+                {field.state.meta.errors.length > 0 && (
+                  <p className="text-sm text-destructive">
+                    {field.state.meta.errors[0]?.toString()}
+                  </p>
+                )}
+              </div>
             )}
-          </div>
+          </form.Field>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="bsl-bucket">Bucket</Label>
-              <Input
-                id="bsl-bucket"
-                placeholder="my-backup-bucket"
-                {...register("bucket")}
-              />
-              {errors.bucket && (
-                <p className="text-sm text-destructive">
-                  {errors.bucket.message}
-                </p>
+            <form.Field name="bucket">
+              {(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor="bsl-bucket">Bucket</Label>
+                  <Input
+                    id="bsl-bucket"
+                    placeholder="my-backup-bucket"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                  />
+                  {field.state.meta.errors.length > 0 && (
+                    <p className="text-sm text-destructive">
+                      {field.state.meta.errors[0]?.toString()}
+                    </p>
+                  )}
+                </div>
               )}
-            </div>
+            </form.Field>
 
-            <div className="space-y-2">
-              <Label htmlFor="bsl-region">Region</Label>
-              <Input
-                id="bsl-region"
-                placeholder="us-east-1"
-                {...register("region")}
-              />
-              {errors.region && (
-                <p className="text-sm text-destructive">
-                  {errors.region.message}
-                </p>
+            <form.Field name="region">
+              {(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor="bsl-region">Region</Label>
+                  <Input
+                    id="bsl-region"
+                    placeholder="us-east-1"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                  />
+                  {field.state.meta.errors.length > 0 && (
+                    <p className="text-sm text-destructive">
+                      {field.state.meta.errors[0]?.toString()}
+                    </p>
+                  )}
+                </div>
               )}
-            </div>
+            </form.Field>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="bsl-access-key">Access Key ID</Label>
-            <Input
-              id="bsl-access-key"
-              placeholder="AKIAIOSFODNN7EXAMPLE"
-              {...register("accessKeyId")}
-            />
-            {errors.accessKeyId && (
-              <p className="text-sm text-destructive">
-                {errors.accessKeyId.message}
-              </p>
+          <form.Field name="accessKeyId">
+            {(field) => (
+              <div className="space-y-2">
+                <Label htmlFor="bsl-access-key">Access Key ID</Label>
+                <Input
+                  id="bsl-access-key"
+                  placeholder="AKIAIOSFODNN7EXAMPLE"
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  onBlur={field.handleBlur}
+                />
+                {field.state.meta.errors.length > 0 && (
+                  <p className="text-sm text-destructive">
+                    {field.state.meta.errors[0]?.toString()}
+                  </p>
+                )}
+              </div>
             )}
-          </div>
+          </form.Field>
 
-          <div className="space-y-2">
-            <Label htmlFor="bsl-secret-key">Secret Access Key</Label>
-            <Input
-              id="bsl-secret-key"
-              type="password"
-              placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-              {...register("secretAccessKey")}
-            />
-            {errors.secretAccessKey && (
-              <p className="text-sm text-destructive">
-                {errors.secretAccessKey.message}
-              </p>
+          <form.Field name="secretAccessKey">
+            {(field) => (
+              <div className="space-y-2">
+                <Label htmlFor="bsl-secret-key">Secret Access Key</Label>
+                <Input
+                  id="bsl-secret-key"
+                  type="password"
+                  placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  onBlur={field.handleBlur}
+                />
+                {field.state.meta.errors.length > 0 && (
+                  <p className="text-sm text-destructive">
+                    {field.state.meta.errors[0]?.toString()}
+                  </p>
+                )}
+              </div>
             )}
-          </div>
+          </form.Field>
 
           <div className="flex justify-end gap-2">
             <Button

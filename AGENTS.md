@@ -138,6 +138,7 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 - Drivers: `driver/DRIVERS.md`
 
 ## Active Technologies
+- TypeScript 5.9.3, Node 22 + React 19.2.4, `@tanstack/react-form` (new), `@tanstack/zod-form-adapter` (new), Zod 4.3.6, Radix UI, `@tanstack/react-query` v5 (001-tanstack-form-migration)
 
 - Python 3.12+ + Pydantic v2, PyYAML, Jinja2, Prefect (001-consolidate-driver-format)
 - Filesystem and Git (driver sources) — no database changes (001-consolidate-driver-format)
