@@ -46,7 +46,7 @@ jobs:
           ref: ${{ inputs.branch }}
 
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       - name: Install yq
         uses: mikefarah/yq@065b200af9851db0d5132f50bc10b1406ea5c0a8  # v4.50.1
