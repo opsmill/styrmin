@@ -1,0 +1,9 @@
+{
+  "label": "Application Drivers",
+  "position": 3,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "description": "Learn how to create and manage Application Drivers for deploying applications with Styrmin."
+  }
+}
