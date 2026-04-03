@@ -123,9 +123,8 @@ class DriverSettings(BaseSettings):
         description="Token used to authenticate with the driver",
     )
 
-    spec_file: str = Field(default="styrmin_driver.yaml")
-    chart_values_template: str = Field(default="chart_values.j2.yaml")
-    actions_spec_file: str = Field(default="actions.yaml")
+    spec_file: str = Field(default="driver.styrmin.yml")
+    values_template: str = Field(default="values.j2.yml")
     actions_code_file: str = Field(default="actions.py")
 
 

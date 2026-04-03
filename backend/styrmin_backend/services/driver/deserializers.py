@@ -2,14 +2,13 @@ from typing import Any, Generic, Type, TypeVar
 
 from pydantic import ValidationError
 
-from styrmin_backend.services.driver.models.resources.actions import ActionsSpec
 from styrmin_backend.services.driver.models.resources.code import ActionsCode
 from styrmin_backend.services.driver.models.resources.driver import DriverSpec
 from styrmin_backend.services.driver.models.structure.resource import Role
 
 from .exceptions import DeserializationError
 
-ModelType = TypeVar("ModelType", DriverSpec, ActionsSpec, ActionsCode)
+ModelType = TypeVar("ModelType", DriverSpec, ActionsCode)
 
 
 class Deserializer(Generic[ModelType]):
@@ -39,18 +38,6 @@ class DriverSpecDeserializer(Deserializer[DriverSpec]):
             ) from err
 
 
-class ActionsSpecDeserializer(Deserializer[ActionsSpec]):
-    model = ActionsSpec
-
-    def deserialize(self, data: Any) -> ActionsSpec:
-        try:
-            return super().deserialize(data)
-        except ValidationError as err:
-            raise DeserializationError(
-                f"The actions specification is invalid: {err!s}"
-            ) from err
-
-
 def get_deserializer(role: Role) -> Deserializer | None:
     """Get the deserializer based on the role.
 
@@ -63,8 +50,6 @@ def get_deserializer(role: Role) -> Deserializer | None:
     match role:
         case Role.DRIVER_SPEC:
             return DriverSpecDeserializer()
-        case Role.ACTIONS_SPEC:
-            return ActionsSpecDeserializer()
         case Role.VALUES_TEMPLATE | Role.ACTIONS_CODE:
             return None
         case _:

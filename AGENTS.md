@@ -139,6 +139,8 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 
 ## Active Technologies
 
+- Python 3.12+ + Pydantic v2, PyYAML, Jinja2, Prefect (001-consolidate-driver-format)
+- Filesystem and Git (driver sources) — no database changes (001-consolidate-driver-format)
 - TypeScript 5.9.3, Node 22 + React 19.2.4, TanStack Router 1.168.x (already installed), TanStack Query v5 (new), `@graphql-codegen/typescript-react-query` (new) (001-tanstack-query-migration)
 - N/A (frontend-only, data via GraphQL API at `/graphql`) (001-tanstack-query-migration)
 - Python 3.12+ + Pydantic v2, ariadne-codegen (build-time), httpx (Transport) (003-sdk-typed-bindings)

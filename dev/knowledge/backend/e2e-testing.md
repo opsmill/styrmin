@@ -97,7 +97,7 @@ A bare git daemon that hosts the application driver source code.
 At setup time, the fixture:
 
 1. Copies the driver source from `driver/examples/simple-app/` to a temp directory
-2. Patches `styrmin_driver.yaml` to point the Helm chart location at the chart server's cluster-internal URL
+2. Patches `driver.styrmin.yml` to point the Helm chart location at the chart server's cluster-internal URL
 3. Initializes a git repository using [dulwich](https://www.dulwich.io/) (pure Python git)
 4. Port-forwards the git-daemon service and pushes the repo
 

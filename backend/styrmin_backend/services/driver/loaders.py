@@ -7,6 +7,8 @@ from styrmin_backend.services.driver.deserializers import (
     get_deserializer,
 )
 from styrmin_backend.services.driver.exceptions import (
+    AmbiguousDriverFormatError,
+    DeprecatedDriverFormatError,
     DeserializationError,
     DriverDefinitionError,
     DriverLoadingError,
@@ -15,6 +17,7 @@ from styrmin_backend.services.driver.exceptions import (
     ValidationError,
 )
 from styrmin_backend.services.driver.models.resources import DriverResource
+from styrmin_backend.services.driver.models.resources.driver import DriverSpec
 from styrmin_backend.services.driver.models.structure.directory import DriverDirectory
 from styrmin_backend.services.driver.models.structure.resource import ResourceFile
 from styrmin_backend.services.driver.parsers import Parser, get_parser
@@ -28,6 +31,9 @@ from styrmin_backend.services.driver.validators import (
     build_user_actions_validator,
     get_validator,
 )
+
+# Old format filenames for deprecation detection
+_OLD_FILENAMES = ("styrmin_driver.yaml", "actions.yaml", "chart_values.j2.yaml")
 
 
 class DriverLoader:
@@ -60,24 +66,53 @@ class DriverLoader:
             # Set the directory map to point to the cloned repository
             directory_map = self.directory_map_model(root_path=driver_dir)
 
+            # Check for format conflicts before loading
+            _check_driver_format(driver_dir, directory_map)
+
             # Load the resource files
             driver_spec = get_resource_file_loader(directory_map.driver_spec).load()
             values_template = get_resource_file_loader(
                 directory_map.values_template
             ).load()
-            actions_spec = get_resource_file_loader(directory_map.actions_spec).load()
-            if actions_spec:
+
+            # Post-deserialization: validate actions against actions.py if present
+            if isinstance(driver_spec, DriverSpec) and driver_spec.spec.actions:
+                validator = build_user_actions_validator(
+                    actions=driver_spec.spec.actions
+                )
                 get_resource_file_loader(
                     resource_file=directory_map.actions_code,
-                    validator=build_user_actions_validator(actions_spec=actions_spec),  # type: ignore[arg-type]
+                    validator=validator,
                 ).load()
 
             return ApplicationDriver(
                 source=self.provider.get_source(),
                 driver_spec=driver_spec,  # type: ignore[arg-type]
-                values_template=values_template,  # type: ignore[arg-type]
-                actions_spec=actions_spec,  # type: ignore[arg-type]
+                values_template=values_template
+                if isinstance(values_template, str)
+                else "",
             )
+
+
+def _check_driver_format(driver_dir: Path, directory_map: DriverDirectory) -> None:
+    """Check for old-format files and raise appropriate errors.
+
+    Args:
+        driver_dir: The root path of the driver directory.
+        directory_map: The directory map with new-format file paths.
+
+    Raises:
+        AmbiguousDriverFormatError: If both old and new format files exist.
+        DeprecatedDriverFormatError: If only old format files exist.
+    """
+    new_spec_exists = directory_map.driver_spec.path.exists()
+    old_files_found = [f for f in _OLD_FILENAMES if (driver_dir / f).exists()]
+
+    if new_spec_exists and old_files_found:
+        raise AmbiguousDriverFormatError(conflicting_files=old_files_found)
+
+    if not new_spec_exists and old_files_found:
+        raise DeprecatedDriverFormatError(old_files=old_files_found)
 
 
 class ResourceFileLoader:

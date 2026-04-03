@@ -28,12 +28,7 @@ class DriverDirectory:
         self.values_template: ResourceFile = ResourceFile(
             role=Role.VALUES_TEMPLATE,
             syntax=Syntax.STR,
-            path=root_path / config.SETTINGS.driver.chart_values_template,
-        )
-        self.actions_spec: ResourceFile = ResourceFile(
-            role=Role.ACTIONS_SPEC,
-            syntax=Syntax.YAML,
-            path=root_path / config.SETTINGS.driver.actions_spec_file,
+            path=root_path / config.SETTINGS.driver.values_template,
             optional=True,
         )
         self.actions_code: ResourceFile = ResourceFile(

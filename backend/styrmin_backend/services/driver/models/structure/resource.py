@@ -8,7 +8,6 @@ class Role(str, Enum):
     """The role enum."""
 
     DRIVER_SPEC = "driver_spec"
-    ACTIONS_SPEC = "actions_spec"
     VALUES_TEMPLATE = "values_template"
     ACTIONS_CODE = "actions_code"
 

@@ -22,3 +22,19 @@ spec:
     main:
       location: oci://registry.opsmill.io/opsmill/chart/infrahub
       version: 2.3.*
+  actions:
+    - name: update_password
+      description: Update administrator password
+      location: "actions.py::update_password"
+      hook: upgrade
+      mode: post
+      parameters:
+        - name: password
+          kind: string
+          mandatory: true
+
+    - name: setup
+      description: Initial Setup of Infrahub
+      location: "actions.py::setup"
+      hook: setup
+      mode: core

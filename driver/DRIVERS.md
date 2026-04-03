@@ -17,16 +17,15 @@ A driver is a directory containing the following files:
 
 | File | Required | Description |
 |------|----------|-------------|
-| `styrmin_driver.yaml` | **Yes** | Main driver specification |
-| `chart_values.j2.yaml` | **Yes** | Jinja2 template for Helm values |
-| `actions.yaml` | No | Action definitions for lifecycle hooks |
+| `driver.styrmin.yml` | **Yes** | Driver specification (includes action declarations) |
+| `values.j2.yml` | No | Jinja2 template for Helm values |
 | `actions.py` | No* | Python implementation of actions |
 
-> \* Required if `actions.yaml` is present.
+> \* Required if actions are declared in `driver.styrmin.yml`.
 
-## Driver Specification (`styrmin_driver.yaml`)
+## Driver Specification (`driver.styrmin.yml`)
 
-The main specification file defines the driver metadata, supported versions, Helm chart location, and component definitions.
+The specification file defines the driver metadata, supported versions, Helm chart location, component definitions, and action declarations — all in a single file.
 
 ### Schema
 
@@ -56,6 +55,25 @@ spec:
         label:
           <key>: <value>   # Kubernetes label selector
       # Additional fields allowed (cpu, memory, etc.)
+  parameters:              # Optional configurable parameters
+    - name: <string>
+      label: <string>
+      kind: <string>       # string, integer, float, boolean
+      default: <any>
+  services:                # Optional service definitions
+    - name: <string>
+      kind: <string>
+      scope: <string>
+      port: <integer>
+      component: <string>
+  actions:                 # Optional action declarations
+    - name: <string>       # Unique action name
+      hook: <string>       # Lifecycle hook: "setup" or "upgrade"
+      mode: <string>       # Execution phase: "pre", "core", or "post"
+      description: <string>
+      location: <string>   # Python function reference: "file.py::function"
+      parameters: []       # Optional parameters
+      image: <string>      # Optional container image for execution
 ```
 
 ### Required Fields
@@ -80,11 +98,11 @@ metadata:
   name: infrahub
 spec:
   version: "1"
-  supported_versions: ">=1.1.5,<=1.2.0"
+  supported_versions: ">=1.5,<1.9"
   info:
     icon: xxxx
     description: Next generation source of truth for infrastructure management
-    authors: [fatih, jeremy]
+    authors: [fatih]
     license: Apache-2.0
     links:
       - link: Homepage
@@ -96,7 +114,7 @@ spec:
   helm:
     main:
       location: oci://registry.opsmill.io/opsmill/chart/infrahub
-      version: 4.1.4
+      version: 4.16.3
   components:
     server:
       cpu: 4
@@ -107,7 +125,7 @@ spec:
       identifier:
         label:
           service: infrahub-task-worker
-    neo4j:
+    database:
       identifier:
         label:
           infrahub/service: database
@@ -115,13 +133,37 @@ spec:
       identifier:
         label:
           infrahub/service: cache
-    rabbitmq:
+    message-queue:
       identifier:
         label:
           infrahub/service: message-queue
+  services:
+    - name: infrahub
+      kind: http
+      scope: internal
+      port: 8000
+      component: server
+  actions:
+    - name: upgrade
+      hook: upgrade
+      mode: core
+      description: Upgrade Infrahub
+      location: "actions.py::upgrade"
+
+    - name: pre_setup
+      hook: setup
+      mode: pre
+      description: Initial Setup of Infrahub
+      location: "actions.py::pre_setup"
+
+    - name: post_setup
+      hook: setup
+      mode: post
+      description: Initial Setup of Infrahub
+      location: "actions.py::post_setup"
 ```
 
-## Helm Values Template (`chart_values.j2.yaml`)
+## Helm Values Template (`values.j2.yml`)
 
 A Jinja2 template that generates Helm values for the deployment. The template has access to a context object containing deployment, cluster, environment, and application information.
 
@@ -151,7 +193,7 @@ The template receives a context object with the following structure:
 
 ### Naming Convention (`fullnameOverride`)
 
-Every `chart_values.j2.yaml` **must** set `fullnameOverride` for the main chart and all subcharts, using the pattern:
+Every `values.j2.yml` **must** set `fullnameOverride` for the main chart and all subcharts, using the pattern:
 
 ```yaml
 fullnameOverride: styrmin-<name>
@@ -205,17 +247,15 @@ infrahubServer:
 
 ## Actions
 
-Actions allow drivers to define custom logic that executes during application lifecycle events (setup, upgrade). Actions are defined in `actions.yaml` and implemented in `actions.py`.
+Actions allow drivers to define custom logic that executes during application lifecycle events (setup, upgrade). Actions are declared in the `actions` section of `driver.styrmin.yml` and implemented in `actions.py`.
 
-### Action Definition (`actions.yaml`)
+### Action Declaration
+
+Actions are defined as a list under `spec.actions` in `driver.styrmin.yml`:
 
 ```yaml
----
-apiVersion: "styrmin.io/v1"
-kind: ActionDefinition
-metadata:
-  package: <string>        # Package name (usually matches driver name)
 spec:
+  # ... other spec fields ...
   actions:
     - name: <string>       # Unique action name
       hook: <string>       # Lifecycle hook: "setup" or "upgrade"
@@ -242,11 +282,6 @@ spec:
 ### Example
 
 ```yaml
----
-apiVersion: "styrmin.io/v1"
-kind: ActionDefinition
-metadata:
-  package: infrahub
 spec:
   actions:
     - name: upgrade
@@ -396,9 +431,9 @@ components:
 Drivers are loaded from Git repositories. When loading a driver, Styrmin:
 
 1. Clones the repository at the specified branch/tag
-2. Parses `styrmin_driver.yaml` and validates the schema
-3. Reads `chart_values.j2.yaml` as a template string
-4. If present, parses `actions.yaml` and loads `actions.py`
+2. Parses `driver.styrmin.yml` and validates the schema (including embedded action declarations)
+3. Reads `values.j2.yml` as a template string (if present)
+4. If actions are declared, loads and validates `actions.py` to ensure all referenced functions exist
 5. Stores the driver version in the database
 6. Registers any actions with the workflow engine (Prefect)
 
@@ -406,4 +441,8 @@ Drivers are loaded from Git repositories. When loading a driver, Styrmin:
 
 See the [`examples/`](examples/) directory for complete driver examples:
 
+- [`examples/simple-app/`](examples/simple-app/) - Simple 3-tier FastAPI application with PostgreSQL
 - [`examples/infrahub/`](examples/infrahub/) - Driver for the Infrahub application
+- [`examples/slurpit/`](examples/slurpit/) - Driver for the Slurpit application
+- [`examples/semaphore/`](examples/semaphore/) - Driver for Ansible Semaphore
+- [`examples/db-test/`](examples/db-test/) - Database test driver

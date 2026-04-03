@@ -6,39 +6,48 @@ Application drivers can define **user actions** - custom Prefect workflows that 
 
 ```text
 Driver Repository
-├── styrmin_driver.yaml      # Driver manifest
-├── actions.yaml             # Action definitions (hooks)
+├── driver.styrmin.yml       # Driver manifest (includes action declarations)
 ├── actions.py               # Action implementations (Prefect flows)
-└── chart_values.j2.yaml     # Helm values template
+└── values.j2.yml            # Helm values template
 
-                ┌─────────────┐
-                │ actions.yaml │ ── defines ──> Hook type + mode + location
-                └──────┬──────┘
-                       │
-                       v
-                ┌──────────────┐
-                │  actions.py  │ ── implements ──> Prefect @flow functions
-                └──────┬───────┘
-                       │
-         ┌─────────────┼─────────────┐
-         │             │             │
-    ┌────▼───┐   ┌────▼────┐   ┌───▼────┐
-    │  pre   │   │  core   │   │  post  │
-    │  hook  │   │  hook   │   │  hook  │
-    └────────┘   └─────────┘   └────────┘
+                ┌──────────────────────┐
+                │ driver.styrmin.yml   │ ── declares ──> Hook type + mode + location
+                │   spec.actions:      │                 (inline in driver spec)
+                └──────────┬───────────┘
+                           │
+                           v
+                    ┌──────────────┐
+                    │  actions.py  │ ── implements ──> Prefect @flow functions
+                    └──────┬───────┘
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+        ┌────▼───┐   ┌────▼────┐   ┌───▼────┐
+        │  pre   │   │  core   │   │  post  │
+        │  hook  │   │  hook   │   │  hook  │
+        └────────┘   └─────────┘   └────────┘
 ```
 
 ## Action Definition Format
 
-### actions.yaml
+### Action declarations in driver.styrmin.yml
+
+Actions are declared inline within the driver spec under `spec.actions`:
 
 ```yaml
 ---
 apiVersion: "styrmin.io/v1"
-kind: ActionDefinition
+kind: ApplicationDriver
 metadata:
-  package: infrahub              # Application name
+  name: infrahub
 spec:
+  version: "1"
+  supported_versions: ">=1.5,<1.9"
+  helm:
+    main:
+      location: oci://registry.opsmill.io/opsmill/chart/infrahub
+      version: 4.16.3
+  # ... components, services, etc. ...
   actions:
     - name: upgrade              # Unique action name
       hook: upgrade              # Hook type: "setup" or "upgrade"
@@ -110,14 +119,12 @@ class ActionDefinition(BaseModel):
     image: str | None = None   # Custom Docker image for execution
 ```
 
-### ActionsSpec Model
+Actions are embedded directly in the `Specification` model (`services/driver/models/resources/driver.py`) as an optional list:
 
 ```python
-class ActionsSpec(BaseModel):
-    api_version: Literal["styrmin.io/v1"]
-    kind: Kind = Kind.ActionDefinition
-    metadata: Metadata     # Contains package name
-    spec: Spec             # Contains list of ActionDefinition
+class Specification(BaseModel):
+    # ... other fields ...
+    actions: list[ActionDefinition] = []
 ```
 
 ### Database Model
@@ -143,7 +150,7 @@ Validates that all declared actions have corresponding function implementations:
 
 1. Parses the driver's `actions.py` using Python AST
 2. Extracts all top-level function definitions
-3. For each action in `actions.yaml`, verifies the function referenced in `location` exists
+3. For each action in `driver_spec.spec.actions`, verifies the function referenced in `location` exists
 4. Functions must be at module root level (not nested)
 
 ## Registration Pipeline
@@ -151,9 +158,9 @@ Validates that all declared actions have corresponding function implementations:
 When a driver is loaded via `load_application_driver_from_object()` in `services/applications.py`:
 
 ```text
-1. Parse actions.yaml ──> ActionsSpec
+1. Parse driver.styrmin.yml ──> DriverSpec (with embedded actions)
 2. Validate actions.py ──> UserActionsValidator
-3. For each action:
+3. For each action in driver_spec.spec.actions:
    a. ActionsWorkflowBuilder.build_user_action_workflow_definition(action)
       ──> Creates a GitSourceWorkflowDefinition with:
           - source: driver's Git repository + branch
@@ -325,7 +332,8 @@ If no upgrade core hook is defined for the application version, the upgrade path
 
 | File | Purpose |
 |------|---------|
-| [services/driver/models/resources/actions.py](backend/styrmin_backend/services/driver/models/resources/actions.py) | `HookKind`, `ActionDefinition`, `ActionsSpec` |
+| [services/driver/models/resources/actions.py](backend/styrmin_backend/services/driver/models/resources/actions.py) | `HookKind`, `ActionDefinition` |
+| [services/driver/models/resources/driver.py](backend/styrmin_backend/services/driver/models/resources/driver.py) | `Specification` (embeds `actions: list[ActionDefinition]`) |
 | [services/driver/validators.py](backend/styrmin_backend/services/driver/validators.py) | `UserActionsValidator` (AST validation) |
 | [services/user.py](backend/styrmin_backend/services/user.py) | `ActionsWorkflowBuilder` |
 | [services/applications.py](backend/styrmin_backend/services/applications.py) | Action registration during driver loading |

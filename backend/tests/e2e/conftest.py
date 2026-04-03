@@ -328,10 +328,10 @@ async def git_server(
         dest = tmp_repo / name
         shutil.copytree(info["source"], dest, dirs_exist_ok=True)
 
-        # Update styrmin_driver.yaml to point to the chart server
+        # Update driver.styrmin.yml to point to the chart server
         # (only for drivers that use an embedded chart)
         if "chart_name" in info:
-            driver_yaml_path = dest / "styrmin_driver.yaml"
+            driver_yaml_path = dest / "driver.styrmin.yml"
             with open(driver_yaml_path) as f:
                 driver_config = yaml.safe_load(f)
             driver_config["spec"]["helm"]["main"]["location"] = (
