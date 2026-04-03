@@ -1,4 +1,4 @@
-mutation RunJob($deploymentId: UUID!, $commands: [String!]!, $image: String!, $env: JSON!) {
+mutation RunJob($deploymentId: UUID!, $commands: [String!]!, $image: String!, $env: [JSON!]!) {
     runJob(deploymentId: $deploymentId, commands: $commands, image: $image, env: $env) {
         id
         status

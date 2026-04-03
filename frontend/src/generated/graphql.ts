@@ -16,7 +16,7 @@ export type Scalars = {
   Float: { input: number; output: number; }
   /** Date with time (isoformat) */
   DateTime: { input: any; output: any; }
-  /** The `JSON` scalar type represents JSON values as specified by ECMA-404 */
+  /** The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf). */
   JSON: { input: Record<string, unknown>; output: Record<string, unknown>; }
   UUID: { input: string; output: string; }
 };
@@ -356,7 +356,7 @@ export type MutationLoadRemoteApplicationDriverVersionArgs = {
 export type MutationRunJobArgs = {
   commands: Array<Scalars['String']['input']>;
   deploymentId: Scalars['UUID']['input'];
-  env: Scalars['JSON']['input'];
+  env: Array<Scalars['JSON']['input']>;
   image: Scalars['String']['input'];
 };
 

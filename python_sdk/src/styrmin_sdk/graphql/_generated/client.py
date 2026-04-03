@@ -1011,11 +1011,11 @@ class Client(AsyncBaseClient):
         deployment_id: UUID,
         commands: list[str],
         image: str,
-        env: Any,
+        env: list[Any],
         **kwargs: Any,
     ) -> RunJob:
         query = gql("""
-            mutation RunJob($deploymentId: UUID!, $commands: [String!]!, $image: String!, $env: JSON!) {
+            mutation RunJob($deploymentId: UUID!, $commands: [String!]!, $image: String!, $env: [JSON!]!) {
               runJob(
                 deploymentId: $deploymentId
                 commands: $commands
