@@ -1,0 +1,222 @@
+---
+# yamllint disable rule:truthy rule:line-length
+name: Release
+
+on:
+  schedule:
+    - cron: "33 0 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        type: boolean
+        description: Run without pushing tags, images, or charts
+        default: false
+
+concurrency:
+  group: automated-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      has_changes: ${{ steps.changes.outputs.has_changes }}
+      current_version: ${{ steps.version.outputs.current_version }}
+      new_version: ${{ steps.version.outputs.new_version }}
+      last_tag: ${{ steps.changes.outputs.last_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes since last tag
+        id: changes
+        run: |
+          LAST_TAG=$(git describe --tags --match "v*" --abbrev=0 2>/dev/null || echo "")
+          echo "last_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$LAST_TAG" ]; then
+            COMMIT_COUNT=$(git rev-list --count HEAD)
+          else
+            COMMIT_COUNT=$(git rev-list --count "${LAST_TAG}..HEAD")
+          fi
+
+          echo "commit_count=$COMMIT_COUNT"
+          if [ "$COMMIT_COUNT" -gt 0 ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install uv
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Compute next version
+        id: version
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          CURRENT_VERSION=$(uv version --short)
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+
+          NEW_VERSION=$(uv version --bump patch --dry-run --short)
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $CURRENT_VERSION -> $NEW_VERSION"
+
+          # Version regression guard
+          LAST_TAG="${{ steps.changes.outputs.last_tag }}"
+          if [ -n "$LAST_TAG" ]; then
+            LATEST_TAG_VERSION="${LAST_TAG#v}"
+            GREATER=$(printf '%s\n%s\n' "$LATEST_TAG_VERSION" "$NEW_VERSION" | sort -V | tail -1)
+            if [ "$GREATER" != "$NEW_VERSION" ] || [ "$LATEST_TAG_VERSION" = "$NEW_VERSION" ]; then
+              echo "::error::Version regression detected: $NEW_VERSION is not greater than $LATEST_TAG_VERSION"
+              exit 1
+            fi
+          fi
+
+  create-release:
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install yq
+        uses: mikefarah/yq@065b200af9851db0d5132f50bc10b1406ea5c0a8  # v4.50.1
+
+      - name: Update version files
+        env:
+          NEW_VERSION: ${{ needs.check-changes.outputs.new_version }}
+        run: |
+          uv version "$NEW_VERSION"
+          yq -i ".version = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
+          yq -i ".appVersion = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
+          yq -i ".version = \"$NEW_VERSION\"" helm/agent/Chart.yaml
+
+          echo "Updated pyproject.toml:"
+          uv version --short
+          echo "Updated helm/styrmin/Chart.yaml:"
+          yq '.version, .appVersion' helm/styrmin/Chart.yaml
+          echo "Updated helm/agent/Chart.yaml:"
+          yq '.version' helm/agent/Chart.yaml
+
+      - name: Commit and tag
+        if: ${{ !inputs.dry_run }}
+        id: tag
+        env:
+          NEW_VERSION: ${{ needs.check-changes.outputs.new_version }}
+        run: |
+          TAG="v${NEW_VERSION}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add pyproject.toml helm/styrmin/Chart.yaml helm/agent/Chart.yaml
+          git commit -m "chore: release ${TAG} [skip ci]"
+          git tag "$TAG"
+          git push origin develop
+          git push origin "$TAG"
+
+      - name: Commit and tag (dry run)
+        if: ${{ inputs.dry_run }}
+        id: tag-dry
+        env:
+          NEW_VERSION: ${{ needs.check-changes.outputs.new_version }}
+        run: |
+          TAG="v${NEW_VERSION}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "::notice::DRY RUN — would create tag $TAG and push to develop"
+          echo "::notice::DRY RUN — version files updated locally but not committed"
+
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --generate-notes \
+            --target develop
+
+      - name: Create GitHub Release (dry run)
+        if: ${{ inputs.dry_run }}
+        env:
+          TAG: ${{ steps.tag-dry.outputs.tag }}
+        run: |
+          echo "::notice::DRY RUN — would create GitHub Release for $TAG with auto-generated notes"
+
+  publish-docker:
+    needs: create-release
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      tag: ${{ needs.create-release.outputs.tag }}
+      push: true
+    secrets: inherit
+
+  publish-helm-agent:
+    needs: create-release
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart: agent
+      publish: true
+      branch: ${{ needs.create-release.outputs.tag }}
+    secrets: inherit
+
+  publish-helm-styrmin:
+    needs:
+      - create-release
+      - publish-helm-agent
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart: styrmin
+      publish: true
+      branch: ${{ needs.create-release.outputs.tag }}
+    secrets: inherit
+
+  finalize:
+    needs:
+      - create-release
+      - publish-docker
+      - publish-helm-agent
+      - publish-helm-styrmin
+    if: always() && needs.create-release.result == 'success' && !inputs.dry_run
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check publish results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          DOCKER_RESULT="${{ needs.publish-docker.result }}"
+          HELM_AGENT_RESULT="${{ needs.publish-helm-agent.result }}"
+          HELM_STYRMIN_RESULT="${{ needs.publish-helm-styrmin.result }}"
+
+          echo "Docker: $DOCKER_RESULT"
+          echo "Helm agent: $HELM_AGENT_RESULT"
+          echo "Helm styrmin: $HELM_STYRMIN_RESULT"
+
+          if [ "$DOCKER_RESULT" != "success" ] || [ "$HELM_AGENT_RESULT" != "success" ] || [ "$HELM_STYRMIN_RESULT" != "success" ]; then
+            echo "::warning::One or more publish jobs failed — marking release as draft"
+            gh release edit "$TAG" --draft --repo "$GITHUB_REPOSITORY"
+            exit 1
+          else
+            echo "All publish jobs succeeded — release is published"
+            gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          fi
