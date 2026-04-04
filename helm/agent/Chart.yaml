@@ -21,6 +21,6 @@ version: 0.1.9
 appVersion: "1.16.0"
 dependencies:
   - name: prefect-worker
-    version: "2026.1.23034724"
+    version: "2026.4.3175105"
     repository: "https://prefecthq.github.io/prefect-helm"
     condition: agent.enabled
