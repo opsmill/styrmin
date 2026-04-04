@@ -1,7 +1,6 @@
 """Database management commands for Styrmin CLI."""
 
 from pathlib import Path
-from typing import Optional
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
@@ -29,7 +28,7 @@ def _get_alembic_config() -> AlembicConfig:
 
 @db_app.command
 def init(
-    config_file: Optional[Path] = None,
+    config_file: Path | None = None,
 ) -> None:
     """Initialize the database by applying all migrations.
 
@@ -55,7 +54,7 @@ def init(
 
 @db_app.command
 def migrate(
-    config_file: Optional[Path] = None,
+    config_file: Path | None = None,
 ) -> None:
     """Apply all pending database migrations.
 
@@ -80,7 +79,7 @@ def migrate(
 
 @db_app.command
 def downgrade(
-    config_file: Optional[Path] = None,
+    config_file: Path | None = None,
 ) -> None:
     """Rollback the most recent database migration.
 
@@ -105,7 +104,7 @@ def downgrade(
 
 @db_app.command
 def status(
-    config_file: Optional[Path] = None,
+    config_file: Path | None = None,
 ) -> None:
     """Show current database migration version.
 
@@ -127,7 +126,7 @@ def status(
 
 @db_app.command
 def stamp(
-    config_file: Optional[Path] = None,
+    config_file: Path | None = None,
 ) -> None:
     """Stamp the database at the latest migration version without running migrations.
 

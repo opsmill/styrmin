@@ -42,6 +42,7 @@ def test_db_init_calls_alembic_upgrade(mocker: MockerFixture) -> None:
     assert exc_info.value.code == 0
     mock_config.SETTINGS.initialize.assert_called_once_with()
     mock_upgrade.assert_called_once()
+    assert mock_upgrade.call_args[0][1] == "head"
 
 
 def test_db_init_with_config_file(mocker: MockerFixture) -> None:
@@ -57,6 +58,7 @@ def test_db_init_with_config_file(mocker: MockerFixture) -> None:
     assert exc_info.value.code == 0
     mock_config.SETTINGS.initialize.assert_called_once_with(config_path)
     mock_upgrade.assert_called_once()
+    assert mock_upgrade.call_args[0][1] == "head"
 
 
 def test_db_init_handles_error(
@@ -88,6 +90,7 @@ def test_db_migrate_calls_alembic_upgrade(mocker: MockerFixture) -> None:
     assert exc_info.value.code == 0
     mock_config.SETTINGS.initialize.assert_called_once_with()
     mock_upgrade.assert_called_once()
+    assert mock_upgrade.call_args[0][1] == "head"
 
 
 def test_db_migrate_handles_error(
@@ -119,6 +122,7 @@ def test_db_downgrade_calls_alembic_downgrade(mocker: MockerFixture) -> None:
     assert exc_info.value.code == 0
     mock_config.SETTINGS.initialize.assert_called_once_with()
     mock_downgrade.assert_called_once()
+    assert mock_downgrade.call_args[0][1] == "-1"
 
 
 def test_db_downgrade_handles_error(

@@ -22,7 +22,7 @@ app_config.SETTINGS.initialize()
 
 # Import models to populate SQLModel.metadata (side-effect import).
 from styrmin_backend.db.models import SQLModel  # noqa: E402
-from styrmin_backend.db.utils import get_database_url  # noqa: E402
+from styrmin_backend.db.utils import get_database_url, get_sync_database_url  # noqa: E402
 
 target_metadata = SQLModel.metadata
 
@@ -32,9 +32,7 @@ config.set_main_option("sqlalchemy.url", get_database_url())
 
 def run_migrations_offline() -> None:
     """Generate SQL script without a live database connection."""
-    url = get_database_url()
-    # Swap async drivers for sync equivalents for offline mode.
-    url = url.replace("+aiosqlite", "").replace("+asyncpg", "+psycopg2")
+    url = get_sync_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
