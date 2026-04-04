@@ -38,7 +38,9 @@ async def portforward_simple_app(
         (
             svc
             for svc in services
-            if "simple-app" in svc.name and "postgresql" not in svc.name
+            if "simple-app" in svc.name
+            and "postgresql" not in svc.name
+            and svc.raw.get("spec", {}).get("type") != "ExternalName"
         ),
         None,
     )

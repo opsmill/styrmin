@@ -49,7 +49,9 @@ async def _deploy_and_wait(
             pass
         await asyncio.sleep(10)
     else:
-        raise TimeoutError(f"Deployment {name} did not reach ready state within {timeout}s")
+        raise TimeoutError(
+            f"Deployment {name} did not reach ready state within {timeout}s"
+        )
 
     instance_id = None
     if deployment and deployment.application_instance:
