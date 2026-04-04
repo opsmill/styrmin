@@ -3,7 +3,7 @@ name = "styrmin-backend"
 version = "0.1.0"
 description = "Styrmin backend services and CLI"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = []
 
 [project.scripts]

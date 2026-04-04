@@ -4,7 +4,7 @@ version = "0.1.9"
 description = "Deployment orchestration platform for Kubernetes applications"
 authors = [{name = "OpsMill", email = "info@opsmill.com"}]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "aiosqlite>=0.21.0",
     "styrmin-backend",
@@ -55,7 +55,7 @@ dev = [
 [tool.ty]
 
 [tool.ty.environment]
-python-version = "3.12"
+python-version = "3.14"
 
 [[tool.ty.overrides]]
 include = ["tasks/**"]

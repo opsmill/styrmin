@@ -630,10 +630,9 @@ async def deployed_simple_app(
     vcluster: dict,
 ) -> dict:
     """Deploy simple-app and return deployment info for reuse by tests."""
-    from styrmin_sdk import StyrminClient
     from styrmin_sdk.exceptions import StyrminError
 
-    client: StyrminClient = styrmin_resources["client"]
+    client = styrmin_resources["client"]
     environment_id = styrmin_resources["environment_id"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
