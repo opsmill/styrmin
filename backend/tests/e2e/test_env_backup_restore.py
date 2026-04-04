@@ -96,13 +96,20 @@ async def test_environment_backup_and_restore_lifecycle(
     kubeconfig_path = vcluster["kubeconfig_path"]
 
     # ── 1. Deploy two simple-app instances ──────────────────────────────
-    app1 = await _deploy_and_wait(client, environment_id, "simple-app-env-test-1")
+    app1 = await _deploy_and_wait(
+        client,
+        environment_id,
+        "simple-app-env-test-1",
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": "simple-app-env-1"},
+        ],
+    )
     app2 = await _deploy_and_wait(
         client,
         environment_id,
         "simple-app-env-test-2",
         service_name_overrides=[
-            {"driverServiceName": "simple-app", "overrideName": "simple-app-2"},
+            {"driverServiceName": "simple-app", "overrideName": "simple-app-env-2"},
         ],
     )
 
