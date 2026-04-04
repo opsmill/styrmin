@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from styrmin_backend.db.models import Cluster
 ```
 
-Tests are exempt from `disallow_untyped_defs`.
+Tests are exempt from strict typing enforcement.
 
 ## Import Ordering
 
