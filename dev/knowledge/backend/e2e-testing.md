@@ -112,8 +112,8 @@ Kind clusters cannot pull images from the internet by default. All dependency im
 ```text
 busybox:1.36                                    # task-worker init container
 bitnamilegacy/postgresql:17.6.0-debian-12-r4    # database
-prefecthq/prefect:3.6.13-python3.11             # Prefect server
-prefecthq/prefect:3.6.13-python3.11-kubernetes  # Prefect worker
+prefecthq/prefect:3.6.25-python3.11             # Prefect server
+prefecthq/prefect:3.6.25-python3.11-kubernetes  # Prefect worker
 fluxcd/helm-controller:v1.1.0                   # FluxCD agent subchart
 fluxcd/source-controller:v1.4.0                 # FluxCD agent subchart
 ```

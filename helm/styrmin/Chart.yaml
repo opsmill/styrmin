@@ -23,7 +23,7 @@ dependencies:
     repository: "https://charts.bitnami.com/bitnami"
     condition: postgresql.enabled
   - name: prefect-server
-    version: "2026.1.23034724"
+    version: "2026.4.3175105"
     repository: "https://prefecthq.github.io/prefect-helm"
     condition: prefect-server.enabled
   - name: styrmin-agent
