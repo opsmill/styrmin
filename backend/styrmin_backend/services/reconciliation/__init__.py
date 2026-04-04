@@ -33,7 +33,7 @@ async def generate_instance_from_deployment(
     return instance
 
 
-@inject
+@inject(cast_result=False)  # type: ignore[arg-type]
 async def apply_state(
     deployment: Deployment,
     current_instance: Instance | None,

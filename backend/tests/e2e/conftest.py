@@ -127,8 +127,11 @@ def _dump_namespace_logs(kubeconfig: str, namespace: str) -> None:
 @pytest.fixture(autouse=True)
 def _dump_k8s_logs_on_failure(request, vcluster):
     yield
+    rep_setup = getattr(request.node, "rep_setup", None)
     rep_call = getattr(request.node, "rep_call", None)
-    if rep_call is None or not rep_call.failed:
+    setup_failed = rep_setup is not None and rep_setup.failed
+    call_failed = rep_call is not None and rep_call.failed
+    if not setup_failed and not call_failed:
         return
 
     kubeconfig = vcluster["kubeconfig_path"]

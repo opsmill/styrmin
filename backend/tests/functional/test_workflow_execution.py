@@ -109,9 +109,9 @@ async def use_real_kubernetes(real_kubernetes):
     async def get_test_api_client():
         yield real_kubernetes
 
-    dependency_provider.dependency_overrides[get_api_client] = get_test_api_client
+    dependency_provider.override(get_api_client, get_test_api_client)
     yield
-    dependency_provider.dependency_overrides.clear()
+    dependency_provider.clear()
 
 
 # @pytest.mark.usefixtures("use_real_kubernetes", "load_styrmin_config")

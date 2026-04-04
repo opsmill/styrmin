@@ -10,7 +10,21 @@ app = App(
     version=version("styrmin-backend"),
 )
 
-app.command("styrmin_backend.cli.server:server_app", name="server")
-app.command("styrmin_backend.cli.db:db_app", name="db")
-app.command("styrmin_backend.cli.config_cmd:config_app", name="config")
-app.command("styrmin_backend.cli.export:export_app", name="export")
+app.command(
+    "styrmin_backend.cli.server:server_app",
+    name="server",
+    help="Server management commands.",
+)
+app.command(
+    "styrmin_backend.cli.db:db_app", name="db", help="Database management commands."
+)
+app.command(
+    "styrmin_backend.cli.config_cmd:config_app",
+    name="config",
+    help="Configuration management commands.",
+)
+app.command(
+    "styrmin_backend.cli.export:export_app",
+    name="export",
+    help="Export commands (schemas, data).",
+)

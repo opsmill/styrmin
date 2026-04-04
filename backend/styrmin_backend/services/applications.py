@@ -59,7 +59,7 @@ from styrmin_backend.workflows.manager import PrefectManager
 from styrmin_backend.workflows.models import PrefectAction
 
 
-@inject
+@inject(cast_result=False)  # type: ignore[arg-type]
 async def load_application_driver_from_object(
     driver_object: ApplicationDriver,
     uow: UnitOfWork,
@@ -309,7 +309,7 @@ async def load_application_driver_from_local_directory(
     )
 
 
-@inject
+@inject(cast_result=False)  # type: ignore[arg-type]
 async def instantiate_application(
     name: str,
     version: str,

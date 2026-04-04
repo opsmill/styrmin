@@ -104,7 +104,7 @@ async def upsert_custom_resource(
                     plural=plurals,
                     body=body,
                     name=body["metadata"]["name"],
-                    _content_type="application/merge-patch+json",  # Workaround for patch type autodetect for custom objects
+                    _content_type="application/merge-patch+json",  # type: ignore[call-arg]  # Workaround for patch type autodetect for custom objects
                 )
             else:
                 raise

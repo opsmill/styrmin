@@ -45,9 +45,9 @@ def prefect_manager_mock(mocker):
     def get_fake_manager(catalogue=None, workflow_executor=None) -> PrefectManager:
         return manager_mock
 
-    dependency_provider.dependency_overrides[get_manager] = get_fake_manager
+    dependency_provider.override(get_manager.__wrapped__, get_fake_manager)
     yield manager_mock
-    dependency_provider.dependency_overrides.clear()
+    dependency_provider.clear()
 
 
 @pytest.fixture

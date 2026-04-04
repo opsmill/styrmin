@@ -714,7 +714,7 @@ class Mutation:
         self,
         deployment_id: UUID,
         commands: list[str],
-        env: JSON,
+        env: list[JSON],
         image: str,
         info: strawberry.Info,
     ) -> Task | None:

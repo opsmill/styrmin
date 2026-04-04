@@ -43,8 +43,8 @@ class Cluster:
             id=instance.id,
             name=instance.name,
             instance=instance,
-            config=instance.config,
-            capabilities=instance.capabilities,
+            config=instance.config or {},
+            capabilities=instance.capabilities or {},
             created_on=instance.created_on,  # type: ignore[arg-type]
             updated_on=instance.updated_on,
         )

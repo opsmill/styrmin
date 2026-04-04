@@ -21,7 +21,7 @@ from styrmin_backend.workflows.manager import PrefectManager
 from styrmin_backend.workflows.models import PrefectAction
 
 
-@inject
+@inject(cast_result=False)  # type: ignore[arg-type]
 async def run_job(
     deployment_id: UUID,
     commands: list[str],

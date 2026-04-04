@@ -1,10 +1,12 @@
-from typing import NewType
+from __future__ import annotations
 
-import strawberry
+from typing import TYPE_CHECKING, Any
 
-JSON = strawberry.scalar(
-    NewType("JSON", object),
-    description="The `JSON` scalar type represents JSON values as specified by ECMA-404",
-    serialize=lambda v: v,
-    parse_value=lambda v: v,
-)
+if TYPE_CHECKING:
+    from typing import TypeAlias
+
+    JSON: TypeAlias = dict[Any, Any]
+else:
+    from strawberry.scalars import JSON
+
+__all__ = ["JSON"]

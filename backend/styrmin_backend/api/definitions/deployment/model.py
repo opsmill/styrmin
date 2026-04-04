@@ -190,7 +190,7 @@ class Deployment:
             id=instance.id,
             name=instance.name,
             status=instance.status,
-            config=instance.config,
+            config=instance.config or {},
             parameters=instance.parameters,
             application_version=instance.application_version,
             application_driver_version_id=instance.application_driver_version_id,

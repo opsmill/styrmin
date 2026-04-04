@@ -136,15 +136,15 @@ Register sub-apps using Cyclopts lazy loading so the root CLI module only import
 
 ```python
 # Root app (cli_commands.py / app.py)
-app.command("mypackage.commands.clusters:clusters_app", name="clusters")
+app.command("mypackage.commands.clusters:clusters_app", name="clusters", help="Manage clusters.")
 ```
 
-The string `"mypackage.commands.clusters:clusters_app"` is resolved only when the `clusters` subcommand is actually invoked. The `name=` parameter sets the CLI command name before the module is imported.
+The string `"mypackage.commands.clusters:clusters_app"` is resolved only when the `clusters` subcommand is actually invoked. The `name=` and `help=` parameters are registered immediately so they appear in the parent `--help` output without importing the target module.
 
 ### Rules
 
 - **Always provide `name=`** — this registers the subcommand name so it appears in parent `--help` output.
-- **Do not pass `help=` or other kwargs** — when the lazy target is an `App` instance, Cyclopts reads `help` from the `App()` declaration in the command module. Passing kwargs raises `ValueError`.
+- **Always provide `help=`** — lazy-loaded sub-apps do not propagate help text from the target `App()` instance into the parent help output. The `help=` kwarg must be passed at registration time for descriptions to appear in `--help`. Keep this string in sync with the `help=` in the target module's `App()` declaration.
 - **Do not change command modules** — each module still creates its own `App()` and registers commands with `@app.command` as usual.
 
 ### Caveats
