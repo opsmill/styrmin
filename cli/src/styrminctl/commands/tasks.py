@@ -25,7 +25,7 @@ async def list_tasks() -> None:
     rows = [
         {
             "id": str(t.id),
-            "type": t.type,
+            "type": t.type_,
             "status": t.status,
             "message": t.message or "",
             "deploymentId": str(t.deployment_id) if t.deployment_id else "",
@@ -44,7 +44,7 @@ async def get(task_id: TaskId) -> None:
 
     row = {
         "id": str(task.id),
-        "type": task.type,
+        "type": task.type_,
         "status": task.status,
         "message": task.message or "",
         "deploymentId": str(task.deployment_id) if task.deployment_id else "",

@@ -51,19 +51,20 @@ dev = [
 
 [tool.ty.environment]
 python-version = "3.14"
+extra-paths = ["backend"]
 
 [[tool.ty.overrides]]
 include = ["**/_generated/**"]
 
 [tool.ty.overrides.rules]
 unused-type-ignore-comment = "ignore" # Generated code by ariadne-codegen — do not edit
+invalid-assignment = "ignore" # Generated code by ariadne-codegen — do not edit
 
 [[tool.ty.overrides]]
 include = ["tasks/**"]
 
 [tool.ty.overrides.rules]
-invalid-argument-type = "ignore" # TODO: fix violations
-unresolved-attribute = "ignore" # TODO: fix violations
+invalid-argument-type = "ignore" # Upstream: invoke library @task decorator has incorrect return type annotations
 
 [[tool.ty.overrides]]
 include = ["backend/**"]
@@ -85,24 +86,17 @@ unresolved-attribute = "ignore" # TODO: fix violations
 unsupported-operator = "ignore" # TODO: fix violations
 
 [[tool.ty.overrides]]
-include = ["cli/**"]
+include = ["driver/examples/db-test/src/**"]
 
 [tool.ty.overrides.rules]
-unresolved-attribute = "ignore" # TODO: fix violations
-
-[[tool.ty.overrides]]
-include = ["driver/**"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore" # TODO: fix violations
+unresolved-import = "ignore" # aiomysql and pymongo are not in root workspace venv — example-specific deps
 
 [[tool.ty.overrides]]
 include = ["python_sdk/**"]
 
 [tool.ty.overrides.rules]
-invalid-argument-type = "ignore" # TODO: fix violations
-invalid-assignment = "ignore" # TODO: fix violations
-invalid-type-form = "ignore" # TODO: fix violations
+invalid-argument-type = "ignore" # Upstream: ty doesn't widen dict[str, str] to dict[str, JsonValue] for recursive type aliases
+invalid-type-form = "ignore" # Upstream: ty bug — method named `list` shadows builtins.list in deferred annotations
 
 [tool.uv]
 package = false
