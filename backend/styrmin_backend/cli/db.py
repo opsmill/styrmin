@@ -14,15 +14,10 @@ console = Console()
 
 
 def _get_alembic_config() -> AlembicConfig:
-    """Create an Alembic Config object pointing to the project's alembic.ini."""
-    backend_dir = Path(__file__).resolve().parent.parent.parent
-    ini_path = backend_dir / "alembic.ini"
-    alembic_cfg = AlembicConfig(str(ini_path))
-    # Ensure script_location is resolved relative to backend_dir.
-    alembic_cfg.set_main_option(
-        "script_location",
-        str(backend_dir / "styrmin_backend" / "db" / "migrations"),
-    )
+    """Create an Alembic Config object programmatically (no .ini file)."""
+    alembic_cfg = AlembicConfig()
+    migrations_dir = Path(__file__).resolve().parent.parent / "db" / "migrations"
+    alembic_cfg.set_main_option("script_location", str(migrations_dir))
     return alembic_cfg
 
 
