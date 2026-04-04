@@ -66,13 +66,11 @@ def make_uow(
 
 
 class TestCreateEnvironmentRestore:
-    @pytest.mark.anyio
     async def test_backup_not_found_raises(self) -> None:
         uow = make_uow()
         with pytest.raises(EnvironmentBackupNotFoundError):
             await create_environment_restore(uuid4(), uow)
 
-    @pytest.mark.anyio
     async def test_rejects_pending_backup(self) -> None:
         eb_id = uuid4()
         eb = EnvironmentBackup(
@@ -85,7 +83,6 @@ class TestCreateEnvironmentRestore:
         with pytest.raises(EnvironmentBackupValidationError, match="Cannot restore"):
             await create_environment_restore(eb_id, uow)
 
-    @pytest.mark.anyio
     async def test_rejects_in_progress_backup(self) -> None:
         eb_id = uuid4()
         eb = EnvironmentBackup(
@@ -98,7 +95,6 @@ class TestCreateEnvironmentRestore:
         with pytest.raises(EnvironmentBackupValidationError):
             await create_environment_restore(eb_id, uow)
 
-    @pytest.mark.anyio
     async def test_rejects_failed_backup(self) -> None:
         eb_id = uuid4()
         eb = EnvironmentBackup(
@@ -111,7 +107,6 @@ class TestCreateEnvironmentRestore:
         with pytest.raises(EnvironmentBackupValidationError):
             await create_environment_restore(eb_id, uow)
 
-    @pytest.mark.anyio
     async def test_rejects_when_restore_in_progress(self) -> None:
         eb_id = uuid4()
         eb = EnvironmentBackup(
@@ -132,7 +127,6 @@ class TestCreateEnvironmentRestore:
         with pytest.raises(EnvironmentBackupOperationInProgressError):
             await create_environment_restore(eb_id, uow)
 
-    @pytest.mark.anyio
     async def test_rejects_when_restore_pending(self) -> None:
         eb_id = uuid4()
         eb = EnvironmentBackup(
@@ -155,7 +149,6 @@ class TestCreateEnvironmentRestore:
 
 
 class TestGetEnvironmentRestore:
-    @pytest.mark.anyio
     async def test_not_found_raises(self) -> None:
         from styrmin_backend.services.exceptions import EnvironmentRestoreNotFoundError
 
@@ -163,7 +156,6 @@ class TestGetEnvironmentRestore:
         with pytest.raises(EnvironmentRestoreNotFoundError):
             await get_environment_restore(uuid4(), uow)
 
-    @pytest.mark.anyio
     async def test_returns_existing(self) -> None:
         eb_id = uuid4()
         er_id = uuid4()
@@ -179,7 +171,6 @@ class TestGetEnvironmentRestore:
 
 
 class TestGetEnvironmentRestores:
-    @pytest.mark.anyio
     async def test_returns_restores_for_backup(self) -> None:
         eb_id = uuid4()
         er1 = EnvironmentRestore(
@@ -204,7 +195,6 @@ class TestGetEnvironmentRestores:
         result = await get_environment_restores(eb_id, uow)
         assert len(result) == 2
 
-    @pytest.mark.anyio
     async def test_filters_by_status(self) -> None:
         eb_id = uuid4()
         er1 = EnvironmentRestore(

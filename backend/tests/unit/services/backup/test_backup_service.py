@@ -96,7 +96,6 @@ class TestGetStrategy:
 
 
 class TestCreateBackup:
-    @pytest.mark.anyio
     async def test_create_backup_success(self) -> None:
         instance_id = uuid4()
         uow = make_uow()
@@ -112,7 +111,6 @@ class TestCreateBackup:
         assert backup.instance_id == instance_id
         assert uow.committed is True
 
-    @pytest.mark.anyio
     async def test_create_backup_generates_name(self) -> None:
         instance_id = uuid4()
         uow = make_uow()
@@ -125,7 +123,6 @@ class TestCreateBackup:
         assert backup.name == f"styrmin-{backup.id}"
         assert backup.status == BackupStatus.PENDING
 
-    @pytest.mark.anyio
     async def test_create_backup_concurrent_prevention(self) -> None:
         instance_id = uuid4()
         existing = Backup(
@@ -142,7 +139,6 @@ class TestCreateBackup:
                 name="new-backup",
             )
 
-    @pytest.mark.anyio
     async def test_create_backup_with_component_configs(self) -> None:
         instance_id = uuid4()
         uow = make_uow()
@@ -168,7 +164,6 @@ class TestCreateBackup:
         assert backup.component_statuses["web"]["volume"] == "data"
         assert backup.component_statuses["db"]["kind"] == "postgres"
 
-    @pytest.mark.anyio
     async def test_create_backup_pending_does_not_block(self) -> None:
         """A PENDING backup should not block creation of a new backup."""
         instance_id = uuid4()
@@ -189,7 +184,6 @@ class TestCreateBackup:
 
 
 class TestGetBackup:
-    @pytest.mark.anyio
     async def test_get_backup_found(self) -> None:
         instance_id = uuid4()
         existing = Backup(
@@ -202,7 +196,6 @@ class TestGetBackup:
         result = await get_backup(backup_id=existing.id, uow=uow)
         assert result.id == existing.id
 
-    @pytest.mark.anyio
     async def test_get_backup_not_found(self) -> None:
         uow = make_uow()
 
@@ -211,7 +204,6 @@ class TestGetBackup:
 
 
 class TestGetBackups:
-    @pytest.mark.anyio
     async def test_get_backups_by_instance(self) -> None:
         instance_id = uuid4()
         other_instance_id = uuid4()
@@ -235,7 +227,6 @@ class TestGetBackups:
         results = await get_backups(instance_id=instance_id, uow=uow)
         assert len(results) == 2
 
-    @pytest.mark.anyio
     async def test_get_backups_with_status_filter(self) -> None:
         instance_id = uuid4()
         b1 = Backup(
@@ -258,7 +249,6 @@ class TestGetBackups:
 
 
 class TestDeleteBackup:
-    @pytest.mark.anyio
     async def test_delete_backup_success(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -273,14 +263,12 @@ class TestDeleteBackup:
         assert uow.committed is True
         assert len(uow.backups.models) == 0
 
-    @pytest.mark.anyio
     async def test_delete_backup_not_found(self) -> None:
         uow = make_uow()
 
         with pytest.raises(BackupNotFoundError):
             await delete_backup(backup_id=uuid4(), uow=uow)
 
-    @pytest.mark.anyio
     async def test_delete_backup_cascades_restores(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -303,7 +291,6 @@ class TestDeleteBackup:
 
 
 class TestUpdateBackupStatus:
-    @pytest.mark.anyio
     async def test_update_to_in_progress(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -322,7 +309,6 @@ class TestUpdateBackupStatus:
         assert result.status == BackupStatus.IN_PROGRESS
         assert result.started_at is not None
 
-    @pytest.mark.anyio
     async def test_update_to_completed(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -343,7 +329,6 @@ class TestUpdateBackupStatus:
         assert result.completed_at is not None
         assert result.size_bytes == 1024
 
-    @pytest.mark.anyio
     async def test_update_to_failed(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -364,7 +349,6 @@ class TestUpdateBackupStatus:
         assert result.completed_at is not None
         assert result.error_message == "Velero timeout"
 
-    @pytest.mark.anyio
     async def test_update_not_found(self) -> None:
         uow = make_uow()
 
@@ -375,7 +359,6 @@ class TestUpdateBackupStatus:
                 uow=uow,
             )
 
-    @pytest.mark.anyio
     async def test_update_component_statuses(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -401,7 +384,6 @@ class TestUpdateBackupStatus:
 
 
 class TestCreateBackupTimeout:
-    @pytest.mark.anyio
     async def test_default_timeout_stored_in_metadata(self) -> None:
         instance_id = uuid4()
         uow = make_uow()
@@ -415,7 +397,6 @@ class TestCreateBackupTimeout:
         assert backup.metadata_ is not None
         assert backup.metadata_["timeout"] == DEFAULT_BACKUP_TIMEOUT
 
-    @pytest.mark.anyio
     async def test_custom_timeout_stored_in_metadata(self) -> None:
         instance_id = uuid4()
         uow = make_uow()
@@ -432,7 +413,6 @@ class TestCreateBackupTimeout:
 
 
 class TestUpdateBackupComponentStatus:
-    @pytest.mark.anyio
     async def test_update_single_component(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -458,7 +438,6 @@ class TestUpdateBackupComponentStatus:
         # Not all completed yet, should still be IN_PROGRESS
         assert result.status == BackupStatus.IN_PROGRESS
 
-    @pytest.mark.anyio
     async def test_all_components_completed(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -482,7 +461,6 @@ class TestUpdateBackupComponentStatus:
         assert result.status == BackupStatus.COMPLETED
         assert result.completed_at is not None
 
-    @pytest.mark.anyio
     async def test_component_failure_marks_backup_failed(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -510,7 +488,6 @@ class TestUpdateBackupComponentStatus:
         assert result.error_message is not None
         assert "db" in result.error_message
 
-    @pytest.mark.anyio
     async def test_component_status_not_found(self) -> None:
         uow = make_uow()
 

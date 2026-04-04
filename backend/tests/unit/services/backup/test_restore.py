@@ -57,7 +57,6 @@ def make_uow(
 
 
 class TestCreateRestore:
-    @pytest.mark.anyio
     async def test_create_restore_success(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -79,7 +78,6 @@ class TestCreateRestore:
         assert restore.name == f"styrmin-{restore.id}"
         assert uow.committed is True
 
-    @pytest.mark.anyio
     async def test_create_restore_custom_name(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -98,7 +96,6 @@ class TestCreateRestore:
 
         assert restore.name == "my-custom-restore"
 
-    @pytest.mark.anyio
     async def test_create_restore_with_target_instance(self) -> None:
         instance_id = uuid4()
         target_instance_id = uuid4()
@@ -118,7 +115,6 @@ class TestCreateRestore:
 
         assert restore.target_instance_id == target_instance_id
 
-    @pytest.mark.anyio
     async def test_create_restore_backup_not_found(self) -> None:
         uow = make_uow()
 
@@ -129,7 +125,6 @@ class TestCreateRestore:
                 uow=uow,
             )
 
-    @pytest.mark.anyio
     async def test_create_restore_already_in_progress(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -152,7 +147,6 @@ class TestCreateRestore:
                 uow=uow,
             )
 
-    @pytest.mark.anyio
     async def test_create_restore_completed_does_not_block(self) -> None:
         """A completed restore should not block creation of a new one."""
         instance_id = uuid4()
@@ -179,7 +173,6 @@ class TestCreateRestore:
 
 
 class TestGetRestore:
-    @pytest.mark.anyio
     async def test_get_restore_found(self) -> None:
         backup_id = uuid4()
         existing = Restore(
@@ -193,7 +186,6 @@ class TestGetRestore:
         result = await get_restore(restore_id=existing.id, uow=uow)
         assert result.id == existing.id
 
-    @pytest.mark.anyio
     async def test_get_restore_not_found(self) -> None:
         uow = make_uow()
 
@@ -202,7 +194,6 @@ class TestGetRestore:
 
 
 class TestGetRestores:
-    @pytest.mark.anyio
     async def test_get_restores_by_backup(self) -> None:
         backup_id = uuid4()
         other_backup_id = uuid4()
@@ -229,7 +220,6 @@ class TestGetRestores:
         results = await get_restores(backup_id=backup_id, uow=uow)
         assert len(results) == 2
 
-    @pytest.mark.anyio
     async def test_get_restores_with_status_filter(self) -> None:
         backup_id = uuid4()
         r1 = Restore(
@@ -254,7 +244,6 @@ class TestGetRestores:
 
 
 class TestUpdateRestoreStatus:
-    @pytest.mark.anyio
     async def test_update_to_in_progress(self) -> None:
         backup_id = uuid4()
         restore = Restore(
@@ -274,7 +263,6 @@ class TestUpdateRestoreStatus:
         assert result.status == RestoreStatus.IN_PROGRESS
         assert result.started_at is not None
 
-    @pytest.mark.anyio
     async def test_update_to_completed(self) -> None:
         backup_id = uuid4()
         restore = Restore(
@@ -294,7 +282,6 @@ class TestUpdateRestoreStatus:
         assert result.status == RestoreStatus.COMPLETED
         assert result.completed_at is not None
 
-    @pytest.mark.anyio
     async def test_update_to_failed_with_error(self) -> None:
         backup_id = uuid4()
         restore = Restore(
@@ -316,7 +303,6 @@ class TestUpdateRestoreStatus:
         assert result.error_message == "Namespace conflict"
         assert result.completed_at is not None
 
-    @pytest.mark.anyio
     async def test_update_not_found(self) -> None:
         uow = make_uow()
 
@@ -327,7 +313,6 @@ class TestUpdateRestoreStatus:
                 uow=uow,
             )
 
-    @pytest.mark.anyio
     async def test_update_component_statuses(self) -> None:
         backup_id = uuid4()
         restore = Restore(

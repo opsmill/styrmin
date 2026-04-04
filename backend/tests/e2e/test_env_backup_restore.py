@@ -13,7 +13,6 @@ import pytest
 from styrmin_sdk import StyrminClient
 
 
-@pytest.mark.anyio
 async def test_create_environment_backup(
     styrmin_resources: dict,
     deployed_simple_app: dict,
@@ -45,7 +44,6 @@ async def test_create_environment_backup(
     assert detail.backup_count > 0
 
 
-@pytest.mark.anyio
 async def test_environment_restore_lifecycle(
     styrmin_resources: dict,
     deployed_simple_app: dict,
@@ -87,7 +85,6 @@ async def test_environment_restore_lifecycle(
     assert detail.restore_count > 0
 
 
-@pytest.mark.anyio
 async def test_list_environment_backups(
     styrmin_resources: dict,
     deployed_simple_app: dict,
@@ -102,7 +99,6 @@ async def test_list_environment_backups(
     assert isinstance(backups, list)
 
 
-@pytest.mark.anyio
 async def test_delete_environment_backup(
     styrmin_resources: dict,
     deployed_simple_app: dict,

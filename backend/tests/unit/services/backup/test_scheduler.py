@@ -49,7 +49,6 @@ def make_uow(
 
 
 class TestCreateBackupSchedule:
-    @pytest.mark.anyio
     async def test_create_backup_schedule_success(self) -> None:
         deployment_id = uuid4()
         uow = make_uow()
@@ -68,7 +67,6 @@ class TestCreateBackupSchedule:
         assert schedule.deployment_id == deployment_id
         assert uow.committed is True
 
-    @pytest.mark.anyio
     async def test_create_backup_schedule_custom_retention(self) -> None:
         deployment_id = uuid4()
         uow = make_uow()
@@ -83,7 +81,6 @@ class TestCreateBackupSchedule:
 
         assert schedule.retention_count == 5
 
-    @pytest.mark.anyio
     async def test_create_backup_schedule_disabled(self) -> None:
         deployment_id = uuid4()
         uow = make_uow()
@@ -98,7 +95,6 @@ class TestCreateBackupSchedule:
 
         assert schedule.enabled is False
 
-    @pytest.mark.anyio
     async def test_create_backup_schedule_duplicate_deployment(self) -> None:
         deployment_id = uuid4()
         existing = BackupSchedule(
@@ -116,7 +112,6 @@ class TestCreateBackupSchedule:
                 uow=uow,
             )
 
-    @pytest.mark.anyio
     async def test_create_backup_schedule_different_deployment_ok(self) -> None:
         deployment_id_1 = uuid4()
         deployment_id_2 = uuid4()
@@ -138,7 +133,6 @@ class TestCreateBackupSchedule:
 
 
 class TestGetBackupSchedule:
-    @pytest.mark.anyio
     async def test_get_backup_schedule_found(self) -> None:
         deployment_id = uuid4()
         existing = BackupSchedule(
@@ -152,7 +146,6 @@ class TestGetBackupSchedule:
         assert result.id == existing.id
         assert result.name == "test-schedule"
 
-    @pytest.mark.anyio
     async def test_get_backup_schedule_not_found(self) -> None:
         uow = make_uow()
 
@@ -161,7 +154,6 @@ class TestGetBackupSchedule:
 
 
 class TestGetBackupSchedules:
-    @pytest.mark.anyio
     async def test_get_backup_schedules_by_deployment(self) -> None:
         deployment_id = uuid4()
         other_deployment_id = uuid4()
@@ -185,7 +177,6 @@ class TestGetBackupSchedules:
         results = await get_backup_schedules(deployment_id=deployment_id, uow=uow)
         assert len(results) == 2
 
-    @pytest.mark.anyio
     async def test_get_backup_schedules_empty(self) -> None:
         uow = make_uow()
 
@@ -194,7 +185,6 @@ class TestGetBackupSchedules:
 
 
 class TestUpdateBackupSchedule:
-    @pytest.mark.anyio
     async def test_update_name(self) -> None:
         deployment_id = uuid4()
         schedule = BackupSchedule(
@@ -214,7 +204,6 @@ class TestUpdateBackupSchedule:
         assert result.cron_expression == "0 0 * * *"
         assert uow.committed is True
 
-    @pytest.mark.anyio
     async def test_update_cron_expression(self) -> None:
         deployment_id = uuid4()
         schedule = BackupSchedule(
@@ -233,7 +222,6 @@ class TestUpdateBackupSchedule:
         assert result.cron_expression == "0 12 * * *"
         assert result.name == "test-schedule"
 
-    @pytest.mark.anyio
     async def test_update_retention_count(self) -> None:
         deployment_id = uuid4()
         schedule = BackupSchedule(
@@ -252,7 +240,6 @@ class TestUpdateBackupSchedule:
 
         assert result.retention_count == 5
 
-    @pytest.mark.anyio
     async def test_update_enabled(self) -> None:
         deployment_id = uuid4()
         schedule = BackupSchedule(
@@ -271,7 +258,6 @@ class TestUpdateBackupSchedule:
 
         assert result.enabled is False
 
-    @pytest.mark.anyio
     async def test_update_multiple_fields(self) -> None:
         deployment_id = uuid4()
         schedule = BackupSchedule(
@@ -297,7 +283,6 @@ class TestUpdateBackupSchedule:
         assert result.retention_count == 3
         assert result.enabled is False
 
-    @pytest.mark.anyio
     async def test_update_no_fields_keeps_existing(self) -> None:
         deployment_id = uuid4()
         schedule = BackupSchedule(
@@ -319,7 +304,6 @@ class TestUpdateBackupSchedule:
         assert result.retention_count == 10
         assert result.enabled is True
 
-    @pytest.mark.anyio
     async def test_update_not_found(self) -> None:
         uow = make_uow()
 
@@ -332,7 +316,6 @@ class TestUpdateBackupSchedule:
 
 
 class TestDeleteBackupSchedule:
-    @pytest.mark.anyio
     async def test_delete_backup_schedule_success(self) -> None:
         deployment_id = uuid4()
         schedule = BackupSchedule(
@@ -347,7 +330,6 @@ class TestDeleteBackupSchedule:
         assert uow.committed is True
         assert len(uow.backup_schedules.models) == 0
 
-    @pytest.mark.anyio
     async def test_delete_backup_schedule_not_found(self) -> None:
         uow = make_uow()
 

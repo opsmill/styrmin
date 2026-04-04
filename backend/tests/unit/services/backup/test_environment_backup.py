@@ -69,13 +69,11 @@ def make_uow(
 
 
 class TestCreateEnvironmentBackup:
-    @pytest.mark.anyio
     async def test_environment_not_found_raises(self) -> None:
         uow = make_uow()
         with pytest.raises(EnvironmentNotFoundError):
             await create_environment_backup(uuid4(), uow)
 
-    @pytest.mark.anyio
     async def test_no_bsl_raises_validation_error(self) -> None:
         env_id = uuid4()
         env = Environment(
@@ -90,7 +88,6 @@ class TestCreateEnvironmentBackup:
         ):
             await create_environment_backup(env_id, uow)
 
-    @pytest.mark.anyio
     async def test_rejects_when_env_backup_already_in_progress(self) -> None:
         env_id = uuid4()
         env = Environment(
@@ -112,7 +109,6 @@ class TestCreateEnvironmentBackup:
         ):
             await create_environment_backup(env_id, uow)
 
-    @pytest.mark.anyio
     async def test_rejects_when_env_backup_pending(self) -> None:
         env_id = uuid4()
         env = Environment(
@@ -133,13 +129,11 @@ class TestCreateEnvironmentBackup:
 
 
 class TestGetEnvironmentBackup:
-    @pytest.mark.anyio
     async def test_not_found_raises(self) -> None:
         uow = make_uow()
         with pytest.raises(EnvironmentBackupNotFoundError):
             await get_environment_backup(uuid4(), uow)
 
-    @pytest.mark.anyio
     async def test_returns_existing(self) -> None:
         eb_id = uuid4()
         eb = EnvironmentBackup(
@@ -155,7 +149,6 @@ class TestGetEnvironmentBackup:
 
 
 class TestGetEnvironmentBackups:
-    @pytest.mark.anyio
     async def test_returns_backups_for_environment(self) -> None:
         env_id = uuid4()
         eb1 = EnvironmentBackup(
@@ -180,7 +173,6 @@ class TestGetEnvironmentBackups:
         result = await get_environment_backups(env_id, uow)
         assert len(result) == 2
 
-    @pytest.mark.anyio
     async def test_filters_by_status(self) -> None:
         env_id = uuid4()
         eb1 = EnvironmentBackup(

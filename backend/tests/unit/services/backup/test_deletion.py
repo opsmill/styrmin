@@ -48,7 +48,6 @@ def make_uow(
 
 
 class TestDeleteBackup:
-    @pytest.mark.anyio
     async def test_delete_removes_backup_record(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -63,14 +62,12 @@ class TestDeleteBackup:
         assert len(uow.backups.models) == 0
         assert uow.committed is True
 
-    @pytest.mark.anyio
     async def test_delete_not_found_raises(self) -> None:
         uow = make_uow()
 
         with pytest.raises(BackupNotFoundError):
             await delete_backup(backup_id=uuid4(), uow=uow)
 
-    @pytest.mark.anyio
     async def test_delete_cascades_single_restore(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -91,7 +88,6 @@ class TestDeleteBackup:
         assert len(uow.backups.models) == 0
         assert len(uow.restores.models) == 0
 
-    @pytest.mark.anyio
     async def test_delete_cascades_multiple_restores(self) -> None:
         instance_id = uuid4()
         backup = Backup(
@@ -118,7 +114,6 @@ class TestDeleteBackup:
         assert len(uow.backups.models) == 0
         assert len(uow.restores.models) == 0
 
-    @pytest.mark.anyio
     async def test_delete_does_not_affect_other_backup_restores(self) -> None:
         """Deleting one backup should not affect restores from other backups."""
         instance_id = uuid4()
@@ -156,7 +151,6 @@ class TestDeleteBackup:
         assert len(uow.restores.models) == 1
         assert uow.restores.models[0].id == other_restore.id
 
-    @pytest.mark.anyio
     async def test_delete_pending_backup(self) -> None:
         """Can delete a backup that's still pending."""
         instance_id = uuid4()
@@ -171,7 +165,6 @@ class TestDeleteBackup:
 
         assert len(uow.backups.models) == 0
 
-    @pytest.mark.anyio
     async def test_delete_failed_backup(self) -> None:
         """Can delete a backup that failed."""
         instance_id = uuid4()
