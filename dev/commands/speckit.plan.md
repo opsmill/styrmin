@@ -74,6 +74,13 @@ You **MUST** consider the user input before proceeding (if not empty).
    - Use standard REST/GraphQL patterns
    - Output OpenAPI/GraphQL schema to `/contracts/`
 
+3. **Agent context update**:
+   - Run `.specify/scripts/bash/update-agent-context.sh`
+   - These scripts detect which AI agent is in use
+   - Update the appropriate agent-specific context file
+   - Add only new technology from current plan
+   - Preserve manual additions between markers
+
 **Output**: data-model.md, /contracts/*, quickstart.md, agent-specific file
 
 ## Key rules
