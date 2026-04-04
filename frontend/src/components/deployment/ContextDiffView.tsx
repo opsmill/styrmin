@@ -30,7 +30,9 @@ function formatValue(value: unknown): string {
 export function ContextDiffView({ changes }: ContextDiffViewProps) {
   if (changes.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground italic">No changes detected.</p>
+      <p className="text-xs text-muted-foreground italic">
+        No changes detected.
+      </p>
     );
   }
 
@@ -52,7 +54,10 @@ export function ContextDiffView({ changes }: ContextDiffViewProps) {
               {change.action === "modified" && (
                 <div className="mt-0.5 space-y-0.5">
                   <div className="text-red-600">
-                    <Badge variant="outline" className="text-[10px] px-1 py-0 mr-1">
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] px-1 py-0 mr-1"
+                    >
                       old
                     </Badge>
                     <span className="font-mono break-all">
@@ -60,7 +65,10 @@ export function ContextDiffView({ changes }: ContextDiffViewProps) {
                     </span>
                   </div>
                   <div className="text-green-600">
-                    <Badge variant="outline" className="text-[10px] px-1 py-0 mr-1">
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] px-1 py-0 mr-1"
+                    >
                       new
                     </Badge>
                     <span className="font-mono break-all">

@@ -85,8 +85,7 @@ export function DeploymentTimeline({ entries }: DeploymentTimelineProps) {
 function TimelineEntryRow({ entry }: { entry: TimelineEntry }) {
   const { task, applicationVersion, contextDiff } = entry;
   const typeLabel = TASK_TYPE_LABELS[task.type] ?? task.type;
-  const hasChanges =
-    contextDiff != null && contextDiff.changes.length > 0;
+  const hasChanges = contextDiff != null && contextDiff.changes.length > 0;
   const [isOpen, setIsOpen] = useState(false);
 
   const content = (
