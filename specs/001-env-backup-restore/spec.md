@@ -93,7 +93,7 @@ The development team needs end-to-end tests that verify the complete environment
 
 **Why this priority**: E2E tests validate the integration of all components and catch issues that unit tests cannot. They are critical for confidence in the feature but depend on all other stories being implemented first.
 
-**Independent Test**: Can be tested by running the E2E test suite which exercises create backup, monitor status, restore from backup, and cleanup operations through the GraphQL API.
+**Independent Test**: Can be tested by running the E2E test suite which exercises create backup, monitor status, restore from backup, and cleanup operations through the styrmin SDK (matching existing E2E test patterns in `backend/tests/e2e/`).
 
 **Acceptance Scenarios**:
 
@@ -137,7 +137,12 @@ The development team needs end-to-end tests that verify the complete environment
 
 - **FR-002**: System MUST create a parent EnvironmentBackup record that links to all constituent Backup records created during the operation.
 
-- **FR-003**: System MUST derive the overall EnvironmentBackup status from the aggregate status of its constituent backups: PENDING (all pending), IN_PROGRESS (any in progress), COMPLETED (all completed), PARTIALLY_FAILED (some completed, some failed), FAILED (all failed).
+- **FR-003**: System MUST derive the overall EnvironmentBackup status using the following rules:
+  - **PENDING**: Set at creation time, before the orchestration workflow starts.
+  - **IN_PROGRESS**: Set when the orchestration workflow begins dispatching constituent backups. Remains IN_PROGRESS while any constituent is PENDING or IN_PROGRESS, regardless of how many have already completed or failed.
+  - **COMPLETED**: All constituent backups reached COMPLETED.
+  - **PARTIALLY_FAILED**: All constituents have a terminal status (COMPLETED or FAILED) and at least one of each.
+  - **FAILED**: All constituent backups FAILED, or the overall timeout was exceeded.
 
 - **FR-004**: System MUST allow restoring an entire environment from a completed or partially-completed EnvironmentBackup by creating individual restore operations for each successfully completed constituent backup.
 
@@ -161,7 +166,7 @@ The development team needs end-to-end tests that verify the complete environment
 
 - **FR-014**: System MUST reuse existing individual backup and restore logic without duplicating backup strategy implementations.
 
-- **FR-015**: System MUST provide end-to-end tests that verify the complete environment backup and restore lifecycle through the GraphQL API.
+- **FR-015**: System MUST provide end-to-end tests that verify the complete environment backup and restore lifecycle through the styrmin SDK (which exercises the full stack including the GraphQL API). E2E tests MUST NOT use raw GraphQL calls.
 
 - **FR-016**: Feature MUST be exposed via three interfaces: GraphQL API (mutations and queries), CLI commands (`styrmin env backup` / `styrmin env restore`), and Frontend UI (environment detail page with backup/restore actions).
 

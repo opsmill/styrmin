@@ -1,0 +1,145 @@
+# SDK GraphQL Operations — these .graphql files will be created in python_sdk/src/styrmin_sdk/graphql/
+# and frontend/src/graphql/ for codegen
+
+# --- Queries ---
+
+query GetEnvironmentBackup($environmentBackupId: UUID!) {
+  environmentBackup(environmentBackupId: $environmentBackupId) {
+    id
+    name
+    status
+    startedAt
+    completedAt
+    errorMessage
+    metadata
+    maxConcurrency
+    timeout
+    createdOn
+    environment {
+      id
+      name
+    }
+    backups {
+      id
+      name
+      status
+      startedAt
+      completedAt
+      errorMessage
+      instance {
+        id
+        deployment {
+          id
+          name
+        }
+      }
+    }
+    restores {
+      id
+      name
+      status
+      createdOn
+    }
+    backupCount
+    completedCount
+    failedCount
+  }
+}
+
+query ListEnvironmentBackups($environmentId: UUID!, $status: EnvironmentBackupStatus) {
+  environmentBackups(environmentId: $environmentId, status: $status) {
+    id
+    name
+    status
+    startedAt
+    completedAt
+    createdOn
+    backupCount
+    completedCount
+    failedCount
+  }
+}
+
+query GetEnvironmentRestore($environmentRestoreId: UUID!) {
+  environmentRestore(environmentRestoreId: $environmentRestoreId) {
+    id
+    name
+    status
+    startedAt
+    completedAt
+    errorMessage
+    metadata
+    createdOn
+    environmentBackup {
+      id
+      name
+    }
+    restores {
+      id
+      name
+      status
+      startedAt
+      completedAt
+      errorMessage
+      backup {
+        id
+        name
+        instance {
+          id
+          deployment {
+            id
+            name
+          }
+        }
+      }
+    }
+    restoreCount
+    completedCount
+    failedCount
+  }
+}
+
+query ListEnvironmentRestores($environmentBackupId: UUID!, $status: EnvironmentRestoreStatus) {
+  environmentRestores(environmentBackupId: $environmentBackupId, status: $status) {
+    id
+    name
+    status
+    startedAt
+    completedAt
+    createdOn
+    restoreCount
+    completedCount
+    failedCount
+  }
+}
+
+# --- Mutations ---
+
+mutation CreateEnvironmentBackup($environmentId: UUID!, $name: String, $maxConcurrency: Int, $timeout: Int) {
+  createEnvironmentBackup(
+    environmentId: $environmentId
+    name: $name
+    maxConcurrency: $maxConcurrency
+    timeout: $timeout
+  ) {
+    id
+    name
+    status
+    createdOn
+    backupCount
+  }
+}
+
+mutation CreateEnvironmentRestore($environmentBackupId: UUID!) {
+  createEnvironmentRestore(environmentBackupId: $environmentBackupId) {
+    id
+    name
+    status
+    createdOn
+    restoreCount
+  }
+}
+
+mutation DeleteEnvironmentBackup($environmentBackupId: UUID!) {
+  deleteEnvironmentBackup(environmentBackupId: $environmentBackupId)
+}

@@ -1,0 +1,110 @@
+# Environment Backup/Restore GraphQL Contract
+# These types, queries, and mutations will be added to the existing Strawberry schema.
+
+# --- Enums ---
+
+enum EnvironmentBackupStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  PARTIALLY_FAILED
+  FAILED
+}
+
+enum EnvironmentRestoreStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  PARTIALLY_FAILED
+  FAILED
+}
+
+# --- Types ---
+
+type EnvironmentBackupType {
+  id: UUID!
+  name: String!
+  status: EnvironmentBackupStatus!
+  startedAt: DateTime
+  completedAt: DateTime
+  errorMessage: String
+  metadata: JSON
+  maxConcurrency: Int!
+  timeout: Int!
+  createdOn: DateTime!
+  updatedOn: DateTime
+
+  # Resolvers
+  environment: EnvironmentType!
+  backups: [BackupType!]!
+  restores: [EnvironmentRestoreType!]!
+
+  # Computed
+  backupCount: Int!
+  completedCount: Int!
+  failedCount: Int!
+}
+
+type EnvironmentRestoreType {
+  id: UUID!
+  name: String!
+  status: EnvironmentRestoreStatus!
+  startedAt: DateTime
+  completedAt: DateTime
+  errorMessage: String
+  metadata: JSON
+  createdOn: DateTime!
+  updatedOn: DateTime
+
+  # Resolvers
+  environmentBackup: EnvironmentBackupType!
+  restores: [RestoreType!]!
+
+  # Computed
+  restoreCount: Int!
+  completedCount: Int!
+  failedCount: Int!
+}
+
+# --- Queries ---
+
+# Get a specific environment backup by ID
+# query environmentBackup(environmentBackupId: UUID!): EnvironmentBackupType
+
+# List environment backups for an environment, optionally filtered by status
+# query environmentBackups(environmentId: UUID!, status: String): [EnvironmentBackupType!]!
+
+# Get a specific environment restore by ID
+# query environmentRestore(environmentRestoreId: UUID!): EnvironmentRestoreType
+
+# List environment restores for an environment backup
+# query environmentRestores(environmentBackupId: UUID!, status: String): [EnvironmentRestoreType!]!
+
+# --- Mutations ---
+
+# Create an environment backup (initiates coordinated backup of all active instances)
+# mutation createEnvironmentBackup(
+#   environmentId: UUID!
+#   name: String          # Optional user-provided label (max 128 chars)
+#   maxConcurrency: Int   # Default: 5
+#   timeout: Int          # Default: 3600 (seconds)
+# ): EnvironmentBackupType
+
+# Create an environment restore from a completed/partially-completed backup
+# mutation createEnvironmentRestore(
+#   environmentBackupId: UUID!
+# ): EnvironmentRestoreType
+
+# Delete an environment backup and all its constituent backups/restores
+# mutation deleteEnvironmentBackup(
+#   environmentBackupId: UUID!
+# ): String
+
+# --- Error Handling ---
+# Mutations return success types directly. Errors are raised as ServiceError subclasses
+# and handled by StructuredErrorExtension middleware (extensions.code in GraphQL response).
+#
+# ServiceError subclasses to create in backend/styrmin_backend/services/exceptions.py:
+#   - EnvironmentBackupNotFoundError(ServiceError)       — error_code: "ENVIRONMENT_BACKUP_NOT_FOUND"
+#   - EnvironmentBackupValidationError(ServiceError)     — error_code: "ENVIRONMENT_BACKUP_VALIDATION_ERROR"
+#   - EnvironmentBackupOperationInProgressError(ServiceError) — error_code: "ENVIRONMENT_BACKUP_OPERATION_IN_PROGRESS"
