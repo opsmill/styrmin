@@ -247,11 +247,36 @@ kubectl get helmreleases -A
 cd backend && uv run pytest tests/e2e -v
 ```
 
+## Environment Backup E2E Test
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-04-05 -->
+
+The environment backup E2E test (`test_env_backup_restore.py`) validates the full composite backup/restore lifecycle with two deployed applications. It is marked `@pytest.mark.order("last")` to run after all other E2E tests (it deploys additional apps which adds delay).
+
+### Test Flow
+
+```text
+1. Deploy two simple-app instances (with service name overrides to avoid conflicts)
+2. Write test data to both apps (increment counter endpoint)
+3. Create environment backup → wait for COMPLETED
+4. Write more data to both apps (counter goes higher)
+5. Restore from environment backup → wait for COMPLETED
+6. Verify both apps' counters reverted to pre-backup values
+7. Delete environment backup → verify cascade (constituent backups and restores gone)
+```
+
+### Key Patterns
+
+- **Service name overrides**: When deploying multiple instances of the same driver in one environment, each deployment needs unique service names via `service_name_overrides` to avoid `ALREADY_EXISTS` conflicts
+- **Data verification**: The simple-app counter endpoint (`GET /count`) increments on each call. Pre-backup count is recorded, and post-restore count should equal pre-backup + 1 (the verification read itself increments once)
+- **Port-forwarding**: Uses kr8s `AsyncService.portforward()` with `ExternalName` service filtering (`svc.raw.get("spec", {}).get("type") != "ExternalName"`) to find the correct ClusterIP service
+
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | [tests/e2e/test_deploy_app.py](backend/tests/e2e/test_deploy_app.py) | Main e2e test |
+| [tests/e2e/test_env_backup_restore.py](backend/tests/e2e/test_env_backup_restore.py) | Environment backup/restore lifecycle test |
 | [tests/e2e/conftest.py](backend/tests/e2e/conftest.py) | E2e fixtures (chart server, git server, Styrmin deployment) |
 | [tests/conftest.py](backend/tests/conftest.py) | Root fixtures (Kind cluster, config loading) |
 | [tests/e2e/fixtures/chart-server/](backend/tests/e2e/fixtures/chart-server/) | Chart server Dockerfile and K8s manifests |

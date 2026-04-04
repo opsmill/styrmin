@@ -46,6 +46,14 @@ class StyrminModel(SQLModel):
                               │  HelmChart  │──N:1─┌─────────────────┐
                               └─────────────┘      │ HelmRepository  │
                                                    └─────────────────┘
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-04-05 -->
+Environment (existing)
+├── 1:N EnvironmentBackup
+│   ├── 1:N Backup (via nullable FK environment_backup_id)
+│   └── 1:N EnvironmentRestore
+│       └── 1:N Restore (via nullable FK environment_restore_id)
+└── BackupStorageLocation (required for env backup)
 ```
 
 ### Infrastructure Models

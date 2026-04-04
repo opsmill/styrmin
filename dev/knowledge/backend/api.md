@@ -53,6 +53,10 @@ styrmin_backend/api/
 | `tasks` | Get all tasks | `[Task]` |
 | `task(task_id)` | Get task by ID | `Task \| TaskNotFound` |
 | `deploymentTimeline(deployment_id)` | Get deployment history timeline with version info and context diffs | `[DeploymentTimelineEntry]` |
+| `environment_backup(environment_backup_id)` | Get environment backup by ID | `EnvironmentBackup` |
+| `environment_backups(environment_id, status?)` | List environment backups for environment | `[EnvironmentBackup]` |
+| `environment_restore(environment_restore_id)` | Get environment restore by ID | `EnvironmentRestore` |
+| `environment_restores(environment_backup_id, status?)` | List restores for environment backup | `[EnvironmentRestore]` |
 
 ### Mutations
 
@@ -66,6 +70,11 @@ styrmin_backend/api/
 | `load_remote_application_driver_version(repository_url, branch)` | Load driver from Git (async) | `ApplicationDriverVersionCreated \| ApplicationDriverVersionCreationFailed` |
 | `deploy(driver, version?, environment_id?, environment_name?, cluster_id?, cluster_name?, name?, config?)` | Deploy application (async) | `DeploymentInProgress \| DeploymentFailed` |
 | `update_deployment(deployment_id, config)` | Update deployment config (async) | `DeploymentUpdateInProgress \| DeploymentUpdateFailed` |
+| `create_environment_backup(environment_id, name?, max_concurrency?, timeout?)` | Create coordinated backup of all active instances | `EnvironmentBackup` |
+| `create_environment_restore(environment_backup_id)` | Restore environment from completed backup | `EnvironmentRestore` |
+| `delete_environment_backup(environment_backup_id)` | Delete backup with cascade | `String` |
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-04-05 -->
 
 ## Internal API
 

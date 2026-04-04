@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-env-backup-restore`  
 **Created**: 2026-04-04  
-**Status**: Draft  
+**Status**: Extracted  
 **Input**: User description: "feat: Environment-level backup and restore operations — Add the ability to back up and restore an entire environment as a single coordinated operation."
 
 ## User Scenarios & Testing *(mandatory)*

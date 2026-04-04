@@ -46,6 +46,8 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 
 - [adr-002-consolidate-driver-single-yaml.md](adr/adr-002-consolidate-driver-single-yaml.md) - Consolidate driver declarative config into single driver.styrmin.yml
 - [adr-003-consolidate-typechecker-on-ty.md](adr/adr-003-consolidate-typechecker-on-ty.md) - Consolidate type checking on ty, removing mypy
+- [adr-004-composite-parent-child-orchestration.md](adr/adr-004-composite-parent-child-orchestration.md) - Composite operations via parent-child orchestration with concurrency limiting and status aggregation
+- [adr-005-composite-operation-timeout-cancellation.md](adr/adr-005-composite-operation-timeout-cancellation.md) - Timeout and cancellation pattern for composite operations
 
 - [adr-003-alembic-database-migrations.md](adr/adr-003-alembic-database-migrations.md) - Adopt Alembic for versioned database migration management
 - [adr-004-shared-async-event-loop-kopf-prefect.md](adr/adr-004-shared-async-event-loop-kopf-prefect.md) - Shared async event loop for kopf operator and Prefect agent

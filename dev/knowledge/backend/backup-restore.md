@@ -203,12 +203,112 @@ Backups and restores track status at the component level. The overall status is 
 
 - `build_backup_volume_annotation_patches()` — Generates Kustomize patches that inject `backup.velero.io/backup-volumes` annotations on pod templates
 
+## Environment-Level Backup & Restore
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-04-05 -->
+
+Environment-level operations coordinate backups and restores across all active application instances in an environment as a single logical unit. They compose on top of the existing per-instance infrastructure — no new Velero logic is introduced.
+
+### Architecture
+
+```text
+GraphQL Mutation (createEnvironmentBackup / createEnvironmentRestore)
+        |
+        v
+  Service Layer (services/backup/environment.py)
+        |  Creates parent record (EnvironmentBackup/EnvironmentRestore)
+        |  Creates constituent Backup/Restore records (one per active instance)
+        v
+  Prefect Action (EXECUTE_ENV_BACKUP / EXECUTE_ENV_RESTORE)
+        |
+        v
+  INTERNAL Flow (execute_environment_backup_workflow / execute_environment_restore_workflow)
+        |   - Marks parent IN_PROGRESS
+        |   - Dispatches constituent EXECUTE_BACKUP/EXECUTE_RESTORE via asyncio.gather + Semaphore
+        |   - Polls until all constituents reach terminal status
+        |   - Recomputes and persists parent status
+        v
+  Existing per-instance flows handle Velero operations (unchanged)
+```
+
+### Parent-Child Status Aggregation
+
+Parent status is derived from constituent statuses:
+
+| Constituent States | Parent Status |
+|-------------------|---------------|
+| All COMPLETED | COMPLETED |
+| All FAILED | FAILED |
+| Mix of COMPLETED + FAILED | PARTIALLY_FAILED |
+| Any PENDING/IN_PROGRESS | IN_PROGRESS |
+
+The `PARTIALLY_FAILED` status is unique to environment-level operations.
+
+### Data Models
+
+```python
+class EnvironmentBackup(StyrminModel, table=True):
+    name: str                       # Unique label (auto-generated or user-provided)
+    status: EnvironmentBackupStatus # PENDING, IN_PROGRESS, COMPLETED, PARTIALLY_FAILED, FAILED
+    environment_id: UUID            # FK to Environment
+    max_concurrency: int = 5        # Concurrent constituent limit
+    timeout: int = 3600             # Overall timeout (seconds)
+    started_at / completed_at / error_message / metadata_
+    backups: list[Backup]           # Constituent backups (cascade delete)
+    restores: list[EnvironmentRestore]  # Cascade delete
+
+class EnvironmentRestore(StyrminModel, table=True):
+    name: str
+    status: EnvironmentRestoreStatus
+    environment_backup_id: UUID     # FK to EnvironmentBackup
+    timeout: int = 7200
+    restores: list[Restore]         # Constituent restores (cascade delete)
+```
+
+Existing `Backup` and `Restore` models gain nullable FK columns (`environment_backup_id`, `environment_restore_id`) — NULL for standalone operations.
+
+### Service Functions (`services/backup/environment.py`)
+
+| Function | Description |
+|----------|-------------|
+| `create_environment_backup(environment_id, uow, ...)` | Validate BSL + active instances, create parent + constituents |
+| `create_environment_restore(environment_backup_id, uow)` | Validate source status, create parent + constituents for COMPLETED backups only |
+| `update_environment_backup_status(id, uow, ...)` | Recompute parent status from constituents |
+| `update_environment_restore_status(id, uow, ...)` | Recompute parent status from constituents |
+| `get_environment_backup` / `get_environment_backups` | Get by ID / list with optional status filter |
+| `get_environment_restore` / `get_environment_restores` | Get by ID / list with optional status filter |
+| `delete_environment_backup(id, uow)` | Reject if in-progress ops, cascade delete via SQLAlchemy |
+
+### Validation Rules
+
+- Environment MUST have a BackupStorageLocation assigned
+- Environment MUST have ≥1 active instance
+- Restore only from COMPLETED or PARTIALLY_FAILED backups
+- No concurrent restore from the same EnvironmentBackup
+- Cannot delete while any constituent is PENDING or IN_PROGRESS
+
+### Concurrency Limiting
+
+The orchestration flow uses `asyncio.Semaphore(max_concurrency)` to bound concurrent constituent dispatches. See [ADR-004](../../adr/adr-004-composite-parent-child-orchestration.md).
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| [services/backup/environment.py](backend/styrmin_backend/services/backup/environment.py) | Environment backup/restore service functions |
+| [workflows/templates/environment_backup.py](backend/styrmin_backend/workflows/templates/environment_backup.py) | Prefect orchestration flows |
+| [repository/environment_backup.py](backend/styrmin_backend/repository/environment_backup.py) | EnvironmentBackup data access |
+| [repository/environment_restore.py](backend/styrmin_backend/repository/environment_restore.py) | EnvironmentRestore data access |
+| [api/definitions/backup/environment_backup.py](backend/styrmin_backend/api/definitions/backup/environment_backup.py) | GraphQL types |
+
 ## Default Timeouts
 
 | Operation | Default |
 |-----------|---------|
-| Backup | 3600s (1 hour) |
-| Restore | 7200s (2 hours) |
+| Backup (per-instance) | 3600s (1 hour) |
+| Restore (per-instance) | 7200s (2 hours) |
+| Environment Backup | 3600s (1 hour) |
+| Environment Restore | 7200s (2 hours) |
 
 ## Key Files
 
