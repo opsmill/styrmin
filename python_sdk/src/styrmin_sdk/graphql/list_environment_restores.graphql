@@ -1,4 +1,4 @@
-query ListEnvironmentRestores($environmentBackupId: UUID!, $status: EnvironmentRestoreStatus) {
+query ListEnvironmentRestores($environmentBackupId: UUID!, $status: String) {
   environmentRestores(environmentBackupId: $environmentBackupId, status: $status) {
     id
     name

@@ -24,10 +24,7 @@ query GetEnvironmentRestore($environmentRestoreId: UUID!) {
         name
         instance {
           id
-          deployment {
-            id
-            name
-          }
+          deploymentId
         }
       }
     }

@@ -22,12 +22,21 @@ from .create_environment import (
     CreateEnvironmentCreateEnvironment,
     CreateEnvironmentCreateEnvironmentCluster,
 )
+from .create_environment_backup import (
+    CreateEnvironmentBackup,
+    CreateEnvironmentBackupCreateEnvironmentBackup,
+)
+from .create_environment_restore import (
+    CreateEnvironmentRestore,
+    CreateEnvironmentRestoreCreateEnvironmentRestore,
+)
 from .create_restore import CreateRestore, CreateRestoreCreateRestore
 from .delete_backup import DeleteBackup
 from .delete_backup_schedule import DeleteBackupSchedule
 from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_environment import DeleteEnvironment
+from .delete_environment_backup import DeleteEnvironmentBackup
 from .deploy import Deploy, DeployDeploy
 from .enums import PodPhase
 from .exceptions import (
@@ -78,6 +87,22 @@ from .get_environment import (
     GetEnvironmentEnvironment,
     GetEnvironmentEnvironmentCluster,
 )
+from .get_environment_backup import (
+    GetEnvironmentBackup,
+    GetEnvironmentBackupEnvironmentBackup,
+    GetEnvironmentBackupEnvironmentBackupBackups,
+    GetEnvironmentBackupEnvironmentBackupBackupsInstance,
+    GetEnvironmentBackupEnvironmentBackupEnvironment,
+    GetEnvironmentBackupEnvironmentBackupRestores,
+)
+from .get_environment_restore import (
+    GetEnvironmentRestore,
+    GetEnvironmentRestoreEnvironmentRestore,
+    GetEnvironmentRestoreEnvironmentRestoreEnvironmentBackup,
+    GetEnvironmentRestoreEnvironmentRestoreRestores,
+    GetEnvironmentRestoreEnvironmentRestoreRestoresBackup,
+    GetEnvironmentRestoreEnvironmentRestoreRestoresBackupInstance,
+)
 from .get_environment_services import (
     GetEnvironmentServices,
     GetEnvironmentServicesEnvironmentServices,
@@ -103,6 +128,14 @@ from .list_backup_storage_locations import (
 )
 from .list_backups import ListBackups, ListBackupsBackups
 from .list_clusters import ListClusters, ListClustersClusters
+from .list_environment_backups import (
+    ListEnvironmentBackups,
+    ListEnvironmentBackupsEnvironmentBackups,
+)
+from .list_environment_restores import (
+    ListEnvironmentRestores,
+    ListEnvironmentRestoresEnvironmentRestores,
+)
 from .list_environments import (
     ListEnvironments,
     ListEnvironmentsEnvironments,
@@ -166,8 +199,12 @@ __all__ = [
     "CreateCluster",
     "CreateClusterCreateCluster",
     "CreateEnvironment",
+    "CreateEnvironmentBackup",
+    "CreateEnvironmentBackupCreateEnvironmentBackup",
     "CreateEnvironmentCreateEnvironment",
     "CreateEnvironmentCreateEnvironmentCluster",
+    "CreateEnvironmentRestore",
+    "CreateEnvironmentRestoreCreateEnvironmentRestore",
     "CreateRestore",
     "CreateRestoreCreateRestore",
     "DeleteBackup",
@@ -175,6 +212,7 @@ __all__ = [
     "DeleteBackupStorageLocation",
     "DeleteCluster",
     "DeleteEnvironment",
+    "DeleteEnvironmentBackup",
     "Deploy",
     "DeployDeploy",
     "DeploymentPodStatusReport",
@@ -207,8 +245,20 @@ __all__ = [
     "GetDeploymentTimelineDeploymentTimelineContextDiffChanges",
     "GetDeploymentTimelineDeploymentTimelineTask",
     "GetEnvironment",
+    "GetEnvironmentBackup",
+    "GetEnvironmentBackupEnvironmentBackup",
+    "GetEnvironmentBackupEnvironmentBackupBackups",
+    "GetEnvironmentBackupEnvironmentBackupBackupsInstance",
+    "GetEnvironmentBackupEnvironmentBackupEnvironment",
+    "GetEnvironmentBackupEnvironmentBackupRestores",
     "GetEnvironmentEnvironment",
     "GetEnvironmentEnvironmentCluster",
+    "GetEnvironmentRestore",
+    "GetEnvironmentRestoreEnvironmentRestore",
+    "GetEnvironmentRestoreEnvironmentRestoreEnvironmentBackup",
+    "GetEnvironmentRestoreEnvironmentRestoreRestores",
+    "GetEnvironmentRestoreEnvironmentRestoreRestoresBackup",
+    "GetEnvironmentRestoreEnvironmentRestoreRestoresBackupInstance",
     "GetEnvironmentServices",
     "GetEnvironmentServicesEnvironmentServices",
     "GetPodStatuses",
@@ -230,6 +280,10 @@ __all__ = [
     "ListBackupsBackups",
     "ListClusters",
     "ListClustersClusters",
+    "ListEnvironmentBackups",
+    "ListEnvironmentBackupsEnvironmentBackups",
+    "ListEnvironmentRestores",
+    "ListEnvironmentRestoresEnvironmentRestores",
     "ListEnvironments",
     "ListEnvironmentsEnvironments",
     "ListEnvironmentsEnvironmentsCluster",
