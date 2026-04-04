@@ -205,30 +205,6 @@ parse_plan_data() {
     fi
 }
 
-format_technology_stack() {
-    local lang="$1"
-    local framework="$2"
-    local parts=()
-    
-    # Add non-empty parts
-    [[ -n "$lang" && "$lang" != "NEEDS CLARIFICATION" ]] && parts+=("$lang")
-    [[ -n "$framework" && "$framework" != "NEEDS CLARIFICATION" && "$framework" != "N/A" ]] && parts+=("$framework")
-    
-    # Join with proper formatting
-    if [[ ${#parts[@]} -eq 0 ]]; then
-        echo ""
-    elif [[ ${#parts[@]} -eq 1 ]]; then
-        echo "${parts[0]}"
-    else
-        # Join multiple parts with " + "
-        local result="${parts[0]}"
-        for ((i=1; i<${#parts[@]}; i++)); do
-            result="$result + ${parts[i]}"
-        done
-        echo "$result"
-    fi
-}
-
 #==============================================================================
 # Template and Content Generation Functions
 #==============================================================================
@@ -300,43 +276,12 @@ create_new_agent_file() {
     local language_conventions
     language_conventions=$(get_language_conventions "$NEW_LANG")
     
-    # Perform substitutions with error checking using safer approach
-    # Escape special characters for sed by using a different delimiter or escaping
-    local escaped_lang=$(printf '%s\n' "$NEW_LANG" | sed 's/[\[\.*^$()+{}|]/\\&/g')
-    local escaped_framework=$(printf '%s\n' "$NEW_FRAMEWORK" | sed 's/[\[\.*^$()+{}|]/\\&/g')
-    local escaped_branch=$(printf '%s\n' "$CURRENT_BRANCH" | sed 's/[\[\.*^$()+{}|]/\\&/g')
-    
-    # Build technology stack and recent change strings conditionally
-    local tech_stack
-    if [[ -n "$escaped_lang" && -n "$escaped_framework" ]]; then
-        tech_stack="- $escaped_lang + $escaped_framework ($escaped_branch)"
-    elif [[ -n "$escaped_lang" ]]; then
-        tech_stack="- $escaped_lang ($escaped_branch)"
-    elif [[ -n "$escaped_framework" ]]; then
-        tech_stack="- $escaped_framework ($escaped_branch)"
-    else
-        tech_stack="- ($escaped_branch)"
-    fi
-
-    local recent_change
-    if [[ -n "$escaped_lang" && -n "$escaped_framework" ]]; then
-        recent_change="- $escaped_branch: Added $escaped_lang + $escaped_framework"
-    elif [[ -n "$escaped_lang" ]]; then
-        recent_change="- $escaped_branch: Added $escaped_lang"
-    elif [[ -n "$escaped_framework" ]]; then
-        recent_change="- $escaped_branch: Added $escaped_framework"
-    else
-        recent_change="- $escaped_branch: Added"
-    fi
-
     local substitutions=(
         "s|\[PROJECT NAME\]|$project_name|"
         "s|\[DATE\]|$current_date|"
-        "s|\[EXTRACTED FROM ALL PLAN.MD FILES\]|$tech_stack|"
         "s|\[ACTUAL STRUCTURE FROM PLANS\]|$project_structure|g"
         "s|\[ONLY COMMANDS FOR ACTIVE TECHNOLOGIES\]|$commands|"
         "s|\[LANGUAGE-SPECIFIC, ONLY FOR LANGUAGES IN USE\]|$language_conventions|"
-        "s|\[LAST 3 FEATURES AND WHAT THEY ADDED\]|$recent_change|"
     )
     
     for substitution in "${substitutions[@]}"; do
@@ -363,105 +308,31 @@ create_new_agent_file() {
 update_existing_agent_file() {
     local target_file="$1"
     local current_date="$2"
-    
+
     log_info "Updating existing agent context file..."
-    
+
     # Use a single temporary file for atomic update
     local temp_file
     temp_file=$(mktemp) || {
         log_error "Failed to create temporary file"
         return 1
     }
-    
-    # Process the file in one pass
-    local tech_stack=$(format_technology_stack "$NEW_LANG" "$NEW_FRAMEWORK")
-    local new_tech_entries=()
-    local new_change_entry=""
-    
-    # Prepare new technology entries
-    if [[ -n "$tech_stack" ]] && ! grep -q "$tech_stack" "$target_file"; then
-        new_tech_entries+=("- $tech_stack ($CURRENT_BRANCH)")
-    fi
-    
-    if [[ -n "$NEW_DB" ]] && [[ "$NEW_DB" != "N/A" ]] && [[ "$NEW_DB" != "NEEDS CLARIFICATION" ]] && ! grep -q "$NEW_DB" "$target_file"; then
-        new_tech_entries+=("- $NEW_DB ($CURRENT_BRANCH)")
-    fi
-    
-    # Prepare new change entry
-    if [[ -n "$tech_stack" ]]; then
-        new_change_entry="- $CURRENT_BRANCH: Added $tech_stack"
-    elif [[ -n "$NEW_DB" ]] && [[ "$NEW_DB" != "N/A" ]] && [[ "$NEW_DB" != "NEEDS CLARIFICATION" ]]; then
-        new_change_entry="- $CURRENT_BRANCH: Added $NEW_DB"
-    fi
-    
-    # Check if sections exist in the file
-    local has_active_technologies=0
-    local has_recent_changes=0
-    
-    if grep -q "^## Active Technologies" "$target_file" 2>/dev/null; then
-        has_active_technologies=1
-    fi
-    
-    if grep -q "^## Recent Changes" "$target_file" 2>/dev/null; then
-        has_recent_changes=1
-    fi
-    
-    # Process file line by line
-    local in_tech_section=false
-    local in_changes_section=false
-    local tech_entries_added=false
-    local changes_entries_added=false
-    local existing_changes_count=0
-    local file_ended=false
-    
+
+    # Process file line by line, stripping Active Technologies and Recent Changes sections
+    local in_skip_section=false
+
     while IFS= read -r line || [[ -n "$line" ]]; do
-        # Handle Active Technologies section
-        if [[ "$line" == "## Active Technologies" ]]; then
-            echo "$line" >> "$temp_file"
-            in_tech_section=true
+        # Skip Active Technologies and Recent Changes sections entirely
+        if [[ "$line" == "## Active Technologies" ]] || [[ "$line" == "## Recent Changes" ]]; then
+            in_skip_section=true
             continue
-        elif [[ $in_tech_section == true ]] && [[ "$line" =~ ^##[[:space:]] ]]; then
-            # Add new tech entries before closing the section
-            if [[ $tech_entries_added == false ]] && [[ ${#new_tech_entries[@]} -gt 0 ]]; then
-                printf '%s\n' "${new_tech_entries[@]}" >> "$temp_file"
-                tech_entries_added=true
-            fi
-            echo "$line" >> "$temp_file"
-            in_tech_section=false
-            continue
-        elif [[ $in_tech_section == true ]] && [[ -z "$line" ]]; then
-            # Add new tech entries before empty line in tech section
-            if [[ $tech_entries_added == false ]] && [[ ${#new_tech_entries[@]} -gt 0 ]]; then
-                printf '%s\n' "${new_tech_entries[@]}" >> "$temp_file"
-                tech_entries_added=true
-            fi
-            echo "$line" >> "$temp_file"
+        elif [[ $in_skip_section == true ]] && [[ "$line" =~ ^##[[:space:]] ]]; then
+            in_skip_section=false
+            # Fall through to write this line normally
+        elif [[ $in_skip_section == true ]]; then
             continue
         fi
-        
-        # Handle Recent Changes section
-        if [[ "$line" == "## Recent Changes" ]]; then
-            echo "$line" >> "$temp_file"
-            # Add new change entry right after the heading
-            if [[ -n "$new_change_entry" ]]; then
-                echo "$new_change_entry" >> "$temp_file"
-            fi
-            in_changes_section=true
-            changes_entries_added=true
-            continue
-        elif [[ $in_changes_section == true ]] && [[ "$line" =~ ^##[[:space:]] ]]; then
-            echo "$line" >> "$temp_file"
-            in_changes_section=false
-            continue
-        elif [[ $in_changes_section == true ]] && [[ "$line" == "- "* ]]; then
-            # Keep only first 2 existing changes
-            if [[ $existing_changes_count -lt 2 ]]; then
-                echo "$line" >> "$temp_file"
-                ((existing_changes_count++))
-            fi
-            continue
-        fi
-        
+
         # Update timestamp
         if [[ "$line" =~ \*\*Last\ updated\*\*:.*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] ]]; then
             echo "$line" | sed "s/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/$current_date/" >> "$temp_file"
@@ -469,35 +340,14 @@ update_existing_agent_file() {
             echo "$line" >> "$temp_file"
         fi
     done < "$target_file"
-    
-    # Post-loop check: if we're still in the Active Technologies section and haven't added new entries
-    if [[ $in_tech_section == true ]] && [[ $tech_entries_added == false ]] && [[ ${#new_tech_entries[@]} -gt 0 ]]; then
-        printf '%s\n' "${new_tech_entries[@]}" >> "$temp_file"
-        tech_entries_added=true
-    fi
-    
-    # If sections don't exist, add them at the end of the file
-    if [[ $has_active_technologies -eq 0 ]] && [[ ${#new_tech_entries[@]} -gt 0 ]]; then
-        echo "" >> "$temp_file"
-        echo "## Active Technologies" >> "$temp_file"
-        printf '%s\n' "${new_tech_entries[@]}" >> "$temp_file"
-        tech_entries_added=true
-    fi
-    
-    if [[ $has_recent_changes -eq 0 ]] && [[ -n "$new_change_entry" ]]; then
-        echo "" >> "$temp_file"
-        echo "## Recent Changes" >> "$temp_file"
-        echo "$new_change_entry" >> "$temp_file"
-        changes_entries_added=true
-    fi
-    
+
     # Move temp file to target atomically
     if ! mv "$temp_file" "$target_file"; then
         log_error "Failed to update target file"
         rm -f "$temp_file"
         return 1
     fi
-    
+
     return 0
 }
 #==============================================================================
