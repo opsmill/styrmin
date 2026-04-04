@@ -51,6 +51,10 @@ from styrmin_backend.services.environments import (
     get_environments,
     resolve_environment,
 )
+from styrmin_backend.api.definitions.deployment_timeline.model import (
+    DeploymentTimelineEntry,
+)
+from styrmin_backend.services.deployment_timeline import build_deployment_timeline
 from styrmin_backend.services.tasks import get_task, get_tasks
 
 
@@ -250,6 +254,15 @@ class Query:
         async with uow:
             services = await uow.deployed_services.get_by_deployment_id(deployment_id)
             return [DeployedServiceType.from_instance(s) for s in services]
+
+    @strawberry.field
+    async def deployment_timeline(
+        self, deployment_id: UUID, info: strawberry.Info
+    ) -> list[DeploymentTimelineEntry]:
+        """Get the deployment history timeline: tasks with version info, newest-first."""
+        uow = info.context["uow"]
+        entries = await build_deployment_timeline(deployment_id=deployment_id, uow=uow)
+        return [DeploymentTimelineEntry.from_data(entry) for entry in entries]
 
     @strawberry.field(description="Health check probe")
     def ok(self) -> bool:

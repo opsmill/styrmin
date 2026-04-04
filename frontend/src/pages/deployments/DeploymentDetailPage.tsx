@@ -3,6 +3,7 @@ import { useParams } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetDeploymentQuery,
+  useGetDeploymentTimelineQuery,
   useCreateBackupMutation,
   useDeleteBackupMutation,
   useListBackupsQuery,
@@ -51,6 +52,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
+import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
 
 export default function DeploymentDetailPage() {
   const { environmentId, deploymentId } = useParams({
@@ -66,6 +68,12 @@ export default function DeploymentDetailPage() {
     );
 
   const deployment = data?.deployment;
+
+  const { data: timelineData } = useGetDeploymentTimelineQuery(
+    { deploymentId },
+    { refetchInterval: autoRefreshEnabled ? 10_000 : false },
+  );
+  const timelineEntries = timelineData?.deploymentTimeline ?? [];
 
   const instanceId = deployment?.applicationInstance?.id;
 
@@ -409,6 +417,8 @@ export default function DeploymentDetailPage() {
             </CardContent>
           </Card>
         )}
+
+        <DeploymentTimeline entries={timelineEntries} />
       </div>
 
       {/* Restore confirmation dialog */}

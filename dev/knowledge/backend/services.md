@@ -12,6 +12,7 @@ styrmin_backend/services/
 ├── applications.py          # Application driver management
 ├── instances.py             # Instance lifecycle
 ├── tasks.py                 # Task state management
+├── deployment_timeline.py   # Deployment history timeline with version correlation and context diffs
 ├── context.py               # Context generation
 ├── primitives.py            # Primitive operations
 ├── user.py                  # User action workflows

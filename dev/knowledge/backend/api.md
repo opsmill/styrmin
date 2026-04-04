@@ -24,6 +24,7 @@ styrmin_backend/api/
 │   ├── environment/
 │   ├── deployment/
 │   ├── task/
+│   ├── deployment_timeline/
 │   ├── application_driver/
 │   ├── context/
 │   ├── callback/
@@ -51,6 +52,7 @@ styrmin_backend/api/
 | `deployment(deployment_id)` | Get deployment by ID (async) | `Deployment \| DeploymentNotFound` |
 | `tasks` | Get all tasks | `[Task]` |
 | `task(task_id)` | Get task by ID | `Task \| TaskNotFound` |
+| `deploymentTimeline(deployment_id)` | Get deployment history timeline with version info and context diffs | `[DeploymentTimelineEntry]` |
 
 ### Mutations
 

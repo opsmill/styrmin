@@ -179,6 +179,11 @@ class FakeApplicationInstanceRepository(
                 return instance
         return instance
 
+    async def find_by_deployment(
+        self, deployment_id: UUID
+    ) -> list[ApplicationInstance]:
+        return [m for m in self.models if m.deployment_id == deployment_id]
+
 
 class FakeApplicationDriverRepository(
     FakeRepository[ApplicationDriver], ApplicationDriverRepository
@@ -217,6 +222,9 @@ class FakeTaskRepository(FakeRepository[Task], TaskRepository):
 
     async def all(self):
         return self.models
+
+    async def find_by_deployment(self, deployment_id: UUID):
+        return [m for m in self.models if m.deployment_id == deployment_id]
 
 
 class FakeBackupRepository(FakeRepository[Backup], BackupRepository):

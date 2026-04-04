@@ -39,6 +39,13 @@ async def get_tasks(uow: UnitOfWork) -> list[Task]:
         return list(tasks)
 
 
+async def get_tasks_by_deployment(deployment_id: UUID, uow: UnitOfWork) -> list[Task]:
+    """Get all tasks for a deployment, ordered newest-first."""
+    async with uow:
+        tasks = await uow.tasks.find_by_deployment(deployment_id)
+        return list(tasks)
+
+
 async def update_task_state(
     task_id: UUID,
     state_name: str,

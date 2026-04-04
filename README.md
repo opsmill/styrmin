@@ -24,18 +24,10 @@ This installs all dependencies (including dev tools) and ensures the CLI and SDK
 ### 2. Set up the cluster and start services
 
 ```shell
-uv run invoke cluster.create cluster.init   # Create a local kind cluster and Install required CRDs via Helm
-uv run invoke cluster.load-images           # Pull and load external Docker images into Kind
-uv run invoke cluster.velero                # Install MinIO + Velero for backup support
-uv run invoke dev.build dev.start           # Build the Docker image and start all services
+uv run invoke cluster.create cluster.connect cluster.init   # Create a local kind cluster and Install required CRDs via Helm
+uv run invoke cluster.velero                                # Install MinIO + Velero for backup support
+uv run invoke dev.build dev.start                           # Build the Docker image and start all services
 ```
-
-> **Note:** This step is optional but recommended. Kind clusters will pull
-> images from remote registries on their own, but pre-loading them from the
-> local Docker daemon is much faster on slow connections.
-> `cluster.load-images` reads `tasks/docker-images.yml`, pulls each image
-> locally (if not already present), then loads it into the Kind cluster.
-> To add or remove images, edit `tasks/docker-images.yml`.
 
 After `dev.start`, the following services are available:
 
@@ -50,7 +42,7 @@ After `dev.start`, the following services are available:
 uv run invoke dev.bootstrap
 ```
 
-This creates the cluster record, environment, application driver, and loads the `infrahub` driver version — no Bruno required.
+This creates the cluster record, environment, application driver, and loads the `infrahub` driver version.
 
 ### 4. Deploy
 

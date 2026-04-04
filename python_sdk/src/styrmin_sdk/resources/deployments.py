@@ -8,6 +8,10 @@ from uuid import UUID
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.graphql._generated.deploy import Deploy, DeployDeploy
 from styrmin_sdk.graphql._generated.get_deployment import GetDeployment, GetDeploymentDeployment
+from styrmin_sdk.graphql._generated.get_deployment_timeline import (
+    GetDeploymentTimeline,
+    GetDeploymentTimelineDeploymentTimeline,
+)
 from styrmin_sdk.graphql._generated.run_job import RunJob, RunJobRunJob
 from styrmin_sdk.graphql._generated.start_components import StartComponents, StartComponentsStartComponents
 from styrmin_sdk.graphql._generated.stop_components import StopComponents, StopComponentsStopComponents
@@ -141,6 +145,15 @@ class DeploymentResource(BaseResource):
         )
         self._check_graphql_errors(result)
         return self._parse(RunJob, result["data"], "run_job", RunJobRunJob)
+
+    async def get_timeline(self, deployment_id: str | UUID) -> list[GetDeploymentTimelineDeploymentTimeline]:
+        result = await self._transport.execute(
+            load_query("get_deployment_timeline"),
+            {"deploymentId": str(deployment_id)},
+        )
+        self._check_graphql_errors(result)
+        validated = GetDeploymentTimeline.model_validate(result["data"])
+        return validated.deployment_timeline
 
     async def get_context(self, deployment_id: str | UUID) -> Context:
         data = await self._transport.get(f"/deployments/{deployment_id}/context")

@@ -1,0 +1,22 @@
+# Frontend query for fetching the deployment timeline
+query GetDeploymentTimeline($deploymentId: UUID!) {
+  deploymentTimeline(deploymentId: $deploymentId) {
+    task {
+      id
+      type
+      status
+      message
+      createdOn
+      updatedOn
+    }
+    applicationVersion
+    contextDiff {
+      changes {
+        path
+        action
+        oldValue
+        newValue
+      }
+    }
+  }
+}

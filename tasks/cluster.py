@@ -12,15 +12,15 @@ def delete(context: Context) -> None:
     """Delete the vCluster."""
     print_header(f"Deleting the {VCLUSTER_NAME} cluster...")
     config_flag = f" --config {vcluster_dir}" if (vcluster_dir := os.environ.get("VCLUSTER_DIR")) else ""
-    context.run(f"vcluster delete {VCLUSTER_NAME} {config_flag}", pty=True)
+    context.run(f"vcluster delete {VCLUSTER_NAME} --driver=docker{config_flag}", pty=True)
 
 
 @task
 def create(context: Context) -> None:
     """Create the vCluster."""
     print_header(f"Creating the {VCLUSTER_NAME} cluster...")
-    config_flag = f" --config {vcluster_dir}" if (vcluster_dir := os.environ.get("VCLUSTER_DIR")) else ""
-    context.run(f"vcluster create {VCLUSTER_NAME} --driver=docker --connect=false{config_flag}", pty=True)
+    config_flag = f" --config {vcluster_dir} " if (vcluster_dir := os.environ.get("VCLUSTER_DIR")) else ""
+    context.run(f"vcluster create {VCLUSTER_NAME} --upgrade --driver=docker --connect=false{config_flag}", pty=True)
 
 
 @task

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from sqlmodel import select
+from sqlmodel import desc, select
 
 from styrmin_backend.db.models import Task as TaskModel
 from styrmin_backend.db.models import TaskStatus as TaskStatusModel
@@ -33,6 +33,13 @@ class TaskRepository(BaseRepository[TaskModel], ABC):
         """Get all tasks."""
         raise NotImplementedError("The all method must be implemented in the subclass.")
 
+    @abstractmethod
+    async def find_by_deployment(self, deployment_id: UUID) -> list[TaskEntity]:
+        """Get all tasks for a deployment, ordered newest-first."""
+        raise NotImplementedError(
+            "The find_by_deployment method must be implemented in the subclass."
+        )
+
 
 class SQLModelTaskRepository(BaseSQLModelRepository[TaskModel], TaskRepository):
     """The async SQLmodel task repository."""
@@ -59,6 +66,8 @@ class SQLModelTaskRepository(BaseSQLModelRepository[TaskModel], TaskRepository):
             message=task.message,
             prefect_flow_run_id=task.prefect_flow_run_id,
             deployment_id=task.deployment_id,
+            created_on=task.created_on,
+            updated_on=task.updated_on,
         )
 
     async def save(self, task: TaskEntity) -> None:
@@ -80,6 +89,17 @@ class SQLModelTaskRepository(BaseSQLModelRepository[TaskModel], TaskRepository):
     async def all(self) -> list[TaskEntity]:
         """Get all tasks."""
         statement = select(self.model_class)
+        result = await self.session.exec(statement)
+        tasks = result.all()
+        return [self._to_entity(task) for task in tasks]
+
+    async def find_by_deployment(self, deployment_id: UUID) -> list[TaskEntity]:
+        """Get all tasks for a deployment, ordered newest-first."""
+        statement = (
+            select(self.model_class)
+            .where(self.model_class.deployment_id == deployment_id)
+            .order_by(desc(self.model_class.created_on))
+        )
         result = await self.session.exec(statement)
         tasks = result.all()
         return [self._to_entity(task) for task in tasks]
