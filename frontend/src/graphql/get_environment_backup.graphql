@@ -23,7 +23,10 @@ query GetEnvironmentBackup($environmentBackupId: UUID!) {
       errorMessage
       instance {
         id
-        deploymentId
+        deployment {
+          id
+          name
+        }
       }
     }
     restores {

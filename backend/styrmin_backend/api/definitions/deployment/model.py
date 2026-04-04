@@ -32,6 +32,7 @@ from styrmin_backend.domain.models import (
 )
 from styrmin_backend.services.exceptions import (
     ApplicationDriverVersionNotFoundError,
+    DeploymentNotFoundError,
     EnvironmentNotFoundError,
 )
 
@@ -76,6 +77,20 @@ class ApplicationInstance:
             ApplicationDriverVersion,
             ApplicationDriverVersionNotFoundError,
         )
+
+    @strawberry.field
+    async def deployment(
+        self, info: strawberry.Info
+    ) -> Annotated[
+        "Deployment",
+        strawberry.lazy("styrmin_backend.api.definitions.deployment.model"),
+    ]:
+        uow = info.context["uow"]
+        async with uow:
+            deployment_entity = await uow.deployments.find(self.deployment_id)
+            if deployment_entity is None:
+                raise DeploymentNotFoundError()
+            return Deployment.from_instance(deployment_entity)
 
     @classmethod
     def from_instance(cls, instance: ApplicationInstanceEntity) -> ApplicationInstance:

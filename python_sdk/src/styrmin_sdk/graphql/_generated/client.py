@@ -877,7 +877,10 @@ class Client(AsyncBaseClient):
                   errorMessage
                   instance {
                     id
-                    deploymentId
+                    deployment {
+                      id
+                      name
+                    }
                   }
                 }
                 restores {
@@ -932,7 +935,10 @@ class Client(AsyncBaseClient):
                     name
                     instance {
                       id
-                      deploymentId
+                      deployment {
+                        id
+                        name
+                      }
                     }
                   }
                 }

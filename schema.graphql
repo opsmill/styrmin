@@ -39,6 +39,7 @@ type ApplicationInstance {
   applicationDriverVersionId: UUID!
   deploymentId: UUID!
   applicationDriverVersion: ApplicationDriverVersion!
+  deployment: Deployment!
 }
 
 type Backup {

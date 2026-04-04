@@ -92,6 +92,7 @@ from .get_environment_backup import (
     GetEnvironmentBackupEnvironmentBackup,
     GetEnvironmentBackupEnvironmentBackupBackups,
     GetEnvironmentBackupEnvironmentBackupBackupsInstance,
+    GetEnvironmentBackupEnvironmentBackupBackupsInstanceDeployment,
     GetEnvironmentBackupEnvironmentBackupEnvironment,
     GetEnvironmentBackupEnvironmentBackupRestores,
 )
@@ -102,6 +103,7 @@ from .get_environment_restore import (
     GetEnvironmentRestoreEnvironmentRestoreRestores,
     GetEnvironmentRestoreEnvironmentRestoreRestoresBackup,
     GetEnvironmentRestoreEnvironmentRestoreRestoresBackupInstance,
+    GetEnvironmentRestoreEnvironmentRestoreRestoresBackupInstanceDeployment,
 )
 from .get_environment_services import (
     GetEnvironmentServices,
@@ -249,6 +251,7 @@ __all__ = [
     "GetEnvironmentBackupEnvironmentBackup",
     "GetEnvironmentBackupEnvironmentBackupBackups",
     "GetEnvironmentBackupEnvironmentBackupBackupsInstance",
+    "GetEnvironmentBackupEnvironmentBackupBackupsInstanceDeployment",
     "GetEnvironmentBackupEnvironmentBackupEnvironment",
     "GetEnvironmentBackupEnvironmentBackupRestores",
     "GetEnvironmentEnvironment",
@@ -259,6 +262,7 @@ __all__ = [
     "GetEnvironmentRestoreEnvironmentRestoreRestores",
     "GetEnvironmentRestoreEnvironmentRestoreRestoresBackup",
     "GetEnvironmentRestoreEnvironmentRestoreRestoresBackupInstance",
+    "GetEnvironmentRestoreEnvironmentRestoreRestoresBackupInstanceDeployment",
     "GetEnvironmentServices",
     "GetEnvironmentServicesEnvironmentServices",
     "GetPodStatuses",

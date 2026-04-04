@@ -62,6 +62,7 @@ export type ApplicationInstance = {
   applicationDriverVersion: ApplicationDriverVersion;
   applicationDriverVersionId: Scalars['UUID']['output'];
   applicationVersion: Scalars['String']['output'];
+  deployment: Deployment;
   deploymentId: Scalars['UUID']['output'];
   id: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
@@ -268,6 +269,45 @@ export type Environment = {
   name: Scalars['String']['output'];
 };
 
+export type EnvironmentBackup = {
+  __typename?: 'EnvironmentBackup';
+  backupCount: Scalars['Int']['output'];
+  backups: Array<Backup>;
+  completedAt?: Maybe<Scalars['DateTime']['output']>;
+  completedCount: Scalars['Int']['output'];
+  createdOn: Scalars['DateTime']['output'];
+  environment: Environment;
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  failedCount: Scalars['Int']['output'];
+  id: Scalars['UUID']['output'];
+  maxConcurrency: Scalars['Int']['output'];
+  metadata?: Maybe<Scalars['JSON']['output']>;
+  name: Scalars['String']['output'];
+  restores: Array<EnvironmentRestore>;
+  startedAt?: Maybe<Scalars['DateTime']['output']>;
+  status: Scalars['String']['output'];
+  timeout: Scalars['Int']['output'];
+  updatedOn?: Maybe<Scalars['DateTime']['output']>;
+};
+
+export type EnvironmentRestore = {
+  __typename?: 'EnvironmentRestore';
+  completedAt?: Maybe<Scalars['DateTime']['output']>;
+  completedCount: Scalars['Int']['output'];
+  createdOn: Scalars['DateTime']['output'];
+  environmentBackup: EnvironmentBackup;
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  failedCount: Scalars['Int']['output'];
+  id: Scalars['UUID']['output'];
+  metadata?: Maybe<Scalars['JSON']['output']>;
+  name: Scalars['String']['output'];
+  restoreCount: Scalars['Int']['output'];
+  restores: Array<Restore>;
+  startedAt?: Maybe<Scalars['DateTime']['output']>;
+  status: Scalars['String']['output'];
+  updatedOn?: Maybe<Scalars['DateTime']['output']>;
+};
+
 export type HelmChart = {
   __typename?: 'HelmChart';
   id: Scalars['UUID']['output'];
@@ -303,12 +343,15 @@ export type Mutation = {
   createBackupStorageLocation?: Maybe<BackupStorageLocation>;
   createCluster?: Maybe<Cluster>;
   createEnvironment?: Maybe<Environment>;
+  createEnvironmentBackup?: Maybe<EnvironmentBackup>;
+  createEnvironmentRestore?: Maybe<EnvironmentRestore>;
   createRestore?: Maybe<Restore>;
   deleteBackup?: Maybe<Scalars['String']['output']>;
   deleteBackupSchedule?: Maybe<Scalars['String']['output']>;
   deleteBackupStorageLocation?: Maybe<Scalars['String']['output']>;
   deleteCluster?: Maybe<Scalars['String']['output']>;
   deleteEnvironment?: Maybe<Scalars['String']['output']>;
+  deleteEnvironmentBackup?: Maybe<Scalars['String']['output']>;
   deploy?: Maybe<Task>;
   loadLocalApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
   loadRemoteApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
@@ -378,6 +421,19 @@ export type MutationCreateEnvironmentArgs = {
 };
 
 
+export type MutationCreateEnvironmentBackupArgs = {
+  environmentId: Scalars['UUID']['input'];
+  maxConcurrency?: InputMaybe<Scalars['Int']['input']>;
+  name?: InputMaybe<Scalars['String']['input']>;
+  timeout?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type MutationCreateEnvironmentRestoreArgs = {
+  environmentBackupId: Scalars['UUID']['input'];
+};
+
+
 export type MutationCreateRestoreArgs = {
   backupId: Scalars['UUID']['input'];
   targetInstanceId?: InputMaybe<Scalars['UUID']['input']>;
@@ -411,6 +467,11 @@ export type MutationDeleteEnvironmentArgs = {
   clusterName?: InputMaybe<Scalars['String']['input']>;
   environmentId?: InputMaybe<Scalars['UUID']['input']>;
   environmentName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationDeleteEnvironmentBackupArgs = {
+  environmentBackupId: Scalars['UUID']['input'];
 };
 
 
@@ -569,6 +630,10 @@ export type Query = {
   deploymentServices: Array<DeployedService>;
   deploymentTimeline: Array<DeploymentTimelineEntry>;
   environment?: Maybe<Environment>;
+  environmentBackup?: Maybe<EnvironmentBackup>;
+  environmentBackups: Array<EnvironmentBackup>;
+  environmentRestore?: Maybe<EnvironmentRestore>;
+  environmentRestores: Array<EnvironmentRestore>;
   environmentServices: Array<DeployedService>;
   environments: Array<Environment>;
   /** Health check probe */
@@ -638,6 +703,28 @@ export type QueryEnvironmentArgs = {
   clusterName?: InputMaybe<Scalars['String']['input']>;
   environmentId?: InputMaybe<Scalars['UUID']['input']>;
   environmentName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryEnvironmentBackupArgs = {
+  environmentBackupId: Scalars['UUID']['input'];
+};
+
+
+export type QueryEnvironmentBackupsArgs = {
+  environmentId: Scalars['UUID']['input'];
+  status?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryEnvironmentRestoreArgs = {
+  environmentRestoreId: Scalars['UUID']['input'];
+};
+
+
+export type QueryEnvironmentRestoresArgs = {
+  environmentBackupId: Scalars['UUID']['input'];
+  status?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -772,6 +859,23 @@ export type CreateEnvironmentMutationVariables = Exact<{
 
 export type CreateEnvironmentMutation = { __typename?: 'Mutation', createEnvironment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string } } | null };
 
+export type CreateEnvironmentBackupMutationVariables = Exact<{
+  environmentId: Scalars['UUID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  maxConcurrency?: InputMaybe<Scalars['Int']['input']>;
+  timeout?: InputMaybe<Scalars['Int']['input']>;
+}>;
+
+
+export type CreateEnvironmentBackupMutation = { __typename?: 'Mutation', createEnvironmentBackup?: { __typename?: 'EnvironmentBackup', id: string, name: string, status: string, createdOn: any, backupCount: number } | null };
+
+export type CreateEnvironmentRestoreMutationVariables = Exact<{
+  environmentBackupId: Scalars['UUID']['input'];
+}>;
+
+
+export type CreateEnvironmentRestoreMutation = { __typename?: 'Mutation', createEnvironmentRestore?: { __typename?: 'EnvironmentRestore', id: string, name: string, status: string, createdOn: any, restoreCount: number } | null };
+
 export type CreateRestoreMutationVariables = Exact<{
   backupId: Scalars['UUID']['input'];
   targetNamespace: Scalars['String']['input'];
@@ -794,6 +898,13 @@ export type DeleteBackupStorageLocationMutationVariables = Exact<{
 
 
 export type DeleteBackupStorageLocationMutation = { __typename?: 'Mutation', deleteBackupStorageLocation?: string | null };
+
+export type DeleteEnvironmentBackupMutationVariables = Exact<{
+  environmentBackupId: Scalars['UUID']['input'];
+}>;
+
+
+export type DeleteEnvironmentBackupMutation = { __typename?: 'Mutation', deleteEnvironmentBackup?: string | null };
 
 export type DeployMutationVariables = Exact<{
   version?: InputMaybe<Scalars['String']['input']>;
@@ -849,6 +960,13 @@ export type GetEnvironmentQueryVariables = Exact<{
 
 export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, internal: boolean, applicationVersion: string, applicationDriverVersionId: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
 
+export type GetEnvironmentBackupQueryVariables = Exact<{
+  environmentBackupId: Scalars['UUID']['input'];
+}>;
+
+
+export type GetEnvironmentBackupQuery = { __typename?: 'Query', environmentBackup?: { __typename?: 'EnvironmentBackup', id: string, name: string, status: string, startedAt?: any | null, completedAt?: any | null, errorMessage?: string | null, metadata?: Record<string, unknown> | null, maxConcurrency: number, timeout: number, createdOn: any, backupCount: number, completedCount: number, failedCount: number, environment: { __typename?: 'Environment', id: string, name: string }, backups: Array<{ __typename?: 'Backup', id: string, name: string, status: string, startedAt?: any | null, completedAt?: any | null, errorMessage?: string | null, instance: { __typename?: 'ApplicationInstance', id: string, deployment: { __typename?: 'Deployment', id: string, name: string } } }>, restores: Array<{ __typename?: 'EnvironmentRestore', id: string, name: string, status: string, createdOn: any }> } | null };
+
 export type GetRestoreQueryVariables = Exact<{
   restoreId: Scalars['UUID']['input'];
 }>;
@@ -889,6 +1007,14 @@ export type ListDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null }> }> };
+
+export type ListEnvironmentBackupsQueryVariables = Exact<{
+  environmentId: Scalars['UUID']['input'];
+  status?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type ListEnvironmentBackupsQuery = { __typename?: 'Query', environmentBackups: Array<{ __typename?: 'EnvironmentBackup', id: string, name: string, status: string, startedAt?: any | null, completedAt?: any | null, createdOn: any, backupCount: number, completedCount: number, failedCount: number }> };
 
 export type ListEnvironmentsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1087,6 +1213,61 @@ export const useCreateEnvironmentMutation = <
   }
     )};
 
+export const CreateEnvironmentBackupDocument = `
+    mutation CreateEnvironmentBackup($environmentId: UUID!, $name: String, $maxConcurrency: Int, $timeout: Int) {
+  createEnvironmentBackup(
+    environmentId: $environmentId
+    name: $name
+    maxConcurrency: $maxConcurrency
+    timeout: $timeout
+  ) {
+    id
+    name
+    status
+    createdOn
+    backupCount
+  }
+}
+    `;
+
+export const useCreateEnvironmentBackupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateEnvironmentBackupMutation, TError, CreateEnvironmentBackupMutationVariables, TContext>) => {
+    
+    return useMutation<CreateEnvironmentBackupMutation, TError, CreateEnvironmentBackupMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateEnvironmentBackup'],
+    mutationFn: (variables?: CreateEnvironmentBackupMutationVariables) => graphqlFetcher<CreateEnvironmentBackupMutation, CreateEnvironmentBackupMutationVariables>(CreateEnvironmentBackupDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const CreateEnvironmentRestoreDocument = `
+    mutation CreateEnvironmentRestore($environmentBackupId: UUID!) {
+  createEnvironmentRestore(environmentBackupId: $environmentBackupId) {
+    id
+    name
+    status
+    createdOn
+    restoreCount
+  }
+}
+    `;
+
+export const useCreateEnvironmentRestoreMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateEnvironmentRestoreMutation, TError, CreateEnvironmentRestoreMutationVariables, TContext>) => {
+    
+    return useMutation<CreateEnvironmentRestoreMutation, TError, CreateEnvironmentRestoreMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateEnvironmentRestore'],
+    mutationFn: (variables?: CreateEnvironmentRestoreMutationVariables) => graphqlFetcher<CreateEnvironmentRestoreMutation, CreateEnvironmentRestoreMutationVariables>(CreateEnvironmentRestoreDocument, variables)(),
+    ...options
+  }
+    )};
+
 export const CreateRestoreDocument = `
     mutation CreateRestore($backupId: UUID!, $targetNamespace: String!, $targetInstanceId: UUID) {
   createRestore(
@@ -1153,6 +1334,25 @@ export const useDeleteBackupStorageLocationMutation = <
       {
     mutationKey: ['DeleteBackupStorageLocation'],
     mutationFn: (variables?: DeleteBackupStorageLocationMutationVariables) => graphqlFetcher<DeleteBackupStorageLocationMutation, DeleteBackupStorageLocationMutationVariables>(DeleteBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const DeleteEnvironmentBackupDocument = `
+    mutation DeleteEnvironmentBackup($environmentBackupId: UUID!) {
+  deleteEnvironmentBackup(environmentBackupId: $environmentBackupId)
+}
+    `;
+
+export const useDeleteEnvironmentBackupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeleteEnvironmentBackupMutation, TError, DeleteEnvironmentBackupMutationVariables, TContext>) => {
+    
+    return useMutation<DeleteEnvironmentBackupMutation, TError, DeleteEnvironmentBackupMutationVariables, TContext>(
+      {
+    mutationKey: ['DeleteEnvironmentBackup'],
+    mutationFn: (variables?: DeleteEnvironmentBackupMutationVariables) => graphqlFetcher<DeleteEnvironmentBackupMutation, DeleteEnvironmentBackupMutationVariables>(DeleteEnvironmentBackupDocument, variables)(),
     ...options
   }
     )};
@@ -1468,6 +1668,69 @@ export const useGetEnvironmentQuery = <
 
 useGetEnvironmentQuery.getKey = (variables: GetEnvironmentQueryVariables) => ['GetEnvironment', variables];
 
+export const GetEnvironmentBackupDocument = `
+    query GetEnvironmentBackup($environmentBackupId: UUID!) {
+  environmentBackup(environmentBackupId: $environmentBackupId) {
+    id
+    name
+    status
+    startedAt
+    completedAt
+    errorMessage
+    metadata
+    maxConcurrency
+    timeout
+    createdOn
+    environment {
+      id
+      name
+    }
+    backups {
+      id
+      name
+      status
+      startedAt
+      completedAt
+      errorMessage
+      instance {
+        id
+        deployment {
+          id
+          name
+        }
+      }
+    }
+    restores {
+      id
+      name
+      status
+      createdOn
+    }
+    backupCount
+    completedCount
+    failedCount
+  }
+}
+    `;
+
+export const useGetEnvironmentBackupQuery = <
+      TData = GetEnvironmentBackupQuery,
+      TError = Error
+    >(
+      variables: GetEnvironmentBackupQueryVariables,
+      options?: Omit<UseQueryOptions<GetEnvironmentBackupQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetEnvironmentBackupQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetEnvironmentBackupQuery, TError, TData>(
+      {
+    queryKey: ['GetEnvironmentBackup', variables],
+    queryFn: graphqlFetcher<GetEnvironmentBackupQuery, GetEnvironmentBackupQueryVariables>(GetEnvironmentBackupDocument, variables),
+    ...options
+  }
+    )};
+
+useGetEnvironmentBackupQuery.getKey = (variables: GetEnvironmentBackupQueryVariables) => ['GetEnvironmentBackup', variables];
+
 export const GetRestoreDocument = `
     query GetRestore($restoreId: UUID!) {
   restore(restoreId: $restoreId) {
@@ -1705,6 +1968,40 @@ export const useListDriversQuery = <
     )};
 
 useListDriversQuery.getKey = (variables?: ListDriversQueryVariables) => variables === undefined ? ['ListDrivers'] : ['ListDrivers', variables];
+
+export const ListEnvironmentBackupsDocument = `
+    query ListEnvironmentBackups($environmentId: UUID!, $status: String) {
+  environmentBackups(environmentId: $environmentId, status: $status) {
+    id
+    name
+    status
+    startedAt
+    completedAt
+    createdOn
+    backupCount
+    completedCount
+    failedCount
+  }
+}
+    `;
+
+export const useListEnvironmentBackupsQuery = <
+      TData = ListEnvironmentBackupsQuery,
+      TError = Error
+    >(
+      variables: ListEnvironmentBackupsQueryVariables,
+      options?: Omit<UseQueryOptions<ListEnvironmentBackupsQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListEnvironmentBackupsQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListEnvironmentBackupsQuery, TError, TData>(
+      {
+    queryKey: ['ListEnvironmentBackups', variables],
+    queryFn: graphqlFetcher<ListEnvironmentBackupsQuery, ListEnvironmentBackupsQueryVariables>(ListEnvironmentBackupsDocument, variables),
+    ...options
+  }
+    )};
+
+useListEnvironmentBackupsQuery.getKey = (variables: ListEnvironmentBackupsQueryVariables) => ['ListEnvironmentBackups', variables];
 
 export const ListEnvironmentsDocument = `
     query ListEnvironments {

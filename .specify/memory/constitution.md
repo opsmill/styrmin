@@ -18,6 +18,10 @@ Code MUST follow the layered architecture: GraphQL API → Service Layer → Rep
 
 Python type hints are mandatory (enforced by ty, Astral's type checker). GraphQL error handling uses exception-based patterns: service functions raise `ServiceError` subclasses (with `error_code` and `default_message`), and the `StructuredErrorExtension` middleware enriches GraphQL errors with machine-readable `extensions.code` and metadata. Union types MUST NOT be used for error handling. Domain models, database models, and context models are separate concerns — never mix persistence with business logic.
 
+### IV-b. Nested Resolvers over Flat ID Fields
+
+Every Strawberry GraphQL type that exposes a foreign key (e.g. `deployment_id: UUID`) MUST also provide a nested resolver field (e.g. `deployment: Deployment!`) that fetches the related entity via `resolve_related()` or an equivalent async resolver. Clients MUST be able to traverse relationships through nested fields — flat `*Id` scalars alone are not sufficient. When writing `.graphql` operation files (SDK or frontend), always prefer the nested resolver (`deployment { id name }`) over the raw ID field (`deploymentId`). This ensures a consistent, self-documenting API where relationships are navigable without extra round-trips.
+
 ### V. Test-First Development
 
 Tests are required for all new functionality. The project uses three test tiers: unit tests (service/repository logic), integration tests (contract testing), and end-to-end tests (real Kind cluster with FluxCD, Prefect, and supporting services). E2E tests MUST run against real infrastructure, not mocks.
@@ -50,4 +54,4 @@ Changes to these areas require explicit discussion before implementation:
 
 This constitution defines the non-negotiable principles for the Styrmin project. All specifications, plans, and implementations MUST be validated against these principles. Amendments require updating this file, incrementing the version, and propagating changes to dependent templates.
 
-**Version**: 1.0.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-03-14
+**Version**: 1.1.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-04-04
