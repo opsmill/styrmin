@@ -6,45 +6,32 @@ import asyncio
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
-
 from styrmin_sdk._queries import load_query
+from styrmin_sdk.graphql._generated.create_environment_backup import (
+    CreateEnvironmentBackup,
+    CreateEnvironmentBackupCreateEnvironmentBackup,
+)
+from styrmin_sdk.graphql._generated.create_environment_restore import (
+    CreateEnvironmentRestore,
+    CreateEnvironmentRestoreCreateEnvironmentRestore,
+)
+from styrmin_sdk.graphql._generated.get_environment_backup import (
+    GetEnvironmentBackup,
+    GetEnvironmentBackupEnvironmentBackup,
+)
+from styrmin_sdk.graphql._generated.get_environment_restore import (
+    GetEnvironmentRestore,
+    GetEnvironmentRestoreEnvironmentRestore,
+)
+from styrmin_sdk.graphql._generated.list_environment_backups import (
+    ListEnvironmentBackups,
+    ListEnvironmentBackupsEnvironmentBackups,
+)
+from styrmin_sdk.graphql._generated.list_environment_restores import (
+    ListEnvironmentRestores,
+    ListEnvironmentRestoresEnvironmentRestores,
+)
 from styrmin_sdk.resources._base import BaseResource
-
-
-class _EnvironmentBackupData(BaseModel):
-    id: str
-    name: str
-    status: str
-    created_on: str | None = None
-    started_at: str | None = None
-    completed_at: str | None = None
-    error_message: str | None = None
-    metadata: Any = None
-    max_concurrency: int | None = None
-    timeout: int | None = None
-    backup_count: int | None = None
-    completed_count: int | None = None
-    failed_count: int | None = None
-    environment: Any = None
-    backups: list[Any] | None = None
-    restores: list[Any] | None = None
-
-
-class _EnvironmentRestoreData(BaseModel):
-    id: str
-    name: str
-    status: str
-    created_on: str | None = None
-    started_at: str | None = None
-    completed_at: str | None = None
-    error_message: str | None = None
-    metadata: Any = None
-    restore_count: int | None = None
-    completed_count: int | None = None
-    failed_count: int | None = None
-    environment_backup: Any = None
-    restores: list[Any] | None = None
 
 
 class EnvironmentBackupResource(BaseResource):
@@ -54,7 +41,7 @@ class EnvironmentBackupResource(BaseResource):
         name: str | None = None,
         max_concurrency: int | None = None,
         backup_timeout: int | None = None,
-    ) -> _EnvironmentBackupData:
+    ) -> CreateEnvironmentBackupCreateEnvironmentBackup:
         variables: dict[str, Any] = {"environmentId": str(environment_id)}
         if name is not None:
             variables["name"] = name
@@ -65,31 +52,39 @@ class EnvironmentBackupResource(BaseResource):
 
         result = await self._transport.execute(load_query("create_environment_backup"), variables)
         self._check_graphql_errors(result)
-        data = result["data"]["createEnvironmentBackup"]
-        return _EnvironmentBackupData.model_validate(data)
+        return self._parse(
+            CreateEnvironmentBackup,
+            result["data"],
+            "create_environment_backup",
+            CreateEnvironmentBackupCreateEnvironmentBackup,
+        )
 
-    async def get(self, environment_backup_id: str | UUID) -> _EnvironmentBackupData:
+    async def get(self, environment_backup_id: str | UUID) -> GetEnvironmentBackupEnvironmentBackup:
         result = await self._transport.execute(
             load_query("get_environment_backup"),
             {"environmentBackupId": str(environment_backup_id)},
         )
         self._check_graphql_errors(result)
-        data = result["data"]["environmentBackup"]
-        return _EnvironmentBackupData.model_validate(data)
+        return self._parse(
+            GetEnvironmentBackup,
+            result["data"],
+            "environment_backup",
+            GetEnvironmentBackupEnvironmentBackup,
+        )
 
     async def list(
         self,
         environment_id: str | UUID,
         status: str | None = None,
-    ) -> list[_EnvironmentBackupData]:
+    ) -> list[ListEnvironmentBackupsEnvironmentBackups]:
         variables: dict[str, Any] = {"environmentId": str(environment_id)}
         if status is not None:
             variables["status"] = status
 
         result = await self._transport.execute(load_query("list_environment_backups"), variables)
         self._check_graphql_errors(result)
-        items = result["data"]["environmentBackups"] or []
-        return [_EnvironmentBackupData.model_validate(item) for item in items]
+        data = ListEnvironmentBackups.model_validate(result["data"])
+        return data.environment_backups or []
 
     async def delete(self, environment_backup_id: str | UUID) -> None:
         result = await self._transport.execute(
@@ -103,7 +98,7 @@ class EnvironmentBackupResource(BaseResource):
         environment_backup_id: str | UUID,
         max_wait: float = 600,
         interval: float = 10,
-    ) -> _EnvironmentBackupData:
+    ) -> GetEnvironmentBackupEnvironmentBackup:
         """Poll until the environment backup reaches a terminal status."""
         elapsed = 0.0
         while elapsed < max_wait:
@@ -119,44 +114,52 @@ class EnvironmentRestoreResource(BaseResource):
     async def create(
         self,
         environment_backup_id: str | UUID,
-    ) -> _EnvironmentRestoreData:
+    ) -> CreateEnvironmentRestoreCreateEnvironmentRestore:
         result = await self._transport.execute(
             load_query("create_environment_restore"),
             {"environmentBackupId": str(environment_backup_id)},
         )
         self._check_graphql_errors(result)
-        data = result["data"]["createEnvironmentRestore"]
-        return _EnvironmentRestoreData.model_validate(data)
+        return self._parse(
+            CreateEnvironmentRestore,
+            result["data"],
+            "create_environment_restore",
+            CreateEnvironmentRestoreCreateEnvironmentRestore,
+        )
 
-    async def get(self, environment_restore_id: str | UUID) -> _EnvironmentRestoreData:
+    async def get(self, environment_restore_id: str | UUID) -> GetEnvironmentRestoreEnvironmentRestore:
         result = await self._transport.execute(
             load_query("get_environment_restore"),
             {"environmentRestoreId": str(environment_restore_id)},
         )
         self._check_graphql_errors(result)
-        data = result["data"]["environmentRestore"]
-        return _EnvironmentRestoreData.model_validate(data)
+        return self._parse(
+            GetEnvironmentRestore,
+            result["data"],
+            "environment_restore",
+            GetEnvironmentRestoreEnvironmentRestore,
+        )
 
     async def list(
         self,
         environment_backup_id: str | UUID,
         status: str | None = None,
-    ) -> list[_EnvironmentRestoreData]:
+    ) -> list[ListEnvironmentRestoresEnvironmentRestores]:
         variables: dict[str, Any] = {"environmentBackupId": str(environment_backup_id)}
         if status is not None:
             variables["status"] = status
 
         result = await self._transport.execute(load_query("list_environment_restores"), variables)
         self._check_graphql_errors(result)
-        items = result["data"]["environmentRestores"] or []
-        return [_EnvironmentRestoreData.model_validate(item) for item in items]
+        data = ListEnvironmentRestores.model_validate(result["data"])
+        return data.environment_restores or []
 
     async def wait_for_completion(
         self,
         environment_restore_id: str | UUID,
         max_wait: float = 600,
         interval: float = 10,
-    ) -> _EnvironmentRestoreData:
+    ) -> GetEnvironmentRestoreEnvironmentRestore:
         """Poll until the environment restore reaches a terminal status."""
         elapsed = 0.0
         while elapsed < max_wait:
