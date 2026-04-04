@@ -43,7 +43,7 @@ async def create(name: Annotated[str, Parameter(help="Name of the application dr
     """Create a new application driver."""
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            driver = await sdk.drivers.create(name=name)  # type: ignore  # TODO: DriverResource.create() not yet implemented in SDK
+            driver = await sdk.drivers.create(name=name)  # type: ignore  # noqa: PGH003  # TODO: DriverResource.create() not yet in SDK
 
     print_success(f"Application driver '{driver.name}' created (id: {driver.id})")
     if driver.versions:

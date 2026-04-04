@@ -6,7 +6,7 @@ Styrmin is a **deployment orchestration platform** that manages application depl
 
 - **Backend:** Python, GraphQL with Strawberry, Pydantic, SQLModel, Prefect
 - **Frontend:** React 19, TypeScript, Vite, urql, Tailwind CSS, Radix UI
-- **Linting:** ruff, mypy (backend); ESLint, Prettier (frontend)
+- **Linting:** ruff, ty (type checking); ESLint, Prettier (frontend)
 - **Testing:** pytest (backend); Vitest, React Testing Library (frontend)
 - **Package Managers:** uv (Python), pnpm (frontend)
 - **Task Runner:** Invoke

@@ -55,9 +55,8 @@ async def test_execute_http_error() -> None:
     )
 
     try:
-        with patch.object(transport._client, "post", new=AsyncMock(return_value=mock_response)):
-            with pytest.raises(StyrminTransportError):
-                await transport.execute("query { clusters { id } }")
+        with patch.object(transport._client, "post", new=AsyncMock(return_value=mock_response)), pytest.raises(StyrminTransportError):
+            await transport.execute("query { clusters { id } }")
     finally:
         await transport.close()
 
@@ -68,9 +67,8 @@ async def test_execute_connection_error() -> None:
     try:
         with patch.object(
             transport._client, "post", new=AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
-        ):
-            with pytest.raises(StyrminTransportError, match="Connection refused"):
-                await transport.execute("query { clusters { id } }")
+        ), pytest.raises(StyrminTransportError, match="Connection refused"):
+            await transport.execute("query { clusters { id } }")
     finally:
         await transport.close()
 
