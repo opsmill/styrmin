@@ -70,6 +70,9 @@ class Environment(StyrminModel, table=True):
     )
 
     deployments: list["Deployment"] = Relationship(back_populates="environment")
+    environment_backups: list["EnvironmentBackup"] = Relationship(
+        back_populates="environment"
+    )
 
 
 # Note: Can be handled in application repository
@@ -354,7 +357,7 @@ class EnvironmentBackup(StyrminModel, table=True):
     timeout: int = Field(default=3600)
 
     environment_id: UUID = Field(foreign_key="environment.id")
-    environment: Environment = Relationship()
+    environment: Environment = Relationship(back_populates="environment_backups")
 
     backups: list["Backup"] = Relationship(
         back_populates="environment_backup",
@@ -376,6 +379,7 @@ class EnvironmentRestore(StyrminModel, table=True):
     completed_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
     error_message: str | None = Field(default=None)
     metadata_: dict | None = Field(default=None, sa_column=Column("metadata", JSON))
+    timeout: int = Field(default=7200)
 
     environment_backup_id: UUID = Field(foreign_key="environmentbackup.id")
     environment_backup: EnvironmentBackup = Relationship(back_populates="restores")

@@ -67,16 +67,16 @@ async def get(environment_backup_id: EnvironmentBackupId) -> None:
         async with client.get_client() as sdk:
             eb = await sdk.environment_backups.get(environment_backup_id)
 
-    console.print(f"  ID: {eb.id}")
-    console.print(f"  Name: {eb.name}")
-    console.print(f"  Status: {eb.status}")
-    console.print(f"  Backup Count: {eb.backup_count or ''}")
-    console.print(f"  Completed: {eb.completed_count or ''}")
-    console.print(f"  Failed: {eb.failed_count or ''}")
-    console.print(f"  Started at: {eb.started_at or ''}")
-    console.print(f"  Completed at: {eb.completed_at or ''}")
-    if eb.error_message:
-        console.print(f"  Error: {eb.error_message}")
+        console.print(f"  ID: {eb.id}")
+        console.print(f"  Name: {eb.name}")
+        console.print(f"  Status: {eb.status}")
+        console.print(f"  Backup Count: {eb.backup_count or ''}")
+        console.print(f"  Completed: {eb.completed_count or ''}")
+        console.print(f"  Failed: {eb.failed_count or ''}")
+        console.print(f"  Started at: {eb.started_at or ''}")
+        console.print(f"  Completed at: {eb.completed_at or ''}")
+        if eb.error_message:
+            console.print(f"  Error: {eb.error_message}")
 
 
 @env_backups_app.command(name="list")
@@ -172,16 +172,16 @@ async def restore_get(
         async with client.get_client() as sdk:
             er = await sdk.environment_restores.get(environment_restore_id)
 
-    console.print(f"  ID: {er.id}")
-    console.print(f"  Name: {er.name}")
-    console.print(f"  Status: {er.status}")
-    console.print(f"  Restore Count: {er.restore_count or ''}")
-    console.print(f"  Completed: {er.completed_count or ''}")
-    console.print(f"  Failed: {er.failed_count or ''}")
-    console.print(f"  Started at: {er.started_at or ''}")
-    console.print(f"  Completed at: {er.completed_at or ''}")
-    if er.error_message:
-        console.print(f"  Error: {er.error_message}")
+        console.print(f"  ID: {er.id}")
+        console.print(f"  Name: {er.name}")
+        console.print(f"  Status: {er.status}")
+        console.print(f"  Restore Count: {er.restore_count or ''}")
+        console.print(f"  Completed: {er.completed_count or ''}")
+        console.print(f"  Failed: {er.failed_count or ''}")
+        console.print(f"  Started at: {er.started_at or ''}")
+        console.print(f"  Completed at: {er.completed_at or ''}")
+        if er.error_message:
+            console.print(f"  Error: {er.error_message}")
 
 
 @env_backups_app.command(name="restore-list")

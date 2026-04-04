@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 import strawberry
+from sqlmodel import func, select
 
 from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
 from styrmin_backend.api.definitions.backup.restore import Restore as RestoreType
@@ -11,12 +12,33 @@ from styrmin_backend.api.definitions.environment.model import (
     Environment as EnvironmentType,
 )
 from styrmin_backend.api.resolvers import resolve_related
+from styrmin_backend.db.models import Backup as BackupModel
+from styrmin_backend.db.models import BackupStatus
 from styrmin_backend.db.models import EnvironmentBackup as EnvironmentBackupModel
 from styrmin_backend.db.models import EnvironmentRestore as EnvironmentRestoreModel
+from styrmin_backend.db.models import Restore as RestoreModel
+from styrmin_backend.db.models import RestoreStatus
 from styrmin_backend.services.exceptions import (
     EnvironmentBackupNotFoundError,
     EnvironmentNotFoundError,
 )
+
+
+async def _count_related(
+    info: strawberry.Info,
+    model_cls: type,
+    parent_id_field: str,
+    parent_id: UUID,
+    status: str | None = None,
+) -> int:
+    """Count related records, optionally filtered by status."""
+    uow = info.context["uow"]
+    async with uow:
+        conditions = [getattr(model_cls, parent_id_field) == parent_id]
+        if status is not None:
+            conditions.append(model_cls.status == status)
+        result = await uow.session.exec(select(func.count()).where(*conditions))
+        return result.one()
 
 
 @strawberry.type
@@ -47,19 +69,15 @@ class EnvironmentBackup:
 
     @strawberry.field
     async def backups(self, info: strawberry.Info) -> list[BackupType]:
-        from sqlmodel import select
-        from styrmin_backend.db.models import Backup
-
         uow = info.context["uow"]
         async with uow:
             result = await uow.session.exec(
-                select(Backup).where(Backup.environment_backup_id == self.id)
+                select(BackupModel).where(BackupModel.environment_backup_id == self.id)
             )
             return [BackupType.from_instance(b) for b in result.all()]
 
     @strawberry.field
     async def restores(self, info: strawberry.Info) -> list["EnvironmentRestore"]:
-
         uow = info.context["uow"]
         async with uow:
             items = await uow.environment_restores.get_by_environment_backup_id(self.id)
@@ -67,45 +85,27 @@ class EnvironmentBackup:
 
     @strawberry.field
     async def backup_count(self, info: strawberry.Info) -> int:
-        from sqlmodel import select, func
-        from styrmin_backend.db.models import Backup
-
-        uow = info.context["uow"]
-        async with uow:
-            result = await uow.session.exec(
-                select(func.count()).where(Backup.environment_backup_id == self.id)
-            )
-            return result.one()
+        return await _count_related(info, BackupModel, "environment_backup_id", self.id)
 
     @strawberry.field
     async def completed_count(self, info: strawberry.Info) -> int:
-        from sqlmodel import select, func
-        from styrmin_backend.db.models import Backup, BackupStatus
-
-        uow = info.context["uow"]
-        async with uow:
-            result = await uow.session.exec(
-                select(func.count()).where(
-                    Backup.environment_backup_id == self.id,
-                    Backup.status == BackupStatus.COMPLETED,
-                )
-            )
-            return result.one()
+        return await _count_related(
+            info,
+            BackupModel,
+            "environment_backup_id",
+            self.id,
+            status=BackupStatus.COMPLETED,
+        )
 
     @strawberry.field
     async def failed_count(self, info: strawberry.Info) -> int:
-        from sqlmodel import select, func
-        from styrmin_backend.db.models import Backup, BackupStatus
-
-        uow = info.context["uow"]
-        async with uow:
-            result = await uow.session.exec(
-                select(func.count()).where(
-                    Backup.environment_backup_id == self.id,
-                    Backup.status == BackupStatus.FAILED,
-                )
-            )
-            return result.one()
+        return await _count_related(
+            info,
+            BackupModel,
+            "environment_backup_id",
+            self.id,
+            status=BackupStatus.FAILED,
+        )
 
     @classmethod
     def from_instance(cls, instance: EnvironmentBackupModel) -> EnvironmentBackup:
@@ -151,57 +151,40 @@ class EnvironmentRestore:
 
     @strawberry.field
     async def restores(self, info: strawberry.Info) -> list[RestoreType]:
-        from sqlmodel import select
-        from styrmin_backend.db.models import Restore
-
         uow = info.context["uow"]
         async with uow:
             result = await uow.session.exec(
-                select(Restore).where(Restore.environment_restore_id == self.id)
+                select(RestoreModel).where(
+                    RestoreModel.environment_restore_id == self.id
+                )
             )
             return [RestoreType.from_instance(r) for r in result.all()]
 
     @strawberry.field
     async def restore_count(self, info: strawberry.Info) -> int:
-        from sqlmodel import select, func
-        from styrmin_backend.db.models import Restore
-
-        uow = info.context["uow"]
-        async with uow:
-            result = await uow.session.exec(
-                select(func.count()).where(Restore.environment_restore_id == self.id)
-            )
-            return result.one()
+        return await _count_related(
+            info, RestoreModel, "environment_restore_id", self.id
+        )
 
     @strawberry.field
     async def completed_count(self, info: strawberry.Info) -> int:
-        from sqlmodel import select, func
-        from styrmin_backend.db.models import Restore, RestoreStatus
-
-        uow = info.context["uow"]
-        async with uow:
-            result = await uow.session.exec(
-                select(func.count()).where(
-                    Restore.environment_restore_id == self.id,
-                    Restore.status == RestoreStatus.COMPLETED,
-                )
-            )
-            return result.one()
+        return await _count_related(
+            info,
+            RestoreModel,
+            "environment_restore_id",
+            self.id,
+            status=RestoreStatus.COMPLETED,
+        )
 
     @strawberry.field
     async def failed_count(self, info: strawberry.Info) -> int:
-        from sqlmodel import select, func
-        from styrmin_backend.db.models import Restore, RestoreStatus
-
-        uow = info.context["uow"]
-        async with uow:
-            result = await uow.session.exec(
-                select(func.count()).where(
-                    Restore.environment_restore_id == self.id,
-                    Restore.status == RestoreStatus.FAILED,
-                )
-            )
-            return result.one()
+        return await _count_related(
+            info,
+            RestoreModel,
+            "environment_restore_id",
+            self.id,
+            status=RestoreStatus.FAILED,
+        )
 
     @classmethod
     def from_instance(cls, instance: EnvironmentRestoreModel) -> EnvironmentRestore:

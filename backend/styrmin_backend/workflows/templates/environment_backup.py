@@ -11,12 +11,15 @@ from uuid import UUID
 
 from prefect import flow
 from prefect.logging import get_run_logger
+from sqlmodel import select
 
 from styrmin_backend import config
 from styrmin_backend.db.models import (
+    Backup,
     BackupStatus,
     EnvironmentBackupStatus,
     EnvironmentRestoreStatus,
+    Restore,
     RestoreStatus,
 )
 from styrmin_backend.services.backup.environment import (
@@ -30,6 +33,12 @@ from styrmin_backend.services.backup.service import (
 from styrmin_backend.services.unit_of_work import get_unit_of_work
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.models import PrefectAction
+
+# Terminal statuses for polling
+_BACKUP_TERMINAL = (BackupStatus.COMPLETED, BackupStatus.FAILED)
+_RESTORE_TERMINAL = (RestoreStatus.COMPLETED, RestoreStatus.FAILED)
+_BACKUP_NON_TERMINAL = (BackupStatus.PENDING, BackupStatus.IN_PROGRESS)
+_RESTORE_NON_TERMINAL = (RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS)
 
 
 @flow(name="execute_env_backup")
@@ -65,10 +74,6 @@ async def execute_environment_backup_workflow(
             max_concurrency = env_backup.max_concurrency
             timeout = env_backup.timeout
 
-            # Load constituent backups with their instances
-            from sqlmodel import select
-            from styrmin_backend.db.models import Backup
-
             result = await uow.session.exec(
                 select(Backup).where(Backup.environment_backup_id == env_backup_uuid)
             )
@@ -91,7 +96,7 @@ async def execute_environment_backup_workflow(
             f"(max_concurrency={max_concurrency}, timeout={timeout}s)"
         )
 
-        # Dispatch constituent backups with concurrency limiting
+        # Dispatch and poll
         semaphore = asyncio.Semaphore(max_concurrency)
         prefect_manager = get_manager()
 
@@ -127,7 +132,6 @@ async def execute_environment_backup_workflow(
                         error_message=f"Failed to dispatch: {exc}",
                     )
 
-        # Dispatch all backups concurrently (bounded by semaphore)
         await asyncio.gather(
             *(dispatch_backup(bid, did) for bid, did in backup_dispatch_info)
         )
@@ -141,38 +145,24 @@ async def execute_environment_backup_workflow(
 
             uow = await get_unit_of_work()
             async with uow:
-                from sqlmodel import select
-                from styrmin_backend.db.models import Backup
-
                 result = await uow.session.exec(
                     select(Backup).where(
                         Backup.environment_backup_id == env_backup_uuid
                     )
                 )
-                current_backups = list(result.all())
-                statuses = [b.status for b in current_backups]
+                statuses = [b.status for b in result.all()]
 
-                all_terminal = all(
-                    s in (BackupStatus.COMPLETED, BackupStatus.FAILED) for s in statuses
-                )
-
-                if all_terminal:
+                if all(s in _BACKUP_TERMINAL for s in statuses):
                     logger.info("All constituent backups reached terminal status")
                     break
         else:
-            # Timeout reached — mark remaining as FAILED
             logger.warning(f"Environment backup timeout ({timeout}s) reached")
             uow = await get_unit_of_work()
             async with uow:
-                from sqlmodel import select
-                from styrmin_backend.db.models import Backup
-
                 result = await uow.session.exec(
                     select(Backup).where(
                         Backup.environment_backup_id == env_backup_uuid,
-                        Backup.status.in_(
-                            [BackupStatus.PENDING, BackupStatus.IN_PROGRESS]
-                        ),  # type: ignore[attr-defined]
+                        Backup.status.in_(_BACKUP_NON_TERMINAL),  # type: ignore[attr-defined]
                     )
                 )
                 for backup in result.all():
@@ -184,7 +174,7 @@ async def execute_environment_backup_workflow(
                         error_message="Environment backup timeout exceeded",
                     )
 
-        # Recompute and update parent status from constituent statuses
+        # Recompute parent status
         uow = await get_unit_of_work()
         await update_environment_backup_status(
             environment_backup_id=env_backup_uuid,
@@ -195,13 +185,18 @@ async def execute_environment_backup_workflow(
 
     except Exception as exc:
         logger.error(f"Environment backup {env_backup_uuid} failed: {exc}")
-        uow = await get_unit_of_work()
-        await update_environment_backup_status(
-            environment_backup_id=env_backup_uuid,
-            uow=uow,
-            status=EnvironmentBackupStatus.FAILED,
-            error_message=str(exc),
-        )
+        try:
+            uow = await get_unit_of_work()
+            await update_environment_backup_status(
+                environment_backup_id=env_backup_uuid,
+                uow=uow,
+                status=EnvironmentBackupStatus.FAILED,
+                error_message=str(exc),
+            )
+        except Exception as status_exc:
+            logger.error(
+                f"Failed to update environment backup status to FAILED: {status_exc}"
+            )
         raise
 
 
@@ -239,9 +234,7 @@ async def execute_environment_restore_workflow(
                 env_restore.environment_backup_id
             )
             max_concurrency = env_backup.max_concurrency if env_backup else 5
-
-            from sqlmodel import select
-            from styrmin_backend.db.models import Restore
+            timeout = env_restore.timeout
 
             result = await uow.session.exec(
                 select(Restore).where(
@@ -272,10 +265,10 @@ async def execute_environment_restore_workflow(
 
         logger.info(
             f"Dispatching {len(restore_dispatch_info)} constituent restores "
-            f"(max_concurrency={max_concurrency})"
+            f"(max_concurrency={max_concurrency}, timeout={timeout}s)"
         )
 
-        # Dispatch constituent restores with concurrency limiting
+        # Dispatch and poll
         semaphore = asyncio.Semaphore(max_concurrency)
         prefect_manager = get_manager()
 
@@ -318,7 +311,6 @@ async def execute_environment_restore_workflow(
                         error_message=f"Failed to dispatch: {exc}",
                     )
 
-        # Dispatch all restores concurrently (bounded by semaphore)
         await asyncio.gather(
             *(
                 dispatch_restore(rid, bid, did, tns)
@@ -326,8 +318,7 @@ async def execute_environment_restore_workflow(
             )
         )
 
-        # Poll until all constituents reach terminal status
-        timeout = 7200
+        # Poll until all constituents reach terminal status or timeout
         poll_interval = 10
         elapsed = 0
         while elapsed < timeout:
@@ -336,38 +327,24 @@ async def execute_environment_restore_workflow(
 
             uow = await get_unit_of_work()
             async with uow:
-                from sqlmodel import select
-                from styrmin_backend.db.models import Restore
-
                 result = await uow.session.exec(
                     select(Restore).where(
                         Restore.environment_restore_id == env_restore_uuid
                     )
                 )
-                current_restores = list(result.all())
-                statuses = [r.status for r in current_restores]
+                statuses = [r.status for r in result.all()]
 
-                all_terminal = all(
-                    s in (RestoreStatus.COMPLETED, RestoreStatus.FAILED)
-                    for s in statuses
-                )
-
-                if all_terminal:
+                if all(s in _RESTORE_TERMINAL for s in statuses):
                     logger.info("All constituent restores reached terminal status")
                     break
         else:
             logger.warning(f"Environment restore timeout ({timeout}s) reached")
             uow = await get_unit_of_work()
             async with uow:
-                from sqlmodel import select
-                from styrmin_backend.db.models import Restore
-
                 result = await uow.session.exec(
                     select(Restore).where(
                         Restore.environment_restore_id == env_restore_uuid,
-                        Restore.status.in_(
-                            [RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS]
-                        ),  # type: ignore[attr-defined]
+                        Restore.status.in_(_RESTORE_NON_TERMINAL),  # type: ignore[attr-defined]
                     )
                 )
                 for restore in result.all():
@@ -379,7 +356,7 @@ async def execute_environment_restore_workflow(
                         error_message="Environment restore timeout exceeded",
                     )
 
-        # Recompute and update parent status
+        # Recompute parent status
         uow = await get_unit_of_work()
         await update_environment_restore_status(
             environment_restore_id=env_restore_uuid,
@@ -390,11 +367,16 @@ async def execute_environment_restore_workflow(
 
     except Exception as exc:
         logger.error(f"Environment restore {env_restore_uuid} failed: {exc}")
-        uow = await get_unit_of_work()
-        await update_environment_restore_status(
-            environment_restore_id=env_restore_uuid,
-            uow=uow,
-            status=EnvironmentRestoreStatus.FAILED,
-            error_message=str(exc),
-        )
+        try:
+            uow = await get_unit_of_work()
+            await update_environment_restore_status(
+                environment_restore_id=env_restore_uuid,
+                uow=uow,
+                status=EnvironmentRestoreStatus.FAILED,
+                error_message=str(exc),
+            )
+        except Exception as status_exc:
+            logger.error(
+                f"Failed to update environment restore status to FAILED: {status_exc}"
+            )
         raise

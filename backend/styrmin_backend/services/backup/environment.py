@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import TYPE_CHECKING, Sequence
 from uuid import UUID
 
@@ -33,6 +34,33 @@ if TYPE_CHECKING:
     from styrmin_backend.services.unit_of_work import UnitOfWork
 
 
+def _aggregate_parent_status(
+    constituent_statuses: list[Enum],
+    completed_value: Enum,
+    failed_value: Enum,
+    pending_value: Enum,
+    in_progress_value: Enum,
+    parent_completed: Enum,
+    parent_failed: Enum,
+    parent_pending: Enum,
+    parent_in_progress: Enum,
+    parent_partially_failed: Enum,
+) -> Enum:
+    """Compute parent status from constituent statuses."""
+    if not constituent_statuses:
+        return parent_failed
+    if all(s == completed_value for s in constituent_statuses):
+        return parent_completed
+    if all(s == failed_value for s in constituent_statuses):
+        return parent_failed
+    if all(s == pending_value for s in constituent_statuses):
+        return parent_pending
+    if any(s in (pending_value, in_progress_value) for s in constituent_statuses):
+        return parent_in_progress
+    # Mix of COMPLETED and FAILED
+    return parent_partially_failed
+
+
 async def create_environment_backup(
     environment_id: UUID,
     uow: UnitOfWork,
@@ -52,6 +80,19 @@ async def create_environment_backup(
             raise EnvironmentBackupValidationError(
                 "Environment does not have a backup storage location assigned"
             )
+
+        # Guard: reject if an environment backup is already PENDING or IN_PROGRESS
+        existing_env_backups = await uow.environment_backups.get_by_environment_id(
+            environment_id
+        )
+        for existing in existing_env_backups:
+            if existing.status in (
+                EnvironmentBackupStatus.PENDING,
+                EnvironmentBackupStatus.IN_PROGRESS,
+            ):
+                raise EnvironmentBackupOperationInProgressError(
+                    "An environment backup is already in progress for this environment"
+                )
 
         # Find all deployments with active instances
         result = await uow.session.exec(
@@ -100,8 +141,6 @@ async def create_environment_backup(
             metadata_={
                 "skipped_instances": skipped_instances,
                 "constituent_count": len(active_instances),
-                "completed_count": 0,
-                "failed_count": 0,
             },
         )
         env_backup = await uow.environment_backups.create(env_backup)
@@ -136,7 +175,7 @@ async def update_environment_backup_status(
     status: EnvironmentBackupStatus | None = None,
     error_message: str | None = None,
 ) -> EnvironmentBackup:
-    """Recompute and update parent status from constituent backup statuses."""
+    """Recompute (or explicitly set) and update parent status from constituent backup statuses."""
     async with uow:
         env_backup = await uow.environment_backups.get(environment_backup_id)
         if env_backup is None:
@@ -152,24 +191,20 @@ async def update_environment_backup_status(
                 )
             )
             constituent_backups = list(result.all())
-
             statuses = [b.status for b in constituent_backups]
 
-            if not statuses:
-                env_backup.status = EnvironmentBackupStatus.FAILED
-            elif all(s == BackupStatus.COMPLETED for s in statuses):
-                env_backup.status = EnvironmentBackupStatus.COMPLETED
-            elif all(s == BackupStatus.FAILED for s in statuses):
-                env_backup.status = EnvironmentBackupStatus.FAILED
-            elif all(s == BackupStatus.PENDING for s in statuses):
-                env_backup.status = EnvironmentBackupStatus.PENDING
-            elif any(
-                s in (BackupStatus.PENDING, BackupStatus.IN_PROGRESS) for s in statuses
-            ):
-                env_backup.status = EnvironmentBackupStatus.IN_PROGRESS
-            else:
-                # Mix of COMPLETED and FAILED
-                env_backup.status = EnvironmentBackupStatus.PARTIALLY_FAILED
+            env_backup.status = _aggregate_parent_status(
+                constituent_statuses=statuses,
+                completed_value=BackupStatus.COMPLETED,
+                failed_value=BackupStatus.FAILED,
+                pending_value=BackupStatus.PENDING,
+                in_progress_value=BackupStatus.IN_PROGRESS,
+                parent_completed=EnvironmentBackupStatus.COMPLETED,
+                parent_failed=EnvironmentBackupStatus.FAILED,
+                parent_pending=EnvironmentBackupStatus.PENDING,
+                parent_in_progress=EnvironmentBackupStatus.IN_PROGRESS,
+                parent_partially_failed=EnvironmentBackupStatus.PARTIALLY_FAILED,
+            )  # type: ignore[assignment]
 
         if (
             env_backup.status == EnvironmentBackupStatus.IN_PROGRESS
@@ -177,10 +212,14 @@ async def update_environment_backup_status(
         ):
             env_backup.started_at = datetime.now(timezone.utc)
 
-        if env_backup.status in (
-            EnvironmentBackupStatus.COMPLETED,
-            EnvironmentBackupStatus.PARTIALLY_FAILED,
-            EnvironmentBackupStatus.FAILED,
+        if (
+            env_backup.status
+            in (
+                EnvironmentBackupStatus.COMPLETED,
+                EnvironmentBackupStatus.PARTIALLY_FAILED,
+                EnvironmentBackupStatus.FAILED,
+            )
+            and env_backup.completed_at is None
         ):
             env_backup.completed_at = datetime.now(timezone.utc)
 
@@ -221,16 +260,26 @@ async def create_environment_restore(
                 "A restore is already in progress for this environment backup"
             )
 
+        # Also check for PENDING restores
+        pending_restores = await uow.environment_restores.get_by_environment_backup_id(
+            environment_backup_id, status=EnvironmentRestoreStatus.PENDING
+        )
+        if pending_restores:
+            raise EnvironmentBackupOperationInProgressError(
+                "A restore is already pending for this environment backup"
+            )
+
+        restore_timeout = env_backup.timeout * 2  # Default: double the backup timeout
+
         # Create EnvironmentRestore record
         env_restore = EnvironmentRestore(
             name="placeholder",
             status=EnvironmentRestoreStatus.PENDING,
             environment_backup_id=environment_backup_id,
+            timeout=restore_timeout,
             metadata_={
                 "skipped_backups": [],
                 "constituent_count": 0,
-                "completed_count": 0,
-                "failed_count": 0,
             },
         )
         env_restore = await uow.environment_restores.create(env_restore)
@@ -258,7 +307,17 @@ async def create_environment_restore(
             # Resolve target namespace from backup's instance -> deployment
             instance = await uow.application_instances.get(backup.instance_id)
             deployment_id = instance.deployment_id if instance else None
-            target_namespace = f"styrmin-{deployment_id}" if deployment_id else ""
+
+            if not deployment_id:
+                skipped_backups.append(
+                    {
+                        "backup_id": str(backup.id),
+                        "reason": "no_deployment_id",
+                    }
+                )
+                continue
+
+            target_namespace = f"styrmin-{deployment_id}"
 
             restore = Restore(
                 name=f"styrmin-{env_restore.id}-{backup.id}",
@@ -267,7 +326,7 @@ async def create_environment_restore(
                 backup_id=backup.id,
                 environment_restore_id=env_restore.id,
                 target_instance_id=backup.instance_id,
-                metadata_={"timeout": 7200},
+                metadata_={"timeout": restore_timeout},
             )
             await uow.restores.create(restore)
             restore_count += 1
@@ -275,8 +334,6 @@ async def create_environment_restore(
         env_restore.metadata_ = {
             "skipped_backups": skipped_backups,
             "constituent_count": restore_count,
-            "completed_count": 0,
-            "failed_count": 0,
         }
 
         await uow.commit()
@@ -295,7 +352,7 @@ async def update_environment_restore_status(
     status: EnvironmentRestoreStatus | None = None,
     error_message: str | None = None,
 ) -> EnvironmentRestore:
-    """Recompute and update parent status from constituent restore statuses."""
+    """Recompute (or explicitly set) and update parent status from constituent restore statuses."""
     async with uow:
         env_restore = await uow.environment_restores.get(environment_restore_id)
         if env_restore is None:
@@ -310,24 +367,20 @@ async def update_environment_restore_status(
                 )
             )
             constituent_restores = list(result.all())
-
             statuses = [r.status for r in constituent_restores]
 
-            if not statuses:
-                env_restore.status = EnvironmentRestoreStatus.FAILED
-            elif all(s == RestoreStatus.COMPLETED for s in statuses):
-                env_restore.status = EnvironmentRestoreStatus.COMPLETED
-            elif all(s == RestoreStatus.FAILED for s in statuses):
-                env_restore.status = EnvironmentRestoreStatus.FAILED
-            elif all(s == RestoreStatus.PENDING for s in statuses):
-                env_restore.status = EnvironmentRestoreStatus.PENDING
-            elif any(
-                s in (RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS)
-                for s in statuses
-            ):
-                env_restore.status = EnvironmentRestoreStatus.IN_PROGRESS
-            else:
-                env_restore.status = EnvironmentRestoreStatus.PARTIALLY_FAILED
+            env_restore.status = _aggregate_parent_status(
+                constituent_statuses=statuses,
+                completed_value=RestoreStatus.COMPLETED,
+                failed_value=RestoreStatus.FAILED,
+                pending_value=RestoreStatus.PENDING,
+                in_progress_value=RestoreStatus.IN_PROGRESS,
+                parent_completed=EnvironmentRestoreStatus.COMPLETED,
+                parent_failed=EnvironmentRestoreStatus.FAILED,
+                parent_pending=EnvironmentRestoreStatus.PENDING,
+                parent_in_progress=EnvironmentRestoreStatus.IN_PROGRESS,
+                parent_partially_failed=EnvironmentRestoreStatus.PARTIALLY_FAILED,
+            )  # type: ignore[assignment]
 
         if (
             env_restore.status == EnvironmentRestoreStatus.IN_PROGRESS
@@ -335,10 +388,14 @@ async def update_environment_restore_status(
         ):
             env_restore.started_at = datetime.now(timezone.utc)
 
-        if env_restore.status in (
-            EnvironmentRestoreStatus.COMPLETED,
-            EnvironmentRestoreStatus.PARTIALLY_FAILED,
-            EnvironmentRestoreStatus.FAILED,
+        if (
+            env_restore.status
+            in (
+                EnvironmentRestoreStatus.COMPLETED,
+                EnvironmentRestoreStatus.PARTIALLY_FAILED,
+                EnvironmentRestoreStatus.FAILED,
+            )
+            and env_restore.completed_at is None
         ):
             env_restore.completed_at = datetime.now(timezone.utc)
 
@@ -405,7 +462,7 @@ async def delete_environment_backup(
         if env_backup is None:
             raise EnvironmentBackupNotFoundError()
 
-        # FR-010: Check no in-progress operations
+        # FR-010: Check no in-progress backup operations
         result = await uow.session.exec(
             select(Backup).where(
                 Backup.environment_backup_id == environment_backup_id,
@@ -418,14 +475,7 @@ async def delete_environment_backup(
                 "Cannot delete environment backup while constituent backups are in progress"
             )
 
-        # Check for in-progress restores across all constituent restores
-        result = await uow.session.exec(
-            select(Restore).where(
-                Restore.environment_restore_id.isnot(None),  # type: ignore[union-attr]
-                Restore.status.in_([RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS]),  # type: ignore[attr-defined]
-            )
-        )
-        # Filter to restores that belong to this environment backup's env restores
+        # Check for in-progress restores belonging to this environment backup
         env_restore_ids_result = await uow.session.exec(
             select(EnvironmentRestore.id).where(
                 EnvironmentRestore.environment_backup_id == environment_backup_id
@@ -433,19 +483,25 @@ async def delete_environment_backup(
         )
         env_restore_ids = set(env_restore_ids_result.all())
 
-        result = await uow.session.exec(
-            select(Restore).where(
-                Restore.environment_restore_id.in_(env_restore_ids),  # type: ignore[union-attr]
-                Restore.status.in_([RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS]),  # type: ignore[attr-defined]
+        if env_restore_ids:
+            result = await uow.session.exec(
+                select(Restore).where(
+                    Restore.environment_restore_id.in_(env_restore_ids),  # type: ignore[union-attr]
+                    Restore.status.in_(
+                        [RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS]
+                    ),  # type: ignore[attr-defined]
+                )
             )
-        )
-        in_progress_restores = result.all()
-        if in_progress_restores:
-            raise EnvironmentBackupOperationInProgressError(
-                "Cannot delete environment backup while constituent restores are in progress"
-            )
+            in_progress_restores = result.all()
+            if in_progress_restores:
+                raise EnvironmentBackupOperationInProgressError(
+                    "Cannot delete environment backup while constituent restores are in progress"
+                )
 
         await uow.environment_backups.delete(env_backup)
         await uow.commit()
 
-        logger.info(f"Deleted environment backup {environment_backup_id}")
+        logger.info(
+            f"Deleted environment backup {environment_backup_id} "
+            f"(cascaded to {len(env_restore_ids)} environment restores)"
+        )

@@ -84,11 +84,15 @@ export default function EnvironmentDetailPage() {
   const [backupError, setBackupError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [bslError, setBslError] = useState<string | null>(null);
 
   const environment = data?.environment;
 
   const handleBslChange = async (value: string) => {
     try {
+      setBslError(null);
       if (value === "__none__") {
         await unassignBslMutation.mutateAsync({ environmentId });
       } else {
@@ -98,8 +102,12 @@ export default function EnvironmentDetailPage() {
         });
       }
       queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
-    } catch {
-      // Error handling can be added if needed
+    } catch (err) {
+      setBslError(
+        err instanceof Error
+          ? err.message
+          : "Failed to update backup storage location",
+      );
     }
   };
 
@@ -353,6 +361,11 @@ export default function EnvironmentDetailPage() {
               ))}
             </SelectContent>
           </Select>
+          {bslError && (
+            <Alert variant="destructive" className="mt-2">
+              <AlertDescription>{bslError}</AlertDescription>
+            </Alert>
+          )}
         </div>
       </TabPanel>
 
@@ -541,7 +554,12 @@ export default function EnvironmentDetailPage() {
         {/* Restore Confirmation Dialog */}
         <Dialog
           open={confirmRestoreId !== null}
-          onOpenChange={(open) => !open && setConfirmRestoreId(null)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setConfirmRestoreId(null);
+              setRestoreError(null);
+            }
+          }}
         >
           <DialogContent>
             <DialogHeader>
@@ -552,6 +570,11 @@ export default function EnvironmentDetailPage() {
                 be replaced.
               </DialogDescription>
             </DialogHeader>
+            {restoreError && (
+              <Alert variant="destructive">
+                <AlertDescription>{restoreError}</AlertDescription>
+              </Alert>
+            )}
             <DialogFooter>
               <Button
                 variant="outline"
@@ -565,6 +588,7 @@ export default function EnvironmentDetailPage() {
                 onClick={async () => {
                   if (!confirmRestoreId) return;
                   try {
+                    setRestoreError(null);
                     await createEnvRestoreMutation.mutateAsync({
                       environmentBackupId: confirmRestoreId,
                     });
@@ -572,8 +596,10 @@ export default function EnvironmentDetailPage() {
                       queryKey: ["ListEnvironmentBackups"],
                     });
                     setConfirmRestoreId(null);
-                  } catch {
-                    // Error handling can be added if needed
+                  } catch (err) {
+                    setRestoreError(
+                      err instanceof Error ? err.message : "Failed to restore",
+                    );
                   }
                 }}
               >
@@ -588,7 +614,12 @@ export default function EnvironmentDetailPage() {
         {/* Delete Confirmation Dialog */}
         <Dialog
           open={confirmDeleteId !== null}
-          onOpenChange={(open) => !open && setConfirmDeleteId(null)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setConfirmDeleteId(null);
+              setDeleteError(null);
+            }
+          }}
         >
           <DialogContent>
             <DialogHeader>
@@ -598,6 +629,11 @@ export default function EnvironmentDetailPage() {
                 constituent backups and restores. This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
+            {deleteError && (
+              <Alert variant="destructive">
+                <AlertDescription>{deleteError}</AlertDescription>
+              </Alert>
+            )}
             <DialogFooter>
               <Button
                 variant="outline"
@@ -611,6 +647,7 @@ export default function EnvironmentDetailPage() {
                 onClick={async () => {
                   if (!confirmDeleteId) return;
                   try {
+                    setDeleteError(null);
                     await deleteEnvBackupMutation.mutateAsync({
                       environmentBackupId: confirmDeleteId,
                     });
@@ -618,8 +655,12 @@ export default function EnvironmentDetailPage() {
                       queryKey: ["ListEnvironmentBackups"],
                     });
                     setConfirmDeleteId(null);
-                  } catch {
-                    // Error handling can be added if needed
+                  } catch (err) {
+                    setDeleteError(
+                      err instanceof Error
+                        ? err.message
+                        : "Failed to delete backup",
+                    );
                   }
                 }}
               >

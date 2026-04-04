@@ -905,10 +905,22 @@ class Mutation:
                 },
             )
         except Exception as exc:
-            logger.warning(
+            logger.error(
                 f"Failed to submit environment backup workflow for {env_backup.id}, "
-                "record created but orchestration not triggered",
+                "marking as FAILED",
                 exc_info=exc,
+            )
+            from styrmin_backend.services.backup.environment import (
+                update_environment_backup_status,
+            )
+            from styrmin_backend.db.models import EnvironmentBackupStatus
+
+            uow = info.context["uow"]
+            env_backup = await update_environment_backup_status(
+                environment_backup_id=env_backup.id,
+                uow=uow,
+                status=EnvironmentBackupStatus.FAILED,
+                error_message=f"Workflow dispatch failed: {exc}",
             )
 
         return EnvironmentBackupType.from_instance(env_backup)
@@ -937,10 +949,22 @@ class Mutation:
                 },
             )
         except Exception as exc:
-            logger.warning(
+            logger.error(
                 f"Failed to submit environment restore workflow for {env_restore.id}, "
-                "record created but orchestration not triggered",
+                "marking as FAILED",
                 exc_info=exc,
+            )
+            from styrmin_backend.services.backup.environment import (
+                update_environment_restore_status,
+            )
+            from styrmin_backend.db.models import EnvironmentRestoreStatus
+
+            uow = info.context["uow"]
+            env_restore = await update_environment_restore_status(
+                environment_restore_id=env_restore.id,
+                uow=uow,
+                status=EnvironmentRestoreStatus.FAILED,
+                error_message=f"Workflow dispatch failed: {exc}",
             )
 
         return EnvironmentRestoreType.from_instance(env_restore)
