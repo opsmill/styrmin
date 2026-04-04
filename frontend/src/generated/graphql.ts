@@ -158,6 +158,19 @@ export type ComponentRestoreStatus = {
   status: Scalars['String']['output'];
 };
 
+export type ContextChange = {
+  __typename?: 'ContextChange';
+  action: Scalars['String']['output'];
+  newValue?: Maybe<Scalars['JSON']['output']>;
+  oldValue?: Maybe<Scalars['JSON']['output']>;
+  path: Scalars['String']['output'];
+};
+
+export type ContextDiff = {
+  __typename?: 'ContextDiff';
+  changes: Array<ContextChange>;
+};
+
 export type DeployedService = {
   __typename?: 'DeployedService';
   component: Scalars['String']['output'];
@@ -188,6 +201,13 @@ export type Deployment = {
   name: Scalars['String']['output'];
   parameters: Scalars['JSON']['output'];
   status: Scalars['String']['output'];
+};
+
+export type DeploymentTimelineEntry = {
+  __typename?: 'DeploymentTimelineEntry';
+  applicationVersion?: Maybe<Scalars['String']['output']>;
+  contextDiff?: Maybe<ContextDiff>;
+  task: Task;
 };
 
 export type Environment = {
@@ -436,6 +456,7 @@ export type Query = {
   clusters: Array<Cluster>;
   deployment?: Maybe<Deployment>;
   deploymentServices: Array<DeployedService>;
+  deploymentTimeline: Array<DeploymentTimelineEntry>;
   environment?: Maybe<Environment>;
   environmentServices: Array<DeployedService>;
   environments: Array<Environment>;
@@ -491,6 +512,11 @@ export type QueryDeploymentArgs = {
 
 
 export type QueryDeploymentServicesArgs = {
+  deploymentId: Scalars['UUID']['input'];
+};
+
+
+export type QueryDeploymentTimelineArgs = {
   deploymentId: Scalars['UUID']['input'];
 };
 
@@ -556,12 +582,14 @@ export type ServiceNameOverride = {
 
 export type Task = {
   __typename?: 'Task';
+  createdOn?: Maybe<Scalars['DateTime']['output']>;
   deployment?: Maybe<Deployment>;
   deploymentId?: Maybe<Scalars['UUID']['output']>;
   id: Scalars['UUID']['output'];
   message?: Maybe<Scalars['String']['output']>;
   status: Scalars['String']['output'];
   type: Scalars['String']['output'];
+  updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };
 
 export type AssignBackupStorageLocationMutationVariables = Exact<{
@@ -664,6 +692,13 @@ export type GetDeploymentQueryVariables = Exact<{
 
 
 export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null }> } | null };
+
+export type GetDeploymentTimelineQueryVariables = Exact<{
+  deploymentId: Scalars['UUID']['input'];
+}>;
+
+
+export type GetDeploymentTimelineQuery = { __typename?: 'Query', deploymentTimeline: Array<{ __typename?: 'DeploymentTimelineEntry', applicationVersion?: string | null, task: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, createdOn?: any | null, updatedOn?: any | null }, contextDiff?: { __typename?: 'ContextDiff', changes: Array<{ __typename?: 'ContextChange', path: string, action: string, oldValue?: Record<string, unknown> | null, newValue?: Record<string, unknown> | null }> } | null }> };
 
 export type GetDriverQueryVariables = Exact<{
   applicationDriverId: Scalars['UUID']['input'];
@@ -1140,6 +1175,48 @@ export const useGetDeploymentQuery = <
     )};
 
 useGetDeploymentQuery.getKey = (variables: GetDeploymentQueryVariables) => ['GetDeployment', variables];
+
+export const GetDeploymentTimelineDocument = `
+    query GetDeploymentTimeline($deploymentId: UUID!) {
+  deploymentTimeline(deploymentId: $deploymentId) {
+    task {
+      id
+      type
+      status
+      message
+      createdOn
+      updatedOn
+    }
+    applicationVersion
+    contextDiff {
+      changes {
+        path
+        action
+        oldValue
+        newValue
+      }
+    }
+  }
+}
+    `;
+
+export const useGetDeploymentTimelineQuery = <
+      TData = GetDeploymentTimelineQuery,
+      TError = Error
+    >(
+      variables: GetDeploymentTimelineQueryVariables,
+      options?: Omit<UseQueryOptions<GetDeploymentTimelineQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetDeploymentTimelineQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetDeploymentTimelineQuery, TError, TData>(
+      {
+    queryKey: ['GetDeploymentTimeline', variables],
+    queryFn: graphqlFetcher<GetDeploymentTimelineQuery, GetDeploymentTimelineQueryVariables>(GetDeploymentTimelineDocument, variables),
+    ...options
+  }
+    )};
+
+useGetDeploymentTimelineQuery.getKey = (variables: GetDeploymentTimelineQueryVariables) => ['GetDeploymentTimeline', variables];
 
 export const GetDriverDocument = `
     query GetDriver($applicationDriverId: UUID!) {

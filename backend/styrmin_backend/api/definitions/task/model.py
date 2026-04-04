@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 import strawberry
@@ -17,6 +18,8 @@ class Task:
     status: str
     message: str | None = None
     deployment_id: UUID | None = None
+    created_on: datetime | None = None
+    updated_on: datetime | None = None
 
     instance: strawberry.Private[TaskEntity]
 
@@ -42,4 +45,6 @@ class Task:
             instance=instance,
             deployment_id=instance.deployment_id,
             message=instance.message,
+            created_on=instance.created_on,
+            updated_on=instance.updated_on,
         )

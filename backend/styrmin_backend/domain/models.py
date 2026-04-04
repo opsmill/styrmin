@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Dict
 from uuid import UUID, uuid4
@@ -257,6 +258,9 @@ class Task(BaseModel):
     prefect_flow_run_id: UUID | None = Field(default=None)
 
     deployment_id: UUID
+
+    created_on: datetime | None = Field(default=None)
+    updated_on: datetime | None = Field(default=None)
 
     @classmethod
     def create(

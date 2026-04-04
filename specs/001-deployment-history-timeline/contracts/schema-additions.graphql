@@ -1,0 +1,58 @@
+# GraphQL Schema Additions for Deployment History Timeline
+# These are ADDITIVE changes to the existing schema — no breaking changes.
+
+# --- Modified Types ---
+
+# Task type: add timestamp fields (existing fields omitted for clarity)
+extend type Task {
+  """Timestamp when the task was created"""
+  createdOn: DateTime!
+
+  """Timestamp when the task was last updated"""
+  updatedOn: DateTime!
+}
+
+# --- New Types ---
+
+"""A single change within a context diff"""
+type ContextChange {
+  """Dot-notation path to the changed field (e.g., 'deployment.version')"""
+  path: String!
+
+  """Type of change: 'added', 'removed', or 'modified'"""
+  action: String!
+
+  """Previous value (null for additions)"""
+  oldValue: JSON
+
+  """New value (null for removals)"""
+  newValue: JSON
+}
+
+"""Diff between two ApplicationInstance context objects"""
+type ContextDiff {
+  """List of individual changes between contexts"""
+  changes: [ContextChange!]!
+}
+
+"""A task enriched with version and diff data for the deployment timeline"""
+type DeploymentTimelineEntry {
+  """The underlying task"""
+  task: Task!
+
+  """Application version at the time of this operation"""
+  applicationVersion: String
+
+  """Context diff compared to the previous operation (null for first operation)"""
+  contextDiff: ContextDiff
+}
+
+# --- New Queries ---
+
+extend type Query {
+  """
+  Fetch the deployment history timeline: tasks for a deployment
+  with version info and context diffs, ordered newest-first.
+  """
+  deploymentTimeline(deploymentId: UUID!): [DeploymentTimelineEntry!]!
+}

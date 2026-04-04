@@ -122,6 +122,17 @@ type ComponentRestoreStatus {
   errorMessage: String
 }
 
+type ContextChange {
+  path: String!
+  action: String!
+  oldValue: JSON
+  newValue: JSON
+}
+
+type ContextDiff {
+  changes: [ContextChange!]!
+}
+
 """Date with time (isoformat)"""
 scalar DateTime
 
@@ -153,6 +164,12 @@ type Deployment {
   environment: Environment!
   applicationDriverVersion: ApplicationDriverVersion!
   deployedServices: [DeployedService!]!
+}
+
+type DeploymentTimelineEntry {
+  task: Task!
+  applicationVersion: String
+  contextDiff: ContextDiff
 }
 
 type Environment {
@@ -233,6 +250,7 @@ type Query {
   applicationDriver(applicationDriverId: UUID!): ApplicationDriver
   environmentServices(environmentId: UUID!): [DeployedService!]!
   deploymentServices(deploymentId: UUID!): [DeployedService!]!
+  deploymentTimeline(deploymentId: UUID!): [DeploymentTimelineEntry!]!
 
   """Health check probe"""
   ok: Boolean!
@@ -273,6 +291,8 @@ type Task {
   status: String!
   message: String
   deploymentId: UUID
+  createdOn: DateTime
+  updatedOn: DateTime
   deployment: Deployment
 }
 
