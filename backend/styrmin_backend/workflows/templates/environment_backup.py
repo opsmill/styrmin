@@ -120,7 +120,6 @@ async def execute_environment_backup_workflow(
                             "backup_id": backup_id,
                             "deployment_id": deployment_id,
                         },
-                        timeout=0,
                     )
                 except Exception as exc:
                     logger.error(f"Failed to dispatch backup {backup_id}: {exc}")
@@ -299,7 +298,6 @@ async def execute_environment_restore_workflow(
                             "deployment_id": deployment_id,
                             "target_namespace": target_namespace,
                         },
-                        timeout=0,
                     )
                 except Exception as exc:
                     logger.error(f"Failed to dispatch restore {restore_id}: {exc}")
