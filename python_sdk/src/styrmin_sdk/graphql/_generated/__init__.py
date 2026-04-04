@@ -53,6 +53,13 @@ from .get_deployment_services import (
     GetDeploymentServices,
     GetDeploymentServicesDeploymentServices,
 )
+from .get_deployment_timeline import (
+    GetDeploymentTimeline,
+    GetDeploymentTimelineDeploymentTimeline,
+    GetDeploymentTimelineDeploymentTimelineContextDiff,
+    GetDeploymentTimelineDeploymentTimelineContextDiffChanges,
+    GetDeploymentTimelineDeploymentTimelineTask,
+)
 from .get_environment import (
     GetEnvironment,
     GetEnvironmentEnvironment,
@@ -157,6 +164,11 @@ __all__ = [
     "GetDeploymentDeploymentComponents",
     "GetDeploymentServices",
     "GetDeploymentServicesDeploymentServices",
+    "GetDeploymentTimeline",
+    "GetDeploymentTimelineDeploymentTimeline",
+    "GetDeploymentTimelineDeploymentTimelineContextDiff",
+    "GetDeploymentTimelineDeploymentTimelineContextDiffChanges",
+    "GetDeploymentTimelineDeploymentTimelineTask",
     "GetEnvironment",
     "GetEnvironmentEnvironment",
     "GetEnvironmentEnvironmentCluster",

@@ -25,6 +25,7 @@ from .get_backup_storage_location import GetBackupStorageLocation
 from .get_cluster import GetCluster
 from .get_deployment import GetDeployment
 from .get_deployment_services import GetDeploymentServices
+from .get_deployment_timeline import GetDeploymentTimeline
 from .get_environment import GetEnvironment
 from .get_environment_services import GetEnvironmentServices
 from .get_restore import GetRestore
@@ -601,6 +602,42 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeploymentServices.model_validate(data)
+
+    async def get_deployment_timeline(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentTimeline:
+        query = gql("""
+            query GetDeploymentTimeline($deploymentId: UUID!) {
+              deploymentTimeline(deploymentId: $deploymentId) {
+                task {
+                  id
+                  type
+                  status
+                  message
+                  createdOn
+                  updatedOn
+                }
+                applicationVersion
+                contextDiff {
+                  changes {
+                    path
+                    action
+                    oldValue
+                    newValue
+                  }
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentTimeline",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentTimeline.model_validate(data)
 
     async def get_environment(
         self,
