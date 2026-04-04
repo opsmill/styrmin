@@ -1,5 +1,4 @@
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
 import {
   useListClustersQuery,
@@ -84,15 +83,7 @@ export function CreateEnvironmentDialog({
   const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    control,
-    reset,
-    watch,
-    formState: { errors, isSubmitting },
-  } = useForm<CreateEnvironmentValues>({
-    resolver: zodResolver(createEnvironmentSchema),
+  const form = useForm({
     defaultValues: {
       name: "",
       clusterId: "",
@@ -104,36 +95,51 @@ export function CreateEnvironmentDialog({
       dedicated_ingress_implementation: "",
       dedicated_ingress_type: "",
     },
+    validators: {
+      onSubmit: ({ value }) => {
+        const result = createEnvironmentSchema.safeParse(value);
+        if (result.success) return undefined;
+        const fieldErrors: Record<string, string> = {};
+        for (const issue of result.error.issues) {
+          const path = issue.path.join(".");
+          if (path) fieldErrors[path] = issue.message;
+        }
+        return { fields: fieldErrors };
+      },
+    },
+    onSubmit: async ({ value }) => {
+      setSubmitError(null);
+      const config = buildEnvironmentConfig(value);
+      try {
+        const data = await createEnvironmentMutation.mutateAsync({
+          name: value.name,
+          clusterId: value.clusterId,
+          config: config ?? null,
+        });
+        if (data.createEnvironment) {
+          queryClient.invalidateQueries({ queryKey: ["ListEnvironments"] });
+          form.reset();
+          setAdvancedOpen(false);
+          setSubmitError(null);
+          setOpen(false);
+          onCreated();
+        }
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
   });
 
-  const dedicatedIngressEnabled = watch("dedicated_ingress_enabled");
-
-  const onSubmit = async (values: CreateEnvironmentValues) => {
-    setSubmitError(null);
-    const config = buildEnvironmentConfig(values);
-    try {
-      const data = await createEnvironmentMutation.mutateAsync({
-        name: values.name,
-        clusterId: values.clusterId,
-        config: config ?? null,
-      });
-      if (data.createEnvironment) {
-        queryClient.invalidateQueries({ queryKey: ["ListEnvironments"] });
-        reset();
-        setAdvancedOpen(false);
-        setSubmitError(null);
-        setOpen(false);
-        onCreated();
-      }
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Unknown error");
-    }
-  };
+  const isSubmitting = useStore(form.store, (s) => s.isSubmitting);
+  const dedicatedIngressEnabled = useStore(
+    form.store,
+    (s) => s.values.dedicated_ingress_enabled,
+  );
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (!nextOpen) {
-      reset();
+      form.reset();
       setAdvancedOpen(false);
       setSubmitError(null);
     }
@@ -151,7 +157,14 @@ export function CreateEnvironmentDialog({
         <DialogHeader>
           <DialogTitle>Create Environment</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            form.handleSubmit();
+          }}
+          className="space-y-4"
+        >
           {submitError && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -160,27 +173,33 @@ export function CreateEnvironmentDialog({
             </Alert>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="env-name">Name</Label>
-            <Input
-              id="env-name"
-              placeholder="production"
-              {...register("name")}
-            />
-            {errors.name && (
-              <p className="text-sm text-destructive">{errors.name.message}</p>
+          <form.Field name="name">
+            {(field) => (
+              <div className="space-y-2">
+                <Label htmlFor="env-name">Name</Label>
+                <Input
+                  id="env-name"
+                  placeholder="production"
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  onBlur={field.handleBlur}
+                />
+                {field.state.meta.errors.length > 0 && (
+                  <p className="text-sm text-destructive">
+                    {field.state.meta.errors[0]?.toString()}
+                  </p>
+                )}
+              </div>
             )}
-          </div>
+          </form.Field>
 
-          <div className="space-y-2">
-            <Label htmlFor="env-cluster">Cluster</Label>
-            <Controller
-              name="clusterId"
-              control={control}
-              render={({ field }) => (
+          <form.Field name="clusterId">
+            {(field) => (
+              <div className="space-y-2">
+                <Label htmlFor="env-cluster">Cluster</Label>
                 <Select
-                  value={field.value}
-                  onValueChange={field.onChange}
+                  value={field.state.value}
+                  onValueChange={field.handleChange}
                   disabled={clustersFetching}
                 >
                   <SelectTrigger>
@@ -200,14 +219,14 @@ export function CreateEnvironmentDialog({
                     ))}
                   </SelectContent>
                 </Select>
-              )}
-            />
-            {errors.clusterId && (
-              <p className="text-sm text-destructive">
-                {errors.clusterId.message}
-              </p>
+                {field.state.meta.errors.length > 0 && (
+                  <p className="text-sm text-destructive">
+                    {field.state.meta.errors[0]?.toString()}
+                  </p>
+                )}
+              </div>
             )}
-          </div>
+          </form.Field>
 
           <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
             <CollapsibleTrigger asChild>
@@ -222,58 +241,82 @@ export function CreateEnvironmentDialog({
               </button>
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-4 pt-3">
-              <div className="space-y-2">
-                <Label htmlFor="env-ingress-class">Ingress Class</Label>
-                <Input
-                  id="env-ingress-class"
-                  placeholder="e.g. nginx"
-                  {...register("ingress_class")}
-                />
-              </div>
+              <form.Field name="ingress_class">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="env-ingress-class">Ingress Class</Label>
+                    <Input
+                      id="env-ingress-class"
+                      placeholder="e.g. nginx"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                  </div>
+                )}
+              </form.Field>
 
-              <div className="space-y-2">
-                <Label htmlFor="env-db-size">DB Size</Label>
-                <Input
-                  id="env-db-size"
-                  placeholder="e.g. small"
-                  {...register("db_size")}
-                />
-              </div>
+              <form.Field name="db_size">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="env-db-size">DB Size</Label>
+                    <Input
+                      id="env-db-size"
+                      placeholder="e.g. small"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                  </div>
+                )}
+              </form.Field>
 
-              <div className="space-y-2">
-                <Label htmlFor="env-fqdn-suffix">FQDN Suffix</Label>
-                <Input
-                  id="env-fqdn-suffix"
-                  placeholder="example.com"
-                  {...register("fqdn_suffix")}
-                />
-              </div>
+              <form.Field name="fqdn_suffix">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="env-fqdn-suffix">FQDN Suffix</Label>
+                    <Input
+                      id="env-fqdn-suffix"
+                      placeholder="example.com"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                  </div>
+                )}
+              </form.Field>
 
-              <div className="space-y-2">
-                <Label htmlFor="env-ip-whitelist">IP Whitelist</Label>
-                <Input
-                  id="env-ip-whitelist"
-                  placeholder="203.0.113.0/24, 198.51.100.0/24"
-                  {...register("ip_whitelist")}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Comma-separated CIDR ranges
-                </p>
-              </div>
+              <form.Field name="ip_whitelist">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="env-ip-whitelist">IP Whitelist</Label>
+                    <Input
+                      id="env-ip-whitelist"
+                      placeholder="203.0.113.0/24, 198.51.100.0/24"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Comma-separated CIDR ranges
+                    </p>
+                  </div>
+                )}
+              </form.Field>
 
               <div className="space-y-3 rounded-md border p-3">
                 <div className="flex items-center gap-2">
-                  <Controller
-                    name="dedicated_ingress_enabled"
-                    control={control}
-                    render={({ field }) => (
+                  <form.Field name="dedicated_ingress_enabled">
+                    {(field) => (
                       <Checkbox
                         id="env-dedicated-ingress"
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
+                        checked={field.state.value}
+                        onCheckedChange={(checked) =>
+                          field.handleChange(checked === true)
+                        }
                       />
                     )}
-                  />
+                  </form.Field>
                   <Label
                     htmlFor="env-dedicated-ingress"
                     className="font-medium"
@@ -283,22 +326,34 @@ export function CreateEnvironmentDialog({
                 </div>
                 {dedicatedIngressEnabled && (
                   <div className="space-y-3 ml-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="env-di-impl">Implementation</Label>
-                      <Input
-                        id="env-di-impl"
-                        placeholder="e.g. traefik"
-                        {...register("dedicated_ingress_implementation")}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="env-di-type">Type</Label>
-                      <Input
-                        id="env-di-type"
-                        placeholder="e.g. ingress"
-                        {...register("dedicated_ingress_type")}
-                      />
-                    </div>
+                    <form.Field name="dedicated_ingress_implementation">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <Label htmlFor="env-di-impl">Implementation</Label>
+                          <Input
+                            id="env-di-impl"
+                            placeholder="e.g. traefik"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                          />
+                        </div>
+                      )}
+                    </form.Field>
+                    <form.Field name="dedicated_ingress_type">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <Label htmlFor="env-di-type">Type</Label>
+                          <Input
+                            id="env-di-type"
+                            placeholder="e.g. ingress"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                          />
+                        </div>
+                      )}
+                    </form.Field>
                   </div>
                 )}
               </div>

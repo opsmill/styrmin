@@ -1,6 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
 import {
   useLoadLocalDriverMutation,
@@ -24,9 +23,6 @@ const remoteSchema = z.object({
   branch: z.string().min(1, "Branch is required"),
 });
 
-type LocalFormValues = z.infer<typeof localSchema>;
-type RemoteFormValues = z.infer<typeof remoteSchema>;
-
 type SourceType = "local" | "remote";
 
 export default function AddDriverPage() {
@@ -37,59 +33,64 @@ export default function AddDriverPage() {
   const loadRemoteMutation = useLoadRemoteDriverMutation();
   const queryClient = useQueryClient();
 
-  const localForm = useForm<LocalFormValues>({
-    resolver: zodResolver(localSchema),
+  const localForm = useForm({
     defaultValues: { path: "" },
+    validators: {
+      onSubmit: localSchema,
+    },
+    onSubmit: async ({ value }) => {
+      setSubmitError(null);
+      try {
+        const data = await loadLocalMutation.mutateAsync({
+          path: value.path,
+        });
+        queryClient.invalidateQueries({ queryKey: ["ListDrivers"] });
+        if (data.loadLocalApplicationDriverVersion) {
+          navigate({
+            to: "/drivers/$driverId",
+            params: {
+              driverId:
+                data.loadLocalApplicationDriverVersion.applicationDriverId,
+            },
+          });
+        }
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
   });
 
-  const remoteForm = useForm<RemoteFormValues>({
-    resolver: zodResolver(remoteSchema),
+  const remoteForm = useForm({
     defaultValues: { repositoryUrl: "", branch: "main" },
+    validators: {
+      onSubmit: remoteSchema,
+    },
+    onSubmit: async ({ value }) => {
+      setSubmitError(null);
+      try {
+        const data = await loadRemoteMutation.mutateAsync({
+          repositoryUrl: value.repositoryUrl,
+          branch: value.branch,
+        });
+        queryClient.invalidateQueries({ queryKey: ["ListDrivers"] });
+        if (data.loadRemoteApplicationDriverVersion) {
+          navigate({
+            to: "/drivers/$driverId",
+            params: {
+              driverId:
+                data.loadRemoteApplicationDriverVersion.applicationDriverId,
+            },
+          });
+        }
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Unknown error");
+      }
+    },
   });
 
-  const isSubmitting =
-    localForm.formState.isSubmitting || remoteForm.formState.isSubmitting;
-
-  const onSubmitLocal = async (values: LocalFormValues) => {
-    setSubmitError(null);
-    try {
-      const data = await loadLocalMutation.mutateAsync({ path: values.path });
-      queryClient.invalidateQueries({ queryKey: ["ListDrivers"] });
-      if (data.loadLocalApplicationDriverVersion) {
-        navigate({
-          to: "/drivers/$driverId",
-          params: {
-            driverId:
-              data.loadLocalApplicationDriverVersion.applicationDriverId,
-          },
-        });
-      }
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Unknown error");
-    }
-  };
-
-  const onSubmitRemote = async (values: RemoteFormValues) => {
-    setSubmitError(null);
-    try {
-      const data = await loadRemoteMutation.mutateAsync({
-        repositoryUrl: values.repositoryUrl,
-        branch: values.branch,
-      });
-      queryClient.invalidateQueries({ queryKey: ["ListDrivers"] });
-      if (data.loadRemoteApplicationDriverVersion) {
-        navigate({
-          to: "/drivers/$driverId",
-          params: {
-            driverId:
-              data.loadRemoteApplicationDriverVersion.applicationDriverId,
-          },
-        });
-      }
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Unknown error");
-    }
-  };
+  const localSubmitting = useStore(localForm.store, (s) => s.isSubmitting);
+  const remoteSubmitting = useStore(remoteForm.store, (s) => s.isSubmitting);
+  const isSubmitting = localSubmitting || remoteSubmitting;
 
   return (
     <PageLayout
@@ -125,22 +126,32 @@ export default function AddDriverPage() {
 
         {sourceType === "local" ? (
           <form
-            onSubmit={localForm.handleSubmit(onSubmitLocal)}
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              localForm.handleSubmit();
+            }}
             className="space-y-4"
           >
-            <div className="space-y-2">
-              <Label htmlFor="path">Filesystem Path</Label>
-              <Input
-                id="path"
-                placeholder="/path/to/driver"
-                {...localForm.register("path")}
-              />
-              {localForm.formState.errors.path && (
-                <p className="text-sm text-destructive">
-                  {localForm.formState.errors.path.message}
-                </p>
+            <localForm.Field name="path">
+              {(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor="path">Filesystem Path</Label>
+                  <Input
+                    id="path"
+                    placeholder="/path/to/driver"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                  />
+                  {field.state.meta.errors.length > 0 && (
+                    <p className="text-sm text-destructive">
+                      {field.state.meta.errors[0]?.toString()}
+                    </p>
+                  )}
+                </div>
               )}
-            </div>
+            </localForm.Field>
             <div className="flex gap-2">
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Loading..." : "Load Driver"}
@@ -156,35 +167,51 @@ export default function AddDriverPage() {
           </form>
         ) : (
           <form
-            onSubmit={remoteForm.handleSubmit(onSubmitRemote)}
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              remoteForm.handleSubmit();
+            }}
             className="space-y-4"
           >
-            <div className="space-y-2">
-              <Label htmlFor="repositoryUrl">Repository URL</Label>
-              <Input
-                id="repositoryUrl"
-                placeholder="https://github.com/org/repo"
-                {...remoteForm.register("repositoryUrl")}
-              />
-              {remoteForm.formState.errors.repositoryUrl && (
-                <p className="text-sm text-destructive">
-                  {remoteForm.formState.errors.repositoryUrl.message}
-                </p>
+            <remoteForm.Field name="repositoryUrl">
+              {(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor="repositoryUrl">Repository URL</Label>
+                  <Input
+                    id="repositoryUrl"
+                    placeholder="https://github.com/org/repo"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                  />
+                  {field.state.meta.errors.length > 0 && (
+                    <p className="text-sm text-destructive">
+                      {field.state.meta.errors[0]?.toString()}
+                    </p>
+                  )}
+                </div>
               )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="branch">Branch</Label>
-              <Input
-                id="branch"
-                placeholder="main"
-                {...remoteForm.register("branch")}
-              />
-              {remoteForm.formState.errors.branch && (
-                <p className="text-sm text-destructive">
-                  {remoteForm.formState.errors.branch.message}
-                </p>
+            </remoteForm.Field>
+            <remoteForm.Field name="branch">
+              {(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor="branch">Branch</Label>
+                  <Input
+                    id="branch"
+                    placeholder="main"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                  />
+                  {field.state.meta.errors.length > 0 && (
+                    <p className="text-sm text-destructive">
+                      {field.state.meta.errors[0]?.toString()}
+                    </p>
+                  )}
+                </div>
               )}
-            </div>
+            </remoteForm.Field>
             <div className="flex gap-2">
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Loading..." : "Load Driver"}
