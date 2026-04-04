@@ -33,9 +33,9 @@ class PrefectCatalogue:
         self._register_default_workflows()
 
     @property
-    def work_pools(self) -> Iterable[WorkflowDefinition]:
-        """Get the list of workflows."""
-        return list(self.work_pools_registry.values())  # type: ignore[arg-type]
+    def work_pools(self) -> Iterable[WorkPoolDefinition]:
+        """Get the list of work pools."""
+        return list(self.work_pools_registry.values())
 
     @property
     def workflows(self) -> Iterable[WorkflowDefinition]:

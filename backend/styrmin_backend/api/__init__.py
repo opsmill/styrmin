@@ -14,4 +14,4 @@ def init_graphql_router() -> GraphQLRouter:
         extensions=[StructuredErrorExtension],
     )
 
-    return GraphQLRouter(schema, context_getter=get_context)  # type: ignore[arg-type]
+    return GraphQLRouter(schema, context_getter=get_context)  # type: ignore  # Strawberry GraphQLRouter generic params

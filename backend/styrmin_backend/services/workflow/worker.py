@@ -86,11 +86,11 @@ class WorkflowWorkerExecutor(StyrminWorkflowExecutor):
         workflow_uuid: UUID,
         parameters: dict[str, Any] | None = None,
         tags: list[str] | None = None,
-    ) -> str:
+    ) -> WorkflowInfo:
         flow_run = await arun_deployment(
             name=workflow_uuid,
             timeout=0,
             parameters=parameters or {},
             tags=tags,
         )
-        return WorkflowInfo.from_flow(flow_run=flow_run)  # type: ignore[return-value]
+        return WorkflowInfo.from_flow(flow_run=flow_run)

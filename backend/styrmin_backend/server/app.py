@@ -47,7 +47,7 @@ async def app_initialization(_: FastAPI) -> None:
 
     # Initialize the Prefect manager
     prefect_manager = get_manager()
-    await prefect_manager.initialize()  # type: ignore[call-overload]
+    await prefect_manager.initialize()  # type: ignore  # Prefect Flow.__call__ overload resolution
 
     # Initialize the utilities
     await initialize_utilities()
