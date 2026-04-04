@@ -16,7 +16,7 @@ Code MUST follow the layered architecture: GraphQL API → Service Layer → Rep
 
 ### IV. Type Safety and Typed Errors
 
-Python type hints are mandatory (enforced by mypy with `disallow_untyped_defs`). GraphQL responses use union types for typed error handling (e.g., `Cluster | ClusterNotFound`). Domain models, database models, and context models are separate concerns — never mix persistence with business logic.
+Python type hints are mandatory (enforced by mypy with `disallow_untyped_defs`). GraphQL error handling uses exception-based patterns: service functions raise `ServiceError` subclasses (with `error_code` and `default_message`), and the `StructuredErrorExtension` middleware enriches GraphQL errors with machine-readable `extensions.code` and metadata. Union types MUST NOT be used for error handling. Domain models, database models, and context models are separate concerns — never mix persistence with business logic.
 
 ### V. Test-First Development
 
