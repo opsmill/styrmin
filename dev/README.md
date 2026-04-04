@@ -47,6 +47,8 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [adr-002-consolidate-driver-single-yaml.md](adr/adr-002-consolidate-driver-single-yaml.md) - Consolidate driver declarative config into single driver.styrmin.yml
 - [adr-003-consolidate-typechecker-on-ty.md](adr/adr-003-consolidate-typechecker-on-ty.md) - Consolidate type checking on ty, removing mypy
 
+- [adr-003-alembic-database-migrations.md](adr/adr-003-alembic-database-migrations.md) - Adopt Alembic for versioned database migration management
+
 ## Current Knowledge
 
 Backend architecture documentation in [knowledge/backend/](knowledge/backend/):
@@ -65,4 +67,4 @@ Backend architecture documentation in [knowledge/backend/](knowledge/backend/):
 
 ## Current Guides
 
-_(No guides yet)_
+- [database-migrations.md](guides/database-migrations.md) - Alembic migration workflow: creating, applying, and rolling back migrations

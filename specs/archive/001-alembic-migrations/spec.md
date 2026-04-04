@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-alembic-migrations`  
 **Created**: 2026-04-04  
-**Status**: Draft  
+**Status**: Extracted  
 **Input**: User description: "https://github.com/opsmill/styrmin/issues/43"
 
 ## User Scenarios & Testing *(mandatory)*
