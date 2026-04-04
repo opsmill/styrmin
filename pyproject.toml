@@ -70,20 +70,16 @@ invalid-argument-type = "ignore" # Upstream: invoke library @task decorator has 
 include = ["backend/**"]
 
 [tool.ty.overrides.rules]
-invalid-argument-type = "ignore" # TODO: fix violations
-invalid-assignment = "ignore" # TODO: fix violations
-invalid-await = "ignore" # TODO: fix violations
-invalid-method-override = "ignore" # TODO: fix violations
-invalid-return-type = "ignore" # TODO: fix violations
-invalid-type-arguments = "ignore" # TODO: fix violations
-no-matching-overload = "ignore" # TODO: fix violations
-not-subscriptable = "ignore" # TODO: fix violations
-invalid-newtype = "ignore" # TODO: fix violations
-invalid-type-form = "ignore" # TODO: fix violations
-missing-argument = "ignore" # TODO: fix violations
-unknown-argument = "ignore" # TODO: fix violations
-unresolved-attribute = "ignore" # TODO: fix violations
-unsupported-operator = "ignore" # TODO: fix violations
+invalid-argument-type = "ignore" # Upstream: Strawberry, SQLAlchemy, Jinja2, kubernetes-asyncio type stub mismatches (~98 violations)
+invalid-assignment = "ignore" # Upstream: ty infers nested dict types too narrowly + test fakes intentionally violate types
+invalid-await = "ignore" # Upstream: Prefect/SQLAlchemy async patterns ty doesn't resolve correctly
+invalid-method-override = "ignore" # Upstream: Strawberry resolver method signatures differ from base
+invalid-return-type = "ignore" # Upstream: Strawberry GraphQLRouter generic params, Prefect WorkflowInfo
+missing-argument = "ignore" # Upstream: Strawberry/SQLAlchemy constructor patterns
+no-matching-overload = "ignore" # Upstream: SQLModel/SQLAlchemy overloaded methods
+not-subscriptable = "ignore" # Upstream: Strawberry/SQLModel generic subscript patterns
+unknown-argument = "ignore" # Upstream: kubernetes-asyncio stubs missing _content_type param
+unresolved-attribute = "ignore" # Upstream: Strawberry/SQLAlchemy/Prefect attribute resolution
 
 [[tool.ty.overrides]]
 include = ["driver/examples/db-test/src/**"]
