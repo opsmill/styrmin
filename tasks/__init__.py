@@ -29,7 +29,6 @@ def lint_all(context: Context) -> None:
     """Run all linters (Python, Markdown, and YAML)."""
     fmt.lint_ruff(context)
     fmt.lint_ty(context)
-    fmt.lint_mypy(context)
     fmt.lint_markdown(context)
     fmt.lint_yaml(context)
     graphql_validate.validate_graphql(context)
