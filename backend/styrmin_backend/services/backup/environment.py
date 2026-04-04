@@ -150,11 +150,27 @@ async def create_environment_backup(
 
         # Create constituent Backup records for each active instance
         for deployment, instance in active_instances:
+            # Resolve component backup configs from the driver version
+            # (same logic as create_backup mutation)
+            component_statuses: dict[str, dict[str, str]] | None = None
+            driver_version = await uow.application_driver_versions.get(
+                instance.application_driver_version_id
+            )
+            if driver_version and driver_version.component_configs:
+                resolved: dict[str, dict[str, str]] = {}
+                for cc in driver_version.component_configs:
+                    backup_raw = cc.config.get("backup")
+                    if isinstance(backup_raw, dict) and backup_raw.get("enabled"):
+                        resolved[cc.name] = {"status": "pending", **backup_raw}
+                if resolved:
+                    component_statuses = resolved
+
             backup = Backup(
                 name=f"styrmin-{env_backup.id}-{instance.id}",
                 status=BackupStatus.PENDING,
                 instance_id=instance.id,
                 environment_backup_id=env_backup.id,
+                component_statuses=component_statuses,
                 metadata_={"timeout": timeout},
             )
             await uow.backups.create(backup)
