@@ -44,6 +44,7 @@ Changes to these areas require explicit discussion before implementation:
 - Edit generated files manually
 - Skip linting in CI
 - Force push to `stable` or `develop`
+- Execute the script `update-agent-context.sh` — agent context files are maintained manually or through other workflows
 
 ## Governance
 
