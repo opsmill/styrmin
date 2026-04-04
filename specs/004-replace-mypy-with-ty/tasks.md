@@ -17,8 +17,8 @@
 
 **Purpose**: Ensure clean starting state
 
-- [ ] T001 Verify current `uv run ty check` passes on develop branch baseline
-- [ ] T002 Verify current `uv run invoke lint` passes on develop branch baseline
+- [x] T001 Verify current `uv run ty check` passes on develop branch baseline
+- [x] T002 Verify current `uv run invoke lint` passes on develop branch baseline
 
 ---
 
@@ -28,18 +28,18 @@
 
 **⚠️ CRITICAL**: No ty rule work (US2) can begin until mypy is fully removed
 
-- [ ] T003 Remove `mypy>=1.19.1` from dev dependencies in `pyproject.toml`
-- [ ] T004 [P] Remove `types-jsonschema>=4.23.0.20241208` from dev dependencies in `pyproject.toml`
-- [ ] T005 [P] Remove `types-pyyaml>=6.0.12.20241230` from dev dependencies in `pyproject.toml`
-- [ ] T006 [P] Remove `types-requests>=2.32.0.20250306` from dev dependencies in `pyproject.toml`
-- [ ] T007 [P] Remove `types-toml>=0.10.8.20240310` from dev dependencies in `pyproject.toml`
-- [ ] T008 Remove `[tool.mypy]` section (lines 120-124) and all `[[tool.mypy.overrides]]` sections (lines 125-148) from `pyproject.toml`
-- [ ] T009 Remove `lint_mypy` function and its `ns.add_task(lint_mypy)` call from `tasks/format.py`
-- [ ] T010 Add `ns.add_task(lint_ty)` to the task collection in `tasks/format.py`
-- [ ] T011 Remove `fmt.lint_mypy(context)` call from `lint_all` function in `tasks/__init__.py`
-- [ ] T012 Remove the `uv run mypy backend` CI step from `.github/workflows/ci.yml`
-- [ ] T013 Run `uv sync --all-groups` to verify dependency resolution succeeds without mypy
-- [ ] T014 Run `uv run ty check` to verify type checking still passes
+- [x] T003 Remove `mypy>=1.19.1` from dev dependencies in `pyproject.toml`
+- [x] T004 [P] Remove `types-jsonschema>=4.23.0.20241208` from dev dependencies in `pyproject.toml`
+- [x] T005 [P] Remove `types-pyyaml>=6.0.12.20241230` from dev dependencies in `pyproject.toml`
+- [x] T006 [P] Remove `types-requests>=2.32.0.20250306` from dev dependencies in `pyproject.toml`
+- [x] T007 [P] Remove `types-toml>=0.10.8.20240310` from dev dependencies in `pyproject.toml`
+- [x] T008 Remove `[tool.mypy]` section (lines 120-124) and all `[[tool.mypy.overrides]]` sections (lines 125-148) from `pyproject.toml`
+- [x] T009 Remove `lint_mypy` function and its `ns.add_task(lint_mypy)` call from `tasks/format.py`
+- [x] T010 Add `ns.add_task(lint_ty)` to the task collection in `tasks/format.py`
+- [x] T011 Remove `fmt.lint_mypy(context)` call from `lint_all` function in `tasks/__init__.py`
+- [x] T012 Remove the `uv run mypy backend` CI step from `.github/workflows/ci.yml`
+- [x] T013 Run `uv sync --all-groups` to verify dependency resolution succeeds without mypy
+- [x] T014 Run `uv run ty check` to verify type checking still passes
 
 **Checkpoint**: mypy is fully removed. Type checking is ty-only.
 
@@ -53,17 +53,17 @@
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Remove `unused-type-ignore-comment = "ignore"` from the `tasks/**` ty override in `pyproject.toml`
-- [ ] T016 [P] [US1] Remove `unused-type-ignore-comment = "ignore"` from the `backend/**` ty override in `pyproject.toml`
-- [ ] T017 [P] [US1] Remove `unused-type-ignore-comment = "ignore"` from the `driver/**` ty override in `pyproject.toml`
-- [ ] T018 [P] [US1] Remove `unused-type-ignore-comment = "ignore"` from the `python_sdk/**` ty override in `pyproject.toml`
-- [ ] T019 [US1] Run `uv run ty check 2>&1` to identify all orphaned `# type: ignore` comments flagged by `unused-type-ignore-comment`
-- [ ] T020 [US1] Remove orphaned `# type: ignore` comments in `backend/` files identified by ty
-- [ ] T021 [P] [US1] Remove orphaned `# type: ignore` comments in `python_sdk/` files identified by ty
-- [ ] T022 [P] [US1] Remove orphaned `# type: ignore` comments in `tasks/` files identified by ty
-- [ ] T023 [P] [US1] Remove orphaned `# type: ignore` comments in `driver/` files identified by ty
-- [ ] T024 [US1] Run `uv run ty check` to verify it passes cleanly with `unused-type-ignore-comment` enabled
-- [ ] T025 [US1] Run `uv run invoke lint` to verify full lint pipeline passes
+- [x] T015 [US1] Remove `unused-type-ignore-comment = "ignore"` from the `tasks/**` ty override in `pyproject.toml`
+- [x] T016 [P] [US1] Remove `unused-type-ignore-comment = "ignore"` from the `backend/**` ty override in `pyproject.toml`
+- [x] T017 [P] [US1] Remove `unused-type-ignore-comment = "ignore"` from the `driver/**` ty override in `pyproject.toml`
+- [x] T018 [P] [US1] Remove `unused-type-ignore-comment = "ignore"` from the `python_sdk/**` ty override in `pyproject.toml`
+- [x] T019 [US1] Run `uv run ty check 2>&1` to identify all orphaned `# type: ignore` comments flagged by `unused-type-ignore-comment`
+- [x] T020 [US1] Remove orphaned `# type: ignore` comments in `backend/` files identified by ty
+- [x] T021 [P] [US1] Remove orphaned `# type: ignore` comments in `python_sdk/` files identified by ty
+- [x] T022 [P] [US1] Remove orphaned `# type: ignore` comments in `tasks/` files identified by ty
+- [x] T023 [P] [US1] Remove orphaned `# type: ignore` comments in `driver/` files identified by ty
+- [x] T024 [US1] Run `uv run ty check` to verify it passes cleanly with `unused-type-ignore-comment` enabled
+- [x] T025 [US1] Run `uv run invoke lint` to verify full lint pipeline passes
 
 **Checkpoint**: `unused-type-ignore-comment` is enabled, orphaned comments are removed. This is the MVP — type checking is consolidated on ty.
 
@@ -79,43 +79,43 @@
 
 #### Audit: cli/ module (1 rule)
 
-- [ ] T026 [US2] Enable `unresolved-attribute` for `cli/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T026 [US2] Enable `unresolved-attribute` for `cli/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
 
 #### Audit: driver/ module (1 remaining rule after Phase 3)
 
-- [ ] T027 [P] [US2] Enable `unresolved-import` for `driver/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T027 [P] [US2] Enable `unresolved-import` for `driver/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
 
 #### Audit: tasks/ module (2 remaining rules after Phase 3)
 
-- [ ] T028 [P] [US2] Enable `invalid-argument-type` for `tasks/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T029 [P] [US2] Enable `unresolved-attribute` for `tasks/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T028 [P] [US2] Enable `invalid-argument-type` for `tasks/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T029 [P] [US2] Enable `unresolved-attribute` for `tasks/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
 
 #### Audit: python_sdk/ module (3 remaining rules after Phase 3)
 
-- [ ] T030 [US2] Enable `invalid-argument-type` for `python_sdk/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T031 [P] [US2] Enable `invalid-assignment` for `python_sdk/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T032 [P] [US2] Enable `invalid-type-form` for `python_sdk/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T030 [US2] Enable `invalid-argument-type` for `python_sdk/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T031 [P] [US2] Enable `invalid-assignment` for `python_sdk/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T032 [P] [US2] Enable `invalid-type-form` for `python_sdk/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
 
 #### Audit: backend/ module (14 remaining rules after Phase 3)
 
-- [ ] T033 [US2] Enable `invalid-newtype` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T034 [P] [US2] Enable `not-subscriptable` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T035 [P] [US2] Enable `unsupported-operator` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T036 [P] [US2] Enable `unknown-argument` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T037 [P] [US2] Enable `missing-argument` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T038 [US2] Enable `no-matching-overload` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T039 [US2] Enable `invalid-await` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T040 [US2] Enable `invalid-type-arguments` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T041 [US2] Enable `invalid-type-form` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T042 [US2] Enable `invalid-method-override` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T043 [US2] Enable `invalid-return-type` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T044 [US2] Enable `invalid-assignment` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T045 [US2] Enable `invalid-argument-type` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
-- [ ] T046 [US2] Enable `unresolved-attribute` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T033 [US2] Enable `invalid-newtype` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T034 [P] [US2] Enable `not-subscriptable` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T035 [P] [US2] Enable `unsupported-operator` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T036 [P] [US2] Enable `unknown-argument` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T037 [P] [US2] Enable `missing-argument` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T038 [US2] Enable `no-matching-overload` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T039 [US2] Enable `invalid-await` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T040 [US2] Enable `invalid-type-arguments` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T041 [US2] Enable `invalid-type-form` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T042 [US2] Enable `invalid-method-override` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T043 [US2] Enable `invalid-return-type` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T044 [US2] Enable `invalid-assignment` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T045 [US2] Enable `invalid-argument-type` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
+- [x] T046 [US2] Enable `unresolved-attribute` for `backend/**` by removing from ty overrides in `pyproject.toml`, run `uv run ty check`, fix violations or document as upstream blocker
 
-- [ ] T047 [US2] Verify remaining suppressed rules count is <=10 (50%+ reduction from 21)
-- [ ] T048 [US2] Run `uv run ty check` to verify all changes pass cleanly
-- [ ] T049 [US2] Run `uv run invoke lint` to verify full lint pipeline passes
+- [x] T047 [US2] Verify remaining suppressed rules count is <=10 (50%+ reduction from 21)
+- [x] T048 [US2] Run `uv run ty check` to verify all changes pass cleanly
+- [x] T049 [US2] Run `uv run invoke lint` to verify full lint pipeline passes
 
 **Checkpoint**: ty rule coverage increased by at least 50%. All remaining suppressions are documented.
 
@@ -129,9 +129,9 @@
 
 ### Implementation for User Story 3
 
-- [ ] T050 [US3] Update linting line in `AGENTS.md` from "ruff, mypy (backend)" to "ruff, ty"
-- [ ] T051 [P] [US3] Update Principle IV in `.specify/memory/constitution.md` to reference ty instead of mypy
-- [ ] T052 [P] [US3] Search `dev/` directory for any mypy references in guides or documentation and update them
+- [x] T050 [US3] Update linting line in `AGENTS.md` from "ruff, mypy (backend)" to "ruff, ty"
+- [x] T051 [P] [US3] Update Principle IV in `.specify/memory/constitution.md` to reference ty instead of mypy
+- [x] T052 [P] [US3] Search `dev/` directory for any mypy references in guides or documentation and update them
 
 **Checkpoint**: All documentation reflects ty as the sole type checker.
 
@@ -141,10 +141,10 @@
 
 **Purpose**: Final verification and cleanup
 
-- [ ] T053 Run `uv run invoke format` to format all modified Python files
-- [ ] T054 Run `uv run invoke lint` for final full lint pass
-- [ ] T055 Run `uv run invoke test` to verify no tests are broken
-- [ ] T056 Verify `uv run ty check` passes cleanly on the entire project
+- [x] T053 Run `uv run invoke format` to format all modified Python files
+- [x] T054 Run `uv run invoke lint` for final full lint pass
+- [x] T055 Run `uv run invoke test` to verify no tests are broken
+- [x] T056 Verify `uv run ty check` passes cleanly on the entire project
 
 ---
 
