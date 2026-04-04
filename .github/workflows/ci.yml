@@ -325,4 +325,4 @@ jobs:
           echo "PYTEST_OTEL_ARGS=--export-traces" >> $GITHUB_ENV
       # Use tini to properly propagate cancellation signal to pytest, so that containers are properly destroyed
       - name: Run E2E tests
-        run: exec tini -s -g -- uv run pytest -v -m ci ${PYTEST_OTEL_ARGS:-} backend/tests/e2e
+        run: exec tini -s -g -- uv run pytest -v -x -m ci ${PYTEST_OTEL_ARGS:-} backend/tests/e2e

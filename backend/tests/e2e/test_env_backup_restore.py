@@ -84,6 +84,7 @@ async def _read_counter(kubeconfig_path: str, namespace: str) -> int:
 
 
 @pytest.mark.ci
+@pytest.mark.order("last")
 async def test_environment_backup_and_restore_lifecycle(
     styrmin_resources: dict,
     velero_ready: None,
