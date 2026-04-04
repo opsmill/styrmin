@@ -33,7 +33,7 @@ async def create(
                 environment_id=environment_id,
                 name=name,
                 max_concurrency=max_concurrency,
-                timeout=backup_timeout,
+                backup_timeout=backup_timeout,
             )
 
             print_success(

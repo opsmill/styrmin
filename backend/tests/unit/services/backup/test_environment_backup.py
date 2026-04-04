@@ -7,6 +7,7 @@ does not support SQLModel select() queries.
 
 from __future__ import annotations
 
+from enum import Enum
 from uuid import uuid4
 
 import pytest
@@ -198,7 +199,7 @@ class TestGetEnvironmentBackups:
 class TestAggregateParentStatus:
     """Test the shared status aggregation helper."""
 
-    def _aggregate(self, statuses: list) -> EnvironmentBackupStatus:
+    def _aggregate(self, statuses: list) -> Enum:
         return _aggregate_parent_status(
             constituent_statuses=statuses,
             completed_value=BackupStatus.COMPLETED,
