@@ -22,8 +22,7 @@ Styrmin is a **deployment orchestration platform** that manages application depl
 ### Setup
 
 ```bash
-uv sync --all-groups                  # Install Python dependencies
-uv sync --all-packages                # Ensure cli packages are installed
+uv sync --all-groups --all-packages   # Install Python dependencies add all packages are installed
 ```
 
 ### Testing
