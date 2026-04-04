@@ -23,6 +23,7 @@ async def _deploy_and_wait(
     environment_id: str,
     name: str,
     timeout: float = 180,
+    service_name_overrides: list[dict[str, str]] | None = None,
 ) -> dict:
     """Deploy a simple-app and poll until running. Returns deployment info."""
     from styrmin_sdk.exceptions import StyrminError
@@ -32,6 +33,7 @@ async def _deploy_and_wait(
         version="0.1.0",
         environment_id=environment_id,
         name=name,
+        service_name_overrides=service_name_overrides,
     )
     deployment_id = task.deployment_id
     assert deployment_id is not None, f"Task for {name} should have a deployment_id"
@@ -93,7 +95,14 @@ async def test_environment_backup_and_restore_lifecycle(
 
     # ── 1. Deploy two simple-app instances ──────────────────────────────
     app1 = await _deploy_and_wait(client, environment_id, "simple-app-env-test-1")
-    app2 = await _deploy_and_wait(client, environment_id, "simple-app-env-test-2")
+    app2 = await _deploy_and_wait(
+        client,
+        environment_id,
+        "simple-app-env-test-2",
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": "simple-app-2"},
+        ],
+    )
 
     assert app1["instance_id"] is not None, "App 1 should have an instance_id"
     assert app2["instance_id"] is not None, "App 2 should have an instance_id"
