@@ -3,7 +3,7 @@
 ## Tooling
 
 - **Linter & Formatter:** ruff (all rules enabled via `select = ["ALL"]`, with selective ignores)
-- **Type Checker:** mypy with `disallow_untyped_defs = true`
+- **Type Checker:** ty (Astral's type checker, configured in `[tool.ty]` in `pyproject.toml`)
 - **Line Length:** 120 characters (hard limit), 150 for pycodestyle
 - **Quote Style:** Double quotes
 - **Complexity:** Max cyclomatic complexity of 10
@@ -16,7 +16,7 @@ uv run invoke format lint
 
 ## Type Hints
 
-All public functions must have complete type annotations (enforced by mypy).
+All public functions must have complete type annotations (enforced by ty).
 
 - Use `X | Y` syntax instead of `Union[X, Y]`
 - Use `X | None` instead of `Optional[X]`
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from styrmin_backend.db.models import Cluster
 ```
 
-Tests are exempt from `disallow_untyped_defs`.
+Tests are exempt from strict typing enforcement.
 
 ## Import Ordering
 

@@ -33,7 +33,6 @@ dev = [
     "invoke>=2.2.0",
     "kr8s>=0.20.15",
     "kubernetes-asyncio>=33.3.0",
-    "mypy>=1.19.1",
     "pytest>=9",
     "pytest-asyncio>=1.3.0",
     "pytest-mock>=3.14.0",
@@ -42,10 +41,6 @@ dev = [
     "opentelemetry-exporter-otlp>=1.25",
     "ruff>=0.14.14",
     "testcontainers>=4.14.0",
-    "types-jsonschema>=4.23.0.20241208",
-    "types-pyyaml>=6.0.12.20241230",
-    "types-requests>=2.32.0.20250306",
-    "types-toml>=0.10.8.20240310",
     "yamllint>=1.35.1",
     "rumdl>=0.1.50",
     "ariadne-codegen>=0.14",
@@ -56,56 +51,46 @@ dev = [
 
 [tool.ty.environment]
 python-version = "3.14"
+extra-paths = ["backend"]
+
+[[tool.ty.overrides]]
+include = ["**/_generated/**"]
+
+[tool.ty.overrides.rules]
+unused-type-ignore-comment = "ignore" # Generated code by ariadne-codegen — do not edit
+invalid-assignment = "ignore" # Generated code by ariadne-codegen — do not edit
 
 [[tool.ty.overrides]]
 include = ["tasks/**"]
 
 [tool.ty.overrides.rules]
-unused-type-ignore-comment = "ignore" # Clashes with mypy's type ignore comments
-invalid-argument-type = "ignore" # TODO: fix violations
-unresolved-attribute = "ignore" # TODO: fix violations
+invalid-argument-type = "ignore" # Upstream: invoke library @task decorator has incorrect return type annotations
 
 [[tool.ty.overrides]]
 include = ["backend/**"]
 
 [tool.ty.overrides.rules]
-unused-type-ignore-comment = "ignore" # Clashes with mypy's type ignore comments
-invalid-argument-type = "ignore" # TODO: fix violations
-invalid-assignment = "ignore" # TODO: fix violations
-invalid-await = "ignore" # TODO: fix violations
-invalid-method-override = "ignore" # TODO: fix violations
-invalid-return-type = "ignore" # TODO: fix violations
-invalid-type-arguments = "ignore" # TODO: fix violations
-no-matching-overload = "ignore" # TODO: fix violations
-not-subscriptable = "ignore" # TODO: fix violations
-invalid-newtype = "ignore" # TODO: fix violations
-invalid-type-form = "ignore" # TODO: fix violations
-missing-argument = "ignore" # TODO: fix violations
-unknown-argument = "ignore" # TODO: fix violations
-unresolved-attribute = "ignore" # TODO: fix violations
-unsupported-operator = "ignore" # TODO: fix violations
+invalid-argument-type = "ignore" # Upstream: Strawberry, SQLAlchemy, Jinja2, kubernetes-asyncio type stub mismatches (~98 violations)
+invalid-assignment = "ignore" # Upstream: ty infers nested dict types too narrowly + test fakes intentionally violate types
+invalid-await = "ignore" # Upstream: Prefect/SQLAlchemy async patterns ty doesn't resolve correctly
+invalid-method-override = "ignore" # Upstream: Strawberry resolver method signatures differ from base
+missing-argument = "ignore" # Upstream: Strawberry/SQLAlchemy constructor patterns
+not-subscriptable = "ignore" # Upstream: Strawberry/SQLModel generic subscript patterns
+unknown-argument = "ignore" # Upstream: kubernetes-asyncio stubs missing _content_type param
+unresolved-attribute = "ignore" # Upstream: Strawberry/SQLAlchemy/Prefect attribute resolution
 
 [[tool.ty.overrides]]
-include = ["cli/**"]
+include = ["driver/examples/db-test/src/**"]
 
 [tool.ty.overrides.rules]
-unresolved-attribute = "ignore" # TODO: fix violations
-
-[[tool.ty.overrides]]
-include = ["driver/**"]
-
-[tool.ty.overrides.rules]
-unused-type-ignore-comment = "ignore" # Clashes with mypy's type ignore comments
-unresolved-import = "ignore" # TODO: fix violations
+unresolved-import = "ignore" # aiomysql and pymongo are not in root workspace venv — example-specific deps
 
 [[tool.ty.overrides]]
 include = ["python_sdk/**"]
 
 [tool.ty.overrides.rules]
-unused-type-ignore-comment = "ignore" # Clashes with mypy's type ignore comments
-invalid-argument-type = "ignore" # TODO: fix violations
-invalid-assignment = "ignore" # TODO: fix violations
-invalid-type-form = "ignore" # TODO: fix violations
+invalid-argument-type = "ignore" # Upstream: ty doesn't widen dict[str, str] to dict[str, JsonValue] for recursive type aliases
+invalid-type-form = "ignore" # Upstream: ty bug — method named `list` shadows builtins.list in deferred annotations
 
 [tool.uv]
 package = false
@@ -116,37 +101,6 @@ styrmin-sdk = { workspace = true }
 
 [tool.uv.workspace]
 members = ["cli", "styrmin-backend", "python_sdk"]
-
-[tool.mypy]
-pretty = true
-ignore_missing_imports = true
-disallow_untyped_defs = true
-plugins = ["strawberry.ext.mypy_plugin"]
-
-[[tool.mypy.overrides]]
-module = "infrahub_sdk.ctl.check"
-disable_error_code = ["call-overload"]
-
-[[tool.mypy.overrides]]
-module = "infrahub_sdk.ctl.generator"
-disable_error_code = ["attr-defined"]
-
-[[tool.mypy.overrides]]
-module = "infrahub_sdk.ctl.schema"
-disable_error_code = ["arg-type", "attr-defined", "misc", "union-attr"]
-
-[[tool.mypy.overrides]]
-module = "infrahub_sdk.utils"
-disable_error_code = ["arg-type", "attr-defined", "return-value", "union-attr"]
-
-[[tool.mypy.overrides]]
-module = "styrmin_sdk.graphql._generated.*"
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-
 
 [tool.ruff]
 line-length = 120

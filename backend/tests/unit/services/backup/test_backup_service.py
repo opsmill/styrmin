@@ -507,7 +507,8 @@ class TestUpdateBackupComponentStatus:
         assert result.status == BackupStatus.FAILED
         assert result.completed_at is not None
         assert result.component_statuses["db"]["error"] == "Connection refused"  # type: ignore[index]
-        assert "db" in result.error_message  # type: ignore[operator]
+        assert result.error_message is not None
+        assert "db" in result.error_message
 
     @pytest.mark.anyio
     async def test_component_status_not_found(self) -> None:

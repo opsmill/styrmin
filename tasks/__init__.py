@@ -29,7 +29,6 @@ def lint_all(context: Context) -> None:
     """Run all linters (Python, Markdown, and YAML)."""
     fmt.lint_ruff(context)
     fmt.lint_ty(context)
-    fmt.lint_mypy(context)
     fmt.lint_markdown(context)
     fmt.lint_yaml(context)
     graphql_validate.validate_graphql(context)
@@ -69,7 +68,7 @@ def generate_validate(context: Context) -> None:
     generated_dir = MAIN_DIRECTORY_PATH / "python_sdk" / "src" / "styrmin_sdk" / "graphql" / "_generated"
     context.run("ariadne-codegen", hide=True)
     result = context.run(f"git diff --exit-code {generated_dir}", warn=True, hide=True)
-    if result.failed:
+    if result is not None and result.failed:
         # Restore the committed state so the working tree stays clean
         context.run(f"git checkout -- {generated_dir}", hide=True)
         raise SystemExit("Generated types are out of date. Run 'uv run invoke generate' to update them.")

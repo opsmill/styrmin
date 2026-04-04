@@ -143,6 +143,7 @@ class TestIngressServiceConfigModel:
             )
         )
         assert config.service is not None
+        assert config.service.annotations is not None
         assert (
             "service.beta.kubernetes.io/aws-load-balancer-target-group-arn"
             in config.service.annotations

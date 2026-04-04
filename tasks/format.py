@@ -8,7 +8,7 @@ from invoke.tasks import task
 if TYPE_CHECKING:
     from invoke.context import Context
 
-from .utils import BACKEND_DIRECTORY, MAIN_DIRECTORY_PATH
+from .utils import MAIN_DIRECTORY_PATH
 
 ns = Collection()
 
@@ -28,15 +28,6 @@ def format_markdown(context: Context) -> None:
     """Format markdown files with rumdl."""
     print(" - Formatting markdown files with rumdl")
     exec_cmd = "rumdl fmt ."
-    with context.cd(MAIN_DIRECTORY_PATH):
-        context.run(exec_cmd, pty=True)
-
-
-@task
-def lint_mypy(context: Context) -> None:
-    """Run Linter to check all Python files."""
-    print(" - Check code with mypy")
-    exec_cmd = f"mypy --show-error-codes {BACKEND_DIRECTORY}"
     with context.cd(MAIN_DIRECTORY_PATH):
         context.run(exec_cmd, pty=True)
 
@@ -79,7 +70,7 @@ def lint_yaml(context: Context) -> None:
 
 ns.add_task(format_python)
 ns.add_task(format_markdown)
-ns.add_task(lint_mypy)
 ns.add_task(lint_ruff)
+ns.add_task(lint_ty)
 ns.add_task(lint_markdown)
 ns.add_task(lint_yaml)

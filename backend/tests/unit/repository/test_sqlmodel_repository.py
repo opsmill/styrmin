@@ -9,7 +9,7 @@ class DummyModel(SQLModel, table=True):
     name: str = Field(unique=True)
 
 
-class DummyModelRepository(BaseSQLModelRepository[DummyModel]):  # type: ignore[type-var]
+class DummyModelRepository(BaseSQLModelRepository[DummyModel]):  # type: ignore  # DummyModel intentionally doesn't extend StyrminModel for test isolation
     model_class = DummyModel
 
 

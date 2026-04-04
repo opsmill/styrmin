@@ -45,6 +45,7 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [adr-001-migrate-cli-typer-to-cyclopts.md](adr/adr-001-migrate-cli-typer-to-cyclopts.md) - Migrate styrminctl from Typer to Cyclopts for performance, native async, and framework unification
 
 - [adr-002-consolidate-driver-single-yaml.md](adr/adr-002-consolidate-driver-single-yaml.md) - Consolidate driver declarative config into single driver.styrmin.yml
+- [adr-003-consolidate-typechecker-on-ty.md](adr/adr-003-consolidate-typechecker-on-ty.md) - Consolidate type checking on ty, removing mypy
 
 ## Current Knowledge
 

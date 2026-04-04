@@ -61,8 +61,6 @@ jobs:
         run: uv run ruff check
       - name: Run type checker
         run: uv run ty check
-      - name: Run type checks
-        run: uv run mypy backend
 
   yaml-lint:
     name: YAML Linting

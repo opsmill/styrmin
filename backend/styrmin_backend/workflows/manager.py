@@ -166,5 +166,5 @@ class PrefectManager:
     async def initialize(self) -> None:
         async with get_client(sync_client=False) as client:
             await self.setup_blocks()
-            await self.setup_work_pools(client=client)  # type: ignore[call-overload]
-            await self.setup_deployments(client=client)  # type: ignore[call-overload]
+            await self.setup_work_pools(client=client)  # type: ignore  # Prefect Task.__call__ overload resolution
+            await self.setup_deployments(client=client)  # type: ignore  # Prefect Task.__call__ overload resolution
