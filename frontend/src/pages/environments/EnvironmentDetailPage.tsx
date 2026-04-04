@@ -5,6 +5,10 @@ import {
   useListBackupStorageLocationsQuery,
   useAssignBackupStorageLocationMutation,
   useUnassignBackupStorageLocationMutation,
+  useListEnvironmentBackupsQuery,
+  useCreateEnvironmentBackupMutation,
+  useCreateEnvironmentRestoreMutation,
+  useDeleteEnvironmentBackupMutation,
 } from "@/generated/graphql";
 import { useQueryClient } from "@tanstack/react-query";
 import { LoadingState } from "@/components/LoadingState";
@@ -13,6 +17,12 @@ import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
 import { ParameterCards } from "@/components/ParameterCards";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -21,14 +31,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Plus, Trash2, RotateCcw } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "parameters", label: "Parameters" },
-  { id: "backups", label: "Backups", badge: "SOON" },
+  { id: "backups", label: "Backups" },
 ];
 
 export default function EnvironmentDetailPage() {
@@ -49,6 +69,21 @@ export default function EnvironmentDetailPage() {
   const assignBslMutation = useAssignBackupStorageLocationMutation();
   const unassignBslMutation = useUnassignBackupStorageLocationMutation();
   const queryClient = useQueryClient();
+
+  // Environment backup state
+  const { data: envBackupsData } = useListEnvironmentBackupsQuery(
+    { environmentId },
+    { refetchInterval: autoRefreshEnabled ? 10_000 : false },
+  );
+  const createEnvBackupMutation = useCreateEnvironmentBackupMutation();
+  const createEnvRestoreMutation = useCreateEnvironmentRestoreMutation();
+  const deleteEnvBackupMutation = useDeleteEnvironmentBackupMutation();
+
+  const [showCreateBackupDialog, setShowCreateBackupDialog] = useState(false);
+  const [backupName, setBackupName] = useState("");
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
 
   const environment = data?.environment;
 
@@ -321,14 +356,278 @@ export default function EnvironmentDetailPage() {
         </div>
       </TabPanel>
 
-      {/* Backups Tab (Coming Soon) */}
+      {/* Backups Tab */}
       <TabPanel active={activeTab === "backups"}>
-        <EmptyState
-          title="Environment Backups"
-          description="Schedule and manage backups across all deployments in this environment. Configure retention policies and restore points from a single place."
-          icon="package"
-          comingSoon
-        />
+        <Card className="mb-6">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-base">Environment Backups</CardTitle>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setBackupName("");
+                setBackupError(null);
+                setShowCreateBackupDialog(true);
+              }}
+              disabled={!environment.backupStorageLocation}
+            >
+              <Plus className="mr-1 h-3 w-3" />
+              Create Backup
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {!environment.backupStorageLocation && (
+              <p className="text-sm text-muted-foreground">
+                Assign a backup storage location to enable environment backups.
+              </p>
+            )}
+            {environment.backupStorageLocation &&
+              (!envBackupsData?.environmentBackups ||
+                envBackupsData.environmentBackups.length === 0) && (
+                <p className="text-sm text-muted-foreground">
+                  No environment backups yet.
+                </p>
+              )}
+            {envBackupsData?.environmentBackups &&
+              envBackupsData.environmentBackups.length > 0 && (
+                <div className="rounded-md border">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="px-4 py-2 text-left text-sm font-medium">
+                          Name
+                        </th>
+                        <th className="px-4 py-2 text-left text-sm font-medium">
+                          Status
+                        </th>
+                        <th className="px-4 py-2 text-left text-sm font-medium">
+                          Backups
+                        </th>
+                        <th className="px-4 py-2 text-left text-sm font-medium">
+                          Created
+                        </th>
+                        <th className="px-4 py-2 text-right text-sm font-medium">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {envBackupsData.environmentBackups.map((eb) => (
+                        <tr
+                          key={eb.id}
+                          className="border-b last:border-0 hover:bg-muted/30 transition-colors"
+                        >
+                          <td className="px-4 py-2 text-sm font-medium">
+                            {eb.name}
+                          </td>
+                          <td className="px-4 py-2 text-sm">
+                            <StatusBadge status={eb.status} />
+                          </td>
+                          <td className="px-4 py-2 text-sm">
+                            {eb.completedCount}/{eb.backupCount}
+                            {eb.failedCount > 0 && (
+                              <span className="text-destructive ml-1">
+                                ({eb.failedCount} failed)
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-muted-foreground">
+                            {eb.createdOn
+                              ? new Date(eb.createdOn).toLocaleString()
+                              : ""}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setConfirmRestoreId(eb.id)}
+                                disabled={
+                                  eb.status !== "completed" &&
+                                  eb.status !== "partially_failed"
+                                }
+                                title="Restore from backup"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setConfirmDeleteId(eb.id)}
+                                disabled={
+                                  eb.status === "pending" ||
+                                  eb.status === "in_progress"
+                                }
+                                title="Delete backup"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+          </CardContent>
+        </Card>
+
+        {/* Create Backup Dialog */}
+        <Dialog
+          open={showCreateBackupDialog}
+          onOpenChange={setShowCreateBackupDialog}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create Environment Backup</DialogTitle>
+              <DialogDescription>
+                Back up all active application instances in this environment.
+              </DialogDescription>
+            </DialogHeader>
+            {backupError && (
+              <Alert variant="destructive">
+                <AlertDescription>{backupError}</AlertDescription>
+              </Alert>
+            )}
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="backup-name">Name (optional)</Label>
+                <Input
+                  id="backup-name"
+                  value={backupName}
+                  onChange={(e) => setBackupName(e.target.value)}
+                  placeholder="Auto-generated if empty"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setShowCreateBackupDialog(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={createEnvBackupMutation.isPending}
+                onClick={async () => {
+                  try {
+                    setBackupError(null);
+                    await createEnvBackupMutation.mutateAsync({
+                      environmentId,
+                      name: backupName || undefined,
+                    });
+                    queryClient.invalidateQueries({
+                      queryKey: ["ListEnvironmentBackups"],
+                    });
+                    setShowCreateBackupDialog(false);
+                  } catch (err) {
+                    setBackupError(
+                      err instanceof Error
+                        ? err.message
+                        : "Failed to create backup",
+                    );
+                  }
+                }}
+              >
+                {createEnvBackupMutation.isPending
+                  ? "Creating..."
+                  : "Create Backup"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Restore Confirmation Dialog */}
+        <Dialog
+          open={confirmRestoreId !== null}
+          onOpenChange={(open) => !open && setConfirmRestoreId(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Restore from Backup</DialogTitle>
+              <DialogDescription>
+                This will restore all application instances from the selected
+                environment backup. Existing data in the target namespaces will
+                be replaced.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setConfirmRestoreId(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={createEnvRestoreMutation.isPending}
+                onClick={async () => {
+                  if (!confirmRestoreId) return;
+                  try {
+                    await createEnvRestoreMutation.mutateAsync({
+                      environmentBackupId: confirmRestoreId,
+                    });
+                    queryClient.invalidateQueries({
+                      queryKey: ["ListEnvironmentBackups"],
+                    });
+                    setConfirmRestoreId(null);
+                  } catch {
+                    // Error handling can be added if needed
+                  }
+                }}
+              >
+                {createEnvRestoreMutation.isPending
+                  ? "Restoring..."
+                  : "Restore"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog
+          open={confirmDeleteId !== null}
+          onOpenChange={(open) => !open && setConfirmDeleteId(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete Environment Backup</DialogTitle>
+              <DialogDescription>
+                This will permanently delete the environment backup and all its
+                constituent backups and restores. This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setConfirmDeleteId(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={deleteEnvBackupMutation.isPending}
+                onClick={async () => {
+                  if (!confirmDeleteId) return;
+                  try {
+                    await deleteEnvBackupMutation.mutateAsync({
+                      environmentBackupId: confirmDeleteId,
+                    });
+                    queryClient.invalidateQueries({
+                      queryKey: ["ListEnvironmentBackups"],
+                    });
+                    setConfirmDeleteId(null);
+                  } catch {
+                    // Error handling can be added if needed
+                  }
+                }}
+              >
+                {deleteEnvBackupMutation.isPending ? "Deleting..." : "Delete"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </TabPanel>
     </div>
   );

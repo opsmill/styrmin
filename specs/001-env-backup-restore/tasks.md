@@ -17,7 +17,7 @@
 
 **Purpose**: No project scaffolding needed — existing repo structure. This phase ensures the spec artifacts are reviewed and the branch is ready.
 
-- [ ] T001 Verify existing backup/restore models and services in backend/styrmin_backend/db/models.py, backend/styrmin_backend/services/backup/service.py, and backend/styrmin_backend/workflows/ to confirm integration points
+- [x] T001 Verify existing backup/restore models and services in backend/styrmin_backend/db/models.py, backend/styrmin_backend/services/backup/service.py, and backend/styrmin_backend/workflows/ to confirm integration points
 
 ---
 
@@ -27,14 +27,14 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 Add `EnvironmentBackupStatus` and `EnvironmentRestoreStatus` enums to backend/styrmin_backend/db/models.py (PENDING, IN_PROGRESS, COMPLETED, PARTIALLY_FAILED, FAILED)
-- [ ] T003 Add `EnvironmentBackup` model to backend/styrmin_backend/db/models.py (extends StyrminModel; fields: name, status, started_at, completed_at, error_message, metadata_, max_concurrency, timeout, environment_id FK; relationships: environment, backups, restores)
-- [ ] T004 Add `EnvironmentRestore` model to backend/styrmin_backend/db/models.py (extends StyrminModel; fields: name, status, started_at, completed_at, error_message, metadata_, environment_backup_id FK; relationships: environment_backup, restores)
-- [ ] T005 Add nullable `environment_backup_id` FK column and `environment_backup` relationship to existing `Backup` model in backend/styrmin_backend/db/models.py (cascade="all, delete-orphan" on EnvironmentBackup.backups side)
-- [ ] T006 Add nullable `environment_restore_id` FK column and `environment_restore` relationship to existing `Restore` model in backend/styrmin_backend/db/models.py (cascade="all, delete-orphan" on EnvironmentRestore.restores side)
-- [ ] T007 [P] Create `EnvironmentBackupRepository` (protocol + SQLModel implementation) in backend/styrmin_backend/repository/environment_backup.py following existing repository patterns
-- [ ] T008 [P] Create `EnvironmentRestoreRepository` (protocol + SQLModel implementation) in backend/styrmin_backend/repository/environment_restore.py following existing repository patterns
-- [ ] T009 Register `environment_backups` and `environment_restores` repositories in `UnitOfWork` in backend/styrmin_backend/services/unit_of_work.py
+- [x] T002 Add `EnvironmentBackupStatus` and `EnvironmentRestoreStatus` enums to backend/styrmin_backend/db/models.py (PENDING, IN_PROGRESS, COMPLETED, PARTIALLY_FAILED, FAILED)
+- [x] T003 Add `EnvironmentBackup` model to backend/styrmin_backend/db/models.py (extends StyrminModel; fields: name, status, started_at, completed_at, error_message, metadata_, max_concurrency, timeout, environment_id FK; relationships: environment, backups, restores)
+- [x] T004 Add `EnvironmentRestore` model to backend/styrmin_backend/db/models.py (extends StyrminModel; fields: name, status, started_at, completed_at, error_message, metadata_, environment_backup_id FK; relationships: environment_backup, restores)
+- [x] T005 Add nullable `environment_backup_id` FK column and `environment_backup` relationship to existing `Backup` model in backend/styrmin_backend/db/models.py (cascade="all, delete-orphan" on EnvironmentBackup.backups side)
+- [x] T006 Add nullable `environment_restore_id` FK column and `environment_restore` relationship to existing `Restore` model in backend/styrmin_backend/db/models.py (cascade="all, delete-orphan" on EnvironmentRestore.restores side)
+- [x] T007 [P] Create `EnvironmentBackupRepository` (protocol + SQLModel implementation) in backend/styrmin_backend/repository/environment_backup.py following existing repository patterns
+- [x] T008 [P] Create `EnvironmentRestoreRepository` (protocol + SQLModel implementation) in backend/styrmin_backend/repository/environment_restore.py following existing repository patterns
+- [x] T009 Register `environment_backups` and `environment_restores` repositories in `UnitOfWork` in backend/styrmin_backend/services/unit_of_work.py
 
 **Checkpoint**: Foundation ready — models exist, repos registered, user story implementation can begin.
 
@@ -48,23 +48,23 @@
 
 ### Tests for User Story 1
 
-- [ ] T010 [P] [US1] Unit test for `create_environment_backup` service function in backend/tests/unit/services/backup/test_environment_backup.py — test record creation, validation (no BSL, no active instances, skipped instances), and constituent backup linkage
-- [ ] T011 [P] [US1] Unit test for `update_environment_backup_status` in backend/tests/unit/services/backup/test_environment_backup.py — test status aggregation logic (all complete, partial fail, all fail, timeout)
+- [x] T010 [P] [US1] Unit test for `create_environment_backup` service function in backend/tests/unit/services/backup/test_environment_backup.py — test record creation, validation (no BSL, no active instances, skipped instances), and constituent backup linkage
+- [x] T011 [P] [US1] Unit test for `update_environment_backup_status` in backend/tests/unit/services/backup/test_environment_backup.py — test status aggregation logic (all complete, partial fail, all fail, timeout)
 
 ### Implementation for User Story 1
 
-- [ ] T012 [US1] Implement `create_environment_backup()` service function in backend/styrmin_backend/services/backup/environment.py — validate environment has BSL (FR-012), find active instances, skip instances with in-progress backups (FR-011), create EnvironmentBackup + constituent Backup records, dispatch orchestration workflow
-- [ ] T013 [US1] Implement `update_environment_backup_status()` service function in backend/styrmin_backend/services/backup/environment.py — recompute parent status from constituent statuses (FR-003), update started_at/completed_at/error_message/metadata
-- [ ] T014 [US1] Add `EXECUTE_ENV_BACKUP` to `PrefectAction` enum in backend/styrmin_backend/workflows/models.py
-- [ ] T015 [US1] Create `execute_environment_backup_workflow` Prefect flow in backend/styrmin_backend/workflows/templates/environment_backup.py — load EnvironmentBackup, mark IN_PROGRESS, dispatch constituent EXECUTE_BACKUP actions with asyncio.Semaphore for concurrency limiting (FR-017), track completions, update parent status, handle overall timeout (FR-018)
-- [ ] T016 [US1] Register `EXECUTE_ENV_BACKUP` workflow in backend/styrmin_backend/workflows/catalogue.py
-- [ ] T017 [P] [US1] Create `EnvironmentBackupType` Strawberry GraphQL type in backend/styrmin_backend/api/definitions/backup/environment_backup.py — include computed fields (backupCount, completedCount, failedCount) and resolvers for environment, backups, restores
-- [ ] T018 [P] [US1] Add `EnvironmentBackupNotFoundError`, `EnvironmentBackupValidationError`, `EnvironmentBackupOperationInProgressError` ServiceError subclasses to backend/styrmin_backend/services/exceptions.py (with error_code and default_message)
-- [ ] T019 [US1] Add `create_environment_backup` mutation to backend/styrmin_backend/api/schema/mutation.py (args: environmentId, name, maxConcurrency, timeout) returning EnvironmentBackupType — errors raised as ServiceError exceptions
-- [ ] T020 [P] [US1] Create SDK mutation file python_sdk/src/styrmin_sdk/graphql/create_environment_backup.graphql per contracts/sdk_operations.graphql
-- [ ] T020a [US1] Create `EnvironmentBackupResource` class in python_sdk/src/styrmin_sdk/resources/environment_backups.py — methods: `create(environment_id, name?, max_concurrency?, timeout?)`, `get(id)`, `list(environment_id, status?)`, `delete(id)`, `wait_for_completion(id, max_wait, interval)` following existing resource patterns (e.g., `BackupResource`)
-- [ ] T020b [US1] Register `environment_backups` attribute on `StyrminClient` in python_sdk/src/styrmin_sdk/client.py — instantiate `EnvironmentBackupResource(transport)` in `__init__`
-- [ ] T021 [P] [US1] Add `styrmin env backup create` CLI command in appropriate CLI module — calls CreateEnvironmentBackup mutation via styrmin-sdk, accepts environment name/ID, optional --name, --max-concurrency, --timeout flags
+- [x] T012 [US1] Implement `create_environment_backup()` service function in backend/styrmin_backend/services/backup/environment.py — validate environment has BSL (FR-012), find active instances, skip instances with in-progress backups (FR-011), create EnvironmentBackup + constituent Backup records, dispatch orchestration workflow
+- [x] T013 [US1] Implement `update_environment_backup_status()` service function in backend/styrmin_backend/services/backup/environment.py — recompute parent status from constituent statuses (FR-003), update started_at/completed_at/error_message/metadata
+- [x] T014 [US1] Add `EXECUTE_ENV_BACKUP` to `PrefectAction` enum in backend/styrmin_backend/workflows/models.py
+- [x] T015 [US1] Create `execute_environment_backup_workflow` Prefect flow in backend/styrmin_backend/workflows/templates/environment_backup.py — load EnvironmentBackup, mark IN_PROGRESS, dispatch constituent EXECUTE_BACKUP actions with asyncio.Semaphore for concurrency limiting (FR-017), track completions, update parent status, handle overall timeout (FR-018)
+- [x] T016 [US1] Register `EXECUTE_ENV_BACKUP` workflow in backend/styrmin_backend/workflows/catalogue.py
+- [x] T017 [P] [US1] Create `EnvironmentBackupType` Strawberry GraphQL type in backend/styrmin_backend/api/definitions/backup/environment_backup.py — include computed fields (backupCount, completedCount, failedCount) and resolvers for environment, backups, restores
+- [x] T018 [P] [US1] Add `EnvironmentBackupNotFoundError`, `EnvironmentBackupValidationError`, `EnvironmentBackupOperationInProgressError` ServiceError subclasses to backend/styrmin_backend/services/exceptions.py (with error_code and default_message)
+- [x] T019 [US1] Add `create_environment_backup` mutation to backend/styrmin_backend/api/schema/mutation.py (args: environmentId, name, maxConcurrency, timeout) returning EnvironmentBackupType — errors raised as ServiceError exceptions
+- [x] T020 [P] [US1] Create SDK mutation file python_sdk/src/styrmin_sdk/graphql/create_environment_backup.graphql per contracts/sdk_operations.graphql
+- [x] T020a [US1] Create `EnvironmentBackupResource` class in python_sdk/src/styrmin_sdk/resources/environment_backups.py — methods: `create(environment_id, name?, max_concurrency?, timeout?)`, `get(id)`, `list(environment_id, status?)`, `delete(id)`, `wait_for_completion(id, max_wait, interval)` following existing resource patterns (e.g., `BackupResource`)
+- [x] T020b [US1] Register `environment_backups` attribute on `StyrminClient` in python_sdk/src/styrmin_sdk/client.py — instantiate `EnvironmentBackupResource(transport)` in `__init__`
+- [x] T021 [P] [US1] Add `styrmin env backup create` CLI command in appropriate CLI module — calls CreateEnvironmentBackup mutation via styrmin-sdk, accepts environment name/ID, optional --name, --max-concurrency, --timeout flags
 
 **Checkpoint**: User Story 1 complete — operators can create environment backups via GraphQL API and CLI. Status updates flow through the Prefect workflow.
 
@@ -78,23 +78,23 @@
 
 ### Tests for User Story 2
 
-- [ ] T022 [P] [US2] Unit test for `create_environment_restore` service function in backend/tests/unit/services/backup/test_environment_restore.py — test validation (reject FAILED backup, reject concurrent restore from same backup), constituent restore creation for COMPLETED-only backups
-- [ ] T023 [P] [US2] Unit test for `update_environment_restore_status` in backend/tests/unit/services/backup/test_environment_restore.py — test status aggregation logic
+- [x] T022 [P] [US2] Unit test for `create_environment_restore` service function in backend/tests/unit/services/backup/test_environment_restore.py — test validation (reject FAILED backup, reject concurrent restore from same backup), constituent restore creation for COMPLETED-only backups
+- [x] T023 [P] [US2] Unit test for `update_environment_restore_status` in backend/tests/unit/services/backup/test_environment_restore.py — test status aggregation logic
 
 ### Implementation for User Story 2
 
-- [ ] T024 [US2] Implement `create_environment_restore()` service function in backend/styrmin_backend/services/backup/environment.py — validate source EnvironmentBackup status (COMPLETED or PARTIALLY_FAILED only), check no concurrent restore in progress, create EnvironmentRestore + constituent Restore records for COMPLETED backups only, dispatch orchestration workflow
-- [ ] T025 [US2] Implement `update_environment_restore_status()` service function in backend/styrmin_backend/services/backup/environment.py — recompute parent status from constituent restore statuses (FR-006)
-- [ ] T026 [US2] Add `EXECUTE_ENV_RESTORE` to `PrefectAction` enum in backend/styrmin_backend/workflows/models.py
-- [ ] T027 [US2] Create `execute_environment_restore_workflow` Prefect flow in backend/styrmin_backend/workflows/templates/environment_backup.py — load EnvironmentRestore, mark IN_PROGRESS, dispatch constituent EXECUTE_RESTORE actions with concurrency limiting, track completions, update parent status
-- [ ] T028 [US2] Register `EXECUTE_ENV_RESTORE` workflow in backend/styrmin_backend/workflows/catalogue.py
-- [ ] T029 [P] [US2] Create `EnvironmentRestoreType` Strawberry GraphQL type in backend/styrmin_backend/api/definitions/backup/environment_restore.py — include computed fields (restoreCount, completedCount, failedCount) and resolvers
-- [ ] T030 [P] [US2] Add `EnvironmentRestoreNotFoundError` ServiceError subclass to backend/styrmin_backend/services/exceptions.py (if not already covered by T018 exceptions)
-- [ ] T031 [US2] Add `create_environment_restore` mutation to backend/styrmin_backend/api/schema/mutation.py (arg: environmentBackupId) returning EnvironmentRestoreType — errors raised as ServiceError exceptions
-- [ ] T032 [P] [US2] Create SDK mutation file python_sdk/src/styrmin_sdk/graphql/create_environment_restore.graphql per contracts/sdk_operations.graphql
-- [ ] T032a [US2] Create `EnvironmentRestoreResource` class in python_sdk/src/styrmin_sdk/resources/environment_restores.py — methods: `create(environment_backup_id)`, `get(id)`, `list(environment_backup_id, status?)`, `wait_for_completion(id, max_wait, interval)` following existing resource patterns
-- [ ] T032b [US2] Register `environment_restores` attribute on `StyrminClient` in python_sdk/src/styrmin_sdk/client.py — instantiate `EnvironmentRestoreResource(transport)` in `__init__`
-- [ ] T033 [P] [US2] Add `styrmin env restore create` CLI command — calls CreateEnvironmentRestore mutation via styrmin-sdk, accepts environment backup name/ID
+- [x] T024 [US2] Implement `create_environment_restore()` service function in backend/styrmin_backend/services/backup/environment.py — validate source EnvironmentBackup status (COMPLETED or PARTIALLY_FAILED only), check no concurrent restore in progress, create EnvironmentRestore + constituent Restore records for COMPLETED backups only, dispatch orchestration workflow
+- [x] T025 [US2] Implement `update_environment_restore_status()` service function in backend/styrmin_backend/services/backup/environment.py — recompute parent status from constituent restore statuses (FR-006)
+- [x] T026 [US2] Add `EXECUTE_ENV_RESTORE` to `PrefectAction` enum in backend/styrmin_backend/workflows/models.py
+- [x] T027 [US2] Create `execute_environment_restore_workflow` Prefect flow in backend/styrmin_backend/workflows/templates/environment_backup.py — load EnvironmentRestore, mark IN_PROGRESS, dispatch constituent EXECUTE_RESTORE actions with concurrency limiting, track completions, update parent status
+- [x] T028 [US2] Register `EXECUTE_ENV_RESTORE` workflow in backend/styrmin_backend/workflows/catalogue.py
+- [x] T029 [P] [US2] Create `EnvironmentRestoreType` Strawberry GraphQL type in backend/styrmin_backend/api/definitions/backup/environment_restore.py — include computed fields (restoreCount, completedCount, failedCount) and resolvers
+- [x] T030 [P] [US2] Add `EnvironmentRestoreNotFoundError` ServiceError subclass to backend/styrmin_backend/services/exceptions.py (if not already covered by T018 exceptions)
+- [x] T031 [US2] Add `create_environment_restore` mutation to backend/styrmin_backend/api/schema/mutation.py (arg: environmentBackupId) returning EnvironmentRestoreType — errors raised as ServiceError exceptions
+- [x] T032 [P] [US2] Create SDK mutation file python_sdk/src/styrmin_sdk/graphql/create_environment_restore.graphql per contracts/sdk_operations.graphql
+- [x] T032a [US2] Create `EnvironmentRestoreResource` class in python_sdk/src/styrmin_sdk/resources/environment_restores.py — methods: `create(environment_backup_id)`, `get(id)`, `list(environment_backup_id, status?)`, `wait_for_completion(id, max_wait, interval)` following existing resource patterns
+- [x] T032b [US2] Register `environment_restores` attribute on `StyrminClient` in python_sdk/src/styrmin_sdk/client.py — instantiate `EnvironmentRestoreResource(transport)` in `__init__`
+- [x] T033 [P] [US2] Add `styrmin env restore create` CLI command — calls CreateEnvironmentRestore mutation via styrmin-sdk, accepts environment backup name/ID
 
 **Checkpoint**: User Story 2 complete — operators can restore an entire environment from a backup via GraphQL API and CLI.
 
@@ -108,23 +108,23 @@
 
 ### Tests for User Story 3
 
-- [ ] T034 [P] [US3] Integration test for `environmentBackups` and `environmentBackup` GraphQL queries in backend/tests/integration/test_environment_backup_queries.py — test list with status filter, get by ID with constituents, empty list case
-- [ ] T034a [P] [US1] Integration test for `createEnvironmentBackup` mutation in backend/tests/integration/test_environment_backup_mutations.py — test successful creation, validation errors (no BSL, no active instances), error union type responses
-- [ ] T034b [P] [US2] Integration test for `createEnvironmentRestore` mutation in backend/tests/integration/test_environment_backup_mutations.py — test successful restore creation, reject FAILED backup, reject concurrent restore, error union type responses
-- [ ] T034c [P] [US4] Integration test for `deleteEnvironmentBackup` mutation in backend/tests/integration/test_environment_backup_mutations.py — test successful cascade delete, reject when operations in progress, error union type responses
+- [x] T034 [P] [US3] Integration test for `environmentBackups` and `environmentBackup` GraphQL queries in backend/tests/integration/test_environment_backup_queries.py — test list with status filter, get by ID with constituents, empty list case
+- [x] T034a [P] [US1] Integration test for `createEnvironmentBackup` mutation in backend/tests/integration/test_environment_backup_mutations.py — test successful creation, validation errors (no BSL, no active instances), error union type responses
+- [x] T034b [P] [US2] Integration test for `createEnvironmentRestore` mutation in backend/tests/integration/test_environment_backup_mutations.py — test successful restore creation, reject FAILED backup, reject concurrent restore, error union type responses
+- [x] T034c [P] [US4] Integration test for `deleteEnvironmentBackup` mutation in backend/tests/integration/test_environment_backup_mutations.py — test successful cascade delete, reject when operations in progress, error union type responses
 
 ### Implementation for User Story 3
 
-- [ ] T035 [P] [US3] Implement `get_environment_backup()`, `get_environment_backups()` service functions in backend/styrmin_backend/services/backup/environment.py — support optional status filter (FR-007, FR-008)
-- [ ] T036 [P] [US3] Implement `get_environment_restore()`, `get_environment_restores()` service functions in backend/styrmin_backend/services/backup/environment.py — support optional status filter
-- [ ] T037 [US3] Add `environment_backup`, `environment_backups`, `environment_restore`, `environment_restores` queries to backend/styrmin_backend/api/schema/query.py
-- [ ] T038 [P] [US3] Create SDK query files in python_sdk/src/styrmin_sdk/graphql/: get_environment_backup.graphql, list_environment_backups.graphql, get_environment_restore.graphql, list_environment_restores.graphql per contracts/sdk_operations.graphql
-- [ ] T039 [P] [US3] Add `styrmin env backup list` and `styrmin env backup get` CLI commands — list backups for an environment (with optional --status filter), show details of a specific backup
-- [ ] T040 [P] [US3] Add `styrmin env restore list` and `styrmin env restore get` CLI commands — list restores for a backup, show details of a specific restore
-- [ ] T041 [US3] Create frontend GraphQL operation files in frontend/src/graphql/: list_environment_backups.graphql, get_environment_backup.graphql per contracts/sdk_operations.graphql
-- [ ] T042 [US3] Add "Backups" section to Environment detail page in frontend/src/pages/environments/EnvironmentDetailPage.tsx — list environment backups with status badges, backup counts, timestamps; detail view showing constituent backup statuses; auto-refresh via refetchInterval polling pattern
-- [ ] T043 [US3] Add "Create Backup" button and dialog to Environment detail page in frontend/src/pages/environments/EnvironmentDetailPage.tsx — calls createEnvironmentBackup mutation with optional name, max concurrency, timeout inputs
-- [ ] T044 [US3] Add "Restore from Backup" button and confirmation dialog per environment backup row in frontend/src/pages/environments/EnvironmentDetailPage.tsx — calls createEnvironmentRestore mutation, shows restore status
+- [x] T035 [P] [US3] Implement `get_environment_backup()`, `get_environment_backups()` service functions in backend/styrmin_backend/services/backup/environment.py — support optional status filter (FR-007, FR-008)
+- [x] T036 [P] [US3] Implement `get_environment_restore()`, `get_environment_restores()` service functions in backend/styrmin_backend/services/backup/environment.py — support optional status filter
+- [x] T037 [US3] Add `environment_backup`, `environment_backups`, `environment_restore`, `environment_restores` queries to backend/styrmin_backend/api/schema/query.py
+- [x] T038 [P] [US3] Create SDK query files in python_sdk/src/styrmin_sdk/graphql/: get_environment_backup.graphql, list_environment_backups.graphql, get_environment_restore.graphql, list_environment_restores.graphql per contracts/sdk_operations.graphql
+- [x] T039 [P] [US3] Add `styrmin env backup list` and `styrmin env backup get` CLI commands — list backups for an environment (with optional --status filter), show details of a specific backup
+- [x] T040 [P] [US3] Add `styrmin env restore list` and `styrmin env restore get` CLI commands — list restores for a backup, show details of a specific restore
+- [x] T041 [US3] Create frontend GraphQL operation files in frontend/src/graphql/: list_environment_backups.graphql, get_environment_backup.graphql per contracts/sdk_operations.graphql
+- [x] T042 [US3] Add "Backups" section to Environment detail page in frontend/src/pages/environments/EnvironmentDetailPage.tsx — list environment backups with status badges, backup counts, timestamps; detail view showing constituent backup statuses; auto-refresh via refetchInterval polling pattern
+- [x] T043 [US3] Add "Create Backup" button and dialog to Environment detail page in frontend/src/pages/environments/EnvironmentDetailPage.tsx — calls createEnvironmentBackup mutation with optional name, max concurrency, timeout inputs
+- [x] T044 [US3] Add "Restore from Backup" button and confirmation dialog per environment backup row in frontend/src/pages/environments/EnvironmentDetailPage.tsx — calls createEnvironmentRestore mutation, shows restore status
 
 **Checkpoint**: User Story 3 complete — operators can view backup/restore status and history via all interfaces (GraphQL, CLI, Frontend).
 
@@ -138,15 +138,15 @@
 
 ### Tests for User Story 4
 
-- [ ] T045 [P] [US4] Unit test for `delete_environment_backup` service function in backend/tests/unit/services/backup/test_environment_backup.py — test successful cascade delete, rejection when operations in progress (FR-010)
+- [x] T045 [P] [US4] Unit test for `delete_environment_backup` service function in backend/tests/unit/services/backup/test_environment_backup.py — test successful cascade delete, rejection when operations in progress (FR-010)
 
 ### Implementation for User Story 4
 
-- [ ] T046 [US4] Implement `delete_environment_backup()` service function in backend/styrmin_backend/services/backup/environment.py — check no in-progress constituent backups or restores (FR-010), then delete EnvironmentBackup (cascade handles constituents via SQLAlchemy)
-- [ ] T047 [US4] Add `delete_environment_backup` mutation to backend/styrmin_backend/api/schema/mutation.py (arg: environmentBackupId) returning Boolean — raises EnvironmentBackupOperationInProgressError or EnvironmentBackupNotFoundError as ServiceError exceptions
-- [ ] T048 [P] [US4] Create SDK mutation file python_sdk/src/styrmin_sdk/graphql/delete_environment_backup.graphql per contracts/sdk_operations.graphql
-- [ ] T049 [P] [US4] Add `styrmin env backup delete` CLI command — calls DeleteEnvironmentBackup mutation, accepts backup name/ID
-- [ ] T050 [US4] Add delete button with confirmation dialog per environment backup row in frontend/src/pages/environments/EnvironmentDetailPage.tsx — calls deleteEnvironmentBackup mutation, refreshes list on success
+- [x] T046 [US4] Implement `delete_environment_backup()` service function in backend/styrmin_backend/services/backup/environment.py — check no in-progress constituent backups or restores (FR-010), then delete EnvironmentBackup (cascade handles constituents via SQLAlchemy)
+- [x] T047 [US4] Add `delete_environment_backup` mutation to backend/styrmin_backend/api/schema/mutation.py (arg: environmentBackupId) returning Boolean — raises EnvironmentBackupOperationInProgressError or EnvironmentBackupNotFoundError as ServiceError exceptions
+- [x] T048 [P] [US4] Create SDK mutation file python_sdk/src/styrmin_sdk/graphql/delete_environment_backup.graphql per contracts/sdk_operations.graphql
+- [x] T049 [P] [US4] Add `styrmin env backup delete` CLI command — calls DeleteEnvironmentBackup mutation, accepts backup name/ID
+- [x] T050 [US4] Add delete button with confirmation dialog per environment backup row in frontend/src/pages/environments/EnvironmentDetailPage.tsx — calls deleteEnvironmentBackup mutation, refreshes list on success
 
 **Checkpoint**: User Story 4 complete — operators can clean up old environment backups via all interfaces.
 
@@ -158,10 +158,10 @@
 
 **Independent Test**: Run the E2E test suite against a test environment with multiple deployments. Verify create → monitor → restore → delete lifecycle works end-to-end via the SDK.
 
-- [ ] T051 [US5] Create E2E test for full environment backup lifecycle in backend/tests/e2e/test_env_backup_restore.py — use `client.environment_backups.create(environment_id, ...)` to create environment backup, verify constituent backups created via `client.environment_backups.get(id)`, poll with `client.environment_backups.wait_for_completion(id)` until COMPLETED status, verify backup counts and metadata
-- [ ] T052 [US5] Add E2E test for environment restore lifecycle in backend/tests/e2e/test_env_backup_restore.py — use `client.environment_restores.create(environment_backup_id)` to restore from completed backup, verify constituent restores via `client.environment_restores.get(id)`, poll with `client.environment_restores.wait_for_completion(id)` until COMPLETED, verify restore counts
-- [ ] T053 [US5] Add E2E test for partial failure scenario in backend/tests/e2e/test_env_backup_restore.py — simulate one constituent backup failure, verify PARTIALLY_FAILED status via `client.environment_backups.get(id)`, verify error details captured, verify restore only includes successful backups
-- [ ] T054 [US5] Add E2E test for cleanup in backend/tests/e2e/test_env_backup_restore.py — use `client.environment_backups.delete(id)` to delete environment backup, verify cascade removes all constituent backups and restores
+- [x] T051 [US5] Create E2E test for full environment backup lifecycle in backend/tests/e2e/test_env_backup_restore.py — use `client.environment_backups.create(environment_id, ...)` to create environment backup, verify constituent backups created via `client.environment_backups.get(id)`, poll with `client.environment_backups.wait_for_completion(id)` until COMPLETED status, verify backup counts and metadata
+- [x] T052 [US5] Add E2E test for environment restore lifecycle in backend/tests/e2e/test_env_backup_restore.py — use `client.environment_restores.create(environment_backup_id)` to restore from completed backup, verify constituent restores via `client.environment_restores.get(id)`, poll with `client.environment_restores.wait_for_completion(id)` until COMPLETED, verify restore counts
+- [x] T053 [US5] Add E2E test for partial failure scenario in backend/tests/e2e/test_env_backup_restore.py — simulate one constituent backup failure, verify PARTIALLY_FAILED status via `client.environment_backups.get(id)`, verify error details captured, verify restore only includes successful backups
+- [x] T054 [US5] Add E2E test for cleanup in backend/tests/e2e/test_env_backup_restore.py — use `client.environment_backups.delete(id)` to delete environment backup, verify cascade removes all constituent backups and restores
 
 **Checkpoint**: User Story 5 complete — full lifecycle validated end-to-end.
 
@@ -171,13 +171,13 @@
 
 **Purpose**: Schema regeneration, SDK type generation, formatting, and final validation.
 
-- [ ] T055 Regenerate GraphQL schema: `uv run styrmin export graphql-schema schema.graphql`
-- [ ] T056 Regenerate SDK types: `uv run invoke generate`
-- [ ] T057 Validate GraphQL operations: `uv run invoke validate-graphql`
-- [ ] T058 Run formatters and linters: `uv run invoke format lint`
-- [ ] T059 Run backend test suite: `uv run invoke test`
-- [ ] T060 Run frontend tests: `cd frontend && pnpm test`
-- [ ] T061 Run quickstart.md validation — walk through all verification steps in specs/001-env-backup-restore/quickstart.md
+- [x] T055 Regenerate GraphQL schema: `uv run styrmin export graphql-schema schema.graphql`
+- [x] T056 Regenerate SDK types: `uv run invoke generate`
+- [x] T057 Validate GraphQL operations: `uv run invoke validate-graphql`
+- [x] T058 Run formatters and linters: `uv run invoke format lint`
+- [x] T059 Run backend test suite: `uv run invoke test`
+- [x] T060 Run frontend tests: `cd frontend && pnpm test`
+- [x] T061 Run quickstart.md validation — walk through all verification steps in specs/001-env-backup-restore/quickstart.md
 
 ---
 

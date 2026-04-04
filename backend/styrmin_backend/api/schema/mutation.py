@@ -12,6 +12,10 @@ import strawberry
 from loguru import logger
 
 from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
+from styrmin_backend.api.definitions.backup.environment_backup import (
+    EnvironmentBackup as EnvironmentBackupType,
+    EnvironmentRestore as EnvironmentRestoreType,
+)
 from styrmin_backend.api.definitions.backup.restore import Restore as RestoreType
 from styrmin_backend.api.definitions.backup.schedule import (
     BackupSchedule as BackupScheduleType,
@@ -66,6 +70,11 @@ from styrmin_backend.services.backup.scheduler import (
     create_backup_schedule as create_backup_schedule_service,
     delete_backup_schedule as delete_backup_schedule_service,
     update_backup_schedule as update_backup_schedule_service,
+)
+from styrmin_backend.services.backup.environment import (
+    create_environment_backup as create_env_backup_service,
+    create_environment_restore as create_env_restore_service,
+    delete_environment_backup as delete_env_backup_service,
 )
 from styrmin_backend.services.backup.service import (
     create_backup as create_backup_service,
@@ -863,3 +872,88 @@ class Mutation:
             statuses_updated=statuses_updated,
             deployments_updated=deployments_updated,
         )
+
+    # ---- Environment Backup/Restore Mutations ----
+
+    @strawberry.mutation
+    async def create_environment_backup(
+        self,
+        environment_id: UUID,
+        info: strawberry.Info,
+        name: str | None = None,
+        max_concurrency: int | None = None,
+        timeout: int | None = None,
+    ) -> EnvironmentBackupType | None:
+        """Create a coordinated backup of all active instances in an environment."""
+        uow = info.context["uow"]
+
+        env_backup = await create_env_backup_service(
+            environment_id=environment_id,
+            uow=uow,
+            name=name,
+            max_concurrency=max_concurrency or 5,
+            timeout=timeout or 3600,
+        )
+
+        # Dispatch orchestration workflow
+        try:
+            prefect_manager = get_manager()
+            await prefect_manager.run_action(
+                action=PrefectAction.EXECUTE_ENV_BACKUP,
+                parameters={
+                    "environment_backup_id": str(env_backup.id),
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Failed to submit environment backup workflow for {env_backup.id}, "
+                "record created but orchestration not triggered",
+                exc_info=exc,
+            )
+
+        return EnvironmentBackupType.from_instance(env_backup)
+
+    @strawberry.mutation
+    async def create_environment_restore(
+        self,
+        environment_backup_id: UUID,
+        info: strawberry.Info,
+    ) -> EnvironmentRestoreType | None:
+        """Create a coordinated restore from a completed environment backup."""
+        uow = info.context["uow"]
+
+        env_restore = await create_env_restore_service(
+            environment_backup_id=environment_backup_id,
+            uow=uow,
+        )
+
+        # Dispatch orchestration workflow
+        try:
+            prefect_manager = get_manager()
+            await prefect_manager.run_action(
+                action=PrefectAction.EXECUTE_ENV_RESTORE,
+                parameters={
+                    "environment_restore_id": str(env_restore.id),
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Failed to submit environment restore workflow for {env_restore.id}, "
+                "record created but orchestration not triggered",
+                exc_info=exc,
+            )
+
+        return EnvironmentRestoreType.from_instance(env_restore)
+
+    @strawberry.mutation
+    async def delete_environment_backup(
+        self,
+        environment_backup_id: UUID,
+        info: strawberry.Info,
+    ) -> str | None:
+        """Delete an environment backup and all its constituent backups/restores."""
+        uow = info.context["uow"]
+        await delete_env_backup_service(
+            environment_backup_id=environment_backup_id, uow=uow
+        )
+        return "Environment backup deleted"

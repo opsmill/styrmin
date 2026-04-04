@@ -15,6 +15,10 @@ from styrmin_backend.db.models import (
     DeployedService,
     DeploymentStatus,
     Environment,
+    EnvironmentBackup,
+    EnvironmentBackupStatus,
+    EnvironmentRestore,
+    EnvironmentRestoreStatus,
     HelmChart,
     HelmRepository,
     PodStatus,
@@ -38,6 +42,8 @@ from styrmin_backend.repository.application_instance import (
 )
 from styrmin_backend.repository.backup import BackupRepository
 from styrmin_backend.repository.backup_schedule import BackupScheduleRepository
+from styrmin_backend.repository.environment_backup import EnvironmentBackupRepository
+from styrmin_backend.repository.environment_restore import EnvironmentRestoreRepository
 from styrmin_backend.repository.base import BaseRepository
 from styrmin_backend.repository.cluster import ClusterRepository
 from styrmin_backend.repository.environment import EnvironmentRepository
@@ -316,6 +322,36 @@ class FakeDeploymentStatusRepository(
         return crd_status
 
 
+class FakeEnvironmentBackupRepository(
+    FakeRepository[EnvironmentBackup], EnvironmentBackupRepository
+):
+    async def get_by_environment_id(
+        self,
+        environment_id: UUID,
+        status: EnvironmentBackupStatus | None = None,
+    ) -> list[EnvironmentBackup]:
+        results = [b for b in self.models if b.environment_id == environment_id]
+        if status is not None:
+            results = [b for b in results if b.status == status]
+        return results
+
+
+class FakeEnvironmentRestoreRepository(
+    FakeRepository[EnvironmentRestore], EnvironmentRestoreRepository
+):
+    async def get_by_environment_backup_id(
+        self,
+        environment_backup_id: UUID,
+        status: EnvironmentRestoreStatus | None = None,
+    ) -> list[EnvironmentRestore]:
+        results = [
+            r for r in self.models if r.environment_backup_id == environment_backup_id
+        ]
+        if status is not None:
+            results = [r for r in results if r.status == status]
+        return results
+
+
 class FakeDeploymentRepository(DeploymentRepository):
     """Fake deployment repository for testing purposes."""
 
@@ -418,6 +454,8 @@ class FakeUnitOfWork(UnitOfWork):
     backup_schedules: FakeBackupScheduleRepository  # type: ignore[assignment]
     pod_statuses: FakePodStatusRepository  # type: ignore[assignment]
     deployment_statuses: FakeDeploymentStatusRepository  # type: ignore[assignment]
+    environment_backups: FakeEnvironmentBackupRepository  # type: ignore[assignment]
+    environment_restores: FakeEnvironmentRestoreRepository  # type: ignore[assignment]
 
     def __init__(
         self,
@@ -438,6 +476,8 @@ class FakeUnitOfWork(UnitOfWork):
         backup_storage_locations: FakeBackupStorageLocationRepository | None = None,
         pod_statuses: FakePodStatusRepository | None = None,
         deployment_statuses: FakeDeploymentStatusRepository | None = None,
+        environment_backups: FakeEnvironmentBackupRepository | None = None,
+        environment_restores: FakeEnvironmentRestoreRepository | None = None,
     ):
         self.backup_storage_locations = (
             backup_storage_locations or FakeBackupStorageLocationRepository()
@@ -461,6 +501,12 @@ class FakeUnitOfWork(UnitOfWork):
         self.pod_statuses = pod_statuses or FakePodStatusRepository()
         self.deployment_statuses = (
             deployment_statuses or FakeDeploymentStatusRepository()
+        )
+        self.environment_backups = (
+            environment_backups or FakeEnvironmentBackupRepository()
+        )
+        self.environment_restores = (
+            environment_restores or FakeEnvironmentRestoreRepository()
         )
         self.session = _FakeSession()  # type: ignore[assignment]
 

@@ -310,6 +310,22 @@ class ApplicationInstance(StyrminModel, table=True):
     context: dict | None = Field(default=None, sa_column=Column(JSON))
 
 
+class EnvironmentBackupStatus(str, Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    PARTIALLY_FAILED = "partially_failed"
+    FAILED = "failed"
+
+
+class EnvironmentRestoreStatus(str, Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    PARTIALLY_FAILED = "partially_failed"
+    FAILED = "failed"
+
+
 class BackupStatus(str, Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -322,6 +338,52 @@ class RestoreStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class EnvironmentBackup(StyrminModel, table=True):
+    name: str = Field(unique=True)
+    status: EnvironmentBackupStatus = Field(
+        sa_column=Column(SQLModelEnum(EnvironmentBackupStatus))
+    )
+
+    started_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
+    completed_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
+    error_message: str | None = Field(default=None)
+    metadata_: dict | None = Field(default=None, sa_column=Column("metadata", JSON))
+    max_concurrency: int = Field(default=5)
+    timeout: int = Field(default=3600)
+
+    environment_id: UUID = Field(foreign_key="environment.id")
+    environment: Environment = Relationship()
+
+    backups: list["Backup"] = Relationship(
+        back_populates="environment_backup",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    restores: list["EnvironmentRestore"] = Relationship(
+        back_populates="environment_backup",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+
+class EnvironmentRestore(StyrminModel, table=True):
+    name: str = Field(unique=True)
+    status: EnvironmentRestoreStatus = Field(
+        sa_column=Column(SQLModelEnum(EnvironmentRestoreStatus))
+    )
+
+    started_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
+    completed_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
+    error_message: str | None = Field(default=None)
+    metadata_: dict | None = Field(default=None, sa_column=Column("metadata", JSON))
+
+    environment_backup_id: UUID = Field(foreign_key="environmentbackup.id")
+    environment_backup: EnvironmentBackup = Relationship(back_populates="restores")
+
+    restores: list["Restore"] = Relationship(
+        back_populates="environment_restore",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
 
 
 class Backup(StyrminModel, table=True):
@@ -340,6 +402,13 @@ class Backup(StyrminModel, table=True):
 
     schedule_id: UUID | None = Field(default=None, foreign_key="backupschedule.id")
 
+    environment_backup_id: UUID | None = Field(
+        default=None, foreign_key="environmentbackup.id"
+    )
+    environment_backup: Optional["EnvironmentBackup"] = Relationship(
+        back_populates="backups"
+    )
+
     restores: list["Restore"] = Relationship(back_populates="backup")
 
 
@@ -356,6 +425,13 @@ class Restore(StyrminModel, table=True):
 
     backup_id: UUID = Field(foreign_key="backup.id")
     backup: Backup = Relationship(back_populates="restores")
+
+    environment_restore_id: UUID | None = Field(
+        default=None, foreign_key="environmentrestore.id"
+    )
+    environment_restore: Optional["EnvironmentRestore"] = Relationship(
+        back_populates="restores"
+    )
 
     target_instance_id: UUID | None = Field(
         default=None, foreign_key="applicationinstance.id"

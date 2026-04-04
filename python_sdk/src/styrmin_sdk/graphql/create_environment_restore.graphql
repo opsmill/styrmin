@@ -1,0 +1,9 @@
+mutation CreateEnvironmentRestore($environmentBackupId: UUID!) {
+  createEnvironmentRestore(environmentBackupId: $environmentBackupId) {
+    id
+    name
+    status
+    createdOn
+    restoreCount
+  }
+}

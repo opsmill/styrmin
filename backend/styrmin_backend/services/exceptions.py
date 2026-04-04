@@ -322,6 +322,34 @@ class BackupScheduleAlreadyExistsError(ServiceError):
         return {"existing_schedule_id": self.existing_schedule_id}
 
 
+class EnvironmentBackupNotFoundError(ServiceError):
+    """The environment backup was not found."""
+
+    error_code = "ENVIRONMENT_BACKUP_NOT_FOUND"
+    default_message = "Environment backup not found"
+
+
+class EnvironmentBackupValidationError(ServiceError):
+    """Validation failed for environment backup operation."""
+
+    error_code = "ENVIRONMENT_BACKUP_VALIDATION_ERROR"
+    default_message = "Environment backup validation failed"
+
+
+class EnvironmentBackupOperationInProgressError(ServiceError):
+    """An operation is in progress on this environment backup."""
+
+    error_code = "ENVIRONMENT_BACKUP_OPERATION_IN_PROGRESS"
+    default_message = "An operation is already in progress for this environment backup"
+
+
+class EnvironmentRestoreNotFoundError(ServiceError):
+    """The environment restore was not found."""
+
+    error_code = "ENVIRONMENT_RESTORE_NOT_FOUND"
+    default_message = "Environment restore not found"
+
+
 class AmbiguousIdentifierError(ServiceError):
     """Both or neither identifier was provided for a resource lookup."""
 

@@ -1,0 +1,13 @@
+query ListEnvironmentBackups($environmentId: UUID!, $status: EnvironmentBackupStatus) {
+  environmentBackups(environmentId: $environmentId, status: $status) {
+    id
+    name
+    status
+    startedAt
+    completedAt
+    createdOn
+    backupCount
+    completedCount
+    failedCount
+  }
+}

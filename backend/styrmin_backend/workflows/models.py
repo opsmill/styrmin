@@ -60,6 +60,8 @@ class PrefectAction(Enum):
     SYNC_BSL_CREATE = "sync_bsl_create"
     SYNC_BSL_DELETE = "sync_bsl_delete"
     SYNC_BSL_UPDATE_CREDENTIALS = "sync_bsl_update_credentials"
+    EXECUTE_ENV_BACKUP = "execute_env_backup"
+    EXECUTE_ENV_RESTORE = "execute_env_restore"
 
     def to_tag(self) -> str:
         """Convert the action to a tag for Prefect."""

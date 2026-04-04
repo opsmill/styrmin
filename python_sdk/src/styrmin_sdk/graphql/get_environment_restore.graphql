@@ -1,0 +1,38 @@
+query GetEnvironmentRestore($environmentRestoreId: UUID!) {
+  environmentRestore(environmentRestoreId: $environmentRestoreId) {
+    id
+    name
+    status
+    startedAt
+    completedAt
+    errorMessage
+    metadata
+    createdOn
+    environmentBackup {
+      id
+      name
+    }
+    restores {
+      id
+      name
+      status
+      startedAt
+      completedAt
+      errorMessage
+      backup {
+        id
+        name
+        instance {
+          id
+          deployment {
+            id
+            name
+          }
+        }
+      }
+    }
+    restoreCount
+    completedCount
+    failedCount
+  }
+}

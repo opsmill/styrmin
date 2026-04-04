@@ -1,0 +1,14 @@
+mutation CreateEnvironmentBackup($environmentId: UUID!, $name: String, $maxConcurrency: Int, $timeout: Int) {
+  createEnvironmentBackup(
+    environmentId: $environmentId
+    name: $name
+    maxConcurrency: $maxConcurrency
+    timeout: $timeout
+  ) {
+    id
+    name
+    status
+    createdOn
+    backupCount
+  }
+}

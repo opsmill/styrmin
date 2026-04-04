@@ -1,0 +1,42 @@
+query GetEnvironmentBackup($environmentBackupId: UUID!) {
+  environmentBackup(environmentBackupId: $environmentBackupId) {
+    id
+    name
+    status
+    startedAt
+    completedAt
+    errorMessage
+    metadata
+    maxConcurrency
+    timeout
+    createdOn
+    environment {
+      id
+      name
+    }
+    backups {
+      id
+      name
+      status
+      startedAt
+      completedAt
+      errorMessage
+      instance {
+        id
+        deployment {
+          id
+          name
+        }
+      }
+    }
+    restores {
+      id
+      name
+      status
+      createdOn
+    }
+    backupCount
+    completedCount
+    failedCount
+  }
+}

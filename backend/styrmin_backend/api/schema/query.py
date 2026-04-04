@@ -10,6 +10,10 @@ from uuid import UUID
 import strawberry
 
 from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
+from styrmin_backend.api.definitions.backup.environment_backup import (
+    EnvironmentBackup as EnvironmentBackupType,
+    EnvironmentRestore as EnvironmentRestoreType,
+)
 from styrmin_backend.api.definitions.backup_storage_location.model import (
     BackupStorageLocation as BackupStorageLocationType,
 )
@@ -34,6 +38,12 @@ from styrmin_backend.services.application_drivers import (
 from styrmin_backend.services.backup.scheduler import (
     get_backup_schedule,
     get_backup_schedules,
+)
+from styrmin_backend.services.backup.environment import (
+    get_environment_backup,
+    get_environment_backups,
+    get_environment_restore,
+    get_environment_restores,
 )
 from styrmin_backend.services.backup.service import (
     get_backup,
@@ -285,6 +295,64 @@ class Query:
             cluster_id=cluster_id,
         )
         return [PodStatusType.from_instance(s) for s in statuses]
+
+    # ---- Environment Backup/Restore Queries ----
+
+    @strawberry.field
+    async def environment_backup(
+        self, environment_backup_id: UUID, info: strawberry.Info
+    ) -> EnvironmentBackupType | None:
+        """Get an environment backup by ID."""
+        uow = info.context["uow"]
+        env_backup = await get_environment_backup(
+            environment_backup_id=environment_backup_id, uow=uow
+        )
+        return EnvironmentBackupType.from_instance(env_backup)
+
+    @strawberry.field
+    async def environment_backups(
+        self,
+        environment_id: UUID,
+        info: strawberry.Info,
+        status: str | None = None,
+    ) -> list[EnvironmentBackupType]:
+        """List environment backups for an environment, optionally filtered by status."""
+        from styrmin_backend.db.models import EnvironmentBackupStatus
+
+        uow = info.context["uow"]
+        backup_status = EnvironmentBackupStatus(status) if status else None
+        env_backups = await get_environment_backups(
+            environment_id=environment_id, uow=uow, status=backup_status
+        )
+        return [EnvironmentBackupType.from_instance(b) for b in env_backups]
+
+    @strawberry.field
+    async def environment_restore(
+        self, environment_restore_id: UUID, info: strawberry.Info
+    ) -> EnvironmentRestoreType | None:
+        """Get an environment restore by ID."""
+        uow = info.context["uow"]
+        env_restore = await get_environment_restore(
+            environment_restore_id=environment_restore_id, uow=uow
+        )
+        return EnvironmentRestoreType.from_instance(env_restore)
+
+    @strawberry.field
+    async def environment_restores(
+        self,
+        environment_backup_id: UUID,
+        info: strawberry.Info,
+        status: str | None = None,
+    ) -> list[EnvironmentRestoreType]:
+        """List environment restores for an environment backup."""
+        from styrmin_backend.db.models import EnvironmentRestoreStatus
+
+        uow = info.context["uow"]
+        restore_status = EnvironmentRestoreStatus(status) if status else None
+        env_restores = await get_environment_restores(
+            environment_backup_id=environment_backup_id, uow=uow, status=restore_status
+        )
+        return [EnvironmentRestoreType.from_instance(r) for r in env_restores]
 
     @strawberry.field(description="Health check probe")
     def ok(self) -> bool:

@@ -334,3 +334,25 @@ class PrefectCatalogue:
                 set_directory="/source/backend/",
             ),
         )
+
+        self.add_workflow_definition(
+            action=PrefectAction.EXECUTE_ENV_BACKUP,
+            workflow=LocalSourceWorkflowDefinition(
+                name="execute_env_backup",
+                type=WorkflowType.INTERNAL,
+                module="styrmin_backend.workflows.templates.environment_backup",
+                function="execute_environment_backup_workflow",
+                set_directory="/source/backend/",
+            ),
+        )
+
+        self.add_workflow_definition(
+            action=PrefectAction.EXECUTE_ENV_RESTORE,
+            workflow=LocalSourceWorkflowDefinition(
+                name="execute_env_restore",
+                type=WorkflowType.INTERNAL,
+                module="styrmin_backend.workflows.templates.environment_backup",
+                function="execute_environment_restore_workflow",
+                set_directory="/source/backend/",
+            ),
+        )

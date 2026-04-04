@@ -60,6 +60,14 @@ from styrmin_backend.repository.application_instance import (
     ApplicationInstanceRepository,
     SQLModelApplicationInstanceRepository,
 )
+from styrmin_backend.repository.environment_backup import (
+    EnvironmentBackupRepository,
+    SQLModelEnvironmentBackupRepository,
+)
+from styrmin_backend.repository.environment_restore import (
+    EnvironmentRestoreRepository,
+    SQLModelEnvironmentRestoreRepository,
+)
 from styrmin_backend.repository.restore import (
     RestoreRepository,
     SQLModelRestoreRepository,
@@ -96,6 +104,8 @@ class UnitOfWork(ABC):
     backup_schedules: BackupScheduleRepository
     pod_statuses: PodStatusRepository
     deployment_statuses: DeploymentStatusRepository
+    environment_backups: EnvironmentBackupRepository
+    environment_restores: EnvironmentRestoreRepository
 
     async def __aenter__(self) -> "UnitOfWork":
         return self
@@ -139,6 +149,8 @@ class SqlModelUnitOfWork(UnitOfWork):
     backup_schedules: SQLModelBackupScheduleRepository
     pod_statuses: SQLModelPodStatusRepository
     deployment_statuses: SQLModelDeploymentStatusRepository
+    environment_backups: SQLModelEnvironmentBackupRepository
+    environment_restores: SQLModelEnvironmentRestoreRepository
 
     def __init__(self, session: AsyncSession):
         self.session: AsyncSession = session
@@ -171,6 +183,12 @@ class SqlModelUnitOfWork(UnitOfWork):
         self.backup_schedules = SQLModelBackupScheduleRepository(session=self.session)
         self.pod_statuses = SQLModelPodStatusRepository(session=self.session)
         self.deployment_statuses = SQLModelDeploymentStatusRepository(
+            session=self.session
+        )
+        self.environment_backups = SQLModelEnvironmentBackupRepository(
+            session=self.session
+        )
+        self.environment_restores = SQLModelEnvironmentRestoreRepository(
             session=self.session
         )
         return self
