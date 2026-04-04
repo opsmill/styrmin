@@ -171,6 +171,25 @@ async def test_environment_backup_and_restore_lifecycle(
     )
 
     # ── 7. Cleanup: delete environment backup, verify cascade ───────────
+    # Collect constituent IDs before deletion
+    pre_delete_detail = await client.environment_backups.get(env_backup.id)
+    constituent_backup_ids = [b.id for b in pre_delete_detail.backups]
+    constituent_restore_ids = [r.id for r in pre_delete_detail.restores]
+
+    assert len(constituent_backup_ids) >= 2, "Should have at least 2 constituent backups"
+
     await client.environment_backups.delete(env_backup.id)
+
+    # Verify environment backup is gone
     with pytest.raises(ResourceNotFoundError):
         await client.environment_backups.get(env_backup.id)
+
+    # Verify constituent backups were cascade-deleted
+    for backup_id in constituent_backup_ids:
+        with pytest.raises(ResourceNotFoundError):
+            await client.backups.get_backup(backup_id)
+
+    # Verify constituent environment restores were cascade-deleted
+    for restore_id in constituent_restore_ids:
+        with pytest.raises(ResourceNotFoundError):
+            await client.environment_restores.get(restore_id)
