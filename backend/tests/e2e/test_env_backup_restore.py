@@ -184,7 +184,9 @@ async def test_environment_backup_and_restore_lifecycle(
     constituent_backup_ids = [b.id for b in pre_delete_detail.backups]
     constituent_restore_ids = [r.id for r in pre_delete_detail.restores]
 
-    assert len(constituent_backup_ids) >= 2, "Should have at least 2 constituent backups"
+    assert len(constituent_backup_ids) >= 2, (
+        "Should have at least 2 constituent backups"
+    )
 
     await client.environment_backups.delete(env_backup.id)
 
