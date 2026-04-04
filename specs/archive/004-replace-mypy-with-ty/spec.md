@@ -2,7 +2,7 @@
 
 **Feature Branch**: `004-replace-mypy-with-ty`
 **Created**: 2026-04-04
-**Status**: Draft
+**Status**: Extracted
 **Input**: GitHub Issue #84 — Consolidate on ty as the sole type checker, removing mypy and progressively enabling suppressed ty rules.
 
 ## User Scenarios & Testing *(mandatory)*
