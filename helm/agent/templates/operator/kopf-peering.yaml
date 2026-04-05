@@ -1,0 +1,6 @@
+apiVersion: kopf.dev/v1
+kind: ClusterKopfPeering
+metadata:
+  name: styrmin-operator
+  labels:
+    {{- include "opsmill-operator.labels" . | nindent 4 }}

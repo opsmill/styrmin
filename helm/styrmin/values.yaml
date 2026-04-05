@@ -358,7 +358,7 @@ styrmin-agent:
 
   prefect-worker:
     # Disable subchart's namespace-scoped RBAC in favor of the ClusterRole
-    # defined in templates/prefect-worker-rbac.yaml
+    # defined in the agent chart's roles.yaml
     role:
       create: false
     rolebinding:
