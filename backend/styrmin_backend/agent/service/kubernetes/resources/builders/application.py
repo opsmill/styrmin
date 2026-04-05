@@ -2,6 +2,10 @@ import jinja2
 from prefect import task
 from yaml import YAMLError, safe_load
 
+from styrmin_backend.agent.service.kubernetes.resources.blocks.metadata import (
+    Annotations,
+    Labels,
+)
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     LabelPatch,
     SpecPatch,
@@ -32,6 +36,13 @@ from styrmin_backend.agent.service.kubernetes.resources.utilities.base import (
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.fqdn import to_fqdn_label
 from styrmin_backend.context.models.contexts import GlobalContext
+from styrmin_backend.operator.config import (
+    ANNOTATION_DEPLOYMENT_ID,
+    LABEL_MANAGED_BY,
+    LABEL_MANAGED_BY_VALUE,
+    LABEL_OPERATOR_MANAGED,
+    LABEL_OPERATOR_MANAGED_VALUE,
+)
 
 from .base import build_minimal_helm_release
 
@@ -270,6 +281,26 @@ class ApplicationHelmReleaseBuilder:
             release_reference=self.context.instance.release_reference,
             chart_reference=get_kubernetes_reference(self.context.app.helm.chart.id),
         )
+
+        # Add operator-managed labels and deployment-id annotation so the
+        # kopf operator knows to take ownership of NetworkPolicy resources
+        # for this deployment.
+        rh.add_metadata(
+            Labels(
+                labels={
+                    LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE,
+                    LABEL_OPERATOR_MANAGED: LABEL_OPERATOR_MANAGED_VALUE,
+                }
+            )
+        )
+        rh.add_metadata(
+            Annotations(
+                annotations={
+                    ANNOTATION_DEPLOYMENT_ID: str(self.context.instance.deployment_id),
+                }
+            )
+        )
+
         rh.add_spec(
             block=Values(
                 value=self.render_value_template(

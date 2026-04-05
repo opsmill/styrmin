@@ -25,15 +25,22 @@ services:
       - ./driver/examples:/styrmin/drivers:ro
       - styrmin_db:/source/data
 
-  k8s-agent:
+  agent-operator:
     image: styrmin:latest
     build:
       dockerfile: docker/Dockerfile
-    command: ["prefect", "worker", "start", "--pool", "user-work-pool"]
+    command:
+      - python
+      - -m
+      - styrmin_backend.entrypoint.combined
+      - --work-pool
+      - user-work-pool
+      - --clusterwide
     restart: unless-stopped
     network_mode: host
     environment:
       PREFECT_API_URL: http://localhost:4200/api
+      STYRMIN_URL_API: http://localhost:8000
       STYRMIN_URL_GRAPHQL_K8S: http://localhost:8000/graphql
       STYRMIN_URL_GRAPHQL: http://localhost:8000/graphql
       STYRMIN_K8S_CONFIG_MODE: kubeconfig
