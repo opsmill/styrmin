@@ -21,6 +21,7 @@ from prefect.workers.utilities import critical_service_loop
 
 # Import handler modules so kopf registers the decorated handlers
 import styrmin_backend.operator.handlers.helmrelease  # noqa: F401
+import styrmin_backend.operator.handlers.styrmin_deployment  # noqa: F401
 import styrmin_backend.operator.handlers.utility_resources  # noqa: F401
 from styrmin_backend.operator.config import PEERING_NAME, PEERING_PRIORITY
 

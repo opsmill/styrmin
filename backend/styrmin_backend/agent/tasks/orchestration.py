@@ -38,10 +38,14 @@ from styrmin_backend.services.reconciliation.remediation import (
 from styrmin_backend import config
 from styrmin_backend.operator.config import (
     ANNOTATION_DEPLOYMENT_IN_PROGRESS,
+    CRD_GROUP,
+    CRD_PLURAL,
+    CRD_VERSION,
     HELMRELEASE_GROUP,
     HELMRELEASE_PLURAL,
     HELMRELEASE_VERSION,
 )
+from styrmin_backend.operator.crd.builder import build_styrmin_deployment_body
 
 
 def _build_namespace_labels(
@@ -531,3 +535,181 @@ async def create_instance(
             )
     finally:
         await _clear_deployment_in_progress(namespace, release_reference)
+
+
+# ─── CRD-Based Orchestration Flows ───────────────────────────────────
+#
+# These flows create/update/delete StyrminDeployment CRDs instead of
+# managing HelmReleases and utility resources directly. The operator
+# handles all Kubernetes resource lifecycle from the CRD.
+#
+# Driver pre/post hooks are retained — they are imperative actions
+# that remain Prefect-managed.
+
+
+@flow(flow_run_name="Create instance (CRD)")
+async def create_instance_crd(
+    instance: Instance,
+    prehook: UUID | None,
+    posthook: UUID | None,
+) -> None:
+    """Create a StyrminDeployment CRD for the operator to process.
+
+    The operator handles all resource creation in guaranteed order:
+    NetworkPolicies/Secrets -> HelmRelease -> Services/Middlewares.
+
+    Driver pre/post hooks remain Prefect-managed.
+    """
+    if not config.SETTINGS.initialized:
+        config.SETTINGS.initialize()
+
+    logger = get_run_logger()
+    context = instance.context
+    release_reference = context.instance.release_reference
+    namespace = context.instance.namespace
+
+    logger.info(
+        "Creating StyrminDeployment CRD for %s:%s in %s",
+        context.app.name,
+        context.app.version,
+        namespace,
+    )
+
+    # Run pre-hook before CRD creation (imperative action)
+    if prehook:
+        await run_deployment_or_fail(
+            flow_run_name=f"Run {context.app.name} pre-hook",
+            name=prehook,
+            parameters={"context": context},
+        )
+
+    # Build and create the StyrminDeployment CRD
+    crd_body = build_styrmin_deployment_body(
+        context=context,
+        release_reference=release_reference,
+        namespace=namespace,
+    )
+
+    from styrmin_backend.agent.service.kubernetes.primitives import (
+        apply_kubernetes_namespace,
+        upsert_custom_resource,
+    )
+
+    namespace_labels = _build_namespace_labels(context)
+    await apply_kubernetes_namespace(namespace=namespace, labels=namespace_labels)
+
+    await upsert_custom_resource(
+        plurals=CRD_PLURAL,
+        body=crd_body,
+        group=CRD_GROUP,
+        version=CRD_VERSION,
+        namespace=namespace,
+    )
+
+    logger.info(
+        "StyrminDeployment CRD created: %s/%s",
+        namespace,
+        release_reference,
+    )
+
+    # Run post-hook after CRD creation (imperative action)
+    if posthook:
+        await run_deployment_or_fail(
+            flow_run_name=f"Run {context.app.name} post-hook",
+            name=posthook,
+            parameters={"context": context},
+        )
+
+
+@flow(flow_run_name="Update instance (CRD)")
+async def update_instance_crd(
+    instance: Instance,
+) -> None:
+    """Update the StyrminDeployment CRD spec for the operator to reconcile."""
+    if not config.SETTINGS.initialized:
+        config.SETTINGS.initialize()
+
+    logger = get_run_logger()
+    context = instance.context
+    release_reference = context.instance.release_reference
+    namespace = context.instance.namespace
+
+    crd_body = build_styrmin_deployment_body(
+        context=context,
+        release_reference=release_reference,
+        namespace=namespace,
+    )
+
+    from styrmin_backend.agent.service.kubernetes.primitives import (
+        upsert_custom_resource,
+    )
+
+    await upsert_custom_resource(
+        plurals=CRD_PLURAL,
+        body=crd_body,
+        group=CRD_GROUP,
+        version=CRD_VERSION,
+        namespace=namespace,
+    )
+
+    logger.info("StyrminDeployment CRD updated: %s/%s", namespace, release_reference)
+
+
+@flow(flow_run_name="Upgrade instance (CRD)")
+async def upgrade_instance_crd(
+    instance: Instance,
+    upgrade_hook: UUID,
+    target_version: str,
+    prehook: UUID | None = None,
+    posthook: UUID | None = None,
+) -> None:
+    """Upgrade via StyrminDeployment CRD. Driver hooks remain Prefect-managed."""
+    if not config.SETTINGS.initialized:
+        config.SETTINGS.initialize()
+
+    logger = get_run_logger()
+    context = instance.context
+    release_reference = context.instance.release_reference
+    namespace = context.instance.namespace
+
+    if prehook:
+        await run_deployment_or_fail(
+            flow_run_name=f"Run {context.app.name} upgrade pre-hook",
+            name=prehook,
+            parameters={"context": context, "target_version": target_version},
+        )
+
+    await run_deployment_or_fail(
+        flow_run_name=f"Upgrade {context.app.name} to {target_version}",
+        name=upgrade_hook,
+        parameters={"context": context, "target_version": target_version},
+    )
+
+    crd_body = build_styrmin_deployment_body(
+        context=context,
+        release_reference=release_reference,
+        namespace=namespace,
+    )
+
+    from styrmin_backend.agent.service.kubernetes.primitives import (
+        upsert_custom_resource,
+    )
+
+    await upsert_custom_resource(
+        plurals=CRD_PLURAL,
+        body=crd_body,
+        group=CRD_GROUP,
+        version=CRD_VERSION,
+        namespace=namespace,
+    )
+
+    if posthook:
+        await run_deployment_or_fail(
+            flow_run_name=f"Run {context.app.name} upgrade post-hook",
+            name=posthook,
+            parameters={"context": context, "target_version": target_version},
+        )
+
+    logger.info(
+        "Upgrade CRD updated: %s:%s in %s", context.app.name, target_version, namespace
+    )

@@ -322,6 +322,39 @@ async def list_managed_resources(
     return resources
 
 
+async def _check_helmrelease_ready(
+    namespace: str,
+    release_reference: str,
+) -> bool:
+    """Check if a HelmRelease has reached Ready state via FluxCD.
+
+    Returns True if the HelmRelease has a Ready=True condition.
+    """
+    from styrmin_backend.agent.service.kubernetes.primitives import get_custom_resource
+    from styrmin_backend.agent.service.kubernetes.exceptions import (
+        CustomResourceNotFound,
+    )
+
+    try:
+        hr = await get_custom_resource(
+            plural=HELMRELEASE_PLURAL,
+            name=release_reference,
+            group=HELMRELEASE_GROUP,
+            version=HELMRELEASE_VERSION,
+            namespace=namespace,
+        )
+        status = hr.get("status", {})  # type: ignore[union-attr]
+        conditions = status.get("conditions", [])
+        for condition in conditions:
+            if condition.get("type") == "Ready" and condition.get("status") == "True":
+                return True
+    except CustomResourceNotFound:
+        logger.debug("HelmRelease %s not found in %s", release_reference, namespace)
+    except Exception:
+        logger.exception("Failed to check HelmRelease %s status", release_reference)
+    return False
+
+
 async def cleanup_operator_resources(
     namespace: str,
     release_reference: str,

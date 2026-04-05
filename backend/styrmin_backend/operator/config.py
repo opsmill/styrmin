@@ -36,6 +36,26 @@ HELMRELEASE_GROUP = "helm.toolkit.fluxcd.io"
 HELMRELEASE_VERSION = "v2"
 HELMRELEASE_PLURAL = "helmreleases"
 
+# --- StyrminDeployment CRD constants ---
+CRD_GROUP = "styrmin.io"
+CRD_VERSION = "v1alpha1"
+CRD_PLURAL = "styrmindeployments"
+CRD_KIND = "StyrminDeployment"
+
+# --- Labels for CRD-managed resources ---
+LABEL_DEPLOYMENT_CRD = "styrmin.io/deployment-crd"
+LABEL_RESOURCE_PHASE = "styrmin.io/resource-phase"
+
+# --- Resource phase values ---
+PHASE_PREREQUISITES = "prerequisites"
+PHASE_HELM = "helm"
+PHASE_SERVICES = "services"
+
+# --- HelmRelease readiness timeout ---
+HELMRELEASE_READY_TIMEOUT_SECONDS = int(
+    os.environ.get("STYRMIN_OPERATOR_HR_READY_TIMEOUT", "600")
+)
+
 # --- Peering ---
 PEERING_NAME = os.environ.get("STYRMIN_OPERATOR_PEERING_NAME", "styrmin-operator")
 PEERING_PRIORITY = int(os.environ.get("STYRMIN_OPERATOR_PEERING_PRIORITY", "100"))
