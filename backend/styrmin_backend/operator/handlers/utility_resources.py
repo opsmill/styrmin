@@ -222,7 +222,6 @@ async def _reconcile_resource_drift(
 
 
 @kopf.on.update(
-    "",
     version="v1",
     plural="networkpolicies",
     labels={
@@ -251,7 +250,6 @@ async def _kopf_on_networkpolicy_update(
 
 
 @kopf.on.delete(
-    "",
     version="v1",
     plural="networkpolicies",
     labels={
@@ -283,7 +281,6 @@ async def _kopf_on_networkpolicy_delete(
 
 
 @kopf.on.update(
-    "",
     version="v1",
     plural="services",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
@@ -311,7 +308,6 @@ async def _kopf_on_service_update(
 
 
 @kopf.on.delete(
-    "",
     version="v1",
     plural="services",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
@@ -342,7 +338,6 @@ async def _kopf_on_service_delete(
 
 
 @kopf.on.update(
-    "",
     version="v1",
     plural="secrets",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
@@ -370,7 +365,6 @@ async def _kopf_on_secret_update(
 
 
 @kopf.on.delete(
-    "",
     version="v1",
     plural="secrets",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
@@ -401,7 +395,7 @@ async def _kopf_on_secret_delete(
 
 
 @kopf.on.update(
-    "traefik.io",
+    group="traefik.io",
     version="v1alpha1",
     plural="middlewares",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
@@ -429,7 +423,7 @@ async def _kopf_on_middleware_update(
 
 
 @kopf.on.delete(
-    "traefik.io",
+    group="traefik.io",
     version="v1alpha1",
     plural="middlewares",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},

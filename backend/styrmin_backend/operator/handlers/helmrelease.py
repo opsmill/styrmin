@@ -182,15 +182,7 @@ async def on_helmrelease_delete(
 
 # --- Kopf handler registrations ---
 
-# Filters to only match Styrmin operator-managed HelmReleases
-_WHEN_OPERATOR_MANAGED = kopf.when(
-    field=f"metadata.labels.{LABEL_OPERATOR_MANAGED.replace('/', '~1').replace('.', '~2')}",
-    value=LABEL_OPERATOR_MANAGED_VALUE,
-)
-
-
 @kopf.on.create(
-    LABEL_MANAGED_BY_VALUE,
     group="helm.toolkit.fluxcd.io",
     version="v2",
     plural="helmreleases",
@@ -218,7 +210,6 @@ async def _kopf_on_helmrelease_create(
 
 
 @kopf.on.delete(
-    LABEL_MANAGED_BY_VALUE,
     group="helm.toolkit.fluxcd.io",
     version="v2",
     plural="helmreleases",
@@ -249,7 +240,7 @@ async def _kopf_on_helmrelease_delete(
 
 
 @kopf.timer(
-    "helm.toolkit.fluxcd.io",
+    group="helm.toolkit.fluxcd.io",
     version="v2",
     plural="helmreleases",
     labels={

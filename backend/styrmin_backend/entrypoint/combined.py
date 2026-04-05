@@ -16,8 +16,8 @@ from typing import Any
 import anyio
 import kopf
 from prefect.settings import PREFECT_WORKER_QUERY_SECONDS
+from prefect.workers.base import critical_service_loop
 from prefect.workers.process import ProcessWorker
-from prefect.workers.utilities import critical_service_loop
 
 # Import handler modules so kopf registers the decorated handlers
 import styrmin_backend.operator.handlers.helmrelease  # noqa: F401
