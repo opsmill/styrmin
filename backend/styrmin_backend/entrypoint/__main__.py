@@ -1,5 +1,8 @@
-"""Allow running as: python -m styrmin_backend.entrypoint.combined"""
+"""Allow running as: python -m styrmin_backend.entrypoint.combined
 
-from styrmin_backend.entrypoint.combined import cli
+Delegates to the styrmin CLI agent command.
+"""
 
-cli()
+from styrmin_backend.cli.agent import agent_app
+
+agent_app()

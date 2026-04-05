@@ -28,3 +28,8 @@ app.command(
     name="export",
     help="Export commands (schemas, data).",
 )
+app.command(
+    "styrmin_backend.cli.agent:agent_app",
+    name="agent",
+    help="Agent and operator management commands.",
+)

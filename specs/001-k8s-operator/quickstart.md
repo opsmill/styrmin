@@ -68,9 +68,7 @@ export STYRMIN_URL_API="http://localhost:8000"
 export PREFECT_API_URL="http://localhost:4200/api"
 
 # Run the combined operator + Prefect worker
-uv run python -m styrmin_backend.entrypoint.combined \
-  --work-pool styrmin-work-pool \
-  --clusterwide
+uv run styrmin agent start --work-pool styrmin-work-pool
 ```
 
 ## Run in Docker Compose
@@ -80,13 +78,7 @@ The `docker-compose.yml` entry for the combined agent/operator replaces the sepa
 ```yaml
 agent-operator:
   image: styrmin:latest
-  command:
-    - python
-    - -m
-    - styrmin_backend.entrypoint.combined
-    - --work-pool
-    - styrmin-work-pool
-    - --clusterwide
+  command: ["styrmin", "agent", "start", "--work-pool", "styrmin-work-pool"]
   environment:
     - STYRMIN_URL_API=http://server:8000
     - PREFECT_API_URL=http://task-manager:4200/api
@@ -109,13 +101,7 @@ spec:
       serviceAccountName: styrmin-service-account
       containers:
         - name: agent-operator
-          command:
-            - python
-            - -m
-            - styrmin_backend.entrypoint.combined
-            - --work-pool
-            - styrmin-work-pool
-            - --clusterwide
+          command: ["styrmin", "agent", "start", "--work-pool", "styrmin-work-pool"]
           env:
             - name: STYRMIN_URL_API
               value: "http://styrmin-server:8000"
