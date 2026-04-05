@@ -6,7 +6,7 @@ React 19 single-page application with TypeScript, Vite, and TanStack Query (Grap
 
 - **Framework:** React 19, TanStack Router, TypeScript 5.9
 - **Build:** Vite 8, pnpm
-- **Styling:** Tailwind CSS 4, Radix UI primitives, class-variance-authority
+- **Styling:** Tailwind CSS 4, Base UI primitives, class-variance-authority
 - **GraphQL:** TanStack Query 5, graphql-codegen (auto-generated hooks in `src/generated/`)
 - **Forms:** React Hook Form 7, Zod 4
 - **Testing:** Vitest, React Testing Library, jsdom
@@ -17,7 +17,7 @@ React 19 single-page application with TypeScript, Vite, and TanStack Query (Grap
 frontend/
 ├── src/
 │   ├── components/       # Shared components
-│   │   └── ui/           # Radix-based UI primitives (Badge, Button, Dialog, etc.)
+│   │   └── ui/           # Base UI primitives (Badge, Button, Dialog, etc.)
 │   ├── pages/            # Route-level page components
 │   │   ├── deployments/  # Deploy form, deployment detail
 │   │   ├── drivers/      # Driver list, detail, add
