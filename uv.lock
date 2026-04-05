@@ -2583,6 +2583,12 @@ wheels = [
 name = "styrmin-backend"
 version = "0.1.0"
 source = { editable = "backend" }
+dependencies = [
+    { name = "alembic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "alembic", specifier = ">=1.14.0" }]
 
 [[package]]
 name = "styrmin-mvp"

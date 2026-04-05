@@ -41,6 +41,12 @@ def get_database_url() -> str:
     raise ValueError(f"Unsupported database type: {db_settings.db_type}")
 
 
+def get_sync_database_url() -> str:
+    """Return a synchronous database URL for Alembic offline mode."""
+    url = get_database_url()
+    return url.replace("+aiosqlite", "").replace("+asyncpg", "+psycopg2")
+
+
 def get_async_engine() -> AsyncEngine:
     """Get the async database engine."""
     global _async_engine
