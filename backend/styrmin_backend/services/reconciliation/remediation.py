@@ -132,9 +132,7 @@ class InstanceCreationStrategy(RemediationStrategy):
         )
 
         # Check if the deployment is internal (e.g., ingress controller)
-        deployment = await self.uow.deployments.get(
-            id=diff.instance.deployment_id
-        )
+        deployment = await self.uow.deployments.get(id=diff.instance.deployment_id)
         is_internal = deployment.internal if deployment else False
 
         return Remediation(

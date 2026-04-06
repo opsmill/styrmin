@@ -77,8 +77,16 @@ invalid-await = "ignore" # Upstream: Prefect/SQLAlchemy async patterns ty doesn'
 invalid-method-override = "ignore" # Upstream: Strawberry resolver method signatures differ from base
 missing-argument = "ignore" # Upstream: Strawberry/SQLAlchemy constructor patterns
 not-subscriptable = "ignore" # Upstream: Strawberry/SQLModel generic subscript patterns
+possibly-missing-submodule = "ignore" # Upstream: auto-generated Alembic migrations use sqlmodel.sql.sqltypes
 unknown-argument = "ignore" # Upstream: kubernetes-asyncio stubs missing _content_type param
 unresolved-attribute = "ignore" # Upstream: Strawberry/SQLAlchemy/Prefect attribute resolution
+
+[[tool.ty.overrides]]
+include = ["tests/**"]
+
+[tool.ty.overrides.rules]
+invalid-await = "ignore" # Upstream: kopf decorators wrap async handlers in Protocol objects ty can't resolve
+missing-argument = "ignore" # Upstream: kopf decorator Protocol signatures include extra params not passed in tests
 
 [[tool.ty.overrides]]
 include = ["driver/examples/db-test/src/**"]

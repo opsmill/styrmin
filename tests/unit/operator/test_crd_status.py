@@ -1,6 +1,5 @@
 """Unit tests for CRD status condition updates in the pipeline."""
 
-
 from styrmin_backend.operator.crd.schema import ConditionStatus, ConditionType, DeploymentPhase
 from styrmin_backend.operator.crd.status import (
     build_managed_resource_counts,

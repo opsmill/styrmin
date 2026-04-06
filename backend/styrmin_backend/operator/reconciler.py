@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kubernetes_asyncio import client as kubeclient
-from kubernetes_asyncio.client.api_client import ApiClient, ApiException
+from kubernetes_asyncio.client.api_client import ApiException
 
 from styrmin_backend.agent.service.kubernetes.primitives import (
     apply_kubernetes_resource,
@@ -346,7 +346,10 @@ async def _check_helmrelease_ready(
             status = hr.get("status", {})
             conditions = status.get("conditions", [])
             for condition in conditions:
-                if condition.get("type") == "Ready" and condition.get("status") == "True":
+                if (
+                    condition.get("type") == "Ready"
+                    and condition.get("status") == "True"
+                ):
                     return True
     except ApiException as exc:
         if exc.status == 404:

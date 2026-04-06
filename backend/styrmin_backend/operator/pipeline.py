@@ -229,7 +229,11 @@ async def execute_phase_helmrelease(
         return result
 
     result.created_count = 3
-    result.resource_details = {"helmRepositories": 1, "helmCharts": 1, "helmReleases": 1}
+    result.resource_details = {
+        "helmRepositories": 1,
+        "helmCharts": 1,
+        "helmReleases": 1,
+    }
     return result
 
 

@@ -37,6 +37,7 @@ from styrmin_backend.operator.state import (
     filter_resources_by_kind,
 )
 
+
 async def on_helmrelease_create(
     body: dict[str, Any],
     meta: dict[str, Any],
@@ -189,6 +190,7 @@ async def on_helmrelease_delete(
 
 
 # --- Kopf handler registrations ---
+
 
 @kopf.on.create(
     group="helm.toolkit.fluxcd.io",

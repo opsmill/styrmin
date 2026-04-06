@@ -33,6 +33,7 @@ from styrmin_backend.operator.pipeline import (
     should_proceed_to_helmrelease,
 )
 
+
 def _is_internal(spec: dict[str, Any]) -> bool:
     """Check if a StyrminDeployment is an internal deployment (e.g., ingress controller)."""
     return spec.get("internal", False)
@@ -392,7 +393,9 @@ async def kopf_styrmin_deployment_timer(
 
     # Phase advancement for in-progress deployments
     if phase == DeploymentPhase.CREATING_HELM_RELEASE.value:
-        hr_already_ready = is_condition_true(conditions, ConditionType.HELM_RELEASE_READY)
+        hr_already_ready = is_condition_true(
+            conditions, ConditionType.HELM_RELEASE_READY
+        )
 
         if not hr_already_ready:
             # Check if HelmRelease is Ready via FluxCD
@@ -450,12 +453,8 @@ async def kopf_styrmin_deployment_timer(
                     "Internal deployment is healthy",
                 )
                 patch.status["conditions"] = conditions
-                set_phase(
-                    patch.status, DeploymentPhase.READY, "All resources deployed"
-                )
-                logger.info(
-                    "Internal deployment %s/%s reached Ready state", ns, name
-                )
+                set_phase(patch.status, DeploymentPhase.READY, "All resources deployed")
+                logger.info("Internal deployment %s/%s reached Ready state", ns, name)
                 return
 
             set_phase(
@@ -489,9 +488,7 @@ async def kopf_styrmin_deployment_timer(
                     "Deployment is healthy",
                 )
                 patch.status["conditions"] = conditions
-                set_phase(
-                    patch.status, DeploymentPhase.READY, "All resources deployed"
-                )
+                set_phase(patch.status, DeploymentPhase.READY, "All resources deployed")
                 logger.info("Deployment %s/%s reached Ready state", ns, name)
         return
 
