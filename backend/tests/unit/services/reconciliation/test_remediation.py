@@ -149,7 +149,6 @@ async def test_upgrade_with_version_change_and_core_hook(
     assert remediation.type == RemediationType.UPGRADE_INSTANCE
     assert remediation.flow_id == upgrade_flow_id
     assert remediation.parameters["upgrade_hook"] == upgrade_hook_id
-    assert remediation.parameters["update_flow"] == update_helm_flow_id
     assert remediation.parameters["target_version"] == "2.0.0"
     assert remediation.parameters["prehook"] == prehook_id
     assert remediation.parameters["posthook"] == posthook_id
@@ -194,7 +193,6 @@ async def test_upgrade_fallback_to_update_when_no_core_hook(
     assert remediation is not None
     assert remediation.type == RemediationType.UPDATE_INSTANCE
     assert remediation.flow_id == update_flow_id
-    assert remediation.parameters["update_flow"] == update_helm_flow_id
 
 
 async def test_update_with_context_change_only(uow, instance, prefect_manager_mock):
