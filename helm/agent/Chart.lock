@@ -1,6 +1,0 @@
-dependencies:
-- name: prefect-worker
-  repository: https://prefecthq.github.io/prefect-helm
-  version: 2026.1.23034724
-digest: sha256:e2c929cd0214f5b56be3df6966cdbca6553009ea2542ccf90d82272e49ec1232
-generated: "2026-03-14T14:49:45.972293+01:00"

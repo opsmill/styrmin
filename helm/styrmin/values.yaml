@@ -356,28 +356,7 @@ styrmin-agent:
   serviceAccount:
     create: false # We already create the service account in this chart
 
-  prefect-worker:
-    # Disable subchart's namespace-scoped RBAC in favor of the ClusterRole
-    # defined in the agent chart's roles.yaml
-    role:
-      create: false
-    rolebinding:
-      create: false
-    worker:
-      config:
-        workPool: user-work-pool
-      initContainer:
-        extraContainers:
-          - name: wait-for-styrmin-server
-            image: busybox:1.36
-            command:
-              - sh
-              - -c
-              - |
-                until wget -q --spider http://styrmin-server:8000/health; do
-                  echo "Waiting for styrmin-server..."
-                  sleep 5
-                done
-      apiConfig: selfHostedServer
-      selfHostedServerApiConfig:
-        apiUrl: http://prefect-server:4200/api
+  agent:
+    workPool: user-work-pool
+    prefectApiUrl: http://prefect-server:4200/api
+    styrminApiUrl: http://styrmin-server:8000
