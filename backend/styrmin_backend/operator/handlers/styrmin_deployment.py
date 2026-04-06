@@ -37,6 +37,11 @@ from styrmin_backend.operator.pipeline import (
 _logger = logging.getLogger(__name__)
 
 
+def _is_internal(spec: dict[str, Any]) -> bool:
+    """Check if a StyrminDeployment is an internal deployment (e.g., ingress controller)."""
+    return spec.get("internal", False)
+
+
 async def on_styrmin_deployment_create(
     spec: dict[str, Any],
     status: dict[str, Any],
@@ -48,14 +53,56 @@ async def on_styrmin_deployment_create(
 ) -> None:
     """Handle StyrminDeployment creation — start ordered deployment."""
     logger.info("StyrminDeployment created: %s/%s", namespace, name)
+
+    conditions: list[dict[str, str]] = status.get("conditions", [])
+
+    # Internal deployments (e.g., ingress controller) skip prerequisites
+    # and go straight to HelmRelease creation.
+    if _is_internal(spec):
+        logger.info(
+            "Internal deployment %s/%s — skipping prerequisites", namespace, name
+        )
+        set_condition(
+            conditions,
+            ConditionType.NETWORK_POLICIES_READY,
+            ConditionStatus.TRUE,
+            "Skipped",
+            "Internal deployment — no prerequisites needed",
+        )
+        set_condition(
+            conditions,
+            ConditionType.SECRETS_READY,
+            ConditionStatus.TRUE,
+            "Skipped",
+            "Internal deployment — no prerequisites needed",
+        )
+        patch.status["conditions"] = conditions
+
+        # Immediately create HelmRelease
+        result = await execute_phase_helmrelease(crd_spec=spec, namespace=namespace)
+        if result.success:
+            set_phase(
+                patch.status,
+                DeploymentPhase.CREATING_HELM_RELEASE,
+                "HelmRelease created, waiting for Ready",
+            )
+        else:
+            set_phase(
+                patch.status,
+                DeploymentPhase.FAILED,
+                f"HelmRelease creation failed: {result.errors}",
+            )
+            raise kopf.TemporaryError(
+                f"HelmRelease creation failed: {result.errors}", delay=30
+            )
+        return
+
     set_phase(
         patch.status, DeploymentPhase.CREATING_PREREQUISITES, "Starting deployment"
     )
 
     # Phase 1: NetworkPolicies + Secrets
     result = await execute_phase_prerequisites(crd_spec=spec, namespace=namespace)
-
-    conditions: list[dict[str, str]] = status.get("conditions", [])
 
     if result.success:
         set_condition(
@@ -73,14 +120,27 @@ async def on_styrmin_deployment_create(
             f"{result.resource_details.get('secrets', 0)} Secrets created",
         )
         patch.status["conditions"] = conditions
-        set_phase(
-            patch.status,
-            DeploymentPhase.CREATING_HELM_RELEASE,
-            "Prerequisites ready, creating HelmRelease",
-        )
         logger.info(
             "Phase 1 complete for %s/%s, proceeding to HelmRelease", namespace, name
         )
+
+        # Phase 2: Create HelmRelease
+        hr_result = await execute_phase_helmrelease(crd_spec=spec, namespace=namespace)
+        if hr_result.success:
+            set_phase(
+                patch.status,
+                DeploymentPhase.CREATING_HELM_RELEASE,
+                "HelmRelease created, waiting for Ready",
+            )
+        else:
+            set_phase(
+                patch.status,
+                DeploymentPhase.FAILED,
+                f"HelmRelease creation failed: {hr_result.errors}",
+            )
+            raise kopf.TemporaryError(
+                f"HelmRelease creation failed: {hr_result.errors}", delay=30
+            )
     else:
         set_condition(
             conditions,
@@ -176,7 +236,7 @@ async def on_styrmin_deployment_resume(
 
 
 @kopf.on.create(CRD_GROUP, CRD_VERSION, CRD_PLURAL)
-async def _kopf_on_styrmin_deployment_create(
+async def kopf_on_styrmin_deployment_create(
     spec: kopf.Spec,
     status: kopf.Status,
     name: str,
@@ -197,7 +257,7 @@ async def _kopf_on_styrmin_deployment_create(
 
 
 @kopf.on.resume(CRD_GROUP, CRD_VERSION, CRD_PLURAL)
-async def _kopf_on_styrmin_deployment_resume(
+async def kopf_on_styrmin_deployment_resume(
     spec: kopf.Spec,
     status: kopf.Status,
     name: str,
@@ -218,7 +278,7 @@ async def _kopf_on_styrmin_deployment_resume(
 
 
 @kopf.on.update(CRD_GROUP, CRD_VERSION, CRD_PLURAL, field="spec")
-async def _kopf_on_styrmin_deployment_update(
+async def kopf_on_styrmin_deployment_update(
     spec: kopf.Spec,
     status: kopf.Status,
     name: str,
@@ -230,7 +290,31 @@ async def _kopf_on_styrmin_deployment_update(
 ) -> None:
     """Handle StyrminDeployment spec changes — re-run ordered pipeline."""
     ns = namespace or ""
+    crd_spec = dict(spec)
     logger.info("StyrminDeployment spec updated: %s/%s, re-reconciling", ns, name)
+
+    conditions: list[dict[str, str]] = list(status.get("conditions", []))
+
+    # Internal deployments skip prerequisites — go straight to HelmRelease
+    if _is_internal(crd_spec):
+        result = await execute_phase_helmrelease(crd_spec=crd_spec, namespace=ns)
+        if result.success:
+            set_phase(
+                patch.status,
+                DeploymentPhase.CREATING_HELM_RELEASE,
+                "HelmRelease updated, waiting for Ready",
+            )
+            patch.status["conditions"] = conditions
+        else:
+            set_phase(
+                patch.status,
+                DeploymentPhase.FAILED,
+                f"Update failed: {result.errors}",
+            )
+            raise kopf.TemporaryError(
+                f"HelmRelease update failed: {result.errors}", delay=30
+            )
+        return
 
     # Reset to CreatingPrerequisites to re-run the full pipeline
     set_phase(
@@ -239,8 +323,7 @@ async def _kopf_on_styrmin_deployment_update(
         "Spec updated, re-reconciling",
     )
 
-    result = await execute_phase_prerequisites(crd_spec=dict(spec), namespace=ns)
-    conditions: list[dict[str, str]] = list(status.get("conditions", []))
+    result = await execute_phase_prerequisites(crd_spec=crd_spec, namespace=ns)
 
     if result.success:
         set_condition(
@@ -278,7 +361,7 @@ async def _kopf_on_styrmin_deployment_update(
     interval=RECONCILIATION_INTERVAL_SECONDS,
     initial_delay=RECONCILIATION_INTERVAL_SECONDS,
 )
-async def _kopf_styrmin_deployment_timer(
+async def kopf_styrmin_deployment_timer(
     *,
     body: kopf.Body,
     spec: kopf.Spec,
@@ -314,6 +397,39 @@ async def _kopf_styrmin_deployment_timer(
                     "HelmRelease is Ready",
                 )
                 patch.status["conditions"] = conditions
+
+                # Internal deployments skip Phase 3 — go straight to Ready
+                if _is_internal(crd_spec):
+                    set_condition(
+                        conditions,
+                        ConditionType.SERVICES_READY,
+                        ConditionStatus.TRUE,
+                        "Skipped",
+                        "Internal deployment — no services needed",
+                    )
+                    set_condition(
+                        conditions,
+                        ConditionType.MIDDLEWARES_READY,
+                        ConditionStatus.TRUE,
+                        "Skipped",
+                        "Internal deployment — no middlewares needed",
+                    )
+                    set_condition(
+                        conditions,
+                        ConditionType.READY,
+                        ConditionStatus.TRUE,
+                        "AllPhasesComplete",
+                        "Internal deployment is healthy",
+                    )
+                    patch.status["conditions"] = conditions
+                    set_phase(
+                        patch.status, DeploymentPhase.READY, "All resources deployed"
+                    )
+                    logger.info(
+                        "Internal deployment %s/%s reached Ready state", ns, name
+                    )
+                    return
+
                 set_phase(
                     patch.status,
                     DeploymentPhase.CREATING_SERVICES,
@@ -365,6 +481,10 @@ async def _kopf_styrmin_deployment_timer(
         return
 
     if phase == DeploymentPhase.READY.value:
+        # Internal deployments have no utility resources to reconcile
+        if _is_internal(crd_spec):
+            return
+
         # Drift detection: reconcile all resources
         from styrmin_backend.operator.pipeline import build_desired_resources_from_crd
         from styrmin_backend.operator.reconciler import (
@@ -413,7 +533,7 @@ async def _kopf_styrmin_deployment_timer(
 
 
 @kopf.on.delete(CRD_GROUP, CRD_VERSION, CRD_PLURAL)
-async def _kopf_on_styrmin_deployment_delete(
+async def kopf_on_styrmin_deployment_delete(
     spec: kopf.Spec,
     status: kopf.Status,
     name: str,

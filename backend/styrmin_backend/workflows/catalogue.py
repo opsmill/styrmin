@@ -207,7 +207,7 @@ class PrefectCatalogue:
             action=PrefectAction.CREATE_INSTANCE,
             workflow=LocalSourceWorkflowDefinition(
                 name="create_instance_crd",
-                type=WorkflowType.INTERNAL,
+                type=WorkflowType.USER,
                 module="styrmin_backend.agent.tasks.orchestration",
                 function="create_instance_crd",
                 set_directory="/source/backend/",
@@ -218,7 +218,7 @@ class PrefectCatalogue:
             action=PrefectAction.UPDATE_INSTANCE,
             workflow=LocalSourceWorkflowDefinition(
                 name="update_instance_crd",
-                type=WorkflowType.INTERNAL,
+                type=WorkflowType.USER,
                 module="styrmin_backend.agent.tasks.orchestration",
                 function="update_instance_crd",
                 set_directory="/source/backend/",
@@ -229,7 +229,7 @@ class PrefectCatalogue:
             action=PrefectAction.UPGRADE_INSTANCE,
             workflow=LocalSourceWorkflowDefinition(
                 name="upgrade_instance_crd",
-                type=WorkflowType.INTERNAL,
+                type=WorkflowType.USER,
                 module="styrmin_backend.agent.tasks.orchestration",
                 function="upgrade_instance_crd",
                 set_directory="/source/backend/",

@@ -552,6 +552,7 @@ async def create_instance_crd(
     instance: Instance,
     prehook: UUID | None,
     posthook: UUID | None,
+    internal: bool = False,
 ) -> None:
     """Create a StyrminDeployment CRD for the operator to process.
 
@@ -588,6 +589,7 @@ async def create_instance_crd(
         context=context,
         release_reference=release_reference,
         namespace=namespace,
+        internal=internal,
     )
 
     from styrmin_backend.agent.service.kubernetes.primitives import (

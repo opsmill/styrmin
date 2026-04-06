@@ -228,7 +228,7 @@ async def _reconcile_resource_drift(
         LABEL_OPERATOR_MANAGED: LABEL_OPERATOR_MANAGED_VALUE,
     },
 )
-async def _kopf_on_networkpolicy_update(
+async def kopf_on_networkpolicy_update(
     body: dict[str, Any],
     meta: kopf.Meta,
     namespace: str | None,
@@ -256,7 +256,7 @@ async def _kopf_on_networkpolicy_update(
         LABEL_OPERATOR_MANAGED: LABEL_OPERATOR_MANAGED_VALUE,
     },
 )
-async def _kopf_on_networkpolicy_delete(
+async def kopf_on_networkpolicy_delete(
     body: dict[str, Any],
     meta: kopf.Meta,
     namespace: str | None,
@@ -284,7 +284,7 @@ async def _kopf_on_networkpolicy_delete(
     plural="services",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
 )
-async def _kopf_on_service_update(
+async def kopf_on_service_update(
     body: dict[str, Any],
     meta: kopf.Meta,
     namespace: str | None,
@@ -311,7 +311,7 @@ async def _kopf_on_service_update(
     plural="services",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
 )
-async def _kopf_on_service_delete(
+async def kopf_on_service_delete(
     body: dict[str, Any],
     meta: kopf.Meta,
     namespace: str | None,
@@ -341,7 +341,7 @@ async def _kopf_on_service_delete(
     plural="secrets",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
 )
-async def _kopf_on_secret_update(
+async def kopf_on_secret_update(
     body: dict[str, Any],
     meta: kopf.Meta,
     namespace: str | None,
@@ -368,7 +368,7 @@ async def _kopf_on_secret_update(
     plural="secrets",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
 )
-async def _kopf_on_secret_delete(
+async def kopf_on_secret_delete(
     body: dict[str, Any],
     meta: kopf.Meta,
     namespace: str | None,
@@ -399,7 +399,7 @@ async def _kopf_on_secret_delete(
     plural="middlewares",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
 )
-async def _kopf_on_middleware_update(
+async def kopf_on_middleware_update(
     body: dict[str, Any],
     meta: kopf.Meta,
     namespace: str | None,
@@ -427,7 +427,7 @@ async def _kopf_on_middleware_update(
     plural="middlewares",
     labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
 )
-async def _kopf_on_middleware_delete(
+async def kopf_on_middleware_delete(
     body: dict[str, Any],
     meta: kopf.Meta,
     namespace: str | None,

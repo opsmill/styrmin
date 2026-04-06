@@ -102,6 +102,7 @@ class StyrminDeploymentSpec(BaseModel):
     release_reference: str = Field(alias="releaseReference")
     app_name: str = Field(alias="appName")
     app_version: str = Field(alias="appVersion")
+    internal: bool = False
     context: dict[str, Any] = Field(default_factory=dict)
     helm: HelmSpec = Field(default_factory=HelmSpec)
     labels: dict[str, Any] = Field(default_factory=dict)

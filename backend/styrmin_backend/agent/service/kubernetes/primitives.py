@@ -181,20 +181,8 @@ async def apply_kubernetes_resource(
     kind = resource["kind"]
     name = resource["metadata"]["name"]
 
-    # Custom resources (e.g., Traefik Middleware)
-    if "/" in api_version:
-        group, version = api_version.rsplit("/", 1)
-        plural = _kind_to_plural(kind)
-        await upsert_custom_resource(
-            plurals=plural,
-            body=resource,
-            group=group,
-            version=version,
-            namespace=namespace,
-        )
-        return
-
-    # Core API resources
+    # Core API resources — check kind first since some core resources
+    # use grouped apiVersions (e.g., networking.k8s.io/v1 for NetworkPolicy)
     if kind == "Secret":
         core_api = kubeclient.CoreV1Api(client)
         try:
@@ -240,6 +228,17 @@ async def apply_kubernetes_resource(
                 )
             else:
                 raise
+    elif "/" in api_version:
+        # Custom resources (e.g., Traefik Middleware)
+        group, version = api_version.rsplit("/", 1)
+        plural = _kind_to_plural(kind)
+        await upsert_custom_resource(
+            plurals=plural,
+            body=resource,
+            group=group,
+            version=version,
+            namespace=namespace,
+        )
     else:
         raise ValueError(f"Unsupported resource kind: {kind}")
 

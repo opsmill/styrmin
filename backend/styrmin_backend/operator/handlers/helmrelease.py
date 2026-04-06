@@ -193,7 +193,7 @@ async def on_helmrelease_delete(
         LABEL_OPERATOR_MANAGED: LABEL_OPERATOR_MANAGED_VALUE,
     },
 )
-async def _kopf_on_helmrelease_create(
+async def kopf_on_helmrelease_create(
     body: dict[str, Any],
     meta: kopf.Meta,
     spec: kopf.Spec,
@@ -220,7 +220,7 @@ async def _kopf_on_helmrelease_create(
         LABEL_OPERATOR_MANAGED: LABEL_OPERATOR_MANAGED_VALUE,
     },
 )
-async def _kopf_on_helmrelease_delete(
+async def kopf_on_helmrelease_delete(
     body: dict[str, Any],
     meta: kopf.Meta,
     spec: kopf.Spec,
@@ -252,7 +252,7 @@ async def _kopf_on_helmrelease_delete(
     interval=RECONCILIATION_INTERVAL_SECONDS,
     initial_delay=RECONCILIATION_INTERVAL_SECONDS,
 )
-async def _kopf_helmrelease_timer(  # noqa: ARG001
+async def kopf_helmrelease_timer(  # noqa: ARG001
     *,
     body: kopf.Body,
     meta: kopf.Meta,

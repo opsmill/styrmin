@@ -25,6 +25,7 @@ def build_styrmin_deployment_body(
     namespace: str,
     helm_chart_spec: dict[str, Any] | None = None,
     helm_repo_spec: dict[str, Any] | None = None,
+    internal: bool = False,
 ) -> dict[str, Any]:
     """Build a StyrminDeployment CRD body from deployment context.
 
@@ -53,7 +54,8 @@ def build_styrmin_deployment_body(
             "releaseReference": release_reference,
             "appName": context.app.name,
             "appVersion": context.app.version,
-            "context": context.model_dump(exclude_none=True),
+            "internal": internal,
+            "context": context.model_dump(mode="json", exclude_none=True),
             "helm": {
                 "chart": {
                     "id": str(context.app.helm.chart.id),

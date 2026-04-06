@@ -129,9 +129,11 @@ async def execute_phase_helmrelease(
     crd_spec: dict[str, Any],
     namespace: str,
 ) -> PhaseResult:
-    """Phase 2: Create the HelmRelease.
+    """Phase 2: Create Flux source objects and the HelmRelease.
 
-    The HelmRelease is built from the CRD spec's context and helm fields.
+    Creates the HelmRepository and HelmChart in the styrmin namespace
+    (Flux source objects are cluster-scoped resources), then creates
+    the HelmRelease in the deployment namespace.
     """
     from styrmin_backend.agent.service.kubernetes.resources.builders.application import (
         ApplicationHelmReleaseBuilder,
@@ -145,16 +147,54 @@ async def execute_phase_helmrelease(
     try:
         context_data = crd_spec.get("context", {})
         context = GlobalContext.model_validate(context_data)
+        helm = context.app.helm
 
+        from styrmin_backend.agent.service.kubernetes.primitives import (
+            upsert_custom_resource,
+        )
+        from styrmin_backend.services.helm.renderer import (
+            render_helm_chart_spec,
+            render_helm_repository_spec,
+        )
+        from styrmin_backend.services.utils import get_helm_repository_type
+
+        # Step 1: Create HelmRepository in styrmin namespace
+        helm_repo_spec = render_helm_repository_spec(
+            repository_id=helm.repository.id,
+            repository_url=helm.repository.url,
+            repository_type=get_helm_repository_type(helm.repository.url),
+        )
+        await upsert_custom_resource(
+            plurals="helmrepositories",
+            body=helm_repo_spec,
+            group="source.toolkit.fluxcd.io",
+            version="v1",
+            namespace="styrmin",
+        )
+        logger.info("Created HelmRepository for %s", helm.repository.url)
+
+        # Step 2: Create HelmChart in styrmin namespace
+        helm_chart_spec = render_helm_chart_spec(
+            helm_chart_id=helm.chart.id,
+            name=helm.chart.name,
+            version=helm.chart.version,
+            repository_id=helm.repository.id,
+        )
+        await upsert_custom_resource(
+            plurals="helmcharts",
+            body=helm_chart_spec,
+            group="source.toolkit.fluxcd.io",
+            version="v1",
+            namespace="styrmin",
+        )
+        logger.info("Created HelmChart %s:%s", helm.chart.name, helm.chart.version)
+
+        # Step 3: Create HelmRelease in deployment namespace
         builder = ApplicationHelmReleaseBuilder(context=context)
         utility_kinds = [u.kind for u in context.utilities]
         utilities = load_utilities(utility_kinds)
         helm_release = builder.build(utilities=utilities)
         release_spec = helm_release.render()
-
-        from styrmin_backend.agent.service.kubernetes.primitives import (
-            upsert_custom_resource,
-        )
 
         await upsert_custom_resource(
             plurals="helmreleases",
@@ -164,8 +204,8 @@ async def execute_phase_helmrelease(
             namespace=namespace,
         )
 
-        result.created_count = 1
-        result.resource_details = {"helmReleases": 1}
+        result.created_count = 3
+        result.resource_details = {"helmRepositories": 1, "helmCharts": 1, "helmReleases": 1}
         logger.info(
             "Created HelmRelease %s in %s",
             context.instance.release_reference,
