@@ -40,6 +40,11 @@ async def on_startup(settings: kopf.OperatorSettings, **_: Any) -> None:
     settings.peering.name = PEERING_NAME
     settings.peering.mandatory = True
     settings.peering.priority = PEERING_PRIORITY
+    # Use a shorter, K8s-valid prefix for handler state annotations
+    settings.persistence.finalizer = "styrmin.io/kopf-finalizer"
+    settings.persistence.progress_storage = kopf.AnnotationsProgressStorage(
+        prefix="styrmin.io",
+    )
     logger.info(
         "Kopf operator starting with peering=%s priority=%d",
         PEERING_NAME,

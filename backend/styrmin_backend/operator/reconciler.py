@@ -238,18 +238,20 @@ async def is_deployment_in_progress(namespace: str, helmrelease_name: str) -> bo
     Reads the deployment-in-progress annotation to determine if the
     operator should defer reconciliation.
     """
-    from styrmin_backend.agent.service.kubernetes.primitives import get_custom_resource
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
 
     try:
-        hr = await get_custom_resource(
-            plural=HELMRELEASE_PLURAL,
-            name=helmrelease_name,
-            group=HELMRELEASE_GROUP,
-            version=HELMRELEASE_VERSION,
-            namespace=namespace,
-        )
-        annotations = hr.get("metadata", {}).get("annotations", {})  # type: ignore[union-attr]
-        return annotations.get(ANNOTATION_DEPLOYMENT_IN_PROGRESS) == "true"
+        async with get_kubernetes_client() as client:
+            custom_api = kubeclient.CustomObjectsApi(client)
+            hr = await custom_api.get_namespaced_custom_object(
+                group=HELMRELEASE_GROUP,
+                version=HELMRELEASE_VERSION,
+                namespace=namespace,
+                plural=HELMRELEASE_PLURAL,
+                name=helmrelease_name,
+            )
+            annotations = hr.get("metadata", {}).get("annotations", {})
+            return annotations.get(ANNOTATION_DEPLOYMENT_IN_PROGRESS) == "true"
     except Exception:
         return False
 
@@ -329,26 +331,28 @@ async def _check_helmrelease_ready(
 
     Returns True if the HelmRelease has a Ready=True condition.
     """
-    from styrmin_backend.agent.service.kubernetes.primitives import get_custom_resource
-    from styrmin_backend.agent.service.kubernetes.exceptions import (
-        CustomResourceNotFound,
-    )
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
 
     try:
-        hr = await get_custom_resource(
-            plural=HELMRELEASE_PLURAL,
-            name=release_reference,
-            group=HELMRELEASE_GROUP,
-            version=HELMRELEASE_VERSION,
-            namespace=namespace,
-        )
-        status = hr.get("status", {})  # type: ignore[union-attr]
-        conditions = status.get("conditions", [])
-        for condition in conditions:
-            if condition.get("type") == "Ready" and condition.get("status") == "True":
-                return True
-    except CustomResourceNotFound:
-        logger.debug("HelmRelease %s not found in %s", release_reference, namespace)
+        async with get_kubernetes_client() as client:
+            custom_api = kubeclient.CustomObjectsApi(client)
+            hr = await custom_api.get_namespaced_custom_object(
+                group=HELMRELEASE_GROUP,
+                version=HELMRELEASE_VERSION,
+                namespace=namespace,
+                plural=HELMRELEASE_PLURAL,
+                name=release_reference,
+            )
+            status = hr.get("status", {})
+            conditions = status.get("conditions", [])
+            for condition in conditions:
+                if condition.get("type") == "Ready" and condition.get("status") == "True":
+                    return True
+    except ApiException as exc:
+        if exc.status == 404:
+            logger.debug("HelmRelease %s not found in %s", release_reference, namespace)
+        else:
+            logger.exception("Failed to check HelmRelease %s status", release_reference)
     except Exception:
         logger.exception("Failed to check HelmRelease %s status", release_reference)
     return False
