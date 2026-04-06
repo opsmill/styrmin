@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-deployment-crd`  
 **Created**: 2026-04-05  
-**Status**: Draft  
+**Status**: Extracted  
 **Input**: User description: "Expand how the operator is working by adding a new CRD to manage Styrmin Deployment, this new CRD will be used to trigger the deployment of the NetworkPolicy and the HelmChart as well. The HelmChart should only be deployed once the NetworkPolicies have been properly instantiated. Also update the operator to also manage the Secrets, Services and Middlewares. Update the Prefect task to create/manage the Deployment CRD instead of managing the HelmChart directly."
 
 ## User Scenarios & Testing *(mandatory)*

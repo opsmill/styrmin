@@ -243,6 +243,16 @@ class IngressUtility(BaseUtility):
     """Ingress controller utility"""
 ```
 
+## Combined Operator/Agent Process
+
+<!-- Extracted from specs/001-k8s-operator and specs/001-deployment-crd on 2026-04-06 -->
+
+The agent container runs both the Prefect worker and the kopf operator in a single async process. Both components share one event loop via `asyncio.gather()`. The kopf operator watches `StyrminDeployment` CRDs and manages all Kubernetes resources (NetworkPolicies, Secrets, HelmReleases, Services, Middlewares) while the Prefect worker continues to execute deployment flows.
+
+Graceful shutdown is coordinated: kopf's `@kopf.on.cleanup()` handler signals an `asyncio.Event` to stop the Prefect worker. Both components stop together.
+
+See [operator.md](operator.md) for full operator documentation, ADR-004 for the shared event loop design, and ADR-008 for the responsibility split between Prefect and the operator.
+
 ## Kubernetes Integration
 
 ### Primitives (`kubernetes/primitives.py`)

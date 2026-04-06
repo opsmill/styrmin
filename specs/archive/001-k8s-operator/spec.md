@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-k8s-operator`  
 **Created**: 2026-04-05  
-**Status**: Draft  
+**Status**: Extracted  
 **Input**: User description: "I want to extend the capabilities of the k8s agent to also work as an operator, the task execution logic with prefect shouldn't change but in addition I would like to build an operator that will track the deployments and that will ensure that the additional utility, network policy etc are always accurate. I want to use the library kopf to manage the k8s operator using Python."
 
 ## Clarifications
