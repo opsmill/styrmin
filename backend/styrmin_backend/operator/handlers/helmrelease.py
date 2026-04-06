@@ -107,20 +107,21 @@ async def on_helmrelease_create(
     )
 
     # Emit status events
-    from kubernetes_asyncio.client.api_client import ApiClient as K8sApiClient
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
 
-    api_client = K8sApiClient()
+    async with get_kubernetes_client() as api_client:
+        if result.has_errors:
+            for error in result.errors:
+                await emit_reconcile_failed(
+                    api_client=api_client,
+                    namespace=namespace,
+                    helmrelease_name=helmrelease_name,
+                    resource_kind="NetworkPolicy",
+                    resource_name="(batch)",
+                    error_message=error,
+                )
 
     if result.has_errors:
-        for error in result.errors:
-            await emit_reconcile_failed(
-                api_client=api_client,
-                namespace=namespace,
-                helmrelease_name=helmrelease_name,
-                resource_kind="NetworkPolicy",
-                resource_name="(batch)",
-                error_message=error,
-            )
         logger.warning(
             "Partial reconciliation for %s/%s: created=%d errors=%d",
             namespace,
@@ -134,12 +135,13 @@ async def on_helmrelease_create(
         )
 
     if result.created > 0:
-        await emit_reconcile_succeeded(
-            api_client=api_client,
-            namespace=namespace,
-            helmrelease_name=helmrelease_name,
-            release_reference=release_reference,
-        )
+        async with get_kubernetes_client() as api_client:
+            await emit_reconcile_succeeded(
+                api_client=api_client,
+                namespace=namespace,
+                helmrelease_name=helmrelease_name,
+                release_reference=release_reference,
+            )
 
     logger.info(
         "Created %d NetworkPolicies for %s/%s",

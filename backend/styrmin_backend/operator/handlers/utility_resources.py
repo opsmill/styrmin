@@ -47,23 +47,23 @@ async def _find_helmrelease_for_resource(
     namespace: str, release_reference: str
 ) -> dict[str, Any] | None:
     """Look up the parent HelmRelease for a utility resource by release-reference label."""
-    from styrmin_backend.agent.service.kubernetes.dependency import get_api_client
     from kubernetes_asyncio import client as kubeclient
 
-    client = await get_api_client()
-    custom_api = kubeclient.CustomObjectsApi(client)
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
 
     try:
-        result = await custom_api.list_namespaced_custom_object(
-            group=HELMRELEASE_GROUP,
-            version=HELMRELEASE_VERSION,
-            namespace=namespace,
-            plural=HELMRELEASE_PLURAL,
-            label_selector=f"{LABEL_RELEASE_REFERENCE}={release_reference}",
-        )
-        items = result.get("items", [])
-        if items:
-            return items[0]
+        async with get_kubernetes_client() as client:
+            custom_api = kubeclient.CustomObjectsApi(client)
+            result = await custom_api.list_namespaced_custom_object(
+                group=HELMRELEASE_GROUP,
+                version=HELMRELEASE_VERSION,
+                namespace=namespace,
+                plural=HELMRELEASE_PLURAL,
+                label_selector=f"{LABEL_RELEASE_REFERENCE}={release_reference}",
+            )
+            items = result.get("items", [])
+            if items:
+                return items[0]
     except Exception:
         _logger.exception(
             "Failed to find HelmRelease for release-reference %s in %s",
@@ -176,35 +176,34 @@ async def _reconcile_resource_drift(
     )
 
     # Emit Kubernetes Events for status reporting
-    from kubernetes_asyncio.client.api_client import ApiClient as K8sApiClient
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
 
-    api_client = K8sApiClient()
-
-    if result.has_errors:
-        for error in result.errors:
-            await emit_reconcile_failed(
+    async with get_kubernetes_client() as api_client:
+        if result.has_errors:
+            for error in result.errors:
+                await emit_reconcile_failed(
+                    api_client=api_client,
+                    namespace=namespace,
+                    helmrelease_name=hr_name,
+                    resource_kind=resource_kind,
+                    resource_name=resource_name,
+                    error_message=error,
+                )
+        elif result.total_actions > 0:
+            await emit_drift_detected(
                 api_client=api_client,
                 namespace=namespace,
                 helmrelease_name=hr_name,
                 resource_kind=resource_kind,
                 resource_name=resource_name,
-                error_message=error,
+                change_type=change_type,
             )
-    elif result.total_actions > 0:
-        await emit_drift_detected(
-            api_client=api_client,
-            namespace=namespace,
-            helmrelease_name=hr_name,
-            resource_kind=resource_kind,
-            resource_name=resource_name,
-            change_type=change_type,
-        )
-        await emit_reconcile_succeeded(
-            api_client=api_client,
-            namespace=namespace,
-            helmrelease_name=hr_name,
-            release_reference=release_reference,
-        )
+            await emit_reconcile_succeeded(
+                api_client=api_client,
+                namespace=namespace,
+                helmrelease_name=hr_name,
+                release_reference=release_reference,
+            )
 
     if result.total_actions > 0 or result.has_errors:
         logger.info(

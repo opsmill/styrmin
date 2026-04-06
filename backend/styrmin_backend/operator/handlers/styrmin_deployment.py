@@ -456,19 +456,19 @@ async def _kopf_on_styrmin_deployment_delete(
     # Step 2: Delete HelmRelease
     logger.info("Step 2: Deleting HelmRelease for %s/%s", ns, name)
     from kubernetes_asyncio import client as kubeclient
-    from styrmin_backend.agent.service.kubernetes.dependency import get_api_client
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
 
     try:
-        client = await anext(get_api_client())
-        custom_api = kubeclient.CustomObjectsApi(client)
-        await custom_api.delete_namespaced_custom_object(
-            group="helm.toolkit.fluxcd.io",
-            version="v2",
-            namespace=ns,
-            plural="helmreleases",
-            name=release_ref,
-        )
-        logger.info("HelmRelease %s deleted", release_ref)
+        async with get_kubernetes_client() as client:
+            custom_api = kubeclient.CustomObjectsApi(client)
+            await custom_api.delete_namespaced_custom_object(
+                group="helm.toolkit.fluxcd.io",
+                version="v2",
+                namespace=ns,
+                plural="helmreleases",
+                name=release_ref,
+            )
+            logger.info("HelmRelease %s deleted", release_ref)
     except Exception:
         logger.warning("HelmRelease %s not found or already deleted", release_ref)
 

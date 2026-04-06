@@ -134,44 +134,43 @@ async def delete_kubernetes_resource(
     Uses kubernetes_asyncio directly since the primitives module doesn't
     have a generic delete function.
     """
-    from styrmin_backend.agent.service.kubernetes.dependency import get_api_client
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
 
     kind = resource.get("kind", "")
     name = resource.get("metadata", {}).get("name", "")
     api_version = resource.get("apiVersion", "")
 
-    client: ApiClient = await get_api_client()
-
-    try:
-        if kind == "NetworkPolicy":
-            networking_api = kubeclient.NetworkingV1Api(client)
-            await networking_api.delete_namespaced_network_policy(
-                name=name, namespace=namespace
-            )
-        elif kind == "Service":
-            core_api = kubeclient.CoreV1Api(client)
-            await core_api.delete_namespaced_service(name=name, namespace=namespace)
-        elif kind == "Secret":
-            core_api = kubeclient.CoreV1Api(client)
-            await core_api.delete_namespaced_secret(name=name, namespace=namespace)
-        elif "/" in api_version:
-            # CRD resource (e.g., Middleware)
-            group, version = api_version.rsplit("/", 1)
-            custom_api = kubeclient.CustomObjectsApi(client)
-            await custom_api.delete_namespaced_custom_object(
-                group=group,
-                version=version,
-                namespace=namespace,
-                plural=kind.lower() + "s",
-                name=name,
-            )
-        else:
-            logger.warning("Cannot delete unsupported resource kind: %s", kind)
-    except ApiException as exc:
-        if exc.status == 404:
-            logger.debug("Resource %s/%s already deleted", kind, name)
-        else:
-            raise
+    async with get_kubernetes_client() as client:
+        try:
+            if kind == "NetworkPolicy":
+                networking_api = kubeclient.NetworkingV1Api(client)
+                await networking_api.delete_namespaced_network_policy(
+                    name=name, namespace=namespace
+                )
+            elif kind == "Service":
+                core_api = kubeclient.CoreV1Api(client)
+                await core_api.delete_namespaced_service(name=name, namespace=namespace)
+            elif kind == "Secret":
+                core_api = kubeclient.CoreV1Api(client)
+                await core_api.delete_namespaced_secret(name=name, namespace=namespace)
+            elif "/" in api_version:
+                # CRD resource (e.g., Middleware)
+                group, version = api_version.rsplit("/", 1)
+                custom_api = kubeclient.CustomObjectsApi(client)
+                await custom_api.delete_namespaced_custom_object(
+                    group=group,
+                    version=version,
+                    namespace=namespace,
+                    plural=kind.lower() + "s",
+                    name=name,
+                )
+            else:
+                logger.warning("Cannot delete unsupported resource kind: %s", kind)
+        except ApiException as exc:
+            if exc.status == 404:
+                logger.debug("Resource %s/%s already deleted", kind, name)
+            else:
+                raise
 
 
 async def reconcile_resources(
@@ -273,7 +272,7 @@ async def list_managed_resources(
     Returns:
         List of resource dicts from the cluster.
     """
-    from styrmin_backend.agent.service.kubernetes.dependency import get_api_client
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
 
     label_parts = [
         f"{LABEL_MANAGED_BY}={LABEL_MANAGED_BY_VALUE}",
@@ -283,41 +282,41 @@ async def list_managed_resources(
         label_parts.append(f"{LABEL_OPERATOR_MANAGED}={LABEL_OPERATOR_MANAGED_VALUE}")
     label_selector = ",".join(label_parts)
 
-    client: ApiClient = await get_api_client()
     resources: list[dict[str, Any]] = []
 
-    if kind is None or kind == "NetworkPolicy":
-        try:
-            networking_api = kubeclient.NetworkingV1Api(client)
-            result = await networking_api.list_namespaced_network_policy(
-                namespace=namespace, label_selector=label_selector
-            )
-            for item in result.items:
-                resources.append(client.sanitize_for_serialization(item))
-        except Exception:
-            logger.exception("Failed to list NetworkPolicies in %s", namespace)
+    async with get_kubernetes_client() as client:
+        if kind is None or kind == "NetworkPolicy":
+            try:
+                networking_api = kubeclient.NetworkingV1Api(client)
+                result = await networking_api.list_namespaced_network_policy(
+                    namespace=namespace, label_selector=label_selector
+                )
+                for item in result.items:
+                    resources.append(client.sanitize_for_serialization(item))
+            except Exception:
+                logger.exception("Failed to list NetworkPolicies in %s", namespace)
 
-    if kind is None or kind == "Service":
-        try:
-            core_api = kubeclient.CoreV1Api(client)
-            result = await core_api.list_namespaced_service(
-                namespace=namespace, label_selector=label_selector
-            )
-            for item in result.items:
-                resources.append(client.sanitize_for_serialization(item))
-        except Exception:
-            logger.exception("Failed to list Services in %s", namespace)
+        if kind is None or kind == "Service":
+            try:
+                core_api = kubeclient.CoreV1Api(client)
+                result = await core_api.list_namespaced_service(
+                    namespace=namespace, label_selector=label_selector
+                )
+                for item in result.items:
+                    resources.append(client.sanitize_for_serialization(item))
+            except Exception:
+                logger.exception("Failed to list Services in %s", namespace)
 
-    if kind is None or kind == "Secret":
-        try:
-            core_api = kubeclient.CoreV1Api(client)
-            result = await core_api.list_namespaced_secret(
-                namespace=namespace, label_selector=label_selector
-            )
-            for item in result.items:
-                resources.append(client.sanitize_for_serialization(item))
-        except Exception:
-            logger.exception("Failed to list Secrets in %s", namespace)
+        if kind is None or kind == "Secret":
+            try:
+                core_api = kubeclient.CoreV1Api(client)
+                result = await core_api.list_namespaced_secret(
+                    namespace=namespace, label_selector=label_selector
+                )
+                for item in result.items:
+                    resources.append(client.sanitize_for_serialization(item))
+            except Exception:
+                logger.exception("Failed to list Secrets in %s", namespace)
 
     return resources
 
