@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "@tanstack/react-router";
+import { useParams, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetDeploymentQuery,
@@ -12,15 +12,14 @@ import {
   useUpdateDeploymentVersionMutation,
   type ListRestoresQuery,
 } from "@/generated/graphql";
-import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Badge } from "@/components/ui/badge";
+import { ParameterCards } from "@/components/ParameterCards";
+import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Collapsible,
@@ -36,23 +35,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   Archive,
-  ArrowUpCircle,
   ChevronRight,
-  EllipsisVertical,
-  Globe,
+  ExternalLink,
+  Lock,
   RotateCcw,
-  Trash2,
 } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
+
+const DEPLOYMENT_TABS = [
+  { id: "overview", label: "Overview" },
+  { id: "parameters", label: "Parameters" },
+  { id: "backups", label: "Backups" },
+  { id: "timeline", label: "Timeline" },
+];
 
 export default function DeploymentDetailPage() {
   const { environmentId, deploymentId } = useParams({
@@ -60,6 +57,7 @@ export default function DeploymentDetailPage() {
   });
   const queryClient = useQueryClient();
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [activeTab, setActiveTab] = useState("overview");
 
   const { data, isLoading, error, refetch, dataUpdatedAt } =
     useGetDeploymentQuery(
@@ -77,29 +75,22 @@ export default function DeploymentDetailPage() {
 
   const instanceId = deployment?.applicationInstance?.id;
 
-  // Backup mutation
+  // Mutations
   const createBackupMutation = useCreateBackupMutation();
   const [backupError, setBackupError] = useState<string | null>(null);
-
-  // Restore mutation and state
   const createRestoreMutation = useCreateRestoreMutation();
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [selectedBackupId, setSelectedBackupId] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
-
-  // Delete backup state
   const deleteBackupMutation = useDeleteBackupMutation();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBackupId, setDeleteBackupId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  // Upgrade mutation
   const updateVersionMutation = useUpdateDeploymentVersionMutation();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
 
-  // Backups list
   const { data: backupsData, isLoading: backupsFetching } = useListBackupsQuery(
     { instanceId: instanceId! },
     {
@@ -172,27 +163,62 @@ export default function DeploymentDetailPage() {
 
   if (isLoading && !data)
     return <LoadingState message="Loading deployment..." />;
-
-  if (error) {
+  if (error)
     return <ErrorState message={error.message} onRetry={() => refetch()} />;
-  }
+  if (!deployment) return <ErrorState message="Deployment not found" />;
 
-  if (!deployment) {
-    return <ErrorState message="Deployment not found" />;
-  }
+  const deploymentParams = deployment.parameters
+    ? Object.entries(deployment.parameters).map(([key, value]) => ({
+        key,
+        value,
+      }))
+    : [];
 
   return (
-    <PageLayout
-      title={deployment.name}
-      breadcrumbs={[
-        {
-          label: "Environment",
-          href: `/environments/${environmentId}`,
-        },
-        { label: deployment.name },
-      ]}
-      actions={
-        <>
+    <div className="flex flex-col gap-6 p-8 px-10">
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-1.5 text-xs">
+        <Link to="/" className="text-muted-foreground hover:text-foreground">
+          Environments
+        </Link>
+        <span className="text-muted-foreground">/</span>
+        <Link
+          to="/environments/$environmentId"
+          params={{ environmentId }}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          Environment
+        </Link>
+        <span className="text-muted-foreground">/</span>
+        <span className="font-medium text-foreground">{deployment.name}</span>
+      </nav>
+
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3">
+            <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
+              {deployment.name}
+            </h1>
+            <StatusBadge status={deployment.status} />
+          </div>
+          <div className="flex items-center gap-4 text-xs">
+            <span className="text-muted-foreground">
+              Version{" "}
+              <span className="font-semibold text-foreground">
+                {deployment.applicationVersion}
+              </span>
+            </span>
+            <div className="h-3 w-px bg-border" />
+            <span className="text-muted-foreground">
+              Driver{" "}
+              <span className="font-semibold text-foreground">
+                {deployment.applicationDriverVersionId}
+              </span>
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
           <AutoRefreshIndicator
             enabled={autoRefreshEnabled}
             onToggle={setAutoRefreshEnabled}
@@ -202,226 +228,279 @@ export default function DeploymentDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={!instanceId || createBackupMutation.isPending}
-            onClick={handleBackup}
-          >
-            <Archive className="h-4 w-4" />
-            {createBackupMutation.isPending ? "Backing up…" : "Backup"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
             disabled={!instanceId}
             onClick={() => setUpgradeOpen(true)}
           >
-            <ArrowUpCircle className="h-4 w-4" />
             Upgrade
           </Button>
-        </>
-      }
-    >
-      <div className="space-y-6 max-w-3xl">
-        {backupError && (
-          <Alert variant="destructive">
-            <AlertDescription>{backupError}</AlertDescription>
-          </Alert>
-        )}
+          <Button size="sm">Redeploy</Button>
+        </div>
+      </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Overview</span>
-              <StatusBadge status={deployment.status} />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <DetailRow
-              label="Version"
-              value={deployment.applicationVersion}
-              mono
-            />
-            <DetailRow
-              label="Driver Version ID"
-              value={deployment.applicationDriverVersionId}
-              mono
-            />
-            <DetailRow
-              label="Environment ID"
-              value={deployment.environmentId}
-              mono
-            />
-          </CardContent>
-        </Card>
+      {backupError && (
+        <Alert variant="destructive">
+          <AlertDescription>{backupError}</AlertDescription>
+        </Alert>
+      )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Application Instance</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {deployment.applicationInstance ? (
-              <div className="space-y-3">
-                <DetailRow
-                  label="Name"
-                  value={deployment.applicationInstance.name}
-                />
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground w-40">
-                    Status
-                  </span>
-                  <StatusBadge status={deployment.applicationInstance.status} />
-                </div>
-                <DetailRow
-                  label="Version"
-                  value={deployment.applicationInstance.applicationVersion}
-                  mono
-                />
-              </div>
-            ) : (
+      {/* Tabs */}
+      <Tabs
+        tabs={DEPLOYMENT_TABS}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      />
+
+      {/* Overview Tab */}
+      <TabPanel active={activeTab === "overview"}>
+        <div className="flex gap-6">
+          {/* Left: Endpoints */}
+          <div className="flex flex-1 flex-col gap-3">
+            <span className="text-[13px] font-semibold text-foreground">
+              Endpoints
+            </span>
+            {deployment.deployedServices.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No active instance
+                No services deployed
               </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Components ({deployment.components.length})</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {deployment.components.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No components</p>
             ) : (
-              <div className="space-y-2">
-                {deployment.components.map((component) => (
-                  <div
-                    key={component.id}
-                    className="flex items-center justify-between py-2"
-                  >
-                    <span className="text-sm font-medium">
-                      {component.name}
-                    </span>
-                    <Badge
-                      variant={component.enabled ? "success" : "secondary"}
-                    >
-                      {component.enabled ? "Enabled" : "Disabled"}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {deployment.deployedServices.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Globe className="h-4 w-4" />
-                Services ({deployment.deployedServices.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {deployment.deployedServices.map((service) => (
-                  <div
-                    key={service.id}
-                    className="border rounded-md p-3 space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">
+              deployment.deployedServices.map((service) => (
+                <div
+                  key={service.id}
+                  className="flex flex-col gap-2.5 rounded-[10px] border border-border p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-[7px] w-[7px] rounded-full bg-success" />
+                      <span className="text-[13px] font-semibold text-foreground">
                         {service.driverServiceName}
                       </span>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">{service.kind}</Badge>
-                        <Badge variant="secondary">:{service.port}</Badge>
+                    </div>
+                    <span className="rounded-lg bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                      {service.kind} :{service.port}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {service.humanReadableFqdn && (
+                      <div className="flex items-center gap-2 rounded-lg bg-primary/5 px-3 py-2">
+                        <ExternalLink className="h-3 w-3 text-primary" />
+                        <span className="font-mono text-xs font-medium text-primary">
+                          {service.humanReadableFqdn}
+                        </span>
+                        <span className="ml-auto rounded bg-primary px-1.5 py-px text-[10px] font-medium text-primary-foreground">
+                          PUBLIC
+                        </span>
                       </div>
-                    </div>
-                    <div className="space-y-1">
-                      <FqdnRow
-                        label="Primary FQDN"
-                        value={service.primaryFqdn}
+                    )}
+                    {service.primaryFqdn && (
+                      <div className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2">
+                        <Lock className="h-3 w-3 text-muted-foreground" />
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {service.primaryFqdn}:{service.port}
+                        </span>
+                        <span className="ml-auto rounded bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                          INTERNAL
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Right: Components + Recent Timeline */}
+          <div className="flex w-[420px] flex-col gap-6">
+            {/* Components */}
+            <div className="flex flex-col gap-2.5">
+              <span className="text-[13px] font-semibold text-foreground">
+                Components
+              </span>
+              <div className="flex flex-col gap-1">
+                {deployment.components.map((component, i) => (
+                  <div
+                    key={component.id}
+                    className={`flex items-center justify-between rounded-lg px-3 py-2 ${
+                      i % 2 === 0 ? "bg-surface" : ""
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`h-[7px] w-[7px] rounded-full ${
+                          component.enabled
+                            ? "bg-success"
+                            : "bg-muted-foreground/30"
+                        }`}
                       />
-                      <FqdnRow
-                        label="Human-readable FQDN"
-                        value={service.humanReadableFqdn}
-                      />
+                      <span
+                        className={`text-[13px] font-medium ${
+                          component.enabled
+                            ? "text-foreground"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {component.name}
+                      </span>
                     </div>
+                    <span
+                      className={`text-[11px] ${
+                        component.enabled
+                          ? "text-success"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {component.enabled ? "enabled" : "disabled"}
+                    </span>
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        )}
+            </div>
 
-        {deployment.config && Object.keys(deployment.config).length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Configuration</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <pre className="text-xs bg-muted p-4 rounded-md overflow-auto max-h-64">
-                {JSON.stringify(deployment.config, null, 2)}
-              </pre>
-            </CardContent>
-          </Card>
-        )}
-
-        {deployment.parameters &&
-          Object.keys(deployment.parameters).length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Parameters</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="text-xs bg-muted p-4 rounded-md overflow-auto max-h-64">
-                  {JSON.stringify(deployment.parameters, null, 2)}
-                </pre>
-              </CardContent>
-            </Card>
-          )}
-
-        {deployment.applicationInstance && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Backups</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {backupsFetching && !backupsData ? (
-                <p className="text-sm text-muted-foreground">
-                  Loading backups…
+            {/* Recent Timeline */}
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-semibold text-foreground">
+                  Recent Timeline
+                </span>
+                <button
+                  onClick={() => setActiveTab("timeline")}
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  View all
+                </button>
+              </div>
+              {timelineEntries.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No timeline entries
                 </p>
-              ) : !backupsData?.backups || backupsData.backups.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No backups yet</p>
               ) : (
-                <div className="space-y-3">
-                  {backupsData.backups.map((backup) => (
-                    <BackupRow
-                      key={backup.id}
-                      backup={backup}
-                      onRestore={(backupId) => {
-                        setSelectedBackupId(backupId);
-                        setRestoreError(null);
-                        setRestoreOpen(true);
-                      }}
-                      onDelete={(backupId) => {
-                        setDeleteBackupId(backupId);
-                        setDeleteError(null);
-                        setDeleteOpen(true);
-                      }}
-                      autoRefreshEnabled={autoRefreshEnabled}
-                    />
+                <div className="flex flex-col">
+                  {timelineEntries.slice(0, 5).map((entry, i) => (
+                    <div key={entry.task.id} className="flex gap-3">
+                      <div
+                        className="flex flex-col items-center"
+                        style={{ width: 20 }}
+                      >
+                        <div
+                          className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${
+                            entry.task.status === "failed"
+                              ? "bg-destructive"
+                              : entry.task.type.includes("stop")
+                                ? "bg-warning"
+                                : "bg-success"
+                          }`}
+                        />
+                        {i < Math.min(timelineEntries.length, 5) - 1 && (
+                          <div className="w-px flex-1 bg-border" />
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-0.5 pb-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-medium text-foreground">
+                            {formatTaskType(entry.task.type)}
+                          </span>
+                          <StatusBadge status={entry.task.status} />
+                        </div>
+                        <span className="text-[11px] text-muted-foreground">
+                          {entry.applicationVersion &&
+                            `${entry.applicationVersion} — `}
+                          {entry.task.createdOn &&
+                            new Date(entry.task.createdOn).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+        </div>
+      </TabPanel>
+
+      {/* Parameters Tab */}
+      <TabPanel active={activeTab === "parameters"}>
+        {deploymentParams.length > 0 ? (
+          <ParameterCards
+            parameters={deploymentParams}
+            title="Deployment Parameters"
+            description="Configuration values passed to the driver at deploy time"
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No parameters configured for this deployment.
+          </p>
         )}
+      </TabPanel>
 
+      {/* Backups Tab */}
+      <TabPanel active={activeTab === "backups"}>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-semibold text-foreground">
+              Backup History
+            </span>
+            <Button
+              size="sm"
+              disabled={!instanceId || createBackupMutation.isPending}
+              onClick={handleBackup}
+            >
+              <Archive className="h-4 w-4" />
+              {createBackupMutation.isPending ? "Creating..." : "Create Backup"}
+            </Button>
+          </div>
+
+          {backupsFetching && !backupsData ? (
+            <p className="text-sm text-muted-foreground">Loading backups...</p>
+          ) : !backupsData?.backups || backupsData.backups.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No backups yet</p>
+          ) : (
+            <>
+              {/* Table header */}
+              <div className="flex items-center gap-4 px-4 py-2">
+                <span className="w-[200px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Name
+                </span>
+                <span className="w-[100px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Status
+                </span>
+                <span className="w-[150px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Created
+                </span>
+                <span className="w-[100px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Size
+                </span>
+                <span className="flex-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Actions
+                </span>
+              </div>
+              {backupsData.backups.map((backup, i) => (
+                <BackupRow
+                  key={backup.id}
+                  backup={backup}
+                  index={i}
+                  onRestore={(backupId) => {
+                    setSelectedBackupId(backupId);
+                    setRestoreError(null);
+                    setRestoreOpen(true);
+                  }}
+                  onDelete={(backupId) => {
+                    setDeleteBackupId(backupId);
+                    setDeleteError(null);
+                    setDeleteOpen(true);
+                  }}
+                  autoRefreshEnabled={autoRefreshEnabled}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      </TabPanel>
+
+      {/* Timeline Tab */}
+      <TabPanel active={activeTab === "timeline"}>
         <DeploymentTimeline entries={timelineEntries} />
-      </div>
+      </TabPanel>
 
-      {/* Restore confirmation dialog */}
+      {/* Restore dialog */}
       <Dialog
         open={restoreOpen}
         onOpenChange={(open) => {
@@ -469,13 +548,13 @@ export default function DeploymentDetailPage() {
               onClick={handleRestore}
               disabled={!selectedBackupId || createRestoreMutation.isPending}
             >
-              {createRestoreMutation.isPending ? "Restoring…" : "Restore"}
+              {createRestoreMutation.isPending ? "Restoring..." : "Restore"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation dialog */}
+      {/* Delete dialog */}
       <Dialog
         open={deleteOpen}
         onOpenChange={(open) => {
@@ -556,23 +635,24 @@ export default function DeploymentDetailPage() {
               onClick={handleUpgrade}
               disabled={!newVersion.trim() || updateVersionMutation.isPending}
             >
-              {updateVersionMutation.isPending ? "Upgrading…" : "Upgrade"}
+              {updateVersionMutation.isPending ? "Upgrading..." : "Upgrade"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PageLayout>
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// BackupRow — each backup manages its own restore list query + actions menu
+// BackupRow
 // ---------------------------------------------------------------------------
 
 type RestoreItem = ListRestoresQuery["restores"][number];
 
 function BackupRow({
   backup,
+  index,
   onRestore,
   onDelete,
   autoRefreshEnabled,
@@ -585,6 +665,7 @@ function BackupRow({
     sizeBytes?: number | null;
     errorMessage?: string | null;
   };
+  index: number;
   onRestore: (backupId: string) => void;
   onDelete: (backupId: string) => void;
   autoRefreshEnabled: boolean;
@@ -605,124 +686,80 @@ function BackupRow({
   const isRestoreDisabled = backup.status !== "completed" || hasActiveRestore;
 
   return (
-    <div className="py-2 border-b last:border-b-0">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <span className="text-sm font-medium">{backup.name}</span>
-          <div className="text-xs text-muted-foreground">
-            {new Date(backup.createdOn).toLocaleString()}
-            {backup.sizeBytes != null && (
-              <span className="ml-2">{formatBytes(backup.sizeBytes)}</span>
-            )}
-          </div>
-          {backup.errorMessage && (
-            <p className="text-xs text-destructive">{backup.errorMessage}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                <EllipsisVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                disabled={isRestoreDisabled}
-                onClick={() => onRestore(backup.id)}
-              >
-                <RotateCcw className="h-4 w-4" />
-                Restore
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive focus:text-destructive"
-                onClick={() => onDelete(backup.id)}
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+    <div>
+      <div
+        className={`flex items-center gap-4 rounded-lg px-4 py-3 ${
+          index % 2 === 0 ? "bg-surface" : ""
+        }`}
+      >
+        <span className="w-[200px] text-[13px] font-medium text-foreground">
+          {backup.name}
+        </span>
+        <div className="w-[100px]">
           <StatusBadge status={backup.status} />
+        </div>
+        <span className="w-[150px] text-[13px] text-muted-foreground">
+          {new Date(backup.createdOn).toLocaleDateString()}
+        </span>
+        <span className="w-[100px] text-[13px] text-muted-foreground">
+          {backup.sizeBytes != null ? formatBytes(backup.sizeBytes) : "—"}
+        </span>
+        <div className="flex flex-1 items-center gap-2">
+          <button
+            disabled={isRestoreDisabled}
+            onClick={() => onRestore(backup.id)}
+            className="text-xs font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+          >
+            Restore
+          </button>
+          <span className="text-muted-foreground/30">|</span>
+          <button
+            onClick={() => onDelete(backup.id)}
+            className="text-xs font-medium text-destructive hover:underline"
+          >
+            Delete
+          </button>
         </div>
       </div>
 
       {/* Restore history */}
-      {restores.length > 0 && (
-        <div className="mt-3 ml-4">
-          <p className="text-xs font-medium text-muted-foreground mb-2">
-            <RotateCcw className="h-3 w-3 inline mr-1" />
-            Restores ({restores.length})
-          </p>
-          <div className="space-y-2">
-            {restores.map((restore) => (
-              <RestoreRow key={restore.id} restore={restore} />
-            ))}
-          </div>
-        </div>
-      )}
+      {restores.map((restore) => (
+        <RestoreRow key={restore.id} restore={restore} />
+      ))}
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// RestoreRow — a single restore with expandable component statuses
-// ---------------------------------------------------------------------------
 
 function RestoreRow({ restore }: { restore: RestoreItem }) {
   const components = restore.componentStatuses ?? [];
 
   return (
-    <div className="rounded-md border-l-2 border-l-blue-400 border border-l-2 bg-muted/20 p-2 pl-3">
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <span className="text-xs font-medium">{restore.name}</span>
-          <div className="text-xs text-muted-foreground">
-            {new Date(restore.createdOn).toLocaleString()}
-            {restore.completedAt && (
-              <span>
-                {" → "}
-                {new Date(restore.completedAt).toLocaleString()}
-              </span>
-            )}
-          </div>
-          <div className="text-xs text-muted-foreground font-mono">
-            {restore.targetNamespace}
-          </div>
-          {restore.errorMessage && (
-            <p className="text-xs text-destructive mt-1">
-              {restore.errorMessage}
-            </p>
-          )}
-        </div>
-        <StatusBadge status={restore.status} />
-      </div>
+    <div className="flex items-center gap-3 border-t border-border/50 px-4 py-2.5 pl-10">
+      <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
+      <span className="text-xs text-muted-foreground">Restored to</span>
+      <span className="text-xs font-medium text-foreground">
+        {restore.targetNamespace}
+      </span>
+      <span className="text-xs text-muted-foreground">—</span>
+      <StatusBadge status={restore.status} />
+      <span className="text-xs text-muted-foreground">
+        {new Date(restore.createdOn).toLocaleDateString()}
+      </span>
 
-      {/* Component-level statuses */}
       {components.length > 0 && (
-        <Collapsible className="mt-2">
+        <Collapsible className="ml-auto">
           <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors group">
             <ChevronRight className="h-3 w-3 transition-transform group-data-[panel-open]:rotate-90" />
-            Components ({components.length})
+            {components.length} components
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-1 ml-4 space-y-1">
+          <CollapsibleContent className="mt-1 space-y-1">
             {components.map((comp) => (
               <div
                 key={comp.componentName}
-                className="flex items-center justify-between py-1"
+                className="flex items-center justify-between py-0.5"
               >
-                <span className="text-xs font-medium">
-                  {comp.componentName}
-                </span>
-                <div className="flex items-center gap-2">
-                  {comp.errorMessage && (
-                    <span className="text-xs text-destructive max-w-48 truncate">
-                      {comp.errorMessage}
-                    </span>
-                  )}
-                  <StatusBadge status={comp.status} />
-                </div>
+                <span className="text-xs">{comp.componentName}</span>
+                <StatusBadge status={comp.status} />
               </div>
             ))}
           </CollapsibleContent>
@@ -733,39 +770,11 @@ function RestoreRow({ restore }: { restore: RestoreItem }) {
 }
 
 // ---------------------------------------------------------------------------
-// Utility components
+// Utilities
 // ---------------------------------------------------------------------------
 
-function DetailRow({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-sm text-muted-foreground w-40">{label}</span>
-      <span className={`text-sm ${mono ? "font-mono" : ""}`}>{value}</span>
-    </div>
-  );
-}
-
-function FqdnRow({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className="text-muted-foreground w-40 shrink-0">{label}</span>
-      {value ? (
-        <span className="font-mono text-xs truncate" title={value}>
-          {value}
-        </span>
-      ) : (
-        <span className="text-muted-foreground italic">Not configured</span>
-      )}
-    </div>
-  );
+function formatTaskType(type: string): string {
+  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function formatBytes(bytes: number): string {

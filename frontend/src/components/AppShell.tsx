@@ -1,24 +1,32 @@
 import { useState, useEffect } from "react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
-  Server,
-  Package,
+  LayoutGrid,
+  Layers,
   HardDrive,
+  Rocket,
   Settings,
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/hooks/use-theme";
 
 const STORAGE_KEY = "sidebar-collapsed";
 
 const navItems = [
-  { label: "Environments", icon: Server, href: "/", exact: true },
-  { label: "Drivers", icon: Package, href: "/drivers", exact: false },
+  { label: "Environments", icon: LayoutGrid, href: "/", exact: true },
+  { label: "Drivers", icon: Layers, href: "/drivers", exact: false },
   {
     label: "Backup Storage",
     icon: HardDrive,
     href: "/backup-storage-locations",
+    exact: false,
+  },
+  {
+    label: "Deployments",
+    icon: Rocket,
+    href: "/deployments",
     exact: false,
   },
 ];
@@ -32,6 +40,7 @@ export function AppShell() {
     return localStorage.getItem(STORAGE_KEY) === "true";
   });
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { theme } = useTheme();
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(collapsed));
@@ -50,14 +59,14 @@ export function AppShell() {
         to={item.href}
         title={collapsed ? item.label : undefined}
         className={cn(
-          "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+          "flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
           active
-            ? "bg-accent text-accent-foreground"
-            : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-          collapsed && "justify-center px-0",
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          collapsed && "justify-center px-2",
         )}
       >
-        <item.icon className="h-4 w-4 shrink-0" />
+        <item.icon className="h-[18px] w-[18px] shrink-0" />
         {!collapsed && <span>{item.label}</span>}
       </Link>
     );
@@ -67,36 +76,59 @@ export function AppShell() {
     <div className="flex min-h-screen">
       <aside
         className={cn(
-          "flex flex-col border-r bg-muted/30 transition-all duration-200",
+          "flex flex-col border-r border-border bg-sidebar transition-all duration-200",
           collapsed ? "w-14" : "w-60",
         )}
       >
-        <div className="flex h-14 items-center border-b px-4">
+        {/* Logo */}
+        <div className="flex items-center gap-2.5 px-4 py-5">
           {!collapsed && (
-            <span className="text-sm font-semibold tracking-tight">
-              Styrmin
-            </span>
+            <>
+              <div
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white",
+                  theme === "dark" ? "bg-primary" : "bg-foreground",
+                )}
+              >
+                S
+              </div>
+              <span className="text-[15px] font-semibold tracking-tight text-sidebar-foreground">
+                Styrmin
+              </span>
+            </>
+          )}
+          {collapsed && (
+            <div
+              className={cn(
+                "mx-auto flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white",
+                theme === "dark" ? "bg-primary" : "bg-foreground",
+              )}
+            >
+              S
+            </div>
           )}
         </div>
 
-        <nav className="flex-1 space-y-1 p-2">
+        {/* Navigation */}
+        <nav className="flex-1 space-y-1 px-3">
           {navItems.map(renderNavLink)}
         </nav>
 
-        <div className="border-t p-2">
+        {/* Bottom */}
+        <div className="space-y-1 border-t border-border px-3 py-2">
           {bottomNavItems.map(renderNavLink)}
           <button
             onClick={() => setCollapsed((prev) => !prev)}
             className={cn(
-              "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-accent-foreground",
-              collapsed && "justify-center px-0",
+              "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+              collapsed && "justify-center px-2",
             )}
           >
             {collapsed ? (
-              <PanelLeft className="h-4 w-4 shrink-0" />
+              <PanelLeft className="h-[18px] w-[18px] shrink-0" />
             ) : (
               <>
-                <PanelLeftClose className="h-4 w-4 shrink-0" />
+                <PanelLeftClose className="h-[18px] w-[18px] shrink-0" />
                 <span>Collapse</span>
               </>
             )}
@@ -104,7 +136,7 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div className="flex-1">
+      <div className="flex-1 overflow-auto">
         <Outlet />
       </div>
     </div>
