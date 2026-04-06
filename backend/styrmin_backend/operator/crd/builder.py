@@ -35,6 +35,7 @@ def build_styrmin_deployment_body(
         namespace: Target namespace.
         helm_chart_spec: Rendered Helm chart spec (optional, derived from context if not provided).
         helm_repo_spec: Rendered Helm repository spec (optional).
+        internal: Whether this is an internal deployment (e.g., ingress controller). Defaults to False.
 
     Returns:
         Dict suitable for upsert_custom_resource.

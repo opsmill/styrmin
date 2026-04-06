@@ -6,7 +6,6 @@ orchestrates the ordered deployment pipeline.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import kopf
@@ -33,9 +32,6 @@ from styrmin_backend.operator.pipeline import (
     execute_phase_services,
     should_proceed_to_helmrelease,
 )
-
-_logger = logging.getLogger(__name__)
-
 
 def _is_internal(spec: dict[str, Any]) -> bool:
     """Check if a StyrminDeployment is an internal deployment (e.g., ingress controller)."""
@@ -178,6 +174,22 @@ async def on_styrmin_deployment_resume(
 
     if phase == DeploymentPhase.READY.value:
         return  # Already complete
+
+    # Internal deployments skip prerequisites — resume straight to HelmRelease
+    if _is_internal(spec):
+        if not is_condition_true(conditions, ConditionType.HELM_RELEASE_READY):
+            result = await execute_phase_helmrelease(crd_spec=spec, namespace=namespace)
+            if result.success:
+                set_phase(
+                    patch.status,
+                    DeploymentPhase.CREATING_HELM_RELEASE,
+                    "HelmRelease created, waiting for Ready",
+                )
+            else:
+                raise kopf.TemporaryError(
+                    f"HelmRelease resume failed: {result.errors}", delay=30
+                )
+        return
 
     if phase in (
         DeploymentPhase.PENDING.value,
@@ -380,91 +392,107 @@ async def kopf_styrmin_deployment_timer(
 
     # Phase advancement for in-progress deployments
     if phase == DeploymentPhase.CREATING_HELM_RELEASE.value:
-        if not is_condition_true(conditions, ConditionType.HELM_RELEASE_READY):
+        hr_already_ready = is_condition_true(conditions, ConditionType.HELM_RELEASE_READY)
+
+        if not hr_already_ready:
             # Check if HelmRelease is Ready via FluxCD
-            from styrmin_backend.operator.reconciler import _check_helmrelease_ready
+            from styrmin_backend.operator.reconciler import (
+                _check_helmrelease_ready,
+                _check_any_pod_ready,
+            )
 
             hr_ready = await _check_helmrelease_ready(
                 namespace=ns,
                 release_reference=crd_spec.get("releaseReference", ""),
             )
-            if hr_ready:
+
+            # For internal deployments (e.g., ingress controller), also accept
+            # running pods as "ready" — the HelmRelease may stay in
+            # Unknown/Progressing if a LoadBalancer can't get an external IP.
+            if not hr_ready and _is_internal(crd_spec):
+                hr_ready = await _check_any_pod_ready(namespace=ns)
+
+            if not hr_ready:
+                return
+
+            hr_already_ready = True
+            set_condition(
+                conditions,
+                ConditionType.HELM_RELEASE_READY,
+                ConditionStatus.TRUE,
+                "FluxReady",
+                "HelmRelease is Ready",
+            )
+            patch.status["conditions"] = conditions
+
+        if hr_already_ready:
+            # Internal deployments skip Phase 3 — go straight to Ready
+            if _is_internal(crd_spec):
                 set_condition(
                     conditions,
-                    ConditionType.HELM_RELEASE_READY,
+                    ConditionType.SERVICES_READY,
                     ConditionStatus.TRUE,
-                    "FluxReady",
-                    "HelmRelease is Ready",
+                    "Skipped",
+                    "Internal deployment — no services needed",
+                )
+                set_condition(
+                    conditions,
+                    ConditionType.MIDDLEWARES_READY,
+                    ConditionStatus.TRUE,
+                    "Skipped",
+                    "Internal deployment — no middlewares needed",
+                )
+                set_condition(
+                    conditions,
+                    ConditionType.READY,
+                    ConditionStatus.TRUE,
+                    "AllPhasesComplete",
+                    "Internal deployment is healthy",
                 )
                 patch.status["conditions"] = conditions
-
-                # Internal deployments skip Phase 3 — go straight to Ready
-                if _is_internal(crd_spec):
-                    set_condition(
-                        conditions,
-                        ConditionType.SERVICES_READY,
-                        ConditionStatus.TRUE,
-                        "Skipped",
-                        "Internal deployment — no services needed",
-                    )
-                    set_condition(
-                        conditions,
-                        ConditionType.MIDDLEWARES_READY,
-                        ConditionStatus.TRUE,
-                        "Skipped",
-                        "Internal deployment — no middlewares needed",
-                    )
-                    set_condition(
-                        conditions,
-                        ConditionType.READY,
-                        ConditionStatus.TRUE,
-                        "AllPhasesComplete",
-                        "Internal deployment is healthy",
-                    )
-                    patch.status["conditions"] = conditions
-                    set_phase(
-                        patch.status, DeploymentPhase.READY, "All resources deployed"
-                    )
-                    logger.info(
-                        "Internal deployment %s/%s reached Ready state", ns, name
-                    )
-                    return
-
                 set_phase(
-                    patch.status,
-                    DeploymentPhase.CREATING_SERVICES,
-                    "HelmRelease ready, creating Services",
+                    patch.status, DeploymentPhase.READY, "All resources deployed"
                 )
+                logger.info(
+                    "Internal deployment %s/%s reached Ready state", ns, name
+                )
+                return
 
-                # Execute phase 3
-                result = await execute_phase_services(crd_spec=crd_spec, namespace=ns)
-                if result.success:
-                    set_condition(
-                        conditions,
-                        ConditionType.SERVICES_READY,
-                        ConditionStatus.TRUE,
-                        "AllApplied",
-                        f"{result.resource_details.get('services', 0)} Services",
-                    )
-                    set_condition(
-                        conditions,
-                        ConditionType.MIDDLEWARES_READY,
-                        ConditionStatus.TRUE,
-                        "AllApplied",
-                        f"{result.resource_details.get('middlewares', 0)} Middlewares",
-                    )
-                    set_condition(
-                        conditions,
-                        ConditionType.READY,
-                        ConditionStatus.TRUE,
-                        "AllPhasesComplete",
-                        "Deployment is healthy",
-                    )
-                    patch.status["conditions"] = conditions
-                    set_phase(
-                        patch.status, DeploymentPhase.READY, "All resources deployed"
-                    )
-                    logger.info("Deployment %s/%s reached Ready state", ns, name)
+            set_phase(
+                patch.status,
+                DeploymentPhase.CREATING_SERVICES,
+                "HelmRelease ready, creating Services",
+            )
+
+            # Execute phase 3
+            result = await execute_phase_services(crd_spec=crd_spec, namespace=ns)
+            if result.success:
+                set_condition(
+                    conditions,
+                    ConditionType.SERVICES_READY,
+                    ConditionStatus.TRUE,
+                    "AllApplied",
+                    f"{result.resource_details.get('services', 0)} Services",
+                )
+                set_condition(
+                    conditions,
+                    ConditionType.MIDDLEWARES_READY,
+                    ConditionStatus.TRUE,
+                    "AllApplied",
+                    f"{result.resource_details.get('middlewares', 0)} Middlewares",
+                )
+                set_condition(
+                    conditions,
+                    ConditionType.READY,
+                    ConditionStatus.TRUE,
+                    "AllPhasesComplete",
+                    "Deployment is healthy",
+                )
+                patch.status["conditions"] = conditions
+                set_phase(
+                    patch.status, DeploymentPhase.READY, "All resources deployed"
+                )
+                logger.info("Deployment %s/%s reached Ready state", ns, name)
         return
 
     if phase == DeploymentPhase.CREATING_PREREQUISITES.value:

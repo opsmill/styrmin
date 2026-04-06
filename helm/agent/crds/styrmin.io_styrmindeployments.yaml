@@ -34,6 +34,10 @@ spec:
                 appVersion:
                   type: string
                   description: Application version being deployed
+                internal:
+                  type: boolean
+                  default: false
+                  description: Whether this is an internal deployment (e.g., ingress controller)
                 context:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true

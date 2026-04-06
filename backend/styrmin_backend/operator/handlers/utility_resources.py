@@ -6,7 +6,6 @@ Watches for modifications and deletions of Styrmin-managed utility resources
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import kopf
@@ -39,9 +38,6 @@ from styrmin_backend.operator.state import (
     fetch_context,
     filter_resources_by_kind,
 )
-
-_logger = logging.getLogger(__name__)
-
 
 async def _find_helmrelease_for_resource(
     namespace: str, release_reference: str

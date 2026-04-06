@@ -358,6 +358,32 @@ async def _check_helmrelease_ready(
     return False
 
 
+async def _check_any_pod_ready(namespace: str) -> bool:
+    """Check if at least one pod in the namespace is Running and Ready.
+
+    Returns True as soon as any single pod has all containers ready.
+    Used as a fallback readiness check for internal deployments (typically
+    single-replica) where the HelmRelease may not reach Ready=True
+    (e.g., LoadBalancer pending in vCluster).
+    """
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
+
+    try:
+        async with get_kubernetes_client() as client:
+            core_api = kubeclient.CoreV1Api(client)
+            pods = await core_api.list_namespaced_pod(namespace=namespace)
+            for pod in pods.items:
+                if pod.status and pod.status.phase == "Running":
+                    container_statuses = pod.status.container_statuses or []
+                    if container_statuses and all(
+                        cs.ready for cs in container_statuses
+                    ):
+                        return True
+    except Exception:
+        logger.exception("Failed to check pod readiness in %s", namespace)
+    return False
+
+
 async def cleanup_operator_resources(
     namespace: str,
     release_reference: str,

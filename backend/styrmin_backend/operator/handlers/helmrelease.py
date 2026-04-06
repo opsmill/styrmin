@@ -6,7 +6,6 @@ deployments and triggers NetworkPolicy lifecycle management.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import kopf
@@ -38,9 +37,6 @@ from styrmin_backend.operator.state import (
     filter_resources_by_kind,
 )
 
-_logger = logging.getLogger(__name__)
-
-
 async def on_helmrelease_create(
     body: dict[str, Any],
     meta: dict[str, Any],
@@ -63,6 +59,16 @@ async def on_helmrelease_create(
     if not deployment_id:
         logger.warning(
             "HelmRelease %s/%s has no deployment-id annotation, skipping",
+            namespace,
+            helmrelease_name,
+        )
+        return
+
+    # Skip CRD-managed deployments — their NetworkPolicies are handled
+    # by the StyrminDeployment pipeline (Phase 1), not this handler.
+    if not release_reference:
+        logger.info(
+            "HelmRelease %s/%s has no release-reference label (CRD-managed), skipping",
             namespace,
             helmrelease_name,
         )

@@ -148,17 +148,22 @@ async def execute_phase_helmrelease(
         context_data = crd_spec.get("context", {})
         context = GlobalContext.model_validate(context_data)
         helm = context.app.helm
+    except Exception as exc:
+        result.add_error(f"Failed to deserialize context: {exc}")
+        logger.error("Failed to deserialize context: %s", exc)
+        return result
 
-        from styrmin_backend.agent.service.kubernetes.primitives import (
-            upsert_custom_resource,
-        )
-        from styrmin_backend.services.helm.renderer import (
-            render_helm_chart_spec,
-            render_helm_repository_spec,
-        )
-        from styrmin_backend.services.utils import get_helm_repository_type
+    from styrmin_backend.agent.service.kubernetes.primitives import (
+        upsert_custom_resource,
+    )
+    from styrmin_backend.services.helm.renderer import (
+        render_helm_chart_spec,
+        render_helm_repository_spec,
+    )
+    from styrmin_backend.services.utils import get_helm_repository_type
 
-        # Step 1: Create HelmRepository in styrmin namespace
+    # Step 1: Create HelmRepository in styrmin namespace
+    try:
         helm_repo_spec = render_helm_repository_spec(
             repository_id=helm.repository.id,
             repository_url=helm.repository.url,
@@ -172,8 +177,13 @@ async def execute_phase_helmrelease(
             namespace="styrmin",
         )
         logger.info("Created HelmRepository for %s", helm.repository.url)
+    except Exception as exc:
+        result.add_error(f"Failed to create HelmRepository: {exc}")
+        logger.error("Failed to create HelmRepository: %s", exc)
+        return result
 
-        # Step 2: Create HelmChart in styrmin namespace
+    # Step 2: Create HelmChart in styrmin namespace
+    try:
         helm_chart_spec = render_helm_chart_spec(
             helm_chart_id=helm.chart.id,
             name=helm.chart.name,
@@ -188,8 +198,13 @@ async def execute_phase_helmrelease(
             namespace="styrmin",
         )
         logger.info("Created HelmChart %s:%s", helm.chart.name, helm.chart.version)
+    except Exception as exc:
+        result.add_error(f"Failed to create HelmChart: {exc}")
+        logger.error("Failed to create HelmChart: %s", exc)
+        return result
 
-        # Step 3: Create HelmRelease in deployment namespace
+    # Step 3: Create HelmRelease in deployment namespace
+    try:
         builder = ApplicationHelmReleaseBuilder(context=context)
         utility_kinds = [u.kind for u in context.utilities]
         utilities = load_utilities(utility_kinds)
@@ -203,9 +218,6 @@ async def execute_phase_helmrelease(
             version="v2",
             namespace=namespace,
         )
-
-        result.created_count = 3
-        result.resource_details = {"helmRepositories": 1, "helmCharts": 1, "helmReleases": 1}
         logger.info(
             "Created HelmRelease %s in %s",
             context.instance.release_reference,
@@ -214,7 +226,10 @@ async def execute_phase_helmrelease(
     except Exception as exc:
         result.add_error(f"Failed to create HelmRelease: {exc}")
         logger.error("Failed to create HelmRelease: %s", exc)
+        return result
 
+    result.created_count = 3
+    result.resource_details = {"helmRepositories": 1, "helmCharts": 1, "helmReleases": 1}
     return result
 
 
