@@ -14,6 +14,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ThemeProvider } from "@/hooks/use-theme";
 
 interface CustomRenderOptions extends Omit<RenderOptions, "wrapper"> {
   initialLocation?: string;
@@ -55,9 +56,11 @@ async function render(ui: ReactElement, options?: CustomRenderOptions) {
   const queryClient = createTestQueryClient();
 
   return rtlRender(
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </ThemeProvider>,
     renderOptions,
   );
 }

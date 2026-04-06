@@ -25,7 +25,39 @@
   --color-success-foreground: hsl(355.7 100% 97.3%);
   --color-warning: hsl(45.4 93.4% 47.5%);
   --color-warning-foreground: hsl(26 83.3% 14.1%);
+  --color-surface: hsl(0 0% 98%);
+  --color-sidebar: hsl(0 0% 98%);
+  --color-sidebar-foreground: hsl(222.2 84% 4.9%);
   --radius: 0.5rem;
+}
+
+.dark {
+  --color-background: #0f1117;
+  --color-foreground: #e4e4e7;
+  --color-card: #161621;
+  --color-card-foreground: #e4e4e7;
+  --color-popover: #161621;
+  --color-popover-foreground: #e4e4e7;
+  --color-primary: #6366f1;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #25253a;
+  --color-secondary-foreground: #e4e4e7;
+  --color-muted: #1c1c2e;
+  --color-muted-foreground: #71717a;
+  --color-accent: rgba(99, 102, 241, 0.12);
+  --color-accent-foreground: #c7d2fe;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #25253a;
+  --color-input: #25253a;
+  --color-ring: #6366f1;
+  --color-success: #34d399;
+  --color-success-foreground: #ecfdf5;
+  --color-warning: #fbbf24;
+  --color-warning-foreground: #fff7ed;
+  --color-surface: #161621;
+  --color-sidebar: #161621;
+  --color-sidebar-foreground: #e4e4e7;
 }
 
 @layer base {
@@ -36,6 +68,7 @@
     @apply bg-background text-foreground;
     margin: 0;
     font-family:
+      "Inter",
       system-ui,
       -apple-system,
       "Segoe UI",
