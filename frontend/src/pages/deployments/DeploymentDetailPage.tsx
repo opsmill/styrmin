@@ -703,7 +703,7 @@ function RestoreRow({ restore }: { restore: RestoreItem }) {
       {components.length > 0 && (
         <Collapsible className="mt-2">
           <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors group">
-            <ChevronRight className="h-3 w-3 transition-transform group-data-[state=open]:rotate-90" />
+            <ChevronRight className="h-3 w-3 transition-transform group-data-[panel-open]:rotate-90" />
             Components ({components.length})
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-1 ml-4 space-y-1">
