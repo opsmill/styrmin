@@ -29,7 +29,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "infrahub-sdk>=0.16",
     "invoke>=2.2.0",
     "kr8s>=0.20.15",
     "kubernetes-asyncio>=33.3.0",
