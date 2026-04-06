@@ -4,7 +4,6 @@ import {
   LayoutGrid,
   Layers,
   HardDrive,
-  Rocket,
   Settings,
   PanelLeftClose,
   PanelLeft,
@@ -21,12 +20,6 @@ const navItems = [
     label: "Backup Storage",
     icon: HardDrive,
     href: "/backup-storage-locations",
-    exact: false,
-  },
-  {
-    label: "Deployments",
-    icon: Rocket,
-    href: "/deployments",
     exact: false,
   },
 ];

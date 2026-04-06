@@ -10,7 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { EmptyState } from "@/components/EmptyState";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
 import { ParameterCards } from "@/components/ParameterCards";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,7 @@ export default function EnvironmentDetailPage() {
   const navigate = useNavigate();
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
+  const [showInternal, setShowInternal] = useState(false);
   const { data, isLoading, error, refetch, dataUpdatedAt } =
     useGetEnvironmentQuery(
       { environmentId },
@@ -78,6 +79,28 @@ export default function EnvironmentDetailPage() {
         .map(([key, value]) => ({ key, value }))
     : [];
 
+  const userDeployments = environment.deployments.filter((d) => !d.internal);
+  const internalDeployments = environment.deployments.filter((d) => d.internal);
+
+  const hasFailures = environment.deployments.some(
+    (d) => d.status === "FAILED" || d.status === "failed",
+  );
+  const hasPending = environment.deployments.some(
+    (d) =>
+      d.status === "PENDING" ||
+      d.status === "pending" ||
+      d.status === "in_progress",
+  );
+  const envHealth =
+    environment.deployments.length === 0
+      ? "pending"
+      : hasFailures
+        ? "failed"
+        : hasPending
+          ? "pending"
+          : "active";
+  const envColors = getStatusColor(envHealth);
+
   return (
     <div className="flex flex-col gap-6 p-8 px-10">
       {/* Breadcrumb */}
@@ -92,12 +115,11 @@ export default function EnvironmentDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
+          <div className={`h-3 w-3 rounded-full ${envColors.dot}`} />
           <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
             {environment.name}
           </h1>
-          <StatusBadge
-            status={environment.deployments.length > 0 ? "ACTIVE" : "PENDING"}
-          />
+          <StatusBadge status={envHealth} />
           <span className="text-xs text-muted-foreground">
             {environment.cluster.name} cluster
           </span>
@@ -130,7 +152,7 @@ export default function EnvironmentDetailPage() {
             Applications
           </span>
           <span className="text-2xl font-bold tracking-tight text-foreground">
-            {environment.deployments.length}
+            {userDeployments.length}
           </span>
         </div>
         <div className="flex flex-1 flex-col gap-1 rounded-[10px] bg-surface p-4">
@@ -157,13 +179,42 @@ export default function EnvironmentDetailPage() {
       {/* Overview Tab */}
       <TabPanel active={activeTab === "overview"}>
         <div className="flex flex-col gap-3">
+          {/* Header with toggle */}
           <div className="flex items-center justify-between">
-            <span className="text-[13px] font-semibold text-foreground">
-              Deployed Applications
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-[13px] font-semibold text-foreground">
+                Deployed Applications
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {userDeployments.length} application
+                {userDeployments.length !== 1 ? "s" : ""}
+                {showInternal &&
+                  internalDeployments.length > 0 &&
+                  ` · ${internalDeployments.length} internal`}
+              </span>
+            </div>
+            {internalDeployments.length > 0 && (
+              <button
+                onClick={() => setShowInternal((prev) => !prev)}
+                className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  showInternal
+                    ? "border-primary bg-primary/5 text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <div
+                  className={`flex h-4 w-7 items-center rounded-full p-0.5 transition-colors ${
+                    showInternal ? "justify-end bg-primary" : "bg-border"
+                  }`}
+                >
+                  <div className="h-3 w-3 rounded-full bg-white" />
+                </div>
+                Show internal
+              </button>
+            )}
           </div>
 
-          {environment.deployments.length === 0 ? (
+          {userDeployments.length === 0 && !showInternal ? (
             <EmptyState
               title="No deployments"
               description="No applications have been deployed to this environment yet."
@@ -192,37 +243,40 @@ export default function EnvironmentDetailPage() {
                   Components
                 </span>
               </div>
-              {/* Table rows */}
-              {environment.deployments.map((deployment, i) => (
-                <Link
+
+              {/* User deployments */}
+              {userDeployments.map((deployment, i) => (
+                <DeploymentRow
                   key={deployment.id}
-                  to="/environments/$environmentId/deployments/$deploymentId"
-                  params={{
-                    environmentId,
-                    deploymentId: deployment.id,
-                  }}
-                >
-                  <div
-                    className={`flex items-center gap-4 rounded-lg px-4 py-3 transition-colors hover:bg-accent/50 ${
-                      i % 2 === 0 ? "bg-surface" : ""
-                    }`}
-                  >
-                    <span className="w-[180px] text-[13px] font-medium text-foreground">
-                      {deployment.name}
-                    </span>
-                    <span className="w-[100px] font-mono text-[13px] text-muted-foreground">
-                      {deployment.applicationVersion}
-                    </span>
-                    <div className="w-[100px]">
-                      <StatusBadge status={deployment.status} />
-                    </div>
-                    <span className="flex-1 text-[13px] text-muted-foreground">
-                      {deployment.components.length} component
-                      {deployment.components.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                </Link>
+                  deployment={deployment}
+                  environmentId={environmentId}
+                  index={i}
+                />
               ))}
+
+              {/* Internal deployments */}
+              {showInternal && internalDeployments.length > 0 && (
+                <>
+                  {/* Dashed separator */}
+                  <div className="flex items-center gap-2.5 py-1">
+                    <div className="h-px flex-1 border-t border-dashed border-border" />
+                    <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                      Internal
+                    </span>
+                    <div className="h-px flex-1 border-t border-dashed border-border" />
+                  </div>
+
+                  {internalDeployments.map((deployment, i) => (
+                    <DeploymentRow
+                      key={deployment.id}
+                      deployment={deployment}
+                      environmentId={environmentId}
+                      index={i}
+                      internal
+                    />
+                  ))}
+                </>
+              )}
             </>
           )}
         </div>
@@ -277,5 +331,73 @@ export default function EnvironmentDetailPage() {
         />
       </TabPanel>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DeploymentRow
+// ---------------------------------------------------------------------------
+
+function DeploymentRow({
+  deployment,
+  environmentId,
+  index,
+  internal = false,
+}: {
+  deployment: {
+    id: string;
+    name: string;
+    status: string;
+    applicationVersion: string;
+    components: { id: string }[];
+  };
+  environmentId: string;
+  index: number;
+  internal?: boolean;
+}) {
+  const dc = getStatusColor(deployment.status);
+
+  return (
+    <Link
+      to="/environments/$environmentId/deployments/$deploymentId"
+      params={{
+        environmentId,
+        deploymentId: deployment.id,
+      }}
+    >
+      <div
+        className={`flex items-center gap-4 rounded-lg border-l-[3px] px-4 py-3 transition-colors hover:bg-accent/50 ${
+          internal ? "border-border opacity-70" : dc.border
+        } ${index % 2 === 0 ? "bg-surface" : ""}`}
+      >
+        <div className="flex w-[180px] items-center gap-2">
+          <div className={`h-2 w-2 flex-shrink-0 rounded-full ${dc.dot}`} />
+          <span
+            className={`text-[13px] font-medium ${internal ? "text-muted-foreground" : "text-foreground"}`}
+          >
+            {deployment.name}
+          </span>
+          {internal && (
+            <span className="rounded bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground">
+              INT
+            </span>
+          )}
+        </div>
+        <span
+          className={`w-[100px] font-mono text-[13px] ${internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+        >
+          {deployment.applicationVersion}
+        </span>
+        <div className="w-[100px]">
+          <StatusBadge status={deployment.status} />
+        </div>
+        <span
+          className={`flex-1 text-[13px] ${internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+        >
+          {deployment.components.length} component
+          {deployment.components.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+    </Link>
   );
 }

@@ -14,7 +14,7 @@ import {
 } from "@/generated/graphql";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
 import { ParameterCards } from "@/components/ParameterCards";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -174,6 +174,8 @@ export default function DeploymentDetailPage() {
       }))
     : [];
 
+  const deployColors = getStatusColor(deployment.status);
+
   return (
     <div className="flex flex-col gap-6 p-8 px-10">
       {/* Breadcrumb */}
@@ -197,6 +199,7 @@ export default function DeploymentDetailPage() {
       <div className="flex items-start justify-between">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3">
+            <div className={`h-3 w-3 rounded-full ${deployColors.dot}`} />
             <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
               {deployment.name}
             </h1>
@@ -685,16 +688,21 @@ function BackupRow({
   );
   const isRestoreDisabled = backup.status !== "completed" || hasActiveRestore;
 
+  const bc = getStatusColor(backup.status);
+
   return (
     <div>
       <div
-        className={`flex items-center gap-4 rounded-lg px-4 py-3 ${
+        className={`flex items-center gap-4 rounded-lg border-l-[3px] px-4 py-3 ${bc.border} ${
           index % 2 === 0 ? "bg-surface" : ""
         }`}
       >
-        <span className="w-[200px] text-[13px] font-medium text-foreground">
-          {backup.name}
-        </span>
+        <div className="flex w-[200px] items-center gap-2">
+          <div className={`h-2 w-2 flex-shrink-0 rounded-full ${bc.dot}`} />
+          <span className="text-[13px] font-medium text-foreground">
+            {backup.name}
+          </span>
+        </div>
         <div className="w-[100px]">
           <StatusBadge status={backup.status} />
         </div>
