@@ -495,6 +495,7 @@ async def styrmin_resources(
                 "dedicated_ingress": {
                     "implementation": "traefik",
                     "type": "ingress",
+                    "service": {"type": "ClusterIP"},
                 },
                 "runtime_class": "default",
                 "standard_storage": {"storage_class": "local-path"},

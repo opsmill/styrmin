@@ -229,15 +229,19 @@ async def test_traffic_routes_through_dedicated_ingress(
     deployed_simple_app: dict,
     vcluster: dict,
 ):
-    """T038: Send HTTP request through Traefik LB and verify 200 response."""
+    """T038: Send HTTP request through Traefik and verify 200 response.
+
+    Uses port-forwarding to reach the Traefik service, which works regardless
+    of whether the service type is LoadBalancer or ClusterIP.
+    """
     import httpx
 
     kubeconfig_path = vcluster["kubeconfig_path"]
 
-    # Get the Traefik service external IP (provisioned by cloud-provider-kind)
+    # Find the Traefik service
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     deadline = time.time() + 120
-    external_ip = None
+    traefik_svc = None
     while time.time() < deadline:
         traefik_services: list[AsyncService] = [
             svc
@@ -249,35 +253,28 @@ async def test_traffic_routes_through_dedicated_ingress(
             if isinstance(svc, AsyncService)
         ]
         if traefik_services:
-            lb_ingress = (
-                traefik_services[0].status.get("loadBalancer", {}).get("ingress", [])
-            )
-            if lb_ingress:
-                external_ip = lb_ingress[0].get("ip")
-                if external_ip:
-                    break
+            traefik_svc = traefik_services[0]
+            break
         await asyncio.sleep(5)
 
-    assert external_ip is not None, "Traefik LoadBalancer did not get an external IP"
+    assert traefik_svc is not None, "Traefik Service not found"
 
     # Build the expected host from the deployment info
     deployment_id = deployed_simple_app["deployment_id"]
     expected_host = f"simple-app-{deployment_id}.styrmin.com"
 
-    # Send HTTP request through Traefik with Host header for routing
-    async with httpx.AsyncClient() as http_client:
-        try:
-            resp = await http_client.get(
-                f"http://{external_ip}/count",
-                headers={"Host": expected_host},
-                timeout=10,
-            )
-            # We expect some response (200)
-            assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
-        except httpx.ConnectError:
-            pytest.skip(
-                "Could not connect to Traefik LB — LoadBalancer may not be available"
-            )
+    # Port-forward to the Traefik service and send HTTP request with Host header
+    async with traefik_svc.portforward(remote_port=80, local_port="auto") as local_port:
+        async with httpx.AsyncClient() as http_client:
+            try:
+                resp = await http_client.get(
+                    f"http://localhost:{local_port}/count",
+                    headers={"Host": expected_host},
+                    timeout=10,
+                )
+                assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
+            except httpx.ConnectError:
+                pytest.skip("Could not connect to Traefik via port-forward")
 
 
 async def test_toggle_dedicated_ingress_on_off(
@@ -295,7 +292,11 @@ async def test_toggle_dedicated_ingress_on_off(
         config={
             "fqdn_suffix": "styrmin.com",
             "ingress_class": "traefik",
-            "dedicated_ingress": {"implementation": "traefik", "type": "ingress"},
+            "dedicated_ingress": {
+                "implementation": "traefik",
+                "type": "ingress",
+                "service": {"type": "ClusterIP"},
+            },
             "standard_storage": {"storage_class": "standard"},
         },
     )

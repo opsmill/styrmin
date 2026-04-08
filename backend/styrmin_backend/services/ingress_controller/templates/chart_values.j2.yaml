@@ -39,7 +39,7 @@ service:
     {{ key }}: "{{ value }}"
 {% endfor %}
 {% endif %}
-  type: LoadBalancer
+  type: {{ instance.config.dedicated_ingress.service.type }}
 {% if instance.config.dedicated_ingress.service.load_balancer_ip %}
   loadBalancerIP: "{{ instance.config.dedicated_ingress.service.load_balancer_ip }}"
 {% endif %}

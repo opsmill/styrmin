@@ -149,9 +149,13 @@ class TestIngressServiceConfigModel:
             in config.service.annotations
         )
 
-    def test_service_none_by_default(self):
+    def test_service_defaults(self):
         config = DedicatedIngressConfig()
-        assert config.service is None
+        assert config.service is not None
+        assert config.service.type == "LoadBalancer"
+        assert config.service.annotations is None
+        assert config.service.load_balancer_ip is None
+        assert config.service.external_traffic_policy is None
 
     def test_from_dict_with_service(self):
         config = DedicatedIngressConfig.model_validate(
