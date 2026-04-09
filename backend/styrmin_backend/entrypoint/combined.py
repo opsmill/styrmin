@@ -121,7 +121,7 @@ async def run_prefect_worker(
                     t.cancel()
                     try:
                         await t
-                    except (asyncio.CancelledError, Exception):
+                    except asyncio.CancelledError, Exception:
                         pass
                 logger.info("Prefect worker '%s' stopped", worker.name)
                 return
