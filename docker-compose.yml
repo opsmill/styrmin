@@ -16,6 +16,7 @@ services:
     command: ["prefect", "worker", "start", "--pool", "styrmin-work-pool"]
     environment:
       PREFECT_API_URL: http://task-manager:4200/api
+      PREFECT_WORKER_QUERY_SECONDS: "2"
       STYRMIN_URL_API: http://server:8000
       STYRMIN_URL_GRAPHQL_K8S: http://host.docker.internal:8000/graphql
       STYRMIN_URL_GRAPHQL: http://server:8000/graphql
@@ -34,6 +35,7 @@ services:
     network_mode: host
     environment:
       PREFECT_API_URL: http://localhost:4200/api
+      PREFECT_WORKER_QUERY_SECONDS: "2"
       STYRMIN_URL_API: http://localhost:8000
       STYRMIN_URL_GRAPHQL_K8S: http://localhost:8000/graphql
       STYRMIN_URL_GRAPHQL: http://localhost:8000/graphql
