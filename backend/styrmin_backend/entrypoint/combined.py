@@ -87,34 +87,61 @@ async def _worker_loops(worker: ProcessWorker) -> None:
         )
 
 
-async def run_prefect_worker(work_pool_name: str) -> None:
-    """Run the Prefect worker until shutdown is signaled."""
-    worker = ProcessWorker(work_pool_name=work_pool_name)
-    try:
-        async with worker:
-            logger.info(
-                "Prefect worker '%s' started for pool '%s'", worker.name, work_pool_name
-            )
-            worker_task = asyncio.create_task(
-                _worker_loops(worker), name="prefect-loops"
-            )
-            shutdown_task = asyncio.create_task(
-                _shutdown.wait(), name="prefect-shutdown-wait"
-            )
+async def run_prefect_worker(
+    work_pool_name: str, max_retries: int = 10, retry_delay: float = 5.0
+) -> None:
+    """Run the Prefect worker until shutdown is signaled.
 
-            done, pending = await asyncio.wait(
-                [worker_task, shutdown_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for t in pending:
-                t.cancel()
-                try:
-                    await t
-                except asyncio.CancelledError, Exception:
-                    pass
-            logger.info("Prefect worker '%s' stopped", worker.name)
-    except asyncio.CancelledError:
-        logger.info("Prefect worker cancelled")
+    Retries on connection errors to handle the case where the Prefect server
+    is not yet available at startup (e.g., DNS not resolved, server starting).
+    """
+    for attempt in range(1, max_retries + 1):
+        if _shutdown.is_set():
+            return
+        try:
+            worker = ProcessWorker(work_pool_name=work_pool_name)
+            async with worker:
+                logger.info(
+                    "Prefect worker '%s' started for pool '%s'",
+                    worker.name,
+                    work_pool_name,
+                )
+                worker_task = asyncio.create_task(
+                    _worker_loops(worker), name="prefect-loops"
+                )
+                shutdown_task = asyncio.create_task(
+                    _shutdown.wait(), name="prefect-shutdown-wait"
+                )
+
+                done, pending = await asyncio.wait(
+                    [worker_task, shutdown_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in pending:
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                logger.info("Prefect worker '%s' stopped", worker.name)
+                return
+        except asyncio.CancelledError:
+            logger.info("Prefect worker cancelled")
+            return
+        except Exception:
+            if attempt < max_retries:
+                logger.warning(
+                    "Prefect worker failed to start (attempt %d/%d), retrying in %.0fs",
+                    attempt,
+                    max_retries,
+                    retry_delay,
+                )
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.exception(
+                    "Prefect worker failed to start after %d attempts", max_retries
+                )
+                raise
 
 
 # --- Main entrypoint ---
