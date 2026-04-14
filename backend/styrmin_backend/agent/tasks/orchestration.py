@@ -614,6 +614,15 @@ async def create_instance_crd(
         release_reference,
     )
 
+    # Apply cross-namespace ExternalName service aliases for service discovery
+    aliases = compute_service_aliases(context)
+    if aliases:
+        namespace_labels = _build_namespace_labels(context)
+        await apply_service_aliases(
+            aliases=aliases,
+            namespace_labels=namespace_labels,
+        )
+
     # Run post-hook after CRD creation (imperative action)
     if posthook:
         await run_deployment_or_fail(
@@ -653,6 +662,15 @@ async def update_instance_crd(
         version=CRD_VERSION,
         namespace=namespace,
     )
+
+    # Apply cross-namespace ExternalName service aliases for service discovery
+    aliases = compute_service_aliases(context)
+    if aliases:
+        namespace_labels = _build_namespace_labels(context)
+        await apply_service_aliases(
+            aliases=aliases,
+            namespace_labels=namespace_labels,
+        )
 
     logger.info("StyrminDeployment CRD updated: %s/%s", namespace, release_reference)
 
@@ -704,6 +722,15 @@ async def upgrade_instance_crd(
         version=CRD_VERSION,
         namespace=namespace,
     )
+
+    # Apply cross-namespace ExternalName service aliases for service discovery
+    aliases = compute_service_aliases(context)
+    if aliases:
+        namespace_labels = _build_namespace_labels(context)
+        await apply_service_aliases(
+            aliases=aliases,
+            namespace_labels=namespace_labels,
+        )
 
     if posthook:
         await run_deployment_or_fail(

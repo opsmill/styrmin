@@ -64,22 +64,32 @@ async def test_service_discovery_between_apps(
                 pass
             await asyncio.sleep(5)
 
-    # Find the executor service via kr8s
+    # Find the executor service via kr8s.
+    # The service-discovery utility creates the service asynchronously after the
+    # deployment reaches "running", so we need to poll until it appears.
     executor_namespace = f"styrmin-{executor_deployment_id}"
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
-    services: list[AsyncService] = [
-        svc
-        async for svc in AsyncService.list(namespace=executor_namespace, api=kr8s_api)
-        if isinstance(svc, AsyncService)
-    ]
-    executor_svc = next(
-        (
+    executor_svc = None
+    svc_deadline = time.time() + 120
+    while time.time() < svc_deadline:
+        services: list[AsyncService] = [
             svc
-            for svc in services
-            if "executor" in svc.name and "postgresql" not in svc.name
-        ),
-        None,
-    )
+            async for svc in AsyncService.list(
+                namespace=executor_namespace, api=kr8s_api
+            )
+            if isinstance(svc, AsyncService)
+        ]
+        executor_svc = next(
+            (
+                svc
+                for svc in services
+                if "executor" in svc.name and "postgresql" not in svc.name
+            ),
+            None,
+        )
+        if executor_svc is not None:
+            break
+        await asyncio.sleep(5)
 
     assert executor_svc, (
         f"Could not find executor service. Available: {[svc.name for svc in services]}"
