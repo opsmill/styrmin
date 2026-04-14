@@ -354,9 +354,29 @@ async def kopf_on_styrmin_deployment_update(
             "Updated",
         )
         patch.status["conditions"] = conditions
-        set_phase(
-            patch.status, DeploymentPhase.CREATING_HELM_RELEASE, "Prerequisites updated"
+        logger.info(
+            "Prerequisites updated for %s/%s, proceeding to HelmRelease update",
+            ns,
+            name,
         )
+
+        # Phase 2: Update HelmRelease with new spec
+        hr_result = await execute_phase_helmrelease(crd_spec=crd_spec, namespace=ns)
+        if hr_result.success:
+            set_phase(
+                patch.status,
+                DeploymentPhase.CREATING_HELM_RELEASE,
+                "HelmRelease updated, waiting for Ready",
+            )
+        else:
+            set_phase(
+                patch.status,
+                DeploymentPhase.FAILED,
+                f"HelmRelease update failed: {hr_result.errors}",
+            )
+            raise kopf.TemporaryError(
+                f"HelmRelease update failed: {hr_result.errors}", delay=30
+            )
     else:
         set_phase(
             patch.status, DeploymentPhase.FAILED, f"Update failed: {result.errors}"
