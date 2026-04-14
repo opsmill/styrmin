@@ -193,13 +193,17 @@ async def _wait_for_service_ready(
 
 
 async def _wait_for_http(
-    url: str, timeout: float = 120.0, interval: float = 2.0, expected_status: int = 200
+    url: str,
+    timeout: float = 120.0,
+    interval: float = 2.0,
+    expected_status: int = 200,
+    headers: dict[str, str] | None = None,
 ) -> None:
     start = time.time()
     async with httpx.AsyncClient() as client:
         while time.time() - start < timeout:
             try:
-                resp = await client.get(url, timeout=5)
+                resp = await client.get(url, timeout=5, headers=headers)
                 if resp.status_code == expected_status:
                     return
             except httpx.HTTPError:

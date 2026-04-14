@@ -85,7 +85,12 @@ class IngressUtility(Utility):
         resources: list[dict[str, Any]] = []
 
         # Generate core API resources first (Secrets, NetworkPolicies),
-        # then CRDs (Middlewares) which may require Traefik CRDs to be installed
+        # then CRDs (Middlewares) which may require Traefik CRDs to be installed.
+        #
+        # Resource names use the bare template names (no release-reference prefix)
+        # because each deployment gets its own namespace, so names can't collide.
+        # Prefixing would break internal cross-references within the template
+        # (e.g., Middleware basicAuth.secret referencing a Secret by name).
 
         # Generate Secrets
         if "secrets" in values:
@@ -95,7 +100,7 @@ class IngressUtility(Utility):
                         "apiVersion": "v1",
                         "kind": "Secret",
                         "metadata": {
-                            "name": f"{release_reference}-{secret['name']}",
+                            "name": secret["name"],
                             "namespace": namespace,
                         },
                         "type": secret.get("type", "Opaque"),
@@ -111,7 +116,7 @@ class IngressUtility(Utility):
                         "apiVersion": "networking.k8s.io/v1",
                         "kind": "NetworkPolicy",
                         "metadata": {
-                            "name": f"{release_reference}-{netpol['name']}",
+                            "name": netpol["name"],
                             "namespace": namespace,
                         },
                         "spec": netpol["spec"],
@@ -126,7 +131,7 @@ class IngressUtility(Utility):
                         "apiVersion": "traefik.io/v1alpha1",
                         "kind": "Middleware",
                         "metadata": {
-                            "name": f"{release_reference}-{middleware['name']}",
+                            "name": middleware["name"],
                             "namespace": namespace,
                         },
                         "spec": middleware["spec"],
