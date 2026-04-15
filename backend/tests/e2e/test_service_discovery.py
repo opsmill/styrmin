@@ -104,15 +104,23 @@ async def test_service_discovery_between_apps(
             interval=3.0,
         )
 
-        # Probe the intent service via short DNS name from the executor pod
+        # Probe the intent service via short DNS name from the executor pod.
+        # Retry because the ExternalName alias DNS may take a few seconds to
+        # propagate after the service resource is created.
         async with httpx.AsyncClient() as http_client:
-            response = await http_client.get(
-                f"http://localhost:{local_port}/probe",
-                params={"target": "http://intent:8000/health"},
-                timeout=10,
-            )
-            assert response.status_code == 200
-            data = response.json()
-            assert data["status"] == 200, (
-                f"Expected HTTP 200, got {data['status']}: {data['body']}"
-            )
+            probe_deadline = time.time() + 60
+            while True:
+                response = await http_client.get(
+                    f"http://localhost:{local_port}/probe",
+                    params={"target": "http://intent:8000/health"},
+                    timeout=10,
+                )
+                assert response.status_code == 200
+                data = response.json()
+                if data["status"] == 200:
+                    break
+                if time.time() >= probe_deadline:
+                    assert data["status"] == 200, (
+                        f"Expected HTTP 200, got {data['status']}: {data['body']}"
+                    )
+                await asyncio.sleep(3)
