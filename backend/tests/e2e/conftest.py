@@ -152,6 +152,34 @@ def _dump_k8s_logs_on_failure(request, vcluster):
         _dump_namespace_logs(kubeconfig, namespace)
 
 
+async def _wait_for_deployment_running(
+    client: StyrminClient,
+    deployment_id,
+    timeout: float = 180.0,
+    interval: float = 10.0,
+):
+    """Poll until a deployment reaches 'running' status.
+
+    Returns the deployment object on success.
+    Raises TimeoutError if the deployment doesn't reach 'running' within the timeout.
+    """
+    from styrmin_sdk.exceptions import StyrminError
+
+    deadline = time.time() + timeout
+    deployment = None
+    while time.time() < deadline:
+        try:
+            deployment = await client.deployments.get(deployment_id)
+            if deployment.status == "running":
+                return deployment
+        except StyrminError:
+            pass
+        await asyncio.sleep(interval)
+    status = deployment.status if deployment else "unknown"
+    msg = f"Deployment {deployment_id} did not reach 'running' after {timeout}s (status: {status})"
+    raise TimeoutError(msg)
+
+
 async def _wait_for_service_ready(
     core_api: kubeclient.CoreV1Api,
     *,

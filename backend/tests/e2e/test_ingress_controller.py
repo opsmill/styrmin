@@ -8,17 +8,15 @@ Covers:
 - T038a: Toggle dedicated_ingress on/off — verify provisioning and deprovisioning
 """
 
-import asyncio
-import time
-
 import kr8s
 import kr8s.asyncio
 import pytest
-from styrmin_sdk import StyrminClient
-from styrmin_sdk.exceptions import StyrminError
 from kr8s.asyncio.objects import Ingress as AsyncIngress
 from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
+from styrmin_sdk import StyrminClient
+
+from tests.e2e.conftest import _wait_for_deployment_running
 
 
 async def test_deploy_with_dedicated_ingress(
@@ -54,20 +52,8 @@ async def test_deploy_with_dedicated_ingress(
     deployment_id = task.deployment_id
     assert deployment_id is not None
 
-    # Wait for deployment to be ready
-    deadline = time.time() + 180
-    deployment = None
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
-
-    assert deployment is not None
-    assert deployment.status in ("deployed", "running")
+    # Wait for deployment to reach running status
+    deployment = await _wait_for_deployment_running(client, deployment_id)
 
     # Verify Traefik pod is running in a namespace (ingress controller namespace)
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
@@ -136,16 +122,8 @@ async def test_deploy_without_dedicated_ingress(
     deployment_id = task.deployment_id
     assert deployment_id is not None
 
-    # Wait for deployment
-    deadline = time.time() + 180
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
+    # Wait for deployment to reach running status
+    await _wait_for_deployment_running(client, deployment_id)
 
     # Verify NO Traefik pod was created in the deployment's namespace
     namespace = f"styrmin-{deployment_id}"
@@ -195,16 +173,8 @@ async def test_second_app_reuses_ingress_controller(
     deployment_id = task.deployment_id
     assert deployment_id is not None
 
-    # Wait for deployment
-    deadline = time.time() + 180
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
+    # Wait for deployment to reach running status
+    await _wait_for_deployment_running(client, deployment_id)
 
     # Verify still only one Traefik deployment (not duplicated)
     traefik_pods_after: list[AsyncPod] = [
@@ -236,45 +206,48 @@ async def test_traffic_routes_through_dedicated_ingress(
     """
     import httpx
 
+    from tests.e2e.conftest import _wait_for_http
+
+    client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
+
+    # Ensure the deployment is in running state before testing traffic
+    deployment_id = deployed_simple_app["deployment_id"]
+    await _wait_for_deployment_running(client, deployment_id)
 
     # Find the Traefik service
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
-    deadline = time.time() + 120
-    traefik_svc = None
-    while time.time() < deadline:
-        traefik_services: list[AsyncService] = [
-            svc
-            async for svc in AsyncService.list(
-                namespace=kr8s.ALL,
-                label_selector={"app.kubernetes.io/name": "traefik"},
-                api=kr8s_api,
-            )
-            if isinstance(svc, AsyncService)
-        ]
-        if traefik_services:
-            traefik_svc = traefik_services[0]
-            break
-        await asyncio.sleep(5)
-
-    assert traefik_svc is not None, "Traefik Service not found"
+    traefik_services: list[AsyncService] = [
+        svc
+        async for svc in AsyncService.list(
+            namespace=kr8s.ALL,
+            label_selector={"app.kubernetes.io/name": "traefik"},
+            api=kr8s_api,
+        )
+        if isinstance(svc, AsyncService)
+    ]
+    assert traefik_services, "Traefik Service not found"
+    traefik_svc = traefik_services[0]
 
     # Build the expected host from the deployment info
-    deployment_id = deployed_simple_app["deployment_id"]
     expected_host = f"simple-app-{deployment_id}.styrmin.com"
 
     # Port-forward to the Traefik service and send HTTP request with Host header
     async with traefik_svc.portforward(remote_port=80, local_port="auto") as local_port:
+        await _wait_for_http(
+            f"http://localhost:{local_port}/count",
+            timeout=60.0,
+            interval=3.0,
+            headers={"Host": expected_host},
+        )
+
         async with httpx.AsyncClient() as http_client:
-            try:
-                resp = await http_client.get(
-                    f"http://localhost:{local_port}/count",
-                    headers={"Host": expected_host},
-                    timeout=10,
-                )
-                assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
-            except httpx.ConnectError:
-                pytest.skip("Could not connect to Traefik via port-forward")
+            resp = await http_client.get(
+                f"http://localhost:{local_port}/count",
+                headers={"Host": expected_host},
+                timeout=10,
+            )
+            assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
 
 
 async def test_toggle_dedicated_ingress_on_off(
@@ -316,16 +289,8 @@ async def test_toggle_dedicated_ingress_on_off(
     deployment_id = task.deployment_id
     assert deployment_id is not None
 
-    # Wait for deployment
-    deadline = time.time() + 180
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
+    # Wait for deployment to reach running status
+    await _wait_for_deployment_running(client, deployment_id)
 
     # Verify Traefik is running
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
