@@ -171,6 +171,23 @@ export type ContextDiff = {
   changes: Array<ContextChange>;
 };
 
+export type CrdConditionInput = {
+  lastTransitionTime?: InputMaybe<Scalars['DateTime']['input']>;
+  message?: InputMaybe<Scalars['String']['input']>;
+  reason?: InputMaybe<Scalars['String']['input']>;
+  status: Scalars['String']['input'];
+  type: Scalars['String']['input'];
+};
+
+export type CrdConditionType = {
+  __typename?: 'CrdConditionType';
+  lastTransitionTime?: Maybe<Scalars['DateTime']['output']>;
+  message?: Maybe<Scalars['String']['output']>;
+  reason?: Maybe<Scalars['String']['output']>;
+  status: Scalars['String']['output'];
+  type: Scalars['String']['output'];
+};
+
 export type DeployedService = {
   __typename?: 'DeployedService';
   component: Scalars['String']['output'];
@@ -193,6 +210,7 @@ export type Deployment = {
   applicationVersion: Scalars['String']['output'];
   components: Array<Component>;
   config: Scalars['JSON']['output'];
+  crdStatus?: Maybe<DeploymentCrdStatusType>;
   deployedServices: Array<DeployedService>;
   environment: Environment;
   environmentId: Scalars['UUID']['output'];
@@ -200,7 +218,35 @@ export type Deployment = {
   internal: Scalars['Boolean']['output'];
   name: Scalars['String']['output'];
   parameters: Scalars['JSON']['output'];
+  podStatuses: Array<PodStatus>;
   status: Scalars['String']['output'];
+};
+
+export type DeploymentCrdStatusReportInput = {
+  conditions?: InputMaybe<Array<CrdConditionInput>>;
+  deploymentId: Scalars['UUID']['input'];
+  displayState?: InputMaybe<Scalars['String']['input']>;
+  managedResourceCounts?: InputMaybe<ManagedResourceCountsInput>;
+  message?: InputMaybe<Scalars['String']['input']>;
+  phase: Scalars['String']['input'];
+};
+
+export type DeploymentCrdStatusType = {
+  __typename?: 'DeploymentCrdStatusType';
+  conditions: Array<CrdConditionType>;
+  createdOn?: Maybe<Scalars['DateTime']['output']>;
+  deploymentId: Scalars['UUID']['output'];
+  id: Scalars['UUID']['output'];
+  lastPolledAt?: Maybe<Scalars['DateTime']['output']>;
+  managedResourceCounts?: Maybe<ManagedResourceCountsType>;
+  message?: Maybe<Scalars['String']['output']>;
+  phase: Scalars['String']['output'];
+  updatedOn?: Maybe<Scalars['DateTime']['output']>;
+};
+
+export type DeploymentPodStatusReport = {
+  deploymentId: Scalars['UUID']['input'];
+  pods: Array<PodStatusInput>;
 };
 
 export type DeploymentTimelineEntry = {
@@ -230,6 +276,23 @@ export type HelmChart = {
   version: Scalars['String']['output'];
 };
 
+export type ManagedResourceCountsInput = {
+  helmReleases?: Scalars['Int']['input'];
+  middlewares?: Scalars['Int']['input'];
+  networkPolicies?: Scalars['Int']['input'];
+  secrets?: Scalars['Int']['input'];
+  services?: Scalars['Int']['input'];
+};
+
+export type ManagedResourceCountsType = {
+  __typename?: 'ManagedResourceCountsType';
+  helmReleases: Scalars['Int']['output'];
+  middlewares: Scalars['Int']['output'];
+  networkPolicies: Scalars['Int']['output'];
+  secrets: Scalars['Int']['output'];
+  services: Scalars['Int']['output'];
+};
+
 export type Mutation = {
   __typename?: 'Mutation';
   assignBackupStorageLocation?: Maybe<Environment>;
@@ -248,6 +311,8 @@ export type Mutation = {
   deploy?: Maybe<Task>;
   loadLocalApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
   loadRemoteApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
+  reportCrdStatuses: ReportCrdStatusesResponse;
+  reportPodStatuses: ReportPodStatusesResponse;
   runJob?: Maybe<Task>;
   startComponents?: Maybe<Task>;
   stopComponents?: Maybe<Task>;
@@ -373,6 +438,16 @@ export type MutationLoadRemoteApplicationDriverVersionArgs = {
 };
 
 
+export type MutationReportCrdStatusesArgs = {
+  reports: Array<DeploymentCrdStatusReportInput>;
+};
+
+
+export type MutationReportPodStatusesArgs = {
+  reports: Array<DeploymentPodStatusReport>;
+};
+
+
 export type MutationRunJobArgs = {
   commands: Array<Scalars['String']['input']>;
   deploymentId: Scalars['UUID']['input'];
@@ -442,6 +517,41 @@ export type ParameterDefinition = {
   values?: Maybe<Array<Scalars['String']['output']>>;
 };
 
+export type PodPhase =
+  | 'FAILED'
+  | 'PENDING'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'UNKNOWN';
+
+export type PodStatus = {
+  __typename?: 'PodStatus';
+  containerStatuses: Scalars['JSON']['output'];
+  createdOn?: Maybe<Scalars['DateTime']['output']>;
+  deploymentId: Scalars['UUID']['output'];
+  id: Scalars['UUID']['output'];
+  lastPolledAt?: Maybe<Scalars['DateTime']['output']>;
+  namespace: Scalars['String']['output'];
+  nodeName?: Maybe<Scalars['String']['output']>;
+  phase: PodPhase;
+  podName: Scalars['String']['output'];
+  ready: Scalars['Boolean']['output'];
+  restartCount: Scalars['Int']['output'];
+  startedAt?: Maybe<Scalars['DateTime']['output']>;
+  updatedOn?: Maybe<Scalars['DateTime']['output']>;
+};
+
+export type PodStatusInput = {
+  containerStatuses?: InputMaybe<Scalars['JSON']['input']>;
+  namespace: Scalars['String']['input'];
+  nodeName?: InputMaybe<Scalars['String']['input']>;
+  phase: PodPhase;
+  podName: Scalars['String']['input'];
+  ready: Scalars['Boolean']['input'];
+  restartCount: Scalars['Int']['input'];
+  startedAt?: InputMaybe<Scalars['DateTime']['input']>;
+};
+
 export type Query = {
   __typename?: 'Query';
   applicationDriver?: Maybe<ApplicationDriver>;
@@ -462,6 +572,7 @@ export type Query = {
   environments: Array<Environment>;
   /** Health check probe */
   ok: Scalars['Boolean']['output'];
+  podStatuses: Array<PodStatus>;
   restore?: Maybe<Restore>;
   restores: Array<Restore>;
   task?: Maybe<Task>;
@@ -534,6 +645,13 @@ export type QueryEnvironmentServicesArgs = {
 };
 
 
+export type QueryPodStatusesArgs = {
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  deploymentId?: InputMaybe<Scalars['UUID']['input']>;
+  environmentId?: InputMaybe<Scalars['UUID']['input']>;
+};
+
+
 export type QueryRestoreArgs = {
   restoreId: Scalars['UUID']['input'];
 };
@@ -547,6 +665,22 @@ export type QueryRestoresArgs = {
 
 export type QueryTaskArgs = {
   taskId: Scalars['UUID']['input'];
+};
+
+export type ReportCrdStatusesResponse = {
+  __typename?: 'ReportCrdStatusesResponse';
+  deploymentsUpdated: Scalars['Int']['output'];
+  message: Scalars['String']['output'];
+  statusesUpdated: Scalars['Int']['output'];
+  success: Scalars['Boolean']['output'];
+};
+
+export type ReportPodStatusesResponse = {
+  __typename?: 'ReportPodStatusesResponse';
+  message: Scalars['String']['output'];
+  podsRemoved: Scalars['Int']['output'];
+  podsUpdated: Scalars['Int']['output'];
+  success: Scalars['Boolean']['output'];
 };
 
 export type Restore = {

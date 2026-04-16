@@ -56,6 +56,11 @@ HELMRELEASE_READY_TIMEOUT_SECONDS = int(
     os.environ.get("STYRMIN_OPERATOR_HR_READY_TIMEOUT", "600")
 )
 
+# --- Deployment ready timeout (for displayState) ---
+DEPLOYMENT_READY_TIMEOUT_SECONDS = int(
+    os.environ.get("STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT", "300")
+)
+
 # --- Peering ---
 PEERING_NAME = os.environ.get("STYRMIN_OPERATOR_PEERING_NAME", "styrmin-operator")
 PEERING_PRIORITY = int(os.environ.get("STYRMIN_OPERATOR_PEERING_PRIORITY", "100"))

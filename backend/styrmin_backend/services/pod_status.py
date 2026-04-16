@@ -81,7 +81,7 @@ async def get_pod_statuses(
 ) -> list[PodStatus]:
     """Get pod statuses with optional filtering.
 
-    At least one filter should be provided for meaningful results.
+    When no filter is provided, returns all pod statuses.
     """
     async with uow:
         if deployment_id is not None:
@@ -90,4 +90,4 @@ async def get_pod_statuses(
             return await uow.pod_statuses.find_by_environment(environment_id)
         if cluster_id is not None:
             return await uow.pod_statuses.find_by_cluster(cluster_id)
-        return []
+        return list(await uow.pod_statuses.get_all())

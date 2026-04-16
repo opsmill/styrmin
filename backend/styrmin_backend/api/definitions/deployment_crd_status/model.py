@@ -103,6 +103,7 @@ class ManagedResourceCountsInput:
 class DeploymentCrdStatusReportInput:
     deployment_id: UUID
     phase: str
+    display_state: str | None = None
     message: str | None = None
     conditions: list[CrdConditionInput] | None = None
     managed_resource_counts: ManagedResourceCountsInput | None = None

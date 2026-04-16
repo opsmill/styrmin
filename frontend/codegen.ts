@@ -11,6 +11,7 @@ const config: CodegenConfig = {
         "typescript-react-query",
       ],
       config: {
+        enumsAsTypes: true,
         reactQueryVersion: 5,
         fetcher: {
           func: "../lib/graphql-fetcher#graphqlFetcher",

@@ -75,7 +75,9 @@ async def update_task_state(
                 target_instance_state = InstanceStatus.PENDING
             case "COMPLETED":
                 target_task_state = TaskStatus.SUCCESS
-                target_deployment_state = DeploymentStatus.RUNNING
+                # Don't set deployment to RUNNING here — the CRD status
+                # reporter will update it when the CRD reaches Ready.
+                target_deployment_state = None
                 target_instance_state = InstanceStatus.RUNNING
             case "FAILED":
                 target_task_state = TaskStatus.FAILED
@@ -85,7 +87,8 @@ async def update_task_state(
                 raise UnknownTaskStateError(f"Unknown task state: {state_name}")
 
         task.status = target_task_state
-        deployment.status = target_deployment_state
+        if target_deployment_state is not None:
+            deployment.status = target_deployment_state
         if deployment.active_instance is not None:
             deployment.active_instance.status = target_instance_state
         task.message = state_message

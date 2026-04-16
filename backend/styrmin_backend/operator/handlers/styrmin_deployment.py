@@ -6,6 +6,7 @@ orchestrates the ordered deployment pipeline.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 import kopf
@@ -14,12 +15,14 @@ from styrmin_backend.operator.config import (
     CRD_GROUP,
     CRD_PLURAL,
     CRD_VERSION,
+    DEPLOYMENT_READY_TIMEOUT_SECONDS,
     RECONCILIATION_INTERVAL_SECONDS,
 )
 from styrmin_backend.operator.crd.schema import (
     ConditionStatus,
     ConditionType,
     DeploymentPhase,
+    DisplayState,
 )
 from styrmin_backend.operator.crd.status import (
     is_condition_true,
@@ -50,6 +53,8 @@ async def on_styrmin_deployment_create(
 ) -> None:
     """Handle StyrminDeployment creation — start ordered deployment."""
     logger.info("StyrminDeployment created: %s/%s", namespace, name)
+
+    patch.status["displayState"] = DisplayState.DEPLOYING.value
 
     conditions: list[dict[str, str]] = status.get("conditions", [])
 
@@ -89,6 +94,7 @@ async def on_styrmin_deployment_create(
                 DeploymentPhase.FAILED,
                 f"HelmRelease creation failed: {result.errors}",
             )
+            patch.status["displayState"] = DisplayState.ERROR.value
             raise kopf.TemporaryError(
                 f"HelmRelease creation failed: {result.errors}", delay=30
             )
@@ -135,6 +141,7 @@ async def on_styrmin_deployment_create(
                 DeploymentPhase.FAILED,
                 f"HelmRelease creation failed: {hr_result.errors}",
             )
+            patch.status["displayState"] = DisplayState.ERROR.value
             raise kopf.TemporaryError(
                 f"HelmRelease creation failed: {hr_result.errors}", delay=30
             )
@@ -148,6 +155,7 @@ async def on_styrmin_deployment_create(
         )
         patch.status["conditions"] = conditions
         set_phase(patch.status, DeploymentPhase.FAILED, "Prerequisites failed")
+        patch.status["displayState"] = DisplayState.ERROR.value
         raise kopf.TemporaryError(
             f"Phase 1 failed: {result.errors}",
             delay=30,
@@ -306,6 +314,8 @@ async def kopf_on_styrmin_deployment_update(
     crd_spec = dict(spec)
     logger.info("StyrminDeployment spec updated: %s/%s, re-reconciling", ns, name)
 
+    patch.status["displayState"] = DisplayState.DEPLOYING.value
+
     conditions: list[dict[str, str]] = list(status.get("conditions", []))
 
     # Internal deployments skip prerequisites — go straight to HelmRelease
@@ -324,6 +334,7 @@ async def kopf_on_styrmin_deployment_update(
                 DeploymentPhase.FAILED,
                 f"Update failed: {result.errors}",
             )
+            patch.status["displayState"] = DisplayState.ERROR.value
             raise kopf.TemporaryError(
                 f"HelmRelease update failed: {result.errors}", delay=30
             )
@@ -374,6 +385,7 @@ async def kopf_on_styrmin_deployment_update(
                 DeploymentPhase.FAILED,
                 f"HelmRelease update failed: {hr_result.errors}",
             )
+            patch.status["displayState"] = DisplayState.ERROR.value
             raise kopf.TemporaryError(
                 f"HelmRelease update failed: {hr_result.errors}", delay=30
             )
@@ -381,6 +393,7 @@ async def kopf_on_styrmin_deployment_update(
         set_phase(
             patch.status, DeploymentPhase.FAILED, f"Update failed: {result.errors}"
         )
+        patch.status["displayState"] = DisplayState.ERROR.value
         raise kopf.TemporaryError(f"Phase 1 update failed: {result.errors}", delay=30)
 
 
@@ -410,6 +423,31 @@ async def kopf_styrmin_deployment_timer(
     phase = status.get("phase", DeploymentPhase.PENDING.value)
     conditions = list(status.get("conditions", []))
     crd_spec = dict(spec)
+
+    # --- displayState timeout check ---
+    # If deployment hasn't reached Ready or Failed within the timeout, mark as Error.
+    if phase not in (
+        DeploymentPhase.READY.value,
+        DeploymentPhase.FAILED.value,
+        DeploymentPhase.DELETING.value,
+    ):
+        creation_ts = body.get("metadata", {}).get("creationTimestamp")
+        if creation_ts:
+            created_at = datetime.fromisoformat(creation_ts)
+            elapsed = (datetime.now(tz=timezone.utc) - created_at).total_seconds()
+            if elapsed > DEPLOYMENT_READY_TIMEOUT_SECONDS:
+                current_display = status.get(
+                    "displayState", DisplayState.DEPLOYING.value
+                )
+                if current_display != DisplayState.ERROR.value:
+                    patch.status["displayState"] = DisplayState.ERROR.value
+                    patch.status["message"] = (
+                        f"Deployment did not reach Ready within"
+                        f" {DEPLOYMENT_READY_TIMEOUT_SECONDS}s (phase: {phase})"
+                    )
+                    logger.warning(
+                        "Deployment %s/%s timed out in phase %s", ns, name, phase
+                    )
 
     # Phase advancement for in-progress deployments
     if phase == DeploymentPhase.CREATING_HELM_RELEASE.value:
@@ -474,6 +512,7 @@ async def kopf_styrmin_deployment_timer(
                 )
                 patch.status["conditions"] = conditions
                 set_phase(patch.status, DeploymentPhase.READY, "All resources deployed")
+                patch.status["displayState"] = DisplayState.RUNNING.value
                 logger.info("Internal deployment %s/%s reached Ready state", ns, name)
                 return
 
@@ -509,6 +548,7 @@ async def kopf_styrmin_deployment_timer(
                 )
                 patch.status["conditions"] = conditions
                 set_phase(patch.status, DeploymentPhase.READY, "All resources deployed")
+                patch.status["displayState"] = DisplayState.RUNNING.value
                 logger.info("Deployment %s/%s reached Ready state", ns, name)
         return
 

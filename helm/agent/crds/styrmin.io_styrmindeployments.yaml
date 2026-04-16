@@ -78,6 +78,13 @@ spec:
                     - Ready
                     - Failed
                     - Deleting
+                displayState:
+                  type: string
+                  description: User-facing deployment state, distinct from internal phase
+                  enum:
+                    - Deploying
+                    - Running
+                    - Error
                 message:
                   type: string
                 conditions:
@@ -116,6 +123,9 @@ spec:
         - name: Phase
           type: string
           jsonPath: .status.phase
+        - name: State
+          type: string
+          jsonPath: .status.displayState
         - name: App
           type: string
           jsonPath: .spec.appName

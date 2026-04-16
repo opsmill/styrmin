@@ -310,7 +310,49 @@ async def test_get_pod_statuses_by_deployment() -> None:
 
 
 @pytest.mark.anyio
-async def test_get_pod_statuses_empty_without_filter() -> None:
+async def test_get_pod_statuses_no_filter_returns_all() -> None:
+    uow = _make_uow()
+    dep_a = uuid4()
+    dep_b = uuid4()
+
+    await report_pod_statuses(
+        [
+            {
+                "deployment_id": dep_a,
+                "pods": [
+                    {
+                        "pod_name": "a-pod",
+                        "namespace": f"styrmin-{dep_a}",
+                        "phase": "running",
+                        "ready": True,
+                        "restart_count": 0,
+                    },
+                ],
+            },
+            {
+                "deployment_id": dep_b,
+                "pods": [
+                    {
+                        "pod_name": "b-pod",
+                        "namespace": f"styrmin-{dep_b}",
+                        "phase": "pending",
+                        "ready": False,
+                        "restart_count": 0,
+                    },
+                ],
+            },
+        ],
+        uow,
+    )
+
+    result = await get_pod_statuses(uow)
+    assert len(result) == 2
+    pod_names = {p.pod_name for p in result}
+    assert pod_names == {"a-pod", "b-pod"}
+
+
+@pytest.mark.anyio
+async def test_get_pod_statuses_no_filter_empty_db() -> None:
     uow = _make_uow()
     result = await get_pod_statuses(uow)
     assert result == []

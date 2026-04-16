@@ -13,17 +13,27 @@ from uuid import UUID
 
 import httpx
 
+from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.agent.service.kubernetes.primitives import (
     get_custom_resource,
     list_pods,
 )
-from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
+from styrmin_backend.agent.status.models import (
+    DeploymentCrdStatusReport,
+    DeploymentPodStatusReport,
+    EnvironmentForStatus,
+    GraphQLResponse,
+    PodPhase,
+    PodStatusData,
+    ReportCrdStatusesResponse,
+    ReportPodStatusesResponse,
+)
 from styrmin_backend.agent.status.queries import load_query
 
 logger = logging.getLogger(__name__)
 
-STATUS_POLL_INTERVAL = int(os.environ.get("STYRMIN_AGENT_STATUS_POLL_INTERVAL", "60"))
+STATUS_POLL_INTERVAL = int(os.environ.get("STYRMIN_AGENT_STATUS_POLL_INTERVAL", "5"))
 
 _QUERY_DEPLOYMENTS = load_query("list_deployments_for_status")
 _MUTATION_REPORT_PODS = load_query("report_pod_statuses")
@@ -35,7 +45,7 @@ _CRD_VERSION = "v1alpha1"
 _CRD_PLURAL = "styrmindeployments"
 
 
-def _extract_pod_data(pod) -> dict:  # type: ignore[no-untyped-def]
+def _extract_pod_data(pod) -> PodStatusData:  # type: ignore[no-untyped-def]
     """Extract relevant status fields from a V1Pod object."""
     status = pod.status
     container_statuses_raw = status.container_statuses or []
@@ -77,25 +87,25 @@ def _extract_pod_data(pod) -> dict:  # type: ignore[no-untyped-def]
     if not container_statuses_raw:
         all_ready = False
 
-    phase = (status.phase or "Unknown").lower()
+    phase = PodPhase((status.phase or "Unknown").upper())
 
     started_at = None
     if status.start_time:
         started_at = status.start_time.isoformat()
 
-    return {
-        "podName": pod.metadata.name,
-        "namespace": pod.metadata.namespace,
-        "phase": phase,
-        "ready": all_ready,
-        "restartCount": total_restarts,
-        "containerStatuses": container_statuses,
-        "nodeName": pod.spec.node_name if pod.spec else None,
-        "startedAt": started_at,
-    }
+    return PodStatusData(
+        podName=pod.metadata.name,
+        namespace=pod.metadata.namespace,
+        phase=phase,
+        ready=all_ready,
+        restartCount=total_restarts,
+        containerStatuses=container_statuses or None,
+        nodeName=pod.spec.node_name if pod.spec else None,
+        startedAt=started_at,
+    )
 
 
-async def _collect_pod_statuses(namespace: str) -> list[dict] | None:
+async def _collect_pod_statuses(namespace: str) -> list[PodStatusData] | None:
     """Collect pod statuses from a Kubernetes namespace.
 
     Returns None on failure (as opposed to empty list) so the caller can
@@ -122,9 +132,11 @@ async def _collect_crd_status(namespace: str, crd_name: str) -> dict | None:
             version=_CRD_VERSION,
             namespace=namespace,
         )
-        status = crd.get("status", {}) if isinstance(crd, dict) else {}
+        crd_dict: dict = crd if isinstance(crd, dict) else {}
+        status: dict = crd_dict.get("status") or {}
         return {
             "phase": status.get("phase", "Pending"),
+            "displayState": status.get("displayState", "Deploying"),
             "message": status.get("message"),
             "conditions": status.get("conditions"),
             "managedResourceCounts": status.get("managedResources"),
@@ -153,71 +165,97 @@ async def _get_active_deployment_ids(graphql_url: str) -> list[UUID]:
                 timeout=30.0,
             )
             response.raise_for_status()
-            data = response.json()
+            gql = GraphQLResponse.model_validate(response.json())
 
-            deployment_ids = []
-            for env in data.get("data", {}).get("environments", []):
-                for deployment in env.get("deployments", []):
-                    if not deployment.get("internal", False):
-                        deployment_ids.append(UUID(deployment["id"]))
+            if gql.errors:
+                logger.warning("Deployment list GraphQL errors: %s", gql.errors)
+                return []
+
+            deployment_ids: list[UUID] = []
+            for env_data in (gql.data or {}).get("environments", []):
+                env = EnvironmentForStatus.model_validate(env_data)
+                for dep in env.deployments:
+                    if not dep.internal:
+                        deployment_ids.append(UUID(dep.id))
             return deployment_ids
+    except httpx.ConnectError, httpx.ConnectTimeout:
+        logger.debug("Backend unreachable at %s, will retry next cycle", graphql_url)
+        return []
     except Exception:
         logger.exception("Failed to fetch deployments from backend")
         return []
 
 
 async def _report_pod_statuses_to_backend(
-    graphql_url: str, reports: list[dict]
+    graphql_url: str, reports: list[DeploymentPodStatusReport]
 ) -> None:
     """Send pod status reports to the backend via GraphQL mutation."""
     if not reports:
         return
 
     try:
+        payload = [r.model_dump(by_alias=True) for r in reports]
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 graphql_url,
                 json={
                     "query": _MUTATION_REPORT_PODS,
-                    "variables": {"reports": reports},
+                    "variables": {"reports": payload},
                 },
                 timeout=30.0,
             )
             response.raise_for_status()
-            result = response.json()
-            data = result.get("data", {}).get("reportPodStatuses", {})
-            if data.get("success"):
-                logger.debug("Pod status report: %s", data.get("message", ""))
+            gql = GraphQLResponse.model_validate(response.json())
+
+            if gql.errors:
+                logger.warning("Pod status GraphQL errors: %s", gql.errors)
+                return
+
+            raw = (gql.data or {}).get("reportPodStatuses", {})
+            data = ReportPodStatusesResponse.model_validate(raw)
+            if data.success:
+                logger.debug("Pod status report: %s", data.message)
             else:
-                logger.warning("Pod status report failed: %s", data.get("message", ""))
+                logger.warning("Pod status report failed: %s", data.message)
+    except httpx.ConnectError, httpx.ConnectTimeout:
+        logger.debug("Backend unreachable, pod status report deferred")
     except Exception:
         logger.exception("Failed to report pod statuses to backend")
 
 
 async def _report_crd_statuses_to_backend(
-    graphql_url: str, reports: list[dict]
+    graphql_url: str, reports: list[DeploymentCrdStatusReport]
 ) -> None:
     """Send CRD status reports to the backend via GraphQL mutation."""
     if not reports:
         return
 
     try:
+        payload = [r.model_dump(by_alias=True) for r in reports]
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 graphql_url,
                 json={
                     "query": _MUTATION_REPORT_CRD,
-                    "variables": {"reports": reports},
+                    "variables": {"reports": payload},
                 },
                 timeout=30.0,
             )
             response.raise_for_status()
-            result = response.json()
-            data = result.get("data", {}).get("reportCrdStatuses", {})
-            if data.get("success"):
-                logger.debug("CRD status report: %s", data.get("message", ""))
+            gql = GraphQLResponse.model_validate(response.json())
+
+            if gql.errors:
+                logger.warning("CRD status GraphQL errors: %s", gql.errors)
+                return
+
+            raw = (gql.data or {}).get("reportCrdStatuses", {})
+            data = ReportCrdStatusesResponse.model_validate(raw)
+            if data.success:
+                logger.debug("CRD status report: %s", data.message)
             else:
-                logger.warning("CRD status report failed: %s", data.get("message", ""))
+                logger.warning("CRD status report failed: %s", data.message)
+    except httpx.ConnectError, httpx.ConnectTimeout:
+        logger.debug("Backend unreachable, CRD status report deferred")
     except Exception:
         logger.exception("Failed to report CRD statuses to backend")
 
@@ -229,8 +267,8 @@ async def _poll_once(graphql_url: str) -> None:
         logger.debug("No active deployments found, skipping poll cycle")
         return
 
-    pod_reports = []
-    crd_reports = []
+    pod_reports: list[DeploymentPodStatusReport] = []
+    crd_reports: list[DeploymentCrdStatusReport] = []
 
     for deployment_id in deployment_ids:
         namespace = get_kubernetes_reference(deployment_id)
@@ -240,27 +278,44 @@ async def _poll_once(graphql_url: str) -> None:
         pods = await _collect_pod_statuses(namespace)
         if pods is not None:
             pod_reports.append(
-                {
-                    "deploymentId": str(deployment_id),
-                    "pods": pods,
-                }
+                DeploymentPodStatusReport(
+                    deploymentId=str(deployment_id),
+                    pods=pods,
+                )
             )
 
         # Collect CRD status
         crd_status = await _collect_crd_status(namespace, crd_name)
         if crd_status is not None:
             crd_reports.append(
-                {
-                    "deploymentId": str(deployment_id),
-                    "phase": crd_status["phase"],
-                    "message": crd_status.get("message"),
-                    "conditions": crd_status.get("conditions"),
-                    "managedResourceCounts": crd_status.get("managedResourceCounts"),
-                }
+                DeploymentCrdStatusReport(
+                    deploymentId=str(deployment_id),
+                    phase=crd_status["phase"],
+                    displayState=crd_status.get("displayState", "Deploying"),
+                    message=crd_status.get("message"),
+                    conditions=crd_status.get("conditions"),
+                    managedResourceCounts=crd_status.get("managedResourceCounts"),
+                )
             )
 
-    await _report_pod_statuses_to_backend(graphql_url, pod_reports)
-    await _report_crd_statuses_to_backend(graphql_url, crd_reports)
+    # Report independently — a failure in one must not block the other
+    try:
+        await _report_pod_statuses_to_backend(graphql_url, pod_reports)
+    except Exception:
+        logger.exception("Unexpected error reporting pod statuses")
+
+    try:
+        await _report_crd_statuses_to_backend(graphql_url, crd_reports)
+    except Exception:
+        logger.exception("Unexpected error reporting CRD statuses")
+
+    total_pods = sum(len(r.pods) for r in pod_reports)
+    logger.info(
+        "Status poll: %d deployments, %d pods, %d CRD statuses reported",
+        len(deployment_ids),
+        total_pods,
+        len(crd_reports),
+    )
 
 
 async def run_status_reporter(

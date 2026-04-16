@@ -34,6 +34,8 @@ def start(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     console.print(
         f"[bold green]Starting Styrmin agent[/bold green] "

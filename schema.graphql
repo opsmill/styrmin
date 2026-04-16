@@ -187,6 +187,7 @@ type Deployment {
 input DeploymentCrdStatusReportInput {
   deploymentId: UUID!
   phase: String!
+  displayState: String = null
   message: String = null
   conditions: [CrdConditionInput!] = null
   managedResourceCounts: ManagedResourceCountsInput = null

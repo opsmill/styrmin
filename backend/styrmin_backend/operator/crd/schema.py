@@ -24,6 +24,14 @@ class DeploymentPhase(StrEnum):
     DELETING = "Deleting"
 
 
+class DisplayState(StrEnum):
+    """User-facing deployment state, distinct from internal phase."""
+
+    DEPLOYING = "Deploying"
+    RUNNING = "Running"
+    ERROR = "Error"
+
+
 class ConditionStatus(StrEnum):
     TRUE = "True"
     FALSE = "False"
@@ -115,6 +123,10 @@ class StyrminDeploymentStatus(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     phase: DeploymentPhase = DeploymentPhase.PENDING
+    display_state: DisplayState = Field(
+        default=DisplayState.DEPLOYING,
+        alias="displayState",
+    )
     message: str = ""
     conditions: list[DeploymentCondition] = Field(default_factory=list)
     managed_resources: ManagedResourceCounts = Field(

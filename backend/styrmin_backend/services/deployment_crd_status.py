@@ -11,17 +11,14 @@ from styrmin_backend.services.unit_of_work import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
-# CRD phase to DeploymentStatus mapping per FR-004
-_PHASE_TO_STATUS: dict[str, DeploymentStatus] = {
-    "Pending": DeploymentStatus.PENDING,
-    "CreatingPrerequisites": DeploymentStatus.PENDING,
-    "CreatingHelmRelease": DeploymentStatus.PENDING,
-    "CreatingServices": DeploymentStatus.PENDING,
-    "Ready": DeploymentStatus.RUNNING,
-    "Failed": DeploymentStatus.FAILED,
+# CRD displayState to DeploymentStatus mapping.
+# The displayState is the user-facing state set by the operator, distinct
+# from the internal phase. It is the sole source of truth for Deployment.status.
+_DISPLAY_STATE_TO_STATUS: dict[str, DeploymentStatus] = {
+    "Deploying": DeploymentStatus.PENDING,
+    "Running": DeploymentStatus.RUNNING,
+    "Error": DeploymentStatus.FAILED,
 }
-
-# "Deleting" intentionally excluded — no status change
 
 
 async def report_crd_statuses(
@@ -47,6 +44,7 @@ async def report_crd_statuses(
         for report in reports:
             deployment_id = report["deployment_id"]
             phase = report["phase"]
+            display_state = report.get("display_state", "Deploying")
 
             crd_status = DeploymentCrdStatus(
                 deployment_id=deployment_id,
@@ -59,8 +57,8 @@ async def report_crd_statuses(
             await uow.deployment_crd_statuses.upsert(crd_status)
             statuses_updated += 1
 
-            # Update Deployment status based on CRD phase mapping
-            target_status = _PHASE_TO_STATUS.get(phase)
+            # Update Deployment status based on CRD displayState
+            target_status = _DISPLAY_STATE_TO_STATUS.get(display_state)
             if target_status is not None:
                 deployment = await uow.deployments.find(deployment_id)
                 if deployment is not None and deployment.status != target_status.value:

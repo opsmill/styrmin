@@ -816,6 +816,7 @@ class Mutation:
             {
                 "deployment_id": report.deployment_id,
                 "phase": report.phase,
+                "display_state": report.display_state,
                 "message": report.message,
                 "conditions": (
                     [
