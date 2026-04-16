@@ -1,0 +1,8 @@
+mutation ReportCrdStatuses($reports: [DeploymentCrdStatusReportInput!]!) {
+    reportCrdStatuses(reports: $reports) {
+        success
+        message
+        statusesUpdated
+        deploymentsUpdated
+    }
+}

@@ -1,0 +1,25 @@
+query GetDeploymentCrdStatus($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        name
+        status
+        crdStatus {
+            phase
+            message
+            conditions {
+                type
+                status
+                reason
+                message
+                lastTransitionTime
+            }
+            managedResourceCounts {
+                networkPolicies
+                secrets
+                helmReleases
+                services
+                middlewares
+            }
+            lastPolledAt
+        }
+    }
+}
