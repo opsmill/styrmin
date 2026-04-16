@@ -24,6 +24,7 @@ class CrdConditionInput(BaseModel):
 class DeploymentCrdStatusReportInput(BaseModel):
     deployment_id: UUID = Field(alias="deploymentId")
     phase: str
+    display_state: Optional[str] = Field(alias="displayState", default=None)
     message: Optional[str] = None
     conditions: Optional[list["CrdConditionInput"]] = None
     managed_resource_counts: Optional["ManagedResourceCountsInput"] = Field(
