@@ -23,6 +23,14 @@ from styrmin_backend.api.definitions.backup_storage_location.model import (
     BackupStorageLocation as BackupStorageLocationType,
 )
 from styrmin_backend.api.definitions.callback.model import CallbackResponse
+from styrmin_backend.api.definitions.pod_status.model import (
+    DeploymentPodStatusReport,
+    ReportPodStatusesResponse,
+)
+from styrmin_backend.api.definitions.deployment_crd_status.model import (
+    DeploymentCrdStatusReportInput,
+    ReportCrdStatusesResponse,
+)
 from styrmin_backend.api.definitions.cluster.model import Cluster
 from styrmin_backend.api.definitions.environment.model import Environment
 from styrmin_backend.api.definitions.service.model import ServiceNameOverride
@@ -74,6 +82,10 @@ from styrmin_backend.services.primitives import (
     start_components,
     stop_components,
 )
+from styrmin_backend.services.deployment_crd_status import (
+    report_crd_statuses,
+)
+from styrmin_backend.services.pod_status import report_pod_statuses
 from styrmin_backend.services.tasks import update_task_state
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.models import PrefectAction
@@ -749,3 +761,103 @@ class Mutation:
             uow=uow,
         )
         return Task.from_instance(task)
+
+    @strawberry.mutation
+    async def report_pod_statuses(
+        self,
+        reports: list[DeploymentPodStatusReport],
+        info: strawberry.Info,
+    ) -> ReportPodStatusesResponse:
+        """Report pod statuses from the agent. Upserts pods and removes stale ones."""
+        uow = info.context["uow"]
+
+        report_dicts = [
+            {
+                "deployment_id": report.deployment_id,
+                "pods": [
+                    {
+                        "pod_name": pod.pod_name,
+                        "namespace": pod.namespace,
+                        "phase": pod.phase.value,
+                        "ready": pod.ready,
+                        "restart_count": pod.restart_count,
+                        "container_statuses": pod.container_statuses,
+                        "node_name": pod.node_name,
+                        "started_at": pod.started_at,
+                    }
+                    for pod in report.pods
+                ],
+            }
+            for report in reports
+        ]
+
+        total_updated, total_removed = await report_pod_statuses(
+            reports=report_dicts,
+            uow=uow,
+        )
+
+        return ReportPodStatusesResponse(
+            success=True,
+            message=f"Updated {total_updated} pods, removed {total_removed} stale pods",
+            pods_updated=total_updated,
+            pods_removed=total_removed,
+        )
+
+    @strawberry.mutation
+    async def report_crd_statuses(
+        self,
+        reports: list[DeploymentCrdStatusReportInput],
+        info: strawberry.Info,
+    ) -> ReportCrdStatusesResponse:
+        """Report CRD statuses from the agent. Upserts CRD status and updates Deployment status."""
+        uow = info.context["uow"]
+
+        report_dicts = [
+            {
+                "deployment_id": report.deployment_id,
+                "phase": report.phase,
+                "message": report.message,
+                "conditions": (
+                    [
+                        {
+                            "type": c.type,
+                            "status": c.status,
+                            "reason": c.reason,
+                            "message": c.message,
+                            "lastTransitionTime": (
+                                c.last_transition_time.isoformat()
+                                if c.last_transition_time
+                                else None
+                            ),
+                        }
+                        for c in report.conditions
+                    ]
+                    if report.conditions
+                    else None
+                ),
+                "managed_resource_counts": (
+                    {
+                        "networkPolicies": report.managed_resource_counts.network_policies,
+                        "secrets": report.managed_resource_counts.secrets,
+                        "helmReleases": report.managed_resource_counts.helm_releases,
+                        "services": report.managed_resource_counts.services,
+                        "middlewares": report.managed_resource_counts.middlewares,
+                    }
+                    if report.managed_resource_counts
+                    else None
+                ),
+            }
+            for report in reports
+        ]
+
+        statuses_updated, deployments_updated = await report_crd_statuses(
+            reports=report_dicts,
+            uow=uow,
+        )
+
+        return ReportCrdStatusesResponse(
+            success=True,
+            message=f"Updated {statuses_updated} CRD statuses, {deployments_updated} deployment statuses synced",
+            statuses_updated=statuses_updated,
+            deployments_updated=deployments_updated,
+        )

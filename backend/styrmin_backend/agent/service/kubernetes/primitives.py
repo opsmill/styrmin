@@ -7,6 +7,7 @@ from kubernetes_asyncio import client as kubeclient
 from kubernetes_asyncio.client import (
     V1DeploymentList,
     V1Job,
+    V1PodList,
     V1PodTemplateSpec,
     V1StatefulSetList,
 )
@@ -259,6 +260,15 @@ def _kind_to_plural(kind: str) -> str:
     if kind in _CRD_KIND_PLURALS:
         return _CRD_KIND_PLURALS[kind]
     return kind.lower() + "s"
+
+
+@inject
+async def list_pods(
+    namespace: str, client: ApiClient = Depends(get_api_client)
+) -> V1PodList:
+    """List all pods in a namespace."""
+    core_api = kubeclient.CoreV1Api(client)
+    return await core_api.list_namespaced_pod(namespace=namespace)
 
 
 @inject

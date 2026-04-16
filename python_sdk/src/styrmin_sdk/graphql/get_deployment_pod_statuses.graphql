@@ -1,0 +1,18 @@
+query GetDeploymentPodStatuses($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        name
+        status
+        podStatuses {
+            id
+            podName
+            namespace
+            phase
+            ready
+            restartCount
+            containerStatuses
+            nodeName
+            startedAt
+            lastPolledAt
+        }
+    }
+}

@@ -1,0 +1,15 @@
+query GetPodStatuses($deploymentId: UUID, $environmentId: UUID, $clusterId: UUID) {
+    podStatuses(deploymentId: $deploymentId, environmentId: $environmentId, clusterId: $clusterId) {
+        id
+        deploymentId
+        podName
+        namespace
+        phase
+        ready
+        restartCount
+        containerStatuses
+        nodeName
+        startedAt
+        lastPolledAt
+    }
+}

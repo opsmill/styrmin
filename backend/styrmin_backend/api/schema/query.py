@@ -55,6 +55,10 @@ from styrmin_backend.api.definitions.deployment_timeline.model import (
     DeploymentTimelineEntry,
 )
 from styrmin_backend.services.deployment_timeline import build_deployment_timeline
+from styrmin_backend.api.definitions.pod_status.model import (
+    PodStatus as PodStatusType,
+)
+from styrmin_backend.services.pod_status import get_pod_statuses
 from styrmin_backend.services.tasks import get_task, get_tasks
 
 
@@ -263,6 +267,24 @@ class Query:
         uow = info.context["uow"]
         entries = await build_deployment_timeline(deployment_id=deployment_id, uow=uow)
         return [DeploymentTimelineEntry.from_data(entry) for entry in entries]
+
+    @strawberry.field
+    async def pod_statuses(
+        self,
+        info: strawberry.Info,
+        deployment_id: UUID | None = None,
+        environment_id: UUID | None = None,
+        cluster_id: UUID | None = None,
+    ) -> list[PodStatusType]:
+        """Get pod statuses with optional filtering by deployment, environment, or cluster."""
+        uow = info.context["uow"]
+        statuses = await get_pod_statuses(
+            uow=uow,
+            deployment_id=deployment_id,
+            environment_id=environment_id,
+            cluster_id=cluster_id,
+        )
+        return [PodStatusType.from_instance(s) for s in statuses]
 
     @strawberry.field(description="Health check probe")
     def ok(self) -> bool:
