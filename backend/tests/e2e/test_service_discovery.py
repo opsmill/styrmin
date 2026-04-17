@@ -13,7 +13,7 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 
-from tests.e2e.conftest import _wait_for_http
+from tests.e2e.conftest import _wait_for_deployment_running, _wait_for_http
 
 
 @pytest.mark.ci
@@ -52,17 +52,11 @@ async def test_service_discovery_between_apps(
     executor_deployment_id = executor_task.deployment_id
 
     # Wait for both deployments to be running
-    deadline = time.time() + 300
-    for dep_task_id in [intent_deployment_id, executor_deployment_id]:
-        while time.time() < deadline:
-            try:
-                if dep_task_id:
-                    deployment = await client.deployments.get(dep_task_id)
-                    if deployment.status == "running":
-                        break
-            except Exception:
-                pass
-            await asyncio.sleep(5)
+    for dep_task_id in (intent_deployment_id, executor_deployment_id):
+        if dep_task_id:
+            await _wait_for_deployment_running(
+                client, dep_task_id, timeout=300.0, interval=5.0
+            )
 
     # Find the executor service via kr8s.
     # The service-discovery utility creates the service asynchronously after the

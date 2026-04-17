@@ -1,12 +1,10 @@
-import asyncio
-import time
-
 import httpx
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
-
+from styrmin_sdk import StyrminClient
 from tests.e2e.conftest import (
+    _wait_for_deployment_running,
     _wait_for_http,
 )
 
@@ -65,8 +63,6 @@ async def test_upgrade_simple_app(
     simple_app_image_v2: str,
     vcluster: dict,
 ) -> None:
-    from styrmin_sdk import StyrminClient
-    from styrmin_sdk.exceptions import StyrminError
 
     client: StyrminClient = styrmin_resources["client"]
     deployment_id = deployed_simple_app["deployment_id"]
@@ -76,20 +72,7 @@ async def test_upgrade_simple_app(
     # Trigger upgrade to version 0.2.0
     await client.deployments.update_version(deployment_id, "0.2.0")
 
-    # Poll deployment status until ready
-    deadline = time.time() + 180
-    deployment_ready = False
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                deployment_ready = True
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
-
-    assert deployment_ready, "Deployment did not reach ready state after upgrade"
+    await _wait_for_deployment_running(client, deployment_id)
 
     # Find the simple-app service via kr8s
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)

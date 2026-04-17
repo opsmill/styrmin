@@ -663,8 +663,6 @@ async def deployed_simple_app(
     vcluster: dict,
 ) -> dict:
     """Deploy simple-app and return deployment info for reuse by tests."""
-    from styrmin_sdk.exceptions import StyrminError
-
     client = styrmin_resources["client"]
     environment_id = styrmin_resources["environment_id"]
     kubeconfig_path = vcluster["kubeconfig_path"]
@@ -676,21 +674,7 @@ async def deployed_simple_app(
     deployment_id = task.deployment_id
     assert deployment_id is not None, "Task should have a deployment_id"
 
-    # Poll deployment status until ready
-    deadline = time.time() + 180
-    deployment_ready = False
-    deployment = None
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                deployment_ready = True
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
-
-    assert deployment_ready, "Deployment did not reach ready state within timeout"
+    deployment = await _wait_for_deployment_running(client, deployment_id)
 
     namespace = f"styrmin-{deployment_id}"
 
@@ -736,8 +720,6 @@ async def deployed_infrahub_app(
     vcluster: dict,
 ) -> dict:
     """Deploy infrahub and return deployment info for reuse by tests."""
-    from styrmin_sdk.exceptions import StyrminError
-
     client: StyrminClient = load_infrahub["client"]
     environment_id = load_infrahub["environment_id"]
     kubeconfig_path = vcluster["kubeconfig_path"]
@@ -748,20 +730,10 @@ async def deployed_infrahub_app(
     deployment_id = task.deployment_id
     assert deployment_id is not None, "Task should have a deployment_id"
 
-    deadline = time.time() + 600  # longer timeout for infrahub (many components)
-    deployment_ready = False
-    deployment = None
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                deployment_ready = True
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
-
-    assert deployment_ready, "Infrahub deployment did not reach ready state"
+    # longer timeout for infrahub (many components)
+    deployment = await _wait_for_deployment_running(
+        client, deployment_id, timeout=600.0
+    )
 
     namespace = f"styrmin-{deployment_id}"
     instance_id = None
@@ -805,8 +777,6 @@ async def deployed_semaphore(
     vcluster: dict,
 ) -> dict:
     """Deploy Semaphore and return deployment info for reuse by tests."""
-    from styrmin_sdk.exceptions import StyrminError
-
     client: StyrminClient = load_semaphore["client"]
     environment_id = load_semaphore["environment_id"]
     kubeconfig_path = vcluster["kubeconfig_path"]
@@ -820,20 +790,9 @@ async def deployed_semaphore(
     deployment_id = task.deployment_id
     assert deployment_id is not None, "Task should have a deployment_id"
 
-    deadline = time.time() + 300
-    deployment_ready = False
-    deployment = None
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                deployment_ready = True
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
-
-    assert deployment_ready, "Semaphore deployment did not reach ready state"
+    deployment = await _wait_for_deployment_running(
+        client, deployment_id, timeout=300.0
+    )
 
     namespace = f"styrmin-{deployment_id}"
     instance_id = None
@@ -902,8 +861,6 @@ async def deployed_db_test(
     vcluster: dict,
 ) -> dict:
     """Deploy db-test and return deployment info for reuse by tests."""
-    from styrmin_sdk.exceptions import StyrminError
-
     client: StyrminClient = load_db_test["client"]
     environment_id = load_db_test["environment_id"]
     kubeconfig_path = vcluster["kubeconfig_path"]
@@ -914,20 +871,9 @@ async def deployed_db_test(
     deployment_id = task.deployment_id
     assert deployment_id is not None, "Task should have a deployment_id"
 
-    deadline = time.time() + 300
-    deployment_ready = False
-    deployment = None
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                deployment_ready = True
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
-
-    assert deployment_ready, "db-test deployment did not reach ready state"
+    deployment = await _wait_for_deployment_running(
+        client, deployment_id, timeout=300.0
+    )
 
     namespace = f"styrmin-{deployment_id}"
     instance_id = None
