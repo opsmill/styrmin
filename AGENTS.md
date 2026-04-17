@@ -39,6 +39,8 @@ uv run invoke format           # Format all Python code
 uv run invoke lint             # Lint all Python code
 ```
 
+**Important:** `ruff` and `ty` are the authoritative tools for detecting Python syntax errors, style violations, and type issues. Do not attempt to identify Python syntax errors by reading the code — run `uv run invoke format lint` instead and rely on the tool output.
+
 ### GraphQL Schema
 
 ```bash

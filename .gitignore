@@ -203,3 +203,4 @@ frontend/dist/
 helm/styrmin/charts/
 helm/styrmin/Chart.lock
 .superset/config.json
+*.local.*
