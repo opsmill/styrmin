@@ -160,12 +160,9 @@ styrmin:
 
   # URL configuration
   url:
-    # -- GraphQL API URL for service-to-service communication
-    # Will be auto-generated if not set: http://<release>-styrmin-server:8000/graphql
-    graphql: ""
-    # -- GraphQL API URL for Kubernetes jobs (must be resolvable from K8s pods)
+    # -- API URL for Kubernetes jobs (must be resolvable from K8s pods)
     # Will be auto-generated if not set using full DNS name
-    graphqlK8s: ""
+    apiK8s: ""
 
   # Kubernetes defaults
   kubernetes:

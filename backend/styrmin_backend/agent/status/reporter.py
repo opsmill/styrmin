@@ -331,9 +331,8 @@ async def run_status_reporter(
         interval: Polling interval in seconds.
     """
     if graphql_url is None:
-        graphql_url = os.environ.get(
-            "STYRMIN_URL_GRAPHQL", "http://localhost:8000/graphql"
-        )
+        api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
+        graphql_url = f"{api_url}/graphql"
     if interval is None:
         interval = STATUS_POLL_INTERVAL
 

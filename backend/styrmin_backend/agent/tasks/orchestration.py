@@ -103,9 +103,8 @@ async def _clear_deployment_in_progress(namespace: str, release_reference: str) 
 
 
 async def orchestration_callback(flow, flow_run: FlowRun, state: State) -> None:  # type: ignore[no-untyped-def]
-    styrmin_server_url = os.environ.get(
-        "STYRMIN_URL_GRAPHQL", "http://localhost:8000/graphql"
-    )
+    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
+    styrmin_server_url = f"{api_url}/graphql"
 
     # Check state
     async with httpx.AsyncClient() as client:

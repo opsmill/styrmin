@@ -21,8 +21,16 @@ class WorkflowDriver(str, Enum):
 class UrlSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STYRMIN_URL_")
 
-    graphql: str = "undefined"
-    graphql_k8s: str = "undefined"
+    api: str = "http://localhost:8000"
+    api_k8s: str = "http://localhost:8000"
+
+    @property
+    def graphql(self) -> str:
+        return f"{self.api}/graphql"
+
+    @property
+    def graphql_k8s(self) -> str:
+        return f"{self.api_k8s}/graphql"
 
 
 class KubernetesConfigMode(str, Enum):

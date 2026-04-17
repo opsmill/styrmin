@@ -10,8 +10,7 @@ data:
   
   # URL configuration
   STYRMIN_URL_API: {{ include "styrmin.apiUrl" . | quote }}
-  STYRMIN_URL_GRAPHQL: {{ include "styrmin.graphqlUrl" . | quote }}
-  STYRMIN_URL_GRAPHQL_K8S: {{ include "styrmin.graphqlUrlK8s" . | quote }}
+  STYRMIN_URL_API_K8S: {{ include "styrmin.apiUrlK8s" . | quote }}
   
   # Prefect/Workflow configuration
   PREFECT_API_URL: {{ include "styrmin.prefect.apiUrl" . | quote }}

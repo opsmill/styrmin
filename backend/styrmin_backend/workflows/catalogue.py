@@ -106,8 +106,8 @@ class PrefectCatalogue:
 
         if config.SETTINGS.url:
             job_template_variables["properties"]["env"]["default"][
-                "STYRMIN_URL_GRAPHQL"
-            ] = config.SETTINGS.url.graphql_k8s
+                "STYRMIN_URL_API"
+            ] = config.SETTINGS.url.api_k8s
 
         # Forward agent poll settings to K8s jobs
         poll_env_vars = {

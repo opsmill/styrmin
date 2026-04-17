@@ -18,8 +18,7 @@ services:
       PREFECT_API_URL: http://task-manager:4200/api
       PREFECT_WORKER_QUERY_SECONDS: "2"
       STYRMIN_URL_API: http://server:8000
-      STYRMIN_URL_GRAPHQL_K8S: http://host.docker.internal:8000/graphql
-      STYRMIN_URL_GRAPHQL: http://server:8000/graphql
+      STYRMIN_URL_API_K8S: http://host.docker.internal:8000
       STYRMIN_DB_NAME: /source/data/styrmin.db
     volumes:
       - ./backend:/source/backend
@@ -37,8 +36,7 @@ services:
       PREFECT_API_URL: http://localhost:4200/api
       PREFECT_WORKER_QUERY_SECONDS: "2"
       STYRMIN_URL_API: http://localhost:8000
-      STYRMIN_URL_GRAPHQL_K8S: http://localhost:8000/graphql
-      STYRMIN_URL_GRAPHQL: http://localhost:8000/graphql
+      STYRMIN_URL_API_K8S: http://localhost:8000
       STYRMIN_K8S_CONFIG_MODE: kubeconfig
       KUBECONFIG: /root/.kube/config
     volumes:
@@ -60,8 +58,7 @@ services:
       STYRMIN_DRIVER_TOKEN: ${STYRMIN_DRIVER_TOKEN}
       STYRMIN_AGENT_SOURCE_TOKEN: ${STYRMIN_AGENT_SOURCE_TOKEN}
       STYRMIN_AGENT_SOURCE_BRANCH: ${STYRMIN_AGENT_SOURCE_BRANCH}
-      STYRMIN_URL_GRAPHQL_K8S: http://host.docker.internal:8000/graphql
-      STYRMIN_URL_GRAPHQL: http://server:8000/graphql
+      STYRMIN_URL_API_K8S: http://host.docker.internal:8000
       STYRMIN_DB_NAME: /source/data/styrmin.db
 
     healthcheck:
