@@ -57,11 +57,20 @@ async def report_crd_statuses(
             await uow.deployment_crd_statuses.upsert(crd_status)
             statuses_updated += 1
 
-            # Update Deployment status based on CRD displayState
+            # Update Deployment status based on CRD displayState.
+            # While a task is still in flight (e.g., an UPGRADE_INSTANCE hook
+            # is running stop/start_components sub-steps), the CRD can
+            # briefly transition to Running between nested pipeline runs.
+            # Suppress the RUNNING override until no active task remains so
+            # callers don't see a premature "running" state.
             target_status = _DISPLAY_STATE_TO_STATUS.get(display_state)
             if target_status is not None:
                 deployment = await uow.deployments.find(deployment_id)
                 if deployment is not None and deployment.status != target_status.value:
+                    if target_status == DeploymentStatus.RUNNING and (
+                        await uow.tasks.has_active_for_deployment(deployment_id)
+                    ):
+                        continue
                     deployment.status = target_status
                     await uow.deployments.save(deployment)
                     deployments_updated += 1

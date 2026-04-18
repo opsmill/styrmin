@@ -21,6 +21,7 @@ from styrmin_backend.db.models import (
     Restore,
     RestoreStatus,
     Task,
+    TaskStatus,
 )
 from styrmin_backend.domain.models import Deployment as DeploymentEntity
 from styrmin_backend.repository.backup_storage_location import (
@@ -231,6 +232,13 @@ class FakeTaskRepository(FakeRepository[Task], TaskRepository):
 
     async def find_by_deployment(self, deployment_id: UUID):
         return [m for m in self.models if m.deployment_id == deployment_id]
+
+    async def has_active_for_deployment(self, deployment_id: UUID) -> bool:
+        return any(
+            m.deployment_id == deployment_id
+            and m.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
+            for m in self.models
+        )
 
 
 class FakeBackupRepository(FakeRepository[Backup], BackupRepository):

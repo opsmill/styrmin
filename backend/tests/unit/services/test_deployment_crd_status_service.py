@@ -4,7 +4,13 @@ from uuid import uuid4
 
 import pytest
 
-from styrmin_backend.domain.models import Deployment, DeploymentStatus
+from styrmin_backend.domain.models import (
+    Deployment,
+    DeploymentStatus,
+    Task,
+    TaskStatus,
+    TaskType,
+)
 from styrmin_backend.services.deployment_crd_status import report_crd_statuses
 from tests.unit.services.fakes import (
     FakeActionRepository,
@@ -24,6 +30,7 @@ from tests.unit.services.fakes import (
 def _make_uow(
     deployments: FakeDeploymentRepository | None = None,
     crd_statuses: FakeDeploymentCrdStatusRepository | None = None,
+    tasks: FakeTaskRepository | None = None,
 ) -> FakeUnitOfWork:
     return FakeUnitOfWork(
         clusters=FakeClusterRepository(),
@@ -33,7 +40,7 @@ def _make_uow(
         application_driver_versions=FakeApplicationRepository(),
         instances=FakeApplicationInstanceRepository(),
         actions=FakeActionRepository(),
-        tasks=FakeTaskRepository(),
+        tasks=tasks if tasks is not None else FakeTaskRepository(),
         deployments=deployments,
         deployment_crd_statuses=crd_statuses,
     )
@@ -161,3 +168,38 @@ async def test_already_running_no_redundant_update() -> None:
     _, deployments_updated = await report_crd_statuses(reports, uow)
 
     assert deployments_updated == 0
+
+
+@pytest.mark.anyio
+async def test_running_suppressed_while_task_active() -> None:
+    """An in-flight task (e.g. UPGRADE_INSTANCE hook running stop_components)
+    can make the CRD transiently report Running between nested pipeline runs.
+    The deployment status must not flip to RUNNING until the task finishes."""
+    dep = _make_deployment(status=DeploymentStatus.PENDING)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+
+    task_repo = FakeTaskRepository()
+    await task_repo.save(
+        Task(
+            id=uuid4(),
+            deployment_id=dep.id,
+            type=TaskType.UPGRADE_INSTANCE,
+            status=TaskStatus.RUNNING,
+        )
+    )
+    uow = _make_uow(deployments=dep_repo, tasks=task_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Ready",
+            "display_state": "Running",
+        }
+    ]
+    _, deployments_updated = await report_crd_statuses(reports, uow)
+
+    assert deployments_updated == 0
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentStatus.PENDING

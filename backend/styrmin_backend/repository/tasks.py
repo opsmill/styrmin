@@ -40,6 +40,13 @@ class TaskRepository(BaseRepository[TaskModel], ABC):
             "The find_by_deployment method must be implemented in the subclass."
         )
 
+    @abstractmethod
+    async def has_active_for_deployment(self, deployment_id: UUID) -> bool:
+        """Return True if a pending or running task exists for the deployment."""
+        raise NotImplementedError(
+            "The has_active_for_deployment method must be implemented in the subclass."
+        )
+
 
 class SQLModelTaskRepository(BaseSQLModelRepository[TaskModel], TaskRepository):
     """The async SQLmodel task repository."""
@@ -103,3 +110,18 @@ class SQLModelTaskRepository(BaseSQLModelRepository[TaskModel], TaskRepository):
         result = await self.session.exec(statement)
         tasks = result.all()
         return [self._to_entity(task) for task in tasks]
+
+    async def has_active_for_deployment(self, deployment_id: UUID) -> bool:
+        """Return True if a pending or running task exists for the deployment."""
+        statement = (
+            select(self.model_class.id)
+            .where(self.model_class.deployment_id == deployment_id)
+            .where(
+                self.model_class.status.in_(  # type: ignore[union-attr]
+                    [TaskStatusModel.PENDING, TaskStatusModel.RUNNING]
+                )
+            )
+            .limit(1)
+        )
+        result = await self.session.exec(statement)
+        return result.first() is not None
