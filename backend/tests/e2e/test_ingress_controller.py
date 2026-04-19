@@ -232,8 +232,12 @@ async def test_traffic_routes_through_dedicated_ingress(
     # Build the expected host from the deployment info
     expected_host = f"simple-app-{deployment_id}.styrmin.com"
 
-    # Port-forward to the Traefik service and send HTTP request with Host header
-    async with traefik_svc.portforward(remote_port=80, local_port="auto") as local_port:
+    # Port-forward to the Traefik service. NOTE: kr8s's Service.portforward
+    # forwards directly to the selected Pod's container port (not the Service
+    # port) — so we pass Traefik's "web" container port (8000), not 80.
+    async with traefik_svc.portforward(
+        remote_port=8000, local_port="auto"
+    ) as local_port:
         await _wait_for_http(
             f"http://localhost:{local_port}/count",
             timeout=60.0,
