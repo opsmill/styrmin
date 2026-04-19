@@ -4,10 +4,15 @@ Covers:
 - T035: Deploy with dedicated_ingress — verify Traefik pod running, correct ingress annotation, internal deployment hidden
 - T036: Deploy without dedicated_ingress — no Traefik controller deployed
 - T037: Second app reuses ingress controller — only ONE Traefik deployment
-- T038: Traffic routes through dedicated ingress — HTTP request via Traefik LB
+- T038: Traffic routes through dedicated ingress — HTTP request via Traefik (port-forward)
+- T038b: Traffic routes via the LoadBalancer external IP provisioned by vcluster
 - T038a: Toggle dedicated_ingress on/off — verify provisioning and deprovisioning
 """
 
+import asyncio
+import time
+
+import httpx
 import kr8s
 import kr8s.asyncio
 import pytest
@@ -16,7 +21,7 @@ from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 
-from tests.e2e.conftest import _wait_for_deployment_running
+from tests.e2e.conftest import _wait_for_deployment_running, _wait_for_http
 
 
 async def test_deploy_with_dedicated_ingress(
@@ -204,10 +209,6 @@ async def test_traffic_routes_through_dedicated_ingress(
     Uses port-forwarding to reach the Traefik service, which works regardless
     of whether the service type is LoadBalancer or ClusterIP.
     """
-    import httpx
-
-    from tests.e2e.conftest import _wait_for_http
-
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
@@ -252,6 +253,75 @@ async def test_traffic_routes_through_dedicated_ingress(
                 timeout=10,
             )
             assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
+
+
+@pytest.mark.e2e
+@pytest.mark.ci
+async def test_traffic_routes_through_loadbalancer_ingress(
+    styrmin_resources: dict,
+    deployed_simple_app: dict,
+    vcluster: dict,
+):
+    """T038b: Send HTTP request via Traefik's LoadBalancer external IP and verify 200.
+
+    The shared cluster is provisioned with ``dedicated_ingress.service.type=
+    LoadBalancer``; vcluster ships with a built-in LoadBalancer implementation
+    that assigns an external IP reachable from the host. This test exercises
+    the full LB data path (no port-forward).
+    """
+    client: StyrminClient = styrmin_resources["client"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    deployment_id = deployed_simple_app["deployment_id"]
+    await _wait_for_deployment_running(client, deployment_id)
+
+    # Find the Traefik LoadBalancer Service and wait for its external IP.
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+    external_ip: str | None = None
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        traefik_services: list[AsyncService] = [
+            svc
+            async for svc in AsyncService.list(
+                namespace=kr8s.ALL,
+                label_selector={"app.kubernetes.io/name": "traefik"},
+                api=kr8s_api,
+            )
+            if isinstance(svc, AsyncService)
+        ]
+        lb_services = [
+            svc
+            for svc in traefik_services
+            if svc.raw.get("spec", {}).get("type") == "LoadBalancer"
+        ]
+        for svc in lb_services:
+            lb_ingress = svc.status.get("loadBalancer", {}).get("ingress", [])
+            if lb_ingress:
+                external_ip = lb_ingress[0].get("ip") or lb_ingress[0].get("hostname")
+                if external_ip:
+                    break
+        if external_ip:
+            break
+        await asyncio.sleep(3)
+
+    assert external_ip is not None, "Traefik LoadBalancer did not get an external IP"
+
+    expected_host = f"simple-app-{deployment_id}.styrmin.com"
+
+    # Traefik endpoints may lag the LB IP by a few seconds — retry until 200.
+    await _wait_for_http(
+        f"http://{external_ip}/count",
+        timeout=120.0,
+        interval=3.0,
+        headers={"Host": expected_host},
+    )
+
+    async with httpx.AsyncClient() as http_client:
+        resp = await http_client.get(
+            f"http://{external_ip}/count",
+            headers={"Host": expected_host},
+            timeout=10,
+        )
+        assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
 
 
 async def test_toggle_dedicated_ingress_on_off(
