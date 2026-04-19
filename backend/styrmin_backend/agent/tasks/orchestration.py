@@ -35,6 +35,11 @@ from styrmin_backend.domain.models import Instance
 from styrmin_backend.services.reconciliation.remediation import (
     Remediation,
 )
+from styrmin_backend.agent.service.kubernetes.primitives import (
+    patch_custom_resource_status,
+    apply_kubernetes_namespace,
+    upsert_custom_resource,
+)
 from styrmin_backend import config
 from styrmin_backend.operator.config import (
     ANNOTATION_DEPLOYMENT_IN_PROGRESS,
@@ -591,11 +596,6 @@ async def create_instance_crd(
         internal=internal,
     )
 
-    from styrmin_backend.agent.service.kubernetes.primitives import (
-        apply_kubernetes_namespace,
-        upsert_custom_resource,
-    )
-
     namespace_labels = _build_namespace_labels(context)
     await apply_kubernetes_namespace(namespace=namespace, labels=namespace_labels)
 
@@ -691,6 +691,40 @@ async def upgrade_instance_crd(
     release_reference = context.instance.release_reference
     namespace = context.instance.namespace
 
+    # Write the new CRD spec and reset its status BEFORE running hooks.
+    # The driver's upgrade hook typically calls back into the server (e.g.
+    # stop_components / start_components / upgrade_deployment_version), each
+    # of which spawns a nested update_instance_crd flow that advances the
+    # CRD to a fresh instance. Writing the CRD at the end of this flow
+    # would stomp those hook-driven updates with this flow's (older)
+    # instance. Writing here first lets hook updates layer correctly on top.
+    crd_body = build_styrmin_deployment_body(
+        context=context,
+        release_reference=release_reference,
+        namespace=namespace,
+    )
+    await upsert_custom_resource(
+        plurals=CRD_PLURAL,
+        body=crd_body,
+        group=CRD_GROUP,
+        version=CRD_VERSION,
+        namespace=namespace,
+    )
+
+    # Reset status.displayState + phase atomically with the spec change.
+    # Without this there is a window where the CRD carries the new
+    # instanceId / appVersion but the previous rollout's "Running"
+    # displayState, letting a stale agent report race the server into
+    # prematurely flipping Deployment.status to RUNNING.
+    await patch_custom_resource_status(
+        plural=CRD_PLURAL,
+        reference=release_reference,
+        group=CRD_GROUP,
+        version=CRD_VERSION,
+        namespace=namespace,
+        status_patch={"displayState": "Deploying", "phase": "Pending"},
+    )
+
     if prehook:
         await run_deployment_or_fail(
             flow_run_name=f"Run {context.app.name} upgrade pre-hook",
@@ -702,24 +736,6 @@ async def upgrade_instance_crd(
         flow_run_name=f"Upgrade {context.app.name} to {target_version}",
         name=upgrade_hook,
         parameters={"context": context, "target_version": target_version},
-    )
-
-    crd_body = build_styrmin_deployment_body(
-        context=context,
-        release_reference=release_reference,
-        namespace=namespace,
-    )
-
-    from styrmin_backend.agent.service.kubernetes.primitives import (
-        upsert_custom_resource,
-    )
-
-    await upsert_custom_resource(
-        plurals=CRD_PLURAL,
-        body=crd_body,
-        group=CRD_GROUP,
-        version=CRD_VERSION,
-        namespace=namespace,
     )
 
     # Apply cross-namespace ExternalName service aliases for service discovery

@@ -168,6 +168,40 @@ async def patch_custom_resource(
 
 
 @inject
+async def patch_custom_resource_status(
+    plural: str,
+    reference: str,
+    group: str,
+    version: str,
+    namespace: str,
+    status_patch: dict,
+    client: ApiClient = Depends(get_api_client),
+) -> None:
+    """Merge-patch the ``status`` subresource of a custom resource.
+
+    Use this when writing fields that live under ``.status`` — the standard
+    spec-level patch does not reach the status subresource.
+    """
+    custom_obj_api = kubeclient.CustomObjectsApi(client)
+    try:
+        await custom_obj_api.patch_namespaced_custom_object_status(
+            group=group,
+            version=version,
+            namespace=namespace,
+            plural=plural,
+            name=reference,
+            body={"status": status_patch},
+            _content_type="application/merge-patch+json",  # type: ignore[call-arg]
+        )
+    except ApiException as exc:
+        if exc.status == status.HTTP_404_NOT_FOUND:
+            raise CustomResourceNotFound(
+                f"Custom resource {plural}/{reference} not found in namespace {namespace}"
+            )
+        raise
+
+
+@inject
 async def apply_kubernetes_resource(
     resource: dict,
     namespace: str,
