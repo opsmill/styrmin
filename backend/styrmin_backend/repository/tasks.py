@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlmodel import desc, select
+from sqlmodel import col, desc, select
 
 from styrmin_backend.db.models import Task as TaskModel
 from styrmin_backend.db.models import TaskStatus as TaskStatusModel
@@ -41,8 +42,15 @@ class TaskRepository(BaseRepository[TaskModel], ABC):
         )
 
     @abstractmethod
-    async def has_active_for_deployment(self, deployment_id: UUID) -> bool:
-        """Return True if a pending or running task exists for the deployment."""
+    async def has_active_for_deployment(
+        self, deployment_id: UUID, max_age_seconds: int | None = None
+    ) -> bool:
+        """Return True if a pending or running task exists for the deployment.
+
+        When max_age_seconds is set, only tasks whose updated_on is within that
+        window count — older tasks are treated as stale (e.g., orphaned by an
+        agent crash) so that callers don't block on them forever.
+        """
         raise NotImplementedError(
             "The has_active_for_deployment method must be implemented in the subclass."
         )
@@ -111,7 +119,9 @@ class SQLModelTaskRepository(BaseSQLModelRepository[TaskModel], TaskRepository):
         tasks = result.all()
         return [self._to_entity(task) for task in tasks]
 
-    async def has_active_for_deployment(self, deployment_id: UUID) -> bool:
+    async def has_active_for_deployment(
+        self, deployment_id: UUID, max_age_seconds: int | None = None
+    ) -> bool:
         """Return True if a pending or running task exists for the deployment."""
         statement = (
             select(self.model_class.id)
@@ -123,5 +133,10 @@ class SQLModelTaskRepository(BaseSQLModelRepository[TaskModel], TaskRepository):
             )
             .limit(1)
         )
+        if max_age_seconds is not None:
+            threshold = datetime.now(tz=timezone.utc) - timedelta(
+                seconds=max_age_seconds
+            )
+            statement = statement.where(col(self.model_class.updated_on) >= threshold)
         result = await self.session.exec(statement)
         return result.first() is not None

@@ -155,7 +155,7 @@ def _dump_k8s_logs_on_failure(request, vcluster):
 async def _wait_for_deployment_running(
     client: StyrminClient,
     deployment_id,
-    timeout: float = 180.0,
+    timeout: float = 300.0,
     interval: float = 10.0,
 ):
     """Poll until a deployment reaches 'running' status.

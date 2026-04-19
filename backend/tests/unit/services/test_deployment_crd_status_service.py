@@ -1,5 +1,6 @@
 """Tests for the deployment CRD status service — displayState to Deployment.status mapping."""
 
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -186,6 +187,7 @@ async def test_running_suppressed_while_task_active() -> None:
             deployment_id=dep.id,
             type=TaskType.UPGRADE_INSTANCE,
             status=TaskStatus.RUNNING,
+            updated_on=datetime.now(tz=timezone.utc),
         )
     )
     uow = _make_uow(deployments=dep_repo, tasks=task_repo)
@@ -203,3 +205,40 @@ async def test_running_suppressed_while_task_active() -> None:
     found = await dep_repo.find(dep.id)
     assert found is not None
     assert found.status == DeploymentStatus.PENDING
+
+
+@pytest.mark.anyio
+async def test_running_allowed_when_task_is_stale() -> None:
+    """A task that has been RUNNING without updates for longer than the
+    staleness window is treated as orphaned (e.g., the agent crashed before
+    callbacks fired) and no longer blocks the RUNNING transition."""
+    dep = _make_deployment(status=DeploymentStatus.PENDING)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+
+    task_repo = FakeTaskRepository()
+    stale_update = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+    await task_repo.save(
+        Task(
+            id=uuid4(),
+            deployment_id=dep.id,
+            type=TaskType.UPGRADE_INSTANCE,
+            status=TaskStatus.RUNNING,
+            updated_on=stale_update,
+        )
+    )
+    uow = _make_uow(deployments=dep_repo, tasks=task_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Ready",
+            "display_state": "Running",
+        }
+    ]
+    _, deployments_updated = await report_crd_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentStatus.RUNNING

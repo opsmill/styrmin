@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from typing import TypeVar
 from uuid import UUID
 
@@ -233,12 +234,25 @@ class FakeTaskRepository(FakeRepository[Task], TaskRepository):
     async def find_by_deployment(self, deployment_id: UUID):
         return [m for m in self.models if m.deployment_id == deployment_id]
 
-    async def has_active_for_deployment(self, deployment_id: UUID) -> bool:
-        return any(
-            m.deployment_id == deployment_id
-            and m.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
-            for m in self.models
-        )
+    async def has_active_for_deployment(
+        self, deployment_id: UUID, max_age_seconds: int | None = None
+    ) -> bool:
+        threshold = None
+        if max_age_seconds is not None:
+            threshold = datetime.now(tz=timezone.utc) - timedelta(
+                seconds=max_age_seconds
+            )
+        for m in self.models:
+            if m.deployment_id != deployment_id:
+                continue
+            if m.status not in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                continue
+            if threshold is not None and (
+                m.updated_on is None or m.updated_on < threshold
+            ):
+                continue
+            return True
+        return False
 
 
 class FakeBackupRepository(FakeRepository[Backup], BackupRepository):

@@ -10,6 +10,16 @@ styrmin:
     interval: 1
 
 styrmin-agent:
+  # The e2e suite runs multiple deployments and Prefect subprocesses inside
+  # the agent pod. The default 1Gi limit OOMs under that load, which leaves
+  # tasks stuck in RUNNING and blocks downstream status transitions.
+  resources:
+    limits:
+      cpu: "2"
+      memory: 2Gi
+    requests:
+      cpu: 100m
+      memory: 512Mi
   prefect-worker:
     worker:
       config:

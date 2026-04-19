@@ -20,6 +20,11 @@ _DISPLAY_STATE_TO_STATUS: dict[str, DeploymentStatus] = {
     "Error": DeploymentStatus.FAILED,
 }
 
+# Window during which an in-flight task blocks the RUNNING transition. Tasks
+# that haven't been updated within this window are considered stale (e.g.,
+# orphaned by an agent crash) and no longer block the status advancement.
+_ACTIVE_TASK_STALENESS_SECONDS = 300
+
 
 async def report_crd_statuses(
     reports: list[dict],
@@ -68,7 +73,10 @@ async def report_crd_statuses(
                 deployment = await uow.deployments.find(deployment_id)
                 if deployment is not None and deployment.status != target_status.value:
                     if target_status == DeploymentStatus.RUNNING and (
-                        await uow.tasks.has_active_for_deployment(deployment_id)
+                        await uow.tasks.has_active_for_deployment(
+                            deployment_id,
+                            max_age_seconds=_ACTIVE_TASK_STALENESS_SECONDS,
+                        )
                     ):
                         continue
                     deployment.status = target_status
