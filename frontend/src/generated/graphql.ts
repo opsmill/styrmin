@@ -226,6 +226,7 @@ export type DeploymentCrdStatusReportInput = {
   conditions?: InputMaybe<Array<CrdConditionInput>>;
   deploymentId: Scalars['UUID']['input'];
   displayState?: InputMaybe<Scalars['String']['input']>;
+  instanceId?: InputMaybe<Scalars['UUID']['input']>;
   managedResourceCounts?: InputMaybe<ManagedResourceCountsInput>;
   message?: InputMaybe<Scalars['String']['input']>;
   phase: Scalars['String']['input'];

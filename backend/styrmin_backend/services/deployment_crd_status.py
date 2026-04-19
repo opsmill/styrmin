@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # The displayState is the user-facing state set by the operator, distinct
 # from the internal phase. It is the sole source of truth for Deployment.status.
 _DISPLAY_STATE_TO_STATUS: dict[str, DeploymentStatus] = {
-    "Deploying": DeploymentStatus.PENDING,
+    "Deploying": DeploymentStatus.DEPLOYING,
     "Running": DeploymentStatus.RUNNING,
     "Error": DeploymentStatus.FAILED,
 }
@@ -27,10 +27,18 @@ async def report_crd_statuses(
 ) -> tuple[int, int]:
     """Upsert CRD statuses and update Deployment status based on CRD phase.
 
+    A status report carries the ``instance_id`` that was on the CRD at poll
+    time. The server updates ``deployment.status`` only when that id matches
+    the current ``deployment.active_application_instance_id``; otherwise the
+    report is for a superseded instance (e.g. the previous version during an
+    in-progress upgrade) and must not be allowed to overwrite the status of
+    the new instance still rolling out. Reports with ``instance_id=None``
+    (legacy CRDs without the field) bypass the guard for backward compat.
+
     Args:
         reports: List of dicts with keys: deployment_id (UUID), phase (str),
-            message (str|None), conditions (list|None),
-            managed_resource_counts (dict|None).
+            instance_id (UUID|None), display_state (str|None), message (str|None),
+            conditions (list|None), managed_resource_counts (dict|None).
         uow: Unit of work for database operations.
 
     Returns:
@@ -45,6 +53,7 @@ async def report_crd_statuses(
             deployment_id = report["deployment_id"]
             phase = report["phase"]
             display_state = report.get("display_state", "Deploying")
+            reported_instance_id: UUID | None = report.get("instance_id")
 
             crd_status = DeploymentCrdStatus(
                 deployment_id=deployment_id,
@@ -59,12 +68,35 @@ async def report_crd_statuses(
 
             # Update Deployment status based on CRD displayState
             target_status = _DISPLAY_STATE_TO_STATUS.get(display_state)
-            if target_status is not None:
-                deployment = await uow.deployments.find(deployment_id)
-                if deployment is not None and deployment.status != target_status.value:
-                    deployment.status = target_status
-                    await uow.deployments.save(deployment)
-                    deployments_updated += 1
+            if target_status is None:
+                continue
+
+            deployment = await uow.deployments.find(deployment_id)
+            if deployment is None:
+                continue
+
+            # Stale-instance guard: ignore reports for an instance that is no
+            # longer the active one on the deployment.
+            active_instance = deployment.active_instance
+            active_instance_id = active_instance.id if active_instance else None
+            if (
+                reported_instance_id is not None
+                and active_instance_id is not None
+                and reported_instance_id != active_instance_id
+            ):
+                logger.info(
+                    "Skipping status update for deployment %s: reported instance %s "
+                    "does not match active instance %s",
+                    deployment_id,
+                    reported_instance_id,
+                    active_instance_id,
+                )
+                continue
+
+            if deployment.status != target_status.value:
+                deployment.status = target_status
+                await uow.deployments.save(deployment)
+                deployments_updated += 1
 
         await uow.commit()
         return statuses_updated, deployments_updated

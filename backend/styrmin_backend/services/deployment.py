@@ -415,7 +415,7 @@ async def update_deployment_version(
 
         # Update the deployment version
         deployment.application_version = version
-        deployment.set_status(DeploymentStatus.PENDING)
+        deployment.set_status(DeploymentStatus.DEPLOYING)
 
         # Get the current instance
         current_instance = deployment.active_instance

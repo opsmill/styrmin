@@ -199,6 +199,7 @@ class Component(StyrminModel, table=True):
 
 class DeploymentStatus(str, Enum):
     PENDING = "pending"
+    DEPLOYING = "deploying"
     RUNNING = "running"
     FAILED = "failed"
 

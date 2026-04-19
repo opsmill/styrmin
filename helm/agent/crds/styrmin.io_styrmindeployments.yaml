@@ -25,6 +25,10 @@ spec:
                 deploymentId:
                   type: string
                   description: UUID linking to Styrmin database deployment
+                instanceId:
+                  type: string
+                  nullable: true
+                  description: UUID of the active ApplicationInstance this CRD represents
                 releaseReference:
                   type: string
                   description: Kubernetes release reference

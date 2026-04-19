@@ -107,6 +107,7 @@ class StyrminDeploymentSpec(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     deployment_id: str = Field(alias="deploymentId")
+    instance_id: str | None = Field(default=None, alias="instanceId")
     release_reference: str = Field(alias="releaseReference")
     app_name: str = Field(alias="appName")
     app_version: str = Field(alias="appVersion")

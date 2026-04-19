@@ -1,10 +1,10 @@
 """Tests for the deployment CRD status service — displayState to Deployment.status mapping."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
-from styrmin_backend.domain.models import Deployment, DeploymentStatus
+from styrmin_backend.domain.models import Deployment, DeploymentStatus, Instance
 from styrmin_backend.services.deployment_crd_status import report_crd_statuses
 from tests.unit.services.fakes import (
     FakeActionRepository,
@@ -19,6 +19,11 @@ from tests.unit.services.fakes import (
     FakeTaskRepository,
     FakeUnitOfWork,
 )
+
+
+def _make_instance(instance_id: UUID | None = None) -> Instance:
+    """Build a minimal Instance for tests that only read `instance.id`."""
+    return Instance.model_construct(id=instance_id or uuid4())
 
 
 def _make_uow(
@@ -55,7 +60,7 @@ def _make_deployment(
 
 
 @pytest.mark.anyio
-async def test_deploying_keeps_pending() -> None:
+async def test_deploying_sets_deploying() -> None:
     dep = _make_deployment()
     dep_repo = FakeDeploymentRepository()
     await dep_repo.save(dep)
@@ -71,10 +76,10 @@ async def test_deploying_keeps_pending() -> None:
     statuses_updated, deployments_updated = await report_crd_statuses(reports, uow)
 
     assert statuses_updated == 1
-    assert deployments_updated == 0
+    assert deployments_updated == 1
     found = await dep_repo.find(dep.id)
     assert found is not None
-    assert found.status == DeploymentStatus.PENDING
+    assert found.status == DeploymentStatus.DEPLOYING
 
 
 @pytest.mark.anyio
@@ -138,10 +143,10 @@ async def test_no_display_state_defaults_to_deploying() -> None:
     ]
     _, deployments_updated = await report_crd_statuses(reports, uow)
 
-    assert deployments_updated == 0
+    assert deployments_updated == 1
     found = await dep_repo.find(dep.id)
     assert found is not None
-    assert found.status == DeploymentStatus.PENDING
+    assert found.status == DeploymentStatus.DEPLOYING
 
 
 @pytest.mark.anyio
@@ -161,3 +166,84 @@ async def test_already_running_no_redundant_update() -> None:
     _, deployments_updated = await report_crd_statuses(reports, uow)
 
     assert deployments_updated == 0
+
+
+@pytest.mark.anyio
+async def test_stale_instance_id_skips_status_update() -> None:
+    """A report for a superseded instance must not flip the deployment
+    back to RUNNING while the new instance is still rolling out."""
+    active_instance = _make_instance()
+    stale_instance_id = uuid4()
+    dep = _make_deployment(status=DeploymentStatus.DEPLOYING)
+    dep.set_active_instance(active_instance)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "instance_id": stale_instance_id,
+            "phase": "Ready",
+            "display_state": "Running",
+        }
+    ]
+    statuses_updated, deployments_updated = await report_crd_statuses(reports, uow)
+
+    # CRD status record is still upserted (kept for observability) but the
+    # deployment status is not advanced.
+    assert statuses_updated == 1
+    assert deployments_updated == 0
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentStatus.DEPLOYING
+
+
+@pytest.mark.anyio
+async def test_matching_instance_id_allows_status_update() -> None:
+    active_instance = _make_instance()
+    dep = _make_deployment(status=DeploymentStatus.DEPLOYING)
+    dep.set_active_instance(active_instance)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "instance_id": active_instance.id,
+            "phase": "Ready",
+            "display_state": "Running",
+        }
+    ]
+    _, deployments_updated = await report_crd_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentStatus.RUNNING
+
+
+@pytest.mark.anyio
+async def test_missing_instance_id_backcompat() -> None:
+    """Reports without instance_id bypass the guard (legacy CRDs)."""
+    active_instance = _make_instance()
+    dep = _make_deployment(status=DeploymentStatus.DEPLOYING)
+    dep.set_active_instance(active_instance)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Ready",
+            "display_state": "Running",
+        }
+    ]
+    _, deployments_updated = await report_crd_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentStatus.RUNNING

@@ -30,6 +30,10 @@ async def generate_instance_from_deployment(
         context=context,
     )
 
+    # Tag the context with the instance id so the CRD carries it and
+    # the server can correlate agent status reports to the active instance.
+    instance.context.instance.id = instance.id
+
     return instance
 
 

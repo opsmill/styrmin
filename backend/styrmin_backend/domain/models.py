@@ -56,6 +56,7 @@ class DeploymentStatus(str, Enum):
     """Deployment status enum."""
 
     PENDING = "pending"
+    DEPLOYING = "deploying"
     RUNNING = "running"
     FAILED = "failed"
 

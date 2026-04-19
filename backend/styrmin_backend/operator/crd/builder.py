@@ -52,6 +52,9 @@ def build_styrmin_deployment_body(
         },
         "spec": {
             "deploymentId": str(context.instance.deployment_id),
+            "instanceId": (
+                str(context.instance.id) if context.instance.id is not None else None
+            ),
             "releaseReference": release_reference,
             "appName": context.app.name,
             "appVersion": context.app.version,

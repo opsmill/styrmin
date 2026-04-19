@@ -815,6 +815,7 @@ class Mutation:
         report_dicts = [
             {
                 "deployment_id": report.deployment_id,
+                "instance_id": report.instance_id,
                 "phase": report.phase,
                 "display_state": report.display_state,
                 "message": report.message,

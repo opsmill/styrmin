@@ -75,6 +75,9 @@ class InstanceContext(BaseModel):
 
     Attributes:
         config (ResolvedConfig): The configuration for the instance, resolved from the deployment, environment, and cluster contexts.
+        id (UUID): The unique identifier for the application instance this context
+            represents. Used to correlate CRD status reports back to the specific
+            instance that was active when the CRD was written.
         deployment_id (UUID): The unique identifier for the deployment.
         namespace (str): The namespace for the instance.
         release_reference (str): The reference of the helm release resource on the Kubernetes cluster.
@@ -84,6 +87,7 @@ class InstanceContext(BaseModel):
 
     config: ResolvedConfig
 
+    id: UUID | None = None
     deployment_id: UUID
     namespace: str
     release_reference: str

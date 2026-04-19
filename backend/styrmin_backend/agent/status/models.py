@@ -104,6 +104,7 @@ class DeploymentCrdStatusReport(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     deployment_id: str = Field(alias="deploymentId")
+    instance_id: str | None = Field(default=None, alias="instanceId")
     phase: str
     display_state: str = Field(default="Deploying", alias="displayState")
     message: str | None = None

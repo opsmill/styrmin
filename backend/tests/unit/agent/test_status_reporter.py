@@ -153,11 +153,13 @@ class TestModelContract:
     def test_crd_status_report_serializes_correctly(self) -> None:
         report = DeploymentCrdStatusReport(
             deploymentId="abc",
+            instanceId="11111111-2222-3333-4444-555555555555",
             phase="Ready",
             message="All good",
         )
         dumped = report.model_dump(by_alias=True)
         assert dumped["deploymentId"] == "abc"
+        assert dumped["instanceId"] == "11111111-2222-3333-4444-555555555555"
         assert dumped["phase"] == "Ready"
         assert dumped["managedResourceCounts"] is None
 
@@ -653,12 +655,15 @@ class TestCollectCrdStatus:
     @pytest.mark.anyio
     async def test_crd_success(self) -> None:
         crd_data = {
+            "spec": {
+                "instanceId": "11111111-2222-3333-4444-555555555555",
+            },
             "status": {
                 "phase": "Ready",
                 "displayState": "Running",
                 "message": "All good",
                 "conditions": [{"type": "Ready", "status": "True"}],
-            }
+            },
         }
         with patch(
             "styrmin_backend.agent.status.reporter.get_custom_resource",
@@ -669,3 +674,4 @@ class TestCollectCrdStatus:
         assert result is not None
         assert result["phase"] == "Ready"
         assert result["message"] == "All good"
+        assert result["instanceId"] == "11111111-2222-3333-4444-555555555555"

@@ -133,8 +133,10 @@ async def _collect_crd_status(namespace: str, crd_name: str) -> dict | None:
             namespace=namespace,
         )
         crd_dict: dict = crd if isinstance(crd, dict) else {}
+        spec: dict = crd_dict.get("spec") or {}
         status: dict = crd_dict.get("status") or {}
         return {
+            "instanceId": spec.get("instanceId"),
             "phase": status.get("phase", "Pending"),
             "displayState": status.get("displayState", "Deploying"),
             "message": status.get("message"),
@@ -290,6 +292,7 @@ async def _poll_once(graphql_url: str) -> None:
             crd_reports.append(
                 DeploymentCrdStatusReport(
                     deploymentId=str(deployment_id),
+                    instanceId=crd_status.get("instanceId"),
                     phase=crd_status["phase"],
                     displayState=crd_status.get("displayState", "Deploying"),
                     message=crd_status.get("message"),
