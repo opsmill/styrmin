@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from styrmin_backend.domain.models import (
-    DeploymentStatus,
+    DeploymentState,
     InstanceStatus,
     Task,
     TaskStatus,
@@ -71,7 +71,7 @@ async def update_task_state(
         match state_name.upper():
             case "RUNNING":
                 target_task_state = TaskStatus.RUNNING
-                target_deployment_state = DeploymentStatus.PENDING
+                target_deployment_state = DeploymentState.PENDING
                 target_instance_state = InstanceStatus.PENDING
             case "COMPLETED":
                 target_task_state = TaskStatus.SUCCESS
@@ -81,7 +81,7 @@ async def update_task_state(
                 target_instance_state = InstanceStatus.RUNNING
             case "FAILED":
                 target_task_state = TaskStatus.FAILED
-                target_deployment_state = DeploymentStatus.FAILED
+                target_deployment_state = DeploymentState.FAILED
                 target_instance_state = InstanceStatus.FAILED
             case _:
                 raise UnknownTaskStateError(f"Unknown task state: {state_name}")

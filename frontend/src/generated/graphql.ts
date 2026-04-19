@@ -210,7 +210,7 @@ export type Deployment = {
   applicationVersion: Scalars['String']['output'];
   components: Array<Component>;
   config: Scalars['JSON']['output'];
-  crdStatus?: Maybe<DeploymentCrdStatusType>;
+  crdStatus?: Maybe<DeploymentStatusType>;
   deployedServices: Array<DeployedService>;
   environment: Environment;
   environmentId: Scalars['UUID']['output'];
@@ -222,7 +222,12 @@ export type Deployment = {
   status: Scalars['String']['output'];
 };
 
-export type DeploymentCrdStatusReportInput = {
+export type DeploymentPodStatusReport = {
+  deploymentId: Scalars['UUID']['input'];
+  pods: Array<PodStatusInput>;
+};
+
+export type DeploymentStatusReportInput = {
   conditions?: InputMaybe<Array<CrdConditionInput>>;
   deploymentId: Scalars['UUID']['input'];
   displayState?: InputMaybe<Scalars['String']['input']>;
@@ -232,8 +237,8 @@ export type DeploymentCrdStatusReportInput = {
   phase: Scalars['String']['input'];
 };
 
-export type DeploymentCrdStatusType = {
-  __typename?: 'DeploymentCrdStatusType';
+export type DeploymentStatusType = {
+  __typename?: 'DeploymentStatusType';
   conditions: Array<CrdConditionType>;
   createdOn?: Maybe<Scalars['DateTime']['output']>;
   deploymentId: Scalars['UUID']['output'];
@@ -243,11 +248,6 @@ export type DeploymentCrdStatusType = {
   message?: Maybe<Scalars['String']['output']>;
   phase: Scalars['String']['output'];
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
-};
-
-export type DeploymentPodStatusReport = {
-  deploymentId: Scalars['UUID']['input'];
-  pods: Array<PodStatusInput>;
 };
 
 export type DeploymentTimelineEntry = {
@@ -312,7 +312,7 @@ export type Mutation = {
   deploy?: Maybe<Task>;
   loadLocalApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
   loadRemoteApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
-  reportCrdStatuses: ReportCrdStatusesResponse;
+  reportDeploymentStatuses: ReportDeploymentStatusesResponse;
   reportPodStatuses: ReportPodStatusesResponse;
   runJob?: Maybe<Task>;
   startComponents?: Maybe<Task>;
@@ -439,8 +439,8 @@ export type MutationLoadRemoteApplicationDriverVersionArgs = {
 };
 
 
-export type MutationReportCrdStatusesArgs = {
-  reports: Array<DeploymentCrdStatusReportInput>;
+export type MutationReportDeploymentStatusesArgs = {
+  reports: Array<DeploymentStatusReportInput>;
 };
 
 
@@ -668,8 +668,8 @@ export type QueryTaskArgs = {
   taskId: Scalars['UUID']['input'];
 };
 
-export type ReportCrdStatusesResponse = {
-  __typename?: 'ReportCrdStatusesResponse';
+export type ReportDeploymentStatusesResponse = {
+  __typename?: 'ReportDeploymentStatusesResponse';
   deploymentsUpdated: Scalars['Int']['output'];
   message: Scalars['String']['output'];
   statusesUpdated: Scalars['Int']['output'];

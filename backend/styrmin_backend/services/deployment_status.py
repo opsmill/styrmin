@@ -1,4 +1,4 @@
-"""Provides the deployment CRD status services."""
+"""Provides the deployment status services."""
 
 from __future__ import annotations
 
@@ -6,26 +6,26 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-from styrmin_backend.db.models import DeploymentCrdStatus, DeploymentStatus
+from styrmin_backend.db.models import DeploymentState, DeploymentStatus
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
-# CRD displayState to DeploymentStatus mapping.
+# CRD displayState to DeploymentState mapping.
 # The displayState is the user-facing state set by the operator, distinct
 # from the internal phase. It is the sole source of truth for Deployment.status.
-_DISPLAY_STATE_TO_STATUS: dict[str, DeploymentStatus] = {
-    "Deploying": DeploymentStatus.DEPLOYING,
-    "Running": DeploymentStatus.RUNNING,
-    "Error": DeploymentStatus.FAILED,
+_DISPLAY_STATE_TO_STATUS: dict[str, DeploymentState] = {
+    "Deploying": DeploymentState.DEPLOYING,
+    "Running": DeploymentState.RUNNING,
+    "Error": DeploymentState.FAILED,
 }
 
 
-async def report_crd_statuses(
+async def report_deployment_statuses(
     reports: list[dict],
     uow: UnitOfWork,
 ) -> tuple[int, int]:
-    """Upsert CRD statuses and update Deployment status based on CRD phase.
+    """Upsert deployment status snapshots and update Deployment state based on CRD phase.
 
     A status report carries the ``instance_id`` that was on the CRD at poll
     time. The server updates ``deployment.status`` only when that id matches
@@ -55,7 +55,7 @@ async def report_crd_statuses(
             display_state = report.get("display_state", "Deploying")
             reported_instance_id: UUID | None = report.get("instance_id")
 
-            crd_status = DeploymentCrdStatus(
+            snapshot = DeploymentStatus(
                 deployment_id=deployment_id,
                 phase=phase,
                 message=report.get("message"),
@@ -63,12 +63,12 @@ async def report_crd_statuses(
                 managed_resource_counts=report.get("managed_resource_counts"),
                 last_polled_at=now,
             )
-            await uow.deployment_crd_statuses.upsert(crd_status)
+            await uow.deployment_statuses.upsert(snapshot)
             statuses_updated += 1
 
-            # Update Deployment status based on CRD displayState
-            target_status = _DISPLAY_STATE_TO_STATUS.get(display_state)
-            if target_status is None:
+            # Update Deployment state based on CRD displayState
+            target_state = _DISPLAY_STATE_TO_STATUS.get(display_state)
+            if target_state is None:
                 continue
 
             deployment = await uow.deployments.find(deployment_id)
@@ -93,8 +93,8 @@ async def report_crd_statuses(
                 )
                 continue
 
-            if deployment.status != target_status.value:
-                deployment.status = target_status
+            if deployment.status != target_state.value:
+                deployment.status = target_state
                 await uow.deployments.save(deployment)
                 deployments_updated += 1
 
@@ -102,10 +102,10 @@ async def report_crd_statuses(
         return statuses_updated, deployments_updated
 
 
-async def get_deployment_crd_status(
+async def get_deployment_status(
     deployment_id: UUID,
     uow: UnitOfWork,
-) -> DeploymentCrdStatus | None:
-    """Get the latest CRD status for a deployment."""
+) -> DeploymentStatus | None:
+    """Get the latest status snapshot for a deployment."""
     async with uow:
-        return await uow.deployment_crd_statuses.find_by_deployment(deployment_id)
+        return await uow.deployment_statuses.find_by_deployment(deployment_id)

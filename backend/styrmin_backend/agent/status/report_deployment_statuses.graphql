@@ -1,0 +1,8 @@
+mutation ReportDeploymentStatuses($reports: [DeploymentStatusReportInput!]!) {
+    reportDeploymentStatuses(reports: $reports) {
+        success
+        message
+        statusesUpdated
+        deploymentsUpdated
+    }
+}

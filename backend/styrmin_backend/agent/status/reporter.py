@@ -20,13 +20,13 @@ from styrmin_backend.agent.service.kubernetes.primitives import (
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.agent.status.models import (
-    DeploymentCrdStatusReport,
+    DeploymentStatusReport,
     DeploymentPodStatusReport,
     EnvironmentForStatus,
     GraphQLResponse,
     PodPhase,
     PodStatusData,
-    ReportCrdStatusesResponse,
+    ReportDeploymentStatusesResponse,
     ReportPodStatusesResponse,
 )
 from styrmin_backend.agent.status.queries import load_query
@@ -37,7 +37,7 @@ STATUS_POLL_INTERVAL = int(os.environ.get("STYRMIN_AGENT_STATUS_POLL_INTERVAL", 
 
 _QUERY_DEPLOYMENTS = load_query("list_deployments_for_status")
 _MUTATION_REPORT_PODS = load_query("report_pod_statuses")
-_MUTATION_REPORT_CRD = load_query("report_crd_statuses")
+_MUTATION_REPORT_CRD = load_query("report_deployment_statuses")
 
 # StyrminDeployment CRD constants
 _CRD_GROUP = "styrmin.io"
@@ -225,8 +225,8 @@ async def _report_pod_statuses_to_backend(
         logger.exception("Failed to report pod statuses to backend")
 
 
-async def _report_crd_statuses_to_backend(
-    graphql_url: str, reports: list[DeploymentCrdStatusReport]
+async def _report_deployment_statuses_to_backend(
+    graphql_url: str, reports: list[DeploymentStatusReport]
 ) -> None:
     """Send CRD status reports to the backend via GraphQL mutation."""
     if not reports:
@@ -250,8 +250,8 @@ async def _report_crd_statuses_to_backend(
                 logger.warning("CRD status GraphQL errors: %s", gql.errors)
                 return
 
-            raw = (gql.data or {}).get("reportCrdStatuses", {})
-            data = ReportCrdStatusesResponse.model_validate(raw)
+            raw = (gql.data or {}).get("reportDeploymentStatuses", {})
+            data = ReportDeploymentStatusesResponse.model_validate(raw)
             if data.success:
                 logger.debug("CRD status report: %s", data.message)
             else:
@@ -270,7 +270,7 @@ async def _poll_once(graphql_url: str) -> None:
         return
 
     pod_reports: list[DeploymentPodStatusReport] = []
-    crd_reports: list[DeploymentCrdStatusReport] = []
+    crd_reports: list[DeploymentStatusReport] = []
 
     for deployment_id in deployment_ids:
         namespace = get_kubernetes_reference(deployment_id)
@@ -290,7 +290,7 @@ async def _poll_once(graphql_url: str) -> None:
         crd_status = await _collect_crd_status(namespace, crd_name)
         if crd_status is not None:
             crd_reports.append(
-                DeploymentCrdStatusReport(
+                DeploymentStatusReport(
                     deploymentId=str(deployment_id),
                     instanceId=crd_status.get("instanceId"),
                     phase=crd_status["phase"],
@@ -308,7 +308,7 @@ async def _poll_once(graphql_url: str) -> None:
         logger.exception("Unexpected error reporting pod statuses")
 
     try:
-        await _report_crd_statuses_to_backend(graphql_url, crd_reports)
+        await _report_deployment_statuses_to_backend(graphql_url, crd_reports)
     except Exception:
         logger.exception("Unexpected error reporting CRD statuses")
 

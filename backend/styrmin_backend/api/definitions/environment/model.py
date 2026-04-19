@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     )
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import Deployment as DeploymentEntity
-from styrmin_backend.domain.models import DeploymentStatus as DeploymentStatusEntity
+from styrmin_backend.domain.models import DeploymentState as DeploymentStateEntity
 from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
 
@@ -32,7 +32,7 @@ def _db_deployment_to_domain(db_deployment: DeploymentDBModel) -> DeploymentEnti
         parameters=db_deployment.parameters or {},
         application_driver_version_id=db_deployment.application_driver_version_id,
         environment_id=db_deployment.environment_id,
-        status=DeploymentStatusEntity(db_deployment.status.value),
+        status=DeploymentStateEntity(db_deployment.status.value),
     )
     for component in db_deployment.components:
         entity.add_component(

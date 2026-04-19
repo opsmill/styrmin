@@ -9,7 +9,7 @@ from styrmin_backend.context.validators import validate_deployment_config
 from styrmin_backend.domain.models import (
     Component,
     Deployment,
-    DeploymentStatus,
+    DeploymentState,
     Task,
 )
 from styrmin_backend.domain.utils import (
@@ -98,7 +98,7 @@ async def refresh_deployment(
 
         # Set the new instance as the active one
         deployment.set_active_instance(instance=new_instance)
-        deployment.set_status(DeploymentStatus.PENDING)
+        deployment.set_status(DeploymentState.PENDING)
 
         # Get the task from the reconciliation workflow
         task = await apply_state(
@@ -234,7 +234,7 @@ async def update_deployment(
 
         # Set the new instance as the active one
         deployment.set_active_instance(instance=new_instance)
-        deployment.set_status(DeploymentStatus.PENDING)
+        deployment.set_status(DeploymentState.PENDING)
         logger.info("New instance set as active: instance_id={}", new_instance.id)
 
         # Get the task from the reconciliation workflow
@@ -415,7 +415,7 @@ async def update_deployment_version(
 
         # Update the deployment version
         deployment.application_version = version
-        deployment.set_status(DeploymentStatus.DEPLOYING)
+        deployment.set_status(DeploymentState.DEPLOYING)
 
         # Get the current instance
         current_instance = deployment.active_instance
@@ -520,9 +520,9 @@ async def _ensure_ingress_controller(
     # Check for existing internal ingress deployment
     existing = await uow.deployments.find_internal_by_environment(environment_id)
     if existing is not None:
-        if existing.status == DeploymentStatus.RUNNING:
+        if existing.status == DeploymentState.RUNNING:
             return
-        if existing.status == DeploymentStatus.FAILED:
+        if existing.status == DeploymentState.FAILED:
             raise IngressControllerNotHealthyError(
                 "The dedicated ingress controller has failed. "
                 "Resolve the ingress controller issue before deploying applications."

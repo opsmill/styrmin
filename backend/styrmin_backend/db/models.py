@@ -197,7 +197,7 @@ class Component(StyrminModel, table=True):
     deployment: "Deployment" = Relationship(back_populates="components")
 
 
-class DeploymentStatus(str, Enum):
+class DeploymentState(str, Enum):
     PENDING = "pending"
     DEPLOYING = "deploying"
     RUNNING = "running"
@@ -215,7 +215,7 @@ class Deployment(StyrminModel, table=True):
     parameters: dict | None = Field(default=None, sa_column=Column(JSON))
     internal: bool = Field(default=False)
 
-    status: DeploymentStatus = Field(sa_column=Column(SQLModelEnum(DeploymentStatus)))
+    status: DeploymentState = Field(sa_column=Column(SQLModelEnum(DeploymentState)))
 
     # ==============
     # Relationships
@@ -269,7 +269,7 @@ class Deployment(StyrminModel, table=True):
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
 
-    crd_status: Optional["DeploymentCrdStatus"] = Relationship(
+    crd_status: Optional["DeploymentStatus"] = Relationship(
         back_populates="deployment",
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "uselist": False},
     )
@@ -439,7 +439,7 @@ class PodStatus(StyrminModel, table=True):
     deployment: Deployment = Relationship(back_populates="pod_statuses")
 
 
-class DeploymentCrdStatus(StyrminModel, table=True):
+class DeploymentStatus(StyrminModel, table=True):
     """Latest StyrminDeployment CRD status snapshot per deployment."""
 
     deployment_id: UUID = Field(foreign_key="deployment.id", unique=True)

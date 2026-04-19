@@ -70,7 +70,7 @@ class ReportPodStatusesResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# CRD status report (mutation ReportCrdStatuses)
+# Deployment status report (mutation ReportDeploymentStatuses)
 # ---------------------------------------------------------------------------
 
 
@@ -98,8 +98,8 @@ class ManagedResourceCountsData(BaseModel):
     middlewares: int = Field(default=0, alias="middlewares")
 
 
-class DeploymentCrdStatusReport(BaseModel):
-    """Matches GraphQL ``DeploymentCrdStatusReportInput``."""
+class DeploymentStatusReport(BaseModel):
+    """Matches GraphQL ``DeploymentStatusReportInput``."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -114,8 +114,8 @@ class DeploymentCrdStatusReport(BaseModel):
     )
 
 
-class ReportCrdStatusesResponse(BaseModel):
-    """Matches GraphQL ``ReportCrdStatusesResponse`` type."""
+class ReportDeploymentStatusesResponse(BaseModel):
+    """Matches GraphQL ``ReportDeploymentStatusesResponse`` type."""
 
     model_config = ConfigDict(populate_by_name=True)
 

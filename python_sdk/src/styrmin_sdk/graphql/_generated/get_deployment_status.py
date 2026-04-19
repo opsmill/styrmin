@@ -9,29 +9,29 @@ from pydantic import Field
 from .base_model import BaseModel
 
 
-class GetDeploymentCrdStatus(BaseModel):
-    deployment: Optional["GetDeploymentCrdStatusDeployment"]
+class GetDeploymentStatus(BaseModel):
+    deployment: Optional["GetDeploymentStatusDeployment"]
 
 
-class GetDeploymentCrdStatusDeployment(BaseModel):
+class GetDeploymentStatusDeployment(BaseModel):
     name: str
     status: str
-    crd_status: Optional["GetDeploymentCrdStatusDeploymentCrdStatus"] = Field(
+    crd_status: Optional["GetDeploymentStatusDeploymentCrdStatus"] = Field(
         alias="crdStatus"
     )
 
 
-class GetDeploymentCrdStatusDeploymentCrdStatus(BaseModel):
+class GetDeploymentStatusDeploymentCrdStatus(BaseModel):
     phase: str
     message: Optional[str]
-    conditions: list["GetDeploymentCrdStatusDeploymentCrdStatusConditions"]
+    conditions: list["GetDeploymentStatusDeploymentCrdStatusConditions"]
     managed_resource_counts: Optional[
-        "GetDeploymentCrdStatusDeploymentCrdStatusManagedResourceCounts"
+        "GetDeploymentStatusDeploymentCrdStatusManagedResourceCounts"
     ] = Field(alias="managedResourceCounts")
     last_polled_at: Optional[datetime] = Field(alias="lastPolledAt")
 
 
-class GetDeploymentCrdStatusDeploymentCrdStatusConditions(BaseModel):
+class GetDeploymentStatusDeploymentCrdStatusConditions(BaseModel):
     type_: str = Field(alias="type")
     status: str
     reason: Optional[str]
@@ -39,7 +39,7 @@ class GetDeploymentCrdStatusDeploymentCrdStatusConditions(BaseModel):
     last_transition_time: Optional[datetime] = Field(alias="lastTransitionTime")
 
 
-class GetDeploymentCrdStatusDeploymentCrdStatusManagedResourceCounts(BaseModel):
+class GetDeploymentStatusDeploymentCrdStatusManagedResourceCounts(BaseModel):
     network_policies: int = Field(alias="networkPolicies")
     secrets: int
     helm_releases: int = Field(alias="helmReleases")
@@ -47,6 +47,6 @@ class GetDeploymentCrdStatusDeploymentCrdStatusManagedResourceCounts(BaseModel):
     middlewares: int
 
 
-GetDeploymentCrdStatus.model_rebuild()
-GetDeploymentCrdStatusDeployment.model_rebuild()
-GetDeploymentCrdStatusDeploymentCrdStatus.model_rebuild()
+GetDeploymentStatus.model_rebuild()
+GetDeploymentStatusDeployment.model_rebuild()
+GetDeploymentStatusDeploymentCrdStatus.model_rebuild()

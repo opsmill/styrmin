@@ -181,10 +181,15 @@ type Deployment {
   applicationDriverVersion: ApplicationDriverVersion!
   deployedServices: [DeployedService!]!
   podStatuses: [PodStatus!]!
-  crdStatus: DeploymentCrdStatusType
+  crdStatus: DeploymentStatusType
 }
 
-input DeploymentCrdStatusReportInput {
+input DeploymentPodStatusReport {
+  deploymentId: UUID!
+  pods: [PodStatusInput!]!
+}
+
+input DeploymentStatusReportInput {
   deploymentId: UUID!
   phase: String!
   instanceId: UUID = null
@@ -194,7 +199,7 @@ input DeploymentCrdStatusReportInput {
   managedResourceCounts: ManagedResourceCountsInput = null
 }
 
-type DeploymentCrdStatusType {
+type DeploymentStatusType {
   id: UUID!
   deploymentId: UUID!
   phase: String!
@@ -204,11 +209,6 @@ type DeploymentCrdStatusType {
   lastPolledAt: DateTime
   createdOn: DateTime
   updatedOn: DateTime
-}
-
-input DeploymentPodStatusReport {
-  deploymentId: UUID!
-  pods: [PodStatusInput!]!
 }
 
 type DeploymentTimelineEntry {
@@ -282,7 +282,7 @@ type Mutation {
   runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task
   updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null): Task
   reportPodStatuses(reports: [DeploymentPodStatusReport!]!): ReportPodStatusesResponse!
-  reportCrdStatuses(reports: [DeploymentCrdStatusReportInput!]!): ReportCrdStatusesResponse!
+  reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!): ReportDeploymentStatusesResponse!
 }
 
 type ParameterDefinition {
@@ -355,7 +355,7 @@ type Query {
   ok: Boolean!
 }
 
-type ReportCrdStatusesResponse {
+type ReportDeploymentStatusesResponse {
   success: Boolean!
   message: String!
   statusesUpdated: Int!

@@ -50,13 +50,6 @@ from .get_deployment import (
     GetDeploymentDeploymentApplicationInstance,
     GetDeploymentDeploymentComponents,
 )
-from .get_deployment_crd_status import (
-    GetDeploymentCrdStatus,
-    GetDeploymentCrdStatusDeployment,
-    GetDeploymentCrdStatusDeploymentCrdStatus,
-    GetDeploymentCrdStatusDeploymentCrdStatusConditions,
-    GetDeploymentCrdStatusDeploymentCrdStatusManagedResourceCounts,
-)
 from .get_deployment_pod_statuses import (
     GetDeploymentPodStatuses,
     GetDeploymentPodStatusesDeployment,
@@ -65,6 +58,13 @@ from .get_deployment_pod_statuses import (
 from .get_deployment_services import (
     GetDeploymentServices,
     GetDeploymentServicesDeploymentServices,
+)
+from .get_deployment_status import (
+    GetDeploymentStatus,
+    GetDeploymentStatusDeployment,
+    GetDeploymentStatusDeploymentCrdStatus,
+    GetDeploymentStatusDeploymentCrdStatusConditions,
+    GetDeploymentStatusDeploymentCrdStatusManagedResourceCounts,
 )
 from .get_deployment_timeline import (
     GetDeploymentTimeline,
@@ -87,8 +87,8 @@ from .get_restore import GetRestore, GetRestoreRestore
 from .get_task import GetTask, GetTaskTask
 from .input_types import (
     CrdConditionInput,
-    DeploymentCrdStatusReportInput,
     DeploymentPodStatusReport,
+    DeploymentStatusReportInput,
     ManagedResourceCountsInput,
     PodStatusInput,
     ServiceNameOverride,
@@ -124,7 +124,10 @@ from .load_remote_application_driver_version import (
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs,
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart,
 )
-from .report_crd_statuses import ReportCrdStatuses, ReportCrdStatusesReportCrdStatuses
+from .report_deployment_statuses import (
+    ReportDeploymentStatuses,
+    ReportDeploymentStatusesReportDeploymentStatuses,
+)
 from .report_pod_statuses import ReportPodStatuses, ReportPodStatusesReportPodStatuses
 from .run_job import RunJob, RunJobRunJob
 from .start_components import StartComponents, StartComponentsStartComponents
@@ -174,8 +177,8 @@ __all__ = [
     "DeleteEnvironment",
     "Deploy",
     "DeployDeploy",
-    "DeploymentCrdStatusReportInput",
     "DeploymentPodStatusReport",
+    "DeploymentStatusReportInput",
     "GetBackup",
     "GetBackupBackup",
     "GetBackupSchedule",
@@ -185,11 +188,6 @@ __all__ = [
     "GetCluster",
     "GetClusterCluster",
     "GetDeployment",
-    "GetDeploymentCrdStatus",
-    "GetDeploymentCrdStatusDeployment",
-    "GetDeploymentCrdStatusDeploymentCrdStatus",
-    "GetDeploymentCrdStatusDeploymentCrdStatusConditions",
-    "GetDeploymentCrdStatusDeploymentCrdStatusManagedResourceCounts",
     "GetDeploymentDeployment",
     "GetDeploymentDeploymentApplicationInstance",
     "GetDeploymentDeploymentComponents",
@@ -198,6 +196,11 @@ __all__ = [
     "GetDeploymentPodStatusesDeploymentPodStatuses",
     "GetDeploymentServices",
     "GetDeploymentServicesDeploymentServices",
+    "GetDeploymentStatus",
+    "GetDeploymentStatusDeployment",
+    "GetDeploymentStatusDeploymentCrdStatus",
+    "GetDeploymentStatusDeploymentCrdStatusConditions",
+    "GetDeploymentStatusDeploymentCrdStatusManagedResourceCounts",
     "GetDeploymentTimeline",
     "GetDeploymentTimelineDeploymentTimeline",
     "GetDeploymentTimelineDeploymentTimelineContextDiff",
@@ -247,8 +250,8 @@ __all__ = [
     "ManagedResourceCountsInput",
     "PodPhase",
     "PodStatusInput",
-    "ReportCrdStatuses",
-    "ReportCrdStatusesReportCrdStatuses",
+    "ReportDeploymentStatuses",
+    "ReportDeploymentStatusesReportDeploymentStatuses",
     "ReportPodStatuses",
     "ReportPodStatusesReportPodStatuses",
     "RunJob",

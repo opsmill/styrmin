@@ -9,7 +9,7 @@ from styrmin_backend.db.models import (
     BackupStatus,
     Cluster,
     Deployment,
-    DeploymentStatus,
+    DeploymentState,
     Environment,
     InstanceStatus,
     Restore,
@@ -39,7 +39,7 @@ async def deployment(session: AsyncSession, environment: Environment) -> Deploym
     dep = Deployment(
         name="test-deployment",
         application_version="1.0.0",
-        status=DeploymentStatus.RUNNING,
+        status=DeploymentState.RUNNING,
         application_driver_version_id=uuid4(),
         environment_id=environment.id,
     )

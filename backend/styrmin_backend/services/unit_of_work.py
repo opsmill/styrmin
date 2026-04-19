@@ -8,9 +8,9 @@ from styrmin_backend.repository.backup_storage_location import (
     BackupStorageLocationRepository,
     SQLModelBackupStorageLocationRepository,
 )
-from styrmin_backend.repository.deployment_crd_status import (
-    DeploymentCrdStatusRepository,
-    SQLModelDeploymentCrdStatusRepository,
+from styrmin_backend.repository.deployment_status import (
+    DeploymentStatusRepository,
+    SQLModelDeploymentStatusRepository,
 )
 from styrmin_backend.repository.application_driver import (
     ApplicationDriverRepository,
@@ -95,7 +95,7 @@ class UnitOfWork(ABC):
     restores: RestoreRepository
     backup_schedules: BackupScheduleRepository
     pod_statuses: PodStatusRepository
-    deployment_crd_statuses: DeploymentCrdStatusRepository
+    deployment_statuses: DeploymentStatusRepository
 
     async def __aenter__(self) -> "UnitOfWork":
         return self
@@ -138,7 +138,7 @@ class SqlModelUnitOfWork(UnitOfWork):
     restores: SQLModelRestoreRepository
     backup_schedules: SQLModelBackupScheduleRepository
     pod_statuses: SQLModelPodStatusRepository
-    deployment_crd_statuses: SQLModelDeploymentCrdStatusRepository
+    deployment_statuses: SQLModelDeploymentStatusRepository
 
     def __init__(self, session: AsyncSession):
         self.session: AsyncSession = session
@@ -170,7 +170,7 @@ class SqlModelUnitOfWork(UnitOfWork):
         self.restores = SQLModelRestoreRepository(session=self.session)
         self.backup_schedules = SQLModelBackupScheduleRepository(session=self.session)
         self.pod_statuses = SQLModelPodStatusRepository(session=self.session)
-        self.deployment_crd_statuses = SQLModelDeploymentCrdStatusRepository(
+        self.deployment_statuses = SQLModelDeploymentStatusRepository(
             session=self.session
         )
         return self

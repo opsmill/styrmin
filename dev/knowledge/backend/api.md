@@ -161,7 +161,7 @@ type Deployment {
   name: String!
   applicationVersion: String!
   config: JSON
-  status: DeploymentStatus!
+  status: String!
   components: [Component!]!
   tasks: [Task!]!
 }
@@ -181,7 +181,7 @@ type Task {
 
 ### Enums
 
-**DeploymentStatus**: `PENDING`, `RUNNING`, `FAILED`
+**Deployment state values** (string): `pending`, `deploying`, `running`, `failed`
 
 **TaskStatus**: `PENDING`, `RUNNING`, `SUCCESS`, `FAILED`
 

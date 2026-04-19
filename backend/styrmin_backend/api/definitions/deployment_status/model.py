@@ -5,7 +5,7 @@ from uuid import UUID
 
 import strawberry
 
-from styrmin_backend.db.models import DeploymentCrdStatus as DeploymentCrdStatusModel
+from styrmin_backend.db.models import DeploymentStatus as DeploymentStatusModel
 
 
 @strawberry.type
@@ -39,7 +39,7 @@ class ManagedResourceCountsType:
 
 
 @strawberry.type
-class DeploymentCrdStatusType:
+class DeploymentStatusType:
     id: UUID
     deployment_id: UUID
     phase: str
@@ -51,9 +51,7 @@ class DeploymentCrdStatusType:
     updated_on: datetime | None = None
 
     @classmethod
-    def from_instance(
-        cls, instance: DeploymentCrdStatusModel
-    ) -> DeploymentCrdStatusType:
+    def from_instance(cls, instance: DeploymentStatusModel) -> DeploymentStatusType:
         conditions = []
         for cond in instance.conditions or []:
             conditions.append(
@@ -100,7 +98,7 @@ class ManagedResourceCountsInput:
 
 
 @strawberry.input
-class DeploymentCrdStatusReportInput:
+class DeploymentStatusReportInput:
     deployment_id: UUID
     phase: str
     instance_id: UUID | None = None
@@ -111,7 +109,7 @@ class DeploymentCrdStatusReportInput:
 
 
 @strawberry.type
-class ReportCrdStatusesResponse:
+class ReportDeploymentStatusesResponse:
     success: bool
     message: str
     statuses_updated: int

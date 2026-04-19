@@ -23,7 +23,7 @@ from styrmin_backend.context.models.config import (
     IngressServiceConfig,
     ResolvedConfig,
 )
-from styrmin_backend.domain.models import Deployment, DeploymentStatus
+from styrmin_backend.domain.models import Deployment, DeploymentState
 from styrmin_backend.services.deployment import (
     _ensure_ingress_controller,
     _resolve_dedicated_ingress,
@@ -451,7 +451,7 @@ class TestEnsureIngressController:
             environment_id=env_with_ingress.id,
             internal=True,
         )
-        existing.set_status(DeploymentStatus.RUNNING)
+        existing.set_status(DeploymentState.RUNNING)
         await fake_deployment_repo.save(existing)
 
         uow = _make_uow(
@@ -478,7 +478,7 @@ class TestEnsureIngressController:
             environment_id=env_with_ingress.id,
             internal=True,
         )
-        existing.set_status(DeploymentStatus.FAILED)
+        existing.set_status(DeploymentState.FAILED)
         await fake_deployment_repo.save(existing)
 
         uow = _make_uow(

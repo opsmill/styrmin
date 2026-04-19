@@ -24,9 +24,9 @@ from .get_backup_schedule import GetBackupSchedule
 from .get_backup_storage_location import GetBackupStorageLocation
 from .get_cluster import GetCluster
 from .get_deployment import GetDeployment
-from .get_deployment_crd_status import GetDeploymentCrdStatus
 from .get_deployment_pod_statuses import GetDeploymentPodStatuses
 from .get_deployment_services import GetDeploymentServices
+from .get_deployment_status import GetDeploymentStatus
 from .get_deployment_timeline import GetDeploymentTimeline
 from .get_environment import GetEnvironment
 from .get_environment_services import GetEnvironmentServices
@@ -34,8 +34,8 @@ from .get_pod_statuses import GetPodStatuses
 from .get_restore import GetRestore
 from .get_task import GetTask
 from .input_types import (
-    DeploymentCrdStatusReportInput,
     DeploymentPodStatusReport,
+    DeploymentStatusReportInput,
     ServiceNameOverride,
 )
 from .list_backup_schedules import ListBackupSchedules
@@ -47,7 +47,7 @@ from .list_restores import ListRestores
 from .list_tasks import ListTasks
 from .load_local_application_driver_version import LoadLocalApplicationDriverVersion
 from .load_remote_application_driver_version import LoadRemoteApplicationDriverVersion
-from .report_crd_statuses import ReportCrdStatuses
+from .report_deployment_statuses import ReportDeploymentStatuses
 from .report_pod_statuses import ReportPodStatuses
 from .run_job import RunJob
 from .start_components import StartComponents
@@ -585,46 +585,6 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetDeployment.model_validate(data)
 
-    async def get_deployment_crd_status(
-        self, deployment_id: UUID, **kwargs: Any
-    ) -> GetDeploymentCrdStatus:
-        query = gql("""
-            query GetDeploymentCrdStatus($deploymentId: UUID!) {
-              deployment(deploymentId: $deploymentId) {
-                name
-                status
-                crdStatus {
-                  phase
-                  message
-                  conditions {
-                    type
-                    status
-                    reason
-                    message
-                    lastTransitionTime
-                  }
-                  managedResourceCounts {
-                    networkPolicies
-                    secrets
-                    helmReleases
-                    services
-                    middlewares
-                  }
-                  lastPolledAt
-                }
-              }
-            }
-            """)
-        variables: dict[str, object] = {"deploymentId": deployment_id}
-        response = await self.execute(
-            query=query,
-            operation_name="GetDeploymentCrdStatus",
-            variables=variables,
-            **kwargs,
-        )
-        data = self.get_data(response)
-        return GetDeploymentCrdStatus.model_validate(data)
-
     async def get_deployment_pod_statuses(
         self, deployment_id: UUID, **kwargs: Any
     ) -> GetDeploymentPodStatuses:
@@ -684,6 +644,46 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeploymentServices.model_validate(data)
+
+    async def get_deployment_status(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentStatus:
+        query = gql("""
+            query GetDeploymentStatus($deploymentId: UUID!) {
+              deployment(deploymentId: $deploymentId) {
+                name
+                status
+                crdStatus {
+                  phase
+                  message
+                  conditions {
+                    type
+                    status
+                    reason
+                    message
+                    lastTransitionTime
+                  }
+                  managedResourceCounts {
+                    networkPolicies
+                    secrets
+                    helmReleases
+                    services
+                    middlewares
+                  }
+                  lastPolledAt
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentStatus",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentStatus.model_validate(data)
 
     async def get_deployment_timeline(
         self, deployment_id: UUID, **kwargs: Any
@@ -1164,12 +1164,12 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return LoadRemoteApplicationDriverVersion.model_validate(data)
 
-    async def report_crd_statuses(
-        self, reports: list[DeploymentCrdStatusReportInput], **kwargs: Any
-    ) -> ReportCrdStatuses:
+    async def report_deployment_statuses(
+        self, reports: list[DeploymentStatusReportInput], **kwargs: Any
+    ) -> ReportDeploymentStatuses:
         query = gql("""
-            mutation ReportCrdStatuses($reports: [DeploymentCrdStatusReportInput!]!) {
-              reportCrdStatuses(reports: $reports) {
+            mutation ReportDeploymentStatuses($reports: [DeploymentStatusReportInput!]!) {
+              reportDeploymentStatuses(reports: $reports) {
                 success
                 message
                 statusesUpdated
@@ -1180,12 +1180,12 @@ class Client(AsyncBaseClient):
         variables: dict[str, object] = {"reports": reports}
         response = await self.execute(
             query=query,
-            operation_name="ReportCrdStatuses",
+            operation_name="ReportDeploymentStatuses",
             variables=variables,
             **kwargs,
         )
         data = self.get_data(response)
-        return ReportCrdStatuses.model_validate(data)
+        return ReportDeploymentStatuses.model_validate(data)
 
     async def report_pod_statuses(
         self, reports: list[DeploymentPodStatusReport], **kwargs: Any

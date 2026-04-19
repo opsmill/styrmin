@@ -30,7 +30,7 @@ from styrmin_backend.context.models.config import (
 from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
 from styrmin_backend.domain.models import (
     Deployment as DeploymentEntity,
-    DeploymentStatus as DeploymentStatusEntity,
+    DeploymentState as DeploymentStateEntity,
     Instance as InstanceEntity,
     InstanceStatus as InstanceStatusEntity,
 )
@@ -131,7 +131,7 @@ async def test_save_deployment_with_new_instance(session: AsyncSession, prerequi
         config={},
         application_driver_version_id=adv.id,
         environment_id=env.id,
-        status=DeploymentStatusEntity.PENDING,
+        status=DeploymentStateEntity.PENDING,
     )
     deployment.set_active_instance(
         InstanceEntity(
@@ -186,7 +186,7 @@ async def test_save_preserves_active_instance_on_round_trip(
         config={},
         application_driver_version_id=adv.id,
         environment_id=env.id,
-        status=DeploymentStatusEntity.PENDING,
+        status=DeploymentStateEntity.PENDING,
     )
     deployment.set_active_instance(
         InstanceEntity(
@@ -208,7 +208,7 @@ async def test_save_preserves_active_instance_on_round_trip(
     assert loaded.active_instance is not None
     assert loaded.active_instance.id == instance_id
 
-    loaded.status = DeploymentStatusEntity.RUNNING
+    loaded.status = DeploymentStateEntity.RUNNING
     await repo.save(loaded)
     await session.commit()
 

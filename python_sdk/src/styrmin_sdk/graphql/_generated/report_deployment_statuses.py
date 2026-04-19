@@ -6,17 +6,17 @@ from pydantic import Field
 from .base_model import BaseModel
 
 
-class ReportCrdStatuses(BaseModel):
-    report_crd_statuses: "ReportCrdStatusesReportCrdStatuses" = Field(
-        alias="reportCrdStatuses"
+class ReportDeploymentStatuses(BaseModel):
+    report_deployment_statuses: "ReportDeploymentStatusesReportDeploymentStatuses" = (
+        Field(alias="reportDeploymentStatuses")
     )
 
 
-class ReportCrdStatusesReportCrdStatuses(BaseModel):
+class ReportDeploymentStatusesReportDeploymentStatuses(BaseModel):
     success: bool
     message: str
     statuses_updated: int = Field(alias="statusesUpdated")
     deployments_updated: int = Field(alias="deploymentsUpdated")
 
 
-ReportCrdStatuses.model_rebuild()
+ReportDeploymentStatuses.model_rebuild()

@@ -14,11 +14,11 @@ import pytest
 from pydantic import ValidationError
 
 from styrmin_backend.agent.status.models import (
-    DeploymentCrdStatusReport,
+    DeploymentStatusReport,
     DeploymentPodStatusReport,
     PodPhase,
     PodStatusData,
-    ReportCrdStatusesResponse,
+    ReportDeploymentStatusesResponse,
     ReportPodStatusesResponse,
 )
 from styrmin_backend.agent.status.reporter import (
@@ -26,7 +26,7 @@ from styrmin_backend.agent.status.reporter import (
     _extract_pod_data,
     _get_active_deployment_ids,
     _poll_once,
-    _report_crd_statuses_to_backend,
+    _report_deployment_statuses_to_backend,
     _report_pod_statuses_to_backend,
     run_status_reporter,
 )
@@ -151,7 +151,7 @@ class TestModelContract:
         assert pod["nodeName"] == "node-1"
 
     def test_crd_status_report_serializes_correctly(self) -> None:
-        report = DeploymentCrdStatusReport(
+        report = DeploymentStatusReport(
             deploymentId="abc",
             instanceId="11111111-2222-3333-4444-555555555555",
             phase="Ready",
@@ -170,8 +170,8 @@ class TestModelContract:
         assert resp.pods_updated == 3
         assert resp.pods_removed == 1
 
-    def test_report_crd_statuses_response_parses(self) -> None:
-        resp = ReportCrdStatusesResponse.model_validate(
+    def test_report_deployment_statuses_response_parses(self) -> None:
+        resp = ReportDeploymentStatusesResponse.model_validate(
             {
                 "success": True,
                 "message": "ok",
@@ -380,17 +380,17 @@ class TestReportPodStatuses:
             mock.assert_not_called()
 
 
-class TestReportCrdStatuses:
+class TestReportDeploymentStatuses:
     @pytest.mark.anyio
     async def test_success(self) -> None:
-        report = DeploymentCrdStatusReport(
+        report = DeploymentStatusReport(
             deploymentId=str(uuid4()),
             phase="Ready",
         )
         mock_resp = _mock_response(
             {
                 "data": {
-                    "reportCrdStatuses": {
+                    "reportDeploymentStatuses": {
                         "success": True,
                         "message": "ok",
                         "statusesUpdated": 1,
@@ -403,11 +403,11 @@ class TestReportCrdStatuses:
             mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
             mock.return_value.__aexit__ = AsyncMock(return_value=False)
             mock.return_value.post = AsyncMock(return_value=mock_resp)
-            await _report_crd_statuses_to_backend(GRAPHQL_URL, [report])
+            await _report_deployment_statuses_to_backend(GRAPHQL_URL, [report])
 
     @pytest.mark.anyio
     async def test_graphql_errors_does_not_crash(self) -> None:
-        report = DeploymentCrdStatusReport(
+        report = DeploymentStatusReport(
             deploymentId=str(uuid4()),
             phase="Ready",
         )
@@ -416,11 +416,11 @@ class TestReportCrdStatuses:
             mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
             mock.return_value.__aexit__ = AsyncMock(return_value=False)
             mock.return_value.post = AsyncMock(return_value=mock_resp)
-            await _report_crd_statuses_to_backend(GRAPHQL_URL, [report])
+            await _report_deployment_statuses_to_backend(GRAPHQL_URL, [report])
 
     @pytest.mark.anyio
     async def test_backend_unavailable_does_not_crash(self) -> None:
-        report = DeploymentCrdStatusReport(
+        report = DeploymentStatusReport(
             deploymentId=str(uuid4()),
             phase="Ready",
         )
@@ -430,7 +430,7 @@ class TestReportCrdStatuses:
             mock.return_value.post = AsyncMock(
                 side_effect=httpx.ConnectError("refused")
             )
-            await _report_crd_statuses_to_backend(GRAPHQL_URL, [report])
+            await _report_deployment_statuses_to_backend(GRAPHQL_URL, [report])
 
 
 class TestGetActiveDeployments:
@@ -546,7 +546,7 @@ class TestPollOnce:
                 new_callable=AsyncMock,
             ) as mock_pod_report,
             patch(
-                "styrmin_backend.agent.status.reporter._report_crd_statuses_to_backend",
+                "styrmin_backend.agent.status.reporter._report_deployment_statuses_to_backend",
                 new_callable=AsyncMock,
             ) as mock_crd_report,
         ):
@@ -597,7 +597,7 @@ class TestPollOnce:
                 side_effect=RuntimeError("pod report exploded"),
             ),
             patch(
-                "styrmin_backend.agent.status.reporter._report_crd_statuses_to_backend",
+                "styrmin_backend.agent.status.reporter._report_deployment_statuses_to_backend",
                 new_callable=AsyncMock,
             ) as mock_crd_report,
         ):

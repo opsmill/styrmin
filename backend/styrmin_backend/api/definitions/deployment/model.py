@@ -8,8 +8,8 @@ import strawberry
 from styrmin_backend.api.definitions.application_driver.model import (
     ApplicationDriverVersion,
 )
-from styrmin_backend.api.definitions.deployment_crd_status.model import (
-    DeploymentCrdStatusType,
+from styrmin_backend.api.definitions.deployment_status.model import (
+    DeploymentStatusType,
 )
 from styrmin_backend.api.definitions.pod_status.model import (
     PodStatus as PodStatusType,
@@ -200,17 +200,17 @@ class Deployment:
         return [PodStatusType.from_instance(s) for s in statuses]
 
     @strawberry.field
-    async def crd_status(self, info: strawberry.Info) -> DeploymentCrdStatusType | None:
-        """Latest StyrminDeployment CRD status for this deployment."""
-        from styrmin_backend.services.deployment_crd_status import (
-            get_deployment_crd_status,
+    async def crd_status(self, info: strawberry.Info) -> DeploymentStatusType | None:
+        """Latest StyrminDeployment status snapshot for this deployment."""
+        from styrmin_backend.services.deployment_status import (
+            get_deployment_status,
         )
 
         uow = info.context["uow"]
-        status = await get_deployment_crd_status(deployment_id=self.id, uow=uow)
+        status = await get_deployment_status(deployment_id=self.id, uow=uow)
         if status is None:
             return None
-        return DeploymentCrdStatusType.from_instance(status)
+        return DeploymentStatusType.from_instance(status)
 
     @classmethod
     def from_instance(cls, instance: DeploymentEntity) -> Deployment:

@@ -27,9 +27,9 @@ from styrmin_backend.api.definitions.pod_status.model import (
     DeploymentPodStatusReport,
     ReportPodStatusesResponse,
 )
-from styrmin_backend.api.definitions.deployment_crd_status.model import (
-    DeploymentCrdStatusReportInput,
-    ReportCrdStatusesResponse,
+from styrmin_backend.api.definitions.deployment_status.model import (
+    DeploymentStatusReportInput,
+    ReportDeploymentStatusesResponse,
 )
 from styrmin_backend.api.definitions.cluster.model import Cluster
 from styrmin_backend.api.definitions.environment.model import Environment
@@ -82,8 +82,8 @@ from styrmin_backend.services.primitives import (
     start_components,
     stop_components,
 )
-from styrmin_backend.services.deployment_crd_status import (
-    report_crd_statuses,
+from styrmin_backend.services.deployment_status import (
+    report_deployment_statuses,
 )
 from styrmin_backend.services.pod_status import report_pod_statuses
 from styrmin_backend.services.tasks import update_task_state
@@ -804,12 +804,12 @@ class Mutation:
         )
 
     @strawberry.mutation
-    async def report_crd_statuses(
+    async def report_deployment_statuses(
         self,
-        reports: list[DeploymentCrdStatusReportInput],
+        reports: list[DeploymentStatusReportInput],
         info: strawberry.Info,
-    ) -> ReportCrdStatusesResponse:
-        """Report CRD statuses from the agent. Upserts CRD status and updates Deployment status."""
+    ) -> ReportDeploymentStatusesResponse:
+        """Report deployment statuses from the agent. Upserts status snapshot and updates Deployment state."""
         uow = info.context["uow"]
 
         report_dicts = [
@@ -852,14 +852,14 @@ class Mutation:
             for report in reports
         ]
 
-        statuses_updated, deployments_updated = await report_crd_statuses(
+        statuses_updated, deployments_updated = await report_deployment_statuses(
             reports=report_dicts,
             uow=uow,
         )
 
-        return ReportCrdStatusesResponse(
+        return ReportDeploymentStatusesResponse(
             success=True,
-            message=f"Updated {statuses_updated} CRD statuses, {deployments_updated} deployment statuses synced",
+            message=f"Updated {statuses_updated} status snapshots, {deployments_updated} deployment states synced",
             statuses_updated=statuses_updated,
             deployments_updated=deployments_updated,
         )

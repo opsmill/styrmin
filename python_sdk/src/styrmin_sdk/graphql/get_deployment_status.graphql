@@ -1,4 +1,4 @@
-query GetDeploymentCrdStatus($deploymentId: UUID!) {
+query GetDeploymentStatus($deploymentId: UUID!) {
     deployment(deploymentId: $deploymentId) {
         name
         status

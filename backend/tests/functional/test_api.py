@@ -554,7 +554,7 @@ async def resolver_data_fixture(session: AsyncSession) -> dict:
         BackupStatus,
         Cluster as ClusterModel,
         Deployment as DeploymentModel,
-        DeploymentStatus,
+        DeploymentState,
         Environment as EnvironmentModel,
         HelmChart as HelmChartModel,
         HelmRepository as HelmRepositoryModel,
@@ -604,7 +604,7 @@ async def resolver_data_fixture(session: AsyncSession) -> dict:
     deployment = DeploymentModel(
         name="resolver-test-deployment",
         application_version="1.0.0",
-        status=DeploymentStatus.RUNNING,
+        status=DeploymentState.RUNNING,
         application_driver_version_id=adv.id,
         environment_id=env.id,
     )

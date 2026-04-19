@@ -21,7 +21,12 @@ class CrdConditionInput(BaseModel):
     )
 
 
-class DeploymentCrdStatusReportInput(BaseModel):
+class DeploymentPodStatusReport(BaseModel):
+    deployment_id: UUID = Field(alias="deploymentId")
+    pods: list["PodStatusInput"]
+
+
+class DeploymentStatusReportInput(BaseModel):
     deployment_id: UUID = Field(alias="deploymentId")
     phase: str
     instance_id: Optional[UUID] = Field(alias="instanceId", default=None)
@@ -31,11 +36,6 @@ class DeploymentCrdStatusReportInput(BaseModel):
     managed_resource_counts: Optional["ManagedResourceCountsInput"] = Field(
         alias="managedResourceCounts", default=None
     )
-
-
-class DeploymentPodStatusReport(BaseModel):
-    deployment_id: UUID = Field(alias="deploymentId")
-    pods: list["PodStatusInput"]
 
 
 class ManagedResourceCountsInput(BaseModel):
@@ -62,5 +62,5 @@ class ServiceNameOverride(BaseModel):
     override_name: str = Field(alias="overrideName")
 
 
-DeploymentCrdStatusReportInput.model_rebuild()
 DeploymentPodStatusReport.model_rebuild()
+DeploymentStatusReportInput.model_rebuild()

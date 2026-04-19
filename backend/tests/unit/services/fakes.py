@@ -13,7 +13,7 @@ from styrmin_backend.db.models import (
     Cluster,
     Deployment,
     DeployedService,
-    DeploymentCrdStatus,
+    DeploymentStatus,
     Environment,
     HelmChart,
     HelmRepository,
@@ -41,8 +41,8 @@ from styrmin_backend.repository.backup_schedule import BackupScheduleRepository
 from styrmin_backend.repository.base import BaseRepository
 from styrmin_backend.repository.cluster import ClusterRepository
 from styrmin_backend.repository.environment import EnvironmentRepository
-from styrmin_backend.repository.deployment_crd_status import (
-    DeploymentCrdStatusRepository,
+from styrmin_backend.repository.deployment_status import (
+    DeploymentStatusRepository,
 )
 from styrmin_backend.repository.pod_status import PodStatusRepository
 from styrmin_backend.repository.helm_chart import HelmChartRepository
@@ -296,20 +296,18 @@ class FakePodStatusRepository(FakeRepository[PodStatus], PodStatusRepository):
         return []
 
 
-class FakeDeploymentCrdStatusRepository(
-    FakeRepository[DeploymentCrdStatus], DeploymentCrdStatusRepository
+class FakeDeploymentStatusRepository(
+    FakeRepository[DeploymentStatus], DeploymentStatusRepository
 ):
     """Fake deployment CRD status repository for testing purposes."""
 
-    async def find_by_deployment(
-        self, deployment_id: UUID
-    ) -> DeploymentCrdStatus | None:
+    async def find_by_deployment(self, deployment_id: UUID) -> DeploymentStatus | None:
         for m in self.models:
             if m.deployment_id == deployment_id:
                 return m
         return None
 
-    async def upsert(self, crd_status: DeploymentCrdStatus) -> DeploymentCrdStatus:
+    async def upsert(self, crd_status: DeploymentStatus) -> DeploymentStatus:
         for i, m in enumerate(self.models):
             if m.deployment_id == crd_status.deployment_id:
                 self.models[i] = crd_status
@@ -419,7 +417,7 @@ class FakeUnitOfWork(UnitOfWork):
     restores: FakeRestoreRepository  # type: ignore[assignment]
     backup_schedules: FakeBackupScheduleRepository  # type: ignore[assignment]
     pod_statuses: FakePodStatusRepository  # type: ignore[assignment]
-    deployment_crd_statuses: FakeDeploymentCrdStatusRepository  # type: ignore[assignment]
+    deployment_statuses: FakeDeploymentStatusRepository  # type: ignore[assignment]
 
     def __init__(
         self,
@@ -439,7 +437,7 @@ class FakeUnitOfWork(UnitOfWork):
         backup_schedules: FakeBackupScheduleRepository | None = None,
         backup_storage_locations: FakeBackupStorageLocationRepository | None = None,
         pod_statuses: FakePodStatusRepository | None = None,
-        deployment_crd_statuses: FakeDeploymentCrdStatusRepository | None = None,
+        deployment_statuses: FakeDeploymentStatusRepository | None = None,
     ):
         self.backup_storage_locations = (
             backup_storage_locations or FakeBackupStorageLocationRepository()
@@ -461,8 +459,8 @@ class FakeUnitOfWork(UnitOfWork):
         self.restores = restores or FakeRestoreRepository()
         self.backup_schedules = backup_schedules or FakeBackupScheduleRepository()
         self.pod_statuses = pod_statuses or FakePodStatusRepository()
-        self.deployment_crd_statuses = (
-            deployment_crd_statuses or FakeDeploymentCrdStatusRepository()
+        self.deployment_statuses = (
+            deployment_statuses or FakeDeploymentStatusRepository()
         )
         self.session = _FakeSession()  # type: ignore[assignment]
 
