@@ -30,8 +30,8 @@ As a platform operator, I want to declare pod affinity and anti-affinity rules f
 1. **Given** a deployment declares an anti-affinity rule that references one or more existing deployments (by their platform identifier), **When** the referencing deployment is rolled out, **Then** the scheduler places its pods on nodes that are not already running pods from any of the referenced deployments, and never reverses that decision after restarts.
 2. **Given** a deployment declares "all components on the same node" affinity, **When** the deployment is rolled out, **Then** every component's pods land on a single node and eviction of that node reschedules all components together.
 3. **Given** a component declares its own affinity rule without `replace: true`, **When** the deployment is rolled out, **Then** the component's pods apply the component-level rule AND every required term inherited from the deployment and environment levels (ANDed); siblings continue to apply only the inherited rules.
-3a. **Given** a component declares an affinity rule with `replace: true`, **When** the deployment is rolled out, **Then** the component's pods apply only the component-level affinity and shallower-level terms are discarded for that component; siblings are unaffected.
-4. **Given** an affinity rule cannot be satisfied (e.g., no node matches), **When** the deployment is rolled out, **Then** the affected pods remain pending and the deployment status surfaces the unsatisfied constraint to the operator.
+4. **Given** a component declares an affinity rule with `replace: true`, **When** the deployment is rolled out, **Then** the component's pods apply only the component-level affinity and shallower-level terms are discarded for that component; siblings are unaffected.
+5. **Given** an affinity rule cannot be satisfied (e.g., no node matches), **When** the deployment is rolled out, **Then** the affected pods remain pending and the deployment status surfaces the unsatisfied constraint to the operator.
 
 ---
 
@@ -187,8 +187,8 @@ As a platform operator, I want the configured scheduling, resource, toleration, 
 - **SC-002**: A platform operator can right-size a component across environments (dev to prod) by changing values at the environment and deployment levels only — without touching driver code or component-level overrides — in under 5 minutes end-to-end.
 - **SC-003**: At least 80% of drivers already in use at the platform work with the new feature without driver-side changes (delivered via post-renderer), measured by a rollout audit of existing drivers.
 - **SC-004**: Operators correctly identify the resolved effective value and its source level (environment, deployment, or component) for any field in under 30 seconds via the deployment status view.
-- **SC-005**: Misconfigurations (unknown component, invalid resource quantity, nonexistent runtime class, unsatisfiable affinity) are rejected before rollout in at least 95% of cases; the remaining cases surface clear error messaging within one reconciliation cycle.
-- **SC-006**: Adding hierarchical scheduling configuration to an existing deployment does not increase rollout time by more than 10% compared to the same deployment without the feature.
+- **SC-005**: Misconfigurations are rejected before rollout in at least 95% of cases across the validation matrix enumerated in `quickstart.md` §9 (unknown component, invalid resource quantity, nonexistent runtime class, unresolvable affinity reference, unsatisfiable affinity); remaining cases surface clear error messaging within one reconciliation cycle.
+- **SC-006**: Adding hierarchical scheduling configuration to an existing deployment does not increase rollout time by more than 10% compared to the same deployment without the feature, measured on the reference deployment defined in `tasks.md` T104 (baseline: rollout time without `scheduling` set at any level vs. full scheduling block set at environment level).
 - **SC-007**: No more than 1% of deployments experience pods stuck pending for more than 5 minutes due to scheduling-config issues that lacked a diagnostic message pointing at the offending level.
 
 ## Assumptions

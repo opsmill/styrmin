@@ -1,0 +1,45 @@
+# GraphQL surface for the hierarchical pod scheduling feature.
+#
+# The core authoring path is ADDITIVE-ONLY: the existing mutations
+#   - createEnvironment(clusterId: UUID!, name: String!, config: JSON)
+#   - updateEnvironment(environmentId: UUID!, config: JSON)
+#   - createDeployment(environmentId: UUID!, name: String!, config: JSON, parameters: JSON)
+#   - updateDeployment(deploymentId: UUID!, config: JSON, parameters: JSON)
+#   - updateComponent(componentId: UUID!, config: JSON, enabled: Boolean)
+#
+# continue to carry the scheduling payload inside the existing `config: JSON`
+# argument under the new `scheduling` key. No schema change is required for
+# authoring; validation errors surface through the existing
+# StructuredErrorExtension with extensions.code = "VALIDATION_ERROR" and a
+# metadata.path pointer.
+#
+# The additive read-only surface below exists so operators can inspect the
+# per-component effective configuration and its provenance from the UI
+# (Success Criterion SC-004) without having to reconstruct the merge
+# client-side.
+
+extend type Deployment {
+  """
+  Per-component resolved scheduling configuration computed from the current
+  environment, deployment, and component-level inputs. Null when the
+  deployment's driver declares no components.
+  """
+  resolvedScheduling: [ResolvedComponentScheduling!]
+}
+
+"""
+Resolved scheduling configuration for a single component, including provenance
+metadata identifying which level contributed each field.
+"""
+type ResolvedComponentScheduling {
+  componentName: String!
+
+  """The effective, merged SchedulingConfig that will be applied."""
+  config: JSON!
+
+  """
+  Map of dotted field path (e.g. 'resources.limits.cpu' or
+  'tolerations[2]') to the level that contributed the value.
+  """
+  provenance: JSON!
+}
