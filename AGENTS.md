@@ -130,7 +130,7 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 | Why was this decided? | `dev/adr/` |
 | What are we building? | `dev/specs/` |
 | How should I write code? | `dev/guidelines/` |
-| What commands are available? | `dev/commands/` |
+| What commands are available? | `.agents/commands/` |
 
 ## Component Maps
 

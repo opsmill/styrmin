@@ -255,7 +255,7 @@ type = "typing.Any"
 type = "datetime.datetime"
 
 [tool.rumdl]
-exclude = [".venv", "node_modules", "dev", ".claude", "specs", ".github/agents", ".specify/extensions"]
+exclude = [".venv", "node_modules", "dev", ".claude", "specs", ".github/agents", ".specify/extensions", ".agents"]
 disable = [
     "MD013",  # Line length
     "MD033",  # Inline HTML

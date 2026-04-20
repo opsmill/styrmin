@@ -11,7 +11,7 @@ Internal documentation for contributors. For user-facing docs, see `/docs/`.
 | Learn why we made a decision | `adr/` |
 | Complete a specific task | `guides/` |
 | See what's being built | `../specs/` |
-| Use agent commands | `commands/` |
+| Use agent commands | `../.agents/commands/` |
 
 ## Directory Guide
 
@@ -22,8 +22,9 @@ Internal documentation for contributors. For user-facing docs, see `/docs/`.
   - `backend/` - Backend architecture and patterns
 - **guides/**: Step-by-step procedures for specific tasks.
 - **adr/**: Architecture Decision Records. Why we chose what we chose.
-- **commands/**: Reusable agent commands (canonical source).
 - **prompts/**: Prompt templates for common thinking tasks.
+
+Agent commands live at the repo root under `.agents/commands/`.
 
 ## Document Lifecycle
 

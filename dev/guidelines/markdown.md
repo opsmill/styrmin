@@ -3,7 +3,7 @@
 ## Tooling
 
 - **Linter:** rumdl
-- **Excluded directories:** `.venv`, `node_modules`, `dev`, `.claude`, `specs`, `.github/agents`
+- **Excluded directories:** `.venv`, `node_modules`, `dev`, `.claude`, `specs`, `.github/agents`, `.agents`
 - Disabled rules: MD013 (line length), MD033 (inline HTML), MD041 (first line heading), MD057 (relative links), MD060 (code block language)
 
 ## File Naming
