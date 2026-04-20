@@ -17,12 +17,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
 import { ParameterCards } from "@/components/ParameterCards";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   Select,
