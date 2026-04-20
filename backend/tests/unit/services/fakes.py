@@ -23,6 +23,7 @@ from styrmin_backend.db.models import (
     Task,
 )
 from styrmin_backend.domain.models import Deployment as DeploymentEntity
+from styrmin_backend.domain.models import Task as TaskEntity
 from styrmin_backend.repository.backup_storage_location import (
     BackupStorageLocationRepository,
 )
@@ -363,6 +364,9 @@ class FakeDeploymentRepository(DeploymentRepository):
             if d.environment_id == environment_id and d.internal:
                 return d
         return None
+
+    async def list_active_tasks(self, deployment_id: UUID) -> list[TaskEntity]:
+        return []
 
 
 class FakeDeployedServiceRepository(
