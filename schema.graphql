@@ -134,6 +134,22 @@ type ContextDiff {
   changes: [ContextChange!]!
 }
 
+input CrdConditionInput {
+  type: String!
+  status: String!
+  reason: String = null
+  message: String = null
+  lastTransitionTime: DateTime = null
+}
+
+type CrdConditionType {
+  type: String!
+  status: String!
+  reason: String
+  message: String
+  lastTransitionTime: DateTime
+}
+
 """Date with time (isoformat)"""
 scalar DateTime
 
@@ -165,6 +181,35 @@ type Deployment {
   environment: Environment!
   applicationDriverVersion: ApplicationDriverVersion!
   deployedServices: [DeployedService!]!
+  podStatuses: [PodStatus!]!
+  crdStatus: DeploymentStatusType
+}
+
+input DeploymentPodStatusReport {
+  deploymentId: UUID!
+  pods: [PodStatusInput!]!
+}
+
+input DeploymentStatusReportInput {
+  deploymentId: UUID!
+  phase: String!
+  instanceId: UUID = null
+  displayState: String = null
+  message: String = null
+  conditions: [CrdConditionInput!] = null
+  managedResourceCounts: ManagedResourceCountsInput = null
+}
+
+type DeploymentStatusType {
+  id: UUID!
+  deploymentId: UUID!
+  phase: String!
+  message: String
+  conditions: [CrdConditionType!]!
+  managedResourceCounts: ManagedResourceCountsType
+  lastPolledAt: DateTime
+  createdOn: DateTime
+  updatedOn: DateTime
 }
 
 type DeploymentTimelineEntry {
@@ -233,6 +278,22 @@ The `JSON` scalar type represents JSON values as specified by [ECMA-404](https:/
 """
 scalar JSON @specifiedBy(url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf")
 
+input ManagedResourceCountsInput {
+  networkPolicies: Int! = 0
+  secrets: Int! = 0
+  helmReleases: Int! = 0
+  services: Int! = 0
+  middlewares: Int! = 0
+}
+
+type ManagedResourceCountsType {
+  networkPolicies: Int!
+  secrets: Int!
+  helmReleases: Int!
+  services: Int!
+  middlewares: Int!
+}
+
 type Mutation {
   createCluster(name: String! = "default", config: JSON = null): Cluster
   deleteCluster(clusterId: UUID = null, clusterName: String = null): String
@@ -258,6 +319,8 @@ type Mutation {
   startComponents(deploymentId: UUID!, components: [String!]!): Task
   runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task
   updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null): Task
+  reportPodStatuses(reports: [DeploymentPodStatusReport!]!): ReportPodStatusesResponse!
+  reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!): ReportDeploymentStatusesResponse!
   createEnvironmentBackup(environmentId: UUID!, name: String = null, maxConcurrency: Int = null, timeout: Int = null): EnvironmentBackup
   createEnvironmentRestore(environmentBackupId: UUID!): EnvironmentRestore
   deleteEnvironmentBackup(environmentBackupId: UUID!): String
@@ -269,6 +332,41 @@ type ParameterDefinition {
   kind: String!
   default: JSON
   values: [String!]
+}
+
+enum PodPhase {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  UNKNOWN
+}
+
+type PodStatus {
+  id: UUID!
+  deploymentId: UUID!
+  podName: String!
+  namespace: String!
+  phase: PodPhase!
+  ready: Boolean!
+  restartCount: Int!
+  containerStatuses: JSON!
+  nodeName: String
+  startedAt: DateTime
+  lastPolledAt: DateTime
+  createdOn: DateTime
+  updatedOn: DateTime
+}
+
+input PodStatusInput {
+  podName: String!
+  namespace: String!
+  phase: PodPhase!
+  ready: Boolean!
+  restartCount: Int!
+  containerStatuses: JSON = null
+  nodeName: String = null
+  startedAt: DateTime = null
 }
 
 type Query {
@@ -292,6 +390,7 @@ type Query {
   environmentServices(environmentId: UUID!): [DeployedService!]!
   deploymentServices(deploymentId: UUID!): [DeployedService!]!
   deploymentTimeline(deploymentId: UUID!): [DeploymentTimelineEntry!]!
+  podStatuses(deploymentId: UUID = null, environmentId: UUID = null, clusterId: UUID = null): [PodStatus!]!
   environmentBackup(environmentBackupId: UUID!): EnvironmentBackup
   environmentBackups(environmentId: UUID!, status: String = null): [EnvironmentBackup!]!
   environmentRestore(environmentRestoreId: UUID!): EnvironmentRestore
@@ -299,6 +398,20 @@ type Query {
 
   """Health check probe"""
   ok: Boolean!
+}
+
+type ReportDeploymentStatusesResponse {
+  success: Boolean!
+  message: String!
+  statusesUpdated: Int!
+  deploymentsUpdated: Int!
+}
+
+type ReportPodStatusesResponse {
+  success: Boolean!
+  message: String!
+  podsUpdated: Int!
+  podsRemoved: Int!
 }
 
 type Restore {
