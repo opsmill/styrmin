@@ -52,7 +52,12 @@ from styrmin_backend.services.clusters import (
     delete_cluster,
     resolve_cluster,
 )
+from styrmin_backend.api.definitions.deployment.model import (
+    BackupDisposition as BackupDispositionType,
+)
+from styrmin_backend.domain.models import BackupDisposition
 from styrmin_backend.services.deployment import (
+    delete_deployment as delete_deployment_service,
     deploy_application,
     update_deployment,
     update_deployment_version,
@@ -759,6 +764,30 @@ class Mutation:
             deployment_parameters=parameters,
             version=version,
             uow=uow,
+        )
+        return Task.from_instance(task)
+
+    @strawberry.mutation
+    async def delete_deployment(
+        self,
+        deployment_id: UUID,
+        backup_disposition: BackupDispositionType,
+        info: strawberry.Info,
+    ) -> Task:
+        """Request deletion of a deployment.
+
+        Soft-deletes (tombstones) the deployment and launches an async
+        DELETE_INSTANCE workflow. Teardown progress is observable via
+        the deployment's lifecycle state and the returned task.
+        """
+        uow = info.context["uow"]
+        deployment = await get_deployment(deployment_id=deployment_id, uow=uow)
+        if deployment.internal:
+            raise InternalDeploymentError()
+        task = await delete_deployment_service(
+            deployment_id=deployment_id,
+            uow=uow,
+            backup_disposition=BackupDisposition(backup_disposition.value.lower()),
         )
         return Task.from_instance(task)
 

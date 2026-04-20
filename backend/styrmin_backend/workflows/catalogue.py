@@ -237,6 +237,17 @@ class PrefectCatalogue:
         )
 
         self.add_workflow_definition(
+            action=PrefectAction.DELETE_INSTANCE,
+            workflow=LocalSourceWorkflowDefinition(
+                name="delete_instance_crd",
+                type=WorkflowType.USER,
+                module="styrmin_backend.agent.tasks.orchestration",
+                function="delete_instance_crd",
+                set_directory="/source/backend/",
+            ),
+        )
+
+        self.add_workflow_definition(
             action=PrefectAction.EXECUTE_BACKUP,
             workflow=LocalSourceWorkflowDefinition(
                 name="execute_backup",

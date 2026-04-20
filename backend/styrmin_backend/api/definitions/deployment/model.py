@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -38,6 +40,14 @@ from styrmin_backend.services.exceptions import (
 
 if TYPE_CHECKING:
     from styrmin_backend.api.definitions.environment.model import Environment
+
+
+@strawberry.enum
+class BackupDisposition(Enum):
+    """Operator's choice for what happens to backups on deployment deletion."""
+
+    RETAIN = "RETAIN"
+    REMOVE = "REMOVE"
 
 
 @strawberry.type
@@ -119,6 +129,7 @@ class Deployment:
     application_driver_version_id: UUID
     environment_id: UUID
     internal: bool
+    deleted_at: datetime | None = None
 
     instance: strawberry.Private[DeploymentEntity]
 
@@ -312,5 +323,6 @@ class Deployment:
             application_driver_version_id=instance.application_driver_version_id,
             environment_id=instance.environment_id,
             internal=instance.internal,
+            deleted_at=instance.deleted_at,
             instance=instance,
         )

@@ -4,6 +4,11 @@
 from enum import Enum
 
 
+class BackupDisposition(str, Enum):
+    RETAIN = "RETAIN"
+    REMOVE = "REMOVE"
+
+
 class PodPhase(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"

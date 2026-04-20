@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from fast_depends import Depends, inject
 from loguru import logger
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
@@ -7,10 +8,12 @@ from packaging.version import Version
 from styrmin_backend.context.exceptions import InvalidDeploymentContextError
 from styrmin_backend.context.validators import validate_deployment_config
 from styrmin_backend.domain.models import (
+    BackupDisposition,
     Component,
     Deployment,
     DeploymentState,
     Task,
+    TaskType,
 )
 from styrmin_backend.domain.utils import (
     generate_deployment_name,
@@ -19,6 +22,8 @@ from styrmin_backend.domain.utils import (
 from styrmin_backend.context.models.config import DedicatedIngressConfig
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
+    DeploymentAlreadyDeletedError,
+    DeploymentMutationInProgressError,
     DeploymentNameConflictError,
     DeploymentNameValidationError,
     DeploymentNotFoundError,
@@ -27,6 +32,9 @@ from styrmin_backend.services.exceptions import (
     InvalidContextError,
     InvalidVersionError,
 )
+from styrmin_backend.workflows.dependency import get_manager
+from styrmin_backend.workflows.manager import PrefectManager
+from styrmin_backend.workflows.models import PrefectAction
 from styrmin_backend.services.ingress_controller.driver import INTERNAL_DRIVER_NAME
 from styrmin_backend.services.parameters import (
     parse_parameter_definitions,
@@ -767,6 +775,93 @@ async def deploy_application(
         await uow.tasks.save(task=task)
 
         await uow.commit()
+
+        result = await uow.tasks.find(id=task.id)
+        assert result is not None, "Task not found"
+        return result
+
+
+_DELETION_LIFECYCLE_STATES = (
+    DeploymentState.DELETION_REQUESTED,
+    DeploymentState.DELETION_IN_PROGRESS,
+    DeploymentState.DELETED,
+)
+
+
+@inject(cast_result=False)  # type: ignore[arg-type]
+async def delete_deployment(
+    deployment_id: UUID,
+    uow: UnitOfWork,
+    backup_disposition: BackupDisposition,
+    prefect_manager: PrefectManager = Depends(get_manager),
+) -> Task:
+    """Request deletion of a deployment.
+
+    Soft-deletes (tombstones) the deployment: the record is kept with
+    its full history, transitions to DELETION_REQUESTED, and a
+    DELETE_INSTANCE task is launched to drive teardown asynchronously.
+
+    Raises:
+        DeploymentNotFoundError: If no deployment matches the id.
+        DeploymentAlreadyDeletedError: If the deployment is already in a
+            deletion lifecycle state or tombstoned.
+        DeploymentMutationInProgressError: If another workflow is in
+            flight for this deployment.
+
+    Returns:
+        The DELETE_INSTANCE task created for the deletion request.
+    """
+    logger.info(
+        "Requesting deployment deletion: deployment_id={} backup_disposition={}",
+        deployment_id,
+        backup_disposition.value,
+    )
+
+    async with uow:
+        deployment = await uow.deployments.find(id=deployment_id)
+        if deployment is None:
+            raise DeploymentNotFoundError(
+                f"Deployment with ID {deployment_id} not found"
+            )
+
+        if deployment.status in _DELETION_LIFECYCLE_STATES:
+            raise DeploymentAlreadyDeletedError(
+                f"Deployment {deployment_id} is already in state {deployment.status.value}"
+            )
+
+        active_tasks = await uow.deployments.list_active_tasks(deployment_id)
+        if active_tasks:
+            raise DeploymentMutationInProgressError(
+                active_task_ids=[str(task.id) for task in active_tasks],
+            )
+
+        deployment.set_status(DeploymentState.DELETION_REQUESTED)
+
+        task = Task.create(
+            type=TaskType.DELETE_INSTANCE,
+            deployment_id=deployment.id,
+        )
+
+        flow_info = await prefect_manager.run_action(
+            action=PrefectAction.DELETE_INSTANCE,
+            parameters={
+                "task_id": task.id,
+                "deployment_id": deployment.id,
+                "backup_disposition": backup_disposition.value,
+            },
+        )
+        task.prefect_flow_run_id = flow_info.id
+
+        await uow.deployments.save(deployment=deployment)
+        await uow.tasks.save(task=task)
+        await uow.commit()
+
+        logger.info(
+            "Deletion request accepted: deployment_id={} task_id={} flow_run_id={}",
+            deployment.id,
+            task.id,
+            flow_info.id,
+        )
 
         result = await uow.tasks.find(id=task.id)
         assert result is not None, "Task not found"

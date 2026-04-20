@@ -97,11 +97,27 @@ class Environment:
         )
 
     @strawberry.field
-    def deployments(self) -> list[Deployment]:
-        return [
-            Deployment.from_instance(_db_deployment_to_domain(deployment))
+    def deployments(self, include_deleted: bool = False) -> list[Deployment]:
+        """Deployments in this environment.
+
+        By default excludes tombstoned (DELETED) deployments. Set
+        ``includeDeleted: true`` to surface them for audit.
+        """
+        entities = [
+            _db_deployment_to_domain(deployment)
             for deployment in self.instance.deployments
         ]
+        if not include_deleted:
+            from styrmin_backend.domain.models import (
+                DeploymentState as DeploymentStateEntity,
+            )
+
+            entities = [
+                entity
+                for entity in entities
+                if entity.status != DeploymentStateEntity.DELETED
+            ]
+        return [Deployment.from_instance(entity) for entity in entities]
 
     @classmethod
     def from_instance(cls, instance: EnvironmentModel) -> Environment:

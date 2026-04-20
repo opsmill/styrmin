@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from styrmin_sdk._queries import load_query
+from styrmin_sdk.graphql._generated.delete_deployment import (
+    DeleteDeployment,
+    DeleteDeploymentDeleteDeployment,
+)
 from styrmin_sdk.graphql._generated.deploy import Deploy, DeployDeploy
 from styrmin_sdk.graphql._generated.get_deployment import GetDeployment, GetDeploymentDeployment
+
+if TYPE_CHECKING:
+    from styrmin_sdk.graphql._generated.enums import BackupDisposition
 from styrmin_sdk.graphql._generated.get_deployment_timeline import (
     GetDeploymentTimeline,
     GetDeploymentTimelineDeploymentTimeline,
@@ -93,6 +100,32 @@ class DeploymentResource(BaseResource):
         )
         self._check_graphql_errors(result)
         return self._parse(UpdateDeployment, result["data"], "update_deployment", UpdateDeploymentUpdateDeployment)
+
+    async def delete(
+        self,
+        deployment_id: str | UUID,
+        backup_disposition: BackupDisposition,
+    ) -> DeleteDeploymentDeleteDeployment:
+        """Request deletion of a deployment.
+
+        Returns immediately with the DELETE_INSTANCE task; teardown is
+        asynchronous. Observe completion via the deployment's lifecycle
+        state and the returned task's status.
+        """
+        result = await self._transport.execute(
+            load_query("delete_deployment"),
+            {
+                "deploymentId": str(deployment_id),
+                "backupDisposition": backup_disposition.value,
+            },
+        )
+        self._check_graphql_errors(result)
+        return self._parse(
+            DeleteDeployment,
+            result["data"],
+            "delete_deployment",
+            DeleteDeploymentDeleteDeployment,
+        )
 
     async def update_version(
         self, deployment_id: str | UUID, version: str

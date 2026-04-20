@@ -17,8 +17,10 @@ from .delete_backup import DeleteBackup
 from .delete_backup_schedule import DeleteBackupSchedule
 from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
+from .delete_deployment import DeleteDeployment
 from .delete_environment import DeleteEnvironment
 from .deploy import Deploy
+from .enums import BackupDisposition
 from .get_backup import GetBackup
 from .get_backup_schedule import GetBackupSchedule
 from .get_backup_storage_location import GetBackupStorageLocation
@@ -369,6 +371,36 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return DeleteCluster.model_validate(data)
+
+    async def delete_deployment(
+        self, deployment_id: UUID, backup_disposition: BackupDisposition, **kwargs: Any
+    ) -> DeleteDeployment:
+        query = gql("""
+            mutation DeleteDeployment($deploymentId: UUID!, $backupDisposition: BackupDisposition!) {
+              deleteDeployment(
+                deploymentId: $deploymentId
+                backupDisposition: $backupDisposition
+              ) {
+                id
+                status
+                type
+                message
+                deploymentId
+              }
+            }
+            """)
+        variables: dict[str, object] = {
+            "deploymentId": deployment_id,
+            "backupDisposition": backup_disposition,
+        }
+        response = await self.execute(
+            query=query,
+            operation_name="DeleteDeployment",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return DeleteDeployment.model_validate(data)
 
     async def delete_environment(
         self,

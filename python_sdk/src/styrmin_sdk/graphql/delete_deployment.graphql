@@ -1,0 +1,9 @@
+mutation DeleteDeployment($deploymentId: UUID!, $backupDisposition: BackupDisposition!) {
+    deleteDeployment(deploymentId: $deploymentId, backupDisposition: $backupDisposition) {
+        id
+        status
+        type
+        message
+        deploymentId
+    }
+}

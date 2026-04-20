@@ -56,6 +56,11 @@ type Backup {
   componentStatuses: [ComponentBackupStatus!]
 }
 
+enum BackupDisposition {
+  RETAIN
+  REMOVE
+}
+
 type BackupSchedule {
   id: UUID!
   name: String!
@@ -175,6 +180,7 @@ type Deployment {
   applicationDriverVersionId: UUID!
   environmentId: UUID!
   internal: Boolean!
+  deletedAt: DateTime
   applicationInstance: ApplicationInstance
   components: [Component!]!
   environment: Environment!
@@ -225,7 +231,7 @@ type Environment {
   capabilities: JSON!
   cluster: Cluster!
   backupStorageLocation: BackupStorageLocation
-  deployments: [Deployment!]!
+  deployments(includeDeleted: Boolean! = false): [Deployment!]!
 }
 
 type HelmChart {
@@ -282,6 +288,7 @@ type Mutation {
   startComponents(deploymentId: UUID!, components: [String!]!): Task
   runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task
   updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null): Task
+  deleteDeployment(deploymentId: UUID!, backupDisposition: BackupDisposition!): Task!
   reportPodStatuses(reports: [DeploymentPodStatusReport!]!): ReportPodStatusesResponse!
   reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!): ReportDeploymentStatusesResponse!
 }

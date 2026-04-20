@@ -631,6 +631,60 @@ async def create_instance_crd(
         )
 
 
+@flow(
+    on_cancellation=[orchestration_callback],
+    on_completion=[orchestration_callback],
+    on_failure=[orchestration_callback],
+    on_crashed=[orchestration_callback],
+    on_running=[orchestration_callback],
+    flow_run_name="Delete instance (CRD)",
+)
+async def delete_instance_crd(
+    task_id: UUID,
+    deployment_id: UUID,
+    backup_disposition: str,
+) -> None:
+    """Declare deletion intent for a Styrmin deployment.
+
+    Current scope (MVP): this flow is a thin stub whose completion is
+    the signal that unblocks the backend's tombstoning logic (see
+    ``update_task_state`` — on SUCCESS of a DELETE_INSTANCE task, the
+    Deployment transitions to DELETED with ``deleted_at`` set).
+
+    Not yet implemented in this flow (tracked as follow-ups to this PR):
+
+    - Patching / deleting the StyrminDeployment CRD to signal deletion
+      intent to the Styrmin operator (per ADR-008). The operator-side
+      handler must then tear down owned HelmReleases, utility
+      resources, and the namespace, then clear the CRD.
+    - Applying ``backup_disposition=REMOVE``: iterating backups
+      associated with the deployment's active instance and removing
+      them before declaring CRD deletion intent.
+
+    Until those land, deletion is accepted and tombstoned in the
+    backend but the cluster-side resources are not torn down by this
+    flow alone; reconciliation/operator work in a follow-up PR is
+    required to reach the spec's FR-005 guarantee. FR-013 (backup
+    disposition) is likewise deferred.
+
+    Arguments are accepted to fix the contract ahead of those changes.
+    """
+    if not config.SETTINGS.initialized:
+        config.SETTINGS.initialize()
+
+    logger = get_run_logger()
+    logger.info(
+        "delete_instance_crd invoked: deployment_id=%s task_id=%s backup_disposition=%s",
+        deployment_id,
+        task_id,
+        backup_disposition,
+    )
+    logger.warning(
+        "delete_instance_crd is currently a stub — cluster teardown and "
+        "backup REMOVE are not yet wired end-to-end."
+    )
+
+
 @flow(flow_run_name="Update instance (CRD)")
 async def update_instance_crd(
     instance: Instance,

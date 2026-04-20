@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from styrmin_backend.domain.models import (
     InstanceStatus,
     Task,
     TaskStatus,
+    TaskType,
 )
 from styrmin_backend.services.exceptions import (
     DeploymentNotFoundError,
@@ -67,21 +69,36 @@ async def update_task_state(
         target_task_state = None
         target_deployment_state = None
         target_instance_state = None
+        is_deletion = task.type == TaskType.DELETE_INSTANCE
         # Map the state name to the task and instance states
         match state_name.upper():
             case "RUNNING":
                 target_task_state = TaskStatus.RUNNING
-                target_deployment_state = DeploymentState.PENDING
+                target_deployment_state = (
+                    DeploymentState.DELETION_IN_PROGRESS
+                    if is_deletion
+                    else DeploymentState.PENDING
+                )
                 target_instance_state = InstanceStatus.PENDING
             case "COMPLETED":
                 target_task_state = TaskStatus.SUCCESS
-                # Don't set deployment to RUNNING here — the CRD status
-                # reporter will update it when the CRD reaches Ready.
-                target_deployment_state = None
-                target_instance_state = InstanceStatus.RUNNING
+                if is_deletion:
+                    target_deployment_state = DeploymentState.DELETED
+                    target_instance_state = InstanceStatus.RUNNING
+                else:
+                    # Don't set deployment to RUNNING here — the CRD status
+                    # reporter will update it when the CRD reaches Ready.
+                    target_deployment_state = None
+                    target_instance_state = InstanceStatus.RUNNING
             case "FAILED":
                 target_task_state = TaskStatus.FAILED
-                target_deployment_state = DeploymentState.FAILED
+                if is_deletion:
+                    # Keep the deployment in DELETION_IN_PROGRESS so a
+                    # retry can advance it; the failed task + message
+                    # carries the reason.
+                    target_deployment_state = None
+                else:
+                    target_deployment_state = DeploymentState.FAILED
                 target_instance_state = InstanceStatus.FAILED
             case _:
                 raise UnknownTaskStateError(f"Unknown task state: {state_name}")
@@ -89,6 +106,12 @@ async def update_task_state(
         task.status = target_task_state
         if target_deployment_state is not None:
             deployment.status = target_deployment_state
+        if (
+            is_deletion
+            and target_deployment_state == DeploymentState.DELETED
+            and deployment.deleted_at is None
+        ):
+            deployment.deleted_at = datetime.now(tz=timezone.utc)
         if deployment.active_instance is not None:
             deployment.active_instance.status = target_instance_state
         task.message = state_message
