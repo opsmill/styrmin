@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from styrmin_backend.domain.models import (
-    DeploymentStatus,
+    DeploymentState,
     InstanceStatus,
     Task,
     TaskStatus,
@@ -71,21 +71,24 @@ async def update_task_state(
         match state_name.upper():
             case "RUNNING":
                 target_task_state = TaskStatus.RUNNING
-                target_deployment_state = DeploymentStatus.PENDING
+                target_deployment_state = DeploymentState.PENDING
                 target_instance_state = InstanceStatus.PENDING
             case "COMPLETED":
                 target_task_state = TaskStatus.SUCCESS
-                target_deployment_state = DeploymentStatus.RUNNING
+                # Don't set deployment to RUNNING here — the CRD status
+                # reporter will update it when the CRD reaches Ready.
+                target_deployment_state = None
                 target_instance_state = InstanceStatus.RUNNING
             case "FAILED":
                 target_task_state = TaskStatus.FAILED
-                target_deployment_state = DeploymentStatus.FAILED
+                target_deployment_state = DeploymentState.FAILED
                 target_instance_state = InstanceStatus.FAILED
             case _:
                 raise UnknownTaskStateError(f"Unknown task state: {state_name}")
 
         task.status = target_task_state
-        deployment.status = target_deployment_state
+        if target_deployment_state is not None:
+            deployment.status = target_deployment_state
         if deployment.active_instance is not None:
             deployment.active_instance.status = target_instance_state
         task.message = state_message

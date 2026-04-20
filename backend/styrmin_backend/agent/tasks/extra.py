@@ -15,6 +15,17 @@ from styrmin_backend.context.models.contexts import GlobalContext, UtilityContex
 from styrmin_backend import config
 
 
+def _filter_out_operator_managed_resources(
+    resources: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Remove NetworkPolicy resources from the list.
+
+    For operator-managed deployments, NetworkPolicies are created and
+    managed by the kopf operator, not by Prefect flows.
+    """
+    return [r for r in resources if r.get("kind") != "NetworkPolicy"]
+
+
 async def _apply_utility(
     utility: UtilityContext,
     release_reference: str,
@@ -36,6 +47,13 @@ async def _apply_utility(
         namespace=namespace,
         context=context,
     )
+
+    # NetworkPolicies are now managed by the kopf operator for all new
+    # deployments, so filter them out from Prefect-managed resources.
+    resources = _filter_out_operator_managed_resources(resources)
+
+    if not resources:
+        return
 
     await arun_deployment(
         flow_run_name=f"{action} Utility Resources",

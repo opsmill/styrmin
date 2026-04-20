@@ -1,5 +1,5 @@
 ---
-description: Extract knowledge, guidelines, and ADRs from a completed spec directory into the project documentation system.
+description: Extract knowledge, guidelines, and ADRs from one or more completed spec directories into the project documentation system.
 ---
 
 ## User Input
@@ -12,37 +12,50 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ## Outline
 
-Goal: Analyze a completed spec directory and extract durable knowledge into the project's documentation system (`dev/knowledge/`, `dev/guidelines/`, `dev/adr/`), then mark the spec as extracted.
+Goal: Analyze one or more completed spec directories and extract durable knowledge into the project's documentation system (`dev/knowledge/`, `dev/guidelines/`, `dev/adr/`), then mark each spec as extracted.
 
-This command operationalizes the documentation lifecycle: `specs/ → knowledge/ or guidelines/` (see `dev/guidelines/markdown.md`).
+This command accepts multiple specs as input (space-separated) and processes them sequentially. It operationalizes the documentation lifecycle: `specs/ → knowledge/ or guidelines/` (see `dev/guidelines/markdown.md`).
 
 ## Phase 0: Setup & Validation
 
 <thinking>
-First, resolve the spec directory from the user's argument and validate it contains the expected artifacts.
+First, resolve all spec directories from the user's arguments and validate each one contains the expected artifacts.
 </thinking>
 
-1. **Resolve spec directory** from `$ARGUMENTS`:
-   - If argument matches `specs/NNN-*` or `NNN-*`, resolve to `REPO_ROOT/specs/NNN-*`
-   - If argument is a bare name like `graphql-name-lookup`, search `specs/` for a matching directory
-   - If no match found, list available spec directories and ask the user to pick one
+1. **Parse arguments** — split `$ARGUMENTS` into individual spec identifiers (space-separated). If `$ARGUMENTS` is empty, list available spec directories and ask the user to pick one or more.
 
-2. **Validate required files**:
-   - `spec.md` MUST exist — abort if missing
+2. **Resolve each spec directory**:
+   - For each identifier in the arguments:
+     - If it matches `specs/NNN-*` or `NNN-*`, resolve to `REPO_ROOT/specs/NNN-*`
+     - If it is a bare name like `graphql-name-lookup`, search `specs/` for a matching directory
+     - If no match found for an identifier, report it and continue resolving the rest
+   - If **no** identifiers could be resolved, list available spec directories and ask the user to pick
+
+3. **Validate each resolved spec**:
+   - `spec.md` MUST exist — skip that spec with an error if missing
    - `research.md` SHOULD exist — warn if missing ("No ADRs can be extracted without research.md") but continue
 
-3. **Check extraction status**:
+4. **Check extraction status** for each spec:
    - If `EXTRACTED.md` exists in the spec directory, warn the user that this spec was previously extracted
    - Also check if the spec already lives under `specs/archive/` — if so, it was previously extracted and archived
    - Ask for confirmation before re-extracting — default is abort
+   - The user can choose to skip individual specs from the batch
 
-4. **Load existing documentation index**:
+5. **Summarize resolved specs** — before proceeding, print the list of specs that will be processed:
+   ```
+   Processing N spec(s):
+   1. specs/<spec-name-1>
+   2. specs/<spec-name-2>
+   ...
+   ```
+
+6. **Load existing documentation index** (once, shared across all specs):
    - List all files in `dev/knowledge/` (recursively)
    - List all files in `dev/guidelines/` (recursively)
    - List all files in `dev/adr/` to determine the next ADR number
    - Read the first 20 lines of each knowledge and guidelines file to build a topic index (title + overview section)
 
-5. **Load spec artifacts** — read all available files from the spec directory:
+7. **Load spec artifacts** — for each spec, read all available files from its directory:
    - `research.md` (primary source for ADRs)
    - `spec.md` (context, scope decisions)
    - `data-model.md` (schema changes, new methods — if exists)
@@ -52,8 +65,10 @@ First, resolve the spec directory from the user's argument and validate it conta
 ## Phase 1: Analysis & Classification
 
 <thinking>
-I need to parse each source and classify content into three buckets: ADR, Knowledge, Guideline. I should also identify content to skip with a clear reason.
+For each spec, I need to parse each source and classify content into three buckets: ADR, Knowledge, Guideline. I should also identify content to skip with a clear reason. I'll process specs sequentially and tag each finding with its source spec.
 </thinking>
+
+Repeat the following steps for **each resolved spec directory**. Tag every finding with the source spec name so the extraction plan in Phase 2 groups items by spec.
 
 ### Step 1: Extract ADR candidates from research.md
 
@@ -100,42 +115,61 @@ For each piece of spec content not classified above, note it with a reason:
 
 ## Phase 2: Interactive Review
 
-Present findings in a structured extraction plan. Use this exact format:
+Present findings in a structured extraction plan. When processing multiple specs, group the plan by spec. Use a **global numbering scheme** across all specs so that item numbers are unique (e.g., spec 1 items are 1–4, spec 2 items are 5–8).
+
+Use this format:
 
 ```markdown
-## Extraction Plan for specs/<spec-name>
+## Extraction Plan
 
-### ADRs to Create (<count>)
+### specs/<spec-name-1>
+
+#### ADRs to Create (<count>)
 
 | # | Source | Title | Target File |
 |---|--------|-------|-------------|
 | 1 | R1 | <title> | dev/adr/adr-NNN-<slug>.md |
 | 2 | R2 | <title> | dev/adr/adr-NNN-<slug>.md |
 
-### Knowledge Updates (<count>)
+#### Knowledge Updates (<count>)
 
 | # | Target File | Section | Change | Summary |
 |---|-------------|---------|--------|---------|
-| 1 | dev/knowledge/backend/api.md | Queries | UPDATE | <what changes> |
+| 3 | dev/knowledge/backend/api.md | Queries | UPDATE | <what changes> |
 
-### Guidelines Updates (<count>)
+#### Guidelines Updates (<count>)
 
 | # | Target File | Section | Change | Summary |
 |---|-------------|---------|--------|---------|
-| 1 | dev/guidelines/backend/python.md | Error Handling | UPDATE | <what changes> |
+| 4 | dev/guidelines/backend/python.md | Error Handling | UPDATE | <what changes> |
 
-### Skipped (with reasons)
+#### Skipped (with reasons)
 
 | Source | Reason |
 |--------|--------|
 | plan.md | Execution artifact — no durable knowledge |
+
+---
+
+### specs/<spec-name-2>
+
+#### ADRs to Create (<count>)
+
+| # | Source | Title | Target File |
+|---|--------|-------|-------------|
+| 5 | R1 | <title> | dev/adr/adr-NNN-<slug>.md |
+
+...
 ```
+
+When processing a single spec, omit the per-spec grouping headers and use the simpler flat format (same as the multi-spec table structure but without the `### specs/<name>` wrapper).
 
 After presenting, tell the user:
 
 > **Actions:**
-> - `approve all` — proceed with all extractions
-> - `approve adrs` / `approve knowledge` / `approve guidelines` — approve by category
+> - `approve all` — proceed with all extractions across all specs
+> - `approve spec <name>` — approve all items for a specific spec
+> - `approve adrs` / `approve knowledge` / `approve guidelines` — approve by category (across all specs)
 > - `skip N` — skip a specific numbered item
 > - `edit N` — modify a specific item before writing
 > - `group N,M` — merge multiple ADR items into a single ADR
@@ -144,7 +178,7 @@ Wait for user response before proceeding. Do NOT write any files until the user 
 
 ## Phase 3: Write Extractions
 
-For each approved item, write the content:
+For each approved item across all specs, write the content. ADR numbering is sequential across all specs (i.e., if spec 1 creates ADR-005 and ADR-006, spec 2 starts at ADR-007).
 
 ### ADRs
 
@@ -208,9 +242,11 @@ If creating a new guidelines file, follow the standard structure:
 
 ## Phase 4: Cleanup & Report
 
+Perform the following steps for **each spec** that had approved extractions.
+
 ### 1. Create extraction record
 
-Write `EXTRACTED.md` in the spec directory:
+Write `EXTRACTED.md` in each spec directory:
 
 ```markdown
 # Extraction Record
@@ -240,6 +276,7 @@ Spec directory moved to `specs/archive/<spec-name>/` as a historical record.
 
 ### 2. Update spec status and archive
 
+For each spec:
 1. In `spec.md`, update or add the status field to: `**Status**: Extracted`
 2. Move the entire spec directory into `specs/archive/`:
    ```bash
@@ -250,30 +287,38 @@ Spec directory moved to `specs/archive/<spec-name>/` as a historical record.
 
 ### 3. Update dev/README.md
 
-If any **new** files were created in `dev/knowledge/`, `dev/guidelines/`, or `dev/adr/`:
-- Read `dev/README.md`
-- Add new entries to the appropriate section (Current Guidelines, Current Knowledge, or a new Current ADRs section)
-- Follow the existing link format: `- [filename.md](path/to/filename.md) - Brief description`
-
-If `dev/adr/` now has content and there is no "Current ADRs" section in the README, create one following the pattern of the existing sections.
+After **all** specs have been processed, update `dev/README.md` once with all new files:
+- If any **new** files were created in `dev/knowledge/`, `dev/guidelines/`, or `dev/adr/`:
+  - Read `dev/README.md`
+  - Add new entries to the appropriate section (Current Guidelines, Current Knowledge, or a new Current ADRs section)
+  - Follow the existing link format: `- [filename.md](path/to/filename.md) - Brief description`
+- If `dev/adr/` now has content and there is no "Current ADRs" section in the README, create one following the pattern of the existing sections.
 
 ### 4. Report
 
-Print a summary:
+Print a combined summary covering all processed specs:
 
 ```markdown
 ## Extraction Complete
 
-**Spec**: specs/<spec-name> → archived to specs/archive/<spec-name>
 **Date**: YYYY-MM-DD
+**Specs processed**: N
 
-### Written
+### Per-Spec Summary
+
+| Spec | ADRs | Knowledge | Guidelines | Status |
+|------|------|-----------|------------|--------|
+| specs/<spec-name-1> | N | N | N | archived |
+| specs/<spec-name-2> | N | N | N | archived |
+
+### Totals
 - N ADR(s) created in dev/adr/
 - N knowledge file(s) updated
 - N guideline file(s) updated
 
 ### Archived
-- specs/<spec-name> → specs/archive/<spec-name>
+- specs/<spec-name-1> → specs/archive/<spec-name-1>
+- specs/<spec-name-2> → specs/archive/<spec-name-2>
 
 ### Files Created/Modified
 - <list each file path>

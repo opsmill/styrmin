@@ -7,6 +7,7 @@ from kubernetes_asyncio import client as kubeclient
 from kubernetes_asyncio.client import (
     V1DeploymentList,
     V1Job,
+    V1PodList,
     V1PodTemplateSpec,
     V1StatefulSetList,
 )
@@ -167,6 +168,40 @@ async def patch_custom_resource(
 
 
 @inject
+async def patch_custom_resource_status(
+    plural: str,
+    reference: str,
+    group: str,
+    version: str,
+    namespace: str,
+    status_patch: dict,
+    client: ApiClient = Depends(get_api_client),
+) -> None:
+    """Merge-patch the ``status`` subresource of a custom resource.
+
+    Use this when writing fields that live under ``.status`` — the standard
+    spec-level patch does not reach the status subresource.
+    """
+    custom_obj_api = kubeclient.CustomObjectsApi(client)
+    try:
+        await custom_obj_api.patch_namespaced_custom_object_status(
+            group=group,
+            version=version,
+            namespace=namespace,
+            plural=plural,
+            name=reference,
+            body={"status": status_patch},
+            _content_type="application/merge-patch+json",  # type: ignore[call-arg]
+        )
+    except ApiException as exc:
+        if exc.status == status.HTTP_404_NOT_FOUND:
+            raise CustomResourceNotFound(
+                f"Custom resource {plural}/{reference} not found in namespace {namespace}"
+            )
+        raise
+
+
+@inject
 async def apply_kubernetes_resource(
     resource: dict,
     namespace: str,
@@ -181,20 +216,8 @@ async def apply_kubernetes_resource(
     kind = resource["kind"]
     name = resource["metadata"]["name"]
 
-    # Custom resources (e.g., Traefik Middleware)
-    if "/" in api_version:
-        group, version = api_version.rsplit("/", 1)
-        plural = _kind_to_plural(kind)
-        await upsert_custom_resource(
-            plurals=plural,
-            body=resource,
-            group=group,
-            version=version,
-            namespace=namespace,
-        )
-        return
-
-    # Core API resources
+    # Core API resources — check kind first since some core resources
+    # use grouped apiVersions (e.g., networking.k8s.io/v1 for NetworkPolicy)
     if kind == "Secret":
         core_api = kubeclient.CoreV1Api(client)
         try:
@@ -240,6 +263,17 @@ async def apply_kubernetes_resource(
                 )
             else:
                 raise
+    elif "/" in api_version:
+        # Custom resources (e.g., Traefik Middleware)
+        group, version = api_version.rsplit("/", 1)
+        plural = _kind_to_plural(kind)
+        await upsert_custom_resource(
+            plurals=plural,
+            body=resource,
+            group=group,
+            version=version,
+            namespace=namespace,
+        )
     else:
         raise ValueError(f"Unsupported resource kind: {kind}")
 
@@ -260,6 +294,15 @@ def _kind_to_plural(kind: str) -> str:
     if kind in _CRD_KIND_PLURALS:
         return _CRD_KIND_PLURALS[kind]
     return kind.lower() + "s"
+
+
+@inject
+async def list_pods(
+    namespace: str, client: ApiClient = Depends(get_api_client)
+) -> V1PodList:
+    """List all pods in a namespace."""
+    core_api = kubeclient.CoreV1Api(client)
+    return await core_api.list_namespaced_pod(namespace=namespace)
 
 
 @inject

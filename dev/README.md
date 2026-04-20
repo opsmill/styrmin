@@ -48,6 +48,11 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [adr-003-consolidate-typechecker-on-ty.md](adr/adr-003-consolidate-typechecker-on-ty.md) - Consolidate type checking on ty, removing mypy
 
 - [adr-003-alembic-database-migrations.md](adr/adr-003-alembic-database-migrations.md) - Adopt Alembic for versioned database migration management
+- [adr-004-shared-async-event-loop-kopf-prefect.md](adr/adr-004-shared-async-event-loop-kopf-prefect.md) - Shared async event loop for kopf operator and Prefect agent
+- [adr-005-leader-election-kopf-peering.md](adr/adr-005-leader-election-kopf-peering.md) - Priority-based leader election via kopf peering
+- [adr-006-embed-context-in-deployment-crd.md](adr/adr-006-embed-context-in-deployment-crd.md) - Embed GlobalContext in StyrminDeployment CRD for autonomous reconciliation
+- [adr-007-ordered-phase-deployment-sub-handlers.md](adr/adr-007-ordered-phase-deployment-sub-handlers.md) - Ordered phase-based deployment via kopf sub-handlers
+- [adr-008-prefect-crd-intent-declaration.md](adr/adr-008-prefect-crd-intent-declaration.md) - Prefect flows declare intent via CRD instead of direct resource management
 
 ## Current Knowledge
 
@@ -61,6 +66,7 @@ Backend architecture documentation in [knowledge/backend/](knowledge/backend/):
 - [hooks-and-actions.md](knowledge/backend/hooks-and-actions.md) - Hook system, driver actions, setup/upgrade hooks
 - [orchestration-flows.md](knowledge/backend/orchestration-flows.md) - Prefect orchestration flows, callbacks, execution patterns
 - [agent.md](knowledge/backend/agent.md) - Kubernetes agent, resource builders, FluxCD integration
+- [operator.md](knowledge/backend/operator.md) - Kopf operator, StyrminDeployment CRD, phase-based deployment, drift reconciliation
 - [backup-restore.md](knowledge/backend/backup-restore.md) - Backup/restore system, Velero integration, strategies
 - [e2e-testing.md](knowledge/backend/e2e-testing.md) - E2E testing architecture, Kind cluster setup, fixture graph
 - [dead-code.md](knowledge/backend/dead-code.md) - Remaining dead code and cleanup tracking

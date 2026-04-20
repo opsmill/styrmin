@@ -160,7 +160,7 @@ class Deployment(StyrminModel, table=True):
     name: str = Field(unique=True)
     application_version: str
     config: dict | None = Field(sa_column=Column(JSON))
-    status: DeploymentStatus
+    status: DeploymentState
 
     application_driver_version_id: UUID
     environment_id: UUID
@@ -218,8 +218,9 @@ class Utility(StyrminModel, table=True):
 ### Status Enums
 
 ```python
-class DeploymentStatus(str, Enum):
+class DeploymentState(str, Enum):
     PENDING = "pending"
+    DEPLOYING = "deploying"
     RUNNING = "running"
     FAILED = "failed"
 
@@ -275,7 +276,7 @@ class Deployment(BaseModel):
     config: dict | None
     application_driver_version_id: UUID
     environment_id: UUID
-    status: DeploymentStatus
+    status: DeploymentState
 
     # Private attributes
     _components: Dict[str, Component]

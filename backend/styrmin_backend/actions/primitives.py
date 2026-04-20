@@ -82,9 +82,8 @@ async def stop_components(components: list[str], context: GlobalContext) -> None
     if context.components is None:
         raise ValueError("No components found in the context.")
 
-    styrmin_server_url = os.environ.get(
-        "STYRMIN_URL_GRAPHQL", "http://localhost:8000/graphql"
-    )
+    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
+    styrmin_server_url = f"{api_url}/graphql"
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -127,9 +126,8 @@ async def start_components(components: list[str], context: GlobalContext) -> Non
     if context.components is None:
         raise ValueError("No components found in the context.")
 
-    styrmin_server_url = os.environ.get(
-        "STYRMIN_URL_GRAPHQL", "http://localhost:8000/graphql"
-    )
+    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
+    styrmin_server_url = f"{api_url}/graphql"
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -310,9 +308,8 @@ async def upgrade_deployment_version(
     Raises:
         ValueError: If the upgrade fails.
     """
-    styrmin_server_url = os.environ.get(
-        "STYRMIN_URL_GRAPHQL", "http://localhost:8000/graphql"
-    )
+    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
+    styrmin_server_url = f"{api_url}/graphql"
 
     async with httpx.AsyncClient() as client:
         response = await client.post(

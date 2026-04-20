@@ -165,7 +165,7 @@ class TestGetApiClient:
         assert config_dict["users"][0]["user"]["token"] == "my-token"
         assert client is mock_api
 
-    async def test_logs_config_mode_at_info_level(self, mocker, caplog):
+    async def test_logs_config_mode_at_debug_level(self, mocker, caplog):
         mock_settings = mocker.MagicMock()
         mock_settings.config_mode = KubernetesConfigMode.INCLUSTER
         mocker.patch("styrmin_backend.config.SETTINGS").kubernetes = mock_settings
@@ -182,7 +182,7 @@ class TestGetApiClient:
         mock_api.__aexit__ = mocker.AsyncMock(return_value=False)
 
         with caplog.at_level(
-            logging.INFO, logger="styrmin_backend.agent.service.kubernetes.dependency"
+            logging.DEBUG, logger="styrmin_backend.agent.service.kubernetes.dependency"
         ):
             gen = get_api_client()
             await gen.__anext__()

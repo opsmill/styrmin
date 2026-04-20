@@ -114,7 +114,9 @@ class InstanceCreationStrategy(RemediationStrategy):
             "Create instance flow deployment not found"
         )
 
-        prehook, posthook, corehook, apply_utility_flow = await asyncio.gather(
+        # The CRD flow only needs pre/post hooks — the operator handles
+        # HelmRelease creation and utility resource management.
+        prehook, posthook = await asyncio.gather(
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,
                 hook=HookKind.SETUP,
@@ -127,27 +129,21 @@ class InstanceCreationStrategy(RemediationStrategy):
                 mode="post",
                 version=driver_version.application_supported_versions,
             ),
-            prefect_manager.get_action_deployment_id(
-                action=PrefectAction.CREATE_HELM_RELEASE
-            ),
-            prefect_manager.get_action_deployment_id(
-                action=PrefectAction.APPLY_UTILITY_RESOURCES
-            ),
         )
-        assert corehook is not None, "Core hook deployment not found"
-        assert apply_utility_flow is not None, (
-            "Apply utility resources flow deployment not found"
-        )
+
+        # Check if the deployment is internal (e.g., ingress controller)
+        deployment = await self.uow.deployments.get(id=diff.instance.deployment_id)
+        is_internal = deployment.internal if deployment else False
+
         return Remediation(
             type=RemediationType.CREATE_INSTANCE,
             instance=diff.instance,
             flow_id=create_instance_flow,
             parameters={
                 "instance": diff.instance,
-                "corehook": corehook,
                 "prehook": prehook,
                 "posthook": posthook,
-                "apply_utility_flow": apply_utility_flow,
+                "internal": is_internal,
             },
         )
 
@@ -236,22 +232,11 @@ class InstanceUpdateStrategy(RemediationStrategy):
             upgrade_hook,
         )
 
-        # Look up required flows and optional pre/post hooks
-        (
-            upgrade_instance_flow,
-            update_helm_release_flow,
-            apply_utility_flow,
-            prehook,
-            posthook,
-        ) = await asyncio.gather(
+        # The CRD flow only needs the upgrade hook and pre/post hooks —
+        # the operator handles HelmRelease and utility resource management.
+        upgrade_instance_flow, prehook, posthook = await asyncio.gather(
             prefect_manager.get_action_deployment_id(
                 action=PrefectAction.UPGRADE_INSTANCE,
-            ),
-            prefect_manager.get_action_deployment_id(
-                action=PrefectAction.UPDATE_HELM_RELEASE,
-            ),
-            prefect_manager.get_action_deployment_id(
-                action=PrefectAction.APPLY_UTILITY_RESOURCES,
             ),
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,
@@ -269,12 +254,6 @@ class InstanceUpdateStrategy(RemediationStrategy):
         assert upgrade_instance_flow is not None, (
             "Upgrade instance flow deployment not found"
         )
-        assert update_helm_release_flow is not None, (
-            "Update helm release flow deployment not found"
-        )
-        assert apply_utility_flow is not None, (
-            "Apply utility resources flow deployment not found"
-        )
 
         logger.info(
             "Upgrade remediation ready: application={} target_version={} prehook={} posthook={}",
@@ -291,8 +270,6 @@ class InstanceUpdateStrategy(RemediationStrategy):
             parameters={
                 "instance": diff.instance,
                 "upgrade_hook": upgrade_hook,
-                "update_flow": update_helm_release_flow,
-                "apply_utility_flow": apply_utility_flow,
                 "target_version": diff.instance.application_version,
                 "prehook": prehook,
                 "posthook": posthook,
@@ -318,27 +295,13 @@ class InstanceUpdateStrategy(RemediationStrategy):
                     type(diff_entry).__name__,
                 )
 
-                # Get the required flow
+                # The CRD flow only needs the instance — the operator
+                # handles HelmRelease and utility resource reconciliation.
                 update_instance_flow = await prefect_manager.get_action_deployment_id(
                     action=PrefectAction.UPDATE_INSTANCE,
                 )
                 assert update_instance_flow is not None, (
                     "Update instance flow deployment not found"
-                )
-
-                update_helm_release_flow, apply_utility_flow = await asyncio.gather(
-                    prefect_manager.get_action_deployment_id(
-                        action=PrefectAction.UPDATE_HELM_RELEASE,
-                    ),
-                    prefect_manager.get_action_deployment_id(
-                        action=PrefectAction.APPLY_UTILITY_RESOURCES,
-                    ),
-                )
-                assert update_helm_release_flow is not None, (
-                    "Update helm release flow deployment not found"
-                )
-                assert apply_utility_flow is not None, (
-                    "Apply utility resources flow deployment not found"
                 )
 
                 return Remediation(
@@ -347,8 +310,6 @@ class InstanceUpdateStrategy(RemediationStrategy):
                     flow_id=update_instance_flow,
                     parameters={
                         "instance": diff.instance,
-                        "update_flow": update_helm_release_flow,
-                        "apply_utility_flow": apply_utility_flow,
                     },
                 )
 

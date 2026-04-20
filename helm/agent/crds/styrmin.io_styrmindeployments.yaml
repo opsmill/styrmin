@@ -1,0 +1,141 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: styrmindeployments.styrmin.io
+spec:
+  group: styrmin.io
+  scope: Namespaced
+  names:
+    kind: StyrminDeployment
+    plural: styrmindeployments
+    singular: styrmindeployment
+    shortNames:
+      - sd
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                deploymentId:
+                  type: string
+                  description: UUID linking to Styrmin database deployment
+                instanceId:
+                  type: string
+                  nullable: true
+                  description: UUID of the active ApplicationInstance this CRD represents
+                releaseReference:
+                  type: string
+                  description: Kubernetes release reference
+                appName:
+                  type: string
+                  description: Application name from the driver
+                appVersion:
+                  type: string
+                  description: Application version being deployed
+                internal:
+                  type: boolean
+                  default: false
+                  description: Whether this is an internal deployment (e.g., ingress controller)
+                context:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: Serialized GlobalContext
+                helm:
+                  type: object
+                  properties:
+                    chart:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    repository:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                labels:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                parameters:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+              required:
+                - deploymentId
+                - releaseReference
+                - appName
+                - appVersion
+                - context
+                - helm
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - CreatingPrerequisites
+                    - CreatingHelmRelease
+                    - CreatingServices
+                    - Ready
+                    - Failed
+                    - Deleting
+                displayState:
+                  type: string
+                  description: User-facing deployment state, distinct from internal phase
+                  enum:
+                    - Deploying
+                    - Running
+                    - Error
+                message:
+                  type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                managedResources:
+                  type: object
+                  properties:
+                    networkPolicies:
+                      type: integer
+                    secrets:
+                      type: integer
+                    helmReleases:
+                      type: integer
+                    services:
+                      type: integer
+                    middlewares:
+                      type: integer
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: State
+          type: string
+          jsonPath: .status.displayState
+        - name: App
+          type: string
+          jsonPath: .spec.appName
+        - name: Version
+          type: string
+          jsonPath: .spec.appVersion
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

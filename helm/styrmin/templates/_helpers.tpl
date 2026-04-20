@@ -165,24 +165,13 @@ Create the base API URL
 {{- end }}
 
 {{/*
-Create the GraphQL API URL
+Create the base API URL for Kubernetes (full DNS name)
 */}}
-{{- define "styrmin.graphqlUrl" -}}
-{{- if .Values.styrmin.url.graphql }}
-{{- .Values.styrmin.url.graphql }}
+{{- define "styrmin.apiUrlK8s" -}}
+{{- if .Values.styrmin.url.apiK8s }}
+{{- .Values.styrmin.url.apiK8s }}
 {{- else }}
-{{- printf "http://%s:%d/graphql" (include "styrmin.server.fullname" .) (int .Values.service.port) }}
-{{- end }}
-{{- end }}
-
-{{/*
-Create the GraphQL API URL for Kubernetes (full DNS name)
-*/}}
-{{- define "styrmin.graphqlUrlK8s" -}}
-{{- if .Values.styrmin.url.graphqlK8s }}
-{{- .Values.styrmin.url.graphqlK8s }}
-{{- else }}
-{{- printf "http://%s.%s.svc.%s:%d/graphql" (include "styrmin.server.fullname" .) .Release.Namespace .Values.styrmin.kubernetes.clusterDomain (int .Values.service.port) }}
+{{- printf "http://%s.%s.svc.%s:%d" (include "styrmin.server.fullname" .) .Release.Namespace .Values.styrmin.kubernetes.clusterDomain (int .Values.service.port) }}
 {{- end }}
 {{- end }}
 

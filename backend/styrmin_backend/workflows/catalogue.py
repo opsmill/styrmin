@@ -106,8 +106,8 @@ class PrefectCatalogue:
 
         if config.SETTINGS.url:
             job_template_variables["properties"]["env"]["default"][
-                "STYRMIN_URL_GRAPHQL"
-            ] = config.SETTINGS.url.graphql_k8s
+                "STYRMIN_URL_API"
+            ] = config.SETTINGS.url.api_k8s
 
         # Forward agent poll settings to K8s jobs
         poll_env_vars = {
@@ -206,10 +206,10 @@ class PrefectCatalogue:
         self.add_workflow_definition(
             action=PrefectAction.CREATE_INSTANCE,
             workflow=LocalSourceWorkflowDefinition(
-                name="create_instance",
-                type=WorkflowType.INTERNAL,
+                name="create_instance_crd",
+                type=WorkflowType.USER,
                 module="styrmin_backend.agent.tasks.orchestration",
-                function="create_instance",
+                function="create_instance_crd",
                 set_directory="/source/backend/",
             ),
         )
@@ -217,10 +217,10 @@ class PrefectCatalogue:
         self.add_workflow_definition(
             action=PrefectAction.UPDATE_INSTANCE,
             workflow=LocalSourceWorkflowDefinition(
-                name="update_instance",
-                type=WorkflowType.INTERNAL,
+                name="update_instance_crd",
+                type=WorkflowType.USER,
                 module="styrmin_backend.agent.tasks.orchestration",
-                function="update_instance",
+                function="update_instance_crd",
                 set_directory="/source/backend/",
             ),
         )
@@ -228,10 +228,10 @@ class PrefectCatalogue:
         self.add_workflow_definition(
             action=PrefectAction.UPGRADE_INSTANCE,
             workflow=LocalSourceWorkflowDefinition(
-                name="upgrade_instance",
-                type=WorkflowType.INTERNAL,
+                name="upgrade_instance_crd",
+                type=WorkflowType.USER,
                 module="styrmin_backend.agent.tasks.orchestration",
-                function="upgrade_instance",
+                function="upgrade_instance_crd",
                 set_directory="/source/backend/",
             ),
         )

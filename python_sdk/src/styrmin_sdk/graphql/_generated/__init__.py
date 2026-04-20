@@ -29,6 +29,7 @@ from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_environment import DeleteEnvironment
 from .deploy import Deploy, DeployDeploy
+from .enums import PodPhase
 from .exceptions import (
     GraphQLClientError,
     GraphQLClientGraphQLError,
@@ -49,9 +50,21 @@ from .get_deployment import (
     GetDeploymentDeploymentApplicationInstance,
     GetDeploymentDeploymentComponents,
 )
+from .get_deployment_pod_statuses import (
+    GetDeploymentPodStatuses,
+    GetDeploymentPodStatusesDeployment,
+    GetDeploymentPodStatusesDeploymentPodStatuses,
+)
 from .get_deployment_services import (
     GetDeploymentServices,
     GetDeploymentServicesDeploymentServices,
+)
+from .get_deployment_status import (
+    GetDeploymentStatus,
+    GetDeploymentStatusDeployment,
+    GetDeploymentStatusDeploymentCrdStatus,
+    GetDeploymentStatusDeploymentCrdStatusConditions,
+    GetDeploymentStatusDeploymentCrdStatusManagedResourceCounts,
 )
 from .get_deployment_timeline import (
     GetDeploymentTimeline,
@@ -69,9 +82,17 @@ from .get_environment_services import (
     GetEnvironmentServices,
     GetEnvironmentServicesEnvironmentServices,
 )
+from .get_pod_statuses import GetPodStatuses, GetPodStatusesPodStatuses
 from .get_restore import GetRestore, GetRestoreRestore
 from .get_task import GetTask, GetTaskTask
-from .input_types import ServiceNameOverride
+from .input_types import (
+    CrdConditionInput,
+    DeploymentPodStatusReport,
+    DeploymentStatusReportInput,
+    ManagedResourceCountsInput,
+    PodStatusInput,
+    ServiceNameOverride,
+)
 from .list_backup_schedules import (
     ListBackupSchedules,
     ListBackupSchedulesBackupSchedules,
@@ -103,6 +124,11 @@ from .load_remote_application_driver_version import (
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs,
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart,
 )
+from .report_deployment_statuses import (
+    ReportDeploymentStatuses,
+    ReportDeploymentStatusesReportDeploymentStatuses,
+)
+from .report_pod_statuses import ReportPodStatuses, ReportPodStatusesReportPodStatuses
 from .run_job import RunJob, RunJobRunJob
 from .start_components import StartComponents, StartComponentsStartComponents
 from .stop_components import StopComponents, StopComponentsStopComponents
@@ -130,6 +156,7 @@ __all__ = [
     "AsyncBaseClient",
     "BaseModel",
     "Client",
+    "CrdConditionInput",
     "CreateBackup",
     "CreateBackupCreateBackup",
     "CreateBackupSchedule",
@@ -150,6 +177,8 @@ __all__ = [
     "DeleteEnvironment",
     "Deploy",
     "DeployDeploy",
+    "DeploymentPodStatusReport",
+    "DeploymentStatusReportInput",
     "GetBackup",
     "GetBackupBackup",
     "GetBackupSchedule",
@@ -162,8 +191,16 @@ __all__ = [
     "GetDeploymentDeployment",
     "GetDeploymentDeploymentApplicationInstance",
     "GetDeploymentDeploymentComponents",
+    "GetDeploymentPodStatuses",
+    "GetDeploymentPodStatusesDeployment",
+    "GetDeploymentPodStatusesDeploymentPodStatuses",
     "GetDeploymentServices",
     "GetDeploymentServicesDeploymentServices",
+    "GetDeploymentStatus",
+    "GetDeploymentStatusDeployment",
+    "GetDeploymentStatusDeploymentCrdStatus",
+    "GetDeploymentStatusDeploymentCrdStatusConditions",
+    "GetDeploymentStatusDeploymentCrdStatusManagedResourceCounts",
     "GetDeploymentTimeline",
     "GetDeploymentTimelineDeploymentTimeline",
     "GetDeploymentTimelineDeploymentTimelineContextDiff",
@@ -174,6 +211,8 @@ __all__ = [
     "GetEnvironmentEnvironmentCluster",
     "GetEnvironmentServices",
     "GetEnvironmentServicesEnvironmentServices",
+    "GetPodStatuses",
+    "GetPodStatusesPodStatuses",
     "GetRestore",
     "GetRestoreRestore",
     "GetTask",
@@ -208,6 +247,13 @@ __all__ = [
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionActions",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart",
+    "ManagedResourceCountsInput",
+    "PodPhase",
+    "PodStatusInput",
+    "ReportDeploymentStatuses",
+    "ReportDeploymentStatusesReportDeploymentStatuses",
+    "ReportPodStatuses",
+    "ReportPodStatusesReportPodStatuses",
     "RunJob",
     "RunJobRunJob",
     "ServiceNameOverride",

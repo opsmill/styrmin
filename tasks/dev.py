@@ -52,7 +52,7 @@ def bootstrap(context: Context, api_url: str = "http://localhost:8000/graphql") 
             "config": {
                 "fqdn_suffix": "styrmin.com",
                 "ingress_class": "traefik",
-                "dedicated_ingress": {"implementation": "traefik", "type": "ingress"},
+                "dedicated_ingress": {"implementation": "traefik", "type": "ingress", "service": {"type": "ClusterIP"}},
                 "runtime_class": "default",
                 "standard_storage": {"storage_class": "local-path"},
             },

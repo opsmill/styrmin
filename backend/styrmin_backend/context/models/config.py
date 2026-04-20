@@ -5,6 +5,7 @@ class IngressServiceConfig(BaseModel):
     """Configuration for the ingress controller's Kubernetes Service.
 
     Attributes:
+        type: The Kubernetes Service type (e.g., "LoadBalancer", "ClusterIP", "NodePort").
         annotations: Annotations to add to the Service (e.g., for LB reuse).
         load_balancer_ip: Static IP for the LoadBalancer.
         external_traffic_policy: External traffic policy (Cluster or Local).
@@ -12,6 +13,7 @@ class IngressServiceConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    type: str = "LoadBalancer"
     annotations: dict[str, str] | None = None
     load_balancer_ip: str | None = None
     external_traffic_policy: str | None = None
@@ -30,7 +32,7 @@ class DedicatedIngressConfig(BaseModel):
 
     implementation: str = "traefik"
     type: str = "ingress"
-    service: IngressServiceConfig | None = None
+    service: IngressServiceConfig = IngressServiceConfig()
 
 
 class StandardStorage(BaseModel):

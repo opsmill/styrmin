@@ -7,7 +7,7 @@ from styrmin_backend.db.models import (
     BackupSchedule,
     Cluster,
     Deployment,
-    DeploymentStatus,
+    DeploymentState,
     Environment,
 )
 from styrmin_backend.repository.backup_schedule import SQLModelBackupScheduleRepository
@@ -34,7 +34,7 @@ async def deployment(session: AsyncSession, environment: Environment) -> Deploym
     dep = Deployment(
         name="test-deployment",
         application_version="1.0.0",
-        status=DeploymentStatus.RUNNING,
+        status=DeploymentState.RUNNING,
         application_driver_version_id=uuid4(),
         environment_id=environment.id,
     )

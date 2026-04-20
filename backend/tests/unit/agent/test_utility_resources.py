@@ -120,7 +120,7 @@ class TestIngressUtilityBuildResources:
         assert len(acl_middlewares) == 1
         acl = acl_middlewares[0]
         assert acl["apiVersion"] == "traefik.io/v1alpha1"
-        assert acl["metadata"]["name"] == f"{RELEASE_REF}-acl"
+        assert acl["metadata"]["name"] == "acl"
         assert acl["metadata"]["namespace"] == NAMESPACE
         assert "ipAllowList" in acl["spec"]
         assert acl["spec"]["ipAllowList"]["sourceRange"] == [
@@ -143,7 +143,7 @@ class TestIngressUtilityBuildResources:
         assert len(auth_middlewares) == 1
         auth = auth_middlewares[0]
         assert auth["apiVersion"] == "traefik.io/v1alpha1"
-        assert auth["metadata"]["name"] == f"{RELEASE_REF}-auth"
+        assert auth["metadata"]["name"] == "auth"
         assert auth["metadata"]["namespace"] == NAMESPACE
         assert auth["spec"]["basicAuth"]["secret"] == "ingress-auth"
         assert auth["spec"]["basicAuth"]["removeHeader"] is True
@@ -160,7 +160,7 @@ class TestIngressUtilityBuildResources:
         assert len(secrets) == 1
         secret = secrets[0]
         assert secret["apiVersion"] == "v1"
-        assert secret["metadata"]["name"] == f"{RELEASE_REF}-ingress-auth"
+        assert secret["metadata"]["name"] == "ingress-auth"
         assert secret["metadata"]["namespace"] == NAMESPACE
         assert secret["type"] == "kubernetes.io/basic-auth"
         assert "username" in secret["data"]
@@ -183,9 +183,7 @@ class TestIngressUtilityBuildResources:
         resources = ingress_utility.build_resources(
             global_context, RELEASE_REF, NAMESPACE
         )
-        netpol = _find_resource(
-            resources, "NetworkPolicy", f"{RELEASE_REF}-default-deny-egress"
-        )
+        netpol = _find_resource(resources, "NetworkPolicy", "default-deny-egress")
         assert netpol is not None
         assert netpol["apiVersion"] == "networking.k8s.io/v1"
         assert netpol["spec"]["policyTypes"] == ["Egress"]
@@ -197,9 +195,7 @@ class TestIngressUtilityBuildResources:
         resources = ingress_utility.build_resources(
             global_context, RELEASE_REF, NAMESPACE
         )
-        netpol = _find_resource(
-            resources, "NetworkPolicy", f"{RELEASE_REF}-default-deny-ingress"
-        )
+        netpol = _find_resource(resources, "NetworkPolicy", "default-deny-ingress")
         assert netpol is not None
         assert netpol["spec"]["policyTypes"] == ["Ingress"]
 
@@ -209,9 +205,7 @@ class TestIngressUtilityBuildResources:
         resources = ingress_utility.build_resources(
             global_context, RELEASE_REF, NAMESPACE
         )
-        netpol = _find_resource(
-            resources, "NetworkPolicy", f"{RELEASE_REF}-traefik-netpolicy-egress"
-        )
+        netpol = _find_resource(resources, "NetworkPolicy", "traefik-netpolicy-egress")
         assert netpol is not None
         assert netpol["spec"]["policyTypes"] == ["Egress"]
 
@@ -221,9 +215,7 @@ class TestIngressUtilityBuildResources:
         resources = ingress_utility.build_resources(
             global_context, RELEASE_REF, NAMESPACE
         )
-        netpol = _find_resource(
-            resources, "NetworkPolicy", f"{RELEASE_REF}-prefect-netpolicy-egress"
-        )
+        netpol = _find_resource(resources, "NetworkPolicy", "prefect-netpolicy-egress")
         assert netpol is not None
         assert netpol["spec"]["policyTypes"] == ["Egress"]
 
@@ -233,9 +225,7 @@ class TestIngressUtilityBuildResources:
         resources = ingress_utility.build_resources(
             global_context, RELEASE_REF, NAMESPACE
         )
-        netpol = _find_resource(
-            resources, "NetworkPolicy", f"{RELEASE_REF}-infrahub-netpolicy-egress"
-        )
+        netpol = _find_resource(resources, "NetworkPolicy", "infrahub-netpolicy-egress")
         assert netpol is not None
         assert netpol["spec"]["policyTypes"] == ["Egress"]
 
@@ -248,14 +238,17 @@ class TestIngressUtilityBuildResources:
         for resource in resources:
             assert resource["metadata"]["namespace"] == NAMESPACE
 
-    def test_all_resources_prefixed_with_release_reference(
+    def test_resource_names_use_bare_template_names(
         self, ingress_utility: IngressUtility, global_context: GlobalContext
     ) -> None:
         resources = ingress_utility.build_resources(
             global_context, RELEASE_REF, NAMESPACE
         )
         for resource in resources:
-            assert resource["metadata"]["name"].startswith(RELEASE_REF)
+            name = resource["metadata"]["name"]
+            assert not name.startswith(f"{RELEASE_REF}-"), (
+                f"Resource {name} should not be prefixed with release reference"
+            )
 
     def test_total_resource_count(
         self, ingress_utility: IngressUtility, global_context: GlobalContext

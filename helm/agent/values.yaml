@@ -1,6 +1,10 @@
-
 ---
 replicaCount: 1
+
+image:
+  repository: styrmin
+  tag: latest
+  pullPolicy: IfNotPresent
 
 imagePullSecrets: []
 nameOverride: ""
@@ -33,26 +37,13 @@ securityContext:
 
 resources:
   limits:
-    cpu: 500m
-    memory: 128Mi
+    cpu: "1"
+    memory: 1Gi
   requests:
-    cpu: 10m
-    memory: 64Mi
+    cpu: 100m
+    memory: 512Mi
 
-livenessProbe:
-  httpGet:
-    path: /healthz
-    port: 8081
-  initialDelaySeconds: 15
-  periodSeconds: 20
-readinessProbe:
-  httpGet:
-    path: /readyz
-    port: 8081
-  initialDelaySeconds: 5
-  periodSeconds: 10
-
-terminationGracePeriodSeconds: 10
+terminationGracePeriodSeconds: 60
 
 nodeSelector: {}
 
@@ -60,14 +51,9 @@ tolerations: []
 
 affinity: {}
 
-prefect-worker:
-  worker:
-    config:
-      workPool: user-work-pool
-    apiConfig: selfHostedServer
-    selfHostedServerApiConfig:
-      apiUrl: http://172.17.0.1:4200/api
-
 agent:
   enabled: true
-
+  workPool: user-work-pool
+  prefectApiUrl: http://prefect-server:4200/api
+  styrminApiUrl: http://styrmin-server:8000
+  extraEnv: []

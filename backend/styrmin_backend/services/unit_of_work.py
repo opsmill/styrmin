@@ -8,6 +8,10 @@ from styrmin_backend.repository.backup_storage_location import (
     BackupStorageLocationRepository,
     SQLModelBackupStorageLocationRepository,
 )
+from styrmin_backend.repository.deployment_status import (
+    DeploymentStatusRepository,
+    SQLModelDeploymentStatusRepository,
+)
 from styrmin_backend.repository.application_driver import (
     ApplicationDriverRepository,
     SQLModelApplicationDriverRepository,
@@ -60,6 +64,10 @@ from styrmin_backend.repository.restore import (
     RestoreRepository,
     SQLModelRestoreRepository,
 )
+from styrmin_backend.repository.pod_status import (
+    PodStatusRepository,
+    SQLModelPodStatusRepository,
+)
 from styrmin_backend.repository.tasks import SQLModelTaskRepository, TaskRepository
 from styrmin_backend.repository.utility import (
     SQLModelUtilityRepository,
@@ -86,6 +94,8 @@ class UnitOfWork(ABC):
     backups: BackupRepository
     restores: RestoreRepository
     backup_schedules: BackupScheduleRepository
+    pod_statuses: PodStatusRepository
+    deployment_statuses: DeploymentStatusRepository
 
     async def __aenter__(self) -> "UnitOfWork":
         return self
@@ -127,6 +137,8 @@ class SqlModelUnitOfWork(UnitOfWork):
     backups: SQLModelBackupRepository
     restores: SQLModelRestoreRepository
     backup_schedules: SQLModelBackupScheduleRepository
+    pod_statuses: SQLModelPodStatusRepository
+    deployment_statuses: SQLModelDeploymentStatusRepository
 
     def __init__(self, session: AsyncSession):
         self.session: AsyncSession = session
@@ -157,6 +169,10 @@ class SqlModelUnitOfWork(UnitOfWork):
         self.backups = SQLModelBackupRepository(session=self.session)
         self.restores = SQLModelRestoreRepository(session=self.session)
         self.backup_schedules = SQLModelBackupScheduleRepository(session=self.session)
+        self.pod_statuses = SQLModelPodStatusRepository(session=self.session)
+        self.deployment_statuses = SQLModelDeploymentStatusRepository(
+            session=self.session
+        )
         return self
 
     async def rollback(self) -> None:

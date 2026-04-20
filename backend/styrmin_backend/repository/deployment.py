@@ -9,11 +9,11 @@ from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.db.models import ApplicationInstance as InstanceModel
 from styrmin_backend.db.models import Component as ComponentModel
 from styrmin_backend.db.models import Deployment as DeploymentModel
-from styrmin_backend.db.models import DeploymentStatus as DeploymentStatusModel
+from styrmin_backend.db.models import DeploymentState as DeploymentStateModel
 from styrmin_backend.db.models import InstanceStatus as InstanceStatusModel
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import Deployment as DeploymentEntity
-from styrmin_backend.domain.models import DeploymentStatus as DeploymentStatusEntity
+from styrmin_backend.domain.models import DeploymentState as DeploymentStateEntity
 from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
 from styrmin_backend.repository.base import BaseRepository
@@ -104,7 +104,7 @@ class SQLModelDeploymentRepository(
             config=deployment.config,
             parameters=deployment.parameters or None,
             internal=deployment.internal,
-            status=DeploymentStatusModel(deployment.status.value),
+            status=DeploymentStateModel(deployment.status.value),
             application_driver_version_id=deployment.application_driver_version_id,
             environment_id=deployment.environment_id,
             components=components,
@@ -138,7 +138,7 @@ class SQLModelDeploymentRepository(
             internal=entity.internal,
             application_driver_version_id=entity.application_driver_version_id,
             environment_id=entity.environment_id,
-            status=DeploymentStatusEntity(entity.status.value),
+            status=DeploymentStateEntity(entity.status.value),
         )
         for component in entity.components:
             deployment.add_component(
@@ -227,7 +227,7 @@ class SQLModelDeploymentRepository(
             internal=entity.internal,
             application_driver_version_id=entity.application_driver_version_id,
             environment_id=entity.environment_id,
-            status=DeploymentStatusEntity(entity.status.value),
+            status=DeploymentStateEntity(entity.status.value),
         )
         for component in entity.components:
             deployment.add_component(

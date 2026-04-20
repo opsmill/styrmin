@@ -337,6 +337,28 @@ class PrefectAction(Enum):
 
 Note: The enum values are used as Prefect deployment tags for lookup.
 
+## CRD-Based Deployment
+
+<!-- Extracted from specs/001-deployment-crd on 2026-04-06 -->
+
+For new deployments, Prefect flows create/update/delete `StyrminDeployment` CRDs instead of directly managing HelmReleases and utility resources. The kopf operator handles all Kubernetes resource lifecycle from the CRD (see [operator.md](operator.md) for details).
+
+**What the Prefect flow does:**
+1. Compute GlobalContext from deployment configuration
+2. Render Helm chart/repository specifications
+3. Serialize context into StyrminDeployment CRD spec
+4. Create/update/delete the CRD via kubernetes-asyncio API
+5. Run driver pre/post hooks (unchanged)
+6. Callback to update task status (unchanged)
+
+**What is no longer done by Prefect:**
+- Direct HelmRelease creation/update
+- Direct utility resource creation/update (`install_utility`, `update_utility`)
+- Namespace label management
+- HelmRelease polling
+
+See ADR-008 for the rationale behind this responsibility shift.
+
 ## Key Files
 
 | File | Purpose |

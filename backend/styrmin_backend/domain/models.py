@@ -52,10 +52,11 @@ class Instance(BaseModel):
         )
 
 
-class DeploymentStatus(str, Enum):
-    """Deployment status enum."""
+class DeploymentState(str, Enum):
+    """Deployment state enum."""
 
     PENDING = "pending"
+    DEPLOYING = "deploying"
     RUNNING = "running"
     FAILED = "failed"
 
@@ -76,7 +77,7 @@ class Deployment(BaseModel):
 
     environment_id: UUID
 
-    status: DeploymentStatus = Field(default=DeploymentStatus.PENDING)
+    status: DeploymentState = Field(default=DeploymentState.PENDING)
 
     _components: Dict[str, Component] = PrivateAttr(default_factory=dict)
 
@@ -117,7 +118,7 @@ class Deployment(BaseModel):
         """Set the active instance for the deployment."""
         self._application_instance = instance
 
-    def set_status(self, status: DeploymentStatus) -> None:
+    def set_status(self, status: DeploymentState) -> None:
         """Set the status of the deployment."""
         self.status = status
 

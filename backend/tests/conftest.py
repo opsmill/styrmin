@@ -23,6 +23,25 @@ from tests.helpers.utils import (
 )
 
 
+_session_failed = False
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--e2e-keep-cluster",
+        action="store_true",
+        default=False,
+        help="Keep the vcluster alive after test failures for debugging",
+    )
+
+
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> None:  # noqa: ARG001
+    """Track whether any test in the session failed."""
+    global _session_failed  # noqa: PLW0603
+    if call.excinfo is not None:
+        _session_failed = True
+
+
 async def load_crds_from_path(kubernetes: kubeclient.ApiClient, path: Path):
     loaded_crd = 0
 
@@ -126,6 +145,15 @@ async def vcluster(
     vcluster_dir = os.environ.get("VCLUSTER_DIR")
 
     def teardown():
+        if request.config.getoption("--e2e-keep-cluster") and _session_failed:
+            print(f"\n{'=' * 60}")
+            print(
+                f"--e2e-keep-cluster: cluster '{cluster_name}' preserved for debugging"
+            )
+            print(f"  export KUBECONFIG={kubeconfig_path}")
+            print(f"  vcluster delete {cluster_name} --driver=docker")
+            print(f"{'=' * 60}\n")
+            return
         delete_cmd = ["vcluster", "delete", cluster_name, "--driver=docker"]
         if vcluster_dir:
             delete_cmd.extend(["--config", vcluster_dir])

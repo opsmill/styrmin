@@ -1,11 +1,9 @@
 """E2E tests for the deployment timeline feature."""
 
-import asyncio
-import time
-
 import pytest
 from styrmin_sdk import StyrminClient
-from styrmin_sdk.exceptions import StyrminError
+
+from tests.e2e.conftest import _wait_for_deployment_running
 
 VALID_TASK_TYPES = {
     "noop",
@@ -67,20 +65,7 @@ async def test_deployment_timeline_after_upgrade(
     # Trigger upgrade to version 0.2.0
     await client.deployments.update_version(deployment_id, "0.2.0")
 
-    # Poll deployment status until ready
-    deadline = time.time() + 180
-    deployment_ready = False
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status in ("deployed", "running"):
-                deployment_ready = True
-                break
-        except StyrminError:
-            pass
-        await asyncio.sleep(10)
-
-    assert deployment_ready, "Deployment did not reach ready state after upgrade"
+    await _wait_for_deployment_running(client, deployment_id)
 
     timeline = await client.deployments.get_timeline(deployment_id)
 

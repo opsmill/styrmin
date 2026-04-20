@@ -57,7 +57,7 @@ async def load_kubernetes_config() -> None:
     settings = config.SETTINGS.kubernetes
     mode = settings.config_mode
 
-    logger.info("Kubernetes config mode: %s", mode.value)
+    logger.debug("Kubernetes config mode: %s", mode.value)
 
     if mode == config.KubernetesConfigMode.INCLUSTER:
         try:

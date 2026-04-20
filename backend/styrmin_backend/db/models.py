@@ -197,8 +197,9 @@ class Component(StyrminModel, table=True):
     deployment: "Deployment" = Relationship(back_populates="components")
 
 
-class DeploymentStatus(str, Enum):
+class DeploymentState(str, Enum):
     PENDING = "pending"
+    DEPLOYING = "deploying"
     RUNNING = "running"
     FAILED = "failed"
 
@@ -214,7 +215,7 @@ class Deployment(StyrminModel, table=True):
     parameters: dict | None = Field(default=None, sa_column=Column(JSON))
     internal: bool = Field(default=False)
 
-    status: DeploymentStatus = Field(sa_column=Column(SQLModelEnum(DeploymentStatus)))
+    status: DeploymentState = Field(sa_column=Column(SQLModelEnum(DeploymentState)))
 
     # ==============
     # Relationships
@@ -262,6 +263,16 @@ class Deployment(StyrminModel, table=True):
     )
 
     tasks: list["Task"] = Relationship(back_populates="deployment")
+
+    pod_statuses: list["PodStatus"] = Relationship(
+        back_populates="deployment",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+    crd_status: Optional["DeploymentStatus"] = Relationship(
+        back_populates="deployment",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan", "uselist": False},
+    )
 
 
 class InstanceStatus(str, Enum):
@@ -369,6 +380,14 @@ class BackupSchedule(StyrminModel, table=True):
     deployment: Deployment = Relationship()
 
 
+class PodPhase(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
 class TaskType(str, Enum):
     NOOP = "noop"
 
@@ -397,3 +416,41 @@ class Task(StyrminModel, table=True):
 
     deployment_id: UUID = Field(foreign_key="deployment.id")
     deployment: Deployment = Relationship(back_populates="tasks")
+
+
+class PodStatus(StyrminModel, table=True):
+    __table_args__ = (UniqueConstraint("deployment_id", "pod_name"),)
+
+    pod_name: str
+    namespace: str
+    phase: PodPhase = Field(sa_column=Column(SQLModelEnum(PodPhase)))
+    ready: bool = Field(default=False)
+    restart_count: int = Field(default=0)
+    container_statuses: list[dict] | None = Field(default=None, sa_column=Column(JSON))
+    node_name: str | None = Field(default=None)
+    started_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
+    last_polled_at: datetime = Field(  # type: ignore[call-overload]
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs={"server_default": func.now()},
+        nullable=False,
+    )
+
+    deployment_id: UUID = Field(foreign_key="deployment.id")
+    deployment: Deployment = Relationship(back_populates="pod_statuses")
+
+
+class DeploymentStatus(StyrminModel, table=True):
+    """Latest StyrminDeployment CRD status snapshot per deployment."""
+
+    deployment_id: UUID = Field(foreign_key="deployment.id", unique=True)
+    phase: str
+    message: str | None = Field(default=None)
+    conditions: list[dict] | None = Field(default=None, sa_column=Column(JSON))
+    managed_resource_counts: dict | None = Field(default=None, sa_column=Column(JSON))
+    last_polled_at: datetime = Field(  # type: ignore[call-overload]
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs={"server_default": func.now()},
+        nullable=False,
+    )
+
+    deployment: Deployment = Relationship(back_populates="crd_status")
