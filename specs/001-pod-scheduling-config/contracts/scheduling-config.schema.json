@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://styrmin.io/schemas/scheduling-config.v1.json",
+  "title": "SchedulingConfig",
+  "description": "Hierarchical pod scheduling & resource configuration. This schema applies at the environment, deployment, and component levels; absent fields inherit from the next shallower level per the platform's merge rules.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "pod_affinity": { "$ref": "#/$defs/AffinityBlock" },
+    "pod_anti_affinity": { "$ref": "#/$defs/AffinityBlock" },
+    "node_affinity": { "$ref": "#/$defs/AffinityBlock" },
+    "topology_spread_constraints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/TopologySpreadConstraint" }
+    },
+    "resources": { "$ref": "#/$defs/ResourceRequirements" },
+    "tolerations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Toleration" }
+    },
+    "runtime_class": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-.]*[a-z0-9])?$" },
+    "inject": { "$ref": "#/$defs/PostRenderInjection" }
+  },
+  "$defs": {
+    "AffinityBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AffinityTerm" },
+          "default": []
+        },
+        "preferred": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/WeightedAffinityTerm" },
+          "default": []
+        },
+        "replace": { "type": "boolean", "default": false }
+      }
+    },
+    "AffinityTerm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "topology_key": { "type": "string" },
+        "namespaces": { "type": "array", "items": { "type": "string" } },
+        "namespace_selector": { "$ref": "#/$defs/LabelSelector" },
+        "label_selector": { "$ref": "#/$defs/LabelSelector" },
+        "deployment_ref": { "$ref": "#/$defs/DeploymentReference" },
+        "match_label_keys": { "type": "array", "items": { "type": "string" } },
+        "mismatch_label_keys": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["topology_key"],
+      "oneOf": [
+        { "required": ["label_selector"] },
+        { "required": ["deployment_ref"] }
+      ]
+    },
+    "WeightedAffinityTerm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "weight": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "term": { "$ref": "#/$defs/AffinityTerm" }
+      },
+      "required": ["weight", "term"]
+    },
+    "DeploymentReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deployment_id": { "type": "string", "format": "uuid" },
+        "deployment_name": { "type": "string" },
+        "components": { "type": "array", "items": { "type": "string" } }
+      },
+      "oneOf": [
+        { "required": ["deployment_id"] },
+        { "required": ["deployment_name"] }
+      ]
+    },
+    "LabelSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "match_labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "match_expressions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LabelSelectorRequirement" }
+        }
+      }
+    },
+    "LabelSelectorRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string" },
+        "operator": {
+          "type": "string",
+          "enum": ["In", "NotIn", "Exists", "DoesNotExist"]
+        },
+        "values": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["key", "operator"]
+    },
+    "TopologySpreadConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_skew": { "type": "integer", "minimum": 1 },
+        "topology_key": { "type": "string" },
+        "when_unsatisfiable": {
+          "type": "string",
+          "enum": ["DoNotSchedule", "ScheduleAnyway"]
+        },
+        "label_selector": { "$ref": "#/$defs/LabelSelector" },
+        "min_domains": { "type": "integer", "minimum": 1 },
+        "node_affinity_policy": { "type": "string", "enum": ["Honor", "Ignore"] },
+        "node_taints_policy": { "type": "string", "enum": ["Honor", "Ignore"] },
+        "match_label_keys": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["max_skew", "topology_key", "when_unsatisfiable"]
+    },
+    "ResourceRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": { "$ref": "#/$defs/ResourceSpec" },
+        "limits": { "$ref": "#/$defs/ResourceSpec" }
+      }
+    },
+    "ResourceSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": { "type": "string", "description": "Parseable Kubernetes quantity, e.g. '100m' or '2'." },
+        "memory": { "type": "string" },
+        "ephemeral_storage": { "type": "string" },
+        "extended": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Hugepages, vendor, or other extended resources keyed by Kubernetes resource name (e.g. 'nvidia.com/gpu', 'hugepages-2Mi')."
+        }
+      }
+    },
+    "Toleration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string" },
+        "operator": { "type": "string", "enum": ["Exists", "Equal"] },
+        "value": { "type": "string" },
+        "effect": {
+          "type": "string",
+          "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"]
+        },
+        "toleration_seconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "PostRenderInjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-feature opt-out flags for the default post-renderer injection. Meaningful at deployment and component scopes only.",
+      "properties": {
+        "pod_affinity": { "type": "boolean", "default": true, "description": "Covers both pod affinity and pod anti-affinity." },
+        "node_affinity": { "type": "boolean", "default": true },
+        "topology_spread": { "type": "boolean", "default": true },
+        "resources": { "type": "boolean", "default": true },
+        "tolerations": { "type": "boolean", "default": true },
+        "runtime_class": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}
