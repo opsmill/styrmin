@@ -50,6 +50,7 @@ class PrefectAction(Enum):
     CREATE_INSTANCE = "orchestrate_instance_creation"
     UPDATE_INSTANCE = "orchestrate_instance_update"
     UPGRADE_INSTANCE = "orchestrate_instance_upgrade"
+    DELETE_INSTANCE = "orchestrate_instance_deletion"
     RUN_JOB = "run_job"
     EXECUTE_BACKUP = "execute_backup"
     EXECUTE_RESTORE = "execute_restore"

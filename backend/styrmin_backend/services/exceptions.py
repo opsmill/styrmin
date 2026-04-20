@@ -164,6 +164,31 @@ class DeploymentNotFoundError(ServiceError):
     default_message = "Deployment not found"
 
 
+class DeploymentAlreadyDeletedError(ServiceError):
+    """The deployment is already in a deletion lifecycle state or tombstoned."""
+
+    error_code = "ALREADY_DELETED"
+    default_message = "Deployment is already being deleted or has already been deleted"
+
+
+class DeploymentMutationInProgressError(ServiceError):
+    """Another workflow is actively mutating the deployment."""
+
+    error_code = "ALREADY_IN_PROGRESS"
+    default_message = (
+        "Another workflow is in flight for this deployment. "
+        "Wait for it to finish before retrying."
+    )
+
+    def __init__(self, active_task_ids: list[str], message: str = "") -> None:
+        self.active_task_ids = active_task_ids
+        super().__init__(message)
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"active_task_ids": self.active_task_ids}
+
+
 class DeploymentNameValidationError(ServiceError):
     """The deployment name is invalid."""
 

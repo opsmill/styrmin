@@ -59,6 +59,16 @@ class DeploymentState(str, Enum):
     DEPLOYING = "deploying"
     RUNNING = "running"
     FAILED = "failed"
+    DELETION_REQUESTED = "deletion_requested"
+    DELETION_IN_PROGRESS = "deletion_in_progress"
+    DELETED = "deleted"
+
+
+class BackupDisposition(str, Enum):
+    """Operator's choice for what happens to backups when a deployment is deleted."""
+
+    RETAIN = "retain"
+    REMOVE = "remove"
 
 
 class Deployment(BaseModel):
@@ -78,6 +88,7 @@ class Deployment(BaseModel):
     environment_id: UUID
 
     status: DeploymentState = Field(default=DeploymentState.PENDING)
+    deleted_at: datetime | None = Field(default=None)
 
     _components: Dict[str, Component] = PrivateAttr(default_factory=dict)
 

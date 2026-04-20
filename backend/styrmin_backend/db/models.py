@@ -202,6 +202,9 @@ class DeploymentState(str, Enum):
     DEPLOYING = "deploying"
     RUNNING = "running"
     FAILED = "failed"
+    DELETION_REQUESTED = "deletion_requested"
+    DELETION_IN_PROGRESS = "deletion_in_progress"
+    DELETED = "deleted"
 
 
 class Deployment(StyrminModel, table=True):
@@ -216,6 +219,12 @@ class Deployment(StyrminModel, table=True):
     internal: bool = Field(default=False)
 
     status: DeploymentState = Field(sa_column=Column(SQLModelEnum(DeploymentState)))
+
+    deleted_at: datetime | None = Field(  # type: ignore[call-overload]
+        sa_type=DateTime(timezone=True),
+        default=None,
+        index=True,
+    )
 
     # ==============
     # Relationships

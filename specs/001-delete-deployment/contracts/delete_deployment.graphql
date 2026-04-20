@@ -1,0 +1,62 @@
+# GraphQL contract — Delete Deployment
+#
+# This file is the source of truth for the `deleteDeployment` mutation
+# shape. Implementation must produce the same signature in
+# `backend/styrmin_backend/api/schema/mutation.py`.
+#
+# Execution model: asynchronous. The mutation returns the accepted
+# Task; callers observe teardown via the deployment's lifecycle state
+# and the Task's status on subsequent queries.
+
+"""
+Operator's choice for what happens to backups associated with the
+deployment on deletion. Required — no default is applied.
+"""
+enum BackupDisposition {
+  """Backups survive the deletion and remain associated with the
+  tombstoned deployment for continued restore access."""
+  RETAIN
+
+  """Backups are removed as part of teardown. The deployment reaches
+  the DELETED terminal state only after all backup removals succeed."""
+  REMOVE
+}
+
+extend type Mutation {
+  """
+  Request deletion of the identified deployment.
+
+  Semantics:
+  - Soft-deletes the deployment record (tombstone); record remains
+    viewable for audit with its full timeline.
+  - Creates a `DELETE_INSTANCE` Task and launches the teardown
+    workflow. Returns immediately.
+  - Tears down all Styrmin-owned Kubernetes resources via the
+    existing reconciliation / operator flow.
+  - Backups are retained or removed per `backupDisposition`.
+
+  Errors (via StructuredErrorExtension `extensions.code`):
+  - `DEPLOYMENT_NOT_FOUND` — unknown `deploymentId`.
+  - `DEPLOYMENT_ALREADY_DELETED` — deployment is already in a
+    deletion lifecycle state.
+  - `DEPLOYMENT_MUTATION_IN_PROGRESS` — another workflow is active
+    for this deployment (including in-flight backup tasks).
+  """
+  deleteDeployment(
+    deploymentId: UUID!
+    backupDisposition: BackupDisposition!
+  ): Task!
+}
+
+# Listing: existing active-deployment query gains an optional flag.
+extend type Environment {
+  """
+  Deployments in this environment.
+
+  - Default (`includeDeleted: false`): returns only non-tombstoned
+    deployments — preserves today's behaviour.
+  - `includeDeleted: true`: includes tombstoned deployments (DELETED
+    state) for audit.
+  """
+  deployments(includeDeleted: Boolean = false): [Deployment!]!
+}

@@ -11,11 +11,16 @@ from styrmin_backend.db.models import Component as ComponentModel
 from styrmin_backend.db.models import Deployment as DeploymentModel
 from styrmin_backend.db.models import DeploymentState as DeploymentStateModel
 from styrmin_backend.db.models import InstanceStatus as InstanceStatusModel
+from styrmin_backend.db.models import Task as TaskModel
+from styrmin_backend.db.models import TaskStatus as TaskStatusModel
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import Deployment as DeploymentEntity
 from styrmin_backend.domain.models import DeploymentState as DeploymentStateEntity
 from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
+from styrmin_backend.domain.models import Task as TaskEntity
+from styrmin_backend.domain.models import TaskStatus as TaskStatusEntity
+from styrmin_backend.domain.models import TaskType as TaskTypeEntity
 from styrmin_backend.repository.base import BaseRepository
 from styrmin_backend.repository.sqlmodel import BaseSQLModelRepository
 
@@ -53,6 +58,12 @@ class DeploymentRepository(BaseRepository[DeploymentModel], ABC):
     ) -> DeploymentEntity | None:
         raise NotImplementedError(
             "The find_internal_by_environment method must be implemented in the subclass."
+        )
+
+    @abstractmethod
+    async def list_active_tasks(self, deployment_id: UUID) -> list[TaskEntity]:
+        raise NotImplementedError(
+            "The list_active_tasks method must be implemented in the subclass."
         )
 
 
@@ -202,6 +213,33 @@ class SQLModelDeploymentRepository(
             return None
 
         return self._to_entity(entity)
+
+    async def list_active_tasks(self, deployment_id: UUID) -> list[TaskEntity]:
+        """Return Tasks for this deployment that are still in flight.
+
+        A Task is considered active when its status is PENDING or RUNNING.
+        Used by mutation services to guard against concurrent workflows.
+        """
+        active_statuses = (TaskStatusModel.PENDING, TaskStatusModel.RUNNING)
+        result = await self.session.exec(
+            select(TaskModel).where(
+                TaskModel.deployment_id == deployment_id,
+                TaskModel.status.in_(active_statuses),  # type: ignore[attr-defined]
+            )
+        )
+        return [
+            TaskEntity(
+                id=task.id,
+                status=TaskStatusEntity(task.status.value),
+                type=TaskTypeEntity(task.type.value),
+                message=task.message,
+                prefect_flow_run_id=task.prefect_flow_run_id,
+                deployment_id=task.deployment_id,
+                created_on=task.created_on,
+                updated_on=task.updated_on,
+            )
+            for task in result.all()
+        ]
 
     async def find_internal_by_environment(
         self, environment_id: UUID
