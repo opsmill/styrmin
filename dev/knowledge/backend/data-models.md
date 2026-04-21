@@ -223,6 +223,12 @@ class DeploymentState(str, Enum):
     DEPLOYING = "deploying"
     RUNNING = "running"
     FAILED = "failed"
+    # Deletion lifecycle — set when delete_deployment() is called.
+    # DELETED is a tombstone terminal state; the record persists
+    # with deleted_at populated so the timeline remains viewable.
+    DELETION_REQUESTED = "deletion_requested"
+    DELETION_IN_PROGRESS = "deletion_in_progress"
+    DELETED = "deleted"
 
 class InstanceStatus(str, Enum):
     PENDING = "pending"
