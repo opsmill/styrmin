@@ -29,6 +29,7 @@ class GetDeploymentTimelineDeploymentTimelineTask(BaseModel):
     type_: str = Field(alias="type")
     status: str
     message: Optional[str]
+    parameters: Optional[Any]
     created_on: Optional[datetime] = Field(alias="createdOn")
     updated_on: Optional[datetime] = Field(alias="updatedOn")
 

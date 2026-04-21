@@ -755,6 +755,7 @@ class Client(AsyncBaseClient):
                   type
                   status
                   message
+                  parameters
                   createdOn
                   updatedOn
                 }

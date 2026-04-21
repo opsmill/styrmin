@@ -747,6 +747,7 @@ export type Task = {
   deploymentId?: Maybe<Scalars['UUID']['output']>;
   id: Scalars['UUID']['output'];
   message?: Maybe<Scalars['String']['output']>;
+  parameters?: Maybe<Scalars['JSON']['output']>;
   status: Scalars['String']['output'];
   type: Scalars['String']['output'];
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
@@ -874,7 +875,7 @@ export type GetDeploymentTimelineQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentTimelineQuery = { __typename?: 'Query', deploymentTimeline: Array<{ __typename?: 'DeploymentTimelineEntry', applicationVersion?: string | null, task: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, createdOn?: any | null, updatedOn?: any | null }, contextDiff?: { __typename?: 'ContextDiff', changes: Array<{ __typename?: 'ContextChange', path: string, action: string, oldValue?: Record<string, unknown> | null, newValue?: Record<string, unknown> | null }> } | null }> };
+export type GetDeploymentTimelineQuery = { __typename?: 'Query', deploymentTimeline: Array<{ __typename?: 'DeploymentTimelineEntry', applicationVersion?: string | null, task: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, parameters?: Record<string, unknown> | null, createdOn?: any | null, updatedOn?: any | null }, contextDiff?: { __typename?: 'ContextDiff', changes: Array<{ __typename?: 'ContextChange', path: string, action: string, oldValue?: Record<string, unknown> | null, newValue?: Record<string, unknown> | null }> } | null }> };
 
 export type GetDriverQueryVariables = Exact<{
   applicationDriverId: Scalars['UUID']['input'];
@@ -1433,6 +1434,7 @@ export const GetDeploymentTimelineDocument = `
       type
       status
       message
+      parameters
       createdOn
       updatedOn
     }

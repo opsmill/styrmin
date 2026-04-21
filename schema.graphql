@@ -417,6 +417,7 @@ type Task {
   type: String!
   status: String!
   message: String
+  parameters: JSON
   deploymentId: UUID
   createdOn: DateTime
   updatedOn: DateTime

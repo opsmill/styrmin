@@ -5,6 +5,7 @@ query GetDeploymentTimeline($deploymentId: UUID!) {
       type
       status
       message
+      parameters
       createdOn
       updatedOn
     }

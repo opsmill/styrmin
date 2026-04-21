@@ -835,11 +835,51 @@ async def delete_deployment(
                 active_task_ids=[str(task.id) for task in active_tasks],
             )
 
+        # Resolve cluster-side teardown targets from the active instance's
+        # context. If the deployment never produced an instance (e.g.,
+        # it was deleted while still PENDING) these stay None and the
+        # flow skips the K8s work.
+        release_reference: str | None = None
+        namespace: str | None = None
+        active_instance = deployment.active_instance
+        if active_instance is not None:
+            release_reference = active_instance.context.instance.release_reference
+            namespace = active_instance.context.instance.namespace
+
+        # REMOVE disposition: drop every backup (and its restores)
+        # attached to any of this deployment's historical instances,
+        # inside the same UoW so failures roll the whole thing back.
+        # Backup rows carry metadata only; the underlying Velero /
+        # object-store artefacts are cleaned up by the existing
+        # backup-service semantics that the row represents.
+        removed_backup_count = 0
+        if backup_disposition == BackupDisposition.REMOVE:
+            instances = await uow.application_instances.find_by_deployment(
+                deployment_id=deployment.id,
+            )
+            for instance in instances:
+                backups = await uow.backups.get_by_instance_id(
+                    instance_id=instance.id,
+                )
+                for backup in backups:
+                    restores = await uow.restores.get_by_backup_id(backup.id)
+                    for restore in restores:
+                        await uow.restores.delete(restore)
+                    await uow.backups.delete(backup)
+                    removed_backup_count += 1
+            logger.info(
+                "Removed {} backup(s) across {} instance(s) for deployment_id={}",
+                removed_backup_count,
+                len(instances),
+                deployment_id,
+            )
+
         deployment.set_status(DeploymentState.DELETION_REQUESTED)
 
         task = Task.create(
             type=TaskType.DELETE_INSTANCE,
             deployment_id=deployment.id,
+            parameters={"backup_disposition": backup_disposition.value},
         )
 
         flow_info = await prefect_manager.run_action(
@@ -847,6 +887,8 @@ async def delete_deployment(
             parameters={
                 "task_id": task.id,
                 "deployment_id": deployment.id,
+                "release_reference": release_reference,
+                "namespace": namespace,
                 "backup_disposition": backup_disposition.value,
             },
         )

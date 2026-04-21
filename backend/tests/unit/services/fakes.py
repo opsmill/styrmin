@@ -413,6 +413,7 @@ class FakeUnitOfWork(UnitOfWork):
     application_drivers: FakeApplicationDriverRepository  # type: ignore[assignment]
     application_driver_versions: FakeApplicationRepository  # type: ignore[assignment]
     instances: FakeApplicationInstanceRepository
+    application_instances: FakeApplicationInstanceRepository  # type: ignore[assignment]
     actions: FakeActionRepository  # type: ignore[assignment]
     tasks: FakeTaskRepository  # type: ignore[assignment]
     deployments: FakeDeploymentRepository  # type: ignore[assignment]
@@ -455,6 +456,11 @@ class FakeUnitOfWork(UnitOfWork):
         )
         self.application_driver_versions = application_driver_versions
         self.instances = instances
+        # The real UoW exposes the same repository as
+        # ``application_instances``; the fake kept the legacy
+        # ``instances`` name. Alias both to the same object so tests
+        # and services can use either.
+        self.application_instances = instances
         self.actions = actions
         self.tasks = tasks
         self.deployments = deployments or FakeDeploymentRepository()

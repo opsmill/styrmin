@@ -6,6 +6,14 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from styrmin_backend.db.models import (
+    ApplicationInstance as ApplicationInstanceDBModel,
+    Backup as BackupDBModel,
+    BackupStatus,
+    InstanceStatus,
+    Restore as RestoreDBModel,
+    RestoreStatus,
+)
 from styrmin_backend.domain.models import (
     BackupDisposition,
     Deployment as DeploymentEntity,
@@ -20,7 +28,60 @@ from styrmin_backend.services.exceptions import (
     DeploymentMutationInProgressError,
     DeploymentNotFoundError,
 )
+from styrmin_backend.context.models.config import (
+    ClusterConfig,
+    DeploymentConfig,
+    EnvironmentConfig,
+    ResolvedConfig,
+)
+from styrmin_backend.context.models.contexts import (
+    ApplicationContext,
+    ClusterContext,
+    DeploymentContext,
+    EnvironmentContext,
+    GlobalContext,
+    InstanceContext,
+)
+from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
+from styrmin_backend.domain.models import Instance as InstanceEntity
+from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
 from styrmin_backend.workflows.models import PrefectAction, WorkflowInfo
+
+
+def _make_instance(deployment_id: UUID, namespace: str, release: str) -> InstanceEntity:
+    context = GlobalContext(
+        cluster=ClusterContext(config=ClusterConfig()),
+        environment=EnvironmentContext(name="env", config=EnvironmentConfig()),
+        deployment=DeploymentContext(config=DeploymentConfig()),
+        instance=InstanceContext(
+            config=ResolvedConfig(),
+            deployment_id=deployment_id,
+            namespace=namespace,
+            release_reference=release,
+        ),
+        app=ApplicationContext(
+            name="app",
+            version="1.0.0",
+            helm=HelmInfo(
+                chart=ChartInfo(
+                    id=uuid4(),
+                    name="chart",
+                    version="0.1.0",
+                    values_template="",
+                ),
+                repository=RepositoryInfo(id=uuid4(), url="https://example.com"),
+            ),
+        ),
+    )
+    return InstanceEntity(
+        id=uuid4(),
+        name="inst",
+        application_version="1.0.0",
+        status=InstanceStatusEntity.RUNNING,
+        deployment_id=deployment_id,
+        application_driver_version_id=uuid4(),
+        context=context,
+    )
 
 
 @pytest.fixture
@@ -67,6 +128,9 @@ async def test_delete_deployment_happy_path(
     assert task.status == TaskStatus.PENDING
     assert task.prefect_flow_run_id == flow_run_id
     assert task.deployment_id == seeded_deployment.id
+    # backup_disposition is persisted on the task so the timeline can
+    # surface it even after the callback overwrites task.message.
+    assert task.parameters == {"backup_disposition": "retain"}
 
     # Deployment transitioned to DELETION_REQUESTED
     assert uow.deployments._deployments[0].status == DeploymentState.DELETION_REQUESTED
@@ -75,8 +139,12 @@ async def test_delete_deployment_happy_path(
     prefect_manager_mock.run_action.assert_awaited_once()
     call_kwargs = prefect_manager_mock.run_action.await_args.kwargs
     assert call_kwargs["action"] == PrefectAction.DELETE_INSTANCE
-    assert call_kwargs["parameters"]["deployment_id"] == seeded_deployment.id
-    assert call_kwargs["parameters"]["backup_disposition"] == "retain"
+    params = call_kwargs["parameters"]
+    assert params["deployment_id"] == seeded_deployment.id
+    assert params["backup_disposition"] == "retain"
+    # No active instance on this seeded deployment — no cluster targets
+    assert params["release_reference"] is None
+    assert params["namespace"] is None
     # UoW committed
     assert uow.committed is True
 
@@ -148,13 +216,63 @@ async def test_delete_deployment_rejects_when_workflow_in_flight(
     assert uow.deployments._deployments[0].status == DeploymentState.RUNNING
 
 
-async def test_delete_deployment_propagates_backup_disposition_remove(
+async def test_delete_deployment_remove_deletes_backups_and_restores(
     uow, prefect_manager_mock, mocker, seeded_deployment
 ):
-    """REMOVE disposition is passed through to the Prefect flow
-    parameters (actual backup teardown is handled by the flow)."""
+    """REMOVE disposition deletes every Backup (and its Restores)
+    attached to any ApplicationInstance of the deployment. The Prefect
+    flow receives ``backup_disposition=remove`` as a breadcrumb even
+    though the iteration has already happened server-side."""
     _, info = _stub_flow(mocker)
     prefect_manager_mock.run_action = mocker.AsyncMock(return_value=info)
+
+    # Two historical instances, three backups total (2 + 1), one restore
+    instance_a = ApplicationInstanceDBModel(
+        id=uuid4(),
+        name="a",
+        application_version="1.0.0",
+        status=InstanceStatus.RUNNING,
+        deployment_id=seeded_deployment.id,
+        application_driver_version_id=uuid4(),
+    )
+    instance_b = ApplicationInstanceDBModel(
+        id=uuid4(),
+        name="b",
+        application_version="1.1.0",
+        status=InstanceStatus.RUNNING,
+        deployment_id=seeded_deployment.id,
+        application_driver_version_id=uuid4(),
+    )
+    uow.instances.models.extend([instance_a, instance_b])
+
+    backup_a1 = BackupDBModel(
+        id=uuid4(),
+        name="b-a-1",
+        status=BackupStatus.COMPLETED,
+        instance_id=instance_a.id,
+    )
+    backup_a2 = BackupDBModel(
+        id=uuid4(),
+        name="b-a-2",
+        status=BackupStatus.COMPLETED,
+        instance_id=instance_a.id,
+    )
+    backup_b1 = BackupDBModel(
+        id=uuid4(),
+        name="b-b-1",
+        status=BackupStatus.COMPLETED,
+        instance_id=instance_b.id,
+    )
+    uow.backups.models.extend([backup_a1, backup_a2, backup_b1])
+
+    restore_a1 = RestoreDBModel(
+        id=uuid4(),
+        name="r-a-1",
+        status=RestoreStatus.COMPLETED,
+        target_namespace="ns",
+        backup_id=backup_a1.id,
+    )
+    uow.restores.models.append(restore_a1)
 
     await delete_deployment(
         deployment_id=seeded_deployment.id,
@@ -162,5 +280,71 @@ async def test_delete_deployment_propagates_backup_disposition_remove(
         backup_disposition=BackupDisposition.REMOVE,
     )
 
+    # Every backup + restore is gone
+    assert uow.backups.models == []
+    assert uow.restores.models == []
+    # Flow still receives the breadcrumb disposition
     params = prefect_manager_mock.run_action.await_args.kwargs["parameters"]
     assert params["backup_disposition"] == "remove"
+
+
+async def test_delete_deployment_retain_keeps_backups(
+    uow, prefect_manager_mock, mocker, seeded_deployment
+):
+    """RETAIN disposition must not touch backup rows."""
+    _, info = _stub_flow(mocker)
+    prefect_manager_mock.run_action = mocker.AsyncMock(return_value=info)
+
+    instance = ApplicationInstanceDBModel(
+        id=uuid4(),
+        name="i",
+        application_version="1.0.0",
+        status=InstanceStatus.RUNNING,
+        deployment_id=seeded_deployment.id,
+        application_driver_version_id=uuid4(),
+    )
+    uow.instances.models.append(instance)
+
+    backup = BackupDBModel(
+        id=uuid4(),
+        name="b",
+        status=BackupStatus.COMPLETED,
+        instance_id=instance.id,
+    )
+    uow.backups.models.append(backup)
+
+    await delete_deployment(
+        deployment_id=seeded_deployment.id,
+        uow=uow,
+        backup_disposition=BackupDisposition.RETAIN,
+    )
+
+    assert uow.backups.models == [backup]
+
+
+async def test_delete_deployment_passes_cluster_targets_from_active_instance(
+    uow, prefect_manager_mock, mocker, seeded_deployment
+):
+    """When the deployment has an active instance, the flow parameters
+    include the release_reference + namespace so the flow can issue
+    the CRD delete against the right target."""
+    _, info = _stub_flow(mocker)
+    prefect_manager_mock.run_action = mocker.AsyncMock(return_value=info)
+
+    seeded_deployment.set_active_instance(
+        _make_instance(
+            deployment_id=seeded_deployment.id,
+            namespace="styrmin-demo",
+            release="demo-1",
+        )
+    )
+
+    await delete_deployment(
+        deployment_id=seeded_deployment.id,
+        uow=uow,
+        backup_disposition=BackupDisposition.RETAIN,
+    )
+
+    params = prefect_manager_mock.run_action.await_args.kwargs["parameters"]
+    assert params["namespace"] == "styrmin-demo"
+    assert params["release_reference"] == "demo-1"

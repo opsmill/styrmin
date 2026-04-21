@@ -7,6 +7,7 @@ import strawberry
 
 from styrmin_backend.api.definitions.deployment.model import Deployment
 from styrmin_backend.api.resolvers import resolve_related
+from styrmin_backend.api.scalars import JSON
 from styrmin_backend.domain.models import Task as TaskEntity
 from styrmin_backend.services.exceptions import DeploymentNotFoundError
 
@@ -17,6 +18,7 @@ class Task:
     type: str
     status: str
     message: str | None = None
+    parameters: JSON | None = None
     deployment_id: UUID | None = None
     created_on: datetime | None = None
     updated_on: datetime | None = None
@@ -45,6 +47,7 @@ class Task:
             instance=instance,
             deployment_id=instance.deployment_id,
             message=instance.message,
+            parameters=instance.parameters,
             created_on=instance.created_on,
             updated_on=instance.updated_on,
         )

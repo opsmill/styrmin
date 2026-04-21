@@ -235,6 +235,7 @@ class SQLModelDeploymentRepository(
                 status=TaskStatusEntity(task.status.value),
                 type=TaskTypeEntity(task.type.value),
                 message=task.message,
+                parameters=task.parameters,
                 prefect_flow_run_id=task.prefect_flow_run_id,
                 deployment_id=task.deployment_id,
                 created_on=task.created_on,

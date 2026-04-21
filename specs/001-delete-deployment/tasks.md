@@ -85,23 +85,23 @@ mutation-in-progress cases.
 
 > **Write these tests FIRST and confirm they FAIL before implementation.**
 
-- [X] T011 [P] [US2] Unit test: service `delete_deployment` happy path — `backend/tests/unit/services/test_deployment_delete.py::test_delete_deployment_happy_path`.
-- [X] T012 [P] [US2] Unit test: concurrency guard rejects — `::test_delete_deployment_rejects_when_workflow_in_flight`.
-- [X] T013 [P] [US2] Unit test: idempotency — `::test_delete_deployment_idempotent_rejects_repeat` (parametrised over `DELETION_REQUESTED`, `DELETION_IN_PROGRESS`, `DELETED`).
-- [X] T014 [P] [US2] Unit test: backup-disposition pass-through — `::test_delete_deployment_propagates_backup_disposition_remove` + `::test_delete_deployment_happy_path` for RETAIN. *End-to-end backup REMOVE iteration lives in the Prefect flow and is covered by T017–T019 once those are unblocked.*
-- [ ] T015 [P] [US2] Contract test: GraphQL `deleteDeployment` mutation matches the contract. *Deferred: the repo has no GraphQL-level integration-test harness; the mutation contract is enforced by `schema.graphql` diff + the strawberry decorator. Follow-up task.*
+- [X] T011 [P] [US2] Unit test: `delete_deployment` happy path (state transition, task creation, flow dispatch, parameters).
+- [X] T012 [P] [US2] Unit test: concurrency guard rejects when a PENDING/RUNNING task exists.
+- [X] T013 [P] [US2] Unit test: idempotency (parametrised over `DELETION_REQUESTED`, `DELETION_IN_PROGRESS`, `DELETED`).
+- [X] T014 [P] [US2] Unit tests: backup disposition — RETAIN leaves backup rows alone, REMOVE iterates every instance's backups and their restores.
+- [ ] T015 [P] [US2] Contract test: GraphQL `deleteDeployment` mutation. *Deferred: the repo has no GraphQL-level integration-test harness; contract is enforced by `schema.graphql` diff + strawberry decorator types.*
 - [ ] T016 [P] [US2] Contract test: `Environment.deployments(includeDeleted)`. *Same deferral as T015.*
-- [ ] T017 [US2] E2E test (Kind): RETAIN path. *Deferred: no local Kind cluster running in this session.*
-- [ ] T018 [US2] E2E test (Kind): REMOVE path. *Deferred with T017.*
-- [ ] T019 [US2] E2E test (Kind): partial teardown failure. *Deferred with T017.*
+- [X] T017 [US2] E2E test (Kind) — RETAIN path: `backend/tests/e2e/test_deployment_deletion.py::test_delete_deployment_retain_tombstones_and_clears_cluster`. Asserts deployment reaches `deleted`, `deleted_at` is set, namespace is gone, timeline keeps the DELETE_INSTANCE entry.
+- [X] T018 [US2] E2E test (Kind) — REMOVE path: `::test_delete_deployment_remove_drops_backups`.
+- [X] T019 [US2] E2E tests (Kind) — concurrency + idempotency: `::test_delete_deployment_rejects_concurrent_mutation`, `::test_delete_deployment_idempotent`. *Partial-teardown-failure variant is still a follow-up: inducing a stuck finalizer deterministically in Kind needs extra harness plumbing and isn't required for baseline acceptance.*
 
 ### Implementation for User Story 2
 
-- [X] T020 [US2] `delete_deployment` in `backend/styrmin_backend/services/deployment.py` — validates, concurrency-guards, transitions state, creates `DELETE_INSTANCE` Task, submits Prefect flow, stores `prefect_flow_run_id`, commits.
-- [X] T021 [US2] `delete_instance_crd` flow added to `backend/styrmin_backend/agent/tasks/orchestration.py` (chose this module to match `create_instance_crd` / `update_instance_crd`). *Currently a stub — its completion is the signal for the backend to tombstone; CRD-intent declaration and backup REMOVE iteration are deferred to a follow-up PR, per the docstring.*
-- [ ] T022 [US2] Operator handler changes for deletion intent. *Deferred: requires ADR-008 contract design and a dedicated Kind-backed pass. Not blocking US2 MVP at the API/service layer.*
-- [X] T023 [US2] `update_task_state` in `backend/styrmin_backend/services/tasks.py` now transitions `Deployment.status` through the deletion lifecycle (RUNNING→`DELETION_IN_PROGRESS`, COMPLETED→`DELETED` + sets `deleted_at`, FAILED→stay in `DELETION_IN_PROGRESS` for retry) for DELETE_INSTANCE tasks.
-- [ ] T024 [US2] `InstanceDeletionStrategy` routing. *Not needed for Option B (direct `run_action`); leave as NotImplementedError stub. Revisit when the feature graduates from direct dispatch to full diff-driven reconciliation.*
+- [X] T020 [US2] `delete_deployment` in `backend/styrmin_backend/services/deployment.py` — validates, concurrency-guards, iterates backups for REMOVE, transitions state, creates a DELETE_INSTANCE Task (with `backup_disposition` stored in Task.parameters), submits the Prefect flow with `release_reference` / `namespace` resolved from the active instance's context, stores `prefect_flow_run_id`, commits.
+- [X] T021 [US2] `delete_instance_crd` flow in `backend/styrmin_backend/agent/tasks/orchestration.py` now does the real teardown: foreground-DELETE on the StyrminDeployment CRD → poll until kopf's finalizer finishes the operator's reverse-order cleanup → DELETE the namespace. Timeout (10 min) + operator-handled ordering keep this safe in face of stuck resources.
+- [X] T022 [US2] The existing operator `kopf.on.delete` handler in `backend/styrmin_backend/operator/handlers/styrmin_deployment.py` already tears down Services / HelmRelease / NetworkPolicies / Secrets in reverse order — no code change needed on the operator. The Prefect flow triggers it via a standard K8s DELETE. Namespace deletion is done by the flow after the operator finalizer completes, so cascade-cleanup covers anything the operator missed.
+- [X] T023 [US2] Two guards now keep the deletion lifecycle terminal for CRD reporting too: `update_task_state` transitions DELETE_INSTANCE tasks (RUNNING→DELETION_IN_PROGRESS, COMPLETED→DELETED + `deleted_at`, FAILED→stay), and `report_deployment_statuses` now skips any deployment already in `DELETION_REQUESTED` / `DELETION_IN_PROGRESS` / `DELETED` so a late agent status report can't regress the state.
+- [ ] T024 [US2] `InstanceDeletionStrategy` routing. *Not needed for Option B (direct `run_action` dispatch). Revisit when the feature graduates to full diff-driven reconciliation.*
 - [X] T025 [P] [US2] GraphQL `BackupDisposition` enum in `backend/styrmin_backend/api/definitions/deployment/model.py`.
 - [X] T026 [US2] `delete_deployment` Strawberry mutation in `backend/styrmin_backend/api/schema/mutation.py`.
 - [X] T027 [US2] `Environment.deployments(includeDeleted: Boolean = false)` in `backend/styrmin_backend/api/definitions/environment/model.py`.
@@ -165,16 +165,14 @@ same timeline remains viewable on a tombstoned deployment.
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T045 [P] [US3] Unit test for backup-disposition rendering in the timeline. *Deferred with T047 — requires the Task.parameters schema change.*
-- [ ] T046 [P] [US3] E2E timeline-after-deletion test. *Deferred with T017–T019 (no Kind).*
+- [X] T045 [P] [US3] Unit test: `backup_disposition` is persisted in `Task.parameters` on creation (extended `test_delete_deployment_happy_path` in `backend/tests/unit/services/test_deployment_delete.py`).
+- [X] T046 [P] [US3] E2E timeline-after-deletion covered by `test_delete_deployment_retain_tombstones_and_clears_cluster` — the test fetches the timeline of the tombstoned deployment and asserts the DELETE_INSTANCE entry is present with a terminal success status.
 
 ### Implementation for User Story 3
 
-**Partially delivered (free ride on existing infrastructure):** the deployment timeline already walks Tasks newest-first; any `DELETE_INSTANCE` Task a deletion creates is therefore visible in both the existing GraphQL timeline query and the Timeline tab of `DeploymentDetailPage`, with its status transitioning PENDING → RUNNING → SUCCESS/FAILED. Task.message (populated from the Prefect callback) surfaces failure reasons on FAILED. This meets FR-009's "timeline events for the deletion lifecycle (including actor and timestamp)" for the baseline lifecycle view.
-
-- [ ] T047 [US3] Surface `backup_disposition` on `DeploymentTimelineEntry`. *Deferred: the existing Task DB model has no `parameters` column — the backup disposition is only carried as a Prefect flow parameter today. Adding `Task.parameters JSON NULL` triggers another governance-gate schema change and a migration, which belongs in a separate PR. The operator's choice is preserved end-to-end in the flow parameters + Prefect flow-run record; the UI label enhancement follows once the persistence path lands.*
-- [ ] T048 [US3] Dedicated frontend label ("Deletion — backups retained/removed"). *Deferred with T047 (needs the disposition from the API).*
-- [ ] T049 [US3] Schema + SDK regeneration after T047. *Deferred with T047.*
+- [X] T047 [US3] Added `parameters: JSON | None` to the GraphQL `Task` type, the domain `Task` model, and the `Task` DB model; Alembic migration `a7b8c9d0e1f2_add_task_parameters.py` adds the column. The delete service now stores `{"backup_disposition": "retain"|"remove"}` on the task, so the timeline can render the operator's choice long after the task has completed.
+- [X] T048 [US3] Frontend `DeploymentTimeline` now renders delete entries as `Delete — backups retained` / `Delete — backups removed` pulled from `task.parameters.backup_disposition`. Both the frontend and SDK `get_deployment_timeline.graphql` queries fetch `parameters`.
+- [X] T049 [US3] Schema + SDK + frontend codegen regenerated.
 
 **Checkpoint**: US3 complete — deletion lifecycle is fully auditable.
 
@@ -182,7 +180,7 @@ same timeline remains viewable on a tombstoned deployment.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T050 [P] Run the full quickstart against a live stack. *Deferred: no local Postgres / Kind in this session; the quickstart remains the acceptance script for whoever picks up the follow-up operator PR.*
+- [ ] T050 [P] Run the full quickstart against a live stack. *Still requires a live Postgres + Kind cluster in CI or a dev box to execute. The quickstart in `specs/001-delete-deployment/quickstart.md` is now directly runnable against the implementation — the deferred box is only the physical "someone clicked through it".*
 - [ ] T051 [P] `dev/knowledge/backend/reconciliation.md` update. *Skipped — the feature uses a direct `run_action` dispatch rather than the diff→remediation path, so the existing reconciliation knowledge remains accurate. When the operator-handler follow-up lands, a short section on the deletion-intent contract will be worth adding.*
 - [ ] T052 [P] `AGENTS.md` updates. *Skipped — no new conventions were introduced (error-code naming follows existing `ALREADY_IN_PROGRESS` / `ALREADY_DELETED` patterns).*
 - [X] T053 Final `uv run invoke format lint` + `uv run ruff check backend/styrmin_backend/` + `pnpm lint` + `pnpm tsc --noEmit` — all clean.

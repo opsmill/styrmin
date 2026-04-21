@@ -202,6 +202,81 @@ async def patch_custom_resource_status(
 
 
 @inject
+async def delete_custom_resource(
+    plural: str,
+    name: str,
+    group: str,
+    version: str,
+    namespace: str,
+    propagation_policy: str = "Foreground",
+    client: ApiClient = Depends(get_api_client),
+) -> bool:
+    """Delete a namespaced custom resource.
+
+    Returns True if the resource was deleted, False if it did not exist.
+    Foreground propagation lets kopf finalizers run before the CRD goes
+    away, which is how the Styrmin operator sequences ordered teardown.
+    """
+    custom_obj_api = kubeclient.CustomObjectsApi(client)
+    try:
+        await custom_obj_api.delete_namespaced_custom_object(
+            group=group,
+            version=version,
+            namespace=namespace,
+            plural=plural,
+            name=name,
+            propagation_policy=propagation_policy,
+        )
+        return True
+    except ApiException as exc:
+        if exc.status == status.HTTP_404_NOT_FOUND:
+            return False
+        raise
+
+
+@inject
+async def delete_kubernetes_namespace(
+    namespace: str,
+    client: ApiClient = Depends(get_api_client),
+) -> bool:
+    """Delete a namespace. Returns True if the delete was issued, False if it was already gone."""
+    core_api = kubeclient.CoreV1Api(client)
+    try:
+        await core_api.delete_namespace(name=namespace)
+        return True
+    except ApiException as exc:
+        if exc.status == status.HTTP_404_NOT_FOUND:
+            return False
+        raise
+
+
+@inject
+async def custom_resource_exists(
+    plural: str,
+    name: str,
+    group: str,
+    version: str,
+    namespace: str,
+    client: ApiClient = Depends(get_api_client),
+) -> bool:
+    """Return True if the custom resource exists in the given namespace."""
+    custom_obj_api = kubeclient.CustomObjectsApi(client)
+    try:
+        await custom_obj_api.get_namespaced_custom_object(
+            group=group,
+            version=version,
+            namespace=namespace,
+            plural=plural,
+            name=name,
+        )
+        return True
+    except ApiException as exc:
+        if exc.status == status.HTTP_404_NOT_FOUND:
+            return False
+        raise
+
+
+@inject
 async def apply_kubernetes_resource(
     resource: dict,
     namespace: str,

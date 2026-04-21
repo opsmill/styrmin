@@ -266,6 +266,7 @@ class Task(BaseModel):
     status: TaskStatus = Field(default=TaskStatus.PENDING)
     type: TaskType
     message: str | None = Field(default=None)
+    parameters: dict | None = Field(default=None)
 
     prefect_flow_run_id: UUID | None = Field(default=None)
 
@@ -281,6 +282,7 @@ class Task(BaseModel):
         deployment_id: UUID,
         prefect_flow_run_id: UUID | None = None,
         status: TaskStatus = TaskStatus.PENDING,
+        parameters: dict | None = None,
     ) -> Task:
         """Create a new Task instance."""
         return cls(
@@ -288,4 +290,5 @@ class Task(BaseModel):
             type=type,
             deployment_id=deployment_id,
             prefect_flow_run_id=prefect_flow_run_id,
+            parameters=parameters,
         )

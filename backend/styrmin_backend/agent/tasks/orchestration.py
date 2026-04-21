@@ -11,6 +11,9 @@ from prefect.states import Completed
 from prefect.client.schemas.objects import State
 
 from styrmin_backend.agent.service.kubernetes.primitives import (
+    custom_resource_exists,
+    delete_custom_resource,
+    delete_kubernetes_namespace,
     patch_custom_resource,
     run_kubernetes_job,
 )
@@ -631,6 +634,13 @@ async def create_instance_crd(
         )
 
 
+# How long we're willing to wait for the operator's reverse-order
+# teardown (Services -> HelmRelease -> NetworkPolicies/Secrets) to run
+# under its kopf finalizer before we give up and surface a failure.
+_CRD_DELETION_TIMEOUT_SECONDS = 600
+_CRD_DELETION_POLL_INTERVAL_SECONDS = 5
+
+
 @flow(
     on_cancellation=[orchestration_callback],
     on_completion=[orchestration_callback],
@@ -642,47 +652,101 @@ async def create_instance_crd(
 async def delete_instance_crd(
     task_id: UUID,
     deployment_id: UUID,
+    release_reference: str | None,
+    namespace: str | None,
     backup_disposition: str,
 ) -> None:
-    """Declare deletion intent for a Styrmin deployment.
+    """Tear down a Styrmin deployment.
 
-    Current scope (MVP): this flow is a thin stub whose completion is
-    the signal that unblocks the backend's tombstoning logic (see
-    ``update_task_state`` — on SUCCESS of a DELETE_INSTANCE task, the
-    Deployment transitions to DELETED with ``deleted_at`` set).
+    Sequence:
 
-    Not yet implemented in this flow (tracked as follow-ups to this PR):
+    1. If ``release_reference`` / ``namespace`` are provided, issue a
+       foreground DELETE on the ``StyrminDeployment`` CRD. The
+       operator's ``kopf.on.delete`` handler runs reverse-order cleanup
+       (Services -> HelmRelease -> NetworkPolicies / Secrets) under the
+       kopf finalizer before the CRD is actually removed.
+    2. Poll until the CRD is gone (the finalizer has completed) or the
+       timeout elapses.
+    3. Delete the deployment's namespace. This cascades through any
+       leftover objects the operator cleanup didn't cover.
+    4. Return; the ``orchestration_callback`` on completion triggers the
+       backend's ``update_task_state`` which advances ``Deployment.status``
+       to ``DELETED`` and sets ``deleted_at``.
 
-    - Patching / deleting the StyrminDeployment CRD to signal deletion
-      intent to the Styrmin operator (per ADR-008). The operator-side
-      handler must then tear down owned HelmReleases, utility
-      resources, and the namespace, then clear the CRD.
-    - Applying ``backup_disposition=REMOVE``: iterating backups
-      associated with the deployment's active instance and removing
-      them before declaring CRD deletion intent.
+    If the deployment never produced an active instance (e.g., it was
+    deleted from PENDING), ``release_reference`` / ``namespace`` are
+    ``None`` and the cluster-side work is skipped.
 
-    Until those land, deletion is accepted and tombstoned in the
-    backend but the cluster-side resources are not torn down by this
-    flow alone; reconciliation/operator work in a follow-up PR is
-    required to reach the spec's FR-005 guarantee. FR-013 (backup
-    disposition) is likewise deferred.
-
-    Arguments are accepted to fix the contract ahead of those changes.
+    ``backup_disposition=REMOVE`` is handled in the backend service
+    before the flow is launched — there is no cluster-side backup
+    teardown here.
     """
     if not config.SETTINGS.initialized:
         config.SETTINGS.initialize()
 
     logger = get_run_logger()
     logger.info(
-        "delete_instance_crd invoked: deployment_id=%s task_id=%s backup_disposition=%s",
+        "delete_instance_crd: deployment_id=%s release=%s namespace=%s disposition=%s",
         deployment_id,
-        task_id,
+        release_reference,
+        namespace,
         backup_disposition,
     )
-    logger.warning(
-        "delete_instance_crd is currently a stub — cluster teardown and "
-        "backup REMOVE are not yet wired end-to-end."
+
+    if not release_reference or not namespace:
+        logger.info(
+            "No active-instance context for deployment_id=%s — nothing to tear down on cluster.",
+            deployment_id,
+        )
+        return
+
+    crd_existed = await delete_custom_resource(
+        plural=CRD_PLURAL,
+        name=release_reference,
+        group=CRD_GROUP,
+        version=CRD_VERSION,
+        namespace=namespace,
     )
+    if crd_existed:
+        logger.info(
+            "DELETE issued on StyrminDeployment %s/%s; waiting for operator finalizer.",
+            namespace,
+            release_reference,
+        )
+        deadline = asyncio.get_event_loop().time() + _CRD_DELETION_TIMEOUT_SECONDS
+        while True:
+            exists = await custom_resource_exists(
+                plural=CRD_PLURAL,
+                name=release_reference,
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+            )
+            if not exists:
+                logger.info(
+                    "StyrminDeployment %s/%s removed.", namespace, release_reference
+                )
+                break
+            if asyncio.get_event_loop().time() >= deadline:
+                raise RuntimeError(
+                    "Timed out waiting for StyrminDeployment "
+                    f"{namespace}/{release_reference} to be removed. "
+                    "Operator finalizer may be stuck on a resource with "
+                    "its own finalizer."
+                )
+            await asyncio.sleep(_CRD_DELETION_POLL_INTERVAL_SECONDS)
+    else:
+        logger.info(
+            "StyrminDeployment %s/%s was already absent; skipping wait.",
+            namespace,
+            release_reference,
+        )
+
+    deleted = await delete_kubernetes_namespace(namespace=namespace)
+    if deleted:
+        logger.info("DELETE issued on namespace %s.", namespace)
+    else:
+        logger.info("Namespace %s already absent.", namespace)
 
 
 @flow(flow_run_name="Update instance (CRD)")

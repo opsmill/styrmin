@@ -314,3 +314,46 @@ class TestExtractSchedulingConditions:
     def test_matches_case_insensitively(self) -> None:
         conds = [{"reason": "TOLERATION_MISMATCH", "message": "x"}]
         assert extract_scheduling_conditions(conds)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "terminal_state",
+    [
+        DeploymentState.DELETION_REQUESTED,
+        DeploymentState.DELETION_IN_PROGRESS,
+        DeploymentState.DELETED,
+    ],
+)
+async def test_deletion_lifecycle_ignores_incoming_reports(
+    terminal_state: DeploymentState,
+) -> None:
+    """A deployment that has entered the deletion lifecycle must not
+    have its status overwritten by a stale CRD report racing the
+    teardown (e.g., an agent emitting ``Deploying`` while the CRD is
+    still briefly present)."""
+    dep = _make_deployment(status=terminal_state)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "CreatingHelmRelease",
+            "display_state": "Deploying",
+        }
+    ]
+    statuses_updated, deployments_updated = await report_deployment_statuses(
+        reports, uow
+    )
+
+    # CRD snapshot still updates — operators need to see phase — but
+    # the Deployment.status must NOT regress out of the deletion
+    # lifecycle.
+    assert statuses_updated == 1
+    assert deployments_updated == 0
+
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == terminal_state

@@ -75,6 +75,18 @@ async def report_deployment_statuses(
             if deployment is None:
                 continue
 
+            # Deletion-lifecycle guard: a deployment that has entered
+            # DELETION_REQUESTED / DELETION_IN_PROGRESS / DELETED is
+            # terminal with respect to CRD-driven state updates — the
+            # CRD is on its way out and any stale report racing the
+            # teardown must not regress the status.
+            if deployment.status in (
+                DeploymentState.DELETION_REQUESTED,
+                DeploymentState.DELETION_IN_PROGRESS,
+                DeploymentState.DELETED,
+            ):
+                continue
+
             # Stale-instance guard: ignore reports for an instance that is no
             # longer the active one on the deployment.
             active_instance = deployment.active_instance

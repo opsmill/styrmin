@@ -31,8 +31,17 @@ interface TimelineTask {
   type: string;
   status: string;
   message?: string | null;
+  parameters?: Record<string, unknown> | null;
   createdOn?: string | null;
   updatedOn?: string | null;
+}
+
+function deletionSubtitle(parameters: Record<string, unknown> | null | undefined): string | null {
+  if (!parameters) return null;
+  const disposition = parameters["backup_disposition"];
+  if (disposition === "retain") return "backups retained";
+  if (disposition === "remove") return "backups removed";
+  return null;
 }
 
 interface ContextChange {
@@ -84,7 +93,10 @@ export function DeploymentTimeline({ entries }: DeploymentTimelineProps) {
 
 function TimelineEntryRow({ entry }: { entry: TimelineEntry }) {
   const { task, applicationVersion, contextDiff } = entry;
-  const typeLabel = TASK_TYPE_LABELS[task.type] ?? task.type;
+  const baseLabel = TASK_TYPE_LABELS[task.type] ?? task.type;
+  const deletionNote =
+    task.type === "delete_instance" ? deletionSubtitle(task.parameters) : null;
+  const typeLabel = deletionNote ? `${baseLabel} — ${deletionNote}` : baseLabel;
   const hasChanges = contextDiff != null && contextDiff.changes.length > 0;
   const [isOpen, setIsOpen] = useState(false);
 

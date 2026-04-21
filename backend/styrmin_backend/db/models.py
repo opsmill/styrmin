@@ -420,6 +420,7 @@ class Task(StyrminModel, table=True):
     status: TaskStatus = Field(sa_column=Column(SQLModelEnum(TaskStatus)))
     type: TaskType = Field(sa_column=Column(SQLModelEnum(TaskType)))
     message: str | None = Field(default=None)
+    parameters: dict | None = Field(default=None, sa_column=Column(JSON))
 
     prefect_flow_run_id: UUID | None = Field(default=None)
 
