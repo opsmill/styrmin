@@ -781,13 +781,6 @@ async def deploy_application(
         return result
 
 
-_DELETION_LIFECYCLE_STATES = (
-    DeploymentState.DELETION_REQUESTED,
-    DeploymentState.DELETION_IN_PROGRESS,
-    DeploymentState.DELETED,
-)
-
-
 @inject(cast_result=False)  # type: ignore[arg-type]
 async def delete_deployment(
     deployment_id: UUID,
@@ -801,10 +794,15 @@ async def delete_deployment(
     its full history, transitions to DELETION_REQUESTED, and a
     DELETE_INSTANCE task is launched to drive teardown asynchronously.
 
+    Retry semantics: if a previous deletion attempt failed (deployment
+    stuck in DELETION_REQUESTED / DELETION_IN_PROGRESS with no active
+    task), this function accepts a fresh request and relaunches. Only
+    a fully tombstoned deployment (``status == DELETED``) is rejected.
+
     Raises:
         DeploymentNotFoundError: If no deployment matches the id.
-        DeploymentAlreadyDeletedError: If the deployment is already in a
-            deletion lifecycle state or tombstoned.
+        DeploymentAlreadyDeletedError: If the deployment is already
+            tombstoned.
         DeploymentMutationInProgressError: If another workflow is in
             flight for this deployment.
 
@@ -824,13 +822,18 @@ async def delete_deployment(
                 f"Deployment with ID {deployment_id} not found"
             )
 
-        if deployment.status in _DELETION_LIFECYCLE_STATES:
+        if deployment.status == DeploymentState.DELETED:
             raise DeploymentAlreadyDeletedError(
-                f"Deployment {deployment_id} is already in state {deployment.status.value}"
+                deployment_id=deployment_id,
             )
 
         active_tasks = await uow.deployments.list_active_tasks(deployment_id)
         if active_tasks:
+            # Catches both "a deployment is currently being deleted"
+            # (status=DELETION_REQUESTED/IN_PROGRESS + a PENDING/RUNNING
+            # DELETE_INSTANCE task) and "some other mutation is in
+            # flight". Rejecting here preserves ordering; once the
+            # active task goes terminal, a new request can come in.
             raise DeploymentMutationInProgressError(
                 active_task_ids=[str(task.id) for task in active_tasks],
             )
@@ -849,9 +852,12 @@ async def delete_deployment(
         # REMOVE disposition: drop every backup (and its restores)
         # attached to any of this deployment's historical instances,
         # inside the same UoW so failures roll the whole thing back.
-        # Backup rows carry metadata only; the underlying Velero /
-        # object-store artefacts are cleaned up by the existing
-        # backup-service semantics that the row represents.
+        # Scope: this removes the Styrmin-side records, matching the
+        # existing semantics of services.backup.service.delete_backup
+        # (which is also DB-row only). The underlying Velero backups
+        # and object-store artefacts are NOT cleaned up here — that
+        # gap is a separate follow-up tracked against the backup
+        # subsystem, not specific to deletion.
         removed_backup_count = 0
         if backup_disposition == BackupDisposition.REMOVE:
             instances = await uow.application_instances.find_by_deployment(

@@ -165,10 +165,34 @@ class DeploymentNotFoundError(ServiceError):
 
 
 class DeploymentAlreadyDeletedError(ServiceError):
-    """The deployment is already in a deletion lifecycle state or tombstoned."""
+    """The deployment is already tombstoned (status=DELETED).
+
+    Raised when ``delete_deployment`` is called on a record that has
+    already reached the terminal DELETED state. An in-progress deletion
+    with no active task is retryable and does NOT raise this — the
+    concurrency guard handles the "currently being deleted" case
+    separately so the UI can disambiguate the two.
+    """
 
     error_code = "ALREADY_DELETED"
-    default_message = "Deployment is already being deleted or has already been deleted"
+    default_message = "Deployment has already been deleted"
+
+    def __init__(self, deployment_id: object | None = None, message: str = "") -> None:
+        self.deployment_id = str(deployment_id) if deployment_id is not None else None
+        super().__init__(
+            message
+            or (
+                f"Deployment {self.deployment_id} is already deleted"
+                if self.deployment_id
+                else self.default_message
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        if self.deployment_id is None:
+            return {}
+        return {"deployment_id": self.deployment_id}
 
 
 class DeploymentMutationInProgressError(ServiceError):

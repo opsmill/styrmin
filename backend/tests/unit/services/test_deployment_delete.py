@@ -159,31 +159,68 @@ async def test_delete_deployment_not_found(uow, prefect_manager_mock):
         )
 
 
-@pytest.mark.parametrize(
-    "existing_status",
-    [
-        DeploymentState.DELETION_REQUESTED,
-        DeploymentState.DELETION_IN_PROGRESS,
-        DeploymentState.DELETED,
-    ],
-)
-async def test_delete_deployment_idempotent_rejects_repeat(
-    uow, prefect_manager_mock, mocker, seeded_deployment, existing_status
+async def test_delete_deployment_rejects_when_already_tombstoned(
+    uow, prefect_manager_mock, mocker, seeded_deployment
 ):
-    """Re-issuing delete against a deployment already in a deletion
-    lifecycle state raises DeploymentAlreadyDeletedError and never
-    submits a second Prefect flow."""
-    seeded_deployment.set_status(existing_status)
+    """A tombstoned deployment (``status=DELETED``) is terminal — the
+    mutation rejects with the typed error and carries the deployment
+    id in metadata so the UI can distinguish this from a
+    mid-flight deletion."""
+    seeded_deployment.set_status(DeploymentState.DELETED)
     prefect_manager_mock.run_action = mocker.AsyncMock()
 
-    with pytest.raises(DeploymentAlreadyDeletedError):
+    with pytest.raises(DeploymentAlreadyDeletedError) as exc:
         await delete_deployment(
             deployment_id=seeded_deployment.id,
             uow=uow,
             backup_disposition=BackupDisposition.RETAIN,
         )
 
+    assert exc.value.error_metadata == {"deployment_id": str(seeded_deployment.id)}
     prefect_manager_mock.run_action.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "previous_status",
+    [
+        DeploymentState.DELETION_REQUESTED,
+        DeploymentState.DELETION_IN_PROGRESS,
+    ],
+)
+async def test_delete_deployment_admits_retry_after_failed_attempt(
+    uow, prefect_manager_mock, mocker, seeded_deployment, previous_status
+):
+    """A deployment stuck in DELETION_REQUESTED / DELETION_IN_PROGRESS
+    with no active task (i.e. the previous attempt failed terminally)
+    must accept a fresh retry. The concurrency guard is the only
+    thing that blocks in-flight deletions — terminal-failed state is
+    recoverable."""
+    seeded_deployment.set_status(previous_status)
+    # Seed a FAILED DELETE_INSTANCE task as the "previous attempt".
+    previous_task = TaskEntity.create(
+        type=TaskType.DELETE_INSTANCE,
+        deployment_id=seeded_deployment.id,
+    )
+    previous_task.status = TaskStatus.FAILED
+    previous_task.message = "teardown exhausted retries"
+    uow.tasks.models.append(previous_task)
+
+    flow_run_id, info = _stub_flow(mocker)
+    prefect_manager_mock.run_action = mocker.AsyncMock(return_value=info)
+
+    task = await delete_deployment(
+        deployment_id=seeded_deployment.id,
+        uow=uow,
+        backup_disposition=BackupDisposition.RETAIN,
+    )
+
+    # New task was created and the Prefect flow was dispatched.
+    assert task.id != previous_task.id
+    assert task.status == TaskStatus.PENDING
+    assert task.prefect_flow_run_id == flow_run_id
+    prefect_manager_mock.run_action.assert_awaited_once()
+    # Deployment transitions back to DELETION_REQUESTED for the new attempt.
+    assert uow.deployments._deployments[0].status == DeploymentState.DELETION_REQUESTED
 
 
 async def test_delete_deployment_rejects_when_workflow_in_flight(
@@ -349,3 +386,96 @@ async def test_delete_deployment_passes_cluster_targets_from_active_instance(
     params = prefect_manager_mock.run_action.await_args.kwargs["parameters"]
     assert params["namespace"] == "styrmin-demo"
     assert params["release_reference"] == "demo-1"
+
+
+# ---------------------------------------------------------------------------
+# update_task_state DELETE_INSTANCE branch — invariant: instance status
+# is NOT overwritten by the deletion lifecycle callbacks. The instance
+# row is a historical snapshot once the deployment is tombstoned; lying
+# about it (e.g., marking RUNNING on a torn-down instance) was the bug
+# we fixed in the review.
+# ---------------------------------------------------------------------------
+from styrmin_backend.services.tasks import update_task_state  # noqa: E402
+
+
+async def _seed_deletion_in_flight(uow, active_instance: InstanceEntity | None = None):
+    """Return (deployment, task) pair — deployment has just transitioned
+    to DELETION_REQUESTED and a DELETE_INSTANCE task is PENDING."""
+    deployment = DeploymentEntity(
+        id=uuid4(),
+        name="td",
+        application_version="1.0.0",
+        config={},
+        parameters={},
+        application_driver_version_id=uuid4(),
+        environment_id=uuid4(),
+        status=DeploymentState.DELETION_REQUESTED,
+    )
+    if active_instance is not None:
+        deployment.set_active_instance(active_instance)
+    uow.deployments._deployments.append(deployment)
+
+    task = TaskEntity.create(type=TaskType.DELETE_INSTANCE, deployment_id=deployment.id)
+    uow.tasks.models.append(task)
+    return deployment, task
+
+
+@pytest.mark.parametrize(
+    "callback_state, expected_deployment_state",
+    [
+        ("RUNNING", DeploymentState.DELETION_IN_PROGRESS),
+        ("COMPLETED", DeploymentState.DELETED),
+    ],
+)
+async def test_update_task_state_delete_instance_preserves_instance_status(
+    uow, callback_state, expected_deployment_state
+):
+    """Callbacks for DELETE_INSTANCE must drive the deployment lifecycle
+    without lying about the historical instance. Previous code set the
+    instance status to RUNNING on COMPLETED, painting a torn-down
+    instance as live."""
+    live_instance = _make_instance(deployment_id=uuid4(), namespace="ns", release="rel")
+    live_instance.status = InstanceStatusEntity.RUNNING
+    deployment, task = await _seed_deletion_in_flight(
+        uow, active_instance=live_instance
+    )
+
+    await update_task_state(
+        task_id=task.id,
+        state_name=callback_state,
+        state_message=None,
+        uow=uow,
+    )
+
+    assert deployment.status == expected_deployment_state
+    # Instance status is unchanged — the historical row is a snapshot.
+    assert deployment.active_instance is not None
+    assert deployment.active_instance.status == InstanceStatusEntity.RUNNING
+
+
+async def test_update_task_state_delete_instance_failed_stays_retryable(
+    uow,
+):
+    """On FAILED the deployment stays in DELETION_IN_PROGRESS so the
+    service's retry path (no active task) can accept a fresh
+    attempt. Instance status is untouched."""
+    live_instance = _make_instance(deployment_id=uuid4(), namespace="ns", release="rel")
+    live_instance.status = InstanceStatusEntity.RUNNING
+    deployment, task = await _seed_deletion_in_flight(
+        uow, active_instance=live_instance
+    )
+    deployment.set_status(DeploymentState.DELETION_IN_PROGRESS)
+
+    await update_task_state(
+        task_id=task.id,
+        state_name="FAILED",
+        state_message="finalizer stuck on pvc",
+        uow=uow,
+    )
+
+    assert task.status == TaskStatus.FAILED
+    # Deployment left in DELETION_IN_PROGRESS so the service can admit
+    # a retry now that no active task remains.
+    assert deployment.status == DeploymentState.DELETION_IN_PROGRESS
+    assert deployment.active_instance is not None
+    assert deployment.active_instance.status == InstanceStatusEntity.RUNNING
