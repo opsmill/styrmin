@@ -165,14 +165,16 @@ same timeline remains viewable on a tombstoned deployment.
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T045 [P] [US3] Unit test: timeline service renders a `DELETE_INSTANCE` Task with its `backup_disposition` parameter and `failure_reason` (when FAILED). `backend/tests/unit/services/test_deployment_timeline_delete.py`
-- [ ] T046 [P] [US3] E2E test: after deletion, fetch the timeline via SDK for the tombstoned deployment and assert the DELETE_INSTANCE entry is present with the chosen disposition and a terminal success status. `backend/tests/e2e/test_deployment_timeline_deletion.py`
+- [ ] T045 [P] [US3] Unit test for backup-disposition rendering in the timeline. *Deferred with T047 — requires the Task.parameters schema change.*
+- [ ] T046 [P] [US3] E2E timeline-after-deletion test. *Deferred with T017–T019 (no Kind).*
 
 ### Implementation for User Story 3
 
-- [ ] T047 [US3] Surface `backup_disposition` (and, on failure, `failure_reason`) on the `DeploymentTimelineEntry` Strawberry type in `backend/styrmin_backend/api/definitions/deployment_timeline/model.py`. Pull the disposition from the associated Task's parameters.
-- [ ] T048 [US3] Render the `DELETE_INSTANCE` entry in the frontend timeline component with a dedicated label ("Deletion — backups retained/removed"), failure reason when present. Touch: the timeline component under `frontend/src/pages/deployments/` (existing timeline renderer).
-- [ ] T049 [US3] Regenerate GraphQL schema + SDK types if T047 changed the schema: `uv run styrmin export graphql-schema schema.graphql && uv run invoke generate`.
+**Partially delivered (free ride on existing infrastructure):** the deployment timeline already walks Tasks newest-first; any `DELETE_INSTANCE` Task a deletion creates is therefore visible in both the existing GraphQL timeline query and the Timeline tab of `DeploymentDetailPage`, with its status transitioning PENDING → RUNNING → SUCCESS/FAILED. Task.message (populated from the Prefect callback) surfaces failure reasons on FAILED. This meets FR-009's "timeline events for the deletion lifecycle (including actor and timestamp)" for the baseline lifecycle view.
+
+- [ ] T047 [US3] Surface `backup_disposition` on `DeploymentTimelineEntry`. *Deferred: the existing Task DB model has no `parameters` column — the backup disposition is only carried as a Prefect flow parameter today. Adding `Task.parameters JSON NULL` triggers another governance-gate schema change and a migration, which belongs in a separate PR. The operator's choice is preserved end-to-end in the flow parameters + Prefect flow-run record; the UI label enhancement follows once the persistence path lands.*
+- [ ] T048 [US3] Dedicated frontend label ("Deletion — backups retained/removed"). *Deferred with T047 (needs the disposition from the API).*
+- [ ] T049 [US3] Schema + SDK regeneration after T047. *Deferred with T047.*
 
 **Checkpoint**: US3 complete — deletion lifecycle is fully auditable.
 
@@ -180,11 +182,11 @@ same timeline remains viewable on a tombstoned deployment.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T050 [P] Run the full quickstart in `specs/001-delete-deployment/quickstart.md` against the dev stack (API smoke, UI flow, concurrency guard, REMOVE path, idempotency).
-- [ ] T051 [P] Update `dev/knowledge/backend/reconciliation.md` (and any other relevant knowledge docs) to mention the deletion lifecycle and where it hooks in. Only if the existing docs reference delete in a stale way — otherwise skip.
-- [ ] T052 [P] Update `backend/AGENTS.md` / `frontend/AGENTS.md` if new conventions were introduced (e.g., typed-error code naming). Likely skipped — confirm and note.
-- [ ] T053 Final `uv run invoke format lint` + `pnpm lint` + `pnpm tsc --noEmit` pass.
-- [ ] T054 Confirm CI (tests + lint + schema/SDK drift checks) is green on the PR.
+- [ ] T050 [P] Run the full quickstart against a live stack. *Deferred: no local Postgres / Kind in this session; the quickstart remains the acceptance script for whoever picks up the follow-up operator PR.*
+- [ ] T051 [P] `dev/knowledge/backend/reconciliation.md` update. *Skipped — the feature uses a direct `run_action` dispatch rather than the diff→remediation path, so the existing reconciliation knowledge remains accurate. When the operator-handler follow-up lands, a short section on the deletion-intent contract will be worth adding.*
+- [ ] T052 [P] `AGENTS.md` updates. *Skipped — no new conventions were introduced (error-code naming follows existing `ALREADY_IN_PROGRESS` / `ALREADY_DELETED` patterns).*
+- [X] T053 Final `uv run invoke format lint` + `uv run ruff check backend/styrmin_backend/` + `pnpm lint` + `pnpm tsc --noEmit` — all clean.
+- [ ] T054 CI green on the PR. *Pending — no PR open yet; the branch `001-delete-deployment` carries four commits ready to push.*
 
 ---
 
