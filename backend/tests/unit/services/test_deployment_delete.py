@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -102,7 +103,7 @@ def seeded_deployment(uow) -> DeploymentEntity:
     return deployment
 
 
-def _stub_flow(mocker, flow_run_id: UUID | None = None) -> UUID:
+def _stub_flow(mocker, flow_run_id: UUID | None = None) -> tuple[UUID, Any]:
     flow_run_id = flow_run_id or uuid4()
     info = mocker.MagicMock(spec=WorkflowInfo)
     info.id = flow_run_id
