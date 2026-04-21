@@ -212,3 +212,5 @@ playwright-report/
 
 # Local demo runtime state (port-forward PID, etc.)
 .vcluster/
+
+.claude/scheduled_tasks.lock
