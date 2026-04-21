@@ -350,12 +350,19 @@ class FakeDeploymentRepository(DeploymentRepository):
 
     async def get_by_name(self, name: str) -> DeploymentEntity | None:
         for d in self._deployments:
-            if d.name == name:
+            # Mirror the partial-unique-index semantics in the real
+            # repository: tombstoned deployments keep their name but
+            # do not match name-based uniqueness lookups.
+            if d.name == name and d.deleted_at is None:
                 return d
         return None
 
     async def find_names_with_prefix(self, prefix: str) -> list[str]:
-        return [d.name for d in self._deployments if d.name.startswith(prefix)]
+        return [
+            d.name
+            for d in self._deployments
+            if d.name.startswith(prefix) and d.deleted_at is None
+        ]
 
     async def find_internal_by_environment(
         self, environment_id: UUID

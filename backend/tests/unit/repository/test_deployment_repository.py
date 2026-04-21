@@ -221,3 +221,167 @@ async def test_save_preserves_active_instance_on_round_trip(
     assert db_deployment.active_application_instance_id == instance_id, (
         "active_application_instance_id was nulled out after a find() -> save() round-trip"
     )
+
+
+# ---------------------------------------------------------------------------
+# Name uniqueness relaxed to live deployments only
+# ---------------------------------------------------------------------------
+
+
+def _make_deployment(
+    name: str,
+    adv_id,
+    env_id,
+    *,
+    status: DeploymentStateEntity = DeploymentStateEntity.RUNNING,
+    deleted_at=None,
+) -> DeploymentEntity:
+    return DeploymentEntity(
+        id=uuid4(),
+        name=name,
+        application_version="1.0.0",
+        config={},
+        application_driver_version_id=adv_id,
+        environment_id=env_id,
+        status=status,
+        deleted_at=deleted_at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_by_name_ignores_tombstoned(
+    session: AsyncSession, prerequisites
+) -> None:
+    """A tombstoned deployment must not match ``get_by_name`` — the
+    name is free for reuse by a new deployment."""
+    from datetime import datetime, timezone
+
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env = prerequisites["environment"]
+
+    tombstoned = _make_deployment(
+        "shared",
+        adv.id,
+        env.id,
+        status=DeploymentStateEntity.DELETED,
+        deleted_at=datetime.now(tz=timezone.utc),
+    )
+    await repo.save(tombstoned)
+    await session.commit()
+
+    assert await repo.get_by_name("shared") is None
+
+
+@pytest.mark.asyncio
+async def test_get_by_name_still_matches_in_progress_deletion(
+    session: AsyncSession, prerequisites
+) -> None:
+    """A deployment mid-delete (``DELETION_REQUESTED`` /
+    ``DELETION_IN_PROGRESS``, where ``deleted_at`` is still ``None``)
+    still reserves its name — the slot only frees when teardown
+    completes and ``deleted_at`` is set."""
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env = prerequisites["environment"]
+
+    mid_delete = _make_deployment(
+        "shared",
+        adv.id,
+        env.id,
+        status=DeploymentStateEntity.DELETION_REQUESTED,
+        deleted_at=None,
+    )
+    await repo.save(mid_delete)
+    await session.commit()
+
+    match = await repo.get_by_name("shared")
+    assert match is not None
+    assert match.id == mid_delete.id
+
+
+@pytest.mark.asyncio
+async def test_find_names_with_prefix_skips_tombstoned(
+    session: AsyncSession, prerequisites
+) -> None:
+    """Auto-naming (``driver-N``) must reuse slots freed by deletion."""
+    from datetime import datetime, timezone
+
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env = prerequisites["environment"]
+
+    tombstoned = _make_deployment(
+        "driver-1",
+        adv.id,
+        env.id,
+        status=DeploymentStateEntity.DELETED,
+        deleted_at=datetime.now(tz=timezone.utc),
+    )
+    await repo.save(tombstoned)
+    await session.commit()
+
+    assert await repo.find_names_with_prefix("driver") == []
+
+
+@pytest.mark.asyncio
+async def test_partial_unique_index_allows_reusing_tombstoned_name(
+    session: AsyncSession, prerequisites
+) -> None:
+    """Two deployments with the same name can coexist as long as one
+    is tombstoned — the partial unique index only covers
+    ``deleted_at IS NULL`` rows."""
+    from datetime import datetime, timezone
+
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env = prerequisites["environment"]
+
+    tombstoned = _make_deployment(
+        "shared",
+        adv.id,
+        env.id,
+        status=DeploymentStateEntity.DELETED,
+        deleted_at=datetime.now(tz=timezone.utc),
+    )
+    await repo.save(tombstoned)
+    await session.commit()
+
+    live = _make_deployment(
+        "shared", adv.id, env.id, status=DeploymentStateEntity.RUNNING
+    )
+    await repo.save(live)
+    await session.commit()
+
+    # Both rows exist; only the live one is returned by name lookup.
+    assert await repo.get_by_name("shared") is not None
+    result = await session.exec(select(DeploymentModel))
+    all_names = sorted(d.name for d in result.all())
+    assert all_names == ["shared", "shared"]
+
+
+@pytest.mark.asyncio
+async def test_partial_unique_index_still_rejects_duplicate_live_names(
+    session: AsyncSession, prerequisites
+) -> None:
+    """Two *live* deployments with the same name must still fail at
+    the DB layer — the partial index enforces uniqueness on
+    non-tombstoned rows."""
+    from sqlalchemy.exc import IntegrityError
+
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env = prerequisites["environment"]
+
+    first = _make_deployment(
+        "shared", adv.id, env.id, status=DeploymentStateEntity.RUNNING
+    )
+    await repo.save(first)
+    await session.commit()
+
+    second = _make_deployment(
+        "shared", adv.id, env.id, status=DeploymentStateEntity.RUNNING
+    )
+    with pytest.raises(IntegrityError):
+        await repo.save(second)
+        await session.commit()

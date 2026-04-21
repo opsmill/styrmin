@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, text
 from sqlmodel import JSON, Column, DateTime, Field, Relationship, SQLModel, func
 from sqlmodel import Enum as SQLModelEnum
 
@@ -212,7 +212,20 @@ class Deployment(StyrminModel, table=True):
     Its attributes reflect the desired state of the service it is responsible for.
     """
 
-    name: str = Field(unique=True)
+    # Uniqueness is scoped to live (non-tombstoned) deployments via a
+    # partial unique index declared in __table_args__ below — deleting
+    # a deployment frees its name so it can be re-used.
+    __table_args__ = (
+        Index(
+            "ix_deployment_name_live",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    name: str
     application_version: str
     config: dict | None = Field(default=None, sa_column=Column(JSON))
     parameters: dict | None = Field(default=None, sa_column=Column(JSON))

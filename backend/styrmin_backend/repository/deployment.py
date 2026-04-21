@@ -181,10 +181,19 @@ class SQLModelDeploymentRepository(
         return deployment
 
     async def get_by_name(self, name: str) -> DeploymentEntity | None:
-        """Get a deployment by its name."""
+        """Get a live (non-tombstoned) deployment by its name.
+
+        Tombstoned deployments keep their name for audit but do not
+        match this lookup — callers use it to enforce "is this name
+        taken by something still running" and must not collide with
+        deleted rows. Use ``find(id)`` to fetch a tombstone by id.
+        """
         result = await self.session.exec(
             select(self.model_class)
-            .where(self.model_class.name == name)
+            .where(
+                self.model_class.name == name,
+                self.model_class.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
             .options(*self._eager_load_options())
         )
         entity = result.first()
@@ -193,11 +202,16 @@ class SQLModelDeploymentRepository(
         return self._to_entity(entity)
 
     async def find_names_with_prefix(self, prefix: str) -> list[str]:
-        """Find all deployment names matching <prefix>-<digits> pattern."""
+        """Find live deployment names matching <prefix>-<digits> pattern.
+
+        Excludes tombstones so auto-naming (``driver-N``) can re-use a
+        slot freed by deletion.
+        """
         like_pattern = f"{prefix}-%"
         result = await self.session.exec(
             select(self.model_class.name).where(
-                self.model_class.name.like(like_pattern)  # type: ignore[union-attr,attr-defined]
+                self.model_class.name.like(like_pattern),  # type: ignore[union-attr,attr-defined]
+                self.model_class.deleted_at.is_(None),  # type: ignore[union-attr]
             )
         )
         return list(result.all())
