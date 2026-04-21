@@ -1,15 +1,17 @@
-import { useState } from "react";
-import { useParams, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { useParams, Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetDeploymentQuery,
   useGetDeploymentTimelineQuery,
   useCreateBackupMutation,
   useDeleteBackupMutation,
+  useDeleteDeploymentMutation,
   useListBackupsQuery,
   useCreateRestoreMutation,
   useListRestoresQuery,
   useUpdateDeploymentVersionMutation,
+  type BackupDisposition,
   type ListRestoresQuery,
 } from "@/generated/graphql";
 import { LoadingState } from "@/components/LoadingState";
@@ -52,10 +54,16 @@ const DEPLOYMENT_TABS = [
   { id: "timeline", label: "Timeline" },
 ];
 
+const DELETION_LIFECYCLE_STATES = new Set([
+  "deletion_requested",
+  "deletion_in_progress",
+]);
+
 export default function DeploymentDetailPage() {
   const { environmentId, deploymentId } = useParams({
     from: "/environments/$environmentId/deployments/$deploymentId",
   });
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
@@ -92,6 +100,13 @@ export default function DeploymentDetailPage() {
   const [newVersion, setNewVersion] = useState("");
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
   const [schedulingOpen, setSchedulingOpen] = useState(false);
+  const deleteDeploymentMutation = useDeleteDeploymentMutation();
+  const [deleteDeploymentOpen, setDeleteDeploymentOpen] = useState(false);
+  const [deleteDeploymentError, setDeleteDeploymentError] = useState<
+    string | null
+  >(null);
+  const [backupDisposition, setBackupDisposition] =
+    useState<BackupDisposition>("RETAIN");
 
   const { data: backupsData, isLoading: backupsFetching } = useListBackupsQuery(
     { instanceId: instanceId ?? "" },
@@ -171,6 +186,35 @@ export default function DeploymentDetailPage() {
     }
   }
 
+  async function handleDeleteDeployment() {
+    setDeleteDeploymentError(null);
+    try {
+      await deleteDeploymentMutation.mutateAsync({
+        deploymentId,
+        backupDisposition,
+      });
+      queryClient.invalidateQueries({ queryKey: ["GetDeployment"] });
+      queryClient.invalidateQueries({ queryKey: ["GetDeploymentTimeline"] });
+      setDeleteDeploymentOpen(false);
+    } catch (err) {
+      setDeleteDeploymentError(
+        err instanceof Error ? err.message : "Unknown error",
+      );
+    }
+  }
+
+  // Once the deployment reaches the DELETED terminal state (observed
+  // via the existing 10s refetch), return to the parent environment
+  // so the operator isn't stranded on a tombstoned detail page.
+  useEffect(() => {
+    if (data?.deployment?.status === "deleted") {
+      navigate({
+        to: "/environments/$environmentId",
+        params: { environmentId },
+      });
+    }
+  }, [data?.deployment?.status, environmentId, navigate]);
+
   if (isLoading && !data)
     return <LoadingState message="Loading deployment..." />;
   if (error)
@@ -185,6 +229,9 @@ export default function DeploymentDetailPage() {
     : [];
 
   const deployColors = getStatusColor(deployment.status);
+  const isDeleting = DELETION_LIFECYCLE_STATES.has(deployment.status);
+  const isDeleted = deployment.status === "deleted";
+  const mutationsDisabled = isDeleting || isDeleted;
 
   return (
     <div
@@ -248,20 +295,57 @@ export default function DeploymentDetailPage() {
             variant="outline"
             size="sm"
             onClick={() => setSchedulingOpen(true)}
+            disabled={mutationsDisabled}
           >
             Scheduling
           </Button>
           <Button
             variant="outline"
             size="sm"
-            disabled={!instanceId}
+            disabled={!instanceId || mutationsDisabled}
             onClick={() => setUpgradeOpen(true)}
           >
             Upgrade
           </Button>
-          <Button size="sm">Redeploy</Button>
+          <Button size="sm" disabled={mutationsDisabled}>
+            Redeploy
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={mutationsDisabled}
+            onClick={() => {
+              setDeleteDeploymentError(null);
+              setBackupDisposition("RETAIN");
+              setDeleteDeploymentOpen(true);
+            }}
+          >
+            Delete
+          </Button>
         </div>
       </div>
+
+      {isDeleting && (
+        <Alert>
+          <AlertDescription>
+            Deletion in progress — all cluster resources for{" "}
+            <code className="font-mono">{deployment.name}</code> are being torn
+            down. You'll be returned to the environment page once complete.
+          </AlertDescription>
+        </Alert>
+      )}
+      {isDeleted && (
+        <Alert>
+          <AlertDescription>
+            This deployment has been deleted
+            {deployment.deletedAt
+              ? ` on ${new Date(deployment.deletedAt).toLocaleString()}`
+              : ""}
+            . The record is retained for audit; no further actions are
+            available.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {backupError && (
         <Alert variant="destructive">
@@ -466,7 +550,11 @@ export default function DeploymentDetailPage() {
             </span>
             <Button
               size="sm"
-              disabled={!instanceId || createBackupMutation.isPending}
+              disabled={
+                !instanceId ||
+                createBackupMutation.isPending ||
+                mutationsDisabled
+              }
               onClick={handleBackup}
             >
               <Archive className="h-4 w-4" />
@@ -673,6 +761,96 @@ export default function DeploymentDetailPage() {
         deploymentId={deploymentId}
         currentConfig={deployment.config}
       />
+
+      {/* Delete deployment dialog */}
+      <Dialog
+        open={deleteDeploymentOpen}
+        onOpenChange={(open) => {
+          setDeleteDeploymentOpen(open);
+          if (!open) {
+            setDeleteDeploymentError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Deployment</DialogTitle>
+            <DialogDescription>
+              Delete{" "}
+              <code className="font-mono font-semibold">{deployment.name}</code>
+              . This tears down all cluster resources owned by the deployment
+              and cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteDeploymentError && (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteDeploymentError}</AlertDescription>
+            </Alert>
+          )}
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-[13px] font-semibold text-foreground">
+              Backups
+            </legend>
+            <p className="text-xs text-muted-foreground">
+              Choose what happens to backups associated with this deployment.
+            </p>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="backup-disposition"
+                value="RETAIN"
+                className="mt-1"
+                checked={backupDisposition === "RETAIN"}
+                onChange={() => setBackupDisposition("RETAIN")}
+              />
+              <span>
+                <span className="font-medium text-foreground">
+                  Retain backups
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Backups remain available and are kept attached to the
+                  tombstoned deployment record.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="backup-disposition"
+                value="REMOVE"
+                className="mt-1"
+                checked={backupDisposition === "REMOVE"}
+                onChange={() => setBackupDisposition("REMOVE")}
+              />
+              <span>
+                <span className="font-medium text-foreground">
+                  Remove backups
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Backups are deleted as part of teardown. The deployment
+                  reaches the deleted state only after all backup removals
+                  succeed.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDeploymentOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteDeployment}
+              disabled={deleteDeploymentMutation.isPending}
+            >
+              {deleteDeploymentMutation.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

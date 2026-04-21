@@ -84,6 +84,10 @@ export type Backup = {
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };
 
+export type BackupDisposition =
+  | 'REMOVE'
+  | 'RETAIN';
+
 export type BackupSchedule = {
   __typename?: 'BackupSchedule';
   createdOn: Scalars['DateTime']['output'];
@@ -211,6 +215,7 @@ export type Deployment = {
   components: Array<Component>;
   config: Scalars['JSON']['output'];
   crdStatus?: Maybe<DeploymentStatusType>;
+  deletedAt?: Maybe<Scalars['DateTime']['output']>;
   deployedServices: Array<DeployedService>;
   environment: Environment;
   environmentId: Scalars['UUID']['output'];
@@ -269,6 +274,11 @@ export type Environment = {
   name: Scalars['String']['output'];
 };
 
+
+export type EnvironmentDeploymentsArgs = {
+  includeDeleted?: Scalars['Boolean']['input'];
+};
+
 export type HelmChart = {
   __typename?: 'HelmChart';
   id: Scalars['UUID']['output'];
@@ -309,6 +319,7 @@ export type Mutation = {
   deleteBackupSchedule?: Maybe<Scalars['String']['output']>;
   deleteBackupStorageLocation?: Maybe<Scalars['String']['output']>;
   deleteCluster?: Maybe<Scalars['String']['output']>;
+  deleteDeployment: Task;
   deleteEnvironment?: Maybe<Scalars['String']['output']>;
   deploy?: Maybe<Task>;
   loadLocalApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
@@ -404,6 +415,12 @@ export type MutationDeleteBackupStorageLocationArgs = {
 export type MutationDeleteClusterArgs = {
   clusterId?: InputMaybe<Scalars['UUID']['input']>;
   clusterName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationDeleteDeploymentArgs = {
+  backupDisposition: BackupDisposition;
+  deploymentId: Scalars['UUID']['input'];
 };
 
 
@@ -803,6 +820,14 @@ export type DeleteBackupStorageLocationMutationVariables = Exact<{
 
 export type DeleteBackupStorageLocationMutation = { __typename?: 'Mutation', deleteBackupStorageLocation?: string | null };
 
+export type DeleteDeploymentMutationVariables = Exact<{
+  deploymentId: Scalars['UUID']['input'];
+  backupDisposition: BackupDisposition;
+}>;
+
+
+export type DeleteDeploymentMutation = { __typename?: 'Mutation', deleteDeployment: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, deploymentId?: string | null } };
+
 export type DeployMutationVariables = Exact<{
   version?: InputMaybe<Scalars['String']['input']>;
   driver: Scalars['String']['input'];
@@ -835,7 +860,7 @@ export type GetDeploymentQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null }> } | null };
+export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null }> } | null };
 
 export type GetDeploymentResolvedSchedulingQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -1184,6 +1209,34 @@ export const useDeleteBackupStorageLocationMutation = <
   }
     )};
 
+export const DeleteDeploymentDocument = `
+    mutation DeleteDeployment($deploymentId: UUID!, $backupDisposition: BackupDisposition!) {
+  deleteDeployment(
+    deploymentId: $deploymentId
+    backupDisposition: $backupDisposition
+  ) {
+    id
+    type
+    status
+    message
+    deploymentId
+  }
+}
+    `;
+
+export const useDeleteDeploymentMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeleteDeploymentMutation, TError, DeleteDeploymentMutationVariables, TContext>) => {
+    
+    return useMutation<DeleteDeploymentMutation, TError, DeleteDeploymentMutationVariables, TContext>(
+      {
+    mutationKey: ['DeleteDeployment'],
+    mutationFn: (variables?: DeleteDeploymentMutationVariables) => graphqlFetcher<DeleteDeploymentMutation, DeleteDeploymentMutationVariables>(DeleteDeploymentDocument, variables)(),
+    ...options
+  }
+    )};
+
 export const DeployDocument = `
     mutation Deploy($version: String, $driver: String!, $name: String, $environmentId: UUID!, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
   deploy(
@@ -1290,6 +1343,7 @@ export const GetDeploymentDocument = `
     id
     name
     status
+    deletedAt
     config
     parameters
     applicationVersion
