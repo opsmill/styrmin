@@ -91,15 +91,31 @@ async def fresh_simple_app(
     styrmin_resources: dict, simple_app_image: str, vcluster: dict
 ) -> dict:
     """Per-test deployment — deletion tests need their own instance so
-    the session-scoped ``deployed_simple_app`` isn't consumed."""
+    the session-scoped ``deployed_simple_app`` isn't consumed.
+
+    The simple-app driver declares a service named ``simple-app``,
+    which would collide with the session fixture's already-registered
+    service in the same environment. Override the service name with a
+    per-test suffix so both deployments can coexist.
+    """
     client: StyrminClient = styrmin_resources["client"]
     environment_id = styrmin_resources["environment_id"]
+
+    unique_suffix = uuid4().hex[:8]
+    deployment_name = f"delete-e2e-{unique_suffix}"
+    service_override = f"simple-app-delete-e2e-{unique_suffix}"
 
     task = await client.deployments.create(
         driver="simple-app",
         version="0.1.0",
         environment_id=environment_id,
-        name=f"delete-e2e-{uuid4().hex[:8]}",
+        name=deployment_name,
+        service_name_overrides=[
+            {
+                "driverServiceName": "simple-app",
+                "overrideName": service_override,
+            }
+        ],
     )
     deployment_id = task.deployment_id
     assert deployment_id is not None
