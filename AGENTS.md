@@ -137,3 +137,8 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 - Backend: `backend/AGENTS.md`
 - Frontend: `frontend/AGENTS.md`
 - Drivers: `driver/DRIVERS.md`
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
