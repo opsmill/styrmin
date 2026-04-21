@@ -36,7 +36,9 @@ interface TimelineTask {
   updatedOn?: string | null;
 }
 
-function deletionSubtitle(parameters: Record<string, unknown> | null | undefined): string | null {
+function deletionSubtitle(
+  parameters: Record<string, unknown> | null | undefined,
+): string | null {
   if (!parameters) return null;
   const disposition = parameters["backup_disposition"];
   if (disposition === "retain") return "backups retained";
