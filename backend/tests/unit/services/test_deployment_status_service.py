@@ -5,6 +5,9 @@ from uuid import UUID, uuid4
 import pytest
 
 from styrmin_backend.domain.models import Deployment, DeploymentState, Instance
+from styrmin_backend.services.deployment_status import (
+    extract_scheduling_conditions,
+)
 from styrmin_backend.services.deployment_status import report_deployment_statuses
 from tests.unit.services.fakes import (
     FakeActionRepository,
@@ -255,3 +258,59 @@ async def test_missing_instance_id_backcompat() -> None:
     found = await dep_repo.find(dep.id)
     assert found is not None
     assert found.status == DeploymentState.RUNNING
+
+
+class TestExtractSchedulingConditions:
+    """T044: conditions whose ``message`` / ``reason`` mentions
+    affinity / tolerations / topology spread / runtime class are surfaced
+    so the deployment status view can highlight them separately.
+    """
+
+    def test_extracts_affinity_unsatisfied(self) -> None:
+        conds = [
+            {
+                "type": "PodScheduled",
+                "status": "False",
+                "reason": "Unschedulable",
+                "message": (
+                    "0/3 nodes are available: 3 node(s) didn't match pod "
+                    "affinity rules."
+                ),
+            },
+            {
+                "type": "Ready",
+                "status": "True",
+                "message": "all good",
+            },
+        ]
+
+        filtered = extract_scheduling_conditions(conds)
+
+        assert len(filtered) == 1
+        assert filtered[0]["scheduling"] is True
+        assert "affinity" in filtered[0]["message"].lower()
+
+    def test_extracts_toleration_and_taint_conditions(self) -> None:
+        conds = [
+            {
+                "message": "node(s) had taint {dedicated: batch}, that the pod didn't tolerate"
+            },
+        ]
+
+        filtered = extract_scheduling_conditions(conds)
+
+        assert len(filtered) == 1
+
+    def test_drops_non_scheduling_conditions(self) -> None:
+        conds = [
+            {"message": "container image pull backoff"},
+            {"message": "ready"},
+        ]
+        assert extract_scheduling_conditions(conds) == []
+
+    def test_handles_none(self) -> None:
+        assert extract_scheduling_conditions(None) == []
+
+    def test_matches_case_insensitively(self) -> None:
+        conds = [{"reason": "TOLERATION_MISMATCH", "message": "x"}]
+        assert extract_scheduling_conditions(conds)

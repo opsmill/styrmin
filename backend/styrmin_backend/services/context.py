@@ -1,10 +1,15 @@
 from uuid import UUID
 
 from loguru import logger
+from pydantic import ValidationError
 
 from styrmin_backend.agent.service.kubernetes.utils import (
     get_kubernetes_reference,
 )
+from styrmin_backend.context.models.components import (
+    ResolvedComponentScheduling,
+)
+from styrmin_backend.context.models.config import SchedulingConfig
 from styrmin_backend.context.models.contexts import (
     GlobalContext,
     UtilityContext,
@@ -20,9 +25,19 @@ from styrmin_backend.context.fqdn import (
     compute_primary_fqdn,
 )
 from styrmin_backend.context.models.services import ServiceReference
-from styrmin_backend.context.resolvers import resolve_global_context
+from styrmin_backend.context.resolvers import (
+    _resolve_scheduling_config,
+    resolve_global_context,
+)
 from styrmin_backend.domain.models import Deployment
-from styrmin_backend.services.exceptions import DeploymentNotFoundError
+from styrmin_backend.services.exceptions import (
+    DeploymentNotFoundError,
+    InvalidSchedulingConfigError,
+)
+from styrmin_backend.services.scheduling.validator import (
+    expand_deployment_references,
+    validate_runtime_class_exists,
+)
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 
@@ -122,7 +137,10 @@ async def generate_context_from_deployment(
                 ],
                 "utilities": utilities_input,
                 "environment_name": environment.name,
-                "labels": {"environment_id": environment.id},
+                "labels": {
+                    "environment_id": environment.id,
+                    "deployment_id": deployment.id,
+                },
                 "parameters": deployment.parameters,
             }
         )
@@ -175,4 +193,101 @@ async def generate_context_from_deployment(
         if has_own_services:
             context.utilities.append(UtilityContext(kind=UtilityKind.SERVICE_DISCOVERY))
 
+        # Resolve scheduling configuration per component and expand any
+        # affinity ``deployment_ref`` terms into concrete label selectors.
+        await _populate_component_scheduling(
+            context=context,
+            uow=uow,
+            environment_id=deployment.environment_id,
+            environment_config=environment.config,
+            deployment_config=deployment.config,
+            deployment_components=deployment.components or [],
+            cluster_capabilities=cluster.capabilities,
+            cluster_id=str(cluster.id),
+        )
+
         return context
+
+
+async def _populate_component_scheduling(
+    *,
+    context: GlobalContext,
+    uow: UnitOfWork,
+    environment_id: UUID,
+    environment_config: dict | None,
+    deployment_config: dict | None,
+    deployment_components: list,
+    cluster_capabilities: dict | None = None,
+    cluster_id: str | None = None,
+) -> None:
+    """Populate ``ComponentContext.scheduling`` for each component.
+
+    Reads ``scheduling`` from each level's raw JSON config, merges them via
+    :func:`_resolve_scheduling_config`, expands affinity ``deployment_ref``
+    terms, validates any resolved ``runtime_class`` against the cluster's
+    capabilities cache, and stores the resulting
+    :class:`ResolvedComponentScheduling` on the matching
+    :class:`ComponentContext`.
+    """
+    if context.components is None:
+        return
+
+    env_scheduling = _extract_scheduling(
+        environment_config, path="environment.config.scheduling"
+    )
+    dep_scheduling = _extract_scheduling(
+        deployment_config, path="deployment.config.scheduling"
+    )
+
+    component_scheduling_by_name: dict[str, SchedulingConfig | None] = {}
+    for component in deployment_components:
+        component_scheduling_by_name[component.name] = _extract_scheduling(
+            component.config,
+            path=f"component[{component.name}].config.scheduling",
+        )
+
+    for name, component_ctx in context.components.root.items():
+        comp_scheduling = component_scheduling_by_name.get(name)
+        if (
+            env_scheduling is None
+            and dep_scheduling is None
+            and comp_scheduling is None
+        ):
+            continue
+        resolved, provenance = _resolve_scheduling_config(
+            env=env_scheduling,
+            dep=dep_scheduling,
+            comp=comp_scheduling,
+        )
+        resolved = await expand_deployment_references(
+            uow=uow,
+            environment_id=environment_id,
+            config=resolved,
+        )
+        if resolved.runtime_class is not None:
+            validate_runtime_class_exists(
+                cluster_capabilities,
+                resolved.runtime_class,
+                cluster_id=cluster_id,
+                path=f"component[{name}].scheduling.runtime_class",
+            )
+        component_ctx.scheduling = ResolvedComponentScheduling(
+            config=resolved, provenance=provenance
+        )
+
+
+def _extract_scheduling(
+    raw_config: dict | None, *, path: str
+) -> SchedulingConfig | None:
+    if not raw_config:
+        return None
+    payload = raw_config.get("scheduling") if isinstance(raw_config, dict) else None
+    if payload is None:
+        return None
+    try:
+        return SchedulingConfig.model_validate(payload)
+    except ValidationError as e:
+        raise InvalidSchedulingConfigError(
+            message=f"Invalid scheduling configuration at {path}: {e!s}",
+            path=path,
+        ) from e

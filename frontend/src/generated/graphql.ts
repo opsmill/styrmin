@@ -219,6 +219,7 @@ export type Deployment = {
   name: Scalars['String']['output'];
   parameters: Scalars['JSON']['output'];
   podStatuses: Array<PodStatus>;
+  resolvedScheduling: Array<ResolvedComponentScheduling>;
   status: Scalars['String']['output'];
 };
 
@@ -684,6 +685,13 @@ export type ReportPodStatusesResponse = {
   success: Scalars['Boolean']['output'];
 };
 
+export type ResolvedComponentScheduling = {
+  __typename?: 'ResolvedComponentScheduling';
+  componentName: Scalars['String']['output'];
+  config: Scalars['JSON']['output'];
+  provenance: Scalars['JSON']['output'];
+};
+
 export type Restore = {
   __typename?: 'Restore';
   backup: Backup;
@@ -828,6 +836,13 @@ export type GetDeploymentQueryVariables = Exact<{
 
 
 export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null }> } | null };
+
+export type GetDeploymentResolvedSchedulingQueryVariables = Exact<{
+  deploymentId: Scalars['UUID']['input'];
+}>;
+
+
+export type GetDeploymentResolvedSchedulingQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, resolvedScheduling: Array<{ __typename?: 'ResolvedComponentScheduling', componentName: string, config: Record<string, unknown>, provenance: Record<string, unknown> }> } | null };
 
 export type GetDeploymentTimelineQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -1312,6 +1327,38 @@ export const useGetDeploymentQuery = <
     )};
 
 useGetDeploymentQuery.getKey = (variables: GetDeploymentQueryVariables) => ['GetDeployment', variables];
+
+export const GetDeploymentResolvedSchedulingDocument = `
+    query GetDeploymentResolvedScheduling($deploymentId: UUID!) {
+  deployment(deploymentId: $deploymentId) {
+    id
+    name
+    resolvedScheduling {
+      componentName
+      config
+      provenance
+    }
+  }
+}
+    `;
+
+export const useGetDeploymentResolvedSchedulingQuery = <
+      TData = GetDeploymentResolvedSchedulingQuery,
+      TError = Error
+    >(
+      variables: GetDeploymentResolvedSchedulingQueryVariables,
+      options?: Omit<UseQueryOptions<GetDeploymentResolvedSchedulingQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetDeploymentResolvedSchedulingQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetDeploymentResolvedSchedulingQuery, TError, TData>(
+      {
+    queryKey: ['GetDeploymentResolvedScheduling', variables],
+    queryFn: graphqlFetcher<GetDeploymentResolvedSchedulingQuery, GetDeploymentResolvedSchedulingQueryVariables>(GetDeploymentResolvedSchedulingDocument, variables),
+    ...options
+  }
+    )};
+
+useGetDeploymentResolvedSchedulingQuery.getKey = (variables: GetDeploymentResolvedSchedulingQueryVariables) => ['GetDeploymentResolvedScheduling', variables];
 
 export const GetDeploymentTimelineDocument = `
     query GetDeploymentTimeline($deploymentId: UUID!) {

@@ -25,6 +25,7 @@ from .get_backup_storage_location import GetBackupStorageLocation
 from .get_cluster import GetCluster
 from .get_deployment import GetDeployment
 from .get_deployment_pod_statuses import GetDeploymentPodStatuses
+from .get_deployment_resolved_scheduling import GetDeploymentResolvedScheduling
 from .get_deployment_services import GetDeploymentServices
 from .get_deployment_status import GetDeploymentStatus
 from .get_deployment_timeline import GetDeploymentTimeline
@@ -617,6 +618,32 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeploymentPodStatuses.model_validate(data)
+
+    async def get_deployment_resolved_scheduling(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentResolvedScheduling:
+        query = gql("""
+            query GetDeploymentResolvedScheduling($deploymentId: UUID!) {
+              deployment(deploymentId: $deploymentId) {
+                id
+                name
+                resolvedScheduling {
+                  componentName
+                  config
+                  provenance
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentResolvedScheduling",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentResolvedScheduling.model_validate(data)
 
     async def get_deployment_services(
         self, deployment_id: UUID, **kwargs: Any

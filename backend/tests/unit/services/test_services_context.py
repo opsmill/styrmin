@@ -1,6 +1,36 @@
 """Unit tests for services context building (T024)."""
 
+import inspect
+from uuid import uuid4
+
+import pytest
+
+from styrmin_backend.context.models.components import (
+    ArbitrarySectionModel,
+    ComponentContext,
+    ComponentsContext,
+    Identifier,
+    LabelIdentifier,
+)
+from styrmin_backend.context.models.config import (
+    ClusterConfig,
+    DeploymentConfig,
+    EnvironmentConfig,
+    ResolvedConfig,
+)
+from styrmin_backend.context.models.contexts import (
+    ApplicationContext,
+    ClusterContext,
+    DeploymentContext,
+    EnvironmentContext,
+    GlobalContext,
+    InstanceContext,
+)
+from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
 from styrmin_backend.context.models.services import ServiceReference
+from styrmin_backend.services import context as context_service
+from styrmin_backend.services.context import _populate_component_scheduling
+from styrmin_backend.services.exceptions import RuntimeClassNotFoundError
 
 
 class TestServiceReference:
@@ -88,3 +118,125 @@ class TestServicesContextDict:
         assert context["redis"]["url"] == "redis:6379"
         assert context["redis"]["host"] == "redis"
         assert context["redis"]["port"] == 6379
+
+
+class TestContextLabels:
+    """T025: the deployment generation labels include both the environment
+    and deployment identity labels so the pod-template post-renderer stamps
+    them on every rendered pod.
+    """
+
+    def test_labels_dict_contains_environment_and_deployment_ids(self) -> None:
+        source = inspect.getsource(context_service.generate_context_from_deployment)
+        assert '"environment_id": environment.id' in source
+        assert '"deployment_id": deployment.id' in source
+
+
+class _FakeDeploymentComponent:
+    """Minimal stand-in for ``Deployment.components[i]`` — the scheduling
+    population path only reads ``.name`` and ``.config``.
+    """
+
+    def __init__(self, name: str, config: dict | None) -> None:
+        self.name = name
+        self.config = config
+
+
+def _make_context_with_component(name: str) -> GlobalContext:
+    namespace = "dep-test"
+    return GlobalContext(
+        cluster=ClusterContext(config=ClusterConfig()),
+        environment=EnvironmentContext(name="test", config=EnvironmentConfig()),
+        deployment=DeploymentContext(config=DeploymentConfig()),
+        instance=InstanceContext(
+            config=ResolvedConfig(),
+            deployment_id=uuid4(),
+            namespace=namespace,
+            release_reference=namespace,
+        ),
+        app=ApplicationContext(
+            name="test-app",
+            version="1.0.0",
+            helm=HelmInfo(
+                chart=ChartInfo(
+                    id=uuid4(),
+                    name="test-chart",
+                    version="1.0.0",
+                    values_template="",
+                ),
+                repository=RepositoryInfo(id=uuid4(), url="https://example.com"),
+            ),
+        ),
+        components=ComponentsContext(
+            root={
+                name: ComponentContext(
+                    name=name,
+                    enabled=True,
+                    config=ArbitrarySectionModel(
+                        identifier=Identifier(
+                            label=LabelIdentifier(root={"app": name})
+                        ),
+                    ),
+                )
+            }
+        ),
+    )
+
+
+class TestPopulateComponentScheduling:
+    """FR-012 end-to-end: resolved scheduling plus per-field provenance
+    must reach the Jinja rendering surface via
+    ``context.components[*].scheduling``, not just the GraphQL API.
+    """
+
+    @pytest.mark.anyio
+    async def test_component_scheduling_exposes_provenance(self, uow) -> None:  # type: ignore[no-untyped-def]
+        context = _make_context_with_component("server")
+        env_config = {"scheduling": {"runtime_class": "kata"}}
+        dep_config = {"scheduling": {"resources": {"requests": {"cpu": "100m"}}}}
+        components = [_FakeDeploymentComponent("server", config=None)]
+
+        await _populate_component_scheduling(
+            context=context,
+            uow=uow,
+            environment_id=uuid4(),
+            environment_config=env_config,
+            deployment_config=dep_config,
+            deployment_components=components,
+            cluster_capabilities={"runtime_class": {"kata": {"name": "kata"}}},
+            cluster_id="c-1",
+        )
+
+        assert context.components is not None
+        scheduling = context.components.root["server"].scheduling
+        assert scheduling is not None
+        assert scheduling.config.runtime_class == "kata"
+        assert scheduling.config.resources is not None
+        assert scheduling.provenance["runtime_class"] == "environment"
+        assert scheduling.provenance["resources.requests.cpu"] == "deployment"
+
+    @pytest.mark.anyio
+    async def test_unknown_runtime_class_is_rejected_at_context_time(self, uow) -> None:  # type: ignore[no-untyped-def]
+        """Runtime class not installed on the cluster must fail context
+        generation so the operator sees the error before FluxCD leaves pods
+        Pending with ``RuntimeClassNotFound``.
+        """
+        context = _make_context_with_component("server")
+        dep_config = {"scheduling": {"runtime_class": "not-installed"}}
+        components = [_FakeDeploymentComponent("server", config=None)]
+
+        with pytest.raises(RuntimeClassNotFoundError) as exc:
+            await _populate_component_scheduling(
+                context=context,
+                uow=uow,
+                environment_id=uuid4(),
+                environment_config=None,
+                deployment_config=dep_config,
+                deployment_components=components,
+                cluster_capabilities={"runtime_class": {"kata": {"name": "kata"}}},
+                cluster_id="c-1",
+            )
+        assert exc.value.error_metadata["runtime_class"] == "not-installed"
+        assert exc.value.error_metadata["path"] == (
+            "component[server].scheduling.runtime_class"
+        )

@@ -359,3 +359,168 @@ class BackupStorageLocationInUseError(ServiceError):
     @property
     def error_metadata(self) -> dict[str, Any]:
         return {"environment_names": self.environment_names}
+
+
+class InvalidSchedulingConfigError(ServiceError):
+    """The scheduling configuration payload failed validation.
+
+    Raised when a level's ``scheduling`` section cannot be parsed into a
+    :class:`SchedulingConfig` — typically an unparseable Kubernetes
+    quantity, a non-DNS-1123 runtime class, or a structural mistake like
+    an affinity term missing both ``label_selector`` and ``deployment_ref``.
+    The ``path`` points at the scope that holds the bad payload so the
+    API error extension can tell the operator where to look.
+    """
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "The scheduling configuration is invalid"
+
+    def __init__(self, message: str = "", path: str | None = None) -> None:
+        self.path = path
+        super().__init__(message)
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"path": self.path} if self.path is not None else {}
+
+
+class UnknownComponentInConfigError(ServiceError):
+    """A component-level scheduling payload references an undeclared component name.
+
+    Raised when scheduling configuration targets a component that the
+    active driver version does not declare. Catching this at config time
+    prevents rendering-time surprises where the configured rules silently
+    apply to nothing.
+    """
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "Scheduling configuration references an unknown component"
+
+    def __init__(
+        self,
+        message: str = "",
+        component_name: str = "",
+        path: str | None = None,
+    ) -> None:
+        self.component_name = component_name
+        self.path = path
+        super().__init__(
+            message
+            or f"Scheduling configuration references unknown component: {component_name!r}"
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        meta: dict[str, Any] = {"component_name": self.component_name}
+        if self.path is not None:
+            meta["path"] = self.path
+        return meta
+
+
+class UnresolvableAffinityReferenceError(ServiceError):
+    """A deployment_ref in an affinity term cannot be resolved in the environment.
+
+    Raised when an affinity term's ``deployment_ref`` points at a
+    deployment that doesn't exist (or lives in a different environment).
+    Surfacing the specific identifier and the term's ``path`` lets the
+    operator fix the typo/stale reference before Kubernetes sees an
+    always-unsatisfied affinity rule.
+    """
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "Affinity deployment reference cannot be resolved"
+
+    def __init__(
+        self,
+        message: str = "",
+        deployment_id: str | None = None,
+        deployment_name: str | None = None,
+        path: str | None = None,
+    ) -> None:
+        self.deployment_id = deployment_id
+        self.deployment_name = deployment_name
+        self.path = path
+        identifier = deployment_id or deployment_name or "<unspecified>"
+        super().__init__(
+            message or f"Affinity deployment reference cannot be resolved: {identifier}"
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        meta: dict[str, Any] = {}
+        if self.deployment_id is not None:
+            meta["deployment_id"] = self.deployment_id
+        if self.deployment_name is not None:
+            meta["deployment_name"] = self.deployment_name
+        if self.path is not None:
+            meta["path"] = self.path
+        return meta
+
+
+class SchedulingPatchRenderingError(ServiceError):
+    """Failed to serialise a scheduling post-renderer patch into YAML.
+
+    Surfaces the failing resource identity (kind + label selector) so the
+    deployment status view can point the operator at the offending rule.
+    """
+
+    error_code = "OPERATION_FAILED"
+    default_message = "Failed to serialise scheduling post-renderer patch"
+
+    def __init__(
+        self,
+        message: str = "",
+        kind: str | None = None,
+        label_selector: str | None = None,
+    ) -> None:
+        self.kind = kind
+        self.label_selector = label_selector
+        super().__init__(message)
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        meta: dict[str, Any] = {}
+        if self.kind is not None:
+            meta["kind"] = self.kind
+        if self.label_selector is not None:
+            meta["label_selector"] = self.label_selector
+        return meta
+
+
+class RuntimeClassNotFoundError(ServiceError):
+    """The referenced runtime class is not installed on the target cluster.
+
+    Raised when ``scheduling.runtime_class`` names a runtime (e.g.
+    ``kata``, ``gvisor``) that is not present in the cluster's
+    capabilities cache. Catching this at context-generation time prevents
+    the scheduler from silently leaving pods Pending with
+    ``RuntimeClassNotFound``; the ``path`` reports the config scope that
+    asked for it.
+    """
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "Runtime class not found on the target cluster"
+
+    def __init__(
+        self,
+        message: str = "",
+        runtime_class: str = "",
+        cluster_id: str | None = None,
+        path: str | None = None,
+    ) -> None:
+        self.runtime_class = runtime_class
+        self.cluster_id = cluster_id
+        self.path = path
+        super().__init__(
+            message
+            or f"Runtime class not found on the target cluster: {runtime_class!r}"
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        meta: dict[str, Any] = {"runtime_class": self.runtime_class}
+        if self.cluster_id is not None:
+            meta["cluster_id"] = self.cluster_id
+        if self.path is not None:
+            meta["path"] = self.path
+        return meta

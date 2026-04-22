@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 import strawberry
+from loguru import logger
 
 from styrmin_backend.api.definitions.application_driver.model import (
     ApplicationDriverVersion,
@@ -52,6 +53,23 @@ class Component:
             name=instance.name,
             enabled=instance.enabled,
         )
+
+
+@strawberry.type
+class ResolvedComponentScheduling:
+    """Per-component effective scheduling configuration plus provenance.
+
+    ``config`` is the fully merged :class:`SchedulingConfig` as a JSON dict
+    (shape defined in
+    ``specs/001-pod-scheduling-config/contracts/scheduling-config.schema.json``).
+    ``provenance`` maps each effective field (dotted path) to the level
+    that contributed its final value —
+    ``"environment" | "deployment" | "component"``.
+    """
+
+    component_name: str
+    config: JSON
+    provenance: JSON
 
 
 @strawberry.type
@@ -198,6 +216,76 @@ class Deployment:
         uow = info.context["uow"]
         statuses = await get_pod_statuses(uow=uow, deployment_id=self.id)
         return [PodStatusType.from_instance(s) for s in statuses]
+
+    @strawberry.field
+    async def resolved_scheduling(
+        self, info: strawberry.Info
+    ) -> list[ResolvedComponentScheduling]:
+        """Return the effective :class:`SchedulingConfig` per component plus
+        per-field provenance (US5). Drivers that want to read the merged
+        values in their Jinja templates use ``context.components[*].scheduling``;
+        this GraphQL field surfaces the same data read-only to the API.
+
+        Validation / resolution errors are propagated as typed service
+        exceptions (``InvalidSchedulingConfigError``,
+        ``UnknownComponentInConfigError``,
+        ``UnresolvableAffinityReferenceError``) with a ``path`` identifying
+        the offending config scope so the API error extension can surface
+        actionable diagnostics. A missing deployment (race with deletion)
+        is logged and returns an empty list.
+        """
+        from styrmin_backend.context.resolvers import _resolve_scheduling_config
+        from styrmin_backend.services.context import _extract_scheduling
+        from styrmin_backend.services.scheduling.validator import (
+            expand_deployment_references,
+        )
+
+        uow = info.context["uow"]
+        async with uow:
+            deployment = await uow.deployments.find(self.id)
+            if deployment is None:
+                logger.warning(
+                    "resolved_scheduling: deployment {} not found (likely "
+                    "deleted between parent query and sub-field resolution)",
+                    self.id,
+                )
+                return []
+            environment = await uow.environments.get(deployment.environment_id)
+            env_config = environment.config if environment is not None else None
+            dep_config = deployment.config
+            components = deployment.components or []
+
+        env_scheduling = _extract_scheduling(
+            env_config, path="environment.config.scheduling"
+        )
+        dep_scheduling = _extract_scheduling(
+            dep_config, path=f"deployment[{self.id}].config.scheduling"
+        )
+
+        results: list[ResolvedComponentScheduling] = []
+        for component in components:
+            comp_scheduling = _extract_scheduling(
+                component.config,
+                path=f"component[{component.name}].config.scheduling",
+            )
+            resolved, provenance = _resolve_scheduling_config(
+                env=env_scheduling,
+                dep=dep_scheduling,
+                comp=comp_scheduling,
+            )
+            resolved = await expand_deployment_references(
+                uow=uow,
+                environment_id=deployment.environment_id,
+                config=resolved,
+            )
+            results.append(
+                ResolvedComponentScheduling(
+                    component_name=component.name,
+                    config=resolved.model_dump(exclude_none=True, mode="json"),
+                    provenance=dict(provenance),
+                )
+            )
+        return results
 
     @strawberry.field
     async def crd_status(self, info: strawberry.Info) -> DeploymentStatusType | None:

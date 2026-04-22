@@ -15,6 +15,7 @@ from styrmin_backend.context.models.capabilities import (
     BackupCapabilityDetail,
     Capabilities,
     IngressCapabilityDetail,
+    RuntimeClassCapabilityDetail,
     StorageCapabilityDetail,
     capabilities_to_dict,
 )
@@ -72,6 +73,20 @@ def compute_cluster_capabilities(cluster: Cluster) -> dict[str, Any] | None:
         }
 
     capabilities.ingress = _derive_ingress(config)
+
+    # Runtime-class capabilities: union of the cluster's default runtime
+    # class (if set) and the operator-declared available list. Later, a
+    # discovery worker can populate this from ``node.k8s.io/v1`` directly;
+    # until then the config-driven list is the source of truth.
+    runtime_classes: dict[str, RuntimeClassCapabilityDetail] = {}
+    if config.runtime_class:
+        runtime_classes[config.runtime_class] = RuntimeClassCapabilityDetail(
+            name=config.runtime_class
+        )
+    for name in config.available_runtime_classes or []:
+        runtime_classes.setdefault(name, RuntimeClassCapabilityDetail(name=name))
+    if runtime_classes:
+        capabilities.runtime_class = runtime_classes
 
     return capabilities_to_dict(capabilities)
 
