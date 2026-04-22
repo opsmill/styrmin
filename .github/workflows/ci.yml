@@ -295,7 +295,7 @@ jobs:
     needs: ["python-lint", "yaml-lint", "markdown-lint", "graphql-schema-check"]
     runs-on:
       group: huge-runners
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8

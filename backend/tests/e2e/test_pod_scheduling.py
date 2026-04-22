@@ -36,17 +36,19 @@ from tests.e2e.conftest import _wait_for_deployment_running
 # Single-node vcluster: we cannot verify actual node placement, only that
 # the rendered pod template carries the intended scheduling fields.
 #
-# 480s is chosen to exceed the observed worst-case end-to-end reconcile path
-# (GraphQL mutation → Styrmin workflow → HelmRelease update → FluxCD
-# re-render → Kustomize post-render → Deployment patch) under test load on
-# a single-node vcluster, where multiple reconciliations serialize.
+# 480s covers the end-to-end reconcile path (GraphQL → Styrmin workflow →
+# HelmRelease update → FluxCD re-render → Kustomize post-render → Deployment
+# patch) for a single deployment on a single-node vcluster.
 RECONCILE_TIMEOUT_SECONDS = 480.0
 RECONCILE_POLL_INTERVAL = 3.0
 
 # SLO for FR-019. The spec says "platform's normal reconciliation SLO" without
-# defining a number; we use the same budget as the other reconciliation waits
-# so the test validates propagation (not micro-latency).
-UPDATE_SLO_SECONDS = RECONCILE_TIMEOUT_SECONDS
+# defining a number; we use a generous 15-minute budget to accommodate the
+# worst-case where the shared FluxCD helm-controller is also reconciling
+# HelmReleases from other E2E tests in the session. In production with
+# dedicated nodes and no queue pressure, reconciliation is typically under
+# one minute; this budget is about propagation correctness, not latency.
+UPDATE_SLO_SECONDS = 900.0
 
 
 # ---------------------------------------------------------------------------
