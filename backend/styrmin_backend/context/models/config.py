@@ -1,4 +1,8 @@
-from pydantic import BaseModel, ConfigDict
+import re
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class IngressServiceConfig(BaseModel):
@@ -49,6 +53,265 @@ class StandardStorage(BaseModel):
     storage_class: str
 
 
+_K8S_QUANTITY_RE = re.compile(
+    r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)"
+    r"(?:[eE][+-]?[0-9]+|[numkKMGTPE]|[KMGTPE]i)?$"
+)
+
+_DNS_1123_SUBDOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9\-.]*[a-z0-9])?$")
+
+_EXTENDED_RESOURCE_KEY_RE = re.compile(
+    r"^"
+    r"(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?"
+    r"(?:\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?"
+    r"[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?"
+    r"$"
+)
+
+
+def _parse_k8s_quantity(value: str) -> str:
+    """Validate that *value* is a parseable Kubernetes quantity string.
+
+    Raises ``ValueError`` on empty string or an unrecognised suffix/format.
+    Returns the input unchanged on success (we do not canonicalise here so
+    round-tripping a config payload is lossless).
+    """
+    if not isinstance(value, str) or not value:
+        raise ValueError("Kubernetes quantity must be a non-empty string.")
+    if not _K8S_QUANTITY_RE.match(value):
+        raise ValueError(
+            f"Invalid Kubernetes quantity: {value!r}. "
+            "Expected a number optionally followed by a unit suffix "
+            "(e.g. '100m', '2', '256Mi', '2Gi', '1.5')."
+        )
+    return value
+
+
+def _validate_extended_key(key: str) -> str:
+    """Validate a Kubernetes extended-resource key (e.g. ``nvidia.com/gpu``)."""
+    if not isinstance(key, str) or not key:
+        raise ValueError("Extended resource key must be a non-empty string.")
+    if any(ch.isspace() for ch in key):
+        raise ValueError(f"Extended resource key {key!r} must not contain whitespace.")
+    if not _EXTENDED_RESOURCE_KEY_RE.match(key):
+        raise ValueError(
+            f"Invalid extended resource key: {key!r}. "
+            "Expected a Kubernetes resource name, optionally prefixed with a "
+            "DNS-subdomain and '/' (e.g. 'nvidia.com/gpu', 'hugepages-2Mi')."
+        )
+    return key
+
+
+class LabelSelectorRequirement(BaseModel):
+    """Single ``matchExpressions`` entry on a Kubernetes label selector."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    operator: Literal["In", "NotIn", "Exists", "DoesNotExist"]
+    values: list[str] | None = None
+
+
+class LabelSelector(BaseModel):
+    """Kubernetes-style label selector (``matchLabels`` and/or ``matchExpressions``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    match_labels: dict[str, str] | None = None
+    match_expressions: list[LabelSelectorRequirement] | None = None
+
+
+class DeploymentReference(BaseModel):
+    """Reference to another deployment in the same environment by platform identifier.
+
+    At resolve time the reference is expanded into a label selector keyed on
+    the platform-generated ``styrmin/deployment_id`` identity label and,
+    when ``components`` is set, the ``styrmin/component`` label.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    deployment_id: UUID | None = None
+    deployment_name: str | None = None
+    components: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _require_one_identifier(self) -> "DeploymentReference":
+        if (self.deployment_id is None) == (self.deployment_name is None):
+            raise ValueError(
+                "Exactly one of deployment_id or deployment_name must be set."
+            )
+        return self
+
+
+class AffinityTerm(BaseModel):
+    """Single affinity term.
+
+    Carries either a ``label_selector`` (escape hatch) or a
+    ``deployment_ref`` that the resolver expands into a ``label_selector``.
+    For ``node_affinity``, ``topology_key`` is ignored and may be empty.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    topology_key: str
+    namespaces: list[str] | None = None
+    namespace_selector: LabelSelector | None = None
+    label_selector: LabelSelector | None = None
+    deployment_ref: DeploymentReference | None = None
+    match_label_keys: list[str] | None = None
+    mismatch_label_keys: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _require_one_selector(self) -> "AffinityTerm":
+        if (self.label_selector is None) == (self.deployment_ref is None):
+            raise ValueError(
+                "Exactly one of label_selector or deployment_ref must be set."
+            )
+        return self
+
+
+class WeightedAffinityTerm(BaseModel):
+    """Weighted affinity term for a ``preferred`` rule (weight in 1..100)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    weight: int
+    term: AffinityTerm
+
+    @field_validator("weight")
+    @classmethod
+    def _weight_range(cls, v: int) -> int:
+        if not 1 <= v <= 100:
+            raise ValueError("weight must be between 1 and 100.")
+        return v
+
+
+class AffinityBlock(BaseModel):
+    """One affinity kind (pod / pod-anti / node) at one level.
+
+    ``required`` and ``preferred`` accumulate across levels; ``replace: true``
+    discards all shallower-level terms for the affected affinity kind.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    required: list[AffinityTerm] = Field(default_factory=list)
+    preferred: list[WeightedAffinityTerm] = Field(default_factory=list)
+    replace: bool = False
+
+
+class TopologySpreadConstraint(BaseModel):
+    """One topology-spread constraint on the pod template."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_skew: int
+    topology_key: str
+    when_unsatisfiable: Literal["DoNotSchedule", "ScheduleAnyway"]
+    label_selector: LabelSelector | None = None
+    min_domains: int | None = None
+    node_affinity_policy: Literal["Honor", "Ignore"] | None = None
+    node_taints_policy: Literal["Honor", "Ignore"] | None = None
+    match_label_keys: list[str] | None = None
+
+
+class ResourceSpec(BaseModel):
+    """Pod-container ``resources.requests`` or ``resources.limits`` payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cpu: str | None = None
+    memory: str | None = None
+    ephemeral_storage: str | None = None
+    extended: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_quantities(self) -> "ResourceSpec":
+        for value in (self.cpu, self.memory, self.ephemeral_storage):
+            if value is not None:
+                _parse_k8s_quantity(value)
+        for key, value in self.extended.items():
+            _validate_extended_key(key)
+            _parse_k8s_quantity(value)
+        return self
+
+
+class ResourceRequirements(BaseModel):
+    """Container resource requirements (``requests`` and ``limits``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requests: ResourceSpec | None = None
+    limits: ResourceSpec | None = None
+
+
+class Toleration(BaseModel):
+    """Single pod toleration entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str | None = None
+    operator: Literal["Exists", "Equal"] | None = None
+    value: str | None = None
+    effect: Literal["NoSchedule", "PreferNoSchedule", "NoExecute"] | None = None
+    toleration_seconds: int | None = None
+
+
+class PostRenderInjection(BaseModel):
+    """Per-feature opt-out flags for the default post-renderer injection.
+
+    Meaningful at deployment and component scopes only; environment-scope
+    ``inject`` is accepted by the schema for symmetry but ignored at
+    resolution time (the merge emits a warning log in that case — see
+    :func:`styrmin_backend.context.resolvers._merge_inject_flags`). Each
+    flag is three-valued: ``None`` inherits from the next shallower level;
+    ``True`` opts the feature in; ``False`` opts it out. A ``None`` all
+    the way up the chain resolves to ``True`` (the default behaviour).
+    Component-level flags override deployment-level flags per field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pod_affinity: bool | None = None
+    node_affinity: bool | None = None
+    topology_spread: bool | None = None
+    resources: bool | None = None
+    tolerations: bool | None = None
+    runtime_class: bool | None = None
+
+
+class SchedulingConfig(BaseModel):
+    """Hierarchical pod scheduling & resource configuration section.
+
+    Attached to every configuration level (environment, deployment, component).
+    Absent fields inherit from the next shallower level per the platform's
+    merge rules. See ``specs/001-pod-scheduling-config/data-model.md``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pod_affinity: AffinityBlock | None = None
+    pod_anti_affinity: AffinityBlock | None = None
+    node_affinity: AffinityBlock | None = None
+    topology_spread_constraints: list[TopologySpreadConstraint] | None = None
+    resources: ResourceRequirements | None = None
+    tolerations: list[Toleration] | None = None
+    runtime_class: str | None = None
+    inject: PostRenderInjection | None = None
+
+    @field_validator("runtime_class")
+    @classmethod
+    def _validate_runtime_class(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not v or not _DNS_1123_SUBDOMAIN_RE.match(v):
+            raise ValueError(
+                "runtime_class must be a non-empty DNS-1123 subdomain (e.g. 'kata')."
+            )
+        return v
+
+
 class BaseConfigSection(BaseModel):
     """Base context section.
 
@@ -56,6 +319,9 @@ class BaseConfigSection(BaseModel):
         ingress_class (str): The ingress class name.
         db_size (str): The database size.
         fqdn_suffix (str): The fully qualified domain name suffix.
+        scheduling (SchedulingConfig): Optional hierarchical pod scheduling
+            and resource configuration. Absent fields inherit from shallower
+            levels during resolution.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -63,6 +329,7 @@ class BaseConfigSection(BaseModel):
     ingress_class: str | None = None
     db_size: str | None = None
     fqdn_suffix: str | None = None
+    scheduling: SchedulingConfig | None = None
 
 
 class ClusterConfig(BaseConfigSection):
@@ -70,6 +337,12 @@ class ClusterConfig(BaseConfigSection):
 
     Attributes:
         runtime_class (str | None): The runtime class.
+        available_runtime_classes (list[str] | None): Runtime classes installed
+            on the cluster. Platform operators declare which runtime classes
+            (e.g. ``kata``, ``gvisor``) are available so that deployment-level
+            scheduling can reference them. A dedicated discovery worker may
+            later populate this by querying the ``node.k8s.io/v1`` API, at
+            which point this manual declaration can be removed.
         node_selector (str | None): The node selector.
         dedicated_ingress (DedicatedIngressConfig | None): The dedicated ingress controller config.
         standard_storage (StandardStorage | None): The standard storage.
@@ -78,9 +351,25 @@ class ClusterConfig(BaseConfigSection):
     model_config = ConfigDict(extra="forbid")
 
     runtime_class: str | None = None
+    available_runtime_classes: list[str] | None = None
     node_selector: str | None = None
     dedicated_ingress: DedicatedIngressConfig | None = None
     standard_storage: StandardStorage | None = None
+
+    @field_validator("available_runtime_classes")
+    @classmethod
+    def _validate_available_runtime_classes(
+        cls, v: list[str] | None
+    ) -> list[str] | None:
+        if v is None:
+            return v
+        for name in v:
+            if not name or not _DNS_1123_SUBDOMAIN_RE.match(name):
+                raise ValueError(
+                    f"Invalid runtime class name: {name!r}. "
+                    "Each entry must be a non-empty DNS-1123 subdomain."
+                )
+        return v
 
 
 class EnvironmentConfig(BaseConfigSection):

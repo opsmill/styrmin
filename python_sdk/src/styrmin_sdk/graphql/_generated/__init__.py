@@ -55,6 +55,11 @@ from .get_deployment_pod_statuses import (
     GetDeploymentPodStatusesDeployment,
     GetDeploymentPodStatusesDeploymentPodStatuses,
 )
+from .get_deployment_resolved_scheduling import (
+    GetDeploymentResolvedScheduling,
+    GetDeploymentResolvedSchedulingDeployment,
+    GetDeploymentResolvedSchedulingDeploymentResolvedScheduling,
+)
 from .get_deployment_services import (
     GetDeploymentServices,
     GetDeploymentServicesDeploymentServices,
@@ -195,6 +200,9 @@ __all__ = [
     "GetDeploymentPodStatuses",
     "GetDeploymentPodStatusesDeployment",
     "GetDeploymentPodStatusesDeploymentPodStatuses",
+    "GetDeploymentResolvedScheduling",
+    "GetDeploymentResolvedSchedulingDeployment",
+    "GetDeploymentResolvedSchedulingDeploymentResolvedScheduling",
     "GetDeploymentServices",
     "GetDeploymentServicesDeploymentServices",
     "GetDeploymentStatus",

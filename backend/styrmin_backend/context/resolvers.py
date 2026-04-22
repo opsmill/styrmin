@@ -1,18 +1,31 @@
+from typing import Literal
 from uuid import UUID
 
+from loguru import logger
 from pydantic import ValidationError
 
 from styrmin_backend.context.exceptions import ContextError
 from styrmin_backend.context.models.components import (
     ComponentContext,
     ComponentsContext,
+    ProvenanceLevel,
 )
 from styrmin_backend.context.models.config import (
+    AffinityBlock,
+    AffinityTerm,
     ClusterConfig,
     DeploymentConfig,
     EnvironmentConfig,
+    PostRenderInjection,
     ResolvedConfig,
+    ResourceRequirements,
+    ResourceSpec,
+    SchedulingConfig,
+    Toleration,
+    TopologySpreadConstraint,
+    WeightedAffinityTerm,
 )
+from styrmin_backend.services.exceptions import UnknownComponentInConfigError
 from styrmin_backend.context.models.contexts import (
     ApplicationContext,
     ClusterContext,
@@ -60,6 +73,23 @@ def _resolve_instance_config(
         **deployment.model_dump(exclude_none=True),
     }
 
+    # T071 (data-model I2): InstanceContext.config.scheduling must be the
+    # deepest-per-field merge of env + dep (component overrides are
+    # per-component and live on ComponentContext.scheduling). The whole-
+    # object dict merge above would lose env fields whenever dep also set
+    # ``scheduling``; recompute it via ``_resolve_scheduling_config``.
+    if environment.scheduling is not None or deployment.scheduling is not None:
+        resolved_scheduling, _ = _resolve_scheduling_config(
+            env=environment.scheduling,
+            dep=deployment.scheduling,
+            comp=None,
+        )
+        resolved_context["scheduling"] = resolved_scheduling.model_dump(
+            exclude_none=True
+        )
+    else:
+        resolved_context.pop("scheduling", None)
+
     return ResolvedConfig(**resolved_context)
 
 
@@ -101,6 +131,355 @@ def _resolve_instance_context(
     )
 
     return instance_context
+
+
+_ResourceField = Literal["cpu", "memory", "ephemeral_storage"]
+_AffinityKind = Literal["pod_affinity", "pod_anti_affinity", "node_affinity"]
+
+_INJECT_FIELDS: tuple[str, ...] = (
+    "pod_affinity",
+    "node_affinity",
+    "topology_spread",
+    "resources",
+    "tolerations",
+    "runtime_class",
+)
+
+
+def _merge_inject_flags(
+    levels: list[tuple[ProvenanceLevel, SchedulingConfig | None]],
+    provenance: dict[str, ProvenanceLevel],
+) -> PostRenderInjection | None:
+    """Merge ``PostRenderInjection`` per-field with deepest-wins.
+
+    Environment-scope ``inject`` is accepted but ignored (data-model §1);
+    when set at the environment level a warning is logged so operators can
+    move it to deployment/component scope instead of silently seeing it
+    dropped. ``None`` at every level is reported as ``None`` (no inject
+    object is constructed); any explicit ``True``/``False`` at deployment
+    or component level yields a :class:`PostRenderInjection` instance.
+    """
+    resolved: dict[str, bool] = {}
+    for level, cfg in levels:
+        if cfg is None or cfg.inject is None:
+            continue
+        if level == "environment":
+            logger.warning(
+                "scheduling.inject set at environment scope is ignored; "
+                "move opt-outs to deployment or component scope"
+            )
+            continue
+        for field_name in _INJECT_FIELDS:
+            value = getattr(cfg.inject, field_name)
+            if value is not None:
+                resolved[field_name] = value
+                provenance[f"inject.{field_name}"] = level
+    if not resolved:
+        return None
+    return PostRenderInjection(**resolved)
+
+
+def effective_inject_flag(inject: PostRenderInjection | None, field_name: str) -> bool:
+    """Return the effective (defaulted) value of an inject flag.
+
+    ``None`` — whether because no level set ``inject`` at all or because
+    the field is inherited — resolves to ``True``.
+    """
+    if inject is None:
+        return True
+    value = getattr(inject, field_name, None)
+    return value if value is not None else True
+
+
+def _merge_affinity_blocks(
+    level_blocks: list[tuple[ProvenanceLevel, AffinityBlock | None]],
+    provenance_key: str,
+    provenance: dict[str, ProvenanceLevel],
+) -> AffinityBlock | None:
+    """Accumulate affinity terms across levels with per-kind ``replace:true`` reset.
+
+    ``required`` terms from all levels are concatenated (ANDed by the
+    Kubernetes scheduler); ``preferred`` terms are merged into a single
+    weighted list. If any level sets ``replace: true`` the running
+    accumulator is discarded at that point; levels deeper than the one that
+    set ``replace: true`` continue to accumulate on top of the replacement
+    unless they also set ``replace: true``.
+
+    Returns ``None`` when no level contributed any terms at all (including
+    the case where the only non-``None`` block at a given kind has empty
+    ``required`` and ``preferred``). Provenance records the last level that
+    contributed — i.e. the deepest level with either ``replace: true`` or a
+    non-empty ``required``/``preferred`` entry.
+    """
+    required: list[AffinityTerm] = []
+    preferred: list[WeightedAffinityTerm] = []
+    last_contributing: ProvenanceLevel | None = None
+
+    for level, block in level_blocks:
+        if block is None:
+            continue
+        if block.replace:
+            required = []
+            preferred = []
+            last_contributing = level
+        if block.required or block.preferred:
+            last_contributing = level
+        required.extend(block.required)
+        preferred.extend(block.preferred)
+
+    if last_contributing is None:
+        return None
+
+    provenance[provenance_key] = last_contributing
+    return AffinityBlock(required=required, preferred=preferred, replace=False)
+
+
+def _merge_resource_spec(
+    level_specs: list[tuple[ProvenanceLevel, ResourceSpec | None]],
+    provenance_path_prefix: str,
+    provenance: dict[str, ProvenanceLevel],
+) -> ResourceSpec | None:
+    """Merge a list of (level, ResourceSpec) entries with deepest-wins per field.
+
+    ``level_specs`` is ordered shallowest → deepest. ``extended`` maps are
+    merged key-by-key (deepest wins per key). Provenance paths are recorded
+    as ``<prefix>.cpu``, ``<prefix>.memory``, ``<prefix>.ephemeral_storage``,
+    and ``<prefix>.extended.<key>``. Returns ``None`` when no level sets the
+    spec at all.
+    """
+    if not any(spec is not None for _, spec in level_specs):
+        return None
+
+    merged_scalars: dict[str, tuple[str, ProvenanceLevel]] = {}
+    merged_extended: dict[str, tuple[str, ProvenanceLevel]] = {}
+    fields: tuple[_ResourceField, ...] = ("cpu", "memory", "ephemeral_storage")
+
+    for level, spec in level_specs:
+        if spec is None:
+            continue
+        for field_name in fields:
+            value = getattr(spec, field_name)
+            if value is not None:
+                merged_scalars[field_name] = (value, level)
+        for key, value in spec.extended.items():
+            merged_extended[key] = (value, level)
+
+    for field_name, (_, level) in merged_scalars.items():
+        provenance[f"{provenance_path_prefix}.{field_name}"] = level
+    for key, (_, level) in merged_extended.items():
+        provenance[f"{provenance_path_prefix}.extended.{key}"] = level
+
+    return ResourceSpec(
+        cpu=merged_scalars["cpu"][0] if "cpu" in merged_scalars else None,
+        memory=merged_scalars["memory"][0] if "memory" in merged_scalars else None,
+        ephemeral_storage=(
+            merged_scalars["ephemeral_storage"][0]
+            if "ephemeral_storage" in merged_scalars
+            else None
+        ),
+        extended={key: value for key, (value, _) in merged_extended.items()},
+    )
+
+
+def _merge_resource_requirements(
+    level_reqs: list[tuple[ProvenanceLevel, ResourceRequirements | None]],
+    provenance: dict[str, ProvenanceLevel],
+) -> ResourceRequirements | None:
+    if not any(req is not None for _, req in level_reqs):
+        return None
+
+    requests = _merge_resource_spec(
+        [
+            (level, req.requests if req is not None else None)
+            for level, req in level_reqs
+        ],
+        "resources.requests",
+        provenance,
+    )
+    limits = _merge_resource_spec(
+        [(level, req.limits if req is not None else None) for level, req in level_reqs],
+        "resources.limits",
+        provenance,
+    )
+    if requests is None and limits is None:
+        return None
+    return ResourceRequirements(requests=requests, limits=limits)
+
+
+def _merge_tolerations(
+    level_tolerations: list[tuple[ProvenanceLevel, list[Toleration] | None]],
+    provenance: dict[str, ProvenanceLevel],
+) -> list[Toleration] | None:
+    """Union tolerations across levels with stable dedup (FR-009).
+
+    Deduplication compares the full tuple
+    ``(key, operator, value, effect, toleration_seconds)``; first occurrence
+    wins in iteration order (env → dep → comp). Provenance records the
+    contributing level per output entry under ``tolerations[<index>]``;
+    the bare ``tolerations`` key reports the deepest level that contributed
+    any entry for at-a-glance summaries.
+    """
+    if not any(t is not None for _, t in level_tolerations):
+        return None
+
+    seen: set[tuple] = set()
+    merged: list[Toleration] = []
+    entry_levels: list[ProvenanceLevel] = []
+    for level, tolerations in level_tolerations:
+        if not tolerations:
+            continue
+        for tol in tolerations:
+            tup = (tol.key, tol.operator, tol.value, tol.effect, tol.toleration_seconds)
+            if tup in seen:
+                continue
+            seen.add(tup)
+            merged.append(tol)
+            entry_levels.append(level)
+    if not entry_levels:
+        return None
+    for idx, level in enumerate(entry_levels):
+        provenance[f"tolerations[{idx}]"] = level
+    provenance["tolerations"] = entry_levels[-1]
+    return merged
+
+
+def _merge_topology_spread(
+    level_constraints: list[
+        tuple[ProvenanceLevel, list[TopologySpreadConstraint] | None]
+    ],
+    provenance: dict[str, ProvenanceLevel],
+) -> list[TopologySpreadConstraint] | None:
+    """Keyed union on ``(topology_key, when_unsatisfiable)`` with deepest-wins.
+
+    Per FR-010b: entries at deeper levels replace entries at shallower
+    levels that share the same key. Iteration order is preserved for
+    entries that only appear at one level. Provenance records the
+    contributing level per output entry under
+    ``topology_spread_constraints[<index>]``; the bare
+    ``topology_spread_constraints`` key reports the deepest level that
+    contributed any entry.
+    """
+    if not any(c is not None for _, c in level_constraints):
+        return None
+
+    by_key: dict[tuple[str, str], TopologySpreadConstraint] = {}
+    level_by_key: dict[tuple[str, str], ProvenanceLevel] = {}
+    for level, constraints in level_constraints:
+        if not constraints:
+            continue
+        for c in constraints:
+            key = (c.topology_key, c.when_unsatisfiable)
+            by_key[key] = c
+            level_by_key[key] = level
+    if not level_by_key:
+        return None
+    for idx, key in enumerate(by_key):
+        provenance[f"topology_spread_constraints[{idx}]"] = level_by_key[key]
+    provenance["topology_spread_constraints"] = next(reversed(level_by_key.values()))
+    return list(by_key.values())
+
+
+def _resolve_scheduling_config(
+    env: SchedulingConfig | None,
+    dep: SchedulingConfig | None,
+    comp: SchedulingConfig | None,
+    driver_components: list[str] | None = None,
+    component_name: str | None = None,
+) -> tuple[SchedulingConfig, dict[str, ProvenanceLevel]]:
+    """Resolve effective scheduling configuration for one component.
+
+    Layers (shallowest → deepest): ``env``, ``dep``, ``comp``. Per-field
+    merge strategy:
+
+    * ``runtime_class``, ``resources.requests.*``, ``resources.limits.*``,
+      ``resources.*.extended[<key>]`` — deepest-wins, per scalar/key.
+    * ``pod_affinity`` / ``pod_anti_affinity`` / ``node_affinity`` —
+      ``required`` and ``preferred`` terms accumulate across levels;
+      ``replace: true`` at any level discards the running accumulator for
+      that affinity kind only (US1 / FR-010a).
+    * ``tolerations`` — union across levels with stable tuple dedup on
+      ``(key, operator, value, effect, toleration_seconds)`` (FR-009).
+    * ``topology_spread_constraints`` — keyed union on
+      ``(topology_key, when_unsatisfiable)``, deepest entry wins per key
+      (FR-010b).
+    * ``inject.*`` — per-field deepest-wins; environment-scope ``inject``
+      is accepted but ignored (data-model §1).
+
+    ``provenance`` records the level that contributed each effective field.
+    For union fields (``tolerations`` and ``topology_spread_constraints``)
+    each entry carries its own provenance under a ``[<index>]`` suffix; a
+    summary entry under the bare key reports the deepest level that
+    contributed any entry. ``driver_components`` is validated against
+    ``component_name`` when both are supplied.
+    """
+    if (
+        component_name is not None
+        and driver_components is not None
+        and component_name not in driver_components
+    ):
+        raise UnknownComponentInConfigError(
+            component_name=component_name,
+            path=f"scheduling.components.{component_name}",
+        )
+
+    provenance: dict[str, ProvenanceLevel] = {}
+    levels: list[tuple[ProvenanceLevel, SchedulingConfig | None]] = [
+        ("environment", env),
+        ("deployment", dep),
+        ("component", comp),
+    ]
+
+    def _of(attr: str) -> list:
+        return [
+            (level, getattr(cfg, attr) if cfg is not None else None)
+            for level, cfg in levels
+        ]
+
+    runtime_class: str | None = None
+    for level, cfg in levels:
+        if cfg is not None and cfg.runtime_class is not None:
+            runtime_class = cfg.runtime_class
+            provenance["runtime_class"] = level
+
+    resources = _merge_resource_requirements(_of("resources"), provenance)
+
+    # Affinity blocks accumulate per-kind with replace:true reset (US1).
+    pod_affinity = _merge_affinity_blocks(
+        _of("pod_affinity"), "pod_affinity", provenance
+    )
+    pod_anti_affinity = _merge_affinity_blocks(
+        _of("pod_anti_affinity"), "pod_anti_affinity", provenance
+    )
+    node_affinity = _merge_affinity_blocks(
+        _of("node_affinity"), "node_affinity", provenance
+    )
+
+    # Tolerations: union with stable tuple dedup (FR-009).
+    tolerations = _merge_tolerations(_of("tolerations"), provenance)
+
+    # Topology spread: keyed union on (topology_key, when_unsatisfiable) (FR-010b).
+    topology_spread_constraints = _merge_topology_spread(
+        _of("topology_spread_constraints"), provenance
+    )
+
+    # Inject flags merge per-field (FR-016): environment-scope `inject` is
+    # accepted but ignored per data-model.md §1; component-level flags
+    # override deployment-level flags field-by-field. A ``None`` anywhere
+    # means "inherit" — resolved to ``True`` downstream via
+    # ``effective_inject_flag``.
+    inject = _merge_inject_flags(levels, provenance)
+
+    resolved = SchedulingConfig(
+        runtime_class=runtime_class,
+        resources=resources,
+        pod_affinity=pod_affinity,
+        pod_anti_affinity=pod_anti_affinity,
+        node_affinity=node_affinity,
+        topology_spread_constraints=topology_spread_constraints,
+        tolerations=tolerations,
+        inject=inject,
+    )
+    return resolved, provenance
 
 
 def _resolve_utilities_context(

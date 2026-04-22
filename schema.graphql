@@ -181,6 +181,7 @@ type Deployment {
   applicationDriverVersion: ApplicationDriverVersion!
   deployedServices: [DeployedService!]!
   podStatuses: [PodStatus!]!
+  resolvedScheduling: [ResolvedComponentScheduling!]!
   crdStatus: DeploymentStatusType
 }
 
@@ -367,6 +368,12 @@ type ReportPodStatusesResponse {
   message: String!
   podsUpdated: Int!
   podsRemoved: Int!
+}
+
+type ResolvedComponentScheduling {
+  componentName: String!
+  config: JSON!
+  provenance: JSON!
 }
 
 type Restore {

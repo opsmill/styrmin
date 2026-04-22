@@ -1,6 +1,8 @@
-from typing import Any, ItemsView
+from typing import Any, ItemsView, Literal
 
-from pydantic import BaseModel, ConfigDict, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel
+
+from .config import SchedulingConfig
 
 
 class LabelIdentifier(RootModel):
@@ -43,12 +45,31 @@ class ArbitrarySectionModel(BaseModel):
         return self.__pydantic_extra__[item]
 
 
+ProvenanceLevel = Literal["environment", "deployment", "component"]
+
+
+class ResolvedComponentScheduling(BaseModel):
+    """Per-component effective scheduling configuration plus provenance.
+
+    ``config`` is the fully merged :class:`SchedulingConfig` for one component
+    (env → deployment → component layers combined). ``provenance`` maps each
+    effective field (dotted path, e.g. ``"resources.requests.cpu"``) to the
+    level that contributed its final value.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    config: SchedulingConfig
+    provenance: dict[str, ProvenanceLevel] = Field(default_factory=dict)
+
+
 class ComponentContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     config: ArbitrarySectionModel
     name: str
     enabled: bool
+    scheduling: ResolvedComponentScheduling | None = None
 
 
 class ComponentsContext(RootModel):

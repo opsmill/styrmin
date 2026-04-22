@@ -630,6 +630,7 @@ async def styrmin_resources(
                 "service": {"type": "LoadBalancer"},
             },
             "runtime_class": "default",
+            "available_runtime_classes": ["kata-e2e"],
             "standard_storage": {"storage_class": "local-path"},
         },
     )

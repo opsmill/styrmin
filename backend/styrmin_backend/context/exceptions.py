@@ -20,3 +20,26 @@ class InvalidDeploymentContextError(ContextError):
 
 class InvalidContextError(ContextError):
     """The context is invalid."""
+
+
+# Re-export scheduling-related service errors so the resolvers package can
+# raise them under a consistent import path (FR-003, FR-005, FR-001d).
+from styrmin_backend.services.exceptions import (  # noqa: E402
+    InvalidSchedulingConfigError,
+    RuntimeClassNotFoundError,
+    UnknownComponentInConfigError,
+    UnresolvableAffinityReferenceError,
+)
+
+__all__ = [
+    "ContextError",
+    "InvalidApplicationContextError",
+    "InvalidClusterContextError",
+    "InvalidContextError",
+    "InvalidDeploymentContextError",
+    "InvalidEnvironmentContextError",
+    "InvalidSchedulingConfigError",
+    "RuntimeClassNotFoundError",
+    "UnknownComponentInConfigError",
+    "UnresolvableAffinityReferenceError",
+]

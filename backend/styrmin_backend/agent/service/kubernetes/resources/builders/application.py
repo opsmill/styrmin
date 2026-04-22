@@ -19,6 +19,17 @@ from styrmin_backend.agent.service.kubernetes.resources.builders.backup_annotati
 from styrmin_backend.services.driver.models.resources.backup import (
     ComponentBackupConfig,
 )
+from styrmin_backend.services.exceptions import (
+    SchedulingPatchRenderingError,
+)
+from styrmin_backend.services.scheduling.patch_builder import (
+    build_affinity_patches,
+    build_node_affinity_patches,
+    build_resources_patches,
+    build_runtime_class_patches,
+    build_tolerations_patches,
+    build_topology_spread_patches,
+)
 from styrmin_backend.agent.service.kubernetes.resources.blocks.spec import (
     PostRenderers,
     Values,
@@ -35,6 +46,10 @@ from styrmin_backend.agent.service.kubernetes.resources.utilities.base import (
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.fqdn import to_fqdn_label
+from styrmin_backend.context.models.config import (
+    PostRenderInjection,
+    SchedulingConfig,
+)
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.operator.config import (
     ANNOTATION_DEPLOYMENT_ID,
@@ -50,6 +65,57 @@ from .base import build_minimal_helm_release
 def split_string(value: str, separator: str | None = None) -> list[str]:
     """Split a string into a list."""
     return value.split(separator)
+
+
+def _validate_renders(patches: list[TargetPatch]) -> list[TargetPatch]:
+    """Eagerly render each patch so serialisation failures raise before
+    Kustomize gets them (spec US6 Scenario 3 / T054). Returns *patches*
+    unchanged on success; raises :class:`SchedulingPatchRenderingError`
+    carrying the failing resource kind and label selector otherwise.
+    """
+    for tp in patches:
+        try:
+            tp.patch.render_value()  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001 — surface as typed error
+            raise SchedulingPatchRenderingError(
+                message=(
+                    f"Failed to render scheduling patch for kind "
+                    f"{tp.target.kind!r}: {exc!s}"
+                ),
+                kind=tp.target.kind,
+                label_selector=tp.target.label_selector,
+            ) from exc
+    return patches
+
+
+_SCHEDULING_PATCH_BUILDERS = (
+    build_affinity_patches,
+    build_resources_patches,
+    build_tolerations_patches,
+    build_topology_spread_patches,
+    build_node_affinity_patches,
+    build_runtime_class_patches,
+)
+
+
+def _build_all_scheduling_patches_for(
+    resolved: SchedulingConfig,
+    inject: PostRenderInjection | None,
+    label_selector: str | None = None,
+) -> list[TargetPatch]:
+    """Invoke every feature's builder for a single resolved scheduling config."""
+    patches: list[TargetPatch] = []
+    for build in _SCHEDULING_PATCH_BUILDERS:
+        patches.extend(
+            _validate_renders(
+                build(
+                    resolved=resolved,
+                    inject=inject,
+                    label_selector=label_selector,
+                )
+            )
+        )
+    return patches
 
 
 def get_jinja_environment(**kwargs: object) -> jinja2.Environment:
@@ -245,6 +311,52 @@ class ApplicationHelmReleaseBuilder:
 
         return patches
 
+    def build_scheduling_post_rendering_patches(self) -> list[TargetPatch]:
+        """Build Kustomize patches that inject resolved scheduling configuration.
+
+        Dispatcher for the hierarchical pod scheduling feature. Each enabled
+        feature group (US1 affinity, US2 resources, US3 tolerations /
+        topology spread / node affinity, US4 runtime class) contributes its
+        patches here; the US6 ``PostRenderInjection.inject.*`` opt-outs are
+        honoured inside each builder.
+
+        Per-component scheduling (read from ``context.components[*].scheduling``)
+        patches are narrowed by the component's identifier label selector.
+        When no components are declared, the deployment-level resolved
+        scheduling (from ``context.instance.config.scheduling``) applies to
+        every pod-template-bearing kind in the release.
+        """
+        patches: list[TargetPatch] = []
+
+        if self.context.components is not None:
+            for component_definition in self.context.components.root.values():
+                if component_definition.scheduling is None:
+                    continue
+                resolved = component_definition.scheduling.config
+                selector = (
+                    component_definition.config.identifier.label.label_selectable()
+                )
+                patches.extend(
+                    _build_all_scheduling_patches_for(
+                        resolved=resolved,
+                        inject=resolved.inject,
+                        label_selector=selector,
+                    )
+                )
+            return patches
+
+        # No components declared — apply deployment-level scheduling broadly.
+        instance_scheduling = self.context.instance.config.scheduling
+        if instance_scheduling is None:
+            return patches
+        patches.extend(
+            _build_all_scheduling_patches_for(
+                resolved=instance_scheduling,
+                inject=instance_scheduling.inject,
+            )
+        )
+        return patches
+
     def build_backup_annotation_patches(self) -> list[TargetPatch]:
         """Extract backup configs from components and build Velero annotation patches."""
         if self.context.components is None:
@@ -335,6 +447,11 @@ class ApplicationHelmReleaseBuilder:
 
         # Add backup volume annotation patches
         target_patches.extend(self.build_backup_annotation_patches())
+
+        # Add scheduling post-renderer patches (affinity, resources,
+        # tolerations, topology spread, runtime class) — dispatcher stub
+        # that later user-story phases extend.
+        target_patches.extend(self.build_scheduling_post_rendering_patches())
 
         if target_patches:
             rh.add_spec(PostRenderers(target_patches=target_patches))

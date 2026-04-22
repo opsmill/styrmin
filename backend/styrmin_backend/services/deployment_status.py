@@ -109,3 +109,45 @@ async def get_deployment_status(
     """Get the latest status snapshot for a deployment."""
     async with uow:
         return await uow.deployment_statuses.find_by_deployment(deployment_id)
+
+
+#: Substrings that mark a Kubernetes pod condition / event message as
+#: scheduling-related. Matched case-insensitively against condition messages
+#: so the deployment status view can highlight unsatisfied affinity or
+#: toleration rules (FR-018).
+_SCHEDULING_MESSAGE_MARKERS: tuple[str, ...] = (
+    "affinity",
+    "anti-affinity",
+    "antiaffinity",
+    "taint",
+    "toleration",
+    "topology",
+    "runtimeclass",
+    "runtime class",
+    "nodeaffinity",
+    "node(s) didn't match",
+)
+
+
+def extract_scheduling_conditions(
+    conditions: list[dict] | None,
+) -> list[dict]:
+    """Pull scheduling-related entries out of a status ``conditions`` list.
+
+    Returns entries whose ``message`` matches any of the scheduling marker
+    substrings (case-insensitive). Each returned entry carries the original
+    condition payload unchanged plus a ``scheduling: True`` marker so the
+    rendering surface can pick it out. Non-scheduling conditions are dropped.
+    """
+    if not conditions:
+        return []
+    out: list[dict] = []
+    for cond in conditions:
+        message = str(cond.get("message") or "").lower()
+        reason = str(cond.get("reason") or "").lower()
+        if any(
+            marker in message or marker in reason
+            for marker in _SCHEDULING_MESSAGE_MARKERS
+        ):
+            out.append({**cond, "scheduling": True})
+    return out
