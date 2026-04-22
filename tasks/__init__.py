@@ -4,7 +4,7 @@ from pathlib import Path
 
 from invoke import Collection, Context, task
 
-from tasks import agent, cluster, dev, graphql_validate
+from tasks import agent, cluster, demo, dev, graphql_validate
 from tasks import format as fmt
 
 from .utils import print_header
@@ -81,3 +81,8 @@ ns.add_task(lint_all)
 ns.add_task(generate_types)
 ns.add_task(generate_validate)
 ns.add_task(graphql_validate.validate_graphql)
+ns.add_task(demo.build, name="build")
+ns.add_task(demo.start, name="start")
+ns.add_task(demo.stop, name="stop")
+ns.add_task(demo.destroy, name="destroy")
+ns.add_task(demo.reset, name="reset")
