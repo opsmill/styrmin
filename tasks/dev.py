@@ -38,7 +38,11 @@ def restart(context: Context) -> None:
 
 
 @task
-def bootstrap(context: Context, api_url: str = "http://localhost:8000/graphql") -> None:  # noqa: ARG001
+def bootstrap(
+    context: Context,  # noqa: ARG001
+    api_url: str = "http://localhost:8000/graphql",
+    fqdn_suffix: str = "styrmin.com",
+) -> None:
     """Bootstrap Styrmin entities: cluster, environment, and local driver version."""
     console = Console()
 
@@ -50,7 +54,7 @@ def bootstrap(context: Context, api_url: str = "http://localhost:8000/graphql") 
         {
             "name": "local",
             "config": {
-                "fqdn_suffix": "styrmin.com",
+                "fqdn_suffix": fqdn_suffix,
                 "ingress_class": "traefik",
                 "dedicated_ingress": {"implementation": "traefik", "type": "ingress", "service": {"type": "ClusterIP"}},
                 "runtime_class": "default",

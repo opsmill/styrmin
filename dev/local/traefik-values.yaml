@@ -1,0 +1,30 @@
+---
+# Traefik ingress controller values for the local vCluster demo.
+#
+# service.type is intentionally NOT set here; the invoke task
+# `cluster.traefik` sets it per-OS via --set (LoadBalancer on Linux,
+# ClusterIP on macOS). Everything else is identical across platforms.
+#
+# Usage: invoke cluster.traefik
+
+ports:
+  web:
+    port: 80
+    expose:
+      default: true
+  websecure:
+    port: 443
+    expose:
+      default: true
+    tls:
+      enabled: true
+
+providers:
+  kubernetesIngress:
+    publishedService:
+      enabled: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi

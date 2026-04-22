@@ -1,10 +1,12 @@
 import os
+import sys
 
 from invoke import Context, task
 
 from .utils import KUBERNETES_ROOT_NAMESPACE, MAIN_DIRECTORY_PATH, VCLUSTER_NAME, print_header
 
 DEV_LOCAL_DIR = MAIN_DIRECTORY_PATH / "dev" / "local"
+HELM_DIR = MAIN_DIRECTORY_PATH / "helm"
 
 
 @task
@@ -36,7 +38,32 @@ def init(context: Context) -> None:
     """Install the cluster with the required CRDs."""
     print_header("Initializating the cluster ...")
     context.run(
-        f"helm install agent helm/agent -n {KUBERNETES_ROOT_NAMESPACE} --create-namespace --set agent.enabled=false --dependency-update",
+        f"helm upgrade --install agent helm/agent -n {KUBERNETES_ROOT_NAMESPACE} --create-namespace --set agent.enabled=false --dependency-update",
+        pty=True,
+    )
+
+
+@task
+def traefik(context: Context) -> None:
+    """Install the Traefik ingress controller.
+
+    Service type is selected per-OS. Linux gets `LoadBalancer` (vCluster's
+    embedded LB provider routes host traffic to it). Anything else gets
+    `ClusterIP` and callers are expected to set up a port-forward.
+    """
+    service_type = "LoadBalancer" if sys.platform == "linux" else "ClusterIP"
+    print_header(f"Installing Traefik ingress controller (service.type={service_type})...")
+    context.run(
+        "helm repo add traefik https://helm.traefik.io/traefik 2>/dev/null || true",
+        pty=True,
+    )
+    context.run("helm repo update traefik", pty=True)
+    context.run(
+        f"helm upgrade --install traefik traefik/traefik"
+        f" -n {KUBERNETES_ROOT_NAMESPACE} --create-namespace"
+        f" -f {DEV_LOCAL_DIR / 'traefik-values.yaml'}"
+        f" --set service.type={service_type}"
+        f" --wait --timeout 5m",
         pty=True,
     )
 
