@@ -34,7 +34,7 @@ description: "Task list for Dual-Entrypoint E2E Tests (API and UI)"
 - [ ] T001 Add `pytest-playwright` and `pytest-rerunfailures` to the `dev` dependency group in `pyproject.toml`, then run `uv sync --all-groups --all-packages` to update `uv.lock` (governance: new deps — see plan.md Complexity Tracking row 1).
 - [ ] T002 Extend `[tool.pytest.ini_options]` in `pyproject.toml` with Playwright defaults: `--tracing=retain-on-failure`, `--video=retain-on-failure`, `--screenshot=only-on-failure`, and `--browser=chromium`; keep the existing `asyncio_mode = "auto"` and markers intact.
 - [ ] T003 [P] Register the `api_only` and `ui_only` pytest markers in `pyproject.toml` under `[tool.pytest.ini_options].markers` so unknown-marker warnings do not trigger for the new opt-outs.
-- [ ] T004 [P] Install Chromium locally for Playwright by running `uv run playwright install chromium` and document the command in `specs/001-dual-e2e-entrypoints/quickstart.md` (already present — verify it matches the final workflow).
+- [ ] T004 Install Chromium locally for Playwright by running `uv run playwright install chromium` and document the command in `specs/001-dual-e2e-entrypoints/quickstart.md` (already present — verify it matches the final workflow). Depends on T001 — requires the `playwright` runtime to be installed.
 
 ---
 
@@ -68,13 +68,13 @@ description: "Task list for Dual-Entrypoint E2E Tests (API and UI)"
 ### UI driver foundation (US2 infrastructure)
 
 - [ ] T015 [P] [US2] Implement `EnvironmentsListPage` in `backend/tests/e2e/pages/environments.py` with `create_environment(name, cluster_id, config) -> EnvironmentRef` and `open_environment(environment_id) -> EnvironmentDetailPage`, using `get_by_role` / `get_by_label` per research R4 and `ui_surface.md`.
-- [ ] T016 [P] [US2] Implement `EnvironmentDetailPage` in `backend/tests/e2e/pages/environments.py` (same file — separate class) with `assign_bsl(bsl_id)`, `open_deploy_form() -> DeployFormPage` — stable anchors per `contracts/ui_surface.md`.
+- [ ] T016 [US2] Implement `EnvironmentDetailPage` in `backend/tests/e2e/pages/environments.py` (same file — separate class) with `assign_bsl(bsl_id)`, `open_deploy_form() -> DeployFormPage` — stable anchors per `contracts/ui_surface.md`. Depends on T015 — same file, not `[P]`-parallelizable with it.
 - [ ] T017 [P] [US2] Implement `DriversListPage` in `backend/tests/e2e/pages/drivers_list.py` with `add_driver(git_url, ref) -> DriverVersionRef` — targets the "Add driver" dialog per `ui_surface.md`.
 - [ ] T018 [P] [US2] Implement `SettingsPage` in `backend/tests/e2e/pages/settings.py` with `open_clusters_tab()` and `create_cluster(name, config) -> ClusterRef` — targets Settings → Clusters per `ui_surface.md`.
 - [ ] T019 [P] [US2] Implement `DeployFormPage` in `backend/tests/e2e/pages/deploy_form.py` with `fill(driver, version, name, parameters)`, `submit() -> DeploymentRef` (service-name overrides field added later in US3 T033).
 - [ ] T020 [P] [US2] Implement `DeploymentDetailPage` in `backend/tests/e2e/pages/deployment_detail.py` with `wait_for_status(expected, timeout)`, `open_upgrade_dialog()`, `confirm_upgrade(version)`, `read_timeline() -> list[TimelineEntry]`, `open_backups_tab()`, `create_backup() -> BackupRef`, `delete_backup(backup_id)`, `open_restores_tab()`, `create_restore(backup_id, target_namespace) -> RestoreRef`, using `data-testid="backup-status"` / `data-testid="restore-status"` fallbacks where roles are ambiguous.
 - [ ] T021 [US2] Implement `UiScenarioDriver` in `backend/tests/e2e/drivers/ui_driver.py` composing the page objects from T015–T020 to satisfy every method of `ScenarioDriver.Protocol`; each action must end on a deterministic success signal (toast, status badge transition, or navigation complete) per `data-model.md` (depends on T015–T020).
-- [ ] T022 [US2] Replace the UI-branch `pytest.skip(...)` stub in `backend/tests/e2e/conftest.py` (from T010) with `UiScenarioDriver(page=page, base_url=styrmin_deployment_url)` construction (depends on T021).
+- [ ] T022 [US2] Replace the UI-branch `pytest.skip(...)` stub in `backend/tests/e2e/conftest.py` (from T010) with `UiScenarioDriver(page=page, base_url=<url yielded by the existing `styrmin_deployment` fixture>)` construction — use the URL value yielded by `styrmin_deployment` directly; do not introduce a new `styrmin_deployment_url` fixture (depends on T021).
 - [ ] T023 [US2] Confirm the `api_only` / `ui_only` marker processing from T012 produces the right collection output by writing a single `@pytest.mark.api_only(reason="...")` scenario stub temporarily in `backend/tests/e2e/test_deploy_app.py` and verifying `[ui]` is reported as skipped (not missing) — delete the stub once verified. No separate test file is introduced.
 
 ### First scenario refactor — US1 demonstration
@@ -130,7 +130,7 @@ description: "Task list for Dual-Entrypoint E2E Tests (API and UI)"
 
 - [ ] T038 [US4] Split the existing `e2e-tests` job in `.github/workflows/ci.yml` into `e2e-tests-api` (runs `uv run pytest -v -m ci -k "[api]" backend/tests/e2e`) and `e2e-tests-ui` (runs `uv run pytest -v -m ci -k "[ui]" backend/tests/e2e` plus a `uv run playwright install chromium` step); both run on the `huge-runners` group, each provisions its own vCluster, and both are required for PR merge (FR-018, governance: CI/CD change — see plan.md Complexity Tracking row 2).
 - [ ] T039 [US4] Update the required-status-checks list in the repository's branch protection (or document the change so a maintainer applies it) so that both `e2e-tests-api` and `e2e-tests-ui` block merges to `develop` — matching the pre-split `e2e-tests` gate exactly (FR-018, SC-007).
-- [ ] T040 [US4] Trigger the new workflow on a draft PR and confirm: (a) both jobs run in parallel against independent vClusters, (b) the UI job produces `test-results/` artifacts on an intentionally failing commit, and (c) both jobs appear as required checks. Revert the intentional failure before merging.
+- [ ] T040 [US4] Trigger the new workflow on a draft PR and confirm: (a) both jobs run in parallel against independent vClusters, (b) the UI job produces `test-results/` artifacts on an intentionally failing commit, (c) both jobs appear as required checks, and (d) record both jobs' wall-clock times from the Actions run summary and verify `e2e-tests-ui` ≤ 1.5× `e2e-tests-api` wall-clock (plan.md Performance Goal). Revert the intentional failure before merging.
 
 **Checkpoint**: Selection modes work locally and in CI; UI failures gate PRs identically to API failures.
 
@@ -153,7 +153,7 @@ description: "Task list for Dual-Entrypoint E2E Tests (API and UI)"
 
 ### Phase Dependencies
 
-- **Setup (Phase 1)**: No prior dependencies — starts immediately after governance sign-off on T001 (new deps) and T038 (CI change, executed in Phase 5).
+- **Setup (Phase 1)**: No prior dependencies — starts immediately after governance sign-off on T001 (new deps). T038 (CI change) has its own governance gate but is executed in Phase 5, not in Phase 1.
 - **Foundational (Phase 2)**: Depends on Setup. Blocks every user story phase.
 - **US1 + US2 MVP (Phase 3)**: Depends on Foundational. Delivered together — US2's UI driver infrastructure is prerequisite for US1's first-scenario demonstration.
 - **US3 (Phase 4)**: Depends on US2 (UiScenarioDriver + page objects must exist) for refactors to compile; T033 additionally depends on T027 (frontend gap).
@@ -175,9 +175,9 @@ description: "Task list for Dual-Entrypoint E2E Tests (API and UI)"
 
 ### Parallel Opportunities
 
-- Phase 1: T003, T004 run in parallel.
+- Phase 1: T003 runs in parallel with T002; T004 is sequential after T001.
 - Phase 2: T006, T007 parallel; T010, T011, T012, T013 parallel after T009.
-- Phase 3 (US2 page objects): T015–T020 all in parallel (different files / different classes).
+- Phase 3 (US2 page objects): T015, T017, T018, T019, T020 in parallel (different files); T016 runs after T015 (same file `pages/environments.py`).
 - Phase 4: T029, T030, T031, T032 parallel (different test files); T028 parallel with backend refactors.
 - Phase 6: T042, T043, T044 parallel.
 
@@ -186,13 +186,16 @@ description: "Task list for Dual-Entrypoint E2E Tests (API and UI)"
 ## Parallel Example: US2 page objects
 
 ```bash
-# After T014 has created the empty scaffolds, run T015–T020 concurrently:
+# After T014 has created the empty scaffolds, run T015, T017–T020 concurrently
+# (T016 edits the same file as T015 and must follow it):
 Task: "Implement EnvironmentsListPage in backend/tests/e2e/pages/environments.py"
-Task: "Implement EnvironmentDetailPage in backend/tests/e2e/pages/environments.py"
 Task: "Implement DriversListPage in backend/tests/e2e/pages/drivers_list.py"
 Task: "Implement SettingsPage in backend/tests/e2e/pages/settings.py"
 Task: "Implement DeployFormPage in backend/tests/e2e/pages/deploy_form.py"
 Task: "Implement DeploymentDetailPage in backend/tests/e2e/pages/deployment_detail.py"
+
+# Then, once T015 is merged into pages/environments.py:
+Task: "Implement EnvironmentDetailPage in backend/tests/e2e/pages/environments.py"
 ```
 
 ## Parallel Example: US3 scenario refactors
