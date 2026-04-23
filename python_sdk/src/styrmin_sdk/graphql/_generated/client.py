@@ -1128,6 +1128,9 @@ class Client(AsyncBaseClient):
               ) {
                 id
                 applicationDriverId
+                applicationDriver {
+                  name
+                }
                 version
                 supportedVersions
                 components

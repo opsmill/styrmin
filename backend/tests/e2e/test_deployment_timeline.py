@@ -1,5 +1,8 @@
 """E2E tests for the deployment timeline feature."""
 
+import asyncio
+import time
+
 import pytest
 
 from tests.e2e.drivers import ScenarioDriver
@@ -105,8 +108,14 @@ async def test_deployment_timeline_ordering(
     scenario_environment_id: str,
     styrmin_resources: dict,  # noqa: ARG001
     simple_app_image: str,  # noqa: ARG001
+    simple_app_image_v2: str,  # noqa: ARG001 — ensures v2 image is built
 ) -> None:
-    """Verify that timeline entries are ordered newest-first by created_on."""
+    """Verify that timeline entries are ordered newest-first by created_on.
+
+    A single deploy produces exactly one task (``create_instance``) — an
+    upgrade is required to get a second entry so ordering is observable.
+    The poll loop absorbs DOM-render lag in the UI variant (FR-014).
+    """
     deployment = await scenario_driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
@@ -115,13 +124,10 @@ async def test_deployment_timeline_ordering(
     deployment = await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment.id
     )
-
-    # Poll until the timeline has ≥2 entries — a running deployment always
-    # produces multiple tasks (create deployment + create instance at least).
-    # A silent skip here would hide the UI case where DOM rendering races
-    # the test (FR-014).
-    import asyncio
-    import time
+    await scenario_driver.upgrade_deployment(
+        deployment_id=deployment.id, version="0.2.0"
+    )
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
 
     deadline = time.time() + 60.0
     timeline = []

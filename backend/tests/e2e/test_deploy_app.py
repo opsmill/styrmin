@@ -1,3 +1,6 @@
+import asyncio
+import time
+
 import httpx
 import kr8s.asyncio
 import pytest
@@ -117,12 +120,24 @@ async def test_upgrade_simple_app(
             interval=3.0,
         )
 
+        # The operator flips displayState=Running once HelmRelease is Ready,
+        # which does not wait for the k8s rolling update to complete. Port-
+        # forward may hit an old v0.1.0 pod still in the Service endpoints
+        # until the rollout finishes. Poll until the Service returns the new
+        # version (or timeout).
+        deadline = time.time() + 120.0
+        last_version: str | None = None
         async with httpx.AsyncClient() as http_client:
-            response = await http_client.get(
-                f"http://localhost:{local_port}/version", timeout=10
-            )
-            assert response.status_code == 200
-            data = response.json()
-            assert data["version"] == "0.2.0", (
-                f"Expected version 0.2.0 but got {data['version']}"
+            while time.time() < deadline:
+                response = await http_client.get(
+                    f"http://localhost:{local_port}/version", timeout=10
+                )
+                assert response.status_code == 200
+                last_version = response.json()["version"]
+                if last_version == "0.2.0":
+                    break
+                await asyncio.sleep(3.0)
+            assert last_version == "0.2.0", (
+                f"Service still serving {last_version!r} after 120s; "
+                "rolling update to 0.2.0 did not complete"
             )
