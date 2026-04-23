@@ -535,19 +535,22 @@ def driver_mode(request: pytest.FixtureRequest) -> str:
 @pytest.fixture(scope="session")
 async def session_ui_page(
     driver_mode: str,
-    browser,  # pytest-playwright-asyncio session-scoped Chromium browser
     styrmin_deployment: str,
+    request: pytest.FixtureRequest,
 ) -> AsyncGenerator["Page | None", None]:
     """Playwright page at session scope for styrmin_resources UI-mode setup.
 
     pytest-playwright-asyncio's ``page`` fixture is function-scoped; session
     fixtures that need to drive the UI must create their own context/page
     manually. Returns ``None`` in api mode so no browser resources are
-    allocated.
+    allocated. ``browser`` is requested lazily because the API-only CI job
+    does not install a Playwright browser, so resolving it up-front would
+    fail at fixture setup time.
     """
     if driver_mode != "ui":
         yield None
         return
+    browser = request.getfixturevalue("browser")
     context = await browser.new_context(base_url=styrmin_deployment)
     page = await context.new_page()
     try:
