@@ -802,6 +802,7 @@ export type DeployMutationVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
   config?: InputMaybe<Scalars['JSON']['input']>;
   parameters?: InputMaybe<Scalars['JSON']['input']>;
+  serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride> | ServiceNameOverride>;
 }>;
 
 
@@ -1158,7 +1159,7 @@ export const useDeleteBackupStorageLocationMutation = <
     )};
 
 export const DeployDocument = `
-    mutation Deploy($version: String, $driver: String!, $name: String, $environmentId: UUID!, $config: JSON, $parameters: JSON) {
+    mutation Deploy($version: String, $driver: String!, $name: String, $environmentId: UUID!, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
   deploy(
     version: $version
     driver: $driver
@@ -1166,6 +1167,7 @@ export const DeployDocument = `
     environmentId: $environmentId
     config: $config
     parameters: $parameters
+    serviceNameOverrides: $serviceNameOverrides
   ) {
     id
     type

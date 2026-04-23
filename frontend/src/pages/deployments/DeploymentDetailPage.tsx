@@ -177,7 +177,12 @@ export default function DeploymentDetailPage() {
   const deployColors = getStatusColor(deployment.status);
 
   return (
-    <div className="flex flex-col gap-6 p-8 px-10">
+    <div
+      className="flex flex-col gap-6 p-8 px-10"
+      data-testid="deployment-detail"
+      data-deployment-id={deployment.id}
+      data-instance-id={instanceId ?? ""}
+    >
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-xs">
         <Link to="/" className="text-muted-foreground hover:text-foreground">
@@ -691,7 +696,12 @@ function BackupRow({
   const bc = getStatusColor(backup.status);
 
   return (
-    <div>
+    <div
+      data-testid="backup-row"
+      data-backup-id={backup.id}
+      data-backup-name={backup.name}
+      data-backup-status={backup.status}
+    >
       <div
         className={`flex items-center gap-4 rounded-lg border-l-[3px] px-4 py-3 ${bc.border} ${
           index % 2 === 0 ? "bg-surface" : ""
@@ -703,7 +713,7 @@ function BackupRow({
             {backup.name}
           </span>
         </div>
-        <div className="w-[100px]">
+        <div className="w-[100px]" data-testid="backup-status">
           <StatusBadge status={backup.status} />
         </div>
         <span className="w-[150px] text-[13px] text-muted-foreground">
@@ -742,14 +752,22 @@ function RestoreRow({ restore }: { restore: RestoreItem }) {
   const components = restore.componentStatuses ?? [];
 
   return (
-    <div className="flex items-center gap-3 border-t border-border/50 px-4 py-2.5 pl-10">
+    <div
+      className="flex items-center gap-3 border-t border-border/50 px-4 py-2.5 pl-10"
+      data-testid="restore-row"
+      data-restore-id={restore.id}
+      data-restore-status={restore.status}
+      data-target-namespace={restore.targetNamespace}
+    >
       <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
       <span className="text-xs text-muted-foreground">Restored to</span>
       <span className="text-xs font-medium text-foreground">
         {restore.targetNamespace}
       </span>
       <span className="text-xs text-muted-foreground">—</span>
-      <StatusBadge status={restore.status} />
+      <span data-testid="restore-status">
+        <StatusBadge status={restore.status} />
+      </span>
       <span className="text-xs text-muted-foreground">
         {new Date(restore.createdOn).toLocaleDateString()}
       </span>

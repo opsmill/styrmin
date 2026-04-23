@@ -20,17 +20,27 @@ reachable Docker daemon, and a `GITHUB_PAT` environment variable.
 
 ## Run the suite
 
-| Mode                         | Command                                                                 |
-| ---------------------------- | ----------------------------------------------------------------------- |
-| Both entrypoints, all scenarios | `uv run pytest -m ci backend/tests/e2e`                              |
-| API entrypoint only          | `uv run pytest -m ci -k "[api]" backend/tests/e2e`                      |
-| UI entrypoint only           | `uv run pytest -m ci -k "[ui]" backend/tests/e2e`                       |
-| One scenario, both entrypoints | `uv run pytest -m ci -k "test_deploy_simple_app" backend/tests/e2e`  |
-| One scenario, one entrypoint | `uv run pytest -m ci -k "test_deploy_simple_app and [ui]" backend/tests/e2e` |
+| Mode                         | Command                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------- |
+| Both entrypoints, all scenarios | `uv run pytest -m ci backend/tests/e2e`                                      |
+| API entrypoint only          | `uv run pytest -m ci -k "api-chromium" backend/tests/e2e`                       |
+| UI entrypoint only           | `uv run pytest -m ci -k "ui-chromium" backend/tests/e2e`                        |
+| One scenario, both entrypoints | `uv run pytest -m ci -k "test_deploy_simple_app" backend/tests/e2e`           |
+| One scenario, one entrypoint | `uv run pytest -m ci -k "test_deploy_simple_app and ui-chromium" backend/tests/e2e` |
+
+Note: `-k` is a pytest keyword-expression matcher that parses `[` / `]`
+as list-literal syntax. `-k "[api]"` therefore fails to collect; use
+`-k "api-chromium"` (substring match against the `-chromium` suffix
+pytest-playwright-asyncio adds). This is the single selection axis used
+locally and in CI.
 
 Each scenario appears twice in collection output — once as
-`...[api]`, once as `...[ui]` — and that suffix is the single
-selection axis used locally and in CI (research R7).
+`...[api-chromium]`, once as `...[ui-chromium]` — and that suffix is
+the single selection axis used locally and in CI (research R7). The
+trailing `-chromium` is added by `pytest-playwright-asyncio`'s
+`browser_name` parametrization; since this suite is chromium-only
+(FR-016) it's a fixed suffix and `-k "[api]"` / `-k "[ui]"` still
+select correctly because they substring-match.
 
 ## Diagnose a UI failure
 
@@ -58,7 +68,8 @@ subdirectory.
    ```bash
    uv run pytest -v backend/tests/e2e/test_<your_file>.py
    ```
-   You should see two collected tests: `...[api]` and `...[ui]`.
+   You should see two collected tests: `...[api-chromium]` and
+   `...[ui-chromium]`.
 4. If neither entrypoint can perform an action your scenario needs,
    stop and extend the weaker entrypoint first (FR-004 / FR-005). Do
    not reach for `@pytest.mark.api_only` / `ui_only` to paper over a
@@ -97,8 +108,8 @@ async def test_deploy_simple_app(
 Collection shows:
 
 ```text
-backend/tests/e2e/test_deploy_app.py::test_deploy_simple_app[api]
-backend/tests/e2e/test_deploy_app.py::test_deploy_simple_app[ui]
+backend/tests/e2e/test_deploy_app.py::test_deploy_simple_app[api-chromium]
+backend/tests/e2e/test_deploy_app.py::test_deploy_simple_app[ui-chromium]
 ```
 
 ## Declare a single-entrypoint scenario

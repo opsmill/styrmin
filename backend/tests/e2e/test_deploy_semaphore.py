@@ -6,18 +6,30 @@ from kr8s.asyncio.objects import Service as AsyncService
 from tests.e2e.conftest import (
     _wait_for_http,
 )
+from tests.e2e.drivers import ScenarioDriver
 
 
 @pytest.mark.e2e
 async def test_deploy_semaphore(
-    load_semaphore: dict,
-    deployed_semaphore: dict,
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    load_semaphore: dict,  # noqa: ARG001 — loads the semaphore driver version into the stack
     vcluster: dict,
 ) -> None:
-    kubeconfig_path = vcluster["kubeconfig_path"]
-    namespace = deployed_semaphore["namespace"]
+    deployment = await scenario_driver.create_deployment(
+        name="semaphore",
+        driver="semaphore",
+        version="2.16.47",
+        environment_id=scenario_environment_id,
+    )
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment.id
+    )
 
-    # Find the semaphore service via kr8s
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    namespace = f"styrmin-{deployment.id}"
+
+    # External-state assertion — identical across both entrypoints.
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     services: list[AsyncService] = [
         svc

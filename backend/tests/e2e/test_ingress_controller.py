@@ -23,9 +23,21 @@ from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 
 from tests.e2e.conftest import _wait_for_deployment_running, _wait_for_http
+from tests.e2e.drivers import ScenarioDriver  # noqa: F401 — collected via scenario_driver fixture
+
+# Ingress controller configuration is a cluster-level resource provisioned by
+# the `styrmin_resources` fixture, not something a user configures from the
+# product UI. Every scenario in this module is therefore declared api-only
+# (FR-011, research R8) — the `[ui]` variant still appears in collection
+# output and reports `skipped` with this reason rather than being absent.
+pytestmark = pytest.mark.api_only(
+    reason="ingress controller is configured at cluster level via the "
+    "styrmin_resources fixture; no UI surface today"
+)
 
 
 async def test_deploy_with_dedicated_ingress(
+    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
     styrmin_resources: dict,
     simple_app_image: str,
     vcluster: dict,
@@ -95,6 +107,7 @@ async def test_deploy_with_dedicated_ingress(
 
 
 async def test_deploy_without_dedicated_ingress(
+    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
     styrmin_resources: dict,
     simple_app_image: str,
     vcluster: dict,
@@ -147,6 +160,7 @@ async def test_deploy_without_dedicated_ingress(
 
 
 async def test_second_app_reuses_ingress_controller(
+    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
     styrmin_resources: dict,
     simple_app_image: str,
     vcluster: dict,
@@ -201,6 +215,7 @@ async def test_second_app_reuses_ingress_controller(
 @pytest.mark.e2e
 @pytest.mark.ci
 async def test_traffic_routes_through_dedicated_ingress(
+    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
     styrmin_resources: dict,
     deployed_simple_app: dict,
     vcluster: dict,
@@ -263,6 +278,7 @@ async def test_traffic_routes_through_dedicated_ingress(
 @pytest.mark.e2e
 @pytest.mark.ci
 async def test_traffic_routes_through_loadbalancer_ingress(
+    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
     styrmin_resources: dict,
     deployed_simple_app: dict,
     vcluster: dict,
@@ -330,6 +346,7 @@ async def test_traffic_routes_through_loadbalancer_ingress(
 
 
 async def test_toggle_dedicated_ingress_on_off(
+    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
     styrmin_resources: dict,
     simple_app_image: str,
     vcluster: dict,

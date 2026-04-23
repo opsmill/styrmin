@@ -80,6 +80,12 @@ export default function DeployFormPage() {
     onSubmit: async ({ value }) => {
       setSubmitError(null);
       try {
+        const overrides = serviceOverrides
+          .map((o) => ({
+            driverServiceName: o.driverServiceName.trim(),
+            overrideName: o.overrideName.trim(),
+          }))
+          .filter((o) => o.driverServiceName && o.overrideName);
         const data = await deployMutation.mutateAsync({
           driver: selectedVersion!.driverName,
           name: value.name,
@@ -87,6 +93,7 @@ export default function DeployFormPage() {
           environmentId,
           parameters:
             Object.keys(dynamicParams).length > 0 ? dynamicParams : null,
+          serviceNameOverrides: overrides.length > 0 ? overrides : null,
         });
         queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
         if (data.deploy) {
@@ -126,6 +133,10 @@ export default function DeployFormPage() {
   const [dynamicParams, setDynamicParams] = useState<Record<string, unknown>>(
     {},
   );
+
+  const [serviceOverrides, setServiceOverrides] = useState<
+    Array<{ driverServiceName: string; overrideName: string }>
+  >([]);
 
   if (isLoading) return <LoadingState message="Loading drivers..." />;
 
@@ -323,6 +334,93 @@ export default function DeployFormPage() {
             ))}
           </div>
         )}
+
+        {/* Service name overrides — optional per-driver-service renames. */}
+        <div
+          role="group"
+          aria-labelledby="service-overrides-heading"
+          className="space-y-3"
+        >
+          <Label id="service-overrides-heading" className="text-base">
+            Service name overrides
+          </Label>
+          {serviceOverrides.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              Optional. Rename the services the driver publishes — for example,
+              run two instances in the same environment under different service
+              names.
+            </p>
+          )}
+          {serviceOverrides.map((row, idx) => (
+            <div
+              key={idx}
+              data-testid="service-override-row"
+              className="flex gap-2 items-end"
+            >
+              <div className="flex-1 space-y-1">
+                <Label htmlFor={`so-driver-service-${idx}`} className="text-xs">
+                  Driver service
+                </Label>
+                <Input
+                  id={`so-driver-service-${idx}`}
+                  placeholder="simple-app"
+                  value={row.driverServiceName}
+                  onChange={(e) =>
+                    setServiceOverrides((prev) =>
+                      prev.map((r, i) =>
+                        i === idx
+                          ? { ...r, driverServiceName: e.target.value }
+                          : r,
+                      ),
+                    )
+                  }
+                />
+              </div>
+              <div className="flex-1 space-y-1">
+                <Label htmlFor={`so-override-${idx}`} className="text-xs">
+                  Override name
+                </Label>
+                <Input
+                  id={`so-override-${idx}`}
+                  placeholder="intent"
+                  value={row.overrideName}
+                  onChange={(e) =>
+                    setServiceOverrides((prev) =>
+                      prev.map((r, i) =>
+                        i === idx ? { ...r, overrideName: e.target.value } : r,
+                      ),
+                    )
+                  }
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setServiceOverrides((prev) =>
+                    prev.filter((_, i) => i !== idx),
+                  )
+                }
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              setServiceOverrides((prev) => [
+                ...prev,
+                { driverServiceName: "", overrideName: "" },
+              ])
+            }
+          >
+            Add service name override
+          </Button>
+        </div>
 
         <div className="flex gap-2">
           <Button type="submit" disabled={isSubmitting}>

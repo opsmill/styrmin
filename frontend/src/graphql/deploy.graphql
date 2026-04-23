@@ -5,6 +5,7 @@ mutation Deploy(
   $environmentId: UUID!
   $config: JSON
   $parameters: JSON
+  $serviceNameOverrides: [ServiceNameOverride!]
 ) {
   deploy(
     version: $version
@@ -13,6 +14,7 @@ mutation Deploy(
     environmentId: $environmentId
     config: $config
     parameters: $parameters
+    serviceNameOverrides: $serviceNameOverrides
   ) {
     id
     type

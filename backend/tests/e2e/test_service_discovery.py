@@ -13,55 +13,50 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 
-from tests.e2e.conftest import _wait_for_deployment_running, _wait_for_http
+from tests.e2e.conftest import _wait_for_http
+from tests.e2e.drivers import ScenarioDriver
 
 
 @pytest.mark.ci
 async def test_service_discovery_between_apps(
-    styrmin_resources: dict,  # type: ignore[type-arg]
-    simple_app_image: str,
-    vcluster: dict,  # type: ignore[type-arg]
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    vcluster: dict,
 ) -> None:
     """Deploy two simple-app instances and verify they can discover each other via DNS."""
-    from styrmin_sdk import StyrminClient
-
-    client: StyrminClient = styrmin_resources["client"]
-    environment_id = styrmin_resources["environment_id"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
-    # Deploy first instance with service name override "intent"
-    intent_task = await client.deployments.create(
+    intent = await scenario_driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
-        environment_id=environment_id,
+        environment_id=scenario_environment_id,
         service_name_overrides=[
             {"driverServiceName": "simple-app", "overrideName": "intent"}
         ],
     )
-    intent_deployment_id = intent_task.deployment_id
-
-    # Deploy second instance with service name override "executor"
-    executor_task = await client.deployments.create(
+    executor = await scenario_driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
-        environment_id=environment_id,
+        environment_id=scenario_environment_id,
         service_name_overrides=[
             {"driverServiceName": "simple-app", "overrideName": "executor"}
         ],
     )
-    executor_deployment_id = executor_task.deployment_id
 
     # Wait for both deployments to be running
-    for dep_task_id in (intent_deployment_id, executor_deployment_id):
-        if dep_task_id:
-            await _wait_for_deployment_running(
-                client, dep_task_id, timeout=300.0, interval=5.0
-            )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=intent.id, timeout=300.0
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=executor.id, timeout=300.0
+    )
 
     # Find the executor service via kr8s.
-    # The service-discovery utility creates the service asynchronously after the
-    # deployment reaches "running", so we need to poll until it appears.
-    executor_namespace = f"styrmin-{executor_deployment_id}"
+    # The service-discovery utility creates the service asynchronously after
+    # the deployment reaches "running", so we need to poll until it appears.
+    executor_namespace = f"styrmin-{executor.id}"
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     executor_svc = None
     svc_deadline = time.time() + 120

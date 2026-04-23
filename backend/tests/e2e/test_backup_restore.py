@@ -20,6 +20,7 @@ from infrahub_sdk import InfrahubClient as InfrahubSDKClient
 from kr8s.asyncio.objects import Service as AsyncService
 
 from tests.e2e.conftest import _wait_for_http
+from tests.e2e.drivers import ResourceNotFound, ScenarioDriver
 
 
 @asynccontextmanager
@@ -117,22 +118,33 @@ async def assert_velero_backup_uses_bsl(
 
 @pytest.mark.ci
 async def test_backup_and_restore_lifecycle(
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
     styrmin_resources: dict,
-    velero_ready: None,
-    deployed_simple_app: dict,
+    velero_ready: None,  # noqa: ARG001 — ensures Velero is up before backup/restore
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ) -> None:
     """Full lifecycle: write data -> backup -> modify -> restore -> verify."""
+    # scenario_environment_id is a fresh env per variant; assign the BSL
+    # (scenario_environment_id does this already on a best-effort basis).
     client: StyrminClient = styrmin_resources["client"]
-    instance_id = deployed_simple_app["instance_id"]
-    namespace = deployed_simple_app["namespace"]
     kubeconfig_path = vcluster["kubeconfig_path"]
-    environment_id = styrmin_resources["environment_id"]
 
+    deployment = await scenario_driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+    )
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment.id
+    )
+    instance_id = deployment.instance_id
     assert instance_id is not None, "Deployment should have an instance_id"
+    namespace = f"styrmin-{deployment.id}"
 
-    # Verify environment exposes backup capability (BSL was assigned in styrmin_resources)
-    environment = await client.environments.get(environment_id=environment_id)
+    # Verify environment exposes backup capability (BSL was assigned by the fixture)
+    environment = await client.environments.get(environment_id=scenario_environment_id)
     assert environment.capabilities is not None, "Environment should have capabilities"
     assert "backup" in environment.capabilities, (
         "Environment should have backup capability"
@@ -153,10 +165,12 @@ async def test_backup_and_restore_lifecycle(
             resp = await http_client.get(f"http://localhost:{port}/count", timeout=10)
             pre_backup_count = resp.json()["counter"]  # 6
 
-    # 2. Create backup via SDK, wait for completion
-    created_backup = await client.backups.create_backup(instance_id=instance_id)
-    assert created_backup.status == "pending"
-    backup = await client.backups.wait_for_backup(created_backup.id, max_wait=180)
+    # 2. Create backup via scenario_driver, wait for completion
+    created_backup = await scenario_driver.create_backup(instance_id=instance_id)
+    assert created_backup.status in {"pending", "in_progress", "completed"}
+    backup = await scenario_driver.wait_for_backup(
+        backup_id=created_backup.id, max_wait=180
+    )
     assert backup.status == "completed"
 
     # 2b. Verify backup targets the assigned BSL
@@ -172,12 +186,14 @@ async def test_backup_and_restore_lifecycle(
             for _ in range(5):
                 await http_client.get(f"http://localhost:{port}/count", timeout=10)
 
-    # 4. Restore from backup via SDK (same namespace, existingResourcePolicy=update)
-    created_restore = await client.backups.create_restore(
+    # 4. Restore from backup via scenario_driver (same namespace)
+    created_restore = await scenario_driver.create_restore(
         backup_id=backup.id, target_namespace=namespace
     )
-    assert created_restore.status == "pending"
-    restore = await client.backups.wait_for_restore(created_restore.id, max_wait=300)
+    assert created_restore.status in {"pending", "in_progress", "completed"}
+    restore = await scenario_driver.wait_for_restore(
+        restore_id=created_restore.id, max_wait=300
+    )
     assert restore.status == "completed"
 
     # 5. Wait for pods to recover, verify data restored
@@ -189,9 +205,9 @@ async def test_backup_and_restore_lifecycle(
             assert resp.json()["counter"] == pre_backup_count + 1
 
     # 6. Delete backup and verify
-    await client.backups.delete_backup(backup.id)
-    with pytest.raises(ResourceNotFoundError):
-        await client.backups.get_backup(backup.id)
+    await scenario_driver.delete_backup(backup_id=backup.id)
+    with pytest.raises(ResourceNotFound):
+        await scenario_driver.get_backup(backup_id=backup.id)
 
 
 @asynccontextmanager

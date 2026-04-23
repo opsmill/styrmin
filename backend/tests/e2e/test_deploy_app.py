@@ -7,18 +7,30 @@ from tests.e2e.conftest import (
     _wait_for_deployment_running,
     _wait_for_http,
 )
+from tests.e2e.drivers import ScenarioDriver
 
 
 @pytest.mark.ci
 async def test_deploy_simple_app(
-    styrmin_resources: dict,
-    deployed_simple_app: dict,
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    styrmin_resources: dict,  # noqa: ARG001 — transitive: builds cluster/BSL/driver
+    simple_app_image: str,  # noqa: ARG001 — required for the image to be built
     vcluster: dict,
 ) -> None:
-    kubeconfig_path = vcluster["kubeconfig_path"]
-    namespace = deployed_simple_app["namespace"]
+    deployment = await scenario_driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+    )
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment.id
+    )
 
-    # Find the simple-app service via kr8s
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    namespace = f"styrmin-{deployment.id}"
+
+    # External-state assertion — identical across both entrypoints.
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     services: list[AsyncService] = [
         svc
