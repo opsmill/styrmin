@@ -25,9 +25,13 @@ class EnvironmentsListPage:
 
     async def goto(self) -> None:
         await self._page.goto("/")
+        # First navigation after a fresh styrmin deployment can be slow
+        # (frontend served by the same pod that's still warming caches);
+        # the Playwright default of 5s is tight. 15s absorbs the jitter
+        # without silently hiding a real stall.
         await expect(
             self._page.get_by_role("heading", name="Environments")
-        ).to_be_visible()
+        ).to_be_visible(timeout=15_000)
 
     async def create_environment(
         self, *, name: str, cluster_id: str, config: dict[str, Any]

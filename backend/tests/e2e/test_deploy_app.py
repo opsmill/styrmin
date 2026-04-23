@@ -123,16 +123,24 @@ async def test_upgrade_simple_app(
         # The operator flips displayState=Running once HelmRelease is Ready,
         # which does not wait for the k8s rolling update to complete. Port-
         # forward may hit an old v0.1.0 pod still in the Service endpoints
-        # until the rollout finishes. Poll until the Service returns the new
-        # version (or timeout).
+        # until the rollout finishes, and requests in flight while a pod
+        # terminates surface as ``RemoteProtocolError`` / ``ReadError`` /
+        # ``ConnectError``. Poll until the Service returns the new version,
+        # treating transport errors as "try again".
         deadline = time.time() + 120.0
         last_version: str | None = None
         async with httpx.AsyncClient() as http_client:
             while time.time() < deadline:
-                response = await http_client.get(
-                    f"http://localhost:{local_port}/version", timeout=10
-                )
-                assert response.status_code == 200
+                try:
+                    response = await http_client.get(
+                        f"http://localhost:{local_port}/version", timeout=10
+                    )
+                except httpx.HTTPError:
+                    await asyncio.sleep(3.0)
+                    continue
+                if response.status_code != 200:
+                    await asyncio.sleep(3.0)
+                    continue
                 last_version = response.json()["version"]
                 if last_version == "0.2.0":
                     break
