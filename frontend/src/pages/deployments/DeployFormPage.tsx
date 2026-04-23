@@ -100,6 +100,7 @@ export default function DeployFormPage() {
           setTaskResult(data.deploy);
         }
       } catch (err) {
+        console.error("[deploy] mutation failed", err);
         setSubmitError(err instanceof Error ? err.message : "Unknown error");
       }
     },

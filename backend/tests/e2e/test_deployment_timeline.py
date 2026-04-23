@@ -116,12 +116,25 @@ async def test_deployment_timeline_ordering(
         deployment_id=deployment.id
     )
 
-    timeline = await scenario_driver.get_deployment_timeline(
-        deployment_id=deployment.id
-    )
+    # Poll until the timeline has ≥2 entries — a running deployment always
+    # produces multiple tasks (create deployment + create instance at least).
+    # A silent skip here would hide the UI case where DOM rendering races
+    # the test (FR-014).
+    import asyncio
+    import time
 
-    if len(timeline) < 2:
-        pytest.skip("Need at least 2 timeline entries to verify ordering")
+    deadline = time.time() + 60.0
+    timeline = []
+    while time.time() < deadline:
+        timeline = await scenario_driver.get_deployment_timeline(
+            deployment_id=deployment.id
+        )
+        if len(timeline) >= 2:
+            break
+        await asyncio.sleep(2.0)
+    assert len(timeline) >= 2, (
+        f"timeline never populated ≥2 entries within 60s (got {len(timeline)})"
+    )
 
     timestamps = [e.created_on for e in timeline if e.created_on is not None]
     assert len(timestamps) >= 2

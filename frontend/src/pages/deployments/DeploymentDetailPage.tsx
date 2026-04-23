@@ -92,7 +92,7 @@ export default function DeploymentDetailPage() {
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
 
   const { data: backupsData, isLoading: backupsFetching } = useListBackupsQuery(
-    { instanceId: instanceId! },
+    { instanceId: instanceId ?? "" },
     {
       enabled: !!instanceId,
       refetchInterval: autoRefreshEnabled ? 10_000 : false,
@@ -109,10 +109,15 @@ export default function DeploymentDetailPage() {
 
   async function handleBackup() {
     setBackupError(null);
+    if (!instanceId) {
+      setBackupError("Deployment has no instance yet");
+      return;
+    }
     try {
-      await createBackupMutation.mutateAsync({ instanceId: instanceId! });
+      await createBackupMutation.mutateAsync({ instanceId });
       queryClient.invalidateQueries({ queryKey: ["ListBackups"] });
     } catch (err) {
+      console.error("[create-backup] mutation failed", err);
       setBackupError(err instanceof Error ? err.message : "Unknown error");
     }
   }
@@ -129,6 +134,7 @@ export default function DeploymentDetailPage() {
       setRestoreOpen(false);
       setSelectedBackupId(null);
     } catch (err) {
+      console.error("[create-restore] mutation failed", err);
       setRestoreError(err instanceof Error ? err.message : "Unknown error");
     }
   }
@@ -142,6 +148,7 @@ export default function DeploymentDetailPage() {
       setDeleteOpen(false);
       setDeleteBackupId(null);
     } catch (err) {
+      console.error("[delete-backup] mutation failed", err);
       setDeleteError(err instanceof Error ? err.message : "Unknown error");
     }
   }
@@ -157,6 +164,7 @@ export default function DeploymentDetailPage() {
       setUpgradeOpen(false);
       setNewVersion("");
     } catch (err) {
+      console.error("[update-version] mutation failed", err);
       setUpgradeError(err instanceof Error ? err.message : "Unknown error");
     }
   }
@@ -182,6 +190,7 @@ export default function DeploymentDetailPage() {
       data-testid="deployment-detail"
       data-deployment-id={deployment.id}
       data-instance-id={instanceId ?? ""}
+      data-application-version={deployment.applicationVersion ?? ""}
     >
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-xs">

@@ -14,3 +14,12 @@ class ScenarioActionError(Exception):
 
 class ResourceNotFound(ScenarioActionError):
     """Raised when a lookup returns nothing (e.g. get_backup after delete)."""
+
+
+class ScenarioTimeout(ScenarioActionError):
+    """Raised when a driver action times out before reaching success.
+
+    Distinct from a generic ``ScenarioActionError`` so scenarios can
+    ``pytest.raises(ScenarioTimeout)`` for negative-path assertions and
+    flake-triage can bucket timeouts separately from protocol violations.
+    """

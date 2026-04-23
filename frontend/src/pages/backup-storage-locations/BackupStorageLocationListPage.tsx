@@ -60,6 +60,9 @@ export default function BackupStorageLocationListPage() {
               key={bsl.id}
               to="/backup-storage-locations/$id"
               params={{ id: bsl.id }}
+              data-testid="bsl-card"
+              data-bsl-id={bsl.id}
+              data-bsl-name={bsl.name}
             >
               <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
                 <CardHeader>
