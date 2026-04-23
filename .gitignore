@@ -206,5 +206,6 @@ helm/styrmin/Chart.lock
 *.local.*
 
 # Playwright / pytest-playwright artifacts
+.playwright-mcp/
 test-results/
 playwright-report/
