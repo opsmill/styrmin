@@ -56,9 +56,7 @@ class SettingsPage:
                 # (aria-hidden, tabindex=-1) underneath the visible button.
                 # Clicking the hidden input is intercepted by the dialog
                 # backdrop, so drive it through the associated <label>.
-                await dialog.locator(
-                    "label[for='cluster-dedicated-ingress']"
-                ).click()
+                await dialog.locator("label[for='cluster-dedicated-ingress']").click()
                 if di.get("implementation"):
                     await dialog.locator("#cluster-di-impl").fill(di["implementation"])
                 if di.get("type"):
