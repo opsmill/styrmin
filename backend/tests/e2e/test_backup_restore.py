@@ -237,7 +237,6 @@ async def portforward_infrahub(
         yield local_port
 
 
-@pytest.mark.ci
 @pytest.mark.api_only(
     reason="Data setup goes through the Infrahub SDK (direct Infrahub API), "
     "not through a Styrmin-managed UI surface; scenario cannot meaningfully "
