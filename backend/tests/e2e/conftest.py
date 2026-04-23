@@ -359,6 +359,9 @@ async def git_server(
         "semaphore": {
             "source": PROJECT_ROOT / "driver" / "examples" / "semaphore",
         },
+        "infrahub": {
+            "source": PROJECT_ROOT / "driver" / "examples" / "infrahub",
+        },
     }
 
     tmp_repo = tmp_path_factory.mktemp("driver-repo")
@@ -767,11 +770,12 @@ async def deployed_simple_app(
 async def load_infrahub(
     styrmin_resources: dict,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    git_server: dict[str, str],
 ) -> AsyncGenerator[dict, None]:
-    """Create an infrahub application driver and load its version from GitHub."""
+    """Load the infrahub application driver from the in-cluster git server."""
     driver, _ = session_scenario_driver
     version = await driver.load_driver_version(
-        git_url="https://github.com/opsmill/styrmin-mvp-driver", ref="develop"
+        git_url=git_server["infrahub"], ref="master"
     )
     yield {**styrmin_resources, "infrahub_driver_id": version.application_driver_id}
 
