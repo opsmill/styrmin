@@ -349,6 +349,17 @@ jobs:
         run: |
           uv run playwright install chromium
           uv run playwright install-deps chromium
+      # Build an LD_PRELOAD shim that fails NETLINK_ROUTE sockets with
+      # EAFNOSUPPORT so Chromium's AddressTrackerLinux takes its graceful
+      # "assume always online" path. Avoids netlink-driven flake on
+      # self-hosted runners without touching the browser binary.
+      - name: Build no-netlink shim
+        run: |
+          apt-get update && apt-get install -y gcc
+          gcc -shared -fPIC -Wall -Wextra \
+            -o "$RUNNER_TEMP/no_netlink.so" \
+            backend/tests/e2e/fixtures/no_netlink.c -ldl
+          echo "NO_NETLINK_SO=$RUNNER_TEMP/no_netlink.so" >> "$GITHUB_ENV"
       - name: Install tini
         run: apt-get update && apt-get install -y tini
       - name: "Set environment variables"
