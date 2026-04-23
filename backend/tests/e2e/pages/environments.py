@@ -10,7 +10,7 @@ import asyncio
 import time
 from typing import Any, TYPE_CHECKING
 
-from playwright.async_api import expect
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 
 from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
 from tests.e2e.drivers.refs import EnvironmentRef
@@ -114,10 +114,16 @@ class EnvironmentDetailPage:
         await selector.wait_for()
         await selector.get_by_role("combobox").click()
         option = self._page.locator(f"[role=option][data-value='{bsl_id}']").first
-        if await option.count() == 0:
+        # Options render inside a Base UI Portal after the combobox's open-
+        # animation kicks in; `count()` right after the click can race the
+        # mount. `wait_for` lets Playwright retry until the option attaches
+        # (or times out with a clearer signal than a silent `count == 0`).
+        try:
+            await option.wait_for(state="visible", timeout=5_000)
+        except PlaywrightTimeoutError as exc:
             raise ScenarioActionError(
                 f"BSL {bsl_id!r} is not listed on environment {environment_id!r}"
-            )
+            ) from exc
         await option.click()
 
         # Wait until the detail page's data-bsl-id reflects the assignment.
