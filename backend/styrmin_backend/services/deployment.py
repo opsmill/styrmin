@@ -442,7 +442,21 @@ async def update_deployment_version(
 
         await uow.deployments.save(deployment=deployment)
 
-        # Reconcile deployed services for the new driver version
+        # Reconcile deployed services for the new driver version. Preserve
+        # the existing ``service_name_overrides`` — ``upgrade_deployment_version``
+        # doesn't accept an ``overrides`` parameter (unlike
+        # ``update_deployment``), so the intent is "keep whatever was in
+        # effect for the deployment". Without this, an upgrade silently
+        # renames the service back to the driver's default name, which
+        # collides with any sibling deployment relying on that name.
+        existing_services = await uow.deployed_services.get_by_deployment_id(
+            deployment.id
+        )
+        existing_overrides = {
+            svc.driver_service_name: svc.resolved_name
+            for svc in existing_services
+            if svc.resolved_name != svc.driver_service_name
+        }
         new_service_defs = parse_service_definitions(effective_driver_version.services)
         if new_service_defs:
             await reconcile_services_on_upgrade(
@@ -450,6 +464,7 @@ async def update_deployment_version(
                 environment_id=deployment.environment_id,
                 new_service_definitions=new_service_defs,
                 uow=uow,
+                service_name_overrides=existing_overrides or None,
             )
         else:
             # New driver version has no services — remove any existing ones
