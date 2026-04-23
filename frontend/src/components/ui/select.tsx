@@ -5,6 +5,7 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function Select({
+  value,
   onValueChange,
   ...props
 }: Omit<
@@ -13,17 +14,30 @@ function Select({
 > & {
   onValueChange?: (value: string) => void;
 }) {
+  // Base UI's Select uses ``alignItemWithTrigger: true`` by default and looks
+  // up the item matching ``value`` to anchor the popup. Passing ``""`` when
+  // nothing is selected (TanStack Form's string default) doesn't match any
+  // ``<SelectItem>`` and sends positioning into a fallback that renders the
+  // popup full-height at a clipped location — visually it looks like the
+  // dropdown never opens. Base UI treats ``null`` explicitly as "no value",
+  // so map empty-string → null on the way in.
+  const normalisedValue = value === "" ? null : value;
   return (
     <SelectPrimitive.Root
+      value={normalisedValue}
       onValueChange={
         onValueChange
-          ? (value: unknown) => {
-              if (typeof value === "string") {
-                onValueChange(value);
+          ? (nextValue: unknown) => {
+              if (typeof nextValue === "string") {
+                onValueChange(nextValue);
+              } else if (nextValue === null) {
+                // User cleared the selection — surface as empty string so
+                // controlled callers keep receiving strings.
+                onValueChange("");
               } else if (import.meta.env.DEV) {
                 console.warn(
                   "[Select] onValueChange received a non-string value:",
-                  value,
+                  nextValue,
                 );
               }
             }
@@ -96,8 +110,28 @@ const SelectContent = React.forwardRef<
     position?: string;
   }
 >(({ className, children, position = "popper", ...props }, ref) => (
+  // ``alignItemWithTrigger`` defaults to ``true``, which stacks the popup
+  // directly over the trigger so the selected item lines up with it. With no
+  // selected value the popup still centres on the trigger rect, making the
+  // trigger button eat every pointer event aimed at an option underneath.
+  // Disable it so the popup anchors below (or flipped above) the trigger —
+  // the usual dropdown behaviour everywhere else in the app expects.
+  //
+  // Both the ``Dialog`` and ``Select`` popups share the same Base UI portal
+  // (``FloatingPortal`` contextually defaults to the nearest ancestor portal
+  // inside a Dialog). The Popup child is ``z-50`` but its parent Positioner
+  // is absolute-positioned with ``z-index: auto``, so at the portal root the
+  // positioner sits at the z-auto level while the Dialog popup sits at z-50.
+  // The Select popup's z-50 only promotes it within the Positioner's own
+  // stacking context — the whole subtree still paints below any z-50 Dialog.
+  // Promote the Positioner to z-50 so the Select popup and the Dialog popup
+  // are siblings at the same level and DOM order decides (Select is later).
   <SelectPrimitive.Portal>
-    <SelectPrimitive.Positioner>
+    <SelectPrimitive.Positioner
+      alignItemWithTrigger={false}
+      sideOffset={4}
+      className="z-50"
+    >
       <SelectPrimitive.Popup
         ref={ref}
         className={cn(
@@ -139,9 +173,15 @@ SelectLabel.displayName = "SelectLabel";
 const SelectItem = React.forwardRef<
   HTMLDivElement,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, value, ...props }, ref) => (
+  // Base UI's ``Select.Item`` keeps ``value`` in internal state rather than
+  // on the DOM. Mirror it to ``data-value`` so tests (and any caller that
+  // needs a stable selector) can target an option by its value without
+  // scraping text content.
   <SelectPrimitive.Item
     ref={ref}
+    value={value}
+    data-value={typeof value === "string" ? value : undefined}
     className={cn(
       "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
