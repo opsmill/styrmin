@@ -117,6 +117,19 @@ Pytest stays paused indefinitely. Inspect with `kubectl` from a separate shell, 
 
 This is faster than `--e2e-keep-cluster` when you want to see state exactly at the point of failure (port-forwards and connections still open), rather than after teardown has partially run. See `.agents/commands/e2e-troubleshoot.md` for the structured multi-iteration variant.
 
+### UI-variant troubleshooting — use the Playwright MCP server
+
+When diagnosing a failure in a `[ui-chromium]` scenario, **always** drive the investigation through the Playwright MCP server rather than adding screenshot/HTML-dump instrumentation to the page object. The MCP server lets you navigate, evaluate, inspect element accessibility trees, and run arbitrary Playwright calls interactively — no round-trip through a 3-minute pytest fixture for each diagnostic iteration, and no throwaway debug code leaking into the test suite.
+
+Typical loop:
+
+1. Start a styrmin deployment the test expects (use `uv run pytest ... --pdb` to pause at the exact state, or run the fixtures explicitly).
+2. Point the Playwright MCP server at the port-forwarded styrmin URL and reproduce the failing step by step.
+3. Use MCP tools (`browser_snapshot`, `browser_evaluate`, `browser_click`, etc.) to inspect DOM, computed styles, `elementFromPoint`, console/network logs.
+4. Form a hypothesis, apply the fix in source, re-run the full pytest to validate.
+
+Only fall back to screenshot/HTML dumps inside the page object when the MCP server is genuinely unavailable.
+
 ## Coding Standards
 
 - Python: `dev/guidelines/backend/python.md`
