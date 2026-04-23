@@ -16,8 +16,15 @@ from styrmin_sdk import StyrminClient
 from kr8s.asyncio.objects import Service as AsyncService
 from kubernetes_asyncio import client as kubeclient
 
+import uuid
+
+from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.drivers.api_driver import ApiScenarioDriver
+from tests.e2e.drivers.ui_driver import UiScenarioDriver
+
 PROJECT_ROOT = Path(__file__).parent.resolve().parents[2]
 FIXTURES_DIR = Path(__file__).parent.resolve() / "fixtures"
+PLAYWRIGHT_OUTPUT_DIR = PROJECT_ROOT / "test-results"
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +35,7 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
     setattr(item, f"rep_{report.when}", report)
+    _preserve_first_ui_attempt_artifacts(item, report)
 
 
 def _dump_namespace_logs(kubeconfig: str, namespace: str) -> None:
@@ -886,3 +894,194 @@ async def deployed_db_test(
         "namespace": namespace,
         "kubeconfig_path": kubeconfig_path,
     }
+
+
+# ---------------------------------------------------------------------------
+# Dual-entrypoint E2E — Playwright + ScenarioDriver wiring
+# ---------------------------------------------------------------------------
+#
+# Every E2E scenario that takes ``scenario_driver`` runs twice — once through
+# ``ApiScenarioDriver`` (SDK-based) and once through ``UiScenarioDriver``
+# (Playwright-based). See specs/001-dual-e2e-entrypoints/.
+
+
+@pytest.fixture(scope="session")
+def browser_type_launch_args() -> dict[str, object]:
+    """Force headless Chromium for Playwright-backed E2E runs."""
+    return {"headless": True}
+
+
+@pytest.fixture
+def browser_context_args(
+    browser_context_args: dict[str, object],
+    styrmin_deployment: str,
+) -> dict[str, object]:
+    """Bind Playwright pages to the port-forwarded styrmin-server URL."""
+    return {**browser_context_args, "base_url": styrmin_deployment}
+
+
+@pytest.fixture
+async def scenario_environment_id(
+    styrmin_resources: dict,
+) -> AsyncGenerator[str, None]:
+    """Create a fresh environment per test so parametrized variants don't collide.
+
+    The session-scoped ``styrmin_resources`` fixture reuses one cluster / BSL /
+    driver version across all tests, which is fine — but sharing a single
+    environment between the ``[api]`` and ``[ui]`` variants of the same
+    scenario triggers ``"Service name 'simple-app' already exists in
+    environment"`` on the second variant. In CI each variant runs in its own
+    vCluster so this never surfaces; locally we isolate at the environment
+    level instead.
+
+    Cleanup is best-effort — the session-scoped vcluster teardown will
+    reclaim anything left behind.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+    name = f"scenario-env-{uuid.uuid4().hex[:8]}"
+    env = await client.environments.create(
+        name=name,
+        cluster_id=styrmin_resources["cluster_id"],
+        config={"ip_whitelist": ["127.0.0.1"]},
+    )
+    env_id = str(env.id)
+    try:
+        await client.backup_storage_locations.assign(
+            env_id, styrmin_resources["bsl_id"]
+        )
+    except Exception:  # noqa: BLE001 — BSL assign is optional for most scenarios
+        pass
+    try:
+        yield env_id
+    finally:
+        try:
+            await client.environments.delete(environment_id=env_id)
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            pass
+
+
+@pytest.fixture(
+    params=[
+        pytest.param("api", id="api"),
+        pytest.param("ui", id="ui"),
+    ],
+)
+async def scenario_driver(
+    request: pytest.FixtureRequest,
+    styrmin_resources: dict,
+    styrmin_deployment: str,
+    page,
+) -> AsyncGenerator[ScenarioDriver, None]:
+    """Parametrized driver: scenarios iterate through API and UI entrypoints.
+
+    ``page`` (pytest-playwright-asyncio) is always requested so pytest-asyncio
+    awaits it properly — the API branch simply doesn't touch it.
+    """
+    mode = request.param
+    if mode == "api":
+        client: StyrminClient = styrmin_resources["client"]
+        yield ApiScenarioDriver(client)
+        return
+
+    yield UiScenarioDriver(page=page, base_url=styrmin_deployment)
+
+
+# ---------------------------------------------------------------------------
+# pytest_collection_modifyitems — api_only / ui_only enforcement + UI retry
+# ---------------------------------------------------------------------------
+
+
+def _get_entrypoint_marker(item: pytest.Item) -> tuple[str | None, str | None]:
+    """Return ``(mode, reason)`` if item has api_only/ui_only, else ``(None, None)``.
+
+    Fails collection if both markers are set or the reason is empty.
+    """
+    api_only = item.get_closest_marker("api_only")
+    ui_only = item.get_closest_marker("ui_only")
+    if api_only is not None and ui_only is not None:
+        pytest.fail(f"{item.nodeid}: cannot declare both api_only and ui_only")
+    for mode, marker in (("api", api_only), ("ui", ui_only)):
+        if marker is None:
+            continue
+        reason = marker.kwargs.get("reason") or (
+            marker.args[0] if marker.args else None
+        )
+        if not reason or not str(reason).strip():
+            pytest.fail(
+                f"{item.nodeid}: @pytest.mark.{mode}_only requires a non-empty "
+                f"reason=... (see specs/001-dual-e2e-entrypoints/spec.md FR-011)"
+            )
+        return mode, str(reason)
+    return None, None
+
+
+def _driver_param_id(item: pytest.Item) -> str | None:
+    """Return the scenario_driver param id ('api' / 'ui') for a parametrized item."""
+    callspec = getattr(item, "callspec", None)
+    if callspec is None:
+        return None
+    return callspec.params.get("scenario_driver")
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config,  # noqa: ARG001
+    items: list[pytest.Item],
+) -> None:
+    """Enforce api_only/ui_only contract and auto-retry [ui] variants."""
+    for item in items:
+        driver_id = _driver_param_id(item)
+        if driver_id is None:
+            continue
+
+        only_mode, reason = _get_entrypoint_marker(item)
+        if only_mode is not None and only_mode != driver_id:
+            item.add_marker(pytest.mark.skip(reason=f"{only_mode}_only: {reason}"))
+
+        if driver_id == "ui":
+            item.add_marker(pytest.mark.flaky(reruns=1, reruns_delay=0))
+
+
+# ---------------------------------------------------------------------------
+# First-attempt artifact retention for [ui] variants on retry
+# ---------------------------------------------------------------------------
+#
+# pytest-playwright writes per-test artifacts under ``test-results/<nodeid>/``.
+# When pytest-rerunfailures retries a failing [ui] test, the plugin overwrites
+# those artifacts. This hook snapshots the first-attempt artifact directory
+# under ``test-results/attempt-1/<nodeid>/`` so the first failure remains
+# observable even when the retry succeeds (FR-019, data-model Diagnostic
+# Artifact).
+
+
+def _sanitize_nodeid(nodeid: str) -> str:
+    """Mirror pytest-playwright's output-dir sanitization."""
+    out = nodeid.replace(os.sep, "-").replace("/", "-")
+    for ch in ("::", " ", "[", "]"):
+        out = out.replace(ch, "-")
+    return out.strip("-")
+
+
+def _preserve_first_ui_attempt_artifacts(item: pytest.Item, report) -> None:
+    """Snapshot failing [ui] first-attempt artifacts before a retry overwrites them."""
+    if report.when != "call" or not report.failed:
+        return
+    if _driver_param_id(item) != "ui":
+        return
+    # pytest-rerunfailures sets execution_count on the item for attempt tracking
+    execution_count = getattr(item, "execution_count", 1)
+    if execution_count != 1:
+        return
+
+    artifact_name = _sanitize_nodeid(item.nodeid)
+    src = PLAYWRIGHT_OUTPUT_DIR / artifact_name
+    if not src.exists():
+        return
+    dst = PLAYWRIGHT_OUTPUT_DIR / "attempt-1" / artifact_name
+    try:
+        if dst.exists():
+            shutil.rmtree(dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dst)
+    except OSError:
+        # Best-effort: artifact snapshotting must never mask the real failure.
+        pass

@@ -89,7 +89,15 @@ function TimelineEntryRow({ entry }: { entry: TimelineEntry }) {
   const [isOpen, setIsOpen] = useState(false);
 
   const content = (
-    <div className="py-3 first:pt-0 last:pb-0">
+    <div
+      className="py-3 first:pt-0 last:pb-0"
+      data-testid="timeline-entry"
+      data-task-id={task.id}
+      data-task-type={task.type}
+      data-task-status={task.status}
+      data-created-on={task.createdOn ?? ""}
+      data-application-version={applicationVersion ?? ""}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           {hasChanges && (

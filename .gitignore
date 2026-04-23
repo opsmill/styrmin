@@ -204,3 +204,7 @@ helm/styrmin/charts/
 helm/styrmin/Chart.lock
 .superset/config.json
 *.local.*
+
+# Playwright / pytest-playwright artifacts
+test-results/
+playwright-report/

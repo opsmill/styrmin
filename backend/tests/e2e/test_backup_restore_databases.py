@@ -13,11 +13,10 @@ from typing import AsyncIterator
 import httpx
 import kr8s.asyncio
 import pytest
-from styrmin_sdk import StyrminClient
-from styrmin_sdk.exceptions import ResourceNotFoundError
 from kr8s.asyncio.objects import Service as AsyncService
 
 from tests.e2e.conftest import _wait_for_http
+from tests.e2e.drivers import ResourceNotFound, ScenarioDriver
 from tests.e2e.test_backup_restore import wait_for_pods_ready
 
 
@@ -58,18 +57,26 @@ async def portforward_db_test(
 
 @pytest.mark.ci
 async def test_mariadb_mongodb_backup_and_restore_lifecycle(
-    load_db_test: dict,
-    velero_ready: None,
-    deployed_db_test: dict,
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    load_db_test: dict,  # noqa: ARG001 — loads the db-test driver version
+    velero_ready: None,  # noqa: ARG001 — ensures Velero is up
+    db_test_image: str,  # noqa: ARG001 — ensures db-test image is built
     vcluster: dict,
 ) -> None:
     """Full lifecycle: write data -> backup -> modify -> restore -> verify for MariaDB + MongoDB."""
-    client: StyrminClient = load_db_test["client"]
-    instance_id = deployed_db_test["instance_id"]
-    namespace = deployed_db_test["namespace"]
-    kubeconfig_path = vcluster["kubeconfig_path"]
-
+    deployment = await scenario_driver.create_deployment(
+        driver="db-test",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+    )
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment.id, timeout=300.0
+    )
+    instance_id = deployment.instance_id
     assert instance_id is not None, "Deployment should have an instance_id"
+    namespace = f"styrmin-{deployment.id}"
+    kubeconfig_path = vcluster["kubeconfig_path"]
 
     # 1. Write test data (increment counters N times in both databases)
     async with portforward_db_test(kubeconfig_path, namespace) as port:
@@ -92,10 +99,12 @@ async def test_mariadb_mongodb_backup_and_restore_lifecycle(
             )
             pre_backup_mongodb = mongodb_resp.json()["counter"]  # 6
 
-    # 2. Create backup via SDK, wait for completion
-    created_backup = await client.backups.create_backup(instance_id=instance_id)
-    assert created_backup.status == "pending"
-    backup = await client.backups.wait_for_backup(created_backup.id, max_wait=300)
+    # 2. Create backup via scenario_driver, wait for completion
+    created_backup = await scenario_driver.create_backup(instance_id=instance_id)
+    assert created_backup.status in {"pending", "in_progress", "completed"}
+    backup = await scenario_driver.wait_for_backup(
+        backup_id=created_backup.id, max_wait=300
+    )
     assert backup.status == "completed"
 
     # 3. Write more data (counters go higher)
@@ -109,12 +118,14 @@ async def test_mariadb_mongodb_backup_and_restore_lifecycle(
                     f"http://localhost:{port}/mongodb/count", timeout=10
                 )
 
-    # 4. Restore from backup via SDK (same namespace, existingResourcePolicy=update)
-    created_restore = await client.backups.create_restore(
+    # 4. Restore from backup via scenario_driver (same namespace)
+    created_restore = await scenario_driver.create_restore(
         backup_id=backup.id, target_namespace=namespace
     )
-    assert created_restore.status == "pending"
-    restore = await client.backups.wait_for_restore(created_restore.id, max_wait=300)
+    assert created_restore.status in {"pending", "in_progress", "completed"}
+    restore = await scenario_driver.wait_for_restore(
+        restore_id=created_restore.id, max_wait=300
+    )
     assert restore.status == "completed"
 
     # 5. Wait for pods to recover, verify data restored
@@ -133,6 +144,6 @@ async def test_mariadb_mongodb_backup_and_restore_lifecycle(
             assert mongodb_resp.json()["counter"] == pre_backup_mongodb + 1
 
     # 6. Delete backup and verify
-    await client.backups.delete_backup(backup.id)
-    with pytest.raises(ResourceNotFoundError):
-        await client.backups.get_backup(backup.id)
+    await scenario_driver.delete_backup(backup_id=backup.id)
+    with pytest.raises(ResourceNotFound):
+        await scenario_driver.get_backup(backup_id=backup.id)

@@ -1,9 +1,8 @@
 """E2E tests for the deployment timeline feature."""
 
 import pytest
-from styrmin_sdk import StyrminClient
 
-from tests.e2e.conftest import _wait_for_deployment_running
+from tests.e2e.drivers import ScenarioDriver
 
 VALID_TASK_TYPES = {
     "noop",
@@ -22,29 +21,40 @@ VALID_TASK_STATUSES = {"pending", "running", "failed", "success"}
 
 @pytest.mark.ci
 async def test_deployment_timeline_has_entries(
-    styrmin_resources: dict,
-    deployed_simple_app: dict,
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
 ) -> None:
     """Verify that a deployment timeline has entries after initial deploy."""
-    client: StyrminClient = styrmin_resources["client"]
-    deployment_id = deployed_simple_app["deployment_id"]
+    deployment = await scenario_driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+    )
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment.id
+    )
 
-    timeline = await client.deployments.get_timeline(deployment_id)
+    timeline = await scenario_driver.get_deployment_timeline(
+        deployment_id=deployment.id
+    )
 
     assert len(timeline) >= 1, (
         f"Expected at least 1 timeline entry, got {len(timeline)}"
     )
 
     for entry in timeline:
-        assert entry.task is not None
-        assert entry.task.id is not None
-        assert entry.task.type_ in VALID_TASK_TYPES, (
-            f"Unexpected task type: {entry.task.type_}"
+        assert entry.task_id, f"Timeline entry missing task_id: {entry}"
+        assert entry.task_type in VALID_TASK_TYPES, (
+            f"Unexpected task type: {entry.task_type}"
         )
-        assert entry.task.status in VALID_TASK_STATUSES, (
-            f"Unexpected task status: {entry.task.status}"
+        assert entry.task_status in VALID_TASK_STATUSES, (
+            f"Unexpected task status: {entry.task_status}"
         )
-        assert entry.task.created_on is not None
+        assert entry.created_on is not None, (
+            f"Timeline entry missing created_on: {entry}"
+        )
 
     # The initial deploy should have version 0.1.0
     versions = [e.application_version for e in timeline if e.application_version]
@@ -53,28 +63,37 @@ async def test_deployment_timeline_has_entries(
 
 @pytest.mark.ci
 async def test_deployment_timeline_after_upgrade(
-    styrmin_resources: dict,
-    deployed_simple_app: dict,
-    simple_app_image_v2: str,
-    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    styrmin_resources: dict,  # noqa: ARG001
+    simple_app_image: str,  # noqa: ARG001
+    simple_app_image_v2: str,  # noqa: ARG001 — ensures v2 image is built
 ) -> None:
     """Verify timeline reflects both deploy and upgrade operations."""
-    client: StyrminClient = styrmin_resources["client"]
-    deployment_id = deployed_simple_app["deployment_id"]
+    deployment = await scenario_driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+    )
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment.id
+    )
 
     # Trigger upgrade to version 0.2.0
-    await client.deployments.update_version(deployment_id, "0.2.0")
+    await scenario_driver.upgrade_deployment(
+        deployment_id=deployment.id, version="0.2.0"
+    )
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
 
-    await _wait_for_deployment_running(client, deployment_id)
-
-    timeline = await client.deployments.get_timeline(deployment_id)
+    timeline = await scenario_driver.get_deployment_timeline(
+        deployment_id=deployment.id
+    )
 
     # After deploy + upgrade, expect at least 2 timeline entries
     assert len(timeline) >= 2, (
         f"Expected at least 2 timeline entries after upgrade, got {len(timeline)}"
     )
 
-    # Timeline is newest-first; the newest entry should reference version 0.2.0
     versions = [e.application_version for e in timeline if e.application_version]
     assert "0.2.0" in versions, f"Expected version 0.2.0 in timeline, got {versions}"
     assert "0.1.0" in versions, f"Expected version 0.1.0 in timeline, got {versions}"
@@ -82,19 +101,29 @@ async def test_deployment_timeline_after_upgrade(
 
 @pytest.mark.ci
 async def test_deployment_timeline_ordering(
-    styrmin_resources: dict,
-    deployed_simple_app: dict,
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    styrmin_resources: dict,  # noqa: ARG001
+    simple_app_image: str,  # noqa: ARG001
 ) -> None:
     """Verify that timeline entries are ordered newest-first by created_on."""
-    client: StyrminClient = styrmin_resources["client"]
-    deployment_id = deployed_simple_app["deployment_id"]
+    deployment = await scenario_driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+    )
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment.id
+    )
 
-    timeline = await client.deployments.get_timeline(deployment_id)
+    timeline = await scenario_driver.get_deployment_timeline(
+        deployment_id=deployment.id
+    )
 
     if len(timeline) < 2:
         pytest.skip("Need at least 2 timeline entries to verify ordering")
 
-    timestamps = [e.task.created_on for e in timeline if e.task.created_on is not None]
+    timestamps = [e.created_on for e in timeline if e.created_on is not None]
     assert len(timestamps) >= 2
 
     for i in range(len(timestamps) - 1):
