@@ -927,8 +927,20 @@ async def deployed_db_test(
 
 @pytest.fixture(scope="session")
 def browser_type_launch_args() -> dict[str, object]:
-    """Force headless Chromium for Playwright-backed E2E runs."""
-    return {"headless": True}
+    """Force headless Chromium for Playwright-backed E2E runs.
+
+    On CI we LD_PRELOAD a shim (``NO_NETLINK_SO``) that makes NETLINK_ROUTE
+    sockets fail with ``EAFNOSUPPORT``. Chromium's ``AddressTrackerLinux``
+    then follows its graceful "assume always online" path instead of
+    reacting to Docker/veth netlink churn mid-test. The env var is scoped
+    to the browser process so LD_PRELOAD does not leak into pytest or the
+    subprocesses it spawns (kubectl, helm, docker).
+    """
+    args: dict[str, object] = {"headless": True}
+    no_netlink_so = os.environ.get("NO_NETLINK_SO")
+    if no_netlink_so:
+        args["env"] = {**os.environ, "LD_PRELOAD": no_netlink_so}
+    return args
 
 
 @pytest.fixture
