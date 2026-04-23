@@ -34,7 +34,6 @@ _LOG = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.resolve().parents[2]
 FIXTURES_DIR = Path(__file__).parent.resolve() / "fixtures"
-PLAYWRIGHT_OUTPUT_DIR = PROJECT_ROOT / "test-results"
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +44,6 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
     setattr(item, f"rep_{report.when}", report)
-    _preserve_first_ui_attempt_artifacts(item, report)
 
 
 def _dump_namespace_logs(kubeconfig: str, namespace: str) -> None:
@@ -1070,7 +1068,7 @@ def pytest_collection_modifyitems(
     config: pytest.Config,  # noqa: ARG001
     items: list[pytest.Item],
 ) -> None:
-    """Enforce api_only/ui_only contract and auto-retry [ui] variants."""
+    """Enforce api_only/ui_only contract."""
     for item in items:
         driver_id = _driver_param_id(item)
         if driver_id is None:
@@ -1079,46 +1077,3 @@ def pytest_collection_modifyitems(
         only_mode, reason = _get_entrypoint_marker(item)
         if only_mode is not None and only_mode != driver_id:
             item.add_marker(pytest.mark.skip(reason=f"{only_mode}_only: {reason}"))
-
-        if driver_id == "ui":
-            item.add_marker(pytest.mark.flaky(reruns=1, reruns_delay=0))
-
-
-def _sanitize_nodeid(nodeid: str) -> str:
-    """Mirror pytest-playwright's output-dir sanitization."""
-    out = nodeid.replace(os.sep, "-").replace("/", "-")
-    for ch in ("::", " ", "[", "]"):
-        out = out.replace(ch, "-")
-    return out.strip("-")
-
-
-def _preserve_first_ui_attempt_artifacts(item: pytest.Item, report) -> None:
-    """Snapshot failing [ui] first-attempt artifacts before a retry overwrites them.
-
-    pytest-playwright writes artifacts under ``test-results/<nodeid>/`` and
-    pytest-rerunfailures overwrites them on retry. We copy the first-attempt
-    directory under ``test-results/attempt-1/<nodeid>/`` so the original
-    failure stays observable even when the retry passes.
-    """
-    if report.when != "call" or not report.failed:
-        return
-    if _driver_param_id(item) != "ui":
-        return
-    # pytest-rerunfailures sets execution_count on the item for attempt tracking
-    execution_count = getattr(item, "execution_count", 1)
-    if execution_count != 1:
-        return
-
-    artifact_name = _sanitize_nodeid(item.nodeid)
-    src = PLAYWRIGHT_OUTPUT_DIR / artifact_name
-    if not src.exists():
-        return
-    dst = PLAYWRIGHT_OUTPUT_DIR / "attempt-1" / artifact_name
-    try:
-        if dst.exists():
-            shutil.rmtree(dst)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(src, dst)
-    except OSError:
-        # Best-effort: artifact snapshotting must never mask the real failure.
-        pass
