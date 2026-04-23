@@ -972,20 +972,26 @@ async def scenario_driver(
     driver_mode: str,
     styrmin_resources: dict,
     styrmin_deployment: str,
-    request: pytest.FixtureRequest,
+    session_ui_page: "Page | None",
 ) -> AsyncGenerator[ScenarioDriver, None]:
     """Per-test ScenarioDriver. Inherits its mode from session-scoped driver_mode.
 
-    Playwright's ``page`` fixture is function-scoped, so the UI branch
-    requests it lazily to avoid spinning up a browser context for API tests.
+    For UI mode we reuse the session-scoped Playwright ``Page`` rather than
+    pytest-playwright's function-scoped ``page`` fixture. That fixture is
+    async and resolving it from inside this async fixture triggers
+    ``Runner.run() cannot be called from a running event loop`` — the same
+    pattern the session fixture already avoids. Since every UI scenario
+    calls ``create_deployment`` via a freshly-built scenario state, reusing
+    the session page is safe: the driver navigates to the relevant URL at
+    the start of each action.
     """
     if driver_mode == "api":
         client: StyrminClient = styrmin_resources["client"]
         yield ApiScenarioDriver(client)
         return
 
-    page = request.getfixturevalue("page")
-    yield UiScenarioDriver(page=page, base_url=styrmin_deployment)
+    assert session_ui_page is not None, "session_ui_page must be built in ui mode"
+    yield UiScenarioDriver(page=session_ui_page, base_url=styrmin_deployment)
 
 
 @pytest.fixture
