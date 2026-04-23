@@ -7,6 +7,8 @@ into the driver-neutral ref types.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 from styrmin_sdk import StyrminClient
@@ -110,11 +112,19 @@ class ApiScenarioDriver:
             version = await self._client.drivers.load_version(git_url, ref)
         except StyrminError as exc:
             raise _normalise(exc) from exc
+        driver_name = getattr(version, "driver_name", None)
+        version_label = getattr(version, "version", None)
+        if driver_name is None or version_label is None:
+            raise ScenarioActionError(
+                f"SDK returned driver version {version.id} without required fields "
+                f"(driver_name={driver_name!r}, version={version_label!r}); "
+                "SDK schema may be out of sync with the backend"
+            )
         return DriverVersionRef(
             id=str(version.id),
             application_driver_id=str(version.application_driver_id),
-            driver_name=getattr(version, "driver_name", "") or "",
-            version=getattr(version, "version", "") or "",
+            driver_name=driver_name,
+            version=version_label,
         )
 
     # --- Deployments ------------------------------------------------------
@@ -155,9 +165,6 @@ class ApiScenarioDriver:
     async def wait_for_deployment_running(
         self, *, deployment_id: str, timeout: float = 300.0
     ) -> DeploymentRef:
-        import asyncio
-        import time
-
         deadline = time.time() + timeout
         deployment = None
         while time.time() < deadline:

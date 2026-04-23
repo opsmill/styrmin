@@ -5,6 +5,8 @@ Route: ``/environments/$environmentId/deployments/$deploymentId``.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import TYPE_CHECKING
 
 from playwright.async_api import expect
@@ -13,7 +15,7 @@ from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
 from tests.e2e.drivers.refs import BackupRef, RestoreRef, TimelineEntry
 
 if TYPE_CHECKING:
-    from playwright.async_api import Page
+    from playwright.async_api import Locator, Page
 
 
 # StatusBadge renders these labels for the corresponding backend statuses.
@@ -24,6 +26,21 @@ _STATUS_LABELS = {
     "completed": "Complete",
     "failed": "Failed",
 }
+
+
+async def _required_attr(locator: Locator, attr: str, *, context: str) -> str:
+    """Read ``attr`` from ``locator`` and raise if absent or empty.
+
+    Prevents a frontend test-hook removal from surfacing as a cryptic
+    downstream assertion; the missing attribute is reported at the boundary.
+    """
+    value = await locator.get_attribute(attr)
+    if not value:
+        raise ScenarioActionError(
+            f"{context} rendered without {attr} attribute "
+            "(frontend test-hook may have been removed or renamed)"
+        )
+    return value
 
 
 class DeploymentDetailPage:
@@ -40,17 +57,10 @@ class DeploymentDetailPage:
     async def wait_for_status(self, *, expected: str, timeout: float = 300.0) -> None:
         """Wait for the header StatusBadge to render *expected*.
 
-        Must target the *deployment* status badge, not the timeline task
-        badges. The detail page renders multiple StatusBadges (one for the
-        deployment in the header, one per task under "Recent Timeline"),
-        and the task "Create Instance" hits ``Running`` long before the
-        deployment does — matching any ``Running`` on the page falsely
-        succeeds while the deployment itself is still ``Pending``.
-
-        Target the badge that sits immediately after the deployment-name
-        ``<h1>`` via the CSS adjacent-sibling selector. The page
-        auto-refreshes every 10s; ``expect().to_contain_text`` polls the
-        DOM for us — no manual reload needed.
+        Must target the deployment's header badge, not the per-task badges
+        rendered under "Recent Timeline" — the "Create Instance" task
+        reaches ``Running`` long before the deployment does, so matching
+        any ``Running`` on the page would succeed prematurely.
         """
         want_label = _STATUS_LABELS.get(expected.lower(), expected)
         header_badge = self._page.locator("h1 + *").first
@@ -97,9 +107,15 @@ class DeploymentDetailPage:
         results: list[TimelineEntry] = []
         for i in range(count):
             row = entries_loc.nth(i)
-            task_id = (await row.get_attribute("data-task-id")) or ""
-            task_type = (await row.get_attribute("data-task-type")) or ""
-            task_status = (await row.get_attribute("data-task-status")) or ""
+            task_id = await _required_attr(
+                row, "data-task-id", context="timeline entry"
+            )
+            task_type = await _required_attr(
+                row, "data-task-type", context=f"timeline entry {task_id}"
+            )
+            task_status = await _required_attr(
+                row, "data-task-status", context=f"timeline entry {task_id}"
+            )
             created_on = await row.get_attribute("data-created-on")
             application_version = await row.get_attribute("data-application-version")
             results.append(
@@ -137,39 +153,31 @@ class DeploymentDetailPage:
         existing_ids: set[str] = set()
         for i in range(await self._page.locator("[data-testid=backup-row]").count()):
             row = self._page.locator("[data-testid=backup-row]").nth(i)
-            row_id = await row.get_attribute("data-backup-id")
-            if row_id:
-                existing_ids.add(row_id)
+            existing_ids.add(
+                await _required_attr(row, "data-backup-id", context="backup row")
+            )
 
         await self._page.get_by_role("button", name="Create Backup").click()
 
-        # Track how many rows we see and how many are missing their id
-        # attribute — surfaces frontend test-hook drift in the timeout
-        # message instead of silently passing through to a 60s timeout.
-        total_rows_last_seen = 0
-        rows_missing_id_last_seen = 0
-
         async def _first_new_row() -> BackupRef | None:
-            nonlocal total_rows_last_seen, rows_missing_id_last_seen
             rows = self._page.locator("[data-testid=backup-row]")
-            total = await rows.count()
-            missing = 0
-            for i in range(total):
+            for i in range(await rows.count()):
                 row = rows.nth(i)
-                row_id = await row.get_attribute("data-backup-id")
-                if not row_id:
-                    missing += 1
+                row_id = await _required_attr(
+                    row, "data-backup-id", context="backup row"
+                )
+                if row_id in existing_ids:
                     continue
-                if row_id not in existing_ids:
-                    name = (await row.get_attribute("data-backup-name")) or ""
-                    status = (await row.get_attribute("data-backup-status")) or ""
-                    return BackupRef(id=row_id, name=name, status=status)
-            total_rows_last_seen = total
-            rows_missing_id_last_seen = missing
+                return BackupRef(
+                    id=row_id,
+                    name=await _required_attr(
+                        row, "data-backup-name", context=f"backup row {row_id}"
+                    ),
+                    status=await _required_attr(
+                        row, "data-backup-status", context=f"backup row {row_id}"
+                    ),
+                )
             return None
-
-        import asyncio
-        import time
 
         deadline = time.time() + 60.0
         while time.time() < deadline:
@@ -177,28 +185,26 @@ class DeploymentDetailPage:
             if ref is not None:
                 return ref
             await asyncio.sleep(1.0)
-        raise ScenarioTimeout(
-            "create_backup: new backup row did not appear within 60s "
-            f"(saw {total_rows_last_seen} rows, "
-            f"{rows_missing_id_last_seen} missing data-backup-id)"
-        )
+        raise ScenarioTimeout("create_backup: new backup row did not appear within 60s")
 
     async def wait_for_backup_status(
         self, *, backup_id: str, terminal_statuses: tuple[str, ...], max_wait: float
     ) -> BackupRef:
         """Poll the backup row until ``data-backup-status`` is terminal."""
-        import asyncio
-        import time
-
         deadline = time.time() + max_wait
         row = self._page.locator(
             f"[data-testid=backup-row][data-backup-id='{backup_id}']"
         ).first
+        context = f"backup row {backup_id}"
         while time.time() < deadline:
             if await row.count() > 0:
-                status = (await row.get_attribute("data-backup-status")) or ""
+                status = await _required_attr(
+                    row, "data-backup-status", context=context
+                )
                 if status in terminal_statuses:
-                    name = (await row.get_attribute("data-backup-name")) or ""
+                    name = await _required_attr(
+                        row, "data-backup-name", context=context
+                    )
                     return BackupRef(id=backup_id, name=name, status=status)
             await asyncio.sleep(2.0)
         raise ScenarioTimeout(
@@ -212,9 +218,12 @@ class DeploymentDetailPage:
         ).first
         if await row.count() == 0:
             return None
-        status = (await row.get_attribute("data-backup-status")) or ""
-        name = (await row.get_attribute("data-backup-name")) or ""
-        return BackupRef(id=backup_id, name=name, status=status)
+        context = f"backup row {backup_id}"
+        return BackupRef(
+            id=backup_id,
+            name=await _required_attr(row, "data-backup-name", context=context),
+            status=await _required_attr(row, "data-backup-status", context=context),
+        )
 
     async def delete_backup(self, *, backup_id: str) -> None:
         """Click the row's Delete, then confirm in the dialog."""
@@ -235,9 +244,10 @@ class DeploymentDetailPage:
     ) -> RestoreRef:
         """Click the row's Restore, confirm in the dialog, return the new restore ref.
 
-        ``target_namespace`` is passed by scenarios for protocol parity — the
-        dialog reads it from the deployment context (readOnly input) and we
-        simply verify the displayed value matches what the scenario expects.
+        ``target_namespace`` is a readOnly input on the UI (the dialog
+        derives it from the deployment context). Scenarios still pass it so
+        the same argument list works against both entrypoints — we verify
+        the displayed value matches so API/UI results stay equivalent.
         """
         await self.open_backups_tab()
         row = self._page.locator(
@@ -258,25 +268,29 @@ class DeploymentDetailPage:
         existing_ids: set[str] = set()
         restore_rows = self._page.locator("[data-testid=restore-row]")
         for i in range(await restore_rows.count()):
-            r_id = await restore_rows.nth(i).get_attribute("data-restore-id")
-            if r_id:
-                existing_ids.add(r_id)
+            existing_ids.add(
+                await _required_attr(
+                    restore_rows.nth(i), "data-restore-id", context="restore row"
+                )
+            )
 
         await dialog.get_by_role("button", name="Restore", exact=True).click()
         await dialog.wait_for(state="hidden")
-
-        import asyncio
-        import time
 
         deadline = time.time() + 60.0
         while time.time() < deadline:
             rows = self._page.locator("[data-testid=restore-row]")
             for i in range(await rows.count()):
                 r = rows.nth(i)
-                rid = await r.get_attribute("data-restore-id")
-                if rid and rid not in existing_ids:
-                    status = (await r.get_attribute("data-restore-status")) or ""
-                    return RestoreRef(id=rid, status=status)
+                rid = await _required_attr(r, "data-restore-id", context="restore row")
+                if rid in existing_ids:
+                    continue
+                return RestoreRef(
+                    id=rid,
+                    status=await _required_attr(
+                        r, "data-restore-status", context=f"restore row {rid}"
+                    ),
+                )
             await asyncio.sleep(1.0)
         raise ScenarioTimeout(
             "create_restore: new restore row did not appear within 60s"
@@ -286,16 +300,16 @@ class DeploymentDetailPage:
         self, *, restore_id: str, terminal_statuses: tuple[str, ...], max_wait: float
     ) -> RestoreRef:
         """Poll the restore row until ``data-restore-status`` is terminal."""
-        import asyncio
-        import time
-
         deadline = time.time() + max_wait
         row = self._page.locator(
             f"[data-testid=restore-row][data-restore-id='{restore_id}']"
         ).first
+        context = f"restore row {restore_id}"
         while time.time() < deadline:
             if await row.count() > 0:
-                status = (await row.get_attribute("data-restore-status")) or ""
+                status = await _required_attr(
+                    row, "data-restore-status", context=context
+                )
                 if status in terminal_statuses:
                     return RestoreRef(id=restore_id, status=status)
             await asyncio.sleep(2.0)

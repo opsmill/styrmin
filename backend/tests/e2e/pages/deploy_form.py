@@ -33,22 +33,14 @@ class DeployFormPage:
         service_name_overrides: list[dict[str, str]] | None = None,
     ) -> None:
         if parameters:
-            # The deploy form renders driver-version-specific parameter widgets
-            # (checkbox / select / integer / text — see DynamicParameterField).
-            # Mapping a scenario's ``parameters`` dict onto those widgets is
-            # non-trivial because Select widgets don't expose the parameter
-            # name as an input id; implement per-kind mapping when the first
-            # parameter-sensitive scenario lands.
             raise ScenarioActionError(
                 "UiScenarioDriver does not yet support create_deployment(parameters=...); "
-                "implement dynamic-parameter fill or mark the scenario as api_only"
+                "mark the scenario as api_only"
             )
         await self._page.get_by_label("Deployment Name").fill(name)
 
-        # Driver-version combobox: the Label's htmlFor="driverVersion" points
-        # to no matching element (the Radix SelectTrigger has no id), so
-        # get_by_label doesn't find the trigger. Target the only combobox
-        # on the deploy form by its placeholder text.
+        # Radix SelectTrigger has no id, so get_by_label doesn't match it —
+        # target the combobox by its placeholder text.
         trigger = self._page.get_by_role("combobox").filter(
             has_text="Select a driver version"
         )

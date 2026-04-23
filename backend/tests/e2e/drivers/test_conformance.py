@@ -119,14 +119,32 @@ def test_protocol_methods_match_both_drivers() -> None:
 
 
 def test_protocol_method_signatures_match() -> None:
-    """Each driver's method parameter names must match the protocol's."""
+    """Each driver's method parameter names, defaults, and return type must match.
+
+    Return-type and default-value divergence would let one driver silently
+    accept a call the other rejects — or return a differently-shaped ref —
+    without any test failing. Checking here keeps the two entrypoints truly
+    interchangeable for scenarios.
+    """
     for name in _protocol_methods():
-        proto_sig = inspect.signature(getattr(ScenarioDriver, name))
+        proto_sig = inspect.signature(getattr(ScenarioDriver, name), eval_str=True)
         for driver_cls in (ApiScenarioDriver, UiScenarioDriver):
-            impl_sig = inspect.signature(getattr(driver_cls, name))
+            impl_sig = inspect.signature(getattr(driver_cls, name), eval_str=True)
             proto_params = list(proto_sig.parameters.values())[1:]
             impl_params = list(impl_sig.parameters.values())[1:]
             assert [p.name for p in proto_params] == [p.name for p in impl_params], (
                 f"{driver_cls.__name__}.{name}: parameter names differ from "
                 f"ScenarioDriver.{name}"
+            )
+            assert [p.default for p in proto_params] == [
+                p.default for p in impl_params
+            ], (
+                f"{driver_cls.__name__}.{name}: parameter defaults differ from "
+                f"ScenarioDriver.{name} (proto={[p.default for p in proto_params]}, "
+                f"impl={[p.default for p in impl_params]})"
+            )
+            assert proto_sig.return_annotation == impl_sig.return_annotation, (
+                f"{driver_cls.__name__}.{name}: return annotation differs "
+                f"(proto={proto_sig.return_annotation!r}, "
+                f"impl={impl_sig.return_annotation!r})"
             )

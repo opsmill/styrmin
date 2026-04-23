@@ -9,9 +9,12 @@ complete) so scenarios never need their own sleeps.
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, TYPE_CHECKING
 from urllib.parse import urlparse
 
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.e2e.drivers.errors import (
@@ -54,6 +57,29 @@ def _environment_id_from_url(url: str) -> str | None:
     return None
 
 
+@asynccontextmanager
+async def _ui_errors(action: str) -> AsyncIterator[None]:
+    """Normalise Playwright exceptions into the ScenarioDriver hierarchy.
+
+    - ``PlaywrightTimeoutError`` → ``ScenarioTimeout`` (flake-triage bucket).
+    - Any other ``playwright.async_api.Error`` (TargetClosedError, detached
+      handles, evaluation failures, navigation errors) → ``ScenarioActionError``
+      so scenarios never see a raw Playwright traceback.
+    - ``ScenarioActionError`` / subclasses pass through unchanged so page
+      objects can raise descriptive errors from inside the block.
+    """
+    try:
+        yield
+    except PlaywrightTimeoutError as exc:
+        raise ScenarioTimeout(f"UI timeout while {action}: {exc}") from exc
+    except ScenarioActionError:
+        raise
+    except PlaywrightError as exc:
+        raise ScenarioActionError(
+            f"UI error while {action} ({type(exc).__name__}): {exc}"
+        ) from exc
+
+
 class UiScenarioDriver:
     def __init__(self, *, page: Page, base_url: str) -> None:
         self._page = page
@@ -70,27 +96,30 @@ class UiScenarioDriver:
         # re-receiving it (matches ApiScenarioDriver's signature).
         self._environment_id: str | None = None
 
+    def attach_to_deployment(self, *, environment_id: str) -> None:
+        """Bind this driver to an environment without going through create_deployment.
+
+        Use when a scenario observes a deployment it did not itself create
+        (e.g. fixtures that deploy via the SDK then assert via the UI). The
+        API driver has no analogue — environment is re-derived from each
+        call's arguments — so scenarios that need both drivers should prefer
+        ``create_deployment`` when possible.
+        """
+        self._environment_id = environment_id
+
     # --- Platform setup ---------------------------------------------------
 
     async def create_cluster(self, *, name: str, config: dict[str, Any]) -> ClusterRef:
-        try:
+        async with _ui_errors(f"creating cluster {name!r}"):
             return await self._settings.create_cluster(name=name, config=config)
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout creating cluster {name!r}: {exc}"
-            ) from exc
 
     async def create_environment(
         self, *, name: str, cluster_id: str, config: dict[str, Any]
     ) -> EnvironmentRef:
-        try:
+        async with _ui_errors(f"creating environment {name!r}"):
             return await self._environments_list.create_environment(
                 name=name, cluster_id=cluster_id, config=config
             )
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout creating environment {name!r}: {exc}"
-            ) from exc
 
     async def delete_environment(self, *, environment_id: str) -> None:
         raise ScenarioActionError(
@@ -110,7 +139,7 @@ class UiScenarioDriver:
         access_key_id: str,
         secret_access_key: str,
     ) -> BSLRef:
-        try:
+        async with _ui_errors(f"creating BSL {name!r}"):
             bsl_id = await self._bsl_list.create(
                 name=name,
                 endpoint=endpoint,
@@ -119,31 +148,21 @@ class UiScenarioDriver:
                 access_key_id=access_key_id,
                 secret_access_key=secret_access_key,
             )
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(f"UI timeout creating BSL {name!r}: {exc}") from exc
         return BSLRef(id=bsl_id, name=name)
 
     async def assign_bsl_to_environment(
         self, *, environment_id: str, bsl_id: str
     ) -> None:
-        try:
+        async with _ui_errors(f"assigning BSL {bsl_id!r} to env {environment_id!r}"):
             await self._environment_detail.assign_bsl(
                 environment_id=environment_id, bsl_id=bsl_id
             )
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout assigning BSL {bsl_id!r} to env {environment_id!r}: {exc}"
-            ) from exc
 
     async def load_driver_version(self, *, git_url: str, ref: str) -> DriverVersionRef:
-        try:
+        async with _ui_errors(f"loading driver {git_url!r}@{ref!r}"):
             return await self._drivers_list.load_remote_version(
                 git_url=git_url, ref=ref
             )
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout loading driver {git_url!r}@{ref!r}: {exc}"
-            ) from exc
 
     # --- Deployments ------------------------------------------------------
 
@@ -163,7 +182,7 @@ class UiScenarioDriver:
         # the scenario's point of view (which does not assert on the name).
         effective_name = name or f"scenario-{uuid.uuid4().hex[:8]}"
 
-        try:
+        async with _ui_errors("creating deployment"):
             await self._deploy_form.goto(environment_id=environment_id)
             await self._deploy_form.fill(
                 driver=driver,
@@ -173,16 +192,14 @@ class UiScenarioDriver:
                 service_name_overrides=service_name_overrides,
             )
             return await self._deploy_form.submit()
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout while creating deployment: {exc}"
-            ) from exc
 
     async def wait_for_deployment_running(
         self, *, deployment_id: str, timeout: float = 300.0
     ) -> DeploymentRef:
         environment_id = self._require_environment_context(deployment_id=deployment_id)
-        try:
+        async with _ui_errors(
+            f"waiting for deployment {deployment_id} to reach 'running'"
+        ):
             await self._deployment_detail.goto(
                 environment_id=environment_id, deployment_id=deployment_id
             )
@@ -193,11 +210,6 @@ class UiScenarioDriver:
             application_version = (
                 await self._deployment_detail.read_application_version()
             )
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout waiting for deployment {deployment_id} "
-                f"to reach 'running': {exc}"
-            ) from exc
         return DeploymentRef(
             id=deployment_id,
             status="running",
@@ -207,38 +219,35 @@ class UiScenarioDriver:
 
     async def upgrade_deployment(self, *, deployment_id: str, version: str) -> None:
         environment_id = self._require_environment_context(deployment_id=deployment_id)
-        try:
+        async with _ui_errors(f"upgrading deployment {deployment_id}"):
             await self._deployment_detail.goto(
                 environment_id=environment_id, deployment_id=deployment_id
             )
             await self._deployment_detail.open_upgrade_dialog()
             await self._deployment_detail.confirm_upgrade(version=version)
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout upgrading deployment {deployment_id}: {exc}"
-            ) from exc
 
     async def get_deployment_timeline(
         self, *, deployment_id: str
     ) -> list[TimelineEntry]:
         environment_id = self._require_environment_context(deployment_id=deployment_id)
-        try:
+        async with _ui_errors(f"reading timeline for deployment {deployment_id}"):
             await self._deployment_detail.goto(
                 environment_id=environment_id, deployment_id=deployment_id
             )
             return await self._deployment_detail.read_timeline()
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout reading timeline for deployment {deployment_id}: {exc}"
-            ) from exc
 
     def _require_environment_context(self, *, deployment_id: str) -> str:
+        # Prefer the explicitly-stashed environment_id (set by create_deployment
+        # or attach_to_deployment); fall back to parsing the current URL so a
+        # scenario that navigated manually before calling a deployment op
+        # still works. If neither is available, fail loudly rather than
+        # letting a downstream page.goto land on a malformed URL.
         env_id = self._environment_id or _environment_id_from_url(self._page.url)
         if env_id is None:
             raise ScenarioActionError(
                 "UI driver has no environment context for "
-                f"deployment_id={deployment_id!r}; call create_deployment or "
-                "navigate to a deployment page first"
+                f"deployment_id={deployment_id!r}; call create_deployment, "
+                "attach_to_deployment, or navigate to a deployment page first"
             )
         return env_id
 
@@ -260,16 +269,14 @@ class UiScenarioDriver:
             )
 
     async def create_backup(self, *, instance_id: str) -> BackupRef:  # noqa: ARG002
-        try:
+        async with _ui_errors("creating backup"):
             await self._ensure_deployment_detail()
             return await self._deployment_detail.create_backup()
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(f"UI timeout creating backup: {exc}") from exc
 
     async def wait_for_backup(
         self, *, backup_id: str, max_wait: float = 300.0
     ) -> BackupRef:
-        try:
+        async with _ui_errors(f"waiting for backup {backup_id}"):
             await self._ensure_deployment_detail()
             await self._deployment_detail.open_backups_tab()
             return await self._deployment_detail.wait_for_backup_status(
@@ -277,26 +284,20 @@ class UiScenarioDriver:
                 terminal_statuses=("completed", "failed"),
                 max_wait=max_wait,
             )
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout waiting for backup {backup_id}: {exc}"
-            ) from exc
 
     async def create_restore(
         self, *, backup_id: str, target_namespace: str
     ) -> RestoreRef:
-        try:
+        async with _ui_errors(f"creating restore from backup {backup_id}"):
             await self._ensure_deployment_detail()
             return await self._deployment_detail.create_restore(
                 backup_id=backup_id, target_namespace=target_namespace
             )
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(f"UI timeout creating restore: {exc}") from exc
 
     async def wait_for_restore(
         self, *, restore_id: str, max_wait: float = 600.0
     ) -> RestoreRef:
-        try:
+        async with _ui_errors(f"waiting for restore {restore_id}"):
             await self._ensure_deployment_detail()
             await self._deployment_detail.open_backups_tab()
             return await self._deployment_detail.wait_for_restore_status(
@@ -304,29 +305,17 @@ class UiScenarioDriver:
                 terminal_statuses=("completed", "failed"),
                 max_wait=max_wait,
             )
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout waiting for restore {restore_id}: {exc}"
-            ) from exc
 
     async def delete_backup(self, *, backup_id: str) -> None:
-        try:
+        async with _ui_errors(f"deleting backup {backup_id}"):
             await self._ensure_deployment_detail()
             await self._deployment_detail.delete_backup(backup_id=backup_id)
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout deleting backup {backup_id}: {exc}"
-            ) from exc
 
     async def get_backup(self, *, backup_id: str) -> BackupRef:
-        try:
+        async with _ui_errors(f"reading backup {backup_id}"):
             await self._ensure_deployment_detail()
             await self._deployment_detail.open_backups_tab()
             ref = await self._deployment_detail.read_backup(backup_id=backup_id)
-        except PlaywrightTimeoutError as exc:
-            raise ScenarioTimeout(
-                f"UI timeout reading backup {backup_id}: {exc}"
-            ) from exc
         if ref is None:
             raise ResourceNotFound(
                 f"backup {backup_id} is not listed on the deployment detail page"
