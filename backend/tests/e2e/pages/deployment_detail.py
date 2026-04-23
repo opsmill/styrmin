@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import expect
 
-from tests.e2e.drivers.errors import ScenarioActionError
+from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
 from tests.e2e.drivers.refs import BackupRef, RestoreRef, TimelineEntry
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ class DeploymentDetailPage:
                 want_label, timeout=int(timeout * 1000)
             )
         except AssertionError as exc:
-            raise ScenarioActionError(
+            raise ScenarioTimeout(
                 f"deployment did not reach status {want_label!r} within {timeout}s"
             ) from exc
 
@@ -120,6 +120,13 @@ class DeploymentDetailPage:
         value = await root.get_attribute("data-instance-id")
         return value or None
 
+    async def read_application_version(self) -> str | None:
+        """Read the deployment's application version from the page attributes."""
+        root = self._page.locator("[data-testid=deployment-detail]").first
+        await root.wait_for()
+        value = await root.get_attribute("data-application-version")
+        return value or None
+
     async def open_backups_tab(self) -> None:
         await self._page.get_by_role("button", name="Backups", exact=True).click()
 
@@ -136,16 +143,29 @@ class DeploymentDetailPage:
 
         await self._page.get_by_role("button", name="Create Backup").click()
 
-        # Wait for a new row to appear.
+        # Track how many rows we see and how many are missing their id
+        # attribute — surfaces frontend test-hook drift in the timeout
+        # message instead of silently passing through to a 60s timeout.
+        total_rows_last_seen = 0
+        rows_missing_id_last_seen = 0
+
         async def _first_new_row() -> BackupRef | None:
+            nonlocal total_rows_last_seen, rows_missing_id_last_seen
             rows = self._page.locator("[data-testid=backup-row]")
-            for i in range(await rows.count()):
+            total = await rows.count()
+            missing = 0
+            for i in range(total):
                 row = rows.nth(i)
                 row_id = await row.get_attribute("data-backup-id")
-                if row_id and row_id not in existing_ids:
+                if not row_id:
+                    missing += 1
+                    continue
+                if row_id not in existing_ids:
                     name = (await row.get_attribute("data-backup-name")) or ""
                     status = (await row.get_attribute("data-backup-status")) or ""
                     return BackupRef(id=row_id, name=name, status=status)
+            total_rows_last_seen = total
+            rows_missing_id_last_seen = missing
             return None
 
         import asyncio
@@ -157,8 +177,10 @@ class DeploymentDetailPage:
             if ref is not None:
                 return ref
             await asyncio.sleep(1.0)
-        raise ScenarioActionError(
-            "create_backup: new backup row did not appear within 60s"
+        raise ScenarioTimeout(
+            "create_backup: new backup row did not appear within 60s "
+            f"(saw {total_rows_last_seen} rows, "
+            f"{rows_missing_id_last_seen} missing data-backup-id)"
         )
 
     async def wait_for_backup_status(
@@ -179,7 +201,7 @@ class DeploymentDetailPage:
                     name = (await row.get_attribute("data-backup-name")) or ""
                     return BackupRef(id=backup_id, name=name, status=status)
             await asyncio.sleep(2.0)
-        raise ScenarioActionError(
+        raise ScenarioTimeout(
             f"backup {backup_id} did not reach a terminal status within {max_wait}s"
         )
 
@@ -256,7 +278,7 @@ class DeploymentDetailPage:
                     status = (await r.get_attribute("data-restore-status")) or ""
                     return RestoreRef(id=rid, status=status)
             await asyncio.sleep(1.0)
-        raise ScenarioActionError(
+        raise ScenarioTimeout(
             "create_restore: new restore row did not appear within 60s"
         )
 
@@ -277,7 +299,7 @@ class DeploymentDetailPage:
                 if status in terminal_statuses:
                     return RestoreRef(id=restore_id, status=status)
             await asyncio.sleep(2.0)
-        raise ScenarioActionError(
+        raise ScenarioTimeout(
             f"restore {restore_id} did not reach a terminal status within {max_wait}s"
         )
 

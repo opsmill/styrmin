@@ -59,9 +59,19 @@ export default function DriverDetailPage() {
         </>
       }
     >
-      <div className="space-y-6">
+      <div
+        className="space-y-6"
+        data-testid="driver-detail"
+        data-driver-id={driver.id}
+        data-driver-name={driver.name}
+      >
         {driver.versions.map((version) => (
-          <Card key={version.id}>
+          <Card
+            key={version.id}
+            data-testid="driver-version-card"
+            data-version-id={version.id}
+            data-version-label={version.version}
+          >
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 v{version.version}

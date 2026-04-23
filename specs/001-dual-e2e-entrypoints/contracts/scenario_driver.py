@@ -81,6 +81,7 @@ class TimelineEntry:
     task_type: str
     task_status: str
     application_version: str | None
+    created_on: str | None
 
 
 # ---------------------------------------------------------------------------

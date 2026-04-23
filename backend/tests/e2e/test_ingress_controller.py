@@ -25,14 +25,14 @@ from styrmin_sdk import StyrminClient
 from tests.e2e.conftest import _wait_for_deployment_running, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver  # noqa: F401 — collected via scenario_driver fixture
 
-# Ingress controller configuration is a cluster-level resource provisioned by
-# the `styrmin_resources` fixture, not something a user configures from the
-# product UI. Every scenario in this module is therefore declared api-only
-# (FR-011, research R8) — the `[ui]` variant still appears in collection
-# output and reports `skipped` with this reason rather than being absent.
+# Ingress scenarios still use ``StyrminClient`` directly for deployment
+# creation and for the kr8s probes that assert on the resulting cluster
+# state. Convert them to ``scenario_driver.create_deployment(...)`` to
+# opt into dual-entrypoint coverage — the kr8s probes themselves are
+# entrypoint-agnostic and would run unchanged.
 pytestmark = pytest.mark.api_only(
-    reason="ingress controller is configured at cluster level via the "
-    "styrmin_resources fixture; no UI surface today"
+    reason="scenarios call client.deployments.create directly; convert to "
+    "scenario_driver.create_deployment to enable dual-entrypoint coverage"
 )
 
 

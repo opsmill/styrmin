@@ -57,6 +57,9 @@ export default function SettingsPage() {
             to="/settings/clusters/$clusterId"
             params={{ clusterId: data.clusters[0].id }}
             className="block max-w-xl"
+            data-testid="cluster-card"
+            data-cluster-id={data.clusters[0].id}
+            data-cluster-name={data.clusters[0].name}
           >
             <Card className="cursor-pointer hover:border-primary/50 transition-colors">
               <CardHeader>

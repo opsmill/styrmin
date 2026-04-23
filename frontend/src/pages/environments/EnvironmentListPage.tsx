@@ -82,6 +82,9 @@ export default function EnvironmentListPage() {
                   key={env.id}
                   to="/environments/$environmentId"
                   params={{ environmentId: env.id }}
+                  data-testid="environment-card"
+                  data-environment-id={env.id}
+                  data-environment-name={env.name}
                 >
                   <div
                     className={`flex flex-col gap-4 rounded-xl border-2 bg-card p-5 transition-colors hover:shadow-md cursor-pointer ${colors.border}`}

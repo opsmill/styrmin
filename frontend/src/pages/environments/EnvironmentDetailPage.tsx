@@ -102,7 +102,12 @@ export default function EnvironmentDetailPage() {
   const envColors = getStatusColor(envHealth);
 
   return (
-    <div className="flex flex-col gap-6 p-8 px-10">
+    <div
+      className="flex flex-col gap-6 p-8 px-10"
+      data-testid="environment-detail"
+      data-environment-id={environment.id}
+      data-bsl-id={environment.backupStorageLocation?.id ?? ""}
+    >
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-xs">
         <Link to="/" className="text-muted-foreground hover:text-foreground">
@@ -298,7 +303,10 @@ export default function EnvironmentDetailPage() {
         )}
 
         {/* BSL selector */}
-        <div className="mt-6 flex items-center gap-3 rounded-[10px] border border-border p-4">
+        <div
+          className="mt-6 flex items-center gap-3 rounded-[10px] border border-border p-4"
+          data-testid="bsl-selector"
+        >
           <Label className="text-[13px] text-muted-foreground whitespace-nowrap">
             Backup Storage Location:
           </Label>

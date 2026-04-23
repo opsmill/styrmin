@@ -1,26 +1,33 @@
 import asyncio
+import logging
 import os
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
-from typing import AsyncGenerator
-
-from dulwich import porcelain
+from typing import TYPE_CHECKING, AsyncGenerator
 
 import httpx
 import kr8s.asyncio
 import pytest
 import yaml
-from styrmin_sdk import StyrminClient
+from dulwich import porcelain
 from kr8s.asyncio.objects import Service as AsyncService
 from kubernetes_asyncio import client as kubeclient
-
-import uuid
+from kubernetes_asyncio.client.exceptions import ApiException as K8sApiException
+from styrmin_sdk import StyrminClient
+from styrmin_sdk.exceptions import ResourceNotFoundError, StyrminError
 
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.drivers.api_driver import ApiScenarioDriver
+from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+
+_LOG = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.resolve().parents[2]
 FIXTURES_DIR = Path(__file__).parent.resolve() / "fixtures"
@@ -171,8 +178,6 @@ async def _wait_for_deployment_running(
     Returns the deployment object on success.
     Raises TimeoutError if the deployment doesn't reach 'running' within the timeout.
     """
-    from styrmin_sdk.exceptions import StyrminError
-
     deadline = time.time() + timeout
     deployment = None
     while time.time() < deadline:
@@ -180,7 +185,8 @@ async def _wait_for_deployment_running(
             deployment = await client.deployments.get(deployment_id)
             if deployment.status == "running":
                 return deployment
-        except StyrminError:
+        except ResourceNotFoundError:
+            # Not materialised yet — keep polling. Other SDK errors propagate.
             pass
         await asyncio.sleep(interval)
     status = deployment.status if deployment else "unknown"
@@ -464,8 +470,9 @@ async def styrmin_deployment(
                 metadata=kubeclient.V1ObjectMeta(name="styrmin")
             )
         )
-    except Exception:
-        pass  # namespace may already exist
+    except K8sApiException as exc:
+        if exc.status != 409:
+            raise
 
     for doc in minio_docs:
         if doc["kind"] == "Deployment":
@@ -515,67 +522,144 @@ async def styrmin_deployment(
 
 
 # ---------------------------------------------------------------------------
+# Dual-entrypoint session fixtures — driver_mode, session_ui_page,
+# session_scenario_driver
+# ---------------------------------------------------------------------------
+#
+# CI runs each mode in its own job with a fresh vcluster (`-k api-chromium`
+# vs `-k ui-chromium`), so the session-scoped setup is exercised through
+# both the SDK (api mode) and Playwright (ui mode) over the course of CI.
+@pytest.fixture(
+    scope="session",
+    params=[
+        pytest.param("api", id="api"),
+        pytest.param("ui", id="ui"),
+    ],
+)
+def driver_mode(request: pytest.FixtureRequest) -> str:
+    """Selects the ScenarioDriver entrypoint for the whole session."""
+    return request.param
+
+
+@pytest.fixture(scope="session")
+async def session_ui_page(
+    driver_mode: str,
+    browser,  # pytest-playwright-asyncio session-scoped Chromium browser
+    styrmin_deployment: str,
+) -> AsyncGenerator["Page | None", None]:
+    """Playwright page at session scope for styrmin_resources UI-mode setup.
+
+    pytest-playwright-asyncio's ``page`` fixture is function-scoped; session
+    fixtures that need to drive the UI must create their own context/page
+    manually. Returns ``None`` in api mode so no browser resources are
+    allocated.
+    """
+    if driver_mode != "ui":
+        yield None
+        return
+    context = await browser.new_context(base_url=styrmin_deployment)
+    page = await context.new_page()
+    try:
+        yield page
+    finally:
+        await page.close()
+        await context.close()
+
+
+@pytest.fixture(scope="session")
+async def session_scenario_driver(
+    driver_mode: str,
+    styrmin_deployment: str,
+    session_ui_page: "Page | None",
+) -> AsyncGenerator[tuple[ScenarioDriver, StyrminClient], None]:
+    """Session-scoped driver used by ``styrmin_resources`` for platform setup.
+
+    Yields ``(driver, client)``. The SDK client is exposed alongside the
+    driver so session-scoped fixtures that still drive SDK-only flows
+    (auxiliary driver loads, infrahub setup, etc.) keep working until
+    they're converted to the driver abstraction.
+    """
+    async with StyrminClient(server_address=styrmin_deployment) as client:
+        driver: ScenarioDriver
+        if driver_mode == "api":
+            driver = ApiScenarioDriver(client)
+        else:
+            assert session_ui_page is not None, (
+                "session_ui_page must be built in ui mode"
+            )
+            driver = UiScenarioDriver(page=session_ui_page, base_url=styrmin_deployment)
+        yield driver, client
+
+
+# ---------------------------------------------------------------------------
 # Fixture: styrmin_resources
 # ---------------------------------------------------------------------------
+#
+# styrmin_resources dispatches platform setup (cluster / environment / BSL /
+# BSL assignment / driver version) through a ScenarioDriver chosen by the
+# session-scoped ``driver_mode`` parameter. CI runs each mode in its own job
+# with a fresh vcluster, so the session-scoped setup is exercised through
+# both the SDK (api mode) and Playwright (ui mode) over the course of CI.
 @pytest.fixture(scope="session")
 async def styrmin_resources(
     git_server: dict[str, str],
     styrmin_deployment: str,
+    driver_mode: str,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
 ) -> AsyncGenerator[dict, None]:
     styrmin_url = styrmin_deployment
     git_url = git_server["simple-app"]
 
-    async with StyrminClient(server_address=styrmin_url) as client:
-        # Create cluster
-        cluster = await client.clusters.create(
-            name="test-cluster",
-            config={
-                "fqdn_suffix": "styrmin.com",
-                "ingress_class": "traefik",
-                "dedicated_ingress": {
-                    "implementation": "traefik",
-                    "type": "ingress",
-                    "service": {"type": "LoadBalancer"},
-                },
-                "runtime_class": "default",
-                "standard_storage": {"storage_class": "local-path"},
+    driver, client = session_scenario_driver
+
+    cluster = await driver.create_cluster(
+        name="test-cluster",
+        config={
+            "fqdn_suffix": "styrmin.com",
+            "ingress_class": "traefik",
+            "dedicated_ingress": {
+                "implementation": "traefik",
+                "type": "ingress",
+                "service": {"type": "LoadBalancer"},
             },
-        )
+            "runtime_class": "default",
+            "standard_storage": {"storage_class": "local-path"},
+        },
+    )
 
-        # Create environment
-        environment = await client.environments.create(
-            name="test-environment",
-            cluster_id=cluster.id,
-            config={
-                "ip_whitelist": ["127.0.0.1"],
-            },
-        )
+    environment = await driver.create_environment(
+        name="test-environment",
+        cluster_id=cluster.id,
+        config={"ip_whitelist": ["127.0.0.1"]},
+    )
 
-        # Create a backup storage location pointing at the test MinIO instance
-        bsl = await client.backup_storage_locations.create(
-            name="test-bsl",
-            endpoint="http://minio.styrmin.svc:9000",
-            bucket="velero",
-            region="minio",
-            access_key_id="minioadmin",
-            secret_access_key="minioadmin",
-        )
+    bsl = await driver.create_backup_storage_location(
+        name="test-bsl",
+        endpoint="http://minio.styrmin.svc:9000",
+        bucket="velero",
+        region="minio",
+        access_key_id="minioadmin",
+        secret_access_key="minioadmin",
+    )
 
-        # Assign BSL to the environment
-        await client.backup_storage_locations.assign(environment.id, bsl.id)
+    await driver.assign_bsl_to_environment(environment_id=environment.id, bsl_id=bsl.id)
 
-        # Load application driver version from git server (implicitly creates the driver)
-        driver_version = await client.drivers.load_version(git_url, "master")
+    driver_version = await driver.load_driver_version(git_url=git_url, ref="master")
 
-        yield {
-            "cluster_id": str(cluster.id),
-            "environment_id": str(environment.id),
-            "bsl_id": str(bsl.id),
-            "bsl_name": bsl.name,
-            "driver_id": str(driver_version.application_driver_id),
-            "styrmin_url": styrmin_url,
-            "client": client,
-        }
+    yield {
+        "cluster_id": cluster.id,
+        "environment_id": environment.id,
+        "bsl_id": bsl.id,
+        "bsl_name": bsl.name,
+        "driver_id": driver_version.application_driver_id,
+        "styrmin_url": styrmin_url,
+        "driver_mode": driver_mode,
+        # ``client`` stays on the dict for session fixtures that still need
+        # to drive SDK operations directly (deploy application drivers,
+        # load auxiliary versions). The UI driver doesn't own the client;
+        # session_scenario_driver yields it alongside regardless of mode.
+        "client": client,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -667,35 +751,24 @@ async def velero_ready(
 @pytest.fixture(scope="session")
 async def deployed_simple_app(
     styrmin_resources: dict,
-    simple_app_image: str,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    simple_app_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> dict:
     """Deploy simple-app and return deployment info for reuse by tests."""
-    client = styrmin_resources["client"]
+    driver, _ = session_scenario_driver
     environment_id = styrmin_resources["environment_id"]
-    kubeconfig_path = vcluster["kubeconfig_path"]
 
-    # Deploy the simple-app
-    task = await client.deployments.create(
+    deployment = await driver.create_deployment(
         driver="simple-app", version="0.1.0", environment_id=environment_id
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None, "Task should have a deployment_id"
-
-    deployment = await _wait_for_deployment_running(client, deployment_id)
-
-    namespace = f"styrmin-{deployment_id}"
-
-    # Get the instance_id from the deployment
-    instance_id = None
-    if deployment and deployment.application_instance:
-        instance_id = str(deployment.application_instance.id)
+    deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
 
     return {
-        "deployment_id": str(deployment_id),
-        "instance_id": instance_id,
-        "namespace": namespace,
-        "kubeconfig_path": kubeconfig_path,
+        "deployment_id": deployment.id,
+        "instance_id": deployment.instance_id,
+        "namespace": f"styrmin-{deployment.id}",
+        "kubeconfig_path": vcluster["kubeconfig_path"],
     }
 
 
@@ -705,18 +778,14 @@ async def deployed_simple_app(
 @pytest.fixture(scope="session")
 async def load_infrahub(
     styrmin_resources: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
 ) -> AsyncGenerator[dict, None]:
     """Create an infrahub application driver and load its version from GitHub."""
-    client: StyrminClient = styrmin_resources["client"]
-
-    driver_version = await client.drivers.load_version(
-        "https://github.com/opsmill/styrmin-mvp-driver", "develop"
+    driver, _ = session_scenario_driver
+    version = await driver.load_driver_version(
+        git_url="https://github.com/opsmill/styrmin-mvp-driver", ref="develop"
     )
-
-    yield {
-        **styrmin_resources,
-        "infrahub_driver_id": str(driver_version.application_driver_id),
-    }
+    yield {**styrmin_resources, "infrahub_driver_id": version.application_driver_id}
 
 
 # ---------------------------------------------------------------------------
@@ -725,34 +794,26 @@ async def load_infrahub(
 @pytest.fixture(scope="session")
 async def deployed_infrahub_app(
     load_infrahub: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
     vcluster: dict,
 ) -> dict:
     """Deploy infrahub and return deployment info for reuse by tests."""
-    client: StyrminClient = load_infrahub["client"]
+    driver, _ = session_scenario_driver
     environment_id = load_infrahub["environment_id"]
-    kubeconfig_path = vcluster["kubeconfig_path"]
 
-    task = await client.deployments.create(
+    deployment = await driver.create_deployment(
         driver="infrahub", version="1.6.0", environment_id=environment_id
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None, "Task should have a deployment_id"
-
-    # longer timeout for infrahub (many components)
-    deployment = await _wait_for_deployment_running(
-        client, deployment_id, timeout=600.0
+    # Infrahub has many components — wait longer than the default.
+    deployment = await driver.wait_for_deployment_running(
+        deployment_id=deployment.id, timeout=600.0
     )
 
-    namespace = f"styrmin-{deployment_id}"
-    instance_id = None
-    if deployment and deployment.application_instance:
-        instance_id = str(deployment.application_instance.id)
-
     return {
-        "deployment_id": str(deployment_id),
-        "instance_id": instance_id,
-        "namespace": namespace,
-        "kubeconfig_path": kubeconfig_path,
+        "deployment_id": deployment.id,
+        "instance_id": deployment.instance_id,
+        "namespace": f"styrmin-{deployment.id}",
+        "kubeconfig_path": vcluster["kubeconfig_path"],
     }
 
 
@@ -762,18 +823,15 @@ async def deployed_infrahub_app(
 @pytest.fixture(scope="session")
 async def load_semaphore(
     styrmin_resources: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
     git_server: dict[str, str],
 ) -> AsyncGenerator[dict, None]:
     """Load the Semaphore application driver from the git server."""
-    client: StyrminClient = styrmin_resources["client"]
-    git_url = git_server["semaphore"]
-
-    driver_version = await client.drivers.load_version(git_url, "master")
-
-    yield {
-        **styrmin_resources,
-        "semaphore_driver_id": str(driver_version.application_driver_id),
-    }
+    driver, _ = session_scenario_driver
+    version = await driver.load_driver_version(
+        git_url=git_server["semaphore"], ref="master"
+    )
+    yield {**styrmin_resources, "semaphore_driver_id": version.application_driver_id}
 
 
 # ---------------------------------------------------------------------------
@@ -782,36 +840,28 @@ async def load_semaphore(
 @pytest.fixture(scope="session")
 async def deployed_semaphore(
     load_semaphore: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
     vcluster: dict,
 ) -> dict:
     """Deploy Semaphore and return deployment info for reuse by tests."""
-    client: StyrminClient = load_semaphore["client"]
+    driver, _ = session_scenario_driver
     environment_id = load_semaphore["environment_id"]
-    kubeconfig_path = vcluster["kubeconfig_path"]
 
-    task = await client.deployments.create(
-        name="semaphore",
+    deployment = await driver.create_deployment(
         driver="semaphore",
         version="2.16.47",
         environment_id=environment_id,
+        name="semaphore",
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None, "Task should have a deployment_id"
-
-    deployment = await _wait_for_deployment_running(
-        client, deployment_id, timeout=300.0
+    deployment = await driver.wait_for_deployment_running(
+        deployment_id=deployment.id, timeout=300.0
     )
-
-    namespace = f"styrmin-{deployment_id}"
-    instance_id = None
-    if deployment and deployment.application_instance:
-        instance_id = str(deployment.application_instance.id)
 
     return {
-        "deployment_id": str(deployment_id),
-        "instance_id": instance_id,
-        "namespace": namespace,
-        "kubeconfig_path": kubeconfig_path,
+        "deployment_id": deployment.id,
+        "instance_id": deployment.instance_id,
+        "namespace": f"styrmin-{deployment.id}",
+        "kubeconfig_path": vcluster["kubeconfig_path"],
     }
 
 
@@ -845,18 +895,15 @@ def db_test_image() -> str:
 @pytest.fixture(scope="session")
 async def load_db_test(
     styrmin_resources: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
     git_server: dict[str, str],
 ) -> AsyncGenerator[dict, None]:
     """Load the db-test application driver from the git server."""
-    client: StyrminClient = styrmin_resources["client"]
-    git_url = git_server["db-test"]
-
-    driver_version = await client.drivers.load_version(git_url, "master")
-
-    yield {
-        **styrmin_resources,
-        "db_test_driver_id": str(driver_version.application_driver_id),
-    }
+    driver, _ = session_scenario_driver
+    version = await driver.load_driver_version(
+        git_url=git_server["db-test"], ref="master"
+    )
+    yield {**styrmin_resources, "db_test_driver_id": version.application_driver_id}
 
 
 # ---------------------------------------------------------------------------
@@ -865,34 +912,26 @@ async def load_db_test(
 @pytest.fixture(scope="session")
 async def deployed_db_test(
     load_db_test: dict,
-    db_test_image: str,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    db_test_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> dict:
     """Deploy db-test and return deployment info for reuse by tests."""
-    client: StyrminClient = load_db_test["client"]
+    driver, _ = session_scenario_driver
     environment_id = load_db_test["environment_id"]
-    kubeconfig_path = vcluster["kubeconfig_path"]
 
-    task = await client.deployments.create(
+    deployment = await driver.create_deployment(
         driver="db-test", version="0.1.0", environment_id=environment_id
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None, "Task should have a deployment_id"
-
-    deployment = await _wait_for_deployment_running(
-        client, deployment_id, timeout=300.0
+    deployment = await driver.wait_for_deployment_running(
+        deployment_id=deployment.id, timeout=300.0
     )
 
-    namespace = f"styrmin-{deployment_id}"
-    instance_id = None
-    if deployment and deployment.application_instance:
-        instance_id = str(deployment.application_instance.id)
-
     return {
-        "deployment_id": str(deployment_id),
-        "instance_id": instance_id,
-        "namespace": namespace,
-        "kubeconfig_path": kubeconfig_path,
+        "deployment_id": deployment.id,
+        "instance_id": deployment.instance_id,
+        "namespace": f"styrmin-{deployment.id}",
+        "kubeconfig_path": vcluster["kubeconfig_path"],
     }
 
 
@@ -921,69 +960,63 @@ def browser_context_args(
 
 
 @pytest.fixture
+async def scenario_driver(
+    driver_mode: str,
+    styrmin_resources: dict,
+    styrmin_deployment: str,
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[ScenarioDriver, None]:
+    """Per-test ScenarioDriver. Inherits its mode from session-scoped driver_mode.
+
+    Playwright's ``page`` fixture is function-scoped, so the UI branch
+    requests it lazily to avoid spinning up a browser context for API tests.
+    """
+    if driver_mode == "api":
+        client: StyrminClient = styrmin_resources["client"]
+        yield ApiScenarioDriver(client)
+        return
+
+    page = request.getfixturevalue("page")
+    yield UiScenarioDriver(page=page, base_url=styrmin_deployment)
+
+
+@pytest.fixture
 async def scenario_environment_id(
     styrmin_resources: dict,
+    scenario_driver: ScenarioDriver,
 ) -> AsyncGenerator[str, None]:
     """Create a fresh environment per test so parametrized variants don't collide.
 
-    The session-scoped ``styrmin_resources`` fixture reuses one cluster / BSL /
-    driver version across all tests, which is fine — but sharing a single
-    environment between the ``[api]`` and ``[ui]`` variants of the same
-    scenario triggers ``"Service name 'simple-app' already exists in
-    environment"`` on the second variant. In CI each variant runs in its own
-    vCluster so this never surfaces; locally we isolate at the environment
-    level instead.
-
-    Cleanup is best-effort — the session-scoped vcluster teardown will
-    reclaim anything left behind.
+    The session-scoped ``styrmin_resources`` fixture provisions one cluster /
+    BSL / driver version; each test gets a fresh environment created through
+    the same ScenarioDriver (and therefore the same entrypoint) as the test
+    itself. Cleanup is best-effort — the session-scoped vcluster teardown
+    will reclaim anything left behind.
     """
     client: StyrminClient = styrmin_resources["client"]
     name = f"scenario-env-{uuid.uuid4().hex[:8]}"
-    env = await client.environments.create(
+    env = await scenario_driver.create_environment(
         name=name,
         cluster_id=styrmin_resources["cluster_id"],
         config={"ip_whitelist": ["127.0.0.1"]},
     )
-    env_id = str(env.id)
+    env_id = env.id
     try:
-        await client.backup_storage_locations.assign(
-            env_id, styrmin_resources["bsl_id"]
+        await scenario_driver.assign_bsl_to_environment(
+            environment_id=env_id, bsl_id=styrmin_resources["bsl_id"]
         )
-    except Exception:  # noqa: BLE001 — BSL assign is optional for most scenarios
-        pass
+    except ScenarioActionError as exc:
+        # BSL assign is optional for most scenarios; log so a real
+        # misconfiguration (auth, network, UI drift) doesn't hide as a
+        # green fixture.
+        _LOG.warning("BSL assign failed for env %s: %s", env_id, exc)
     try:
         yield env_id
     finally:
         try:
             await client.environments.delete(environment_id=env_id)
-        except Exception:  # noqa: BLE001 — best-effort cleanup
-            pass
-
-
-@pytest.fixture(
-    params=[
-        pytest.param("api", id="api"),
-        pytest.param("ui", id="ui"),
-    ],
-)
-async def scenario_driver(
-    request: pytest.FixtureRequest,
-    styrmin_resources: dict,
-    styrmin_deployment: str,
-    page,
-) -> AsyncGenerator[ScenarioDriver, None]:
-    """Parametrized driver: scenarios iterate through API and UI entrypoints.
-
-    ``page`` (pytest-playwright-asyncio) is always requested so pytest-asyncio
-    awaits it properly — the API branch simply doesn't touch it.
-    """
-    mode = request.param
-    if mode == "api":
-        client: StyrminClient = styrmin_resources["client"]
-        yield ApiScenarioDriver(client)
-        return
-
-    yield UiScenarioDriver(page=page, base_url=styrmin_deployment)
+        except StyrminError as exc:
+            _LOG.warning("Env cleanup failed for env %s: %s", env_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1016,11 +1049,11 @@ def _get_entrypoint_marker(item: pytest.Item) -> tuple[str | None, str | None]:
 
 
 def _driver_param_id(item: pytest.Item) -> str | None:
-    """Return the scenario_driver param id ('api' / 'ui') for a parametrized item."""
+    """Return the driver_mode param id ('api' / 'ui') for a parametrized item."""
     callspec = getattr(item, "callspec", None)
     if callspec is None:
         return None
-    return callspec.params.get("scenario_driver")
+    return callspec.params.get("driver_mode")
 
 
 def pytest_collection_modifyitems(

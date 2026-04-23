@@ -1,8 +1,4 @@
-"""E2E tests for the backup and restore lifecycle.
-
-These tests reuse the ``deployed_simple_app`` fixture (shared with
-``test_deploy_simple_app``) so the app is deployed only once per session.
-"""
+"""E2E tests for the backup and restore lifecycle."""
 
 from __future__ import annotations
 
@@ -241,6 +237,12 @@ async def portforward_infrahub(
         yield local_port
 
 
+@pytest.mark.ci
+@pytest.mark.api_only(
+    reason="Data setup goes through the Infrahub SDK (direct Infrahub API), "
+    "not through a Styrmin-managed UI surface; scenario cannot meaningfully "
+    "run through UiScenarioDriver."
+)
 async def test_infrahub_backup_and_restore_lifecycle(
     load_infrahub: dict,
     velero_ready: None,
@@ -322,75 +324,3 @@ async def test_infrahub_backup_and_restore_lifecycle(
     await client.backups.delete_backup(backup.id)
     with pytest.raises(ResourceNotFoundError):
         await client.backups.get_backup(backup.id)
-
-
-# async def test_concurrent_backup_prevention(
-#    styrmin_resources: dict,
-#    velero_ready: None,
-#    deployed_simple_app: dict,
-# ) -> None:
-#    """Creating a backup while another is in-progress should fail."""
-#    from styrmin_sdk.exceptions import OperationFailedError
-#
-#    client: StyrminClient = styrmin_resources["client"]
-#    instance_id = deployed_simple_app["instance_id"]
-#
-#    assert instance_id is not None
-#
-#    # Create a backup
-#    backup = await client.backups.create_backup(instance_id=instance_id)
-#
-#    try:
-#        # While it's pending/in-progress, try another
-#        if backup.status in ("pending", "in_progress"):
-#            with pytest.raises((OperationFailedError, Exception)):
-#                await client.backups.create_backup(instance_id=instance_id)
-#    finally:
-#        # Wait for the first backup to finish before next test
-#        await client.backups.wait_for_backup(backup.id, max_wait=180)
-#
-#
-# async def test_backup_schedule_crud(
-#    styrmin_resources: dict,
-#    deployed_simple_app: dict,
-# ) -> None:
-#    """Create -> get -> update -> delete a backup schedule via SDK."""
-#    client: StyrminClient = styrmin_resources["client"]
-#    deployment_id = deployed_simple_app["deployment_id"]
-#
-#    # Create schedule
-#    schedule = await client.schedules.create(
-#        deployment_id=deployment_id,
-#        name="daily-backup",
-#        cron_expression="0 2 * * *",
-#        retention_count=5,
-#        enabled=True,
-#    )
-#    assert schedule.name == "daily-backup"
-#    assert schedule.cron_expression == "0 2 * * *"
-#    assert schedule.retention_count == 5
-#    assert schedule.enabled is True
-#
-#    # Get schedule
-#    fetched = await client.schedules.get(schedule.id)
-#    assert fetched.id == schedule.id
-#    assert fetched.name == "daily-backup"
-#
-#    # List schedules
-#    schedules = await client.schedules.list(deployment_id=deployment_id)
-#    assert any(s.id == schedule.id for s in schedules)
-#
-#    # Update schedule
-#    updated = await client.schedules.update(
-#        schedule_id=schedule.id,
-#        cron_expression="0 3 * * *",
-#        retention_count=7,
-#    )
-#    assert updated.cron_expression == "0 3 * * *"
-#    assert updated.retention_count == 7
-#
-#    # Delete schedule
-#    await client.schedules.delete(schedule.id)
-#
-#    with pytest.raises(ResourceNotFoundError):
-#        await client.schedules.get(schedule.id)

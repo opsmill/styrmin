@@ -12,7 +12,11 @@ from typing import Any
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import ResourceNotFoundError, StyrminError
 
-from tests.e2e.drivers.errors import ResourceNotFound, ScenarioActionError
+from tests.e2e.drivers.errors import (
+    ResourceNotFound,
+    ScenarioActionError,
+    ScenarioTimeout,
+)
 from tests.e2e.drivers.refs import (
     BackupRef,
     BSLRef,
@@ -159,7 +163,10 @@ class ApiScenarioDriver:
         while time.time() < deadline:
             try:
                 deployment = await self._client.deployments.get(deployment_id)
-            except StyrminError:
+            except ResourceNotFoundError:
+                # Deployment hasn't materialised yet — keep polling. Other
+                # SDK errors (auth, 5xx, schema mismatch) propagate so a
+                # broken server doesn't hide as a generic timeout.
                 deployment = None
             else:
                 if deployment.status == "running":
@@ -174,7 +181,7 @@ class ApiScenarioDriver:
                     )
             await asyncio.sleep(10)
         status = deployment.status if deployment else "unknown"
-        raise ScenarioActionError(
+        raise ScenarioTimeout(
             f"Deployment {deployment_id} did not reach 'running' after {timeout}s "
             f"(status: {status})"
         )
