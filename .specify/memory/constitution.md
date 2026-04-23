@@ -22,6 +22,10 @@ Python type hints are mandatory (enforced by ty, Astral's type checker). GraphQL
 
 Tests are required for all new functionality. The project uses three test tiers: unit tests (service/repository logic), integration tests (contract testing), and end-to-end tests (real Kind cluster with FluxCD, Prefect, and supporting services). E2E tests MUST run against real infrastructure, not mocks.
 
+**New features MUST ship with an E2E test that covers the user-visible flow end-to-end, and that E2E test MUST be executed and observed to pass before the feature is considered complete.** Deferring E2E coverage to a follow-up, gating it behind "we'll add it later", or relying on unit/integration tests alone is not acceptable for net-new functionality. The test — or an existing one extended to cover the new behaviour — is part of the feature's definition of done.
+
+For bug fixes and small changes (refactors, doc updates, config tweaks, internal behaviour that is already exercised end-to-end), writing a new E2E test is not always proportionate. In those cases the implementer MUST ask for confirmation before skipping E2E coverage, describing what existing tests already cover the affected path; the reviewer's explicit approval is what authorises skipping, not the implementer's own judgment.
+
 ### VI. Format and Lint Before Commit
 
 `uv run invoke format lint` MUST pass before any commit. Line length is 120 characters. Ruff handles formatting and linting. This is non-negotiable and applies to all contributions.
@@ -50,4 +54,4 @@ Changes to these areas require explicit discussion before implementation:
 
 This constitution defines the non-negotiable principles for the Styrmin project. All specifications, plans, and implementations MUST be validated against these principles. Amendments require updating this file, incrementing the version, and propagating changes to dependent templates.
 
-**Version**: 1.0.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-03-14
+**Version**: 1.1.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-04-23
