@@ -52,14 +52,20 @@ class SettingsPage:
                 )
             di = config.get("dedicated_ingress")
             if di:
-                await dialog.locator("#cluster-dedicated-ingress").click()
+                # Base UI's <Checkbox> puts the id on a hidden <input>
+                # (aria-hidden, tabindex=-1) underneath the visible button.
+                # Clicking the hidden input is intercepted by the dialog
+                # backdrop, so drive it through the associated <label>.
+                await dialog.locator(
+                    "label[for='cluster-dedicated-ingress']"
+                ).click()
                 if di.get("implementation"):
                     await dialog.locator("#cluster-di-impl").fill(di["implementation"])
                 if di.get("type"):
                     await dialog.locator("#cluster-di-type").fill(di["type"])
             ss = config.get("standard_storage")
             if ss:
-                await dialog.locator("#cluster-standard-storage").click()
+                await dialog.locator("label[for='cluster-standard-storage']").click()
                 if ss.get("storage_class"):
                     await dialog.locator("#cluster-sc").fill(ss["storage_class"])
 
