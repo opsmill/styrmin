@@ -28,6 +28,8 @@ from tests.e2e.drivers.ui_driver import UiScenarioDriver
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
+from playwright.async_api import async_playwright
+
 _LOG = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.resolve().parents[2]
@@ -540,31 +542,35 @@ async def session_ui_page(
     driver_mode: str,
     styrmin_deployment: str,
     browser_name: str,  # noqa: ARG001 — declared so pytest-playwright parametrizes node IDs with `-chromium`
-    request: pytest.FixtureRequest,
 ) -> AsyncGenerator["Page | None", None]:
     """Playwright page at session scope for styrmin_resources UI-mode setup.
 
-    pytest-playwright-asyncio's ``page`` fixture is function-scoped; session
-    fixtures that need to drive the UI must create their own context/page
-    manually. Returns ``None`` in api mode so no browser resources are
-    allocated. ``browser_name`` is declared as a parameter (a cheap string)
-    so pytest-playwright adds ``-chromium`` to node IDs — that's what the CI
-    ``-k "api-chromium"`` / ``-k "ui-chromium"`` filters match. ``browser``
-    (which launches the actual binary) is requested lazily because the
-    API-only CI job does not install a Playwright browser, so resolving it
-    up-front would fail at fixture setup time.
+    pytest-playwright-asyncio's ``page`` fixture is function-scoped and its
+    ``browser`` fixture is async — requesting the latter from inside this
+    async fixture triggers ``Runner.run() cannot be called from a running
+    event loop`` because pytest-asyncio spins up a nested runner for each
+    async fixture resolution. We bypass it by driving ``async_playwright``
+    directly, which also keeps the ``browser_name`` declaration cheap
+    (string-only) so the API-only CI job still doesn't pay for the browser
+    binary — it never enters this branch.
+
+    ``browser_name`` is kept as a declared parameter so pytest-playwright
+    adds ``-chromium`` to node IDs — that's what the CI filters
+    ``-k "api-chromium"`` / ``-k "ui-chromium"`` match.
     """
     if driver_mode != "ui":
         yield None
         return
-    browser = request.getfixturevalue("browser")
-    context = await browser.new_context(base_url=styrmin_deployment)
-    page = await context.new_page()
-    try:
-        yield page
-    finally:
-        await page.close()
-        await context.close()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        context = await browser.new_context(base_url=styrmin_deployment)
+        page = await context.new_page()
+        try:
+            yield page
+        finally:
+            await page.close()
+            await context.close()
+            await browser.close()
 
 
 @pytest.fixture(scope="session")
