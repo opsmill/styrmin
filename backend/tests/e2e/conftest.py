@@ -559,8 +559,16 @@ async def session_ui_page(
     if driver_mode != "ui":
         yield None
         return
+    # Headless + the NETLINK_ROUTE LD_PRELOAD shim (scoped to the browser
+    # process so it doesn't leak into pytest / kubectl / helm subprocesses).
+    # Chromium's AddressTrackerLinux otherwise reacts to Docker/veth netlink
+    # churn mid-test and occasionally wedges.
+    launch_kwargs: dict[str, object] = {"headless": True}
+    no_netlink_so = os.environ.get("NO_NETLINK_SO")
+    if no_netlink_so:
+        launch_kwargs["env"] = {**os.environ, "LD_PRELOAD": no_netlink_so}
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
+        browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(base_url=styrmin_deployment)
         page = await context.new_page()
         try:
@@ -938,33 +946,6 @@ async def deployed_db_test(
 # Every E2E scenario that takes ``scenario_driver`` runs twice — once through
 # ``ApiScenarioDriver`` (SDK-based) and once through ``UiScenarioDriver``
 # (Playwright-based). See specs/001-dual-e2e-entrypoints/.
-
-
-@pytest.fixture(scope="session")
-def browser_type_launch_args() -> dict[str, object]:
-    """Force headless Chromium for Playwright-backed E2E runs.
-
-    On CI we LD_PRELOAD a shim (``NO_NETLINK_SO``) that makes NETLINK_ROUTE
-    sockets fail with ``EAFNOSUPPORT``. Chromium's ``AddressTrackerLinux``
-    then follows its graceful "assume always online" path instead of
-    reacting to Docker/veth netlink churn mid-test. The env var is scoped
-    to the browser process so LD_PRELOAD does not leak into pytest or the
-    subprocesses it spawns (kubectl, helm, docker).
-    """
-    args: dict[str, object] = {"headless": True}
-    no_netlink_so = os.environ.get("NO_NETLINK_SO")
-    if no_netlink_so:
-        args["env"] = {**os.environ, "LD_PRELOAD": no_netlink_so}
-    return args
-
-
-@pytest.fixture
-def browser_context_args(
-    browser_context_args: dict[str, object],
-    styrmin_deployment: str,
-) -> dict[str, object]:
-    """Bind Playwright pages to the port-forwarded styrmin-server URL."""
-    return {**browser_context_args, "base_url": styrmin_deployment}
 
 
 @pytest.fixture
