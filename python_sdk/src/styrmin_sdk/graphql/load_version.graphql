@@ -2,6 +2,9 @@ mutation LoadRemoteApplicationDriverVersion($repositoryUrl: String!, $branch: St
     loadRemoteApplicationDriverVersion(repositoryUrl: $repositoryUrl, branch: $branch) {
         id
         applicationDriverId
+        applicationDriver {
+            name
+        }
         version
         supportedVersions
         components

@@ -536,6 +536,7 @@ def driver_mode(request: pytest.FixtureRequest) -> str:
 async def session_ui_page(
     driver_mode: str,
     styrmin_deployment: str,
+    browser_name: str,  # noqa: ARG001 — declared so pytest-playwright parametrizes node IDs with `-chromium`
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator["Page | None", None]:
     """Playwright page at session scope for styrmin_resources UI-mode setup.
@@ -543,9 +544,12 @@ async def session_ui_page(
     pytest-playwright-asyncio's ``page`` fixture is function-scoped; session
     fixtures that need to drive the UI must create their own context/page
     manually. Returns ``None`` in api mode so no browser resources are
-    allocated. ``browser`` is requested lazily because the API-only CI job
-    does not install a Playwright browser, so resolving it up-front would
-    fail at fixture setup time.
+    allocated. ``browser_name`` is declared as a parameter (a cheap string)
+    so pytest-playwright adds ``-chromium`` to node IDs — that's what the CI
+    ``-k "api-chromium"`` / ``-k "ui-chromium"`` filters match. ``browser``
+    (which launches the actual binary) is requested lazily because the
+    API-only CI job does not install a Playwright browser, so resolving it
+    up-front would fail at fixture setup time.
     """
     if driver_mode != "ui":
         yield None

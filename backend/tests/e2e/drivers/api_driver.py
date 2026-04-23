@@ -112,19 +112,11 @@ class ApiScenarioDriver:
             version = await self._client.drivers.load_version(git_url, ref)
         except StyrminError as exc:
             raise _normalise(exc) from exc
-        driver_name = getattr(version, "driver_name", None)
-        version_label = getattr(version, "version", None)
-        if driver_name is None or version_label is None:
-            raise ScenarioActionError(
-                f"SDK returned driver version {version.id} without required fields "
-                f"(driver_name={driver_name!r}, version={version_label!r}); "
-                "SDK schema may be out of sync with the backend"
-            )
         return DriverVersionRef(
             id=str(version.id),
             application_driver_id=str(version.application_driver_id),
-            driver_name=driver_name,
-            version=version_label,
+            driver_name=version.application_driver.name,
+            version=version.version,
         )
 
     # --- Deployments ------------------------------------------------------

@@ -91,6 +91,32 @@ When an Invoke task does not use the `context` parameter, suppress the lint erro
 def my_task(context: Context) -> None:  # noqa: ARG001
 ```
 
+## Debugging E2E Tests
+
+When an E2E test in `backend/tests/e2e/` fails and the traceback alone doesn't explain why, run it with `--pdb`:
+
+```bash
+uv run pytest backend/tests/e2e/<node_id> -v -s --pdb
+```
+
+On failure, pytest drops into pdb **at the failure line** with the session still alive — the vcluster, port-forwards, SDK clients, and test fixtures are all still running. While paused, open a second shell and introspect the cluster directly:
+
+```bash
+export KUBECONFIG=$(ls /tmp/pytest-of-*/pytest-*/vcluster0/kubeconfig | tail -1)
+kubectl get pods -A
+kubectl logs -n styrmin-<deployment-id> <pod> --all-containers
+```
+
+**When running via a non-interactive shell (background job, agent tool, CI), prefix the command with `sleep infinity |`** so pdb's stdin stays open instead of immediately hitting EOF and exiting (which tears the cluster down):
+
+```bash
+sleep infinity | uv run pytest backend/tests/e2e/<node_id> -v -s --pdb 2>&1 | tee /tmp/pdb.log
+```
+
+Pytest stays paused indefinitely. Inspect with `kubectl` from a separate shell, then kill the whole process group (`pkill -f pytest` or kill the job) once you're done — pdb can't receive commands over the dummy stdin.
+
+This is faster than `--e2e-keep-cluster` when you want to see state exactly at the point of failure (port-forwards and connections still open), rather than after teardown has partially run. See `.agents/commands/e2e-troubleshoot.md` for the structured multi-iteration variant.
+
 ## Coding Standards
 
 - Python: `dev/guidelines/backend/python.md`

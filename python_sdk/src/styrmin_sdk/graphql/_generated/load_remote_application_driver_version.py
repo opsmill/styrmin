@@ -18,6 +18,9 @@ class LoadRemoteApplicationDriverVersion(BaseModel):
 class LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion(BaseModel):
     id: UUID
     application_driver_id: UUID = Field(alias="applicationDriverId")
+    application_driver: "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionApplicationDriver" = Field(
+        alias="applicationDriver"
+    )
     version: str
     supported_versions: str = Field(alias="supportedVersions")
     components: Optional[Any]
@@ -30,6 +33,12 @@ class LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion(BaseM
     helm_chart: "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart" = Field(
         alias="helmChart"
     )
+
+
+class LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionApplicationDriver(
+    BaseModel
+):
+    name: str
 
 
 class LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs(

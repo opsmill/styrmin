@@ -121,6 +121,7 @@ from .load_remote_application_driver_version import (
     LoadRemoteApplicationDriverVersion,
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion,
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionActions,
+    LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionApplicationDriver,
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs,
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart,
 )
@@ -245,6 +246,7 @@ __all__ = [
     "LoadRemoteApplicationDriverVersion",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionActions",
+    "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionApplicationDriver",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart",
     "ManagedResourceCountsInput",
