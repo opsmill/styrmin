@@ -975,30 +975,34 @@ async def scenario_driver(
     yield UiScenarioDriver(page=session_ui_page, base_url=styrmin_deployment)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def scenario_environment_id(
     styrmin_resources: dict,
-    scenario_driver: ScenarioDriver,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
     driver_mode: str,
 ) -> AsyncGenerator[str, None]:
-    """Create a fresh environment per test so parametrized variants don't collide.
+    """Session-scoped environment shared by all scenarios in the mode.
 
-    The session-scoped ``styrmin_resources`` fixture provisions one cluster /
-    BSL / driver version; each test gets a fresh environment created through
-    the same ScenarioDriver (and therefore the same entrypoint) as the test
-    itself. Cleanup is best-effort — the session-scoped vcluster teardown
-    will reclaim anything left behind.
+    Parametrized through ``session_scenario_driver`` (which inherits the
+    ``driver_mode`` param), so the ``[api]`` and ``[ui]`` variants each
+    get their own environment — isolation is preserved between modes,
+    but within a single mode every test sees the same env. That avoids
+    per-test create + BSL-assign + delete churn, which adds up on the
+    API-only CI job where ~10 tests each take a deploy.
+
+    Tests that mutate environment-level state (if any) should still create
+    their own env explicitly via the driver.
     """
-    client: StyrminClient = styrmin_resources["client"]
+    driver, client = session_scenario_driver
     name = f"scenario-env-{uuid.uuid4().hex[:8]}"
-    env = await scenario_driver.create_environment(
+    env = await driver.create_environment(
         name=name,
         cluster_id=styrmin_resources["cluster_id"],
         config={"ip_whitelist": ["127.0.0.1"]},
     )
     env_id = env.id
     try:
-        await scenario_driver.assign_bsl_to_environment(
+        await driver.assign_bsl_to_environment(
             environment_id=env_id, bsl_id=styrmin_resources["bsl_id"]
         )
     except ScenarioActionError as exc:

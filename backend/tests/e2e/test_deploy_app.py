@@ -11,23 +11,15 @@ from tests.e2e.drivers import ScenarioDriver
 
 @pytest.mark.ci
 async def test_deploy_simple_app(
-    scenario_driver: ScenarioDriver,
-    scenario_environment_id: str,
-    styrmin_resources: dict,  # noqa: ARG001 — transitive: builds cluster/BSL/driver
-    simple_app_image: str,  # noqa: ARG001 — required for the image to be built
+    deployed_simple_app: dict,
     vcluster: dict,
 ) -> None:
-    deployment = await scenario_driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-    )
-    deployment = await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment.id
-    )
-
+    # Read-only observation of a running simple-app. Reuses the session-
+    # scoped deployment (parametrized by driver_mode via
+    # ``session_scenario_driver``) instead of deploying per-test — a deploy
+    # costs ~30–60s and this test doesn't mutate the running state.
     kubeconfig_path = vcluster["kubeconfig_path"]
-    namespace = f"styrmin-{deployment.id}"
+    namespace = deployed_simple_app["namespace"]
 
     # External-state assertion — identical across both entrypoints.
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)

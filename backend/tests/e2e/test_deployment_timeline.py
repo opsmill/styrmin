@@ -25,22 +25,16 @@ VALID_TASK_STATUSES = {"pending", "running", "failed", "success"}
 @pytest.mark.ci
 async def test_deployment_timeline_has_entries(
     scenario_driver: ScenarioDriver,
-    scenario_environment_id: str,
-    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver
-    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    deployed_simple_app: dict,
 ) -> None:
-    """Verify that a deployment timeline has entries after initial deploy."""
-    deployment = await scenario_driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-    )
-    deployment = await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment.id
-    )
+    """Verify that a deployment timeline has entries after initial deploy.
 
+    Reuses the session-scoped ``deployed_simple_app`` (parametrized by
+    driver_mode). This test only observes the timeline of an already-
+    running deployment; no mutation, so no need for a fresh deploy.
+    """
     timeline = await scenario_driver.get_deployment_timeline(
-        deployment_id=deployment.id
+        deployment_id=deployed_simple_app["deployment_id"]
     )
 
     assert len(timeline) >= 1, (
