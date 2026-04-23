@@ -17,11 +17,12 @@ from kr8s.asyncio.objects import Service as AsyncService
 from kubernetes_asyncio import client as kubeclient
 from kubernetes_asyncio.client.exceptions import ApiException as K8sApiException
 from styrmin_sdk import StyrminClient
-from styrmin_sdk.exceptions import ResourceNotFoundError, StyrminError
+from styrmin_sdk.exceptions import StyrminError
 
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.drivers.api_driver import ApiScenarioDriver
 from tests.e2e.drivers.errors import ScenarioActionError
+from tests.e2e.drivers.refs import DeploymentRef
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
 
 if TYPE_CHECKING:
@@ -171,27 +172,17 @@ async def _wait_for_deployment_running(
     client: StyrminClient,
     deployment_id,
     timeout: float = 300.0,
-    interval: float = 10.0,
-):
-    """Poll until a deployment reaches 'running' status.
+    interval: float = 10.0,  # noqa: ARG001 — preserved for call-site compatibility
+) -> DeploymentRef:
+    """Shim for api-only tests that drive the SDK directly.
 
-    Returns the deployment object on success.
-    Raises TimeoutError if the deployment doesn't reach 'running' within the timeout.
+    Delegates to :class:`ApiScenarioDriver` so the polling logic lives in one
+    place. Returns a ``DeploymentRef`` (callers only assert ``is not None``).
     """
-    deadline = time.time() + timeout
-    deployment = None
-    while time.time() < deadline:
-        try:
-            deployment = await client.deployments.get(deployment_id)
-            if deployment.status == "running":
-                return deployment
-        except ResourceNotFoundError:
-            # Not materialised yet — keep polling. Other SDK errors propagate.
-            pass
-        await asyncio.sleep(interval)
-    status = deployment.status if deployment else "unknown"
-    msg = f"Deployment {deployment_id} did not reach 'running' after {timeout}s (status: {status})"
-    raise TimeoutError(msg)
+    driver = ApiScenarioDriver(client)
+    return await driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=timeout
+    )
 
 
 async def _wait_for_service_ready(
@@ -594,12 +585,6 @@ async def session_scenario_driver(
 # ---------------------------------------------------------------------------
 # Fixture: styrmin_resources
 # ---------------------------------------------------------------------------
-#
-# styrmin_resources dispatches platform setup (cluster / environment / BSL /
-# BSL assignment / driver version) through a ScenarioDriver chosen by the
-# session-scoped ``driver_mode`` parameter. CI runs each mode in its own job
-# with a fresh vcluster, so the session-scoped setup is exercised through
-# both the SDK (api mode) and Playwright (ui mode) over the course of CI.
 @pytest.fixture(scope="session")
 async def styrmin_resources(
     git_server: dict[str, str],
@@ -654,10 +639,6 @@ async def styrmin_resources(
         "driver_id": driver_version.application_driver_id,
         "styrmin_url": styrmin_url,
         "driver_mode": driver_mode,
-        # ``client`` stays on the dict for session fixtures that still need
-        # to drive SDK operations directly (deploy application drivers,
-        # load auxiliary versions). The UI driver doesn't own the client;
-        # session_scenario_driver yields it alongside regardless of mode.
         "client": client,
     }
 
@@ -984,6 +965,7 @@ async def scenario_driver(
 async def scenario_environment_id(
     styrmin_resources: dict,
     scenario_driver: ScenarioDriver,
+    driver_mode: str,
 ) -> AsyncGenerator[str, None]:
     """Create a fresh environment per test so parametrized variants don't collide.
 
@@ -1006,10 +988,9 @@ async def scenario_environment_id(
             environment_id=env_id, bsl_id=styrmin_resources["bsl_id"]
         )
     except ScenarioActionError as exc:
-        # BSL assign is optional for most scenarios; log so a real
-        # misconfiguration (auth, network, UI drift) doesn't hide as a
-        # green fixture.
-        _LOG.warning("BSL assign failed for env %s: %s", env_id, exc)
+        pytest.skip(
+            f"BSL assign failed for env {env_id} (driver_mode={driver_mode}): {exc}"
+        )
     try:
         yield env_id
     finally:
@@ -1042,7 +1023,7 @@ def _get_entrypoint_marker(item: pytest.Item) -> tuple[str | None, str | None]:
         if not reason or not str(reason).strip():
             pytest.fail(
                 f"{item.nodeid}: @pytest.mark.{mode}_only requires a non-empty "
-                f"reason=... (see specs/001-dual-e2e-entrypoints/spec.md FR-011)"
+                "reason=..."
             )
         return mode, str(reason)
     return None, None
@@ -1074,18 +1055,6 @@ def pytest_collection_modifyitems(
             item.add_marker(pytest.mark.flaky(reruns=1, reruns_delay=0))
 
 
-# ---------------------------------------------------------------------------
-# First-attempt artifact retention for [ui] variants on retry
-# ---------------------------------------------------------------------------
-#
-# pytest-playwright writes per-test artifacts under ``test-results/<nodeid>/``.
-# When pytest-rerunfailures retries a failing [ui] test, the plugin overwrites
-# those artifacts. This hook snapshots the first-attempt artifact directory
-# under ``test-results/attempt-1/<nodeid>/`` so the first failure remains
-# observable even when the retry succeeds (FR-019, data-model Diagnostic
-# Artifact).
-
-
 def _sanitize_nodeid(nodeid: str) -> str:
     """Mirror pytest-playwright's output-dir sanitization."""
     out = nodeid.replace(os.sep, "-").replace("/", "-")
@@ -1095,7 +1064,13 @@ def _sanitize_nodeid(nodeid: str) -> str:
 
 
 def _preserve_first_ui_attempt_artifacts(item: pytest.Item, report) -> None:
-    """Snapshot failing [ui] first-attempt artifacts before a retry overwrites them."""
+    """Snapshot failing [ui] first-attempt artifacts before a retry overwrites them.
+
+    pytest-playwright writes artifacts under ``test-results/<nodeid>/`` and
+    pytest-rerunfailures overwrites them on retry. We copy the first-attempt
+    directory under ``test-results/attempt-1/<nodeid>/`` so the original
+    failure stays observable even when the retry passes.
+    """
     if report.when != "call" or not report.failed:
         return
     if _driver_param_id(item) != "ui":

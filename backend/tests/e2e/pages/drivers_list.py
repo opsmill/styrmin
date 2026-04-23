@@ -43,10 +43,14 @@ class DriversListPage:
         await detail_root.wait_for()
 
         application_driver_id = await detail_root.get_attribute("data-driver-id")
-        driver_name = (await detail_root.get_attribute("data-driver-name")) or ""
         if not application_driver_id:
             raise ScenarioActionError(
                 "driver detail page rendered without data-driver-id"
+            )
+        driver_name = await detail_root.get_attribute("data-driver-name")
+        if not driver_name:
+            raise ScenarioActionError(
+                "driver detail page rendered without data-driver-name"
             )
 
         # Pick the first version card (AddDriverPage lists versions newest-first
@@ -54,10 +58,14 @@ class DriversListPage:
         card = self._page.locator("[data-testid=driver-version-card]").first
         await card.wait_for()
         version_id = await card.get_attribute("data-version-id")
-        version = (await card.get_attribute("data-version-label")) or ""
         if not version_id:
             raise ScenarioActionError(
                 "driver version card rendered without data-version-id"
+            )
+        version = await card.get_attribute("data-version-label")
+        if not version:
+            raise ScenarioActionError(
+                "driver version card rendered without data-version-label"
             )
 
         # Also validate the URL matches the detail root, just to catch

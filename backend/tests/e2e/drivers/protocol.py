@@ -8,6 +8,19 @@ Implementations MUST:
     implementation-specific exceptions.
   - End each action on a deterministic success signal so that callers
     never need to add their own sleeps.
+
+Ordering contract (UI-driver specific but observable through this protocol):
+  Deployment operations (``wait_for_deployment_running``, ``upgrade_deployment``,
+  ``get_deployment_timeline``, ``create_backup`` …) require the driver to know
+  the owning environment. ``create_deployment`` sets that context implicitly;
+  scenarios that observe a deployment created elsewhere must navigate the UI
+  driver to it first (see ``UiScenarioDriver.attach_to_deployment``) or accept
+  a ``ScenarioActionError``.
+
+Entrypoint asymmetry:
+  ``create_deployment(parameters=...)`` is API-only today — the UI driver
+  rejects non-empty ``parameters`` with ``ScenarioActionError``. Scenarios
+  exercising parameters must mark themselves ``api_only``.
 """
 
 from __future__ import annotations
