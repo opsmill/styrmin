@@ -68,10 +68,15 @@ async def test_upgrade_simple_app(
     simple_app_image_v2: str,  # noqa: ARG001 — v0.2.0 image
     vcluster: dict,
 ) -> None:
+    # Unique ``service_name_overrides`` so this deployment doesn't collide
+    # with other tests' simple-app instances in the shared session env.
     deployment = await scenario_driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
         environment_id=scenario_environment_id,
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": "simple-app-upgrade"}
+        ],
     )
     deployment = await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment.id

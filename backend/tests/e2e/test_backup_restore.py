@@ -122,15 +122,18 @@ async def test_backup_and_restore_lifecycle(
     vcluster: dict,
 ) -> None:
     """Full lifecycle: write data -> backup -> modify -> restore -> verify."""
-    # scenario_environment_id is a fresh env per variant; assign the BSL
-    # (scenario_environment_id does this already on a best-effort basis).
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
+    # Unique ``service_name_overrides`` so this deployment doesn't collide
+    # with other tests' simple-app instances in the shared session env.
     deployment = await scenario_driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
         environment_id=scenario_environment_id,
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": "simple-app-backup"}
+        ],
     )
     deployment = await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment.id

@@ -983,15 +983,20 @@ async def scenario_environment_id(
 ) -> AsyncGenerator[str, None]:
     """Session-scoped environment shared by all scenarios in the mode.
 
-    Parametrized through ``session_scenario_driver`` (which inherits the
-    ``driver_mode`` param), so the ``[api]`` and ``[ui]`` variants each
-    get their own environment — isolation is preserved between modes,
-    but within a single mode every test sees the same env. That avoids
-    per-test create + BSL-assign + delete churn, which adds up on the
-    API-only CI job where ~10 tests each take a deploy.
+    Parametrized through ``session_scenario_driver`` (which inherits
+    ``driver_mode``), so ``[api]`` and ``[ui]`` variants each get their
+    own env — isolation between modes is preserved, but tests within a
+    single mode share one env. That avoids paying ``create_environment``
+    + ``assign_bsl`` + ``delete_environment`` per test (minor in itself)
+    and, more importantly, lets ``deployed_simple_app`` and friends be
+    reused across tests that merely observe a running deployment.
 
-    Tests that mutate environment-level state (if any) should still create
-    their own env explicitly via the driver.
+    Multiple tests deploying the same driver into this shared env must
+    pass a unique ``service_name_overrides`` to avoid the per-env
+    service-name uniqueness check. ``test_service_discovery`` already
+    does this; ``test_upgrade_simple_app``, ``test_deployment_timeline_*``,
+    and ``test_backup_and_restore_lifecycle`` do the same for that
+    reason.
     """
     driver, client = session_scenario_driver
     name = f"scenario-env-{uuid.uuid4().hex[:8]}"

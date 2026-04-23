@@ -67,10 +67,17 @@ async def test_deployment_timeline_after_upgrade(
     simple_app_image_v2: str,  # noqa: ARG001 — ensures v2 image is built
 ) -> None:
     """Verify timeline reflects both deploy and upgrade operations."""
+    # Unique ``service_name_overrides`` — see test_upgrade_simple_app.
     deployment = await scenario_driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
         environment_id=scenario_environment_id,
+        service_name_overrides=[
+            {
+                "driverServiceName": "simple-app",
+                "overrideName": "simple-app-timeline-after-upgrade",
+            }
+        ],
     )
     deployment = await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment.id
@@ -110,10 +117,17 @@ async def test_deployment_timeline_ordering(
     upgrade is required to get a second entry so ordering is observable.
     The poll loop absorbs DOM-render lag in the UI variant (FR-014).
     """
+    # Unique ``service_name_overrides`` — see test_upgrade_simple_app.
     deployment = await scenario_driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
         environment_id=scenario_environment_id,
+        service_name_overrides=[
+            {
+                "driverServiceName": "simple-app",
+                "overrideName": "simple-app-timeline-ordering",
+            }
+        ],
     )
     deployment = await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment.id
