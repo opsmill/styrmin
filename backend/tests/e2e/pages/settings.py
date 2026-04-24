@@ -50,6 +50,11 @@ class SettingsPage:
                 await dialog.locator("#cluster-runtime-class").fill(
                     config["runtime_class"]
                 )
+            available_runtime_classes = config.get("available_runtime_classes")
+            if available_runtime_classes:
+                await dialog.locator("#cluster-available-runtime-classes").fill(
+                    ", ".join(str(c) for c in available_runtime_classes)
+                )
             di = config.get("dedicated_ingress")
             if di:
                 # Base UI's <Checkbox> puts the id on a hidden <input>
@@ -89,6 +94,7 @@ def _needs_advanced(config: dict[str, Any]) -> bool:
         "ingress_class",
         "fqdn_suffix",
         "runtime_class",
+        "available_runtime_classes",
         "dedicated_ingress",
         "standard_storage",
     )
