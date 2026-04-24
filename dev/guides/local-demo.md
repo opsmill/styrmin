@@ -61,6 +61,12 @@ Credentials: `minioadmin / minioadmin`.
   `service.type=ClusterIP` and a backgrounded `kubectl port-forward`
   exposes it on 8080/4443. The PID is recorded at
   `.vcluster/traefik.pid`.
+- **Single shared ingress**: The demo cluster is bootstrapped with
+  `ingress_class=traefik` only — `dedicated_ingress` is intentionally
+  omitted so every deployment's Ingress is served by the one front-door
+  Traefik. The per-environment dedicated-Traefik path exists for
+  multi-environment isolation in production and would not be reachable
+  through the single port-forward.
 
 ## Troubleshooting
 
