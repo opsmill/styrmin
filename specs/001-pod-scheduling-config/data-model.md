@@ -317,7 +317,8 @@ New `ServiceError` subclasses (registered in `backend/styrmin_backend/services/e
 | `InvalidSchedulingConfigError` | `VALIDATION_ERROR` | Any Pydantic `ValidationError` while parsing the `scheduling` payload (shape, quantity syntax, weight range, DNS-1123 runtime-class name). |
 | `UnknownComponentInConfigError` | `VALIDATION_ERROR` | A component-level scheduling payload references a name not declared by the driver (FR-005). |
 | `UnresolvableAffinityReferenceError` | `VALIDATION_ERROR` | `DeploymentReference` at config-time resolves to no visible deployment in the environment (FR-001d). |
-| `RuntimeClassNotFoundError` | `VALIDATION_ERROR` | `runtime_class` does not exist in the target cluster's capabilities cache at rollout time. |
+
+> Note: a `RuntimeClassNotFoundError` was originally defined to reject runtime-class names not installed on the cluster. That check was removed after the feature shipped — `runtime_class` now passes through validation and an unknown name surfaces later as a Pending pod with a scheduler error.
 
 The resolver surfaces per-field error paths in `error_metadata` so the GraphQL `StructuredErrorExtension` (`api/errors.py:39–66`) forwards them on `extensions.metadata.path`.
 

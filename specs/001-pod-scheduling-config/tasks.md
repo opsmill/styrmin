@@ -55,7 +55,7 @@
 - [X] T020 [P] Add `InvalidSchedulingConfigError` (`VALIDATION_ERROR`) in `backend/styrmin_backend/services/exceptions.py`
 - [X] T021 [P] Add `UnknownComponentInConfigError` (`VALIDATION_ERROR`) in `backend/styrmin_backend/services/exceptions.py`
 - [X] T022 [P] Add `UnresolvableAffinityReferenceError` (`VALIDATION_ERROR`) in `backend/styrmin_backend/services/exceptions.py`
-- [X] T023 [P] Add `RuntimeClassNotFoundError` (`VALIDATION_ERROR`) in `backend/styrmin_backend/services/exceptions.py`
+- [~] T023 [P] ~~Add `RuntimeClassNotFoundError`~~ — **reverted**: the cluster-side allow-list was dropped after the feature shipped; any DNS-1123 name is now accepted and an unknown class surfaces as a Pending pod instead of a rollout-time rejection.
 
 ### Context label extension (FR-001c, research §6)
 
@@ -223,15 +223,15 @@
 ### Tests for User Story 4
 
 - [X] T089 [P] [US4] Unit tests for `runtime_class` DNS-1123 syntactic validation in `backend/tests/unit/services/test_scheduling_validator.py::TestRuntimeClassValidation`
-- [X] T090 [P] [US4] Unit test for cluster-capabilities cache lookup and `RuntimeClassNotFoundError` on miss in `backend/tests/unit/services/test_scheduling_validator.py::TestRuntimeClassValidation`
+- [~] T090 [P] [US4] ~~Unit test for cluster-capabilities cache lookup and `RuntimeClassNotFoundError` on miss~~ — **reverted** with T023; `TestRuntimeClassValidation` now covers only the DNS-1123 syntactic check.
 - [X] T091 [P] [US4] Unit test for `RuntimeClassPatch` strategic-merge against `spec.template.spec.runtimeClassName` in `backend/tests/unit/agent/test_application_builder_scheduling.py::TestRuntimeClassPatchRendering`
 - [X] T092 [P] [US4] E2E test in `backend/tests/e2e/test_pod_scheduling.py::test_runtime_class_via_graphql` — registers a RuntimeClass on the vcluster, sets `scheduling.runtime_class` at the deployment level via `updateDeployment`, asserts the rendered pod template carries `runtimeClassName`. Per-component selectivity is currently integration-tier only (`backend/tests/integration/test_pod_scheduling.py::TestRuntimeClassPostRenderer`) because the public API does not yet expose per-component config mutation; the MVP stops at deployment-level.
 
 ### Implementation for User Story 4
 
-- [X] T093 [US4] Implement `validate_runtime_class_exists(cluster_capabilities, runtime_class_name)` reading the `Cluster.capabilities` JSON cache in `backend/styrmin_backend/services/scheduling/validator.py`, raising `RuntimeClassNotFoundError` on miss (depends on T023)
-- [X] T094 [US4] Extend the cluster-capability discovery to populate available runtime classes in `backend/styrmin_backend/services/capabilities.py` — reads `ClusterConfig.runtime_class` and the new `available_runtime_classes` list. A live `node.k8s.io/v1` discovery worker remains a follow-up; `available_runtime_classes` is the operator-declared source of truth in the meantime.
-- [ ] T095 [US4] Call `validate_runtime_class_exists` during deployment rollout (pre-apply hook in the reconciler) in `backend/styrmin_backend/services/deployment.py` — deferred: validator + error class are in place; wiring the pre-apply call is a small follow-up
+- [~] T093 [US4] ~~Implement `validate_runtime_class_exists`~~ — **reverted**: validator + error class removed; see T023 note.
+- [~] T094 [US4] ~~Extend the cluster-capability discovery to populate available runtime classes~~ — **reverted**: `ClusterConfig.available_runtime_classes` field removed, `compute_cluster_capabilities` no longer emits a `runtime_class` section.
+- [~] T095 [US4] ~~Call `validate_runtime_class_exists` during deployment rollout~~ — **cancelled**: no validator to call.
 - [X] T096 [US4] Add `RuntimeClassPatch` (merges onto `spec.template.spec.runtimeClassName`) in `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py`
 - [X] T097 [US4] Implement `patch_builder.build_runtime_class_patches` honouring `inject.runtime_class` opt-out in `backend/styrmin_backend/services/scheduling/patch_builder.py` (depends on T096)
 - [X] T098 [US4] Wire `build_runtime_class_patches` into `build_scheduling_post_rendering_patches` in `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` (depends on T052, T097)

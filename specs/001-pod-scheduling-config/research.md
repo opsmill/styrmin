@@ -86,8 +86,8 @@ All NEEDS CLARIFICATION items from the Technical Context are resolved below. The
 ## 7. Runtime-class validation
 
 **Decision**: Validate the runtime-class name at two points:
-1. **Configuration time (FR-006)**: a syntactic check (non-empty DNS-1123 subdomain).
-2. **Rollout time (FR-018)**: existence verification against the target cluster's `RuntimeClass` API (`node.k8s.io/v1`). Reuse the existing cluster `capabilities` mechanism (`Cluster.capabilities` JSON column) — the existing cluster-capability discovery worker periodically lists available runtime classes; the resolver consults that cache. A miss causes `RuntimeClassNotFoundError` before the HelmRelease is applied.
+1. **Configuration time (FR-006)**: a syntactic check (non-empty DNS-1123 subdomain). *(Still in effect.)*
+2. ~~**Rollout time (FR-018)**: existence verification against the target cluster's `RuntimeClass` API (`node.k8s.io/v1`). Reuse the existing cluster `capabilities` mechanism (`Cluster.capabilities` JSON column) — the existing cluster-capability discovery worker periodically lists available runtime classes; the resolver consults that cache. A miss causes `RuntimeClassNotFoundError` before the HelmRelease is applied.~~ **Reverted after shipping.** The allow-list (`ClusterConfig.available_runtime_classes`) and the cluster-side existence check were dropped; any DNS-1123-valid name passes. An unknown class surfaces as a Pending pod during reconciliation rather than a pre-apply rejection. Reintroducing validation would require a discovery worker populating `Cluster.capabilities` from the live `node.k8s.io/v1` API.
 
 **Rationale**:
 - Clusters routinely roll out new runtime classes out-of-band (e.g., a new sandboxed runtime); blocking configuration on existence would require live cluster reads from the API path. The capability cache is the standard pattern in the codebase and is already designed to back similar checks.
