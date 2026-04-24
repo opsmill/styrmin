@@ -1,9 +1,14 @@
 """Unit tests for the operator reconciler logic."""
 
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from styrmin_backend.operator.reconciler import compute_diff, reconcile_resources
+from styrmin_backend.operator.reconciler import (
+    compute_diff,
+    list_managed_resources,
+    reconcile_resources,
+)
 
 
 class TestComputeDiff:
@@ -62,6 +67,64 @@ class TestComputeDiff:
             {"kind": "Service", "metadata": {"name": "svc-1", "namespace": "ns"}, "spec": {"ports": [80]}},
         ]
         actual = list(desired)
+        to_create, to_update, to_delete = compute_diff(desired, actual)
+        assert to_create == []
+        assert to_update == []
+        assert to_delete == []
+
+    @pytest.mark.anyio
+    async def test_no_diff_for_listed_resources_missing_kind_metadata(self) -> None:
+        class MockClientContext:
+            def __init__(self, client: Mock) -> None:
+                self.client = client
+
+            async def __aenter__(self) -> Mock:
+                return self.client
+
+            async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+                return None
+
+        desired = [
+            {
+                "kind": "NetworkPolicy",
+                "apiVersion": "networking.k8s.io/v1",
+                "metadata": {"name": "np-1", "namespace": "ns"},
+                "spec": {"podSelector": {}},
+            }
+        ]
+        mock_client = Mock()
+        mock_client.sanitize_for_serialization.return_value = {
+            "metadata": {"name": "np-1", "namespace": "ns"},
+            "spec": {"podSelector": {}},
+        }
+        networking_api = AsyncMock()
+        networking_api.list_namespaced_network_policy.return_value = SimpleNamespace(items=[object()])
+
+        with (
+            patch(
+                "styrmin_backend.operator.kubernetes.get_kubernetes_client",
+                return_value=MockClientContext(mock_client),
+            ),
+            patch(
+                "styrmin_backend.operator.reconciler.kubeclient.NetworkingV1Api",
+                return_value=networking_api,
+            ),
+        ):
+            actual = await list_managed_resources(
+                namespace="ns",
+                release_reference="ref-123",
+                kind="NetworkPolicy",
+            )
+
+        assert actual == [
+            {
+                "kind": "NetworkPolicy",
+                "apiVersion": "networking.k8s.io/v1",
+                "metadata": {"name": "np-1", "namespace": "ns"},
+                "spec": {"podSelector": {}},
+            }
+        ]
+
         to_create, to_update, to_delete = compute_diff(desired, actual)
         assert to_create == []
         assert to_update == []

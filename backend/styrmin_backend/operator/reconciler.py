@@ -85,6 +85,21 @@ def _normalize_for_comparison(resource: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ensure_resource_type_metadata(
+    resource: dict[str, Any],
+    *,
+    kind: str,
+    api_version: str,
+) -> dict[str, Any]:
+    """Ensure serialized resources retain kind and apiVersion metadata."""
+    payload = dict(resource)
+    if not payload.get("kind"):
+        payload["kind"] = kind
+    if not payload.get("apiVersion"):
+        payload["apiVersion"] = api_version
+    return payload
+
+
 def compute_diff(
     desired: list[dict[str, Any]],
     actual: list[dict[str, Any]],
@@ -294,7 +309,13 @@ async def list_managed_resources(
                     namespace=namespace, label_selector=label_selector
                 )
                 for item in result.items:
-                    resources.append(client.sanitize_for_serialization(item))
+                    resources.append(
+                        _ensure_resource_type_metadata(
+                            client.sanitize_for_serialization(item),
+                            kind="NetworkPolicy",
+                            api_version="networking.k8s.io/v1",
+                        )
+                    )
             except Exception:
                 logger.exception("Failed to list NetworkPolicies in %s", namespace)
 
@@ -305,7 +326,13 @@ async def list_managed_resources(
                     namespace=namespace, label_selector=label_selector
                 )
                 for item in result.items:
-                    resources.append(client.sanitize_for_serialization(item))
+                    resources.append(
+                        _ensure_resource_type_metadata(
+                            client.sanitize_for_serialization(item),
+                            kind="Service",
+                            api_version="v1",
+                        )
+                    )
             except Exception:
                 logger.exception("Failed to list Services in %s", namespace)
 
@@ -316,7 +343,13 @@ async def list_managed_resources(
                     namespace=namespace, label_selector=label_selector
                 )
                 for item in result.items:
-                    resources.append(client.sanitize_for_serialization(item))
+                    resources.append(
+                        _ensure_resource_type_metadata(
+                            client.sanitize_for_serialization(item),
+                            kind="Secret",
+                            api_version="v1",
+                        )
+                    )
             except Exception:
                 logger.exception("Failed to list Secrets in %s", namespace)
 
