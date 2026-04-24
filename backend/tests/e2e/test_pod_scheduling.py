@@ -1,7 +1,7 @@
 """End-to-end tests for hierarchical pod scheduling and resource configuration.
 
-Drives the full user-facing path: GraphQL mutation via ``StyrminClient`` →
-server reconciler → FluxCD HelmRelease post-renderers → rendered pod spec
+Drives the full user-facing path: ``updateDeployment`` (SDK or Playwright)
+→ server reconciler → FluxCD HelmRelease post-renderers → rendered pod spec
 on the vcluster. Asserts by reading the resulting ``apps/v1`` resource back
 from the vcluster API server.
 
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from typing import Any, AsyncGenerator, Callable
 
 import pytest
@@ -31,7 +32,7 @@ from styrmin_sdk.graphql._generated.get_deployment_resolved_scheduling import (
     GetDeploymentResolvedScheduling,
 )
 
-from tests.e2e.conftest import _wait_for_deployment_running
+from tests.e2e.drivers import ScenarioDriver
 
 # Single-node vcluster: we cannot verify actual node placement, only that
 # the rendered pod template carries the intended scheduling fields.
@@ -94,7 +95,7 @@ async def _wait_for_pod_template(
 
 
 async def _update_scheduling_and_wait(
-    client: StyrminClient,
+    scenario_driver: ScenarioDriver,
     deployment_id: str,
     *,
     scheduling: dict,
@@ -104,11 +105,19 @@ async def _update_scheduling_and_wait(
     predicate: Callable[[Any], bool],
     description: str,
 ) -> Any:
-    """Submit an ``updateDeployment`` with *scheduling* and wait for the
-    rendered pod template to satisfy *predicate*.
+    """Submit scheduling config and wait for the rendered pod template to match.
+
+    Goes through ``ScenarioDriver.update_deployment`` so both the API and
+    UI entrypoints exercise the same path. The subsequent
+    ``wait_for_deployment_running`` gives the Styrmin workflow time to
+    complete before we start polling k8s directly.
     """
-    await client.deployments.update(deployment_id, config={"scheduling": scheduling})
-    await _wait_for_deployment_running(client, deployment_id, timeout=300.0)
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_id, config={"scheduling": scheduling}
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=300.0
+    )
     return await _wait_for_pod_template(
         vcluster,
         namespace=namespace,
@@ -118,15 +127,18 @@ async def _update_scheduling_and_wait(
     )
 
 
-async def _clear_scheduling(client: StyrminClient, deployment_id: str) -> None:
-    """Reset deployment config so subsequent tests start clean.
+async def _clear_scheduling(
+    scenario_driver: ScenarioDriver, deployment_id: str
+) -> None:
+    """Reset deployment scheduling so subsequent tests start clean.
 
-    We preserve non-scheduling config by reading the deployment first.
+    An empty ``scheduling`` object signals "no scheduling config" to both
+    entrypoints — the API driver sends ``config={"scheduling": {}}`` and
+    the UI driver opens the dialog, clears every field, and saves.
     """
-    deployment = await client.deployments.get(deployment_id)
-    current = deployment.config if isinstance(deployment.config, dict) else {}
-    cleaned = {k: v for k, v in current.items() if k != "scheduling"}
-    await client.deployments.update(deployment_id, config=cleaned)
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_id, config={"scheduling": {}}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +149,7 @@ async def _clear_scheduling(client: StyrminClient, deployment_id: str) -> None:
 @pytest.fixture(scope="module")
 async def scheduling_environment(
     styrmin_resources: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
 ) -> AsyncGenerator[dict, None]:
     """Dedicated environment for scheduling E2E.
 
@@ -148,16 +161,18 @@ async def scheduling_environment(
     rest of the session. Env+deployment merge is covered at unit level
     (``backend/tests/unit/context/test_scheduling_resolver.py``) and by
     the integration test ``TestResourceHierarchyPostRenderer``.
-    """
-    client: StyrminClient = styrmin_resources["client"]
-    cluster_id = styrmin_resources["cluster_id"]
 
-    env = await client.environments.create(
-        name="scheduling-e2e",
+    Created through ``session_scenario_driver`` so the ``[api]`` and
+    ``[ui]`` variants each get their own env (the scenario driver is
+    parametrized by ``driver_mode``). The uuid suffix keeps both names
+    unique across modes and reruns.
+    """
+    driver, client = session_scenario_driver
+    cluster_id = styrmin_resources["cluster_id"]
+    env = await driver.create_environment(
+        name=f"scheduling-e2e-{uuid.uuid4().hex[:8]}",
         cluster_id=cluster_id,
-        config={
-            "ip_whitelist": ["127.0.0.1"],
-        },
+        config={"ip_whitelist": ["127.0.0.1"]},
     )
     yield {
         "environment_id": str(env.id),
@@ -168,29 +183,28 @@ async def scheduling_environment(
 @pytest.fixture(scope="module")
 async def scheduling_deployment(
     scheduling_environment: dict,
-    simple_app_image: str,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    simple_app_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> dict:
     """Fresh simple-app deployment dedicated to the scheduling test suite.
 
-    Session-scoped so the deployment is created once and reused across
+    Module-scoped so the deployment is created once and reused across
     tests in this file. Each test sets the full scheduling config it cares
     about, then (via teardown) clears it so the next test starts from a
     known state.
     """
-    client: StyrminClient = scheduling_environment["client"]
-    task = await client.deployments.create(
+    driver, _ = session_scenario_driver
+    deployment = await driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
         environment_id=scheduling_environment["environment_id"],
         name="scheduling-a",
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None
-    await _wait_for_deployment_running(client, deployment_id)
+    deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
     return {
-        "deployment_id": str(deployment_id),
-        "namespace": f"styrmin-{deployment_id}",
+        "deployment_id": str(deployment.id),
+        "namespace": f"styrmin-{deployment.id}",
         "kubeconfig_path": vcluster["kubeconfig_path"],
     }
 
@@ -198,7 +212,8 @@ async def scheduling_deployment(
 @pytest.fixture(scope="module")
 async def scheduling_deployment_b(
     scheduling_environment: dict,
-    simple_app_image: str,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    simple_app_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> dict:
     """Second deployment used only by the cross-deployment anti-affinity
@@ -209,8 +224,8 @@ async def scheduling_deployment_b(
     deployment in the same env must override the service name to avoid
     ``ResourceAlreadyExistsError``.
     """
-    client: StyrminClient = scheduling_environment["client"]
-    task = await client.deployments.create(
+    driver, _ = session_scenario_driver
+    deployment = await driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
         environment_id=scheduling_environment["environment_id"],
@@ -219,12 +234,10 @@ async def scheduling_deployment_b(
             {"driverServiceName": "simple-app", "overrideName": "simple-app-b"}
         ],
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None
-    await _wait_for_deployment_running(client, deployment_id)
+    deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
     return {
-        "deployment_id": str(deployment_id),
-        "namespace": f"styrmin-{deployment_id}",
+        "deployment_id": str(deployment.id),
+        "namespace": f"styrmin-{deployment.id}",
         "kubeconfig_path": vcluster["kubeconfig_path"],
     }
 
@@ -233,17 +246,17 @@ async def scheduling_deployment_b(
 async def _reset_scheduling_after_test(
     scheduling_environment: dict,
     scheduling_deployment: dict,
+    scenario_driver: ScenarioDriver,
 ) -> AsyncGenerator[None, None]:
     """Strip scheduling config after each test to avoid cross-test bleed."""
+    scenario_driver.attach_to_deployment(
+        environment_id=scheduling_environment["environment_id"]
+    )
     yield
     try:
-        await _clear_scheduling(
-            scheduling_environment["client"], scheduling_deployment["deployment_id"]
-        )
-        await _wait_for_deployment_running(
-            scheduling_environment["client"],
-            scheduling_deployment["deployment_id"],
-            timeout=300.0,
+        await _clear_scheduling(scenario_driver, scheduling_deployment["deployment_id"])
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=scheduling_deployment["deployment_id"], timeout=300.0
         )
     except Exception:  # noqa: BLE001
         # Teardown errors shouldn't mask the test's own failure.
@@ -256,13 +269,11 @@ async def _reset_scheduling_after_test(
 
 
 @pytest.mark.ci
-@pytest.mark.api_only(
-    reason="scheduling config is not exposed through the UI; drives the SDK directly"
-)
 async def test_post_renderer_injects_into_unmodified_driver(
-    scheduling_environment: dict,
+    scheduling_environment: dict,  # noqa: ARG001 — consumed via scenario_driver binding
     scheduling_deployment: dict,
     vcluster: dict,
+    scenario_driver: ScenarioDriver,
     _reset_scheduling_after_test: None,
 ) -> None:
     """US6 / T049: the ``simple-app`` driver's ``values.j2.yml`` does not
@@ -271,14 +282,13 @@ async def test_post_renderer_injects_into_unmodified_driver(
     injection: any scheduling on the rendered pod template can only have
     come from ``HelmRelease.spec.postRenderers``, not the chart template.
     """
-    client = scheduling_environment["client"]
 
     def _has_tolerations(dep: Any) -> bool:
         tols = dep.spec.template.spec.tolerations or []
         return any(t.key == "dedicated" and t.value == "batch" for t in tols)
 
     await _update_scheduling_and_wait(
-        client,
+        scenario_driver,
         scheduling_deployment["deployment_id"],
         scheduling={
             "tolerations": [
@@ -299,13 +309,11 @@ async def test_post_renderer_injects_into_unmodified_driver(
 
 
 @pytest.mark.ci
-@pytest.mark.api_only(
-    reason="scheduling config is not exposed through the UI; drives the SDK directly"
-)
 async def test_resource_requests_via_graphql(
-    scheduling_environment: dict,
+    scheduling_environment: dict,  # noqa: ARG001
     scheduling_deployment: dict,
     vcluster: dict,
+    scenario_driver: ScenarioDriver,
     _reset_scheduling_after_test: None,
 ) -> None:
     """US2 / T060: deployment-level ``resources.requests`` lands on the
@@ -317,7 +325,6 @@ async def test_resource_requests_via_graphql(
     (deepest-wins) is covered by the resolver unit tests and the
     integration test ``TestResourceHierarchyPostRenderer``.
     """
-    client = scheduling_environment["client"]
 
     def _resources_match(dep: Any) -> bool:
         containers = dep.spec.template.spec.containers or []
@@ -329,7 +336,7 @@ async def test_resource_requests_via_graphql(
         return requests.get("cpu") == "250m" and requests.get("memory") == "256Mi"
 
     await _update_scheduling_and_wait(
-        client,
+        scenario_driver,
         scheduling_deployment["deployment_id"],
         scheduling={
             "resources": {
@@ -345,19 +352,16 @@ async def test_resource_requests_via_graphql(
 
 
 @pytest.mark.ci
-@pytest.mark.api_only(
-    reason="scheduling config is not exposed through the UI; drives the SDK directly"
-)
 async def test_tolerations_topology_node_affinity_compose_via_graphql(
-    scheduling_environment: dict,
+    scheduling_environment: dict,  # noqa: ARG001
     scheduling_deployment: dict,
     vcluster: dict,
+    scenario_driver: ScenarioDriver,
     _reset_scheduling_after_test: None,
 ) -> None:
     """US3 / T080: three independent scheduling features set together must
     each appear on the rendered pod spec without clobbering each other.
     """
-    client = scheduling_environment["client"]
 
     def _all_three_present(dep: Any) -> bool:
         spec = dep.spec.template.spec
@@ -384,7 +388,7 @@ async def test_tolerations_topology_node_affinity_compose_via_graphql(
         return has_toleration and has_spread and has_node
 
     await _update_scheduling_and_wait(
-        client,
+        scenario_driver,
         scheduling_deployment["deployment_id"],
         scheduling={
             "tolerations": [
@@ -431,13 +435,11 @@ async def test_tolerations_topology_node_affinity_compose_via_graphql(
 
 
 @pytest.mark.ci
-@pytest.mark.api_only(
-    reason="scheduling config is not exposed through the UI; drives the SDK directly"
-)
 async def test_runtime_class_via_graphql(
-    scheduling_environment: dict,
+    scheduling_environment: dict,  # noqa: ARG001
     scheduling_deployment: dict,
     vcluster: dict,
+    scenario_driver: ScenarioDriver,
     _reset_scheduling_after_test: None,
 ) -> None:
     """US4 / T092: register a RuntimeClass on the vcluster, set it through
@@ -447,7 +449,6 @@ async def test_runtime_class_via_graphql(
     Per-component selectivity is integration-tier only until the public
     API exposes per-component config mutation.
     """
-    client = scheduling_environment["client"]
     node_api = kubeclient.NodeV1Api(vcluster["api"])
     try:
         await node_api.create_runtime_class(
@@ -466,7 +467,7 @@ async def test_runtime_class_via_graphql(
         return dep.spec.template.spec.runtime_class_name == "kata-e2e"
 
     await _update_scheduling_and_wait(
-        client,
+        scenario_driver,
         scheduling_deployment["deployment_id"],
         scheduling={"runtime_class": "kata-e2e"},
         vcluster=vcluster,
@@ -478,13 +479,11 @@ async def test_runtime_class_via_graphql(
 
 
 @pytest.mark.ci
-@pytest.mark.api_only(
-    reason="scheduling config is not exposed through the UI; drives the SDK directly"
-)
 async def test_resolved_scheduling_graphql_query(
     scheduling_environment: dict,
     scheduling_deployment: dict,
-    vcluster: dict,
+    vcluster: dict,  # noqa: ARG001 — fixture dependency for cluster readiness
+    scenario_driver: ScenarioDriver,
     _reset_scheduling_after_test: None,
 ) -> None:
     """US5 / T069: after configuring deployment-level scheduling, the
@@ -492,14 +491,15 @@ async def test_resolved_scheduling_graphql_query(
     per component, each carrying the fully-merged per-component
     ``SchedulingConfig`` plus provenance.
 
-    This is the exact data that drivers receive under
-    ``context.components[*].scheduling`` — so the resolver path is
-    exercised end-to-end even without a custom driver template.
+    The assertion is against the GraphQL resolver output — there's no UI
+    surface displaying resolvedScheduling today, so both entrypoints
+    exercise the same mutation path then read via the SDK.
     """
-    client = scheduling_environment["client"]
+    client: StyrminClient = scheduling_environment["client"]
+    deployment_id = scheduling_deployment["deployment_id"]
 
-    await client.deployments.update(
-        scheduling_deployment["deployment_id"],
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_id,
         config={
             "scheduling": {
                 "resources": {
@@ -508,13 +508,13 @@ async def test_resolved_scheduling_graphql_query(
             }
         },
     )
-    await _wait_for_deployment_running(
-        client, scheduling_deployment["deployment_id"], timeout=300.0
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=300.0
     )
 
     raw = await client._transport.execute(
         load_query("get_deployment_resolved_scheduling"),
-        {"deploymentId": scheduling_deployment["deployment_id"]},
+        {"deploymentId": deployment_id},
     )
     assert "errors" not in raw or not raw.get("errors"), raw.get("errors")
     parsed = GetDeploymentResolvedScheduling.model_validate(raw["data"])
@@ -532,7 +532,8 @@ async def test_resolved_scheduling_graphql_query(
         resources = (entry.config or {}).get("resources") or {}
         requests = resources.get("requests") or {}
         assert requests.get("memory") == "128Mi", (
-            f"component {entry.component_name} memory = {requests.get('memory')!r}, expected '128Mi' (deployment)"
+            f"component {entry.component_name} memory = {requests.get('memory')!r}, "
+            "expected '128Mi' (deployment)"
         )
         provenance = entry.provenance or {}
         assert provenance.get("resources.requests.memory") == "deployment"
@@ -540,7 +541,10 @@ async def test_resolved_scheduling_graphql_query(
 
 @pytest.mark.ci
 @pytest.mark.api_only(
-    reason="scheduling config is not exposed through the UI; drives the SDK directly"
+    reason="scenario coordinates mutations across two deployments; the UI's "
+    "scheduling dialog is single-deployment scoped, so driving this flow "
+    "through the UI would require a bespoke two-deployment page-object "
+    "helper that does not yet exist"
 )
 async def test_pod_anti_affinity_cross_deployment_via_graphql(
     scheduling_environment: dict,
@@ -560,7 +564,7 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
     the full Styrmin → Flux pipeline) is identical for preferred and required
     terms; actual placement guarantees require multi-node clusters.
     """
-    client = scheduling_environment["client"]
+    client: StyrminClient = scheduling_environment["client"]
     dep_a_id = scheduling_deployment["deployment_id"]
     dep_b_id = scheduling_deployment_b["deployment_id"]
 
@@ -601,8 +605,23 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
                 }
             },
         )
-        await _wait_for_deployment_running(client, dep_a_id, timeout=300.0)
-        await _wait_for_deployment_running(client, dep_b_id, timeout=300.0)
+
+        async def _wait_running(deployment_id: str) -> None:
+            # Duplicate of the protocol's wait, but scoped to this test's
+            # api-only path — we drive the SDK directly so no scenario
+            # driver is in play.
+            deadline = time.time() + 300.0
+            while time.time() < deadline:
+                dep = await client.deployments.get(deployment_id)
+                if getattr(dep, "status", None) == "running":
+                    return
+                await asyncio.sleep(3.0)
+            raise TimeoutError(
+                f"deployment {deployment_id} did not reach 'running' within 300s"
+            )
+
+        await _wait_running(dep_a_id)
+        await _wait_running(dep_b_id)
 
         def _anti_affinity_targets(expected_deployment_id: str):
             def _predicate(dep: Any) -> bool:
@@ -647,20 +666,17 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
         # post-test state matches what other tests expect.
         for did in (dep_a_id, dep_b_id):
             try:
-                await _clear_scheduling(client, did)
-                await _wait_for_deployment_running(client, did, timeout=300.0)
+                await client.deployments.update(did, config={"scheduling": {}})
             except Exception:  # noqa: BLE001
                 pass
 
 
 @pytest.mark.ci
-@pytest.mark.api_only(
-    reason="scheduling config is not exposed through the UI; drives the SDK directly"
-)
 async def test_quickstart_consolidated_scenario(
-    scheduling_environment: dict,
+    scheduling_environment: dict,  # noqa: ARG001
     scheduling_deployment: dict,
     vcluster: dict,
+    scenario_driver: ScenarioDriver,
     _reset_scheduling_after_test: None,
 ) -> None:
     """T107: stack multiple feature groups onto one deployment and verify
@@ -670,7 +686,6 @@ async def test_quickstart_consolidated_scenario(
     MVP public API supports (deployment-level, since per-component and
     per-environment update mutations are not yet exposed).
     """
-    client = scheduling_environment["client"]
 
     def _everything_landed(dep: Any) -> bool:
         spec = dep.spec.template.spec
@@ -692,7 +707,7 @@ async def test_quickstart_consolidated_scenario(
         )
 
     await _update_scheduling_and_wait(
-        client,
+        scenario_driver,
         scheduling_deployment["deployment_id"],
         scheduling={
             "resources": {
@@ -742,13 +757,11 @@ async def test_quickstart_consolidated_scenario(
 
 
 @pytest.mark.ci
-@pytest.mark.api_only(
-    reason="scheduling config is not exposed through the UI; drives the SDK directly"
-)
 async def test_update_triggers_reconciliation_within_slo(
-    scheduling_environment: dict,
+    scheduling_environment: dict,  # noqa: ARG001
     scheduling_deployment: dict,
     vcluster: dict,
+    scenario_driver: ScenarioDriver,
     _reset_scheduling_after_test: None,
 ) -> None:
     """T109 / FR-019: changing scheduling config must propagate to the
@@ -756,13 +769,11 @@ async def test_update_triggers_reconciliation_within_slo(
     time from the ``updateDeployment`` mutation returning to the rendered
     pod template reflecting the new value.
     """
-    client = scheduling_environment["client"]
-
     marker_memory = "223Mi"
 
     start = time.monotonic()
-    await client.deployments.update(
-        scheduling_deployment["deployment_id"],
+    await scenario_driver.update_deployment(
+        deployment_id=scheduling_deployment["deployment_id"],
         config={
             "scheduling": {
                 "resources": {"requests": {"memory": marker_memory}},
