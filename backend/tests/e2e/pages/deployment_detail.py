@@ -9,7 +9,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
-from playwright.async_api import expect
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 
 from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
 from tests.e2e.drivers.refs import BackupRef, RestoreRef, TimelineEntry
@@ -106,10 +106,12 @@ class DeploymentDetailPage:
         await dialog.get_by_role("button", name="Save", exact=True).click()
         # The dialog closes on server-accepted mutation. An error surfaces
         # as an inline <Alert> that keeps the dialog open — surface that as
-        # a ScenarioActionError so callers see the backend message.
+        # a ScenarioActionError so callers see the backend message. Playwright
+        # raises ``TimeoutError`` (not ``AssertionError``) on ``wait_for``,
+        # so the except clause must match the real raised type.
         try:
             await dialog.wait_for(state="hidden", timeout=30_000)
-        except AssertionError as exc:
+        except PlaywrightTimeoutError as exc:
             alert = dialog.locator("[role=alert]")
             message = (
                 await alert.inner_text()
