@@ -58,25 +58,14 @@ async def portforward_db_test(
 @pytest.mark.ci
 async def test_mariadb_mongodb_backup_and_restore_lifecycle(
     scenario_driver: ScenarioDriver,
-    scenario_environment_id: str,
-    load_db_test: dict,  # noqa: ARG001 — loads the db-test driver version
+    deployed_db_test: dict,
     velero_ready: None,  # noqa: ARG001 — ensures Velero is up
-    db_test_image: str,  # noqa: ARG001 — ensures db-test image is built
-    vcluster: dict,
 ) -> None:
     """Full lifecycle: write data -> backup -> modify -> restore -> verify for MariaDB + MongoDB."""
-    deployment = await scenario_driver.create_deployment(
-        driver="db-test",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-    )
-    deployment = await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment.id, timeout=300.0
-    )
-    instance_id = deployment.instance_id
+    instance_id = deployed_db_test["instance_id"]
     assert instance_id is not None, "Deployment should have an instance_id"
-    namespace = f"styrmin-{deployment.id}"
-    kubeconfig_path = vcluster["kubeconfig_path"]
+    namespace = deployed_db_test["namespace"]
+    kubeconfig_path = deployed_db_test["kubeconfig_path"]
 
     # 1. Write test data (increment counters N times in both databases)
     async with portforward_db_test(kubeconfig_path, namespace) as port:

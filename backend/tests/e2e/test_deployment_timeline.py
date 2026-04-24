@@ -61,36 +61,23 @@ async def test_deployment_timeline_has_entries(
 @pytest.mark.ci
 async def test_deployment_timeline_after_upgrade(
     scenario_driver: ScenarioDriver,
-    scenario_environment_id: str,
-    styrmin_resources: dict,  # noqa: ARG001
-    simple_app_image: str,  # noqa: ARG001
+    deployed_simple_app: dict,
     simple_app_image_v2: str,  # noqa: ARG001 — ensures v2 image is built
 ) -> None:
-    """Verify timeline reflects both deploy and upgrade operations."""
-    # Unique ``service_name_overrides`` — see test_upgrade_simple_app.
-    deployment = await scenario_driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-        service_name_overrides=[
-            {
-                "driverServiceName": "simple-app",
-                "overrideName": "simple-app-timeline-after-upgrade",
-            }
-        ],
-    )
-    deployment = await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment.id
-    )
+    """Verify timeline reflects both deploy and upgrade operations.
 
-    # Trigger upgrade to version 0.2.0
+    Upgrades the shared session deployment in place — idempotent if a
+    previous test already did the upgrade. Timeline still retains the
+    initial ``create_instance`` at 0.1.0 alongside the upgrade entry.
+    """
+    deployment_id = deployed_simple_app["deployment_id"]
     await scenario_driver.upgrade_deployment(
-        deployment_id=deployment.id, version="0.2.0"
+        deployment_id=deployment_id, version="0.2.0"
     )
-    await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
 
     timeline = await scenario_driver.get_deployment_timeline(
-        deployment_id=deployment.id
+        deployment_id=deployment_id
     )
 
     # After deploy + upgrade, expect at least 2 timeline entries
@@ -106,42 +93,28 @@ async def test_deployment_timeline_after_upgrade(
 @pytest.mark.ci
 async def test_deployment_timeline_ordering(
     scenario_driver: ScenarioDriver,
-    scenario_environment_id: str,
-    styrmin_resources: dict,  # noqa: ARG001
-    simple_app_image: str,  # noqa: ARG001
+    deployed_simple_app: dict,
     simple_app_image_v2: str,  # noqa: ARG001 — ensures v2 image is built
 ) -> None:
     """Verify that timeline entries are ordered newest-first by created_on.
 
     A single deploy produces exactly one task (``create_instance``) — an
     upgrade is required to get a second entry so ordering is observable.
-    The poll loop absorbs DOM-render lag in the UI variant (FR-014).
+    The upgrade is idempotent, so this test works whether it runs before
+    or after the other tests that upgrade the shared deployment. The poll
+    loop absorbs DOM-render lag in the UI variant (FR-014).
     """
-    # Unique ``service_name_overrides`` — see test_upgrade_simple_app.
-    deployment = await scenario_driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-        service_name_overrides=[
-            {
-                "driverServiceName": "simple-app",
-                "overrideName": "simple-app-timeline-ordering",
-            }
-        ],
-    )
-    deployment = await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment.id
-    )
+    deployment_id = deployed_simple_app["deployment_id"]
     await scenario_driver.upgrade_deployment(
-        deployment_id=deployment.id, version="0.2.0"
+        deployment_id=deployment_id, version="0.2.0"
     )
-    await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
 
     deadline = time.time() + 60.0
     timeline = []
     while time.time() < deadline:
         timeline = await scenario_driver.get_deployment_timeline(
-            deployment_id=deployment.id
+            deployment_id=deployment_id
         )
         if len(timeline) >= 2:
             break
