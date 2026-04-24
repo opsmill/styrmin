@@ -22,24 +22,14 @@ async def test_deploy_simple_app(
     namespace = deployed_simple_app["namespace"]
 
     # External-state assertion — identical across both entrypoints.
+    # Target the driver's default service name directly; fuzzy substring
+    # match picks up cross-namespace ``ExternalName`` aliases from other
+    # tests' deployments that share the env.
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
-    services: list[AsyncService] = [
-        svc
-        async for svc in AsyncService.list(namespace=namespace, api=kr8s_api)
-        if isinstance(svc, AsyncService)
-    ]
-    simple_app_svc = next(
-        (
-            svc
-            for svc in services
-            if "simple-app" in svc.name and "postgresql" not in svc.name
-        ),
-        None,
+    simple_app_svc = await AsyncService.get(
+        "simple-app", namespace=namespace, api=kr8s_api
     )
-
-    assert simple_app_svc, (
-        f"Could not find simple-app service. Available services:\n{[svc.name for svc in services]}"
-    )
+    assert simple_app_svc is not None, "simple-app service not found"
 
     async with simple_app_svc.portforward(
         remote_port=8000, local_port="auto"
@@ -88,25 +78,15 @@ async def test_upgrade_simple_app(
     )
     await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
 
+    # Target the exact override name — fuzzy substring match would catch
+    # cross-namespace ExternalName aliases for sibling deployments in the
+    # shared env.
     kubeconfig_path = vcluster["kubeconfig_path"]
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
-    services: list[AsyncService] = [
-        svc
-        async for svc in AsyncService.list(namespace=namespace, api=kr8s_api)
-        if isinstance(svc, AsyncService)
-    ]
-    simple_app_svc = next(
-        (
-            svc
-            for svc in services
-            if "simple-app" in svc.name and "postgresql" not in svc.name
-        ),
-        None,
+    simple_app_svc = await AsyncService.get(
+        "simple-app-upgrade", namespace=namespace, api=kr8s_api
     )
-
-    assert simple_app_svc, (
-        f"Could not find simple-app service. Available services:\n{[svc.name for svc in services]}"
-    )
+    assert simple_app_svc is not None, "simple-app-upgrade service not found"
 
     async with simple_app_svc.portforward(
         remote_port=8000, local_port="auto"
