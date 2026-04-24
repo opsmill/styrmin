@@ -22,24 +22,14 @@ from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 
-from tests.e2e.conftest import _wait_for_deployment_running, _wait_for_http
-from tests.e2e.drivers import ScenarioDriver  # noqa: F401 — collected via scenario_driver fixture
-
-# Ingress scenarios still use ``StyrminClient`` directly for deployment
-# creation and for the kr8s probes that assert on the resulting cluster
-# state. Convert them to ``scenario_driver.create_deployment(...)`` to
-# opt into dual-entrypoint coverage — the kr8s probes themselves are
-# entrypoint-agnostic and would run unchanged.
-pytestmark = pytest.mark.api_only(
-    reason="scenarios call client.deployments.create directly; convert to "
-    "scenario_driver.create_deployment to enable dual-entrypoint coverage"
-)
+from tests.e2e.conftest import _wait_for_http
+from tests.e2e.drivers import ScenarioDriver
 
 
 async def test_deploy_with_dedicated_ingress(
-    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
+    scenario_driver: ScenarioDriver,
     styrmin_resources: dict,
-    simple_app_image: str,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ):
     """T035: With dedicated_ingress, Traefik pod runs, app uses annotation-based routing
@@ -60,18 +50,17 @@ async def test_deploy_with_dedicated_ingress(
         cluster.capabilities["ingress"]["external"]["fqdn_suffix"] == "styrmin.com"
     ), "Cluster ingress fqdn_suffix should be 'styrmin.com'"
 
-    # Deploy simple-app
-    task = await client.deployments.create(
+    # Deploy simple-app via the scenario driver (API or UI, depending on mode)
+    deployment = await scenario_driver.create_deployment(
         driver="simple-app",
         name="simple-app",
         version="0.1.0",
         environment_id=environment_id,
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None
-
-    # Wait for deployment to reach running status
-    deployment = await _wait_for_deployment_running(client, deployment_id)
+    deployment_id = deployment.id
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id
+    )
 
     # Verify Traefik pod is running in a namespace (ingress controller namespace)
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
@@ -107,17 +96,15 @@ async def test_deploy_with_dedicated_ingress(
 
 
 async def test_deploy_without_dedicated_ingress(
-    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
-    styrmin_resources: dict,
-    simple_app_image: str,
+    scenario_driver: ScenarioDriver,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ):
     """T036: Without dedicated_ingress, no Traefik controller is deployed."""
-    client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Create a cluster and environment WITHOUT dedicated_ingress
-    cluster = await client.clusters.create(
+    cluster = await scenario_driver.create_cluster(
         name="no-ingress-cluster",
         config={
             "fqdn_suffix": "styrmin.com",
@@ -125,27 +112,25 @@ async def test_deploy_without_dedicated_ingress(
             "standard_storage": {"storage_class": "standard"},
         },
     )
-    environment = await client.environments.create(
+    environment = await scenario_driver.create_environment(
         name="no-ingress-env",
         cluster_id=cluster.id,
         config={"ip_whitelist": ["127.0.0.1"]},
     )
 
     # Deploy simple-app
-    task = await client.deployments.create(
+    deployment = await scenario_driver.create_deployment(
         driver="simple-app",
         name="simple-app",
         version="0.1.0",
-        environment_id=str(environment.id),
+        environment_id=environment.id,
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None
-
-    # Wait for deployment to reach running status
-    await _wait_for_deployment_running(client, deployment_id)
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment.id
+    )
 
     # Verify NO Traefik pod was created in the deployment's namespace
-    namespace = f"styrmin-{deployment_id}"
+    namespace = f"styrmin-{deployment.id}"
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     traefik_pods: list[AsyncPod] = [
         pod
@@ -160,13 +145,12 @@ async def test_deploy_without_dedicated_ingress(
 
 
 async def test_second_app_reuses_ingress_controller(
-    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
+    scenario_driver: ScenarioDriver,
     styrmin_resources: dict,
-    simple_app_image: str,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ):
     """T037: Second app in the same environment reuses the existing ingress controller."""
-    client: StyrminClient = styrmin_resources["client"]
     environment_id = styrmin_resources["environment_id"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
@@ -184,17 +168,13 @@ async def test_second_app_reuses_ingress_controller(
     traefik_count_before = len(traefik_pods_before)
 
     # Deploy a second app in the same environment
-    task = await client.deployments.create(
+    deployment = await scenario_driver.create_deployment(
         driver="simple-app",
         name="simple-app",
         version="0.1.0",
         environment_id=environment_id,
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None
-
-    # Wait for deployment to reach running status
-    await _wait_for_deployment_running(client, deployment_id)
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
 
     # Verify still only one Traefik deployment (not duplicated)
     traefik_pods_after: list[AsyncPod] = [
@@ -215,8 +195,7 @@ async def test_second_app_reuses_ingress_controller(
 @pytest.mark.e2e
 @pytest.mark.ci
 async def test_traffic_routes_through_dedicated_ingress(
-    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
-    styrmin_resources: dict,
+    scenario_driver: ScenarioDriver,
     deployed_simple_app: dict,
     vcluster: dict,
 ):
@@ -225,16 +204,11 @@ async def test_traffic_routes_through_dedicated_ingress(
     Uses port-forwarding to reach the Traefik service, which works regardless
     of whether the service type is LoadBalancer or ClusterIP.
     """
-    import httpx
-
-    from tests.e2e.conftest import _wait_for_http
-
-    client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Ensure the deployment is in running state before testing traffic
     deployment_id = deployed_simple_app["deployment_id"]
-    await _wait_for_deployment_running(client, deployment_id)
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
 
     # Find the Traefik service
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
@@ -278,8 +252,7 @@ async def test_traffic_routes_through_dedicated_ingress(
 @pytest.mark.e2e
 @pytest.mark.ci
 async def test_traffic_routes_through_loadbalancer_ingress(
-    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
-    styrmin_resources: dict,
+    scenario_driver: ScenarioDriver,
     deployed_simple_app: dict,
     vcluster: dict,
 ):
@@ -290,10 +263,9 @@ async def test_traffic_routes_through_loadbalancer_ingress(
     that assigns an external IP reachable from the host. This test exercises
     the full LB data path (no port-forward).
     """
-    client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
     deployment_id = deployed_simple_app["deployment_id"]
-    await _wait_for_deployment_running(client, deployment_id)
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
 
     # Find the Traefik LoadBalancer Service and wait for its external IP.
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
@@ -346,17 +318,15 @@ async def test_traffic_routes_through_loadbalancer_ingress(
 
 
 async def test_toggle_dedicated_ingress_on_off(
-    scenario_driver: ScenarioDriver,  # noqa: ARG001 — pulled for [api]/[ui] parametrization; api_only skips [ui]
-    styrmin_resources: dict,
-    simple_app_image: str,
+    scenario_driver: ScenarioDriver,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ):
     """T038a: Enable dedicated_ingress, deploy, then disable — verify provisioning and deprovisioning."""
-    client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
     # Create a fresh cluster with dedicated_ingress
-    cluster = await client.clusters.create(
+    cluster = await scenario_driver.create_cluster(
         name="toggle-cluster",
         config={
             "fqdn_suffix": "styrmin.com",
@@ -369,24 +339,20 @@ async def test_toggle_dedicated_ingress_on_off(
             "standard_storage": {"storage_class": "standard"},
         },
     )
-    environment = await client.environments.create(
+    environment = await scenario_driver.create_environment(
         name="toggle-env",
         cluster_id=cluster.id,
         config={"ip_whitelist": ["127.0.0.1"]},
     )
 
     # Deploy app — should trigger ingress controller creation
-    task = await client.deployments.create(
+    deployment = await scenario_driver.create_deployment(
         driver="simple-app",
         name="simple-app",
         version="0.1.0",
-        environment_id=str(environment.id),
+        environment_id=environment.id,
     )
-    deployment_id = task.deployment_id
-    assert deployment_id is not None
-
-    # Wait for deployment to reach running status
-    await _wait_for_deployment_running(client, deployment_id)
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
 
     # Verify Traefik is running
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
