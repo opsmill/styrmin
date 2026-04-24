@@ -24,4 +24,6 @@ styrmin:
     apiK8s: http://styrmin-server.styrmin.svc.cluster.local:8000
 
 velero:
-  backupsEnabled: true
+  backupsEnabled: false
+  credentials:
+    useSecret: false

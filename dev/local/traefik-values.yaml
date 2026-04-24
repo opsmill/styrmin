@@ -12,12 +12,6 @@ ports:
     port: 80
     expose:
       default: true
-  websecure:
-    port: 443
-    expose:
-      default: true
-    tls:
-      enabled: true
 
 providers:
   kubernetesIngress:
