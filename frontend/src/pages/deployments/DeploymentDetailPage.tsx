@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
+import { SchedulingConfigDialog } from "@/components/deployment/scheduling/SchedulingConfigDialog";
 
 const DEPLOYMENT_TABS = [
   { id: "overview", label: "Overview" },
@@ -90,6 +91,7 @@ export default function DeploymentDetailPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const [schedulingOpen, setSchedulingOpen] = useState(false);
 
   const { data: backupsData, isLoading: backupsFetching } = useListBackupsQuery(
     { instanceId: instanceId ?? "" },
@@ -242,6 +244,13 @@ export default function DeploymentDetailPage() {
             lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
             onRefreshNow={() => refetch()}
           />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSchedulingOpen(true)}
+          >
+            Scheduling
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -657,6 +666,13 @@ export default function DeploymentDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SchedulingConfigDialog
+        open={schedulingOpen}
+        onOpenChange={setSchedulingOpen}
+        deploymentId={deploymentId}
+        currentConfig={deployment.config}
+      />
     </div>
   );
 }
