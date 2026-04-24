@@ -127,20 +127,6 @@ async def _update_scheduling_and_wait(
     )
 
 
-async def _clear_scheduling(
-    scenario_driver: ScenarioDriver, deployment_id: str
-) -> None:
-    """Reset deployment scheduling so subsequent tests start clean.
-
-    An empty ``scheduling`` object signals "no scheduling config" to both
-    entrypoints — the API driver sends ``config={"scheduling": {}}`` and
-    the UI driver opens the dialog, clears every field, and saves.
-    """
-    await scenario_driver.update_deployment(
-        deployment_id=deployment_id, config={"scheduling": {}}
-    )
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -243,24 +229,30 @@ async def scheduling_deployment_b(
 
 
 @pytest.fixture
-async def _reset_scheduling_after_test(
+def _scheduling_driver_bound(
     scheduling_environment: dict,
-    scheduling_deployment: dict,
+    scheduling_deployment: dict,  # noqa: ARG001 — force fixture ordering
     scenario_driver: ScenarioDriver,
-) -> AsyncGenerator[None, None]:
-    """Strip scheduling config after each test to avoid cross-test bleed."""
+) -> None:
+    """Binds the function-scoped ``scenario_driver`` to the scheduling env.
+
+    The function-scoped driver is a fresh instance per test with no
+    environment context, while ``scheduling_deployment`` was created via
+    the session-scoped driver — so the per-test driver needs this
+    explicit attach before calling ``update_deployment`` /
+    ``wait_for_deployment_running``.
+
+    There is deliberately no post-test cleanup. Every test submits a
+    *full replace* of the ``scheduling`` sub-tree (API path sends
+    ``config={"scheduling": {...}}``; the UI page-object clears the
+    dialog form before filling), so the next test's mutation overwrites
+    whatever state the previous test left. A separate clear+wait cycle
+    per test would double the number of reconciliations for no
+    additional isolation.
+    """
     scenario_driver.attach_to_deployment(
         environment_id=scheduling_environment["environment_id"]
     )
-    yield
-    try:
-        await _clear_scheduling(scenario_driver, scheduling_deployment["deployment_id"])
-        await scenario_driver.wait_for_deployment_running(
-            deployment_id=scheduling_deployment["deployment_id"], timeout=300.0
-        )
-    except Exception:  # noqa: BLE001
-        # Teardown errors shouldn't mask the test's own failure.
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +266,7 @@ async def test_post_renderer_injects_into_unmodified_driver(
     scheduling_deployment: dict,
     vcluster: dict,
     scenario_driver: ScenarioDriver,
-    _reset_scheduling_after_test: None,
+    _scheduling_driver_bound: None,
 ) -> None:
     """US6 / T049: the ``simple-app`` driver's ``values.j2.yml`` does not
     reference ``context.components[*].scheduling``. Setting deployment-level
@@ -314,7 +306,7 @@ async def test_resource_requests_via_graphql(
     scheduling_deployment: dict,
     vcluster: dict,
     scenario_driver: ScenarioDriver,
-    _reset_scheduling_after_test: None,
+    _scheduling_driver_bound: None,
 ) -> None:
     """US2 / T060: deployment-level ``resources.requests`` lands on the
     rendered pod template.
@@ -357,7 +349,7 @@ async def test_tolerations_topology_node_affinity_compose_via_graphql(
     scheduling_deployment: dict,
     vcluster: dict,
     scenario_driver: ScenarioDriver,
-    _reset_scheduling_after_test: None,
+    _scheduling_driver_bound: None,
 ) -> None:
     """US3 / T080: three independent scheduling features set together must
     each appear on the rendered pod spec without clobbering each other.
@@ -440,7 +432,7 @@ async def test_runtime_class_via_graphql(
     scheduling_deployment: dict,
     vcluster: dict,
     scenario_driver: ScenarioDriver,
-    _reset_scheduling_after_test: None,
+    _scheduling_driver_bound: None,
 ) -> None:
     """US4 / T092: register a RuntimeClass on the vcluster, set it through
     ``updateDeployment``, and assert the rendered pod template carries
@@ -484,7 +476,7 @@ async def test_resolved_scheduling_graphql_query(
     scheduling_deployment: dict,
     vcluster: dict,  # noqa: ARG001 — fixture dependency for cluster readiness
     scenario_driver: ScenarioDriver,
-    _reset_scheduling_after_test: None,
+    _scheduling_driver_bound: None,
 ) -> None:
     """US5 / T069: after configuring deployment-level scheduling, the
     ``Deployment.resolvedScheduling`` GraphQL field must return one entry
@@ -677,7 +669,7 @@ async def test_quickstart_consolidated_scenario(
     scheduling_deployment: dict,
     vcluster: dict,
     scenario_driver: ScenarioDriver,
-    _reset_scheduling_after_test: None,
+    _scheduling_driver_bound: None,
 ) -> None:
     """T107: stack multiple feature groups onto one deployment and verify
     they all survive rendering through Flux.
@@ -762,7 +754,7 @@ async def test_update_triggers_reconciliation_within_slo(
     scheduling_deployment: dict,
     vcluster: dict,
     scenario_driver: ScenarioDriver,
-    _reset_scheduling_after_test: None,
+    _scheduling_driver_bound: None,
 ) -> None:
     """T109 / FR-019: changing scheduling config must propagate to the
     pod template within the reconciliation SLO. We measure wall-clock
