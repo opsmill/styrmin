@@ -15,17 +15,27 @@ interface ThemeContextValue {
 }
 
 const STORAGE_KEY = "styrmin-theme";
+const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function getInitialTheme(): Theme {
+function getStoredTheme(): Theme | null {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "dark" || stored === "light") return stored;
   } catch {
     // localStorage may not be available in tests
   }
-  return "light";
+  return null;
+}
+
+function getSystemTheme(): Theme {
+  if (typeof window === "undefined" || !window.matchMedia) return "light";
+  return window.matchMedia(COLOR_SCHEME_QUERY).matches ? "dark" : "light";
+}
+
+function getInitialTheme(): Theme {
+  return getStoredTheme() ?? getSystemTheme();
 }
 
 function applyTheme(theme: Theme) {
@@ -35,18 +45,36 @@ function applyTheme(theme: Theme) {
 export function createThemeProvider() {
   function ThemeProvider({ children }: { children: ReactNode }) {
     const [theme, setTheme] = useState<Theme>(getInitialTheme);
+    const [hasManualChoice, setHasManualChoice] = useState<boolean>(
+      () => getStoredTheme() !== null,
+    );
 
     useEffect(() => {
       applyTheme(theme);
-      try {
-        localStorage.setItem(STORAGE_KEY, theme);
-      } catch {
-        // localStorage may not be available in tests
-      }
     }, [theme]);
 
+    useEffect(() => {
+      if (hasManualChoice) return;
+      if (typeof window === "undefined" || !window.matchMedia) return;
+      const mq = window.matchMedia(COLOR_SCHEME_QUERY);
+      const handler = (event: MediaQueryListEvent) => {
+        setTheme(event.matches ? "dark" : "light");
+      };
+      mq.addEventListener("change", handler);
+      return () => mq.removeEventListener("change", handler);
+    }, [hasManualChoice]);
+
     const toggleTheme = useCallback(() => {
-      setTheme((prev) => (prev === "light" ? "dark" : "light"));
+      setTheme((prev) => {
+        const next = prev === "light" ? "dark" : "light";
+        try {
+          localStorage.setItem(STORAGE_KEY, next);
+        } catch {
+          // localStorage may not be available in tests
+        }
+        return next;
+      });
+      setHasManualChoice(true);
     }, []);
 
     return (
