@@ -19,10 +19,7 @@ interface Props {
 }
 
 export function TopologySpreadEditor({ value, onChange }: Props) {
-  function updateAt(
-    i: number,
-    patch: Partial<TopologySpreadConstraint>,
-  ): void {
+  function updateAt(i: number, patch: Partial<TopologySpreadConstraint>): void {
     onChange(value.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
   }
 

@@ -84,7 +84,9 @@ function TermEditor({
           <Input
             id={`${idPrefix}-topology`}
             value={term.topology_key}
-            onChange={(e) => onChange({ ...term, topology_key: e.target.value })}
+            onChange={(e) =>
+              onChange({ ...term, topology_key: e.target.value })
+            }
             placeholder="e.g. kubernetes.io/hostname"
           />
         </div>
