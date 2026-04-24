@@ -126,9 +126,7 @@ export function LabelSelectorEditor({ value, onChange, idPrefix }: Props) {
       <div className="space-y-2">
         <Label>Match expressions</Label>
         {matchExpressions.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            No match expressions.
-          </p>
+          <p className="text-xs text-muted-foreground">No match expressions.</p>
         )}
         {matchExpressions.map((expr, i) => (
           <div

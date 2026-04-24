@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUpdateDeploymentMutation } from "@/generated/graphql";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -27,9 +27,7 @@ interface Props {
   currentConfig: Record<string, unknown>;
 }
 
-function extractScheduling(
-  config: Record<string, unknown>,
-): SchedulingConfig {
+function extractScheduling(config: Record<string, unknown>): SchedulingConfig {
   const raw = config.scheduling;
   if (!raw || typeof raw !== "object") return {};
   return raw as SchedulingConfig;
@@ -45,15 +43,22 @@ export function SchedulingConfigDialog({
     extractScheduling(currentConfig),
   );
   const [error, setError] = useState<string | null>(null);
+  const [prevOpen, setPrevOpen] = useState(open);
 
-  // When the dialog opens fresh (or the deployment's config changes underneath
-  // us), reset the draft to whatever is currently persisted.
-  useEffect(() => {
+  // Reset the draft and clear any prior error the moment the dialog
+  // transitions from closed → open. React permits setState during render
+  // when it's guarded by a prior-value check; this is the officially-
+  // recommended pattern for "resync state from props on a specific
+  // transition" and avoids the cascading-renders warning that
+  // useEffect-based resets trigger under the React Compiler
+  // (react-hooks/set-state-in-effect).
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) {
       setDraft(extractScheduling(currentConfig));
       setError(null);
     }
-  }, [open, currentConfig]);
+  }
 
   const updateMutation = useUpdateDeploymentMutation();
   const queryClient = useQueryClient();
@@ -86,9 +91,9 @@ export function SchedulingConfigDialog({
         <DialogHeader>
           <DialogTitle>Edit Scheduling</DialogTitle>
           <DialogDescription>
-            Configure pod placement, resource requests/limits, and runtime
-            class for this deployment. Leave sections empty to inherit from
-            the environment.
+            Configure pod placement, resource requests/limits, and runtime class
+            for this deployment. Leave sections empty to inherit from the
+            environment.
           </DialogDescription>
         </DialogHeader>
 
@@ -99,7 +104,10 @@ export function SchedulingConfigDialog({
         )}
 
         <div className="space-y-6">
-          <section className="space-y-2" data-testid="scheduling-section-resources">
+          <section
+            className="space-y-2"
+            data-testid="scheduling-section-resources"
+          >
             <h3 className="text-sm font-semibold">Resources</h3>
             <ResourcesEditor
               value={draft.resources ?? {}}
@@ -107,7 +115,10 @@ export function SchedulingConfigDialog({
             />
           </section>
 
-          <section className="space-y-2" data-testid="scheduling-section-tolerations">
+          <section
+            className="space-y-2"
+            data-testid="scheduling-section-tolerations"
+          >
             <h3 className="text-sm font-semibold">Tolerations</h3>
             <TolerationsEditor
               value={draft.tolerations ?? []}
@@ -199,10 +210,7 @@ export function SchedulingConfigDialog({
           >
             Cancel
           </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={updateMutation.isPending}
-          >
+          <Button onClick={handleSubmit} disabled={updateMutation.isPending}>
             {updateMutation.isPending ? "Saving..." : "Save"}
           </Button>
         </DialogFooter>
@@ -210,4 +218,3 @@ export function SchedulingConfigDialog({
     </Dialog>
   );
 }
-
