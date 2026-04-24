@@ -9,13 +9,11 @@ pieces into a single happy-path experience:
     invoke destroy   # tear down
     invoke reset     # destroy + start
 
-The Cloudflare wildcard zone *.local.styrmin.app resolves to 127.0.0.1,
+The Cloudflare wildcard zone *.local.styrmin.io resolves to 127.0.0.1,
 so no /etc/hosts manipulation is needed.
 """
 
 from __future__ import annotations
-
-import sys
 
 from invoke import Context, task
 from rich.console import Console
@@ -25,21 +23,18 @@ from tasks import agent, cluster, dev
 
 from .utils import KUBERNETES_ROOT_NAMESPACE, MAIN_DIRECTORY_PATH, VCLUSTER_NAME, print_header
 
-DEMO_HOSTNAME = "styrmin.local.styrmin.app"
-DEMO_FQDN_SUFFIX = "local.styrmin.app"
+DEMO_HOSTNAME = "styrmin.local.styrmin.io"
+DEMO_FQDN_SUFFIX = "local.styrmin.io"
 DEMO_RELEASE = "styrmin"
 DEMO_IMAGE = "styrmin:latest"
+DEMO_PORT = 8080
 DEMO_VALUES = MAIN_DIRECTORY_PATH / "dev" / "local" / "demo-values.yaml"
 HELM_STYRMIN_DIR = MAIN_DIRECTORY_PATH / "helm" / "styrmin"
 PORT_FORWARD_PID_FILE = MAIN_DIRECTORY_PATH / ".vcluster" / "traefik.pid"
 
 
-def _is_linux() -> bool:
-    return sys.platform == "linux"
-
-
 def _demo_url() -> str:
-    return f"http://{DEMO_HOSTNAME}" if _is_linux() else f"http://{DEMO_HOSTNAME}:8080"
+    return f"http://{DEMO_HOSTNAME}:{DEMO_PORT}"
 
 
 def _image_exists(context: Context) -> bool:
@@ -48,16 +43,18 @@ def _image_exists(context: Context) -> bool:
 
 
 def _start_traefik_port_forward(context: Context) -> None:
-    """Start a backgrounded `kubectl port-forward` for Traefik on macOS.
+    """Start a backgrounded `kubectl port-forward` for Traefik.
 
-    Port 8080 is used because 80 is privileged on macOS.
+    Used uniformly on Linux and macOS so the demo flow is identical
+    across platforms (no reliance on vCluster's embedded LB provider).
+    Port 8080 is used because 80 is privileged.
     Stops any previous port-forward recorded in the PID file first.
     """
     _stop_traefik_port_forward(context)
     PORT_FORWARD_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    print_header("Starting Traefik port-forward (8080:80)...")
+    print_header(f"Starting Traefik port-forward ({DEMO_PORT}:80)...")
     context.run(
-        f"nohup kubectl port-forward svc/traefik 8080:80"
+        f"nohup kubectl port-forward svc/traefik {DEMO_PORT}:80"
         f" -n {KUBERNETES_ROOT_NAMESPACE}"
         f" > /tmp/styrmin-traefik-portforward.log 2>&1 &"
         f" echo $! > {PORT_FORWARD_PID_FILE}",
@@ -111,8 +108,7 @@ def start(context: Context, build_image: bool = False) -> None:
         pty=True,
     )
 
-    if not _is_linux():
-        _start_traefik_port_forward(context)
+    _start_traefik_port_forward(context)
 
     print_header("Waiting for the Styrmin server to be ready...")
     context.run(

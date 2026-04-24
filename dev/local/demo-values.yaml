@@ -2,7 +2,7 @@
 # Helm values overrides for the one-command local demo on vCluster.
 #
 # Usage: invoke start (applied automatically via `helm upgrade --install`).
-# The Cloudflare wildcard zone *.local.styrmin.app resolves to 127.0.0.1,
+# The Cloudflare wildcard zone *.local.styrmin.io resolves to 127.0.0.1,
 # so no /etc/hosts edit is needed.
 
 image:
@@ -14,7 +14,7 @@ ingress:
   enabled: true
   className: traefik
   hosts:
-    - host: styrmin.local.styrmin.app
+    - host: styrmin.local.styrmin.io
       paths:
         - path: /
           pathType: Prefix

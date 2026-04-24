@@ -1,5 +1,4 @@
 import os
-import sys
 
 from invoke import Context, task
 
@@ -45,14 +44,13 @@ def init(context: Context) -> None:
 
 @task
 def traefik(context: Context) -> None:
-    """Install the Traefik ingress controller.
+    """Install the Traefik ingress controller as a ClusterIP service.
 
-    Service type is selected per-OS. Linux gets `LoadBalancer` (vCluster's
-    embedded LB provider routes host traffic to it). Anything else gets
-    `ClusterIP` and callers are expected to set up a port-forward.
+    Callers are expected to set up a port-forward to reach it from the
+    host. We use ClusterIP uniformly across platforms so the demo flow
+    is identical on Linux and macOS.
     """
-    service_type = "LoadBalancer" if sys.platform == "linux" else "ClusterIP"
-    print_header(f"Installing Traefik ingress controller (service.type={service_type})...")
+    print_header("Installing Traefik ingress controller (service.type=ClusterIP)...")
     context.run(
         "helm repo add traefik https://helm.traefik.io/traefik 2>/dev/null || true",
         pty=True,
@@ -62,7 +60,7 @@ def traefik(context: Context) -> None:
         f"helm upgrade --install traefik traefik/traefik"
         f" -n {KUBERNETES_ROOT_NAMESPACE} --create-namespace"
         f" -f {DEV_LOCAL_DIR / 'traefik-values.yaml'}"
-        f" --set service.type={service_type}"
+        f" --set service.type=ClusterIP"
         f" --wait --timeout 5m",
         pty=True,
     )

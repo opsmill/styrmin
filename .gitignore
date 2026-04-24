@@ -209,3 +209,6 @@ helm/styrmin/Chart.lock
 .playwright-mcp/
 test-results/
 playwright-report/
+
+# Local demo runtime state (port-forward PID, etc.)
+.vcluster/
