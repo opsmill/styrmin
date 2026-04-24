@@ -753,17 +753,23 @@ async def velero_ready(
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
 async def deployed_simple_app(
-    styrmin_resources: dict,
+    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver
+    scenario_environment_id: str,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
     simple_app_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> dict:
-    """Deploy simple-app and return deployment info for reuse by tests."""
-    driver, _ = session_scenario_driver
-    environment_id = styrmin_resources["environment_id"]
+    """Deploy simple-app and return deployment info for reuse by tests.
 
+    Deploys into the session-scoped ``scenario_environment_id`` (shared
+    across all tests in the same driver mode) rather than the bootstrap
+    ``styrmin_resources`` env. Two envs would mean two dedicated-ingress
+    controllers, which confuses ``test_traffic_routes_through_*`` when
+    picking "the" Traefik service.
+    """
+    driver, _ = session_scenario_driver
     deployment = await driver.create_deployment(
-        driver="simple-app", version="0.1.0", environment_id=environment_id
+        driver="simple-app", version="0.1.0", environment_id=scenario_environment_id
     )
     deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
 

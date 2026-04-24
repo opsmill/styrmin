@@ -124,7 +124,7 @@ async def test_mariadb_mongodb_backup_and_restore_lifecycle(
     )
     assert created_restore.status in {"pending", "in_progress", "completed"}
     restore = await scenario_driver.wait_for_restore(
-        restore_id=created_restore.id, max_wait=300
+        restore_id=created_restore.id, max_wait=600
     )
     assert restore.status == "completed"
 

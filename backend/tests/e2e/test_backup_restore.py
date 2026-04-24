@@ -23,24 +23,21 @@ from tests.e2e.drivers import ResourceNotFound, ScenarioDriver
 async def portforward_simple_app(
     kubeconfig_path: str,
     namespace: str,
+    service_name: str = "simple-app",
 ) -> AsyncIterator[int]:
-    """Port-forward the simple-app service and yield the local port."""
+    """Port-forward the simple-app service and yield the local port.
+
+    ``service_name`` defaults to the driver's service name; callers that
+    deploy with a ``service_name_overrides`` must pass the override so
+    that cross-namespace ``ExternalName`` aliases for sibling deployments
+    in the shared env don't get matched instead.
+    """
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
-    services: list[AsyncService] = [
-        svc
-        async for svc in AsyncService.list(namespace=namespace, api=kr8s_api)
-        if isinstance(svc, AsyncService)
-    ]
-    simple_app_svc = next(
-        (
-            svc
-            for svc in services
-            if "simple-app" in svc.name and "postgresql" not in svc.name
-        ),
-        None,
+    simple_app_svc = await AsyncService.get(
+        service_name, namespace=namespace, api=kr8s_api
     )
-    assert simple_app_svc, (
-        f"Could not find simple-app service. Available: {[s.name for s in services]}"
+    assert simple_app_svc is not None, (
+        f"Could not find service {service_name!r} in namespace {namespace!r}"
     )
 
     async with simple_app_svc.portforward(
@@ -157,7 +154,9 @@ async def test_backup_and_restore_lifecycle(
     ), f"Backup storage_location should be '{styrmin_resources['bsl_name']}'"
 
     # 1. Write test data (increment counter N times)
-    async with portforward_simple_app(kubeconfig_path, namespace) as port:
+    async with portforward_simple_app(
+        kubeconfig_path, namespace, service_name="simple-app-backup"
+    ) as port:
         async with httpx.AsyncClient() as http_client:
             for _ in range(5):
                 await http_client.get(f"http://localhost:{port}/count", timeout=10)
@@ -180,7 +179,9 @@ async def test_backup_and_restore_lifecycle(
     )
 
     # 3. Write more data (counter goes higher)
-    async with portforward_simple_app(kubeconfig_path, namespace) as port:
+    async with portforward_simple_app(
+        kubeconfig_path, namespace, service_name="simple-app-backup"
+    ) as port:
         async with httpx.AsyncClient() as http_client:
             for _ in range(5):
                 await http_client.get(f"http://localhost:{port}/count", timeout=10)
@@ -197,7 +198,9 @@ async def test_backup_and_restore_lifecycle(
 
     # 5. Wait for pods to recover, verify data restored
     await wait_for_pods_ready(kubeconfig_path, namespace)
-    async with portforward_simple_app(kubeconfig_path, namespace) as port:
+    async with portforward_simple_app(
+        kubeconfig_path, namespace, service_name="simple-app-backup"
+    ) as port:
         async with httpx.AsyncClient() as http_client:
             resp = await http_client.get(f"http://localhost:{port}/count", timeout=10)
             # Counter should be back near pre-backup value
