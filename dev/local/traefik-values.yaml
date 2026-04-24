@@ -1,9 +1,9 @@
 ---
 # Traefik ingress controller values for the local vCluster demo.
 #
-# service.type is intentionally NOT set here; the invoke task
-# `cluster.traefik` sets it per-OS via --set (LoadBalancer on Linux,
-# ClusterIP on macOS). Everything else is identical across platforms.
+# service.type is set to ClusterIP via `--set` in the invoke task
+# `cluster.traefik`; the demo flow port-forwards svc/traefik on every
+# platform rather than relying on a LoadBalancer.
 #
 # Usage: invoke cluster.traefik
 

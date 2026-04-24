@@ -11,10 +11,10 @@ Four top-level invoke commands drive the full lifecycle.
 | `docker` | Runs the vCluster node and builds the Styrmin image |
 | `vcluster` | Creates the virtual Kubernetes cluster |
 | `helm` | Installs Styrmin, Traefik, Velero, and MinIO |
-| `kubectl` | Waits for deployments and (on macOS) port-forwards Traefik |
+| `kubectl` | Waits for deployments and port-forwards Traefik |
 
-DNS for the demo hostname `styrmin.local.styrmin.app` is provided by the
-Cloudflare-hosted wildcard `*.local.styrmin.app` → `127.0.0.1`; no
+DNS for the demo hostname `styrmin.local.styrmin.io` is provided by the
+Cloudflare-hosted wildcard `*.local.styrmin.io` → `127.0.0.1`; no
 `/etc/hosts` edit is needed.
 
 ## Commands
@@ -32,15 +32,16 @@ force a rebuild.
 
 ## Access URLs
 
-After `start` completes, the summary panel prints the demo URLs:
+After `start` completes, the summary panel prints the demo URL:
 
-- **Linux**: `https://styrmin.local.styrmin.app`
-- **macOS**: `https://styrmin.local.styrmin.app:4443`
+```
+http://styrmin.local.styrmin.io:8080
+```
 
-The port difference is because macOS cannot bind privileged ports
-(80/443) without root; `start` backgrounds a
-`kubectl port-forward svc/traefik 8080:80 4443:443` instead, and `stop`
-tears it down.
+`start` backgrounds a `kubectl port-forward svc/traefik 8080:80` (PID
+recorded at `.vcluster/traefik.pid`) and `stop` tears it down. The
+non-privileged port is needed on macOS, and we use it on Linux too so
+the flow is identical across platforms.
 
 The GraphQL endpoint is the same base URL + `/graphql`.
 
@@ -54,13 +55,11 @@ Credentials: `minioadmin / minioadmin`.
 
 ## Platform notes
 
-- **Linux**: Traefik is installed with `service.type=LoadBalancer`.
-  vCluster's embedded LB provider routes traffic from the host to the
-  service — the browser can hit port 443 directly.
-- **macOS** (and other non-Linux platforms): Traefik is installed with
-  `service.type=ClusterIP` and a backgrounded `kubectl port-forward`
-  exposes it on 8080/4443. The PID is recorded at
-  `.vcluster/traefik.pid`.
+- **Traefik exposure**: Installed with `service.type=ClusterIP` on every
+  platform and reached via a backgrounded `kubectl port-forward
+  svc/traefik 8080:80`. We avoid `service.type=LoadBalancer` (and
+  vCluster's embedded LB provider) on Linux for parity with macOS — one
+  code path, one access URL, no host-network surprises.
 - **Single shared ingress**: The demo cluster is bootstrapped with
   `ingress_class=traefik` only — `dedicated_ingress` is intentionally
   omitted so every deployment's Ingress is served by the one front-door
@@ -74,12 +73,7 @@ Credentials: `minioadmin / minioadmin`.
 — check `kubectl get pods -n styrmin` for pending/errored pods. Postgres
 takes the longest on first start (it initializes the `prefect` database).
 
-**Linux: Traefik service stays in `<pending>` external IP** — the vCluster
-embedded LB provider did not pick up the service. Verify with
-`vcluster list` that the cluster is `Running`, then
-`kubectl describe svc traefik -n styrmin`.
-
-**macOS: URL works briefly then stops responding** — the backgrounded
+**URL works briefly then stops responding** — the backgrounded
 port-forward died. Check `/tmp/styrmin-traefik-portforward.log`, then
 re-run `uv run invoke start` to restart it (safely idempotent).
 
