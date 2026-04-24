@@ -256,6 +256,9 @@ async def _reset_scheduling_after_test(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="scheduling config is not exposed through the UI; drives the SDK directly"
+)
 async def test_post_renderer_injects_into_unmodified_driver(
     scheduling_environment: dict,
     scheduling_deployment: dict,
@@ -296,6 +299,9 @@ async def test_post_renderer_injects_into_unmodified_driver(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="scheduling config is not exposed through the UI; drives the SDK directly"
+)
 async def test_resource_requests_via_graphql(
     scheduling_environment: dict,
     scheduling_deployment: dict,
@@ -339,6 +345,9 @@ async def test_resource_requests_via_graphql(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="scheduling config is not exposed through the UI; drives the SDK directly"
+)
 async def test_tolerations_topology_node_affinity_compose_via_graphql(
     scheduling_environment: dict,
     scheduling_deployment: dict,
@@ -422,6 +431,9 @@ async def test_tolerations_topology_node_affinity_compose_via_graphql(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="scheduling config is not exposed through the UI; drives the SDK directly"
+)
 async def test_runtime_class_via_graphql(
     scheduling_environment: dict,
     scheduling_deployment: dict,
@@ -466,6 +478,9 @@ async def test_runtime_class_via_graphql(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="scheduling config is not exposed through the UI; drives the SDK directly"
+)
 async def test_resolved_scheduling_graphql_query(
     scheduling_environment: dict,
     scheduling_deployment: dict,
@@ -524,6 +539,9 @@ async def test_resolved_scheduling_graphql_query(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="scheduling config is not exposed through the UI; drives the SDK directly"
+)
 async def test_pod_anti_affinity_cross_deployment_via_graphql(
     scheduling_environment: dict,
     scheduling_deployment: dict,
@@ -636,6 +654,9 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="scheduling config is not exposed through the UI; drives the SDK directly"
+)
 async def test_quickstart_consolidated_scenario(
     scheduling_environment: dict,
     scheduling_deployment: dict,
@@ -721,6 +742,9 @@ async def test_quickstart_consolidated_scenario(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="scheduling config is not exposed through the UI; drives the SDK directly"
+)
 async def test_update_triggers_reconciliation_within_slo(
     scheduling_environment: dict,
     scheduling_deployment: dict,
