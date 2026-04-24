@@ -226,6 +226,34 @@ class UiScenarioDriver:
             await self._deployment_detail.open_upgrade_dialog()
             await self._deployment_detail.confirm_upgrade(version=version)
 
+    async def update_deployment(
+        self, *, deployment_id: str, config: dict[str, Any]
+    ) -> None:
+        # The Edit Scheduling dialog only surfaces the ``scheduling`` sub-tree
+        # today — mirroring the frontend form's scope. Scenarios that need to
+        # mutate other config keys via UI must grow the dialog first.
+        scheduling = config.get("scheduling")
+        if not isinstance(scheduling, dict):
+            raise ScenarioActionError(
+                "UI driver only supports update_deployment with a "
+                "``config['scheduling']`` sub-tree; other keys are not "
+                "editable through the frontend yet"
+            )
+        unsupported = set(config.keys()) - {"scheduling"}
+        if unsupported:
+            raise ScenarioActionError(
+                "UI driver's update_deployment only accepts the "
+                f"'scheduling' key; got unsupported keys: {sorted(unsupported)}"
+            )
+        environment_id = self._require_environment_context(deployment_id=deployment_id)
+        async with _ui_errors(f"updating scheduling for deployment {deployment_id}"):
+            await self._deployment_detail.goto(
+                environment_id=environment_id, deployment_id=deployment_id
+            )
+            await self._deployment_detail.open_scheduling_dialog()
+            await self._deployment_detail.fill_scheduling_config(scheduling)
+            await self._deployment_detail.save_scheduling_config()
+
     async def get_deployment_timeline(
         self, *, deployment_id: str
     ) -> list[TimelineEntry]:
