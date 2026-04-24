@@ -10,7 +10,10 @@ from styrmin_backend.api.definitions.deployment.model import (
 )
 from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.db.models import Backup as BackupModel
+from styrmin_backend.db.models import BackupStatus as BackupStatusDB
 from styrmin_backend.services.exceptions import InstanceNotFoundError
+
+BackupStatusType = strawberry.enum(BackupStatusDB, name="BackupStatus")
 
 
 @strawberry.type

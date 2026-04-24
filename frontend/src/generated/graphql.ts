@@ -100,6 +100,12 @@ export type BackupSchedule = {
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };
 
+export type BackupStatus =
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'IN_PROGRESS'
+  | 'PENDING';
+
 export type BackupStorageLocation = {
   __typename?: 'BackupStorageLocation';
   bucket: Scalars['String']['output'];
@@ -608,7 +614,7 @@ export type QueryBackupStorageLocationArgs = {
 
 export type QueryBackupsArgs = {
   instanceId: Scalars['UUID']['input'];
-  status?: InputMaybe<Scalars['String']['input']>;
+  status?: InputMaybe<BackupStatus>;
 };
 
 
@@ -660,7 +666,7 @@ export type QueryRestoreArgs = {
 
 export type QueryRestoresArgs = {
   backupId: Scalars['UUID']['input'];
-  status?: InputMaybe<Scalars['String']['input']>;
+  status?: InputMaybe<RestoreStatus>;
 };
 
 
@@ -700,6 +706,12 @@ export type Restore = {
   targetNamespace: Scalars['String']['output'];
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };
+
+export type RestoreStatus =
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'IN_PROGRESS'
+  | 'PENDING';
 
 export type ServiceDefinition = {
   __typename?: 'ServiceDefinition';
@@ -897,7 +909,7 @@ export type ListEnvironmentsQuery = { __typename?: 'Query', environments: Array<
 
 export type ListRestoresQueryVariables = Exact<{
   backupId: Scalars['UUID']['input'];
-  status?: InputMaybe<Scalars['String']['input']>;
+  status?: InputMaybe<RestoreStatus>;
 }>;
 
 
@@ -1751,7 +1763,7 @@ export const useListEnvironmentsQuery = <
 useListEnvironmentsQuery.getKey = (variables?: ListEnvironmentsQueryVariables) => variables === undefined ? ['ListEnvironments'] : ['ListEnvironments', variables];
 
 export const ListRestoresDocument = `
-    query ListRestores($backupId: UUID!, $status: String) {
+    query ListRestores($backupId: UUID!, $status: RestoreStatus) {
   restores(backupId: $backupId, status: $status) {
     id
     name

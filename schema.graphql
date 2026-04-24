@@ -71,6 +71,13 @@ type BackupSchedule {
   deployment: Deployment!
 }
 
+enum BackupStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
 type BackupStorageLocation {
   id: UUID!
   name: String!
@@ -339,9 +346,9 @@ type Query {
   environment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): Environment
   deployment(deploymentId: UUID!): Deployment
   backup(backupId: UUID!): Backup
-  backups(instanceId: UUID!, status: String = null): [Backup!]!
+  backups(instanceId: UUID!, status: BackupStatus = null): [Backup!]!
   restore(restoreId: UUID!): Restore
-  restores(backupId: UUID!, status: String = null): [Restore!]!
+  restores(backupId: UUID!, status: RestoreStatus = null): [Restore!]!
   backupSchedule(scheduleId: UUID!): BackupSchedule
   backupSchedules(deploymentId: UUID!): [BackupSchedule!]!
   applicationDrivers: [ApplicationDriver!]!
@@ -383,6 +390,13 @@ type Restore {
   targetInstanceId: UUID
   backup: Backup!
   componentStatuses: [ComponentRestoreStatus!]
+}
+
+enum RestoreStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
 }
 
 type ServiceDefinition {

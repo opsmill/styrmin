@@ -858,3 +858,121 @@ async def test_restore_backup_resolver(client: AsyncClient, resolver_data: dict)
     assert result["backupId"] == resolver_data["backup_id"]
     assert result["backup"]["id"] == resolver_data["backup_id"]
     assert result["backup"]["name"] == resolver_data["backup_name"]
+
+
+# --- Status filter validation ---
+
+
+_LIST_BACKUPS_QUERY = """
+    query ListBackups($instanceId: UUID!, $status: BackupStatus) {
+        backups(instanceId: $instanceId, status: $status) {
+            id
+            status
+        }
+    }
+"""
+
+_LIST_RESTORES_QUERY = """
+    query ListRestores($backupId: UUID!, $status: RestoreStatus) {
+        restores(backupId: $backupId, status: $status) {
+            id
+            status
+        }
+    }
+"""
+
+
+@pytest.mark.asyncio
+async def test_list_backups_rejects_invalid_status(
+    client: AsyncClient, resolver_data: dict
+):
+    """Invalid backup status filter values are rejected at the schema boundary."""
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": _LIST_BACKUPS_QUERY,
+            "variables": {
+                "instanceId": resolver_data["instance_id"],
+                "status": "NOT_A_REAL_STATUS",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("data") is None
+    assert len(payload["errors"]) >= 1
+    assert any(
+        "BackupStatus" in err["message"] or "NOT_A_REAL_STATUS" in err["message"]
+        for err in payload["errors"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_backups_accepts_valid_status(
+    client: AsyncClient, resolver_data: dict
+):
+    """A valid enum value is accepted and returns matching backups."""
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": _LIST_BACKUPS_QUERY,
+            "variables": {
+                "instanceId": resolver_data["instance_id"],
+                "status": "COMPLETED",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload
+    assert payload["data"]["backups"][0]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_list_restores_rejects_invalid_status(
+    client: AsyncClient, resolver_data: dict
+):
+    """Invalid restore status filter values are rejected at the schema boundary."""
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": _LIST_RESTORES_QUERY,
+            "variables": {
+                "backupId": resolver_data["backup_id"],
+                "status": "NOT_A_REAL_STATUS",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("data") is None
+    assert len(payload["errors"]) >= 1
+    assert any(
+        "RestoreStatus" in err["message"] or "NOT_A_REAL_STATUS" in err["message"]
+        for err in payload["errors"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_restores_accepts_valid_status(
+    client: AsyncClient, resolver_data: dict
+):
+    """A valid enum value is accepted and returns matching restores."""
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": _LIST_RESTORES_QUERY,
+            "variables": {
+                "backupId": resolver_data["backup_id"],
+                "status": "COMPLETED",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload
+    assert payload["data"]["restores"][0]["status"] == "completed"

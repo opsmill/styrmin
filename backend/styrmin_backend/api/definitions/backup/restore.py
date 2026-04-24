@@ -8,7 +8,10 @@ import strawberry
 from styrmin_backend.api.definitions.backup.backup import Backup
 from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.db.models import Restore as RestoreModel
+from styrmin_backend.db.models import RestoreStatus as RestoreStatusDB
 from styrmin_backend.services.exceptions import BackupNotFoundError
+
+RestoreStatusType = strawberry.enum(RestoreStatusDB, name="RestoreStatus")
 
 
 @strawberry.type
