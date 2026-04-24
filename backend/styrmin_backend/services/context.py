@@ -36,7 +36,6 @@ from styrmin_backend.services.exceptions import (
 )
 from styrmin_backend.services.scheduling.validator import (
     expand_deployment_references,
-    validate_runtime_class_exists,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
@@ -202,8 +201,6 @@ async def generate_context_from_deployment(
             environment_config=environment.config,
             deployment_config=deployment.config,
             deployment_components=deployment.components or [],
-            cluster_capabilities=cluster.capabilities,
-            cluster_id=str(cluster.id),
         )
 
         return context
@@ -217,17 +214,16 @@ async def _populate_component_scheduling(
     environment_config: dict | None,
     deployment_config: dict | None,
     deployment_components: list,
-    cluster_capabilities: dict | None = None,
-    cluster_id: str | None = None,
 ) -> None:
     """Populate ``ComponentContext.scheduling`` for each component.
 
     Reads ``scheduling`` from each level's raw JSON config, merges them via
     :func:`_resolve_scheduling_config`, expands affinity ``deployment_ref``
-    terms, validates any resolved ``runtime_class`` against the cluster's
-    capabilities cache, and stores the resulting
-    :class:`ResolvedComponentScheduling` on the matching
-    :class:`ComponentContext`.
+    terms, and stores the resulting :class:`ResolvedComponentScheduling` on
+    the matching :class:`ComponentContext`. Deployment-level ``runtime_class``
+    values are passed through without cluster-side validation — an unknown
+    name surfaces later as a Pending pod with a scheduler error rather than
+    a pre-rollout rejection.
     """
     if context.components is None:
         return
@@ -264,13 +260,6 @@ async def _populate_component_scheduling(
             environment_id=environment_id,
             config=resolved,
         )
-        if resolved.runtime_class is not None:
-            validate_runtime_class_exists(
-                cluster_capabilities,
-                resolved.runtime_class,
-                cluster_id=cluster_id,
-                path=f"component[{name}].scheduling.runtime_class",
-            )
         component_ctx.scheduling = ResolvedComponentScheduling(
             config=resolved, provenance=provenance
         )

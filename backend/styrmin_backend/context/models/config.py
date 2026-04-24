@@ -337,12 +337,6 @@ class ClusterConfig(BaseConfigSection):
 
     Attributes:
         runtime_class (str | None): The runtime class.
-        available_runtime_classes (list[str] | None): Runtime classes installed
-            on the cluster. Platform operators declare which runtime classes
-            (e.g. ``kata``, ``gvisor``) are available so that deployment-level
-            scheduling can reference them. A dedicated discovery worker may
-            later populate this by querying the ``node.k8s.io/v1`` API, at
-            which point this manual declaration can be removed.
         node_selector (str | None): The node selector.
         dedicated_ingress (DedicatedIngressConfig | None): The dedicated ingress controller config.
         standard_storage (StandardStorage | None): The standard storage.
@@ -351,25 +345,9 @@ class ClusterConfig(BaseConfigSection):
     model_config = ConfigDict(extra="forbid")
 
     runtime_class: str | None = None
-    available_runtime_classes: list[str] | None = None
     node_selector: str | None = None
     dedicated_ingress: DedicatedIngressConfig | None = None
     standard_storage: StandardStorage | None = None
-
-    @field_validator("available_runtime_classes")
-    @classmethod
-    def _validate_available_runtime_classes(
-        cls, v: list[str] | None
-    ) -> list[str] | None:
-        if v is None:
-            return v
-        for name in v:
-            if not name or not _DNS_1123_SUBDOMAIN_RE.match(name):
-                raise ValueError(
-                    f"Invalid runtime class name: {name!r}. "
-                    "Each entry must be a non-empty DNS-1123 subdomain."
-                )
-        return v
 
 
 class EnvironmentConfig(BaseConfigSection):

@@ -1,8 +1,7 @@
 """Validators for the scheduling feature.
 
 Hosts cross-cutting validation that cannot be expressed as a Pydantic field
-validator: component-name validation against driver-declared components,
-runtime-class existence against the cluster capabilities cache, and
+validator: component-name validation against driver-declared components and
 deployment-reference expansion for affinity-by-reference.
 """
 
@@ -20,7 +19,6 @@ from styrmin_backend.context.models.config import (
     WeightedAffinityTerm,
 )
 from styrmin_backend.services.exceptions import (
-    RuntimeClassNotFoundError,
     UnresolvableAffinityReferenceError,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
@@ -160,30 +158,3 @@ async def expand_deployment_references(
         runtime_class=config.runtime_class,
         inject=config.inject,
     )
-
-
-def validate_runtime_class_exists(
-    cluster_capabilities: dict | None,
-    runtime_class_name: str,
-    *,
-    cluster_id: str | None = None,
-    path: str | None = None,
-) -> None:
-    """Raise :class:`RuntimeClassNotFoundError` if *runtime_class_name* is
-    not present in the cluster's capabilities cache.
-
-    ``cluster_capabilities`` is the JSON blob stored on ``Cluster.capabilities``.
-    A ``None`` or missing ``runtime_class`` subtree is treated as empty —
-    meaning no runtime classes are known to exist on the cluster.
-    """
-    available: dict = {}
-    if cluster_capabilities:
-        rc = cluster_capabilities.get("runtime_class")
-        if isinstance(rc, dict):
-            available = rc
-    if runtime_class_name not in available:
-        raise RuntimeClassNotFoundError(
-            runtime_class=runtime_class_name,
-            cluster_id=cluster_id,
-            path=path,
-        )

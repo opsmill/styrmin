@@ -30,7 +30,6 @@ from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryI
 from styrmin_backend.context.models.services import ServiceReference
 from styrmin_backend.services import context as context_service
 from styrmin_backend.services.context import _populate_component_scheduling
-from styrmin_backend.services.exceptions import RuntimeClassNotFoundError
 
 
 class TestServiceReference:
@@ -203,8 +202,6 @@ class TestPopulateComponentScheduling:
             environment_config=env_config,
             deployment_config=dep_config,
             deployment_components=components,
-            cluster_capabilities={"runtime_class": {"kata": {"name": "kata"}}},
-            cluster_id="c-1",
         )
 
         assert context.components is not None
@@ -214,29 +211,3 @@ class TestPopulateComponentScheduling:
         assert scheduling.config.resources is not None
         assert scheduling.provenance["runtime_class"] == "environment"
         assert scheduling.provenance["resources.requests.cpu"] == "deployment"
-
-    @pytest.mark.anyio
-    async def test_unknown_runtime_class_is_rejected_at_context_time(self, uow) -> None:  # type: ignore[no-untyped-def]
-        """Runtime class not installed on the cluster must fail context
-        generation so the operator sees the error before FluxCD leaves pods
-        Pending with ``RuntimeClassNotFound``.
-        """
-        context = _make_context_with_component("server")
-        dep_config = {"scheduling": {"runtime_class": "not-installed"}}
-        components = [_FakeDeploymentComponent("server", config=None)]
-
-        with pytest.raises(RuntimeClassNotFoundError) as exc:
-            await _populate_component_scheduling(
-                context=context,
-                uow=uow,
-                environment_id=uuid4(),
-                environment_config=None,
-                deployment_config=dep_config,
-                deployment_components=components,
-                cluster_capabilities={"runtime_class": {"kata": {"name": "kata"}}},
-                cluster_id="c-1",
-            )
-        assert exc.value.error_metadata["runtime_class"] == "not-installed"
-        assert exc.value.error_metadata["path"] == (
-            "component[server].scheduling.runtime_class"
-        )
