@@ -954,6 +954,17 @@ export type UpdateBackupStorageLocationMutationVariables = Exact<{
 
 export type UpdateBackupStorageLocationMutation = { __typename?: 'Mutation', updateBackupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string, endpoint: string, bucket: string, region: string, createdOn: any, updatedOn?: any | null, environmentCount: number } | null };
 
+export type UpdateDeploymentMutationVariables = Exact<{
+  deploymentId: Scalars['UUID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  config?: InputMaybe<Scalars['JSON']['input']>;
+  parameters?: InputMaybe<Scalars['JSON']['input']>;
+  serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride> | ServiceNameOverride>;
+}>;
+
+
+export type UpdateDeploymentMutation = { __typename?: 'Mutation', updateDeployment?: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, deploymentId?: string | null } | null };
+
 export type UpdateDeploymentVersionMutationVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
   version: Scalars['String']['input'];
@@ -1944,6 +1955,37 @@ export const useUpdateBackupStorageLocationMutation = <
       {
     mutationKey: ['UpdateBackupStorageLocation'],
     mutationFn: (variables?: UpdateBackupStorageLocationMutationVariables) => graphqlFetcher<UpdateBackupStorageLocationMutation, UpdateBackupStorageLocationMutationVariables>(UpdateBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateDeploymentDocument = `
+    mutation UpdateDeployment($deploymentId: UUID!, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
+  updateDeployment(
+    deploymentId: $deploymentId
+    name: $name
+    config: $config
+    parameters: $parameters
+    serviceNameOverrides: $serviceNameOverrides
+  ) {
+    id
+    type
+    status
+    message
+    deploymentId
+  }
+}
+    `;
+
+export const useUpdateDeploymentMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateDeploymentMutation, TError, UpdateDeploymentMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateDeploymentMutation, TError, UpdateDeploymentMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateDeployment'],
+    mutationFn: (variables?: UpdateDeploymentMutationVariables) => graphqlFetcher<UpdateDeploymentMutation, UpdateDeploymentMutationVariables>(UpdateDeploymentDocument, variables)(),
     ...options
   }
     )};
