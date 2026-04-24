@@ -37,16 +37,11 @@ def restart(context: Context) -> None:
     """Restart the Docker Compose services."""
 
 
-@task
-def bootstrap(
-    context: Context,  # noqa: ARG001
-    api_url: str = "http://localhost:8000/graphql",
-    fqdn_suffix: str = "styrmin.com",
-) -> None:
-    """Bootstrap Styrmin entities: cluster, environment, and local driver version."""
-    console = Console()
+def _error_code(result: dict) -> str:  # type: ignore[type-arg]
+    return result["errors"][0].get("extensions", {}).get("code", "")
 
-    # 1. Create cluster
+
+def _bootstrap_cluster(console: Console, api_url: str, fqdn_suffix: str) -> str:
     print_header("Creating cluster record...")
     result = graphql(
         api_url,
@@ -64,51 +59,94 @@ def bootstrap(
     )
     if result.get("errors"):
         error = result["errors"][0]
-        code = error.get("extensions", {}).get("code", "")
-        if code == "ALREADY_EXISTS":
+        if _error_code(result) == "ALREADY_EXISTS":
             console.print(f"[yellow]⚠[/yellow] Cluster already exists: {error['message']}")
             raise SystemExit(
                 "Cluster already exists — run 'uv run invoke dev.clean' to reset, or use Bruno to get the existing cluster ID."
             )
         raise RuntimeError(f"Failed to create cluster: {error['message']}")
-    cluster_id = result["data"]["createCluster"]["id"]
+    cluster_id: str = result["data"]["createCluster"]["id"]
     console.print(f"[green]✓[/green] Cluster created: {cluster_id}")
+    return cluster_id
 
-    # 2. Create environment
+
+def _bootstrap_environment(console: Console, api_url: str, cluster_id: str) -> str | None:
     print_header("Creating environment record...")
     result = graphql(
         api_url,
         load_query("create_environment"),
+        {"name": "local", "clusterId": cluster_id, "config": {"ip_whitelist": ["127.0.0.1"]}},
+    )
+    if result.get("errors"):
+        error = result["errors"][0]
+        if _error_code(result) == "ALREADY_EXISTS":
+            console.print(f"[yellow]⚠[/yellow] Environment already exists: {error['message']}")
+            return None
+        raise RuntimeError(f"Failed to create environment: {error['message']}")
+    environment_id: str = result["data"]["createEnvironment"]["id"]
+    console.print(f"[green]✓[/green] Environment created: {environment_id}")
+    return environment_id
+
+
+def _bootstrap_backup_storage(console: Console, api_url: str, environment_id: str | None) -> None:
+    # Create a backup storage location pointing at the in-cluster MinIO and
+    # assign it to the environment. Mirrors the e2e bootstrap flow.
+    print_header("Creating backup storage location (MinIO)...")
+    result = graphql(
+        api_url,
+        load_query("create_backup_storage_location"),
         {
             "name": "local",
-            "clusterId": cluster_id,
-            "config": {"ip_whitelist": ["127.0.0.1"]},
+            "endpoint": "http://minio.styrmin.svc:9000",
+            "bucket": "velero",
+            "region": "minio",
+            "accessKeyId": "minioadmin",
+            "secretAccessKey": "minioadmin",
         },
     )
     if result.get("errors"):
         error = result["errors"][0]
-        code = error.get("extensions", {}).get("code", "")
-        if code == "ALREADY_EXISTS":
-            console.print(f"[yellow]⚠[/yellow] Environment already exists: {error['message']}")
-        else:
-            raise RuntimeError(f"Failed to create environment: {error['message']}")
-    else:
-        environment_id = result["data"]["createEnvironment"]["id"]
-        console.print(f"[green]✓[/green] Environment created: {environment_id}")
+        if _error_code(result) != "ALREADY_EXISTS":
+            raise RuntimeError(f"Failed to create backup storage location: {error['message']}")
+        console.print(f"[yellow]⚠[/yellow] Backup storage location already exists: {error['message']}")
+        return
+    bsl_id: str = result["data"]["createBackupStorageLocation"]["id"]
+    console.print(f"[green]✓[/green] Backup storage location created: {bsl_id}")
 
-    # 3. Load local driver version (auto-creates the ApplicationDriver if needed)
-    print_header("Loading local driver version (infrahub)...")
+    if environment_id is None:
+        return
+    print_header("Assigning backup storage location to environment...")
     result = graphql(
         api_url,
-        load_query("load_local_driver_version"),
-        {"path": "/styrmin/drivers/infrahub"},
+        load_query("assign_backup_storage_location"),
+        {"environmentId": environment_id, "backupStorageLocationId": bsl_id},
     )
     if result.get("errors"):
-        error = result["errors"][0]
-        raise RuntimeError(f"Failed to load driver version: {error['message']}")
+        raise RuntimeError(f"Failed to assign backup storage location: {result['errors'][0]['message']}")
+    console.print("[green]✓[/green] Backup storage location assigned")
+
+
+def _bootstrap_driver_version(console: Console, api_url: str) -> None:
+    print_header("Loading local driver version (infrahub)...")
+    result = graphql(api_url, load_query("load_local_driver_version"), {"path": "/styrmin/drivers/infrahub"})
+    if result.get("errors"):
+        raise RuntimeError(f"Failed to load driver version: {result['errors'][0]['message']}")
     adv = result["data"]["loadLocalApplicationDriverVersion"]
     console.print(f"[green]✓[/green] Driver version loaded: {adv['version']} (id: {adv['id']})")
 
+
+@task
+def bootstrap(
+    context: Context,  # noqa: ARG001
+    api_url: str = "http://localhost:8000/graphql",
+    fqdn_suffix: str = "styrmin.com",
+) -> None:
+    """Bootstrap Styrmin entities: cluster, environment, BSL, and local driver version."""
+    console = Console()
+    cluster_id = _bootstrap_cluster(console, api_url, fqdn_suffix)
+    environment_id = _bootstrap_environment(console, api_url, cluster_id)
+    _bootstrap_backup_storage(console, api_url, environment_id)
+    _bootstrap_driver_version(console, api_url)
     console.print(
         "\n[bold green]Bootstrap complete![/bold green] You can now deploy Infrahub using Bruno (Deploy Infrahub, seq 8)."
     )

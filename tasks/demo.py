@@ -39,7 +39,7 @@ def _is_linux() -> bool:
 
 
 def _demo_url() -> str:
-    return f"https://{DEMO_HOSTNAME}" if _is_linux() else f"https://{DEMO_HOSTNAME}:4443"
+    return f"http://{DEMO_HOSTNAME}" if _is_linux() else f"http://{DEMO_HOSTNAME}:8080"
 
 
 def _image_exists(context: Context) -> bool:
@@ -50,14 +50,14 @@ def _image_exists(context: Context) -> bool:
 def _start_traefik_port_forward(context: Context) -> None:
     """Start a backgrounded `kubectl port-forward` for Traefik on macOS.
 
-    Ports 8080/4443 are used because 80/443 are privileged on macOS.
+    Port 8080 is used because 80 is privileged on macOS.
     Stops any previous port-forward recorded in the PID file first.
     """
     _stop_traefik_port_forward(context)
     PORT_FORWARD_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    print_header("Starting Traefik port-forward (8080:80, 4443:443)...")
+    print_header("Starting Traefik port-forward (8080:80)...")
     context.run(
-        f"nohup kubectl port-forward svc/traefik 8080:80 4443:443"
+        f"nohup kubectl port-forward svc/traefik 8080:80"
         f" -n {KUBERNETES_ROOT_NAMESPACE}"
         f" > /tmp/styrmin-traefik-portforward.log 2>&1 &"
         f" echo $! > {PORT_FORWARD_PID_FILE}",
@@ -99,9 +99,8 @@ def start(context: Context, build_image: bool = False) -> None:
 
     cluster.create(context)
     cluster.connect(context)
-    cluster.init(context)
     cluster.traefik(context)
-    cluster.velero(context)
+    cluster.minio(context)
 
     print_header(f"Deploying the Styrmin Helm chart (release={DEMO_RELEASE})...")
     context.run(

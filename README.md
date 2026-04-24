@@ -25,7 +25,7 @@ This installs all dependencies (including dev tools) and ensures the CLI and SDK
 
 ```shell
 uv run invoke cluster.create cluster.connect cluster.init   # Create a local kind cluster and Install required CRDs via Helm
-uv run invoke cluster.velero                                # Install MinIO + Velero for backup support
+uv run invoke cluster.minio                                 # Install MinIO for backup storage
 uv run invoke dev.build dev.start                           # Build the Docker image and start all services
 ```
 
