@@ -15,7 +15,7 @@ from infrahub_sdk import Config as InfrahubConfig
 from infrahub_sdk import InfrahubClient as InfrahubSDKClient
 from kr8s.asyncio.objects import Service as AsyncService
 
-from tests.e2e.conftest import _wait_for_http
+from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ResourceNotFound, ScenarioDriver
 
 
@@ -40,9 +40,7 @@ async def portforward_simple_app(
         f"Could not find service {service_name!r} in namespace {namespace!r}"
     )
 
-    async with simple_app_svc.portforward(
-        remote_port=8000, local_port="auto"
-    ) as local_port:
+    async with _portforward(simple_app_svc, remote_port=8000) as local_port:
         await _wait_for_http(
             f"http://localhost:{local_port}/health", timeout=30.0, interval=3.0
         )
@@ -213,9 +211,7 @@ async def portforward_infrahub(
         f"Could not find infrahub server service. Available: {[s.name for s in services]}"
     )
 
-    async with infrahub_svc.portforward(
-        remote_port=8000, local_port="auto"
-    ) as local_port:
+    async with _portforward(infrahub_svc, remote_port=8000) as local_port:
         await _wait_for_http(
             f"http://localhost:{local_port}/api/schema/summary",
             timeout=120.0,

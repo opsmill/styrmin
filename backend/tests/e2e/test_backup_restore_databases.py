@@ -15,7 +15,7 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 
-from tests.e2e.conftest import _wait_for_http
+from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ResourceNotFound, ScenarioDriver
 from tests.e2e.test_backup_restore import wait_for_pods_ready
 
@@ -46,9 +46,7 @@ async def portforward_db_test(
         f"Could not find db-test service. Available: {[s.name for s in services]}"
     )
 
-    async with db_test_svc.portforward(
-        remote_port=8000, local_port="auto"
-    ) as local_port:
+    async with _portforward(db_test_svc, remote_port=8000) as local_port:
         await _wait_for_http(
             f"http://localhost:{local_port}/health", timeout=60.0, interval=3.0
         )

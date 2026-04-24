@@ -4,6 +4,7 @@ import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 
 from tests.e2e.conftest import (
+    _portforward,
     _wait_for_http,
 )
 from tests.e2e.drivers import ScenarioDriver
@@ -49,9 +50,7 @@ async def test_deploy_semaphore(
         f"Could not find semaphore service. Available services:\n{[svc.name for svc in services]}"
     )
 
-    async with semaphore_svc.portforward(
-        remote_port=3000, local_port="auto"
-    ) as local_port:
+    async with _portforward(semaphore_svc, remote_port=3000) as local_port:
         # Wait for Semaphore to be reachable
         await _wait_for_http(
             f"http://localhost:{local_port}/api/ping",

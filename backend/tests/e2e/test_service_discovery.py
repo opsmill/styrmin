@@ -13,7 +13,7 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 
-from tests.e2e.conftest import _wait_for_http
+from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 
 
@@ -84,9 +84,7 @@ async def test_service_discovery_between_apps(
         f"Could not find executor service. Available: {[svc.name for svc in services]}"
     )
 
-    async with executor_svc.portforward(
-        remote_port=8000, local_port="auto"
-    ) as local_port:
+    async with _portforward(executor_svc, remote_port=8000) as local_port:
         await _wait_for_http(
             f"http://localhost:{local_port}/health",
             timeout=30.0,
