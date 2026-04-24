@@ -82,7 +82,7 @@ backend/
 │   │   ├── resolvers.py                  # + _resolve_scheduling_config(env, deployment, component, driver_components)
 │   │   │                                 #   Implements FR-007..FR-011 and Story 5 provenance map.
 │   │   └── exceptions.py                 # + InvalidSchedulingConfigError, UnknownComponentInConfigError,
-│   │                                     #   UnresolvableAffinityReferenceError, RuntimeClassNotFoundError
+│   │                                     #   UnresolvableAffinityReferenceError
 │   ├── services/
 │   │   ├── scheduling/                   # NEW package
 │   │   │   ├── __init__.py

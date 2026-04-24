@@ -8,8 +8,7 @@ This walkthrough shows a platform operator configuring the new `scheduling` sect
 - An environment (`dev`) in that cluster.
 - An application driver registered whose spec declares two components: `server` and `worker`.
 - A tainted node pool on the cluster: `dedicated=batch:NoSchedule` (for Story 3 validation).
-- A sandboxed `RuntimeClass` named `kata` installed on the cluster (for Story 4 validation).
-- The cluster-capability discovery worker has run at least once after `kata` was installed, so `Cluster.capabilities.runtime_classes` contains `kata`. Rollout-time runtime-class validation reads from this cache, not live from the cluster — if you install a new runtime class and deploy immediately, the rollout may fail with `RuntimeClassNotFoundError` until the next capability refresh.
+- A sandboxed `RuntimeClass` named `kata` installed on the cluster (for Story 4 validation). The platform no longer validates the name against the cluster — any DNS-1123 string is accepted. If the `RuntimeClass` resource is missing the pod goes Pending with a scheduler error.
 
 ## 1. Set environment-wide defaults (US2, US3)
 
@@ -125,7 +124,7 @@ mutation {
 }
 ```
 
-**Expected**: only `worker` pods launch under `runtimeClassName: kata`. Invalid runtime class names (not present in the cluster's capabilities cache) are rejected at rollout with a `RuntimeClassNotFoundError`.
+**Expected**: only `worker` pods launch under `runtimeClassName: kata`. Names that reference a `RuntimeClass` not installed on the cluster pass validation but the pod stays `Pending` with a scheduler error until the `RuntimeClass` is created.
 
 ## 6. Opt out of post-render injection for resources on a single component (FR-016)
 
@@ -226,7 +225,7 @@ kubectl -n <app-a-namespace> get deploy -l styrmin/deployment_id=<app-a-uuid> -o
 - **Unknown component**: submit component-level scheduling for a name the driver did not declare → `UnknownComponentInConfigError` (VALIDATION_ERROR) (FR-005).
 - **Unresolvable deployment_ref**: reference a deployment that does not exist in the environment → `UnresolvableAffinityReferenceError` (FR-001d).
 - **Invalid quantity**: set `resources.requests.cpu = "two"` → Pydantic validation fails with a clear `path` (`scheduling.resources.requests.cpu`).
-- **Non-existent runtime class**: set `runtime_class = "ghost"` → rollout blocks with `RuntimeClassNotFoundError` and the deployment status identifies the offending level.
+- **Non-existent runtime class**: set `runtime_class = "ghost"` → the mutation succeeds, FluxCD applies the pod spec, and the pod goes `Pending` with a scheduler `RuntimeClassNotFound` error (no pre-apply rejection — the allow-list check was removed).
 - **Unsatisfiable affinity**: define anti-affinity against a deployment that already occupies every node → pods remain `Pending` and the deployment status surfaces the unsatisfied constraint with its source level (FR-018).
 
 ## 10. What "done" looks like
