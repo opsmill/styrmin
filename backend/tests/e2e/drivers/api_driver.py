@@ -44,6 +44,12 @@ class ApiScenarioDriver:
     def __init__(self, client: StyrminClient) -> None:
         self._client = client
 
+    def attach_to_deployment(self, *, environment_id: str) -> None:  # noqa: ARG002
+        # API driver does not cache an environment context; every call takes
+        # the deployment/environment id it needs. Implemented as a no-op to
+        # satisfy the protocol used by UI-aware helpers.
+        return
+
     # --- Platform setup ---------------------------------------------------
 
     async def create_cluster(self, *, name: str, config: dict[str, Any]) -> ClusterRef:
@@ -188,6 +194,14 @@ class ApiScenarioDriver:
     async def upgrade_deployment(self, *, deployment_id: str, version: str) -> None:
         try:
             await self._client.deployments.update_version(deployment_id, version)
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+
+    async def update_deployment(
+        self, *, deployment_id: str, config: dict[str, Any]
+    ) -> None:
+        try:
+            await self._client.deployments.update(deployment_id, config=config)
         except StyrminError as exc:
             raise _normalise(exc) from exc
 

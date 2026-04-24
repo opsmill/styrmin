@@ -85,11 +85,34 @@ class ScenarioDriver(Protocol):
         parameters: dict[str, Any] | None = None,
     ) -> DeploymentRef: ...
 
+    def attach_to_deployment(self, *, environment_id: str) -> None:
+        """Bind the driver to an environment without going through ``create_deployment``.
+
+        Use when a scenario observes a deployment created by a module-scoped
+        fixture (which creates via the session-scoped driver) and then uses
+        the function-scoped driver for subsequent operations — the function-
+        scoped instance has not seen the environment yet. API driver
+        implementations may be no-ops since they re-derive the environment
+        from each call's arguments.
+        """
+
     async def wait_for_deployment_running(
         self, *, deployment_id: str, timeout: float = 300.0
     ) -> DeploymentRef: ...
 
     async def upgrade_deployment(self, *, deployment_id: str, version: str) -> None: ...
+
+    async def update_deployment(
+        self, *, deployment_id: str, config: dict[str, Any]
+    ) -> None:
+        """Submit a new ``config`` for an existing deployment.
+
+        The UI driver drives the Edit Scheduling dialog on the deployment
+        detail page; the API driver calls ``client.deployments.update``.
+        Both implementations block until the server has accepted the
+        mutation — callers still need ``wait_for_deployment_running`` to
+        observe the reconciliation completing.
+        """
 
     async def get_deployment_timeline(
         self, *, deployment_id: str

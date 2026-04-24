@@ -86,6 +86,236 @@ class DeploymentDetailPage:
         # Dialog closes on success; treat its disappearance as the signal.
         await dialog.wait_for(state="hidden")
 
+    # ------------------------------------------------------------------
+    # Scheduling dialog
+    # ------------------------------------------------------------------
+    #
+    # The frontend renders a single form over the whole SchedulingConfig
+    # shape (tolerations, resources, topology spread, three affinity
+    # blocks, runtime class). The fill helper below wipes each section's
+    # existing rows before populating the new payload — tests submit a
+    # full desired scheduling config, not a patch, so the semantics match
+    # a fresh fill.
+
+    async def open_scheduling_dialog(self) -> None:
+        await self._page.get_by_role("button", name="Scheduling", exact=True).click()
+        await self._page.get_by_role("dialog", name="Edit Scheduling").wait_for()
+
+    async def save_scheduling_config(self) -> None:
+        dialog = self._page.get_by_role("dialog", name="Edit Scheduling")
+        await dialog.get_by_role("button", name="Save", exact=True).click()
+        # The dialog closes on server-accepted mutation. An error surfaces
+        # as an inline <Alert> that keeps the dialog open — surface that as
+        # a ScenarioActionError so callers see the backend message.
+        try:
+            await dialog.wait_for(state="hidden", timeout=30_000)
+        except AssertionError as exc:
+            alert = dialog.locator("[role=alert]")
+            message = (
+                await alert.inner_text()
+                if await alert.count() > 0
+                else "(no alert rendered)"
+            )
+            raise ScenarioActionError(
+                f"scheduling save did not close the dialog: {message}"
+            ) from exc
+
+    async def fill_scheduling_config(self, scheduling: dict) -> None:
+        dialog = self._page.get_by_role("dialog", name="Edit Scheduling")
+        await self._reset_scheduling_form(dialog)
+
+        resources = scheduling.get("resources")
+        if isinstance(resources, dict):
+            await self._fill_scheduling_resources(dialog, resources)
+
+        tolerations = scheduling.get("tolerations") or []
+        for entry in tolerations:
+            await self._add_scheduling_toleration(dialog, entry)
+
+        topology = scheduling.get("topology_spread_constraints") or []
+        for entry in topology:
+            await self._add_scheduling_topology_spread(dialog, entry)
+
+        for kind in ("pod_affinity", "pod_anti_affinity", "node_affinity"):
+            block = scheduling.get(kind)
+            if isinstance(block, dict):
+                await self._fill_scheduling_affinity(dialog, kind, block)
+
+        runtime_class = scheduling.get("runtime_class")
+        if isinstance(runtime_class, str):
+            await dialog.get_by_label("Runtime class name").fill(runtime_class)
+
+    async def _reset_scheduling_form(self, dialog: Locator) -> None:
+        # Clear every list-based section by clicking each row's remove
+        # button. Iterates to count() each loop so removals shrink the
+        # list in place. Resource inputs are cleared by filling with "".
+        for testid in (
+            "toleration-row",
+            "topology-spread-row",
+            "pod_affinity-required-row",
+            "pod_affinity-preferred-row",
+            "pod_anti_affinity-required-row",
+            "pod_anti_affinity-preferred-row",
+            "node_affinity-required-row",
+            "node_affinity-preferred-row",
+            "match-label-row",
+            "match-expression-row",
+        ):
+            rows = dialog.locator(f"[data-testid={testid}]")
+            # Deleting from the end avoids re-indexing the selectors between
+            # clicks.
+            while True:
+                count = await rows.count()
+                if count == 0:
+                    break
+                row = rows.nth(count - 1)
+                await row.locator("[aria-label^='Remove']").first.click()
+        # Clear resource input fields — they are plain <Input>s that never
+        # create/remove rows.
+        for variant in ("requests", "limits"):
+            for field in ("cpu", "memory", "ephemeral_storage"):
+                await dialog.locator(f"#res-{variant}-{field}").fill("")
+        await dialog.get_by_label("Runtime class name").fill("")
+
+    async def _fill_scheduling_resources(
+        self, dialog: Locator, resources: dict
+    ) -> None:
+        for variant in ("requests", "limits"):
+            spec = resources.get(variant)
+            if not isinstance(spec, dict):
+                continue
+            for field in ("cpu", "memory", "ephemeral_storage"):
+                value = spec.get(field)
+                if value is None:
+                    continue
+                await dialog.locator(f"#res-{variant}-{field}").fill(str(value))
+
+    async def _add_scheduling_toleration(self, dialog: Locator, entry: dict) -> None:
+        await dialog.get_by_role("button", name="Add toleration", exact=True).click()
+        row = dialog.locator("[data-testid=toleration-row]").last
+        if (key := entry.get("key")) is not None:
+            await row.get_by_label("Key").fill(str(key))
+        if (operator := entry.get("operator")) is not None:
+            await self._select_value(row, "Operator", str(operator))
+        if (value := entry.get("value")) is not None:
+            await row.get_by_label("Value").fill(str(value))
+        if (effect := entry.get("effect")) is not None:
+            await self._select_value(row, "Effect", str(effect))
+        if (seconds := entry.get("toleration_seconds")) is not None:
+            await row.get_by_label("Toleration seconds (optional)").fill(str(seconds))
+
+    async def _add_scheduling_topology_spread(
+        self, dialog: Locator, entry: dict
+    ) -> None:
+        await dialog.get_by_role(
+            "button", name="Add topology spread constraint", exact=True
+        ).click()
+        row = dialog.locator("[data-testid=topology-spread-row]").last
+        if (skew := entry.get("max_skew")) is not None:
+            await row.get_by_label("Max skew").fill(str(skew))
+        if (topology_key := entry.get("topology_key")) is not None:
+            await row.get_by_label("Topology key").fill(str(topology_key))
+        if (when := entry.get("when_unsatisfiable")) is not None:
+            await self._select_value(row, "When unsatisfiable", str(when))
+        label_selector = entry.get("label_selector")
+        if isinstance(label_selector, dict):
+            await self._fill_label_selector(row, label_selector)
+
+    async def _fill_scheduling_affinity(
+        self, dialog: Locator, kind: str, block: dict
+    ) -> None:
+        required_terms = block.get("required") or []
+        preferred_terms = block.get("preferred") or []
+        # Find the section by its testid (built in SchedulingConfigDialog).
+        section_testid = {
+            "pod_affinity": "scheduling-section-pod-affinity",
+            "pod_anti_affinity": "scheduling-section-pod-anti-affinity",
+            "node_affinity": "scheduling-section-node-affinity",
+        }[kind]
+        section = dialog.locator(f"[data-testid={section_testid}]")
+
+        for term in required_terms:
+            await section.get_by_role(
+                "button", name="Add required term", exact=True
+            ).click()
+            row = section.locator(f"[data-testid={kind}-required-row]").last
+            await self._fill_affinity_term(row, kind, term)
+
+        for weighted in preferred_terms:
+            await section.get_by_role(
+                "button", name="Add preferred term", exact=True
+            ).click()
+            row = section.locator(f"[data-testid={kind}-preferred-row]").last
+            if (weight := weighted.get("weight")) is not None:
+                await row.get_by_label("Weight (1–100)").fill(str(weight))
+            term = weighted.get("term")
+            if isinstance(term, dict):
+                await self._fill_affinity_term(row, kind, term)
+
+    async def _fill_affinity_term(self, row: Locator, kind: str, term: dict) -> None:
+        topology_key = term.get("topology_key")
+        if kind != "node_affinity" and topology_key is not None:
+            await row.get_by_label("Topology key").fill(str(topology_key))
+
+        if kind in ("pod_affinity", "pod_anti_affinity"):
+            # The target-mode selector only appears on pod-affinity rows.
+            if term.get("deployment_ref"):
+                await self._select_value(row, "Target by", "Deployment")
+                dep_ref = term["deployment_ref"]
+                if dep_id := dep_ref.get("deployment_id"):
+                    await row.get_by_label("Deployment ID").fill(str(dep_id))
+                if dep_name := dep_ref.get("deployment_name"):
+                    await row.get_by_label("Deployment name (alternative)").fill(
+                        str(dep_name)
+                    )
+                return
+            # Fall through to label_selector (the default mode).
+            await self._select_value(row, "Target by", "Label selector")
+
+        label_selector = term.get("label_selector")
+        if isinstance(label_selector, dict):
+            await self._fill_label_selector(row, label_selector)
+
+    async def _fill_label_selector(self, row: Locator, label_selector: dict) -> None:
+        match_labels = label_selector.get("match_labels") or {}
+        for key, value in match_labels.items():
+            await row.get_by_role("button", name="Add match label", exact=True).click()
+            ml_row = row.locator("[data-testid=match-label-row]").last
+            # aria-label ends with the row's 1-based ordinal; targeting the
+            # last row by its aria-label would require knowing the count, so
+            # we fill the first empty key/value pair inside it.
+            await ml_row.locator("input[placeholder='key']").fill(str(key))
+            await ml_row.locator("input[placeholder='value']").fill(str(value))
+
+        match_expressions = label_selector.get("match_expressions") or []
+        for expr in match_expressions:
+            await row.get_by_role(
+                "button", name="Add match expression", exact=True
+            ).click()
+            expr_row = row.locator("[data-testid=match-expression-row]").last
+            if (k := expr.get("key")) is not None:
+                await expr_row.locator("input[placeholder='key']").fill(str(k))
+            if (op := expr.get("operator")) is not None:
+                # Each expression row contains exactly one combobox (the
+                # operator Select); scope to the row and click it.
+                await expr_row.get_by_role("combobox").click()
+                await self._page.get_by_role("option", name=op, exact=True).click()
+            values = expr.get("values") or []
+            if values:
+                await expr_row.locator(
+                    "input[placeholder='values (comma-separated)']"
+                ).fill(",".join(str(v) for v in values))
+
+    async def _select_value(
+        self, container: Locator, label_text: str, option: str
+    ) -> None:
+        # Base UI's Select renders the trigger as a <button role="combobox">.
+        # Options appear inside a portal outside the dialog, so click handling
+        # happens at the page level.
+        trigger = container.get_by_label(label_text)
+        await trigger.click()
+        await self._page.get_by_role("option", name=option, exact=True).click()
+
     async def read_timeline(self) -> list[TimelineEntry]:
         """Click the Timeline tab and read every entry from the rendered DOM.
 
