@@ -1,10 +1,12 @@
 import asyncio
+import errno
 import logging
 import os
 import shutil
 import subprocess
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncGenerator
 
@@ -246,6 +248,47 @@ async def _wait_for_http(
     raise TimeoutError(msg)
 
 
+@asynccontextmanager
+async def _portforward(
+    service,
+    *,
+    remote_port: int,
+    attempts: int = 5,
+) -> AsyncGenerator[int, None]:
+    """Open a kr8s port-forward to *service*, retrying on EADDRINUSE.
+
+    kr8s picks a random local port and checks it, then hands the port to
+    ``asyncio.start_server`` — a TOCTOU window during which another
+    process can grab the same port. Under CI port pressure this races
+    intermittently. Each retry asks kr8s for a fresh port by creating a
+    new ``PortForward`` instance.
+
+    Only the EADDRINUSE failure during context entry is retried;
+    anything else (auth errors, missing service, caller exceptions
+    inside the ``async with`` body) propagates.
+    """
+    last_exc: OSError | None = None
+    for attempt in range(attempts):
+        cm = service.portforward(remote_port=remote_port, local_port="auto")
+        try:
+            port = await cm.__aenter__()
+        except OSError as exc:
+            if exc.errno != errno.EADDRNOTAVAIL and exc.errno != errno.EADDRINUSE:
+                raise
+            last_exc = exc
+            if attempt == attempts - 1:
+                break
+            await asyncio.sleep(0.1 * (attempt + 1))
+            continue
+        try:
+            yield port
+        finally:
+            await cm.__aexit__(None, None, None)
+        return
+    assert last_exc is not None  # loop only exits here after an EADDR* failure
+    raise last_exc
+
+
 # ---------------------------------------------------------------------------
 # Fixture: chart_server
 # ---------------------------------------------------------------------------
@@ -296,7 +339,7 @@ async def chart_server(
     # Port-forward chart-server service and verify index.yaml is accessible
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     service = await AsyncService.get("chart-server", namespace="default", api=kr8s_api)
-    async with service.portforward(remote_port=8080, local_port="auto") as local_port:
+    async with _portforward(service, remote_port=8080) as local_port:
         await _wait_for_http(f"http://localhost:{local_port}/index.yaml", timeout=60.0)
 
         # Yield cluster-internal chart server URL
@@ -404,7 +447,7 @@ async def git_server(
     # Port-forward git-daemon service for git push
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     service = await AsyncService.get("git-server", namespace="default", api=kr8s_api)
-    async with service.portforward(remote_port=9418, local_port="auto") as local_port:
+    async with _portforward(service, remote_port=9418) as local_port:
         for name, repo_dir in repo_dirs.items():
             await asyncio.to_thread(
                 porcelain.push,
@@ -506,7 +549,7 @@ async def styrmin_deployment(
     service = await AsyncService.get(
         "styrmin-server", namespace="styrmin", api=kr8s_api
     )
-    async with service.portforward(remote_port=8000, local_port="auto") as local_port:
+    async with _portforward(service, remote_port=8000) as local_port:
         styrmin_url = f"http://localhost:{local_port}"
 
         # Wait for styrmin to be healthy

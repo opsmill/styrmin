@@ -22,7 +22,7 @@ from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 
-from tests.e2e.conftest import _wait_for_http
+from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 
 
@@ -230,9 +230,7 @@ async def test_traffic_routes_through_dedicated_ingress(
     # Port-forward to the Traefik service and send HTTP request with Host header
     # forwards directly to the selected Pod's container port (not the Service
     # port) — so we pass Traefik's "web" container port (8000), not 80.
-    async with traefik_svc.portforward(
-        remote_port=8000, local_port="auto"
-    ) as local_port:
+    async with _portforward(traefik_svc, remote_port=8000) as local_port:
         await _wait_for_http(
             f"http://localhost:{local_port}/count",
             timeout=60.0,

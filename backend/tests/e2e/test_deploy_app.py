@@ -5,7 +5,7 @@ import httpx
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
-from tests.e2e.conftest import _wait_for_http
+from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 
 
@@ -31,9 +31,7 @@ async def test_deploy_simple_app(
     )
     assert simple_app_svc is not None, "simple-app service not found"
 
-    async with simple_app_svc.portforward(
-        remote_port=8000, local_port="auto"
-    ) as local_port:
+    async with _portforward(simple_app_svc, remote_port=8000) as local_port:
         # Wait for the simple-app to be reachable
         await _wait_for_http(
             f"http://localhost:{local_port}/health",
@@ -73,9 +71,7 @@ async def test_upgrade_simple_app(
     )
     assert simple_app_svc is not None, "simple-app service not found"
 
-    async with simple_app_svc.portforward(
-        remote_port=8000, local_port="auto"
-    ) as local_port:
+    async with _portforward(simple_app_svc, remote_port=8000) as local_port:
         await _wait_for_http(
             f"http://localhost:{local_port}/health",
             timeout=60.0,
