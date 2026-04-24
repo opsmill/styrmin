@@ -51,7 +51,6 @@ def _bootstrap_cluster(console: Console, api_url: str, fqdn_suffix: str) -> str:
             "config": {
                 "fqdn_suffix": fqdn_suffix,
                 "ingress_class": "traefik",
-                "dedicated_ingress": {"implementation": "traefik", "type": "ingress", "service": {"type": "ClusterIP"}},
                 "runtime_class": "default",
                 "standard_storage": {"storage_class": "local-path"},
             },
