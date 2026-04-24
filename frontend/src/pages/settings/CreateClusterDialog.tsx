@@ -28,6 +28,7 @@ const createClusterSchema = z
     ingress_class: z.string().optional(),
     fqdn_suffix: z.string().optional(),
     runtime_class: z.string().optional(),
+    available_runtime_classes: z.string().optional(),
     dedicated_ingress_enabled: z.boolean(),
     dedicated_ingress_implementation: z.string(),
     dedicated_ingress_type: z.string(),
@@ -53,6 +54,13 @@ function buildClusterConfig(
   if (values.ingress_class) config.ingress_class = values.ingress_class;
   if (values.fqdn_suffix) config.fqdn_suffix = values.fqdn_suffix;
   if (values.runtime_class) config.runtime_class = values.runtime_class;
+  if (values.available_runtime_classes) {
+    const classes = values.available_runtime_classes
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (classes.length > 0) config.available_runtime_classes = classes;
+  }
   if (values.dedicated_ingress_enabled) {
     const di: Record<string, string> = {};
     if (values.dedicated_ingress_implementation)
@@ -81,6 +89,7 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
       ingress_class: "",
       fqdn_suffix: "",
       runtime_class: "",
+      available_runtime_classes: "",
       dedicated_ingress_enabled: false,
       dedicated_ingress_implementation: "",
       dedicated_ingress_type: "",
@@ -238,6 +247,23 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                     <Input
                       id="cluster-runtime-class"
                       placeholder="e.g. default"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                  </div>
+                )}
+              </form.Field>
+
+              <form.Field name="available_runtime_classes">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="cluster-available-runtime-classes">
+                      Available Runtime Classes
+                    </Label>
+                    <Input
+                      id="cluster-available-runtime-classes"
+                      placeholder="comma-separated, e.g. kata, gvisor"
                       value={field.state.value}
                       onChange={(e) => field.handleChange(e.target.value)}
                       onBlur={field.handleBlur}
