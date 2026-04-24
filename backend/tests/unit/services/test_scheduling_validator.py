@@ -25,14 +25,12 @@ from styrmin_backend.domain.models import (
     DeploymentState,
 )
 from styrmin_backend.services.exceptions import (
-    RuntimeClassNotFoundError,
     UnknownComponentInConfigError,
     UnresolvableAffinityReferenceError,
 )
 from styrmin_backend.services.scheduling.validator import (
     expand_deployment_references,
     resolve_deployment_reference,
-    validate_runtime_class_exists,
 )
 
 
@@ -263,10 +261,13 @@ class TestExpandDeploymentReferences:
 
 
 class TestRuntimeClassValidation:
-    """T089 / T090: runtime_class syntactic validation + existence check."""
+    """Runtime-class syntactic validation. Cluster-side existence checks
+    were removed when the allow-list was dropped — any DNS-1123 name is
+    accepted and surfaces later as a Pending pod if the cluster does not
+    install the referenced RuntimeClass."""
 
     def test_dns_1123_syntactic_validation(self) -> None:
-        """T089: ``runtime_class`` must be a DNS-1123 subdomain."""
+        """``runtime_class`` must be a DNS-1123 subdomain."""
         from pydantic import ValidationError
         from styrmin_backend.context.models.config import SchedulingConfig
 
@@ -279,34 +280,3 @@ class TestRuntimeClassValidation:
             SchedulingConfig(runtime_class="-leading-dash")
         with pytest.raises(ValidationError):
             SchedulingConfig(runtime_class="")
-
-    def test_existence_check_happy_path(self) -> None:
-        capabilities = {
-            "runtime_class": {
-                "kata": {"name": "kata"},
-                "gvisor": {"name": "gvisor"},
-            }
-        }
-        # No exception = present
-        validate_runtime_class_exists(capabilities, "kata")
-        validate_runtime_class_exists(capabilities, "gvisor")
-
-    def test_existence_check_missing_raises(self) -> None:
-        with pytest.raises(RuntimeClassNotFoundError) as exc:
-            validate_runtime_class_exists(
-                {"runtime_class": {"kata": {"name": "kata"}}},
-                "not-installed",
-                cluster_id="c-1",
-                path="scheduling.runtime_class",
-            )
-        assert exc.value.error_metadata["runtime_class"] == "not-installed"
-        assert exc.value.error_metadata["cluster_id"] == "c-1"
-        assert exc.value.error_metadata["path"] == "scheduling.runtime_class"
-
-    def test_empty_capabilities_treated_as_none_installed(self) -> None:
-        with pytest.raises(RuntimeClassNotFoundError):
-            validate_runtime_class_exists(None, "kata")
-        with pytest.raises(RuntimeClassNotFoundError):
-            validate_runtime_class_exists({}, "kata")
-        with pytest.raises(RuntimeClassNotFoundError):
-            validate_runtime_class_exists({"runtime_class": None}, "kata")

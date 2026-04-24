@@ -37,14 +37,6 @@ class BackupCapabilityDetail(BaseModel):
     storage_location: str
 
 
-class RuntimeClassCapabilityDetail(BaseModel):
-    """Detail for an installed ``node.k8s.io/v1`` runtime class."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-
-
 class Capabilities(BaseModel):
     """Root model representing the full capability set for a Cluster or Environment.
 
@@ -57,7 +49,6 @@ class Capabilities(BaseModel):
     storage: dict[str, StorageCapabilityDetail] | None = None
     backup: dict[str, BackupCapabilityDetail] | None = None
     ingress: dict[str, IngressCapabilityDetail] | None = None
-    runtime_class: dict[str, RuntimeClassCapabilityDetail] | None = None
 
 
 def capabilities_to_dict(capabilities: Capabilities) -> dict[str, Any] | None:
