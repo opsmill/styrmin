@@ -11,6 +11,7 @@ ignore: |
   /specs/
   /helm/**/*.yaml
   /.claude/worktrees/
+  /.playwright-mcp/
   /.specify/extensions/
   /.specify/extensions.yml
   /driver/examples/simple-app/src/helm/
