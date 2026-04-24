@@ -52,41 +52,26 @@ async def test_deploy_simple_app(
 @pytest.mark.ci
 async def test_upgrade_simple_app(
     scenario_driver: ScenarioDriver,
-    scenario_environment_id: str,
-    styrmin_resources: dict,  # noqa: ARG001 — transitive: builds cluster/BSL/driver
-    simple_app_image: str,  # noqa: ARG001 — v0.1.0 image
+    deployed_simple_app: dict,
     simple_app_image_v2: str,  # noqa: ARG001 — v0.2.0 image
     vcluster: dict,
 ) -> None:
-    # Unique ``service_name_overrides`` so this deployment doesn't collide
-    # with other tests' simple-app instances in the shared session env.
-    deployment = await scenario_driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-        service_name_overrides=[
-            {"driverServiceName": "simple-app", "overrideName": "simple-app-upgrade"}
-        ],
-    )
-    deployment = await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment.id
-    )
-    namespace = f"styrmin-{deployment.id}"
-
+    # Upgrade the shared session deployment in place. ``upgrade_deployment``
+    # is idempotent — if another test already bumped the version, this is a
+    # no-op and we go straight to the /version check.
+    deployment_id = deployed_simple_app["deployment_id"]
+    namespace = deployed_simple_app["namespace"]
     await scenario_driver.upgrade_deployment(
-        deployment_id=deployment.id, version="0.2.0"
+        deployment_id=deployment_id, version="0.2.0"
     )
-    await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
 
-    # Target the exact override name — fuzzy substring match would catch
-    # cross-namespace ExternalName aliases for sibling deployments in the
-    # shared env.
     kubeconfig_path = vcluster["kubeconfig_path"]
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     simple_app_svc = await AsyncService.get(
-        "simple-app-upgrade", namespace=namespace, api=kr8s_api
+        "simple-app", namespace=namespace, api=kr8s_api
     )
-    assert simple_app_svc is not None, "simple-app-upgrade service not found"
+    assert simple_app_svc is not None, "simple-app service not found"
 
     async with simple_app_svc.portforward(
         remote_port=8000, local_port="auto"

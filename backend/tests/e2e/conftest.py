@@ -921,17 +921,22 @@ async def load_db_test(
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
 async def deployed_db_test(
-    load_db_test: dict,
+    load_db_test: dict,  # noqa: ARG001 — transitive: loads the driver version
+    scenario_environment_id: str,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
     db_test_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> dict:
-    """Deploy db-test and return deployment info for reuse by tests."""
-    driver, _ = session_scenario_driver
-    environment_id = load_db_test["environment_id"]
+    """Deploy db-test and return deployment info for reuse by tests.
 
+    Targets the session-scoped ``scenario_environment_id`` (same env as
+    ``deployed_simple_app``) so the cluster has exactly one env with
+    application deployments and therefore one dedicated ingress
+    controller.
+    """
+    driver, _ = session_scenario_driver
     deployment = await driver.create_deployment(
-        driver="db-test", version="0.1.0", environment_id=environment_id
+        driver="db-test", version="0.1.0", environment_id=scenario_environment_id
     )
     deployment = await driver.wait_for_deployment_running(
         deployment_id=deployment.id, timeout=300.0

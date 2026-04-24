@@ -114,30 +114,17 @@ async def test_backup_and_restore_lifecycle(
     scenario_driver: ScenarioDriver,
     scenario_environment_id: str,
     styrmin_resources: dict,
+    deployed_simple_app: dict,
     velero_ready: None,  # noqa: ARG001 — ensures Velero is up before backup/restore
-    simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ) -> None:
     """Full lifecycle: write data -> backup -> modify -> restore -> verify."""
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
-    # Unique ``service_name_overrides`` so this deployment doesn't collide
-    # with other tests' simple-app instances in the shared session env.
-    deployment = await scenario_driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-        service_name_overrides=[
-            {"driverServiceName": "simple-app", "overrideName": "simple-app-backup"}
-        ],
-    )
-    deployment = await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment.id
-    )
-    instance_id = deployment.instance_id
+    instance_id = deployed_simple_app["instance_id"]
     assert instance_id is not None, "Deployment should have an instance_id"
-    namespace = f"styrmin-{deployment.id}"
+    namespace = deployed_simple_app["namespace"]
 
     # Verify environment exposes backup capability (BSL was assigned by the fixture)
     environment = await client.environments.get(environment_id=scenario_environment_id)
@@ -154,9 +141,7 @@ async def test_backup_and_restore_lifecycle(
     ), f"Backup storage_location should be '{styrmin_resources['bsl_name']}'"
 
     # 1. Write test data (increment counter N times)
-    async with portforward_simple_app(
-        kubeconfig_path, namespace, service_name="simple-app-backup"
-    ) as port:
+    async with portforward_simple_app(kubeconfig_path, namespace) as port:
         async with httpx.AsyncClient() as http_client:
             for _ in range(5):
                 await http_client.get(f"http://localhost:{port}/count", timeout=10)
@@ -179,9 +164,7 @@ async def test_backup_and_restore_lifecycle(
     )
 
     # 3. Write more data (counter goes higher)
-    async with portforward_simple_app(
-        kubeconfig_path, namespace, service_name="simple-app-backup"
-    ) as port:
+    async with portforward_simple_app(kubeconfig_path, namespace) as port:
         async with httpx.AsyncClient() as http_client:
             for _ in range(5):
                 await http_client.get(f"http://localhost:{port}/count", timeout=10)
@@ -198,9 +181,7 @@ async def test_backup_and_restore_lifecycle(
 
     # 5. Wait for pods to recover, verify data restored
     await wait_for_pods_ready(kubeconfig_path, namespace)
-    async with portforward_simple_app(
-        kubeconfig_path, namespace, service_name="simple-app-backup"
-    ) as port:
+    async with portforward_simple_app(kubeconfig_path, namespace) as port:
         async with httpx.AsyncClient() as http_client:
             resp = await http_client.get(f"http://localhost:{port}/count", timeout=10)
             # Counter should be back near pre-backup value
