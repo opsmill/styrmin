@@ -595,6 +595,7 @@ class Client(AsyncBaseClient):
                 id
                 name
                 status
+                deletedAt
                 config
                 applicationVersion
                 applicationDriverVersionId

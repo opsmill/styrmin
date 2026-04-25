@@ -3,6 +3,7 @@ query GetDeployment($deploymentId: UUID!) {
         id
         name
         status
+        deletedAt
         config
         applicationVersion
         applicationDriverVersionId

@@ -202,9 +202,9 @@ async def test_delete_deployment_remove_drops_backups(
     # Create a backup so we have something concrete to verify got
     # removed. This may take time to complete depending on driver
     # strategies; the E2E harness tolerates slow starts.
-    await client.backups.create(instance_id=instance_id)
+    await client.backups.create_backup(instance_id=instance_id)
 
-    backups_before = await client.backups.list(instance_id=instance_id)
+    backups_before = await client.backups.list_backups(instance_id=instance_id)
     assert backups_before, "Precondition: at least one backup present"
 
     await client.deployments.delete(
@@ -214,7 +214,7 @@ async def test_delete_deployment_remove_drops_backups(
     await _wait_for_deployment_deleted(client, deployment_id)
 
     # Post-condition: backups for the original instance are gone.
-    backups_after = await client.backups.list(instance_id=instance_id)
+    backups_after = await client.backups.list_backups(instance_id=instance_id)
     assert backups_after == [], (
         f"REMOVE disposition should leave no backups, got {len(backups_after)}"
     )
