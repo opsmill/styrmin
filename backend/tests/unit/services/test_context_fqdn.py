@@ -1,5 +1,6 @@
 """Unit tests for FQDN population during context generation."""
 
+from styrmin_backend.context.fqdn import compute_external_url
 from styrmin_backend.context.models.services import ServiceReference
 
 
@@ -73,3 +74,50 @@ class TestServiceReferenceFqdnFields:
         ref = ServiceReference(host="my-svc", port=8080, kind="http")
         assert ref.primary_fqdn is None
         assert ref.human_readable_fqdn is None
+
+
+class TestComputeExternalUrl:
+    """Tests for compute_external_url URL builder."""
+
+    def test_returns_none_when_fqdn_is_none(self) -> None:
+        assert compute_external_url(None, "https", 443) is None
+        assert compute_external_url(None, None, None) is None
+
+    def test_returns_none_when_fqdn_is_empty(self) -> None:
+        assert compute_external_url("", "https", 443) is None
+
+    def test_defaults_to_https_when_scheme_is_none(self) -> None:
+        assert (
+            compute_external_url("app.example.com", None, None)
+            == "https://app.example.com"
+        )
+
+    def test_omits_default_https_port(self) -> None:
+        assert (
+            compute_external_url("app.example.com", "https", 443)
+            == "https://app.example.com"
+        )
+
+    def test_omits_default_http_port(self) -> None:
+        assert (
+            compute_external_url("app.example.com", "http", 80)
+            == "http://app.example.com"
+        )
+
+    def test_includes_non_default_port(self) -> None:
+        assert (
+            compute_external_url("app.example.com", "http", 8080)
+            == "http://app.example.com:8080"
+        )
+
+    def test_https_with_non_default_port(self) -> None:
+        assert (
+            compute_external_url("app.example.com", "https", 8443)
+            == "https://app.example.com:8443"
+        )
+
+    def test_omits_port_when_none(self) -> None:
+        assert (
+            compute_external_url("app.example.com", "http", None)
+            == "http://app.example.com"
+        )

@@ -58,6 +58,8 @@ class DeployedService:
     component: str
     primary_fqdn: str | None = None
     human_readable_fqdn: str | None = None
+    primary_url: str | None = None
+    human_readable_url: str | None = None
 
     instance: strawberry.Private[DeployedServiceModel]
 
@@ -72,6 +74,8 @@ class DeployedService:
         *,
         primary_fqdn: str | None = None,
         human_readable_fqdn: str | None = None,
+        primary_url: str | None = None,
+        human_readable_url: str | None = None,
     ) -> DeployedService:
         return cls(
             id=instance.id,
@@ -83,6 +87,8 @@ class DeployedService:
             component=instance.component,
             primary_fqdn=primary_fqdn,
             human_readable_fqdn=human_readable_fqdn,
+            primary_url=primary_url,
+            human_readable_url=human_readable_url,
             instance=instance,
         )
 

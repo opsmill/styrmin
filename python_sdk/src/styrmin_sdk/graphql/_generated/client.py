@@ -577,6 +577,19 @@ class Client(AsyncBaseClient):
                   name
                   enabled
                 }
+                deployedServices {
+                  id
+                  driverServiceName
+                  resolvedName
+                  kind
+                  scope
+                  port
+                  component
+                  primaryFqdn
+                  humanReadableFqdn
+                  primaryUrl
+                  humanReadableUrl
+                }
               }
             }
             """)

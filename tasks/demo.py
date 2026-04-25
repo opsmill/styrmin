@@ -118,7 +118,13 @@ def start(context: Context, build_image: bool = False) -> None:
 
     print_header("Bootstrapping cluster, environment, and local driver...")
     try:
-        dev.bootstrap(context, api_url=f"{_demo_url()}/graphql", fqdn_suffix=DEMO_FQDN_SUFFIX)
+        dev.bootstrap(
+            context,
+            api_url=f"{_demo_url()}/graphql",
+            fqdn_suffix=DEMO_FQDN_SUFFIX,
+            external_url_scheme="http",
+            external_url_port=DEMO_PORT,
+        )
     except SystemExit as exc:
         console.print(f"[yellow]⚠[/yellow] Bootstrap skipped (already initialized): {exc}")
 
