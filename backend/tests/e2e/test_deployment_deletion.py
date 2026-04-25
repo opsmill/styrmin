@@ -128,6 +128,11 @@ async def fresh_simple_app(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="deletion lifecycle is exercised through the SDK and Prefect "
+    "DELETE_INSTANCE flow; the UI delete dialog has its own ui_only "
+    "scenario in test_deployment_deletion_ui.py"
+)
 async def test_delete_deployment_retain_tombstones_and_clears_cluster(
     styrmin_resources: dict,
     fresh_simple_app: dict,
@@ -176,6 +181,11 @@ async def test_delete_deployment_retain_tombstones_and_clears_cluster(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="deletion lifecycle is exercised through the SDK and Prefect "
+    "DELETE_INSTANCE flow; the UI delete dialog has its own ui_only "
+    "scenario in test_deployment_deletion_ui.py"
+)
 async def test_delete_deployment_remove_drops_backups(
     styrmin_resources: dict,
     fresh_simple_app: dict,
@@ -211,6 +221,11 @@ async def test_delete_deployment_remove_drops_backups(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="deletion lifecycle is exercised through the SDK and Prefect "
+    "DELETE_INSTANCE flow; the UI delete dialog has its own ui_only "
+    "scenario in test_deployment_deletion_ui.py"
+)
 async def test_delete_deployment_rejects_concurrent_mutation(
     styrmin_resources: dict,
     fresh_simple_app: dict,
@@ -236,6 +251,11 @@ async def test_delete_deployment_rejects_concurrent_mutation(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="deletion lifecycle is exercised through the SDK and Prefect "
+    "DELETE_INSTANCE flow; the UI delete dialog has its own ui_only "
+    "scenario in test_deployment_deletion_ui.py"
+)
 async def test_delete_deployment_idempotent(
     styrmin_resources: dict,
     fresh_simple_app: dict,
