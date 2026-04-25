@@ -1,4 +1,6 @@
-# Feature Specification: Instance Backup & Restore for Styrmin
+# Archived Design Note: Instance Backup & Restore for Styrmin
+
+This archived design note captured the initial backup and restore feature direction. The maintained backend reference now lives in `dev/knowledge/backend/backup-restore.md`.
 
 ## Overview
 

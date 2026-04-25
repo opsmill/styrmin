@@ -115,7 +115,7 @@ sleep infinity | uv run pytest backend/tests/e2e/<node_id> -v -s --pdb 2>&1 | te
 
 Pytest stays paused indefinitely on failure. Inspect with `kubectl` from a separate shell, then kill the whole process group (`pkill -f pytest` or kill the job) once you're done — pdb can't receive commands over the dummy stdin.
 
-This is faster than `--e2e-keep-cluster` when you want to see state exactly at the point of failure (port-forwards and connections still open), rather than after teardown has partially run. See `.agents/commands/e2e-troubleshoot.md` for the structured multi-iteration variant.
+Use `.agents/skills/e2e-troubleshoot/SKILL.md` for the structured multi-iteration variant of this `--pdb` workflow.
 
 `--reruns` from ``pytest-rerunfailures`` is incompatible with ``--pdb``, which is why the plugin and its auto-retry markers were removed in bce37c1. Do not reintroduce them.
 
@@ -171,9 +171,9 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 | How does the system work? | `dev/knowledge/` |
 | How do I do X? | `dev/guides/` |
 | Why was this decided? | `dev/adr/` |
-| What are we building? | `dev/specs/` |
+| What are we building? | `specs/` |
 | How should I write code? | `dev/guidelines/` |
-| What commands are available? | `.agents/commands/` |
+| What agent workflows are available? | `.agents/skills/` and `.agents/commands/` |
 
 ## Component Maps
 
