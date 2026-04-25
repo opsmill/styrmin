@@ -10,6 +10,7 @@ from styrmin_backend.agent.service.kubernetes.velero.resources import VeleroBack
 from styrmin_backend.db.models import (
     Backup,
     BackupStatus,
+    DeploymentState,
     Restore,
     RestoreStatus,
 )
@@ -23,6 +24,7 @@ from styrmin_backend.services.backup.strategies.postgres import PostgresBackupSt
 from styrmin_backend.services.exceptions import (
     BackupAlreadyInProgressError,
     BackupNotFoundError,
+    InternalDeploymentError,
     RestoreAlreadyInProgressError,
     RestoreNotFoundError,
 )
@@ -243,14 +245,52 @@ async def create_restore(
     name: str | None = None,
     target_instance_id: UUID | None = None,
     timeout: int = DEFAULT_RESTORE_TIMEOUT,
-) -> Restore:
-    """Create a new restore operation from a backup."""
+) -> tuple[Restore, UUID]:
+    """Create a new restore operation from a backup.
+
+    Resolves the target deployment from the backup, blocks restoring an
+    internal deployment, blocks a second concurrent restore on the same
+    deployment, and flips the deployment to RESTORING in the same
+    transaction so the UI reflects the lifecycle immediately.
+
+    Returns:
+        Tuple of ``(restore_record, deployment_id)``. The deployment id
+        is returned so the caller can dispatch the restore workflow
+        without re-resolving it.
+    """
     async with uow:
         backup = await uow.backups.get(backup_id)
         if backup is None:
             raise BackupNotFoundError(f"Backup {backup_id} not found")
 
-        # Check for in-progress restores from the same backup
+        # Resolve the target deployment via backup -> instance -> deployment.
+        instance = await uow.application_instances.get(backup.instance_id)
+        if instance is None or instance.deployment_id is None:
+            raise BackupNotFoundError(
+                f"Backup {backup_id} has no associated deployment"
+            )
+        deployment_id = instance.deployment_id
+
+        deployment = await uow.deployments.find(deployment_id)
+        if deployment is None:
+            raise BackupNotFoundError(
+                f"Backup {backup_id}: deployment {deployment_id} not found"
+            )
+
+        if deployment.internal:
+            raise InternalDeploymentError(
+                f"Cannot restore internal deployment {deployment_id}"
+            )
+
+        # Concurrency guard: block a second restore on the same deployment.
+        if deployment.status == DeploymentState.RESTORING:
+            existing = await uow.restores.get_by_target_namespace(
+                target_namespace, status=RestoreStatus.IN_PROGRESS
+            )
+            existing_id = str(existing[0].id) if existing else "unknown"
+            raise RestoreAlreadyInProgressError(existing_restore_id=existing_id)
+
+        # Same-backup guard (preserved from prior behavior).
         existing_restores = await uow.restores.get_by_backup_id(
             backup_id, status=RestoreStatus.IN_PROGRESS
         )
@@ -273,6 +313,12 @@ async def create_restore(
         if name is None:
             restore.name = f"styrmin-{restore.id}"
 
+        # Flip the deployment into RESTORING so the UI/API reflect it
+        # immediately. The CRD status patch happens in the restore workflow
+        # (which has K8s access).
+        deployment.status = DeploymentState.RESTORING
+        await uow.deployments.save(deployment)
+
         await uow.commit()
         await uow.session.refresh(restore)  # Load server-generated fields
 
@@ -280,7 +326,7 @@ async def create_restore(
             f"Created restore {restore.id} ({restore.name}) "
             f"from backup {backup_id} to namespace {target_namespace}"
         )
-        return restore
+        return restore, deployment_id
 
 
 async def get_restore(restore_id: UUID, uow: UnitOfWork) -> Restore:
