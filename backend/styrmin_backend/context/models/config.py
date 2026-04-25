@@ -319,6 +319,12 @@ class BaseConfigSection(BaseModel):
         ingress_class (str): The ingress class name.
         db_size (str): The database size.
         fqdn_suffix (str): The fully qualified domain name suffix.
+        external_url_scheme (str): Scheme used for user-facing service URLs
+            ("http" or "https"). Defaults to "https" when not set.
+        external_url_port (int): Port to include in user-facing service URLs.
+            Omitted from rendered URLs when it matches the scheme default
+            (80 for http, 443 for https). Used for local demos that expose
+            the cluster on a non-default port (e.g. via `kubectl port-forward`).
         scheduling (SchedulingConfig): Optional hierarchical pod scheduling
             and resource configuration. Absent fields inherit from shallower
             levels during resolution.
@@ -329,6 +335,8 @@ class BaseConfigSection(BaseModel):
     ingress_class: str | None = None
     db_size: str | None = None
     fqdn_suffix: str | None = None
+    external_url_scheme: Literal["http", "https"] | None = None
+    external_url_port: int | None = Field(default=None, ge=1, le=65535)
     scheduling: SchedulingConfig | None = None
 
 

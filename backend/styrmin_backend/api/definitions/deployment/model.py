@@ -21,6 +21,7 @@ from styrmin_backend.api.definitions.service.model import (
 from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.api.scalars import JSON
 from styrmin_backend.context.fqdn import (
+    compute_external_url,
     compute_human_readable_fqdn,
     compute_primary_fqdn,
 )
@@ -171,9 +172,11 @@ class Deployment:
         async with uow:
             services = await uow.deployed_services.get_by_deployment_id(self.id)
 
-            # Resolve config hierarchy to get fqdn_suffix
+            # Resolve config hierarchy to get fqdn_suffix and external URL settings
             environment = await uow.environments.get(self.instance.environment_id)
             fqdn_suffix: str | None = None
+            external_url_scheme: str | None = None
+            external_url_port: int | None = None
             environment_name: str = ""
             app_name: str = ""
 
@@ -187,6 +190,8 @@ class Deployment:
                     **(self.instance.config or {}),
                 }
                 fqdn_suffix = resolved.get("fqdn_suffix")
+                external_url_scheme = resolved.get("external_url_scheme")
+                external_url_port = resolved.get("external_url_port")
                 environment_name = environment.name
 
             driver_version = await uow.application_driver_versions.get(
@@ -195,18 +200,30 @@ class Deployment:
             if driver_version is not None:
                 app_name = driver_version.application_driver.name
 
-            return [
-                DeployedServiceType.from_instance(
-                    s,
-                    primary_fqdn=compute_primary_fqdn(
-                        app_name, str(self.id), fqdn_suffix
-                    ),
-                    human_readable_fqdn=compute_human_readable_fqdn(
-                        s.resolved_name, environment_name, fqdn_suffix
-                    ),
+            primary_fqdn = compute_primary_fqdn(app_name, str(self.id), fqdn_suffix)
+            primary_url = compute_external_url(
+                primary_fqdn, external_url_scheme, external_url_port
+            )
+
+            results: list[DeployedServiceType] = []
+            for s in services:
+                human_readable_fqdn = compute_human_readable_fqdn(
+                    s.resolved_name, environment_name, fqdn_suffix
                 )
-                for s in services
-            ]
+                results.append(
+                    DeployedServiceType.from_instance(
+                        s,
+                        primary_fqdn=primary_fqdn,
+                        human_readable_fqdn=human_readable_fqdn,
+                        primary_url=primary_url,
+                        human_readable_url=compute_external_url(
+                            human_readable_fqdn,
+                            external_url_scheme,
+                            external_url_port,
+                        ),
+                    )
+                )
+            return results
 
     @strawberry.field
     async def pod_statuses(self, info: strawberry.Info) -> list[PodStatusType]:

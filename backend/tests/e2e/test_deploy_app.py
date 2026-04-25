@@ -5,6 +5,7 @@ import httpx
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
+from styrmin_sdk import StyrminClient
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 
@@ -106,4 +107,44 @@ async def test_upgrade_simple_app(
             assert last_version == "0.2.0", (
                 f"Service still serving {last_version!r} after 120s; "
                 "rolling update to 0.2.0 did not complete"
+            )
+
+
+@pytest.mark.ci
+async def test_deployed_service_external_url_includes_port(
+    deployed_simple_app: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+) -> None:
+    """Deployed services expose URL fields that reflect the cluster's configured
+    external scheme/port.
+
+    The session fixture configures the cluster with
+    ``external_url_scheme=http`` / ``external_url_port=8080`` (matching the
+    one-command demo on macOS where Traefik is reached via ``kubectl
+    port-forward 8080:80``). Without these fields the frontend would render
+    ``http://<host>`` (no port), which is unreachable.
+    """
+    _, client = session_scenario_driver
+    deployment_id = deployed_simple_app["deployment_id"]
+
+    deployment = await client.deployments.get(deployment_id)
+
+    assert deployment.deployed_services, (
+        "simple-app should expose at least one deployed service"
+    )
+    for svc in deployment.deployed_services:
+        # Both URL forms must include the cluster's configured external port
+        # so the rendered link is actually reachable from a browser on the host.
+        assert svc.primary_url is not None, (
+            f"primary_url should be populated for service {svc.driver_service_name!r}"
+        )
+        assert svc.primary_url.startswith("http://"), (
+            f"primary_url should use the configured http scheme, got: {svc.primary_url}"
+        )
+        assert svc.primary_url.endswith(":8080"), (
+            f"primary_url should include the cluster's external port (8080), got: {svc.primary_url}"
+        )
+        if svc.human_readable_url is not None:
+            assert svc.human_readable_url.endswith(":8080"), (
+                f"human_readable_url should include the cluster's external port (8080), got: {svc.human_readable_url}"
             )

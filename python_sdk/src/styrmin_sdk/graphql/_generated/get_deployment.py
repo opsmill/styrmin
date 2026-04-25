@@ -25,6 +25,9 @@ class GetDeploymentDeployment(BaseModel):
         Field(alias="applicationInstance")
     )
     components: list["GetDeploymentDeploymentComponents"]
+    deployed_services: list["GetDeploymentDeploymentDeployedServices"] = Field(
+        alias="deployedServices"
+    )
 
 
 class GetDeploymentDeploymentApplicationInstance(BaseModel):
@@ -36,6 +39,20 @@ class GetDeploymentDeploymentComponents(BaseModel):
     id: UUID
     name: str
     enabled: bool
+
+
+class GetDeploymentDeploymentDeployedServices(BaseModel):
+    id: UUID
+    driver_service_name: str = Field(alias="driverServiceName")
+    resolved_name: str = Field(alias="resolvedName")
+    kind: str
+    scope: str
+    port: int
+    component: str
+    primary_fqdn: Optional[str] = Field(alias="primaryFqdn")
+    human_readable_fqdn: Optional[str] = Field(alias="humanReadableFqdn")
+    primary_url: Optional[str] = Field(alias="primaryUrl")
+    human_readable_url: Optional[str] = Field(alias="humanReadableUrl")
 
 
 GetDeployment.model_rebuild()

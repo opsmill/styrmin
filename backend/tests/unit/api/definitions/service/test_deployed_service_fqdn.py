@@ -79,3 +79,25 @@ class TestDeployedServiceFqdnFields:
             == "my-app-550e8400-e29b-41d4-a716-446655440000.example.com"
         )
         assert gql_svc.human_readable_fqdn == "web-svc-production.example.com"
+
+
+class TestDeployedServiceUrlFields:
+    """Tests for primary_url and human_readable_url resolver fields."""
+
+    def test_urls_present_when_injected(self) -> None:
+        db_svc = _make_db_service()
+        gql_svc = DeployedService.from_instance(
+            db_svc,
+            primary_fqdn="myapp-123.example.com",
+            human_readable_fqdn="web-svc-prod.example.com",
+            primary_url="http://myapp-123.example.com:8080",
+            human_readable_url="http://web-svc-prod.example.com:8080",
+        )
+        assert gql_svc.primary_url == "http://myapp-123.example.com:8080"
+        assert gql_svc.human_readable_url == "http://web-svc-prod.example.com:8080"
+
+    def test_urls_none_when_not_provided(self) -> None:
+        db_svc = _make_db_service()
+        gql_svc = DeployedService.from_instance(db_svc)
+        assert gql_svc.primary_url is None
+        assert gql_svc.human_readable_url is None

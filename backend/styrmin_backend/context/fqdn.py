@@ -59,3 +59,25 @@ def compute_human_readable_fqdn(
     host_label = to_fqdn_label(service_host)
     env_label = to_fqdn_label(environment_name)
     return f"{host_label}-{env_label}.{fqdn_suffix}"
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def compute_external_url(
+    fqdn: str | None,
+    scheme: str | None,
+    port: int | None,
+) -> str | None:
+    """Build a user-facing URL from an FQDN, scheme, and port.
+
+    Returns ``None`` when *fqdn* is ``None``. ``scheme`` defaults to
+    ``"https"``. ``port`` is omitted from the URL when it matches the
+    default for the scheme (80 for http, 443 for https).
+    """
+    if not fqdn:
+        return None
+    resolved_scheme = scheme or "https"
+    if port is None or port == _DEFAULT_PORTS.get(resolved_scheme):
+        return f"{resolved_scheme}://{fqdn}"
+    return f"{resolved_scheme}://{fqdn}:{port}"

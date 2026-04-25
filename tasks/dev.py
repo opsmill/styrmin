@@ -41,20 +41,28 @@ def _error_code(result: dict) -> str:  # type: ignore[type-arg]
     return result["errors"][0].get("extensions", {}).get("code", "")
 
 
-def _bootstrap_cluster(console: Console, api_url: str, fqdn_suffix: str) -> str:
+def _bootstrap_cluster(
+    console: Console,
+    api_url: str,
+    fqdn_suffix: str,
+    external_url_scheme: str | None = None,
+    external_url_port: int | None = None,
+) -> str:
     print_header("Creating cluster record...")
+    config: dict = {
+        "fqdn_suffix": fqdn_suffix,
+        "ingress_class": "traefik",
+        "runtime_class": "default",
+        "standard_storage": {"storage_class": "local-path"},
+    }
+    if external_url_scheme is not None:
+        config["external_url_scheme"] = external_url_scheme
+    if external_url_port is not None:
+        config["external_url_port"] = external_url_port
     result = graphql(
         api_url,
         load_query("create_cluster"),
-        {
-            "name": "local",
-            "config": {
-                "fqdn_suffix": fqdn_suffix,
-                "ingress_class": "traefik",
-                "runtime_class": "default",
-                "standard_storage": {"storage_class": "local-path"},
-            },
-        },
+        {"name": "local", "config": config},
     )
     if result.get("errors"):
         error = result["errors"][0]
@@ -139,10 +147,18 @@ def bootstrap(
     context: Context,  # noqa: ARG001
     api_url: str = "http://localhost:8000/graphql",
     fqdn_suffix: str = "styrmin.com",
+    external_url_scheme: str | None = None,
+    external_url_port: int | None = None,
 ) -> None:
     """Bootstrap Styrmin entities: cluster, environment, BSL, and local driver version."""
     console = Console()
-    cluster_id = _bootstrap_cluster(console, api_url, fqdn_suffix)
+    cluster_id = _bootstrap_cluster(
+        console,
+        api_url,
+        fqdn_suffix,
+        external_url_scheme=external_url_scheme,
+        external_url_port=external_url_port,
+    )
     environment_id = _bootstrap_environment(console, api_url, cluster_id)
     _bootstrap_backup_storage(console, api_url, environment_id)
     _bootstrap_driver_version(console, api_url)
