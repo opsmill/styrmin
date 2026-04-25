@@ -78,6 +78,37 @@
       },
       "registered_skills": [],
       "installed_at": "2026-04-21T05:14:28.436431+00:00"
+    },
+    "archive": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:818720ef80e39cc609f31c0e781096e128276c7e72bca071410127679d8f3209",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ],
+        "amp": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ],
+        "claude": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ],
+        "codex": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ],
+        "copilot": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-04-25T14:30:45.870277+00:00"
     }
   }
 }
