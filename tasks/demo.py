@@ -78,9 +78,7 @@ def _wait_for_port(port: int, host: str = "127.0.0.1", timeout: float = 30.0) ->
                 return
         except OSError:
             time.sleep(0.2)
-    raise RuntimeError(
-        f"Timed out after {timeout:.0f}s waiting for {host}:{port} to accept connections"
-    )
+    raise RuntimeError(f"Timed out after {timeout:.0f}s waiting for {host}:{port} to accept connections")
 
 
 def _stop_traefik_port_forward(context: Context) -> None:
