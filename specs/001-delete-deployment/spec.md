@@ -156,6 +156,13 @@ is visible with actor and timestamp.
   another workflow is actively mutating the same deployment, either
   by rejecting the request with an actionable error or by safely
   queuing it until the in-flight workflow completes.
+- **FR-003a**: Conversely, System MUST reject any non-reconciliation
+  mutation (`update_deployment`, `update_deployment_version`, and any
+  future mutation in `services/deployment.py`) targeting a deployment
+  that is already in `DELETION_REQUESTED`, `DELETION_IN_PROGRESS`, or
+  `DELETED`. Without this guard a sibling mutation that calls
+  `set_status(PENDING)` would silently revive a tombstone and break
+  the deletion-lifecycle invariant in `data-model.md`.
 - **FR-004**: System MUST be idempotent for repeated delete requests
   on the same deployment — a second request MUST NOT trigger a second
   teardown and MUST return a clear status.

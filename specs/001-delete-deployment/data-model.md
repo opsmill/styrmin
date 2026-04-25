@@ -20,7 +20,15 @@ Domain invariants:
 - A deployment not in `DELETED` MUST have `deleted_at == None`.
 - `DELETION_*` states and `DELETED` are terminal with respect to
   other mutation workflows — no non-reconciliation write is permitted
-  on a deployment in these states.
+  on a deployment in these states. This is enforced at the entry of
+  every sibling mutation in
+  `styrmin_backend.services.deployment` — the deletion service raises
+  `DeploymentAlreadyDeletedError` / `DeploymentMutationInProgressError`,
+  and the update mutations (`update_deployment`,
+  `update_deployment_version`) re-raise `DeploymentAlreadyDeletedError`
+  when the deployment is in any deletion-lifecycle state. **Any new
+  mutation added under `services/deployment.py` MUST replicate the
+  same guard immediately after the find-by-id check.**
 
 ### DeploymentState (modified enum)
 

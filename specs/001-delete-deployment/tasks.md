@@ -185,6 +185,8 @@ same timeline remains viewable on a tombstoned deployment.
 - [ ] T052 [P] `AGENTS.md` updates. *Skipped — no new conventions were introduced (error-code naming follows existing `ALREADY_IN_PROGRESS` / `ALREADY_DELETED` patterns).*
 - [X] T053 Final `uv run invoke format lint` + `uv run ruff check backend/styrmin_backend/` + `pnpm lint` + `pnpm tsc --noEmit` — all clean.
 - [ ] T054 CI green on the PR. *Pending — no PR open yet; the branch `001-delete-deployment` carries four commits ready to push.*
+- [X] T055 Post-rebase tombstone guard for sibling mutations (FR-003a). After the rebase onto develop pulled in the new `update_deployment` mutation (pod scheduling), both `update_deployment` and `update_deployment_version` were unconditionally calling `set_status(PENDING)` and would silently revive a tombstoned deployment. Added the `DELETION_REQUESTED / DELETION_IN_PROGRESS / DELETED → DeploymentAlreadyDeletedError` guard at the entry of both functions and parametrized unit tests in `backend/tests/unit/services/test_deployment_update_tombstone_guard.py`. **Future mutations under `services/deployment.py` MUST replicate this guard** — see the data-model invariants.
+- [X] T056 Dual-entrypoint E2E coverage. Develop introduced a `driver_mode=[api,ui]` parametrization for every E2E test. Marked the four existing deletion E2E tests in `test_deployment_deletion.py` as `api_only` (they drive the SDK directly), and added a new `ui_only` scenario in `test_deployment_deletion_ui.py` that exercises the delete dialog through a `delete_deployment(disposition)` page-object method on `DeploymentDetailPage`.
 
 ---
 
