@@ -133,9 +133,16 @@ def _bootstrap_backup_storage(console: Console, api_url: str, environment_id: st
     console.print("[green]✓[/green] Backup storage location assigned")
 
 
-def _bootstrap_driver_version(console: Console, api_url: str) -> None:
-    print_header("Loading local driver version (infrahub)...")
-    result = graphql(api_url, load_query("load_local_driver_version"), {"path": "/styrmin/drivers/infrahub"})
+BUNDLED_DRIVERS: tuple[str, ...] = ("infrahub", "semaphore")
+
+
+def _bootstrap_driver_version(console: Console, api_url: str, name: str) -> None:
+    print_header(f"Loading local driver version ({name})...")
+    result = graphql(
+        api_url,
+        load_query("load_local_driver_version"),
+        {"path": f"/styrmin/drivers/{name}"},
+    )
     if result.get("errors"):
         raise RuntimeError(f"Failed to load driver version: {result['errors'][0]['message']}")
     adv = result["data"]["loadLocalApplicationDriverVersion"]
@@ -161,7 +168,10 @@ def bootstrap(
     )
     environment_id = _bootstrap_environment(console, api_url, cluster_id)
     _bootstrap_backup_storage(console, api_url, environment_id)
-    _bootstrap_driver_version(console, api_url)
+    for driver_name in BUNDLED_DRIVERS:
+        _bootstrap_driver_version(console, api_url, driver_name)
     console.print(
-        "\n[bold green]Bootstrap complete![/bold green] You can now deploy Infrahub using Bruno (Deploy Infrahub, seq 8)."
+        "\n[bold green]Bootstrap complete![/bold green]"
+        " Deploy an application from the Styrmin UI or with"
+        " [cyan]uv run styrminctl deployments create[/cyan]."
     )
