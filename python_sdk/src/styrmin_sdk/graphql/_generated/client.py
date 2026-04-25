@@ -19,6 +19,7 @@ from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_environment import DeleteEnvironment
 from .deploy import Deploy
+from .enums import BackupStatus, RestoreStatus
 from .get_backup import GetBackup
 from .get_backup_schedule import GetBackupSchedule
 from .get_backup_storage_location import GetBackupStorageLocation
@@ -957,11 +958,11 @@ class Client(AsyncBaseClient):
     async def list_backups(
         self,
         instance_id: UUID,
-        status: Union[Optional[str], UnsetType] = UNSET,
+        status: Union[Optional[BackupStatus], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> ListBackups:
         query = gql("""
-            query ListBackups($instanceId: UUID!, $status: String) {
+            query ListBackups($instanceId: UUID!, $status: BackupStatus) {
               backups(instanceId: $instanceId, status: $status) {
                 id
                 name
@@ -1027,11 +1028,11 @@ class Client(AsyncBaseClient):
     async def list_restores(
         self,
         backup_id: UUID,
-        status: Union[Optional[str], UnsetType] = UNSET,
+        status: Union[Optional[RestoreStatus], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> ListRestores:
         query = gql("""
-            query ListRestores($backupId: UUID!, $status: String) {
+            query ListRestores($backupId: UUID!, $status: RestoreStatus) {
               restores(backupId: $backupId, status: $status) {
                 id
                 name

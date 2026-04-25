@@ -29,7 +29,7 @@ from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_environment import DeleteEnvironment
 from .deploy import Deploy, DeployDeploy
-from .enums import PodPhase
+from .enums import BackupStatus, PodPhase, RestoreStatus
 from .exceptions import (
     GraphQLClientError,
     GraphQLClientGraphQLError,
@@ -160,6 +160,7 @@ __all__ = [
     "AssignBackupStorageLocation",
     "AssignBackupStorageLocationAssignBackupStorageLocation",
     "AsyncBaseClient",
+    "BackupStatus",
     "BaseModel",
     "Client",
     "CrdConditionInput",
@@ -264,6 +265,7 @@ __all__ = [
     "ReportDeploymentStatusesReportDeploymentStatuses",
     "ReportPodStatuses",
     "ReportPodStatusesReportPodStatuses",
+    "RestoreStatus",
     "RunJob",
     "RunJobRunJob",
     "ServiceNameOverride",

@@ -1,4 +1,4 @@
-query ListBackups($instanceId: UUID!, $status: String) {
+query ListBackups($instanceId: UUID!, $status: BackupStatus) {
     backups(instanceId: $instanceId, status: $status) {
         id
         name

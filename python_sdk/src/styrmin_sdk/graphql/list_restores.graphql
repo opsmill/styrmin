@@ -1,4 +1,4 @@
-query ListRestores($backupId: UUID!, $status: String) {
+query ListRestores($backupId: UUID!, $status: RestoreStatus) {
     restores(backupId: $backupId, status: $status) {
         id
         name

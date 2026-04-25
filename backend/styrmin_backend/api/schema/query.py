@@ -9,11 +9,17 @@ from uuid import UUID
 
 import strawberry
 
-from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
+from styrmin_backend.api.definitions.backup.backup import (
+    Backup as BackupType,
+    BackupStatusType,
+)
 from styrmin_backend.api.definitions.backup_storage_location.model import (
     BackupStorageLocation as BackupStorageLocationType,
 )
-from styrmin_backend.api.definitions.backup.restore import Restore as RestoreType
+from styrmin_backend.api.definitions.backup.restore import (
+    Restore as RestoreType,
+    RestoreStatusType,
+)
 from styrmin_backend.api.definitions.backup.schedule import (
     BackupSchedule as BackupScheduleType,
 )
@@ -161,16 +167,11 @@ class Query:
         self,
         instance_id: UUID,
         info: strawberry.Info,
-        status: str | None = None,
+        status: BackupStatusType | None = None,  # type: ignore[valid-type]
     ) -> list[BackupType]:
         """List all backups for an instance."""
-        from styrmin_backend.db.models import BackupStatus
-
         uow = info.context["uow"]
-        backup_status = BackupStatus(status) if status else None
-        backups = await get_backups(
-            instance_id=instance_id, uow=uow, status=backup_status
-        )
+        backups = await get_backups(instance_id=instance_id, uow=uow, status=status)
         return [BackupType.from_instance(b) for b in backups]
 
     @strawberry.field
@@ -187,16 +188,11 @@ class Query:
         self,
         backup_id: UUID,
         info: strawberry.Info,
-        status: str | None = None,
+        status: RestoreStatusType | None = None,  # type: ignore[valid-type]
     ) -> list[RestoreType]:
         """List all restores for a backup."""
-        from styrmin_backend.db.models import RestoreStatus
-
         uow = info.context["uow"]
-        restore_status = RestoreStatus(status) if status else None
-        restores = await get_restores(
-            backup_id=backup_id, uow=uow, status=restore_status
-        )
+        restores = await get_restores(backup_id=backup_id, uow=uow, status=status)
         return [RestoreType.from_instance(r) for r in restores]
 
     @strawberry.field

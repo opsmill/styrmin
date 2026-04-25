@@ -9,11 +9,24 @@ from uuid import UUID
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.graphql._generated.create_backup import CreateBackup, CreateBackupCreateBackup
 from styrmin_sdk.graphql._generated.create_restore import CreateRestore, CreateRestoreCreateRestore
+from styrmin_sdk.graphql._generated.enums import BackupStatus, RestoreStatus
 from styrmin_sdk.graphql._generated.get_backup import GetBackup, GetBackupBackup
 from styrmin_sdk.graphql._generated.get_restore import GetRestore, GetRestoreRestore
 from styrmin_sdk.graphql._generated.list_backups import ListBackups, ListBackupsBackups
 from styrmin_sdk.graphql._generated.list_restores import ListRestores, ListRestoresRestores
 from styrmin_sdk.resources._base import BaseResource
+
+
+def _coerce_backup_status(value: BackupStatus | str | None) -> str | None:
+    if value is None or isinstance(value, BackupStatus):
+        return value.value if isinstance(value, BackupStatus) else None
+    return BackupStatus(value.upper()).value
+
+
+def _coerce_restore_status(value: RestoreStatus | str | None) -> str | None:
+    if value is None or isinstance(value, RestoreStatus):
+        return value.value if isinstance(value, RestoreStatus) else None
+    return RestoreStatus(value.upper()).value
 
 
 class BackupResource(BaseResource):
@@ -38,11 +51,12 @@ class BackupResource(BaseResource):
     async def list_backups(
         self,
         instance_id: str | UUID,
-        status: str | None = None,
+        status: BackupStatus | str | None = None,
     ) -> list[ListBackupsBackups]:
         variables: dict[str, Any] = {"instanceId": str(instance_id)}
-        if status is not None:
-            variables["status"] = status
+        coerced = _coerce_backup_status(status)
+        if coerced is not None:
+            variables["status"] = coerced
 
         result = await self._transport.execute(load_query("list_backups"), variables)
         self._check_graphql_errors(result)
@@ -78,11 +92,12 @@ class BackupResource(BaseResource):
     async def list_restores(
         self,
         backup_id: str | UUID,
-        status: str | None = None,
+        status: RestoreStatus | str | None = None,
     ) -> list[ListRestoresRestores]:
         variables: dict[str, Any] = {"backupId": str(backup_id)}
-        if status is not None:
-            variables["status"] = status
+        coerced = _coerce_restore_status(status)
+        if coerced is not None:
+            variables["status"] = coerced
 
         result = await self._transport.execute(load_query("list_restores"), variables)
         self._check_graphql_errors(result)
