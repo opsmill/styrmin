@@ -113,6 +113,35 @@ async def test_running_sets_running() -> None:
 
 
 @pytest.mark.anyio
+async def test_restoring_sets_restoring() -> None:
+    """When the operator reports displayState=Restoring (during the
+    velero window), the DB-side deployment.status should reflect that
+    so the UI shows 'restoring' rather than 'deploying' or 'failed'.
+    """
+    dep = _make_deployment(status=DeploymentState.RUNNING)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Restoring",
+            "display_state": "Restoring",
+        }
+    ]
+    statuses_updated, deployments_updated = await report_deployment_statuses(
+        reports, uow
+    )
+
+    assert statuses_updated == 1
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.RESTORING
+
+
+@pytest.mark.anyio
 async def test_error_sets_failed() -> None:
     dep = _make_deployment()
     dep_repo = FakeDeploymentRepository()
