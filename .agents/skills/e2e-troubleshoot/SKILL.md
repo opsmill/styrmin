@@ -1,17 +1,17 @@
 ---
 name: e2e-troubleshoot
-description: Run a specific E2E test with `--e2e-keep-cluster`, investigate failures using the preserved cluster, apply targeted fixes, and re-run up to five iterations.
+description: Run a specific E2E test with `--pdb`, investigate failures while pytest is paused, apply targeted fixes, and re-run up to five iterations.
 argument-hint: A test identifier — file path, file::function, or a test function name
 compatibility: Requires the Styrmin repo, vcluster, kubectl, uv, and the E2E pytest fixtures.
 metadata:
-  source: .agents/commands/e2e-troubleshoot.md
+  source: AGENTS.md E2E debugging policy
 ---
 
 # E2E Test Troubleshooter
 
 ## Introduction
 
-Run a specific E2E test with `--e2e-keep-cluster`, and if it fails, investigate the failure using the preserved cluster, apply a fix, and re-run. Repeat up to 5 iterations. Always produce a summary at the end.
+Run a specific E2E test with `--pdb`, and if it fails, investigate the failure while pytest is paused with the vcluster, port-forwards, SDK clients, and fixtures still alive. Apply a fix and re-run. Repeat up to 5 iterations. Always produce a summary at the end.
 
 ## Arguments
 
@@ -86,24 +86,30 @@ investigation_log = []   # Append to this after every iteration
 Increment `iteration` by 1.
 
 ```bash
-uv run pytest backend/tests/e2e/<test_node_id> -v -s --tb=long --e2e-keep-cluster 2>&1
+sleep infinity | uv run pytest backend/tests/e2e/<test_node_id> -v -s --tb=long --pdb 2>&1 | tee /tmp/e2e-pdb.log
 ```
 
-**Capture the full output.** Parse for:
+Use the `sleep infinity |` prefix for non-interactive shells so pdb's stdin stays open on failure instead of immediately receiving EOF and tearing the cluster down.
+
+**Capture the full output.** Parse `/tmp/e2e-pdb.log` for:
 
 - `PASSED` / `FAILED` / `ERROR`.
 - The traceback if failed.
-- The kubeconfig path from the `--e2e-keep-cluster` output (pattern: `export KUBECONFIG=...`).
+- The active kubeconfig path. If the test is paused in pdb, find it with:
+
+  ```bash
+  ls /tmp/pytest-of-*/pytest-*/vcluster0/kubeconfig | tail -1
+  ```
 
 **If the test passed:** set `test_resolved = true`, go to Phase 4.
 
-**If the test failed:** record the failure in `investigation_log`, proceed to Phase 2.
+**If the test failed and pytest is paused in pdb:** keep the pytest process running, record the failure in `investigation_log`, and proceed to Phase 2 from a separate shell. Do not kill pytest until after diagnostics are collected.
 
 ---
 
 ## Phase 2: Investigate
 
-The cluster is still alive. Use it. The goal is to understand WHY the test failed, not just WHAT failed. The traceback tells you the symptom; kubectl and logs tell you the cause.
+The pytest process is still alive and paused at the failure. Use that exact live state. The goal is to understand WHY the test failed, not just WHAT failed. The traceback tells you the symptom; kubectl and logs tell you the cause.
 
 ### Step 2a: Classify the failure
 
@@ -117,9 +123,9 @@ Read the traceback and classify it:
 | **Assertion error** | `assert X == Y` | Compare expected vs actual, query the API, check the resource state |
 | **Kubernetes error** | `ApiException`, `404`, `409` | Check if the resource/namespace exists, check RBAC, check CRDs |
 
-### Step 2b: Collect diagnostics from the preserved cluster
+### Step 2b: Collect diagnostics from the live cluster
 
-Use the kubeconfig from Phase 1 output. Set it for all kubectl commands:
+Use the kubeconfig discovered in Phase 1. Set it for all kubectl commands:
 
 ```bash
 export KUBECONFIG=<path_from_phase_1>
@@ -194,9 +200,15 @@ investigation_log.append({
 
 Apply the minimal fix. Don't refactor, don't improve, don't clean up — just fix the failing test or the code it exercises. If the fix involves backend Python code, the Styrmin server inside the cluster will NOT auto-reload — a rebuild and redeploy may be needed. Try fixes that don't require that first (test code changes, timing adjustments, fixture issues).
 
-1. **Apply the fix.** Edit the relevant file(s).
+1. **Stop the paused pytest run after diagnostics are complete.** Kill the whole pytest process group so teardown can proceed or, if necessary, force-stop the run:
 
-2. **Run the linter:**
+   ```bash
+   pkill -f "pytest .*backend/tests/e2e"
+   ```
+
+2. **Apply the fix.** Edit the relevant file(s).
+
+3. **Run the linter:**
 
    ```bash
    uv run invoke format lint
@@ -204,7 +216,7 @@ Apply the minimal fix. Don't refactor, don't improve, don't clean up — just fi
 
    Fix any lint errors before proceeding.
 
-3. **Delete the preserved cluster.** The next iteration will create a fresh one. This is mandatory — never leave a stale cluster running between iterations.
+4. **Ensure the test cluster is gone.** The next iteration should create a fresh one. This is mandatory — never leave a stale cluster running between iterations.
 
    ```bash
    vcluster delete <cluster_name> --driver=docker
@@ -216,21 +228,25 @@ Apply the minimal fix. Don't refactor, don't improve, don't clean up — just fi
    vcluster list 2>/dev/null
    ```
 
-4. **If backend code was changed** (`backend/styrmin_backend/`), rebuild the Docker image so the next test run picks up the changes:
+5. **If backend code was changed** (`backend/styrmin_backend/`), rebuild the Docker image so the next test run picks up the changes:
 
    ```bash
    docker compose build
    ```
 
-5. **Check iteration count.** If `iteration >= max_iterations`: go to Phase 4.
+6. **Check iteration count.** If `iteration >= max_iterations`: go to Phase 4.
 
-6. **Go back to Phase 1** (run the test again).
+7. **Go back to Phase 1** (run the test again).
 
 ---
 
 ## Phase 4: Final Cleanup and Summary Report
 
-**Before writing the summary**, ensure no test cluster is still running:
+**Before writing the summary**, ensure no paused pytest process or test cluster is still running:
+
+```bash
+pkill -f "pytest .*backend/tests/e2e" 2>/dev/null || true
+```
 
 ```bash
 vcluster list 2>/dev/null | grep pytest
@@ -286,8 +302,8 @@ vcluster delete <cluster_name> --driver=docker
 
 ## Important Guidelines
 
-- **Do not skip the investigation.** Don't guess at fixes without looking at the cluster state. The cluster is preserved for a reason — use it.
+- **Do not skip the investigation.** Don't guess at fixes without looking at the cluster state. Pytest is paused at the failure so the exact failing state is available — use it.
 - **One fix per iteration.** Don't stack multiple speculative fixes. Apply one targeted change and re-run.
 - **Record everything.** The summary is the most valuable output of this skill. A human or future agent should be able to read it and understand exactly what happened.
 - **Don't fight the test framework.** If the test expects a specific behavior and the code doesn't provide it, fix the code. If the test has a wrong assertion, fix the test. But be sure which one is wrong before changing either.
-- **Always clean up the cluster.** Delete the preserved cluster after investigation and before retrying, and after the final iteration regardless of outcome. There must never be a test cluster left running when the skill finishes.
+- **Always clean up the run.** Kill paused pytest after investigation, delete any leftover test cluster before retrying, and clean up after the final iteration regardless of outcome. There must never be a test cluster left running when the skill finishes.

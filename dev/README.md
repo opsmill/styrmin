@@ -11,7 +11,7 @@ Internal documentation for contributors. For user-facing docs, see `/docs/`.
 | Learn why we made a decision | `adr/` |
 | Complete a specific task | `guides/` |
 | See what's being built | `../specs/` |
-| Use agent commands | `../.agents/commands/` |
+| Use agent workflows | `../.agents/skills/` and `../.agents/commands/` |
 
 ## Directory Guide
 
@@ -22,9 +22,9 @@ Internal documentation for contributors. For user-facing docs, see `/docs/`.
   - `backend/` - Backend architecture and patterns
 - **guides/**: Step-by-step procedures for specific tasks.
 - **adr/**: Architecture Decision Records. Why we chose what we chose.
-- **prompts/**: Prompt templates for common thinking tasks.
+- **prompts/**: Prompt templates for common thinking tasks. Currently empty.
 
-Agent commands live at the repo root under `.agents/commands/`.
+Agent workflows live at the repo root under `.agents/skills/` and `.agents/commands/`.
 
 ## Document Lifecycle
 
@@ -44,16 +44,14 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 ## Current ADRs
 
 - [adr-001-migrate-cli-typer-to-cyclopts.md](adr/adr-001-migrate-cli-typer-to-cyclopts.md) - Migrate styrminctl from Typer to Cyclopts for performance, native async, and framework unification
-
 - [adr-002-consolidate-driver-single-yaml.md](adr/adr-002-consolidate-driver-single-yaml.md) - Consolidate driver declarative config into single driver.styrmin.yml
-- [adr-003-consolidate-typechecker-on-ty.md](adr/adr-003-consolidate-typechecker-on-ty.md) - Consolidate type checking on ty, removing mypy
-
 - [adr-003-alembic-database-migrations.md](adr/adr-003-alembic-database-migrations.md) - Adopt Alembic for versioned database migration management
 - [adr-004-shared-async-event-loop-kopf-prefect.md](adr/adr-004-shared-async-event-loop-kopf-prefect.md) - Shared async event loop for kopf operator and Prefect agent
 - [adr-005-leader-election-kopf-peering.md](adr/adr-005-leader-election-kopf-peering.md) - Priority-based leader election via kopf peering
 - [adr-006-embed-context-in-deployment-crd.md](adr/adr-006-embed-context-in-deployment-crd.md) - Embed GlobalContext in StyrminDeployment CRD for autonomous reconciliation
 - [adr-007-ordered-phase-deployment-sub-handlers.md](adr/adr-007-ordered-phase-deployment-sub-handlers.md) - Ordered phase-based deployment via kopf sub-handlers
 - [adr-008-prefect-crd-intent-declaration.md](adr/adr-008-prefect-crd-intent-declaration.md) - Prefect flows declare intent via CRD instead of direct resource management
+- [adr-009-consolidate-typechecker-on-ty.md](adr/adr-009-consolidate-typechecker-on-ty.md) - Consolidate type checking on ty, removing mypy
 
 ## Current Knowledge
 
@@ -75,3 +73,5 @@ Backend architecture documentation in [knowledge/backend/](knowledge/backend/):
 ## Current Guides
 
 - [database-migrations.md](guides/database-migrations.md) - Alembic migration workflow: creating, applying, and rolling back migrations
+- [local-demo.md](guides/local-demo.md) - Local vCluster demo lifecycle
+- [pod-scheduling.md](guides/pod-scheduling.md) - Pod scheduling configuration reference

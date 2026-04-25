@@ -1,4 +1,4 @@
-# ADR-003: Consolidate Type Checking on ty, Removing mypy
+# ADR-009: Consolidate Type Checking on ty, Removing mypy
 
 **Status**: Accepted
 **Date**: 2026-04-04
