@@ -61,6 +61,7 @@ def traefik(context: Context) -> None:
         f" -n {KUBERNETES_ROOT_NAMESPACE} --create-namespace"
         f" -f {DEV_LOCAL_DIR / 'traefik-values.yaml'}"
         f" --set service.type=ClusterIP"
+        f" --take-ownership"
         f" --wait --timeout 5m",
         pty=True,
     )
