@@ -78,6 +78,151 @@
       },
       "registered_skills": [],
       "installed_at": "2026-04-21T05:14:28.436431+00:00"
+    },
+    "reconcile": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:e1674fb7e16923c0e9e32eee78ef5a04626d05f092c56cc7c59e26fab07c210b",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.reconcile.run"
+        ],
+        "amp": [
+          "speckit.reconcile.run"
+        ],
+        "claude": [
+          "speckit.reconcile.run"
+        ],
+        "codex": [
+          "speckit.reconcile.run"
+        ],
+        "copilot": [
+          "speckit.reconcile.run"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-04-25T14:11:04.284563+00:00"
+    },
+    "critique": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:0b63a1835415df730cbd487c90c1252b294980176c10c14a3fa9c31a7cb882e0",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.critique.run"
+        ],
+        "amp": [
+          "speckit.critique.run"
+        ],
+        "claude": [
+          "speckit.critique.run"
+        ],
+        "codex": [
+          "speckit.critique.run"
+        ],
+        "copilot": [
+          "speckit.critique.run"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-04-25T14:14:07.165506+00:00"
+    },
+    "iterate": {
+      "version": "2.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:f69d92321c68c54afb56b77947e34b0431e41a0b923e4e69e432abcf5957d95a",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.iterate.define",
+          "speckit.iterate.apply"
+        ],
+        "amp": [
+          "speckit.iterate.define",
+          "speckit.iterate.apply"
+        ],
+        "claude": [
+          "speckit.iterate.define",
+          "speckit.iterate.apply"
+        ],
+        "codex": [
+          "speckit.iterate.define",
+          "speckit.iterate.apply"
+        ],
+        "copilot": [
+          "speckit.iterate.define",
+          "speckit.iterate.apply"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-04-25T14:14:43.947712+00:00"
+    },
+    "auto": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:8f863e4857cfa852bc1fe6730fa7cf7fbf549e9813597c2b5a17bb0ae86fb57c",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.auto.run",
+          "speckit.auto"
+        ],
+        "amp": [
+          "speckit.auto.run",
+          "speckit.auto"
+        ],
+        "claude": [
+          "speckit.auto.run",
+          "speckit.auto"
+        ],
+        "codex": [
+          "speckit.auto.run",
+          "speckit.auto"
+        ],
+        "copilot": [
+          "speckit.auto.run",
+          "speckit.auto"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-04-25T14:21:06.854950+00:00"
+    },
+    "archive": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:818720ef80e39cc609f31c0e781096e128276c7e72bca071410127679d8f3209",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ],
+        "amp": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ],
+        "claude": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ],
+        "codex": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ],
+        "copilot": [
+          "speckit.archive.run",
+          "speckit.archive"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-04-25T14:30:45.870277+00:00"
     }
   }
 }

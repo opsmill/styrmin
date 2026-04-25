@@ -1,0 +1,33 @@
+schema_version: "1.0"
+
+extension:
+  id: "auto"
+  name: "Spec Auto"
+  version: "1.0.0"
+  description: "Run the full speckit workflow end-to-end — specify, plan, tasks, implement, review, extract — making all decisions autonomously."
+  author: "Damien Garros"
+  license: "MIT"
+
+requires:
+  speckit_version: ">=0.1.0"
+
+  commands:
+    - "speckit.specify"
+    - "speckit.plan"
+    - "speckit.tasks"
+    - "speckit.implement"
+    - "speckit.review"
+    - "speckit.extract"
+    - "speckit.checkpoint.commit"
+
+provides:
+  commands:
+    - name: "speckit.auto.run"
+      file: "commands/run.md"
+      description: "Run the full speckit pipeline end-to-end with autonomous decision-making"
+      aliases: ["speckit.auto"]
+
+tags:
+  - "automation"
+  - "workflow"
+  - "pipeline"
