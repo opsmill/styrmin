@@ -1,7 +1,7 @@
 """add deletion states and deleted_at to deployment
 
-Revision ID: f6a7b8c9d0e1
-Revises: e5f6a7b8c9d0
+Revision ID: c1d2e3f4a5b6
+Revises: f6a7b8c9d0e1
 Create Date: 2026-04-20 00:00:00.000000
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "f6a7b8c9d0e1"
-down_revision: Union[str, None] = "e5f6a7b8c9d0"
+revision: str = "c1d2e3f4a5b6"
+down_revision: Union[str, None] = "f6a7b8c9d0e1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
