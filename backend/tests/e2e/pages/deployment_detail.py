@@ -78,6 +78,43 @@ class DeploymentDetailPage:
         await self._page.get_by_role("button", name="Upgrade", exact=True).click()
         await self._page.get_by_role("dialog", name="Upgrade Deployment").wait_for()
 
+    async def delete_deployment(self, *, disposition: str) -> None:
+        """Click the header Delete button, pick a disposition, confirm.
+
+        ``disposition`` is the wire value the dialog's radios carry —
+        ``"RETAIN"`` or ``"REMOVE"`` — matching the backend
+        ``BackupDisposition`` enum.
+        """
+        if disposition not in ("RETAIN", "REMOVE"):
+            raise ValueError(
+                f"disposition must be 'RETAIN' or 'REMOVE', got {disposition!r}"
+            )
+        # Header has exactly one button labeled "Delete" while no dialog is
+        # open and the Backups tab is not active; the per-row Delete buttons
+        # in the Backups tab live under data-testid=backup-row.
+        await self._page.get_by_role("button", name="Delete", exact=True).click()
+        dialog = self._page.get_by_role("dialog", name="Delete Deployment")
+        await dialog.wait_for()
+        # Radios are native <input type="radio"> with a name+value pair, not
+        # ARIA-labelled — target them by attribute.
+        await dialog.locator(f'input[type="radio"][value="{disposition}"]').check()
+        await dialog.get_by_role("button", name="Delete", exact=True).click()
+        # Dialog closes on a server-accepted mutation; if the backend rejects
+        # (e.g. concurrency guard) the dialog stays open with an Alert. Match
+        # the same surfacing pattern as ``save_scheduling_config``.
+        try:
+            await dialog.wait_for(state="hidden", timeout=30_000)
+        except PlaywrightTimeoutError as exc:
+            alert = dialog.locator("[role=alert]")
+            message = (
+                await alert.inner_text()
+                if await alert.count() > 0
+                else "(no alert rendered)"
+            )
+            raise ScenarioActionError(
+                f"delete-deployment dialog did not close: {message}"
+            ) from exc
+
     async def confirm_upgrade(self, *, version: str) -> None:
         """Fill the New Version input and click Upgrade inside the dialog."""
         dialog = self._page.get_by_role("dialog", name="Upgrade Deployment")
