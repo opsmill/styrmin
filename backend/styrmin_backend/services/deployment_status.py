@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 _DISPLAY_STATE_TO_STATUS: dict[str, DeploymentState] = {
     "Deploying": DeploymentState.DEPLOYING,
     "Running": DeploymentState.RUNNING,
+    "Restoring": DeploymentState.RESTORING,
     "Error": DeploymentState.FAILED,
 }
 
