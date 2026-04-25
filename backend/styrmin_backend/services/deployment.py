@@ -173,6 +173,24 @@ async def update_deployment(
                 f"Deployment with ID {deployment_id} not found"
             )
 
+        # Reject updates on deployments that are tombstoned or in the
+        # process of being torn down. Without this, ``set_status(PENDING)``
+        # below would silently revive a deployment in the deletion
+        # lifecycle.
+        if deployment.status in (
+            DeploymentState.DELETION_REQUESTED,
+            DeploymentState.DELETION_IN_PROGRESS,
+            DeploymentState.DELETED,
+        ):
+            raise DeploymentAlreadyDeletedError(
+                deployment_id=deployment_id,
+                message=(
+                    f"Deployment {deployment_id} is in the deletion "
+                    f"lifecycle (status={deployment.status.value}) and "
+                    "cannot be updated"
+                ),
+            )
+
         logger.info(
             "Deployment found: id={} current_version={}",
             deployment.id,
@@ -314,6 +332,23 @@ async def update_deployment_version(
         if deployment is None:
             raise DeploymentNotFoundError(
                 f"Deployment with ID {deployment_id} not found"
+            )
+
+        # Reject version upgrades on deployments that are tombstoned or
+        # in the process of being torn down — same rationale as
+        # ``update_deployment``.
+        if deployment.status in (
+            DeploymentState.DELETION_REQUESTED,
+            DeploymentState.DELETION_IN_PROGRESS,
+            DeploymentState.DELETED,
+        ):
+            raise DeploymentAlreadyDeletedError(
+                deployment_id=deployment_id,
+                message=(
+                    f"Deployment {deployment_id} is in the deletion "
+                    f"lifecycle (status={deployment.status.value}) and "
+                    "cannot be upgraded"
+                ),
             )
 
         logger.info(
