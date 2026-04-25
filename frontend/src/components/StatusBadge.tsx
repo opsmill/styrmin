@@ -31,6 +31,7 @@ const statusConfig: Record<string, StatusConfig> = {
   updating: { label: "Updating", variant: "warning" },
   scaling: { label: "Scaling", variant: "warning" },
   reconciling: { label: "Reconciling", variant: "warning" },
+  restoring: { label: "Restoring", variant: "warning" },
   deleting: { label: "Deleting", variant: "warning" },
   stopping: { label: "Stopping", variant: "warning" },
 
@@ -107,6 +108,7 @@ export function getStatusColor(status: string): {
     s === "updating" ||
     s === "scaling" ||
     s === "reconciling" ||
+    s === "restoring" ||
     s === "deleting" ||
     s === "stopping"
   ) {
