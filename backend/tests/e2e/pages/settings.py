@@ -50,6 +50,14 @@ class SettingsPage:
                 await dialog.locator("#cluster-runtime-class").fill(
                     config["runtime_class"]
                 )
+            if config.get("external_url_scheme"):
+                await dialog.locator("#cluster-external-url-scheme").select_option(
+                    config["external_url_scheme"]
+                )
+            if config.get("external_url_port") is not None:
+                await dialog.locator("#cluster-external-url-port").fill(
+                    str(config["external_url_port"])
+                )
             di = config.get("dedicated_ingress")
             if di:
                 # Base UI's <Checkbox> puts the id on a hidden <input>
@@ -89,10 +97,12 @@ def _needs_advanced(config: dict[str, Any]) -> bool:
         "ingress_class",
         "fqdn_suffix",
         "runtime_class",
+        "external_url_scheme",
+        "external_url_port",
         "dedicated_ingress",
         "standard_storage",
     )
-    return any(config.get(k) for k in keys)
+    return any(config.get(k) is not None and config.get(k) != "" for k in keys)
 
 
 class BackupStorageLocationsListPage:

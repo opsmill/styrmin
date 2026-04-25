@@ -30,7 +30,7 @@ class EnvironmentsListPage:
         # the Playwright default of 5s is tight. 15s absorbs the jitter
         # without silently hiding a real stall.
         await expect(
-            self._page.get_by_role("heading", name="Environments")
+            self._page.get_by_role("heading", name="Environments", exact=True)
         ).to_be_visible(timeout=15_000)
 
     async def create_environment(
