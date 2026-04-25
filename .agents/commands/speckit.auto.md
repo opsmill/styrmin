@@ -1,7 +1,11 @@
 ---
-description: Run the full speckit workflow end-to-end — specify, plan, tasks, implement, review, extract — making all decisions autonomously.
+description: Run the full speckit workflow end-to-end — specify, plan, tasks, implement,
+  review, extract — making all decisions autonomously.
 ---
 
+
+<!-- Extension: auto -->
+<!-- Config: .specify/extensions/auto/ -->
 ## User Input
 
 ```text
