@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- dev/adr/adr-003-consolidate-typechecker-on-ty.md (from D1-D6)
+- dev/adr/adr-009-consolidate-typechecker-on-ty.md (from D1-D6)
 
 ## Knowledge Updated
 
