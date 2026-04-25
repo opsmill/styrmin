@@ -15,6 +15,9 @@ so no /etc/hosts manipulation is needed.
 
 from __future__ import annotations
 
+import socket
+import time
+
 from invoke import Context, task
 from rich.console import Console
 from rich.panel import Panel
@@ -49,6 +52,9 @@ def _start_traefik_port_forward(context: Context) -> None:
     across platforms (no reliance on vCluster's embedded LB provider).
     Port 8080 is used because 80 is privileged.
     Stops any previous port-forward recorded in the PID file first.
+
+    Blocks until the local port is actually listening so callers can
+    issue requests without racing kubectl's startup.
     """
     _stop_traefik_port_forward(context)
     PORT_FORWARD_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +65,21 @@ def _start_traefik_port_forward(context: Context) -> None:
         f" > /tmp/styrmin-traefik-portforward.log 2>&1 &"
         f" echo $! > {PORT_FORWARD_PID_FILE}",
         pty=False,
+    )
+    _wait_for_port(DEMO_PORT)
+
+
+def _wait_for_port(port: int, host: str = "127.0.0.1", timeout: float = 30.0) -> None:
+    """Block until *host:port* accepts a TCP connection or *timeout* elapses."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=1.0):
+                return
+        except OSError:
+            time.sleep(0.2)
+    raise RuntimeError(
+        f"Timed out after {timeout:.0f}s waiting for {host}:{port} to accept connections"
     )
 
 
