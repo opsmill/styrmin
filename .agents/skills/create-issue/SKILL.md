@@ -1,26 +1,33 @@
+---
+name: create-issue
+description: Transform a feature description, bug report, or improvement idea into a well-structured GitHub issue that follows project conventions.
+argument-hint: Feature, bug, or improvement description to turn into a GitHub issue
+compatibility: Requires GitHub access (gh CLI authenticated, or equivalent GitHub MCP/API tooling) and write access to the target repository.
+metadata:
+  source: .agents/commands/create-issue.md
+---
+
 # Create GitHub Issue
 
 ## Introduction
 
-Transform feature descriptions, bug reports, or improvement ideas into well-structured GitHub issues that follow project conventions and best practices. This command provides flexible detail levels to match your needs.
+Transform feature descriptions, bug reports, or improvement ideas into well-structured GitHub issues that follow project conventions and best practices. This skill provides flexible detail levels to match your needs.
 
 ## Prerequisites
 
-- GitHub CLI (`gh`) installed and authenticated
-- Access to the target repository
-- Understanding of the feature/bug/improvement to document
+- GitHub access available to the agent (any of: `gh` CLI authenticated, GitHub MCP server, or direct API credentials)
+- Write access to the target repository
+- Understanding of the feature, bug, or improvement to document
 
 ## Feature Description
 
-<feature_description> #$ARGUMENTS </feature_description>
+<feature_description> $ARGUMENTS </feature_description>
 
 ## Main Tasks
 
 ### 1. Repository Research & Context Gathering
 
-<thinking>
-First, I need to understand the project's conventions and existing patterns, leveraging all available resources
-</thinking>
+First, understand the project's conventions and existing patterns, leveraging all available resources.
 
 **Internal Repository Research:**
 
@@ -31,7 +38,7 @@ First, I need to understand the project's conventions and existing patterns, lev
 
 **External Best Practices Research:**
 
-- [ ] Search web for issue creation best practices specific to the technology stack
+- [ ] Search the web for issue creation best practices specific to the technology stack
 - [ ] Find examples of well-written issues in similar open source projects
 - [ ] Research domain-specific terminology and conventions
 
@@ -39,18 +46,16 @@ First, I need to understand the project's conventions and existing patterns, lev
 
 - [ ] Include URLs to external documentation and best practices guides
 - [ ] Create a reference list of similar issues or PRs (e.g., `#123`, `#456`)
-- [ ] Note any team conventions discovered in `CLAUDE.md` or team documentation
+- [ ] Note any team conventions discovered in `CLAUDE.md`, `AGENTS.md`, or team documentation
 
 ### 2. Issue Planning & Structure
 
-<thinking>
-Think like a product manager - what would make this issue clear and actionable? Consider multiple perspectives
-</thinking>
+Think like a product manager — what would make this issue clear and actionable? Consider multiple perspectives.
 
 **Title & Categorization:**
 
-- [ ] Draft clear, searchable issue title using conventional format (e.g., `feat:`, `fix:`, `docs:`)
-- [ ] Identify appropriate labels from repository's label set (`gh label list`)
+- [ ] Draft a clear, searchable issue title using conventional format (e.g., `feat:`, `fix:`, `docs:`)
+- [ ] Identify appropriate labels from the repository's label set (e.g., `gh label list`)
 - [ ] Determine issue type: enhancement, bug, documentation, refactor
 - [ ] Consider adding priority labels if available (P0, P1, P2 or critical, high, medium, low)
 
@@ -61,17 +66,17 @@ Think like a product manager - what would make this issue clear and actionable? 
 
 **Content Planning:**
 
-- [ ] Choose appropriate detail level based on issue complexity and audience
+- [ ] Choose an appropriate detail level based on issue complexity and audience
 - [ ] List all necessary sections for the chosen template
 - [ ] Gather supporting materials (error logs, screenshots, design mockups)
 
 ### 3. Choose Implementation Detail Level
 
-Select how comprehensive you want the issue to be:
+Select how comprehensive you want the issue to be.
 
-#### 📄 MINIMAL (Quick Issue)
+#### MINIMAL (Quick Issue)
 
-**Best for:** Simple bugs, small improvements, clear features
+**Best for:** Simple bugs, small improvements, clear features.
 
 **Includes:**
 
@@ -101,9 +106,9 @@ Select how comprehensive you want the issue to be:
 - Documentation: [relevant_docs_url]
 ```
 
-#### 📋 MORE (Standard Issue)
+#### MORE (Standard Issue)
 
-**Best for:** Most features, complex bugs, team collaboration
+**Best for:** Most features, complex bugs, team collaboration.
 
 **Includes everything from MINIMAL plus:**
 
@@ -132,9 +137,9 @@ Select how comprehensive you want the issue to be:
 [How we measure success]
 ```
 
-#### 📚 A LOT (Comprehensive Issue)
+#### A LOT (Comprehensive Issue)
 
-**Best for:** Major features, architectural changes, complex integrations
+**Best for:** Major features, architectural changes, complex integrations.
 
 **Includes everything from MORE plus:**
 
@@ -181,24 +186,22 @@ Select how comprehensive you want the issue to be:
 
 ### 4. Issue Creation & Formatting
 
-<thinking>
-Apply best practices for clarity and actionability, making the issue easy to scan and understand
-</thinking>
+Apply best practices for clarity and actionability, making the issue easy to scan and understand.
 
 **Content Formatting:**
 
-- [ ] Use clear, descriptive headings with proper hierarchy (##, ###)
+- [ ] Use clear, descriptive headings with proper hierarchy (`##`, `###`)
 - [ ] Add screenshots/mockups if UI-related (drag & drop or use image hosting)
-- [ ] Use task lists (- [ ]) for trackable items that can be checked off
+- [ ] Use task lists (`- [ ]`) for trackable items that can be checked off
 - [ ] Add collapsible sections for lengthy logs or optional details using `<details>` tags
-- [ ] Apply appropriate emoji for visual scanning (🐛 bug, ✨ feature, 📚 docs, ♻️ refactor)
+- [ ] Apply appropriate emoji for visual scanning where house style allows
 
 **Cross-Referencing:**
 
-- [ ] Link to related issues/PRs using #number format
+- [ ] Link to related issues/PRs using `#number` format
 - [ ] Reference specific commits with SHA hashes when relevant
-- [ ] Link to code using GitHub's permalink feature (press 'y' for permanent link)
-- [ ] Mention relevant team members with @username if needed
+- [ ] Link to code using GitHub's permalink feature (press `y` for a permanent link)
+- [ ] Mention relevant team members with `@username` if needed
 - [ ] Add links to external resources with descriptive text
 
 **AI-Era Considerations:**
@@ -209,7 +212,7 @@ Apply best practices for clarity and actionability, making the issue easy to sca
 
 ### 5. User Validation & Submission
 
-**IMPORTANT: Always present the draft issue to the user for review and approval BEFORE creating it.** Even if you have CLI permissions to run `gh issue create` directly, you MUST ask the user to validate the issue content first. Never create an issue without explicit user approval.
+**IMPORTANT: Always present the draft issue to the user for review and approval BEFORE creating it.** Even if the agent has CLI/API permissions to create issues directly, the user MUST validate the issue content first. Never create an issue without explicit user approval.
 
 **Pre-submission Checklist:**
 
@@ -221,40 +224,42 @@ Apply best practices for clarity and actionability, making the issue easy to sca
 
 ## Output Format
 
-1. Present the complete draft issue content to the user for review
-2. Wait for the user's explicit approval or requested changes
-3. Only after approval, create the issue using GitHub CLI:
+1. Present the complete draft issue content to the user for review.
+2. Wait for the user's explicit approval or requested changes.
+3. Only after approval, create the issue using the GitHub interface available to the agent. Examples:
 
-```bash
-gh issue create --title "[TITLE]" --body "[CONTENT]" --label "[LABELS]"
-```
+   ```bash
+   gh issue create --title "[TITLE]" --body "[CONTENT]" --label "[LABELS]"
+   ```
+
+   Or, when using the GitHub MCP server, the equivalent `issue_write` call.
 
 ## Thinking Approaches
 
-- **Analytical:** Break down complex features into manageable components
-- **User-Centric:** Consider end-user impact and experience
-- **Strategic:** Align with project goals and roadmap
+- **Analytical:** Break down complex features into manageable components.
+- **User-Centric:** Consider end-user impact and experience.
+- **Strategic:** Align with project goals and roadmap.
 
 ## Notes
 
 **Issue Quality Guidelines:**
 
-- Prioritize clarity over completeness - a clear MINIMAL issue beats a confusing comprehensive one
-- Consider your audience: maintainers need different details than contributors
-- Write for future you - include context you'll forget in 6 months
-- Make issues self-contained - minimize need to reference external discussions
+- Prioritize clarity over completeness — a clear MINIMAL issue beats a confusing comprehensive one.
+- Consider your audience: maintainers need different details than contributors.
+- Write for future you — include context you'll forget in 6 months.
+- Make issues self-contained — minimize the need to reference external discussions.
 
 **Modern Development Considerations:**
 
-- Write problem descriptions that are clear enough to serve as effective prompts for implementation agents
-- Focus on observable outcomes and acceptance criteria rather than implementation prescriptions
+- Write problem descriptions that are clear enough to serve as effective prompts for implementation agents.
+- Focus on observable outcomes and acceptance criteria rather than implementation prescriptions.
 
 ## Expected Outcome
 
 A well-structured GitHub issue that:
 
-- Clearly communicates the problem and desired outcome
-- Provides appropriate detail for the chosen level
-- Follows project conventions
-- Focuses on **what** and **why**, leaving implementation to a separate agent
-- Facilitates team collaboration
+- Clearly communicates the problem and desired outcome.
+- Provides appropriate detail for the chosen level.
+- Follows project conventions.
+- Focuses on **what** and **why**, leaving implementation to a separate agent.
+- Facilitates team collaboration.

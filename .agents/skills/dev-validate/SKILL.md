@@ -1,57 +1,77 @@
+---
+name: dev-validate
+description: Idempotently spin up the full Styrmin dev environment, run tests, deploy a Semaphore application, and verify everything works end-to-end including the frontend.
+argument-hint: Optional flags (none, `skip-cluster`, `skip-deploy`, `skip-tests`, or `frontend-only`) to control which phases run
+compatibility: Requires the Styrmin repo, Docker, vcluster, helm, kubectl, uv, curl, pnpm, and an authenticated dev environment.
+metadata:
+  source: .agents/commands/dev-validate.md
+---
+
 # Dev Environment Validation
 
 ## Introduction
 
-Autonomously spin up the full Styrmin dev environment, run tests, deploy a Semaphore application, and verify everything works end-to-end — including browser-based frontend validation. This command is idempotent: it detects what is already running and skips completed steps.
+Autonomously spin up the full Styrmin dev environment, run tests, deploy a Semaphore application, and verify everything works end-to-end — including browser-based frontend validation. This skill is idempotent: it detects what is already running and skips completed steps.
 
 ## Arguments
 
-<arguments> #$ARGUMENTS </arguments>
+<arguments> $ARGUMENTS </arguments>
 
 **Supported arguments:**
 
-- _(no args)_ — Full run: tests, environment setup, deploy Semaphore, verify everything including frontend
-- `skip-cluster` — Skip vCluster creation (assume Kubernetes cluster already exists)
-- `skip-deploy` — Skip Semaphore deployment (only verify existing environment)
-- `skip-tests` — Skip unit and frontend tests
-- `frontend-only` — Only run frontend browser verification (assumes environment is up with a deployment)
+- _(no args)_ — Full run: tests, environment setup, deploy Semaphore, verify everything including frontend.
+- `skip-cluster` — Skip vCluster creation (assume the Kubernetes cluster already exists).
+- `skip-deploy` — Skip Semaphore deployment (only verify the existing environment).
+- `skip-tests` — Skip unit and frontend tests.
+- `frontend-only` — Only run frontend browser verification (assumes the environment is up with a deployment).
 
 ---
 
 ## Phase 0: Prerequisites
 
-<thinking>
-Fail fast if required tools are missing. No point starting a 5-minute setup if docker isn't installed.
-</thinking>
+Fail fast if required tools are missing. No point starting a 5-minute setup if Docker isn't installed.
 
-1. **Verify working directory is the repo root.** The shell may start in a subdirectory (e.g., `frontend/`). Always assert the root first:
+1. **Verify the working directory is the repo root.** The shell may start in a subdirectory (e.g., `frontend/`). Always assert the root first:
+
    ```bash
    cd "$(git rev-parse --show-toplevel)"
    test -f CLAUDE.md && test -d backend && test -d frontend
    ```
+
    If the assertion fails, STOP — you are not in the Styrmin repo.
 
 2. Check that all required CLI tools are installed:
+
    ```bash
    command -v docker && command -v vcluster && command -v helm && command -v kubectl && command -v uv && command -v curl && command -v pnpm
    ```
-3. Verify Docker daemon is running:
+
+3. Verify the Docker daemon is running:
+
    ```bash
    docker info > /dev/null 2>&1
    ```
-4. Verify Python virtual environment exists:
+
+4. Verify the Python virtual environment exists:
+
    ```bash
    test -d .venv
    ```
+
    If `.venv` does not exist, run:
+
    ```bash
    uv sync --all-groups --all-packages
    ```
+
 5. Verify frontend dependencies are installed:
+
    ```bash
    test -d frontend/node_modules
    ```
+
    If missing, run:
+
    ```bash
    cd frontend && pnpm install
    ```
@@ -61,11 +81,13 @@ Fail fast if required tools are missing. No point starting a 5-minute setup if d
 ### Invoke task runner reference
 
 All project automation is through Invoke tasks, run via `uv run invoke <task>`. To see available tasks:
+
 ```bash
 uv run invoke --list
 ```
 
-Key tasks used in this command:
+Key tasks used in this skill:
+
 | Task | Purpose |
 |------|---------|
 | `invoke test` | Run backend pytest suite |
@@ -86,20 +108,22 @@ Key tasks used in this command:
 
 **Skip this phase if `skip-tests` or `frontend-only` argument was provided.**
 
-<thinking>
 Run tests early. If the code is broken, there's no point spinning up infrastructure. But don't hard-fail — the live environment might still work even if some tests are flaky.
-</thinking>
 
 1. Run backend tests:
+
    ```bash
    uv run invoke test
    ```
+
    Record: total passed, total failed, total errors.
 
 2. Run frontend tests:
+
    ```bash
    cd frontend && pnpm test
    ```
+
    Record: total passed, total failed.
 
 3. **Report results to the user.** On failures: list which tests failed but **continue** to the next phase. Say something like: "X backend tests failed, Y frontend tests failed. Continuing with environment validation — these failures may or may not affect the live deployment."
@@ -108,36 +132,42 @@ Run tests early. If the code is broken, there's no point spinning up infrastruct
 
 ## Phase 2: Environment Assessment
 
-<thinking>
-Before creating or starting anything, check what's already running. This makes the command idempotent — running it twice doesn't break anything.
-</thinking>
+Before creating or starting anything, check what's already running. This makes the skill idempotent — running it twice doesn't break anything.
 
 **Skip to Phase 8 if `frontend-only` argument was provided.**
 
 Check each component and record its state:
 
 1. **vCluster:** Does a `styrmin` cluster already exist?
+
    ```bash
    vcluster list 2>/dev/null
    ```
+
    Look for a cluster named `styrmin` in the output. Record: `cluster_exists = true/false`.
 
 2. **Docker Compose services:** Are they running?
+
    ```bash
    docker compose ps --format json 2>/dev/null
    ```
+
    Check if `server`, `task-manager`, `task-worker`, `agent-operator` are listed and running. Record: `services_running = true/false`.
 
 3. **Backend health:**
+
    ```bash
    curl -sf http://localhost:8000/health 2>/dev/null
    ```
+
    Record: `backend_healthy = true/false`.
 
 4. **Prefect health:**
+
    ```bash
    curl -sf http://localhost:4200/api/health 2>/dev/null
    ```
+
    Record: `prefect_healthy = true/false`.
 
 Report what was found: "Cluster: running, Services: running, Backend: healthy, Prefect: healthy" (or the actual state).
@@ -148,14 +178,14 @@ Report what was found: "Cluster: running, Services: running, Backend: healthy, P
 
 **Skip this phase if `skip-cluster` argument was provided or `cluster_exists = true`.**
 
-<thinking>
-Create the vCluster, connect to it, and install the required CRDs. If the cluster already exists, just ensure we're connected.
-</thinking>
+Create the vCluster, connect to it, and install the required CRDs. If the cluster already exists, just ensure the agent is connected.
 
 1. If `cluster_exists = false`:
+
    ```bash
    uv run invoke cluster.create
    ```
+
    Wait for it to complete. This can take 30-60 seconds.
 
    ```bash
@@ -166,16 +196,19 @@ Create the vCluster, connect to it, and install the required CRDs. If the cluste
    uv run invoke cluster.init
    ```
 
-2. If `cluster_exists = true` but we need to ensure connectivity:
+2. If `cluster_exists = true` but the agent needs to ensure connectivity:
+
    ```bash
    uv run invoke cluster.connect
    ```
 
 3. Verify the cluster is ready:
+
    ```bash
    kubectl get nodes
    kubectl get namespaces
    ```
+
    Both commands should succeed. If they fail, report the error and stop.
 
 ---
@@ -184,11 +217,10 @@ Create the vCluster, connect to it, and install the required CRDs. If the cluste
 
 **Skip this phase if `services_running = true` AND `backend_healthy = true` AND `prefect_healthy = true`.**
 
-<thinking>
 Build the Docker image and start services. Then poll health endpoints until they're ready. This is where most of the startup time is spent.
-</thinking>
 
 1. If services are not running at all:
+
    ```bash
    uv run invoke dev.build
    uv run invoke dev.start
@@ -197,65 +229,75 @@ Build the Docker image and start services. Then poll health endpoints until they
 2. **Poll health endpoints.** Check every 5 seconds for up to 120 seconds (24 attempts):
 
    Backend health:
+
    ```bash
    curl -sf http://localhost:8000/health
    ```
-   Expected response: `{"status": "healthy"}`
+
+   Expected response: `{"status": "healthy"}`.
 
    Prefect health:
+
    ```bash
    curl -sf http://localhost:4200/api/health
    ```
+
    Expected: HTTP 200.
 
-   Report progress every 30 seconds: "Waiting for services... 30s/120s"
+   Report progress every 30 seconds: "Waiting for services... 30s/120s".
 
 3. **If timeout is reached** without both being healthy:
    - Dump the last 100 lines of logs for each service:
+
      ```bash
      docker compose logs --tail=100 server
      docker compose logs --tail=100 task-manager
      docker compose logs --tail=100 task-worker
      docker compose logs --tail=100 agent-operator
      ```
+
    - Report the failure and **STOP** — downstream phases cannot work without healthy services.
 
 4. **Scan container logs for errors** (informational, do not stop on errors):
+
    ```bash
    docker compose logs --tail=50 server 2>&1 | grep -iE "error|exception|traceback"
    docker compose logs --tail=50 task-worker 2>&1 | grep -iE "error|exception|traceback"
    docker compose logs --tail=50 agent-operator 2>&1 | grep -iE "error|exception|traceback"
    ```
+
    Report any errors found, with the service name and the error line. Continue regardless.
 
 ---
 
 ## Phase 5: Bootstrap
 
-<thinking>
-Check if Styrmin entities (cluster, environment, driver) already exist. If they do, skip bootstrap. If not, run it. The bootstrap task creates a "local" cluster, "local" environment, and loads the infrahub driver.
-</thinking>
+Check if Styrmin entities (cluster, environment, driver) already exist. If they do, skip bootstrap. If not, run it. The bootstrap task creates a `local` cluster, a `local` environment, and loads the infrahub driver.
 
 1. Query for existing clusters:
+
    ```bash
    curl -sf http://localhost:8000/graphql -H "Content-Type: application/json" -d '{"query":"{ clusters { id name } }"}'
    ```
 
 2. Query for existing environments:
+
    ```bash
    curl -sf http://localhost:8000/graphql -H "Content-Type: application/json" -d '{"query":"{ environments { id name } }"}'
    ```
 
 3. **If clusters or environments are empty** (no data returned), run bootstrap:
+
    ```bash
    uv run invoke dev.bootstrap
    ```
-   This creates:
-   - A cluster named `local`
-   - An environment named `local` linked to that cluster
-   - Loads the infrahub driver version from `/styrmin/drivers/infrahub`
 
-4. **If entities already exist**, report what was found and skip. Record the environment ID from the query response — you will need it for the deployment phase.
+   This creates:
+   - A cluster named `local`.
+   - An environment named `local` linked to that cluster.
+   - Loads the infrahub driver version from `/styrmin/drivers/infrahub`.
+
+4. **If entities already exist**, report what was found and skip. Record the environment ID from the query response — it is needed for the deployment phase.
 
 ---
 
@@ -263,9 +305,7 @@ Check if Styrmin entities (cluster, environment, driver) already exist. If they 
 
 **Skip this phase if `skip-deploy` argument was provided.**
 
-<thinking>
-This is the core sanity check. Load the Semaphore example driver, deploy it, and wait for it to become healthy. Use curl with GraphQL — the same pattern as dev.bootstrap and the E2E tests.
-</thinking>
+This is the core sanity check. Load the Semaphore example driver, deploy it, and wait for it to become healthy. Use curl with GraphQL — the same pattern as `dev.bootstrap` and the E2E tests.
 
 ### Step 6a: Load the Semaphore driver
 
@@ -305,55 +345,67 @@ Replace `<DEPLOYMENT_ID>` with the actual deployment ID captured in step 6b.
 
 **Success condition:** `status` is `"deployed"` or `"active"`.
 
-Report progress every 30 seconds: "Deployment status: in_progress... 60s/300s"
+Report progress every 30 seconds: "Deployment status: in_progress... 60s/300s".
 
 **If timeout is reached:**
-- Report the current deployment status
+
+- Report the current deployment status.
 - Dump diagnostic info:
+
   ```bash
   docker compose logs --tail=100 task-worker
   docker compose logs --tail=100 agent-operator
   ```
+
 - List pods and events in the deployment namespace. The namespace follows the pattern `styrmin-<name>` where name is the deployment name:
+
   ```bash
   kubectl get pods -A | grep styrmin
   kubectl get events -A --sort-by=.lastTimestamp | grep styrmin | tail -20
   ```
+
 - **STOP** — the deployment failed.
 
 ---
 
 ## Phase 7: Verify Kubernetes Resources
 
-<thinking>
 The deployment is reported as successful by the API. Now verify the actual Kubernetes resources are healthy — pods running, services created, HelmRelease reconciled.
-</thinking>
 
 1. **Find the deployment namespace.** Query the deployment to get the instance namespace, or look for namespaces:
+
    ```bash
    kubectl get namespaces | grep styrmin
    ```
+
    The Semaphore deployment namespace will match the pattern based on the deployment name/ID.
 
 2. **Check pods:**
+
    ```bash
    kubectl get pods -n <namespace>
    ```
+
    All pods should be `Running` with all containers ready (e.g., `1/1`). Report any pods in `CrashLoopBackOff`, `Pending`, or `Error` state.
 
 3. **Check services:**
+
    ```bash
    kubectl get svc -n <namespace>
    ```
+
    Should show the Semaphore service on port 3000.
 
 4. **Check HelmRelease:**
+
    ```bash
    kubectl get helmrelease -n <namespace>
    ```
+
    Status should show `Ready`.
 
 5. **Port-forward and health-check Semaphore:**
+
    ```bash
    kubectl port-forward -n <namespace> svc/styrmin-semaphore 3000:3000 &
    PF_PID=$!
@@ -362,6 +414,7 @@ The deployment is reported as successful by the API. Now verify the actual Kuber
    PING_EXIT=$?
    kill $PF_PID 2>/dev/null
    ```
+
    If curl returns HTTP 200, the Semaphore application is alive and serving requests.
 
    **Note:** If the port-forward or health check fails, this is not necessarily a blocker — it may take time for the application to fully start. Report the result but continue.
@@ -370,63 +423,59 @@ The deployment is reported as successful by the API. Now verify the actual Kuber
 
 ## Phase 8: Frontend Browser Validation
 
-<thinking>
-Now verify that the frontend UI correctly displays the environment and deployment. Use Playwright MCP tools if available. The frontend is served by the backend at http://localhost:8000/. The index route shows the environment list, environment detail shows deployments, and deployment detail shows status and components.
+Verify that the frontend UI correctly displays the environment and deployment. Use Playwright tooling if available. The frontend is served by the backend at `http://localhost:8000/`. The index route shows the environment list, environment detail shows deployments, and deployment detail shows status and components.
 
 Frontend routes:
-- / — Environment list (shows "local" environment)
-- /environments/<environmentId> — Environment detail (shows deployments)
-- /environments/<environmentId>/deployments/<deploymentId> — Deployment detail
-</thinking>
 
-### Option A: Playwright MCP Available
+- `/` — Environment list (shows the `local` environment).
+- `/environments/<environmentId>` — Environment detail (shows deployments).
+- `/environments/<environmentId>/deployments/<deploymentId>` — Deployment detail.
 
-If the Playwright MCP tools are available (check for `mcp__playwright__browser_navigate` or similar tools), use them:
+### Option A: Playwright tooling available
 
-1. **Navigate to the app:**
-   Use the browser navigate tool to go to `http://localhost:8000/`
+If Playwright tooling is available to the agent (e.g., a Playwright MCP server with `browser_navigate`, `browser_snapshot`, `browser_click` tools), use it:
 
+1. **Navigate to the app:** Use the browser navigate tool to go to `http://localhost:8000/`.
 2. **Verify the environment list page loads:**
-   - Take a screenshot
-   - Look for the "local" environment in the page content
-   - If the page is empty or shows an error, report it
-
-3. **Click into the "local" environment:**
-   - Find and click the "local" environment link/card
-   - Wait for the environment detail page to load
-
+   - Take a screenshot.
+   - Look for the `local` environment in the page content.
+   - If the page is empty or shows an error, report it.
+3. **Click into the `local` environment:**
+   - Find and click the `local` environment link/card.
+   - Wait for the environment detail page to load.
 4. **Verify the Semaphore deployment appears:**
-   - Take a screenshot
-   - Look for "semaphore-validate" in the deployment list
-   - Verify the deployment status is displayed (should show "deployed" or "active")
-
+   - Take a screenshot.
+   - Look for `semaphore-validate` in the deployment list.
+   - Verify the deployment status is displayed (should show `deployed` or `active`).
 5. **Click into the deployment detail:**
-   - Find and click the "semaphore-validate" deployment
-   - Wait for the deployment detail page to load
-
+   - Find and click the `semaphore-validate` deployment.
+   - Wait for the deployment detail page to load.
 6. **Verify deployment details:**
-   - Take a screenshot to show the user
-   - Verify the status, application version (2.16.47), and components (server, database) are visible
-
+   - Take a screenshot to show the user.
+   - Verify the status, application version (2.16.47), and components (server, database) are visible.
 7. **Close the browser** when done.
 
-### Option B: No Playwright MCP (Fallback)
+### Option B: No Playwright tooling (Fallback)
 
-If Playwright MCP tools are NOT available:
+If Playwright tooling is NOT available:
 
 1. Verify the frontend HTML is served:
+
    ```bash
    curl -sf http://localhost:8000/ | head -20
    ```
-   Should return HTML containing `<div id="root">` or similar React mount point.
+
+   Should return HTML containing `<div id="root">` or a similar React mount point.
 
 2. Verify the GraphQL API responds to frontend-style queries:
+
    ```bash
    curl -sf http://localhost:8000/graphql -H "Content-Type: application/json" -d '{"query":"{ environments { id name } }"}'
    ```
 
 3. Report to the user:
-   > Frontend HTML is being served correctly and the GraphQL API is responding. For full browser-based UI validation, install the Playwright MCP server. You can manually verify the UI at http://localhost:8000/
+
+   > Frontend HTML is being served correctly and the GraphQL API is responding. For full browser-based UI validation, install a Playwright-compatible browser-automation tool. You can manually verify the UI at http://localhost:8000/
 
 ---
 
@@ -434,7 +483,7 @@ If Playwright MCP tools are NOT available:
 
 Present the final validation report as a table:
 
-```
+```text
 | Check                  | Status    | Details                              |
 |------------------------|-----------|--------------------------------------|
 | Backend unit tests     | PASS/FAIL | X passed, Y failed                   |
@@ -452,9 +501,10 @@ Present the final validation report as a table:
 | Container log errors   | WARN/PASS | Error count per service              |
 ```
 
-Use PASS/FAIL/WARN/SKIP for each check. SKIP means the phase was skipped due to arguments.
+Use `PASS` / `FAIL` / `WARN` / `SKIP` for each check. `SKIP` means the phase was skipped due to arguments.
 
 If everything passed, end with:
+
 > All validation checks passed. The Styrmin dev environment is fully operational.
 
 If there were failures, end with a summary of what failed and suggested next steps for debugging.
@@ -468,14 +518,15 @@ Throughout all phases, follow these principles:
 - **Be specific in error messages.** Don't just say "deployment failed" — include the status, error message, and relevant logs.
 - **Dump diagnostics before stopping.** When a phase fails and you need to stop, always collect logs, pod status, or events first.
 - **Don't retry blindly.** If a command fails, check why before retrying. One retry is fine for transient network issues; repeated retries indicate a real problem.
-- **Clean up background processes.** If you started a `kubectl port-forward` in the background, make sure to kill it before finishing.
+- **Clean up background processes.** If a `kubectl port-forward` was started in the background, make sure to kill it before finishing.
 
 ## Expected Outcome
 
 A fully validated dev environment with:
-- All unit tests reported (pass or fail)
-- Kubernetes cluster running
-- All Docker Compose services healthy
-- Semaphore application deployed and serving HTTP requests
-- Frontend UI verified (with screenshots if Playwright is available)
-- A clear summary report showing the status of every check
+
+- All unit tests reported (pass or fail).
+- Kubernetes cluster running.
+- All Docker Compose services healthy.
+- Semaphore application deployed and serving HTTP requests.
+- Frontend UI verified (with screenshots if Playwright is available).
+- A clear summary report showing the status of every check.
