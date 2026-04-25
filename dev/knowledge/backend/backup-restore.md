@@ -121,7 +121,7 @@ class BackupSchedule(StyrminModel, table=True):
 
 | Function | Description |
 |----------|-------------|
-| `create_restore(backup_id, target_namespace, uow, ...)` | Create restore from backup |
+| `create_restore(backup_id, target_namespace, uow, ...)` | Create restore from backup; resolves the target deployment, rejects internal deployments and concurrent restores, flips `deployment.status` to `RESTORING`. Returns `(Restore, deployment_id)`. |
 | `get_restore(restore_id, uow)` | Get restore by ID |
 | `get_restores(backup_id, uow, status)` | List restores for backup |
 | `update_restore_status(restore_id, status, uow, ...)` | Update restore status |
@@ -157,8 +157,34 @@ Results are passed between workers via **Prefect Variables** (a cross-worker com
 
 **Restore:**
 
-1. `execute_restore_workflow` (INTERNAL) — marks restore IN_PROGRESS, builds Velero CRD, dispatches to USER flow, updates status from result
-2. `execute_velero_restore_flow` (USER) — deletes target namespace first, creates Velero Restore CRD, polls completion, stores result in Prefect Variable
+1. `execute_restore_workflow` (INTERNAL) — marks restore IN_PROGRESS, builds Velero CRD, dispatches to USER flow, transitions `deployment.status` between `RESTORING` and `RUNNING` / `FAILED` based on the result.
+2. `execute_velero_restore_flow` (USER) — deletes target namespace first, creates Velero Restore CRD, polls completion, then runs the post-velero recovery (see [Restore Lifecycle](#restore-lifecycle) below), stores result in Prefect Variable.
+
+## Restore Lifecycle
+
+A restore is a multi-stage operation: velero recreates the namespace and its resources, but Kubernetes does not restore the `status` subresource and kopf does not fire `on.create` for a restored CRD (the `kopf.zalando.org/last-handled-configuration` annotation is restored too, fooling kopf into thinking it has already handled the resource). The styrmin restore workflow therefore drives the lifecycle explicitly so the deployment converges back to a healthy state without the operator's 300 s readiness timeout tripping.
+
+### Stages
+
+1. **Restore start (`services/backup/service.py:create_restore`).** The deployment's status is flipped to `DeploymentState.RESTORING` in the same transaction that creates the `Restore` record. Internal deployments are rejected. A second restore on a deployment already `RESTORING` is rejected with `RestoreAlreadyInProgressError`.
+2. **Velero work (USER flow).** Namespace is deleted, then velero restores everything from the backup. The CRD is recreated with empty status.
+3. **Operator quiesce.** While `phase == Restoring`, the operator's `kopf_styrmin_deployment_timer` early-returns — it does not advance phases and does not trip the 300 s readiness-timeout-to-Error branch.
+4. **Post-velero recovery (`operator/restore_recovery.py`).** Called from the USER flow after velero polling reports `Completed`:
+   - `mark_restoring` — patches the restored CRD to `phase=Restoring` / `displayState=Restoring` so the operator timer recognises the in-flight state.
+   - `reapply_and_finalize` — strips kopf state-tracking annotations, re-applies prerequisites (`execute_phase_prerequisites`) and utility resources (`execute_phase_services`), then patches the CRD to `phase=Ready` / `displayState=Running`.
+   - `mark_failed` — used on any failure with a message that distinguishes velero failure from post-restore reapply failure.
+5. **Final DB transition (INTERNAL flow).** `deployment.status` is moved from `RESTORING` to `RUNNING` (or `FAILED`) inline so the UI reflects the transition immediately rather than waiting on the next agent status poll.
+
+### Display state mapping
+
+The agent's status reporter maps CRD `displayState` to `deployment.status` (see `services/deployment_status.py:_DISPLAY_STATE_TO_STATUS`):
+
+| `DisplayState` | `DeploymentState` |
+|----------------|-------------------|
+| `Deploying` | `DEPLOYING` |
+| `Running` | `RUNNING` |
+| `Restoring` | `RESTORING` |
+| `Error` | `FAILED` |
 
 ## GraphQL API
 
