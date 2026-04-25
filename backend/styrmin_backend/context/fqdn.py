@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from uuid import UUID
 
+_DNS_MAX_LABEL_LENGTH = 63
+
 
 def to_fqdn_label(value: str) -> str:
     """Sanitize a string into a valid DNS label (RFC 1035).
@@ -17,13 +19,40 @@ def to_fqdn_label(value: str) -> str:
     2. Replace non-alphanumeric characters (except hyphens) with hyphens
     3. Collapse consecutive hyphens to a single hyphen
     4. Strip leading and trailing hyphens
-    5. Truncate to 63 characters
+    5. Truncate to 63 characters and strip any hyphen exposed by truncation
     """
     value = value.lower()
     value = re.sub(r"[^a-z0-9-]", "-", value)
     value = re.sub(r"-{2,}", "-", value)
     value = value.strip("-")
-    return value[:63]
+    return value[:_DNS_MAX_LABEL_LENGTH].rstrip("-")
+
+
+def _combine_labels(prefix: str, suffix: str) -> str:
+    """Join two already-sanitized labels with ``-``, fitting within the DNS limit.
+
+    The suffix is preserved intact whenever possible (it carries the
+    uniqueness or environment identity); the prefix is truncated as needed.
+    Returns an empty string when no valid combined label can be produced.
+    """
+    if not prefix and not suffix:
+        return ""
+    if not prefix:
+        return suffix[:_DNS_MAX_LABEL_LENGTH].rstrip("-")
+    if not suffix:
+        return prefix[:_DNS_MAX_LABEL_LENGTH].rstrip("-")
+
+    if len(suffix) >= _DNS_MAX_LABEL_LENGTH:
+        return suffix[:_DNS_MAX_LABEL_LENGTH].rstrip("-")
+
+    available_for_prefix = _DNS_MAX_LABEL_LENGTH - 1 - len(suffix)
+    if available_for_prefix <= 0:
+        return suffix
+
+    truncated_prefix = prefix[:available_for_prefix].rstrip("-")
+    if not truncated_prefix:
+        return suffix
+    return f"{truncated_prefix}-{suffix}"
 
 
 def compute_primary_fqdn(
@@ -35,12 +64,17 @@ def compute_primary_fqdn(
 
     Pattern: ``{sanitized-app-name}-{deployment-id}.{fqdn-suffix}``
 
-    Returns ``None`` when *fqdn_suffix* is not configured.
+    Returns ``None`` when *fqdn_suffix* is not configured or no valid
+    left-hand label can be constructed.
     """
     if not fqdn_suffix:
         return None
-    label = to_fqdn_label(app_name)
-    return f"{label}-{deployment_id}.{fqdn_suffix}"
+    deployment_label = to_fqdn_label(str(deployment_id))
+    app_label = to_fqdn_label(app_name)
+    label = _combine_labels(app_label, deployment_label)
+    if not label:
+        return None
+    return f"{label}.{fqdn_suffix}"
 
 
 def compute_human_readable_fqdn(
@@ -52,10 +86,14 @@ def compute_human_readable_fqdn(
 
     Pattern: ``{sanitized-host}-{sanitized-env}.{fqdn-suffix}``
 
-    Returns ``None`` when *fqdn_suffix* is not configured.
+    Returns ``None`` when *fqdn_suffix* is not configured or no valid
+    left-hand label can be constructed.
     """
     if not fqdn_suffix:
         return None
     host_label = to_fqdn_label(service_host)
     env_label = to_fqdn_label(environment_name)
-    return f"{host_label}-{env_label}.{fqdn_suffix}"
+    label = _combine_labels(host_label, env_label)
+    if not label:
+        return None
+    return f"{label}.{fqdn_suffix}"
