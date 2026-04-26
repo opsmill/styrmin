@@ -258,6 +258,14 @@ class FakeRestoreRepository(FakeRepository[Restore], RestoreRepository):
             results = [r for r in results if r.status == status]
         return results
 
+    async def get_by_target_namespace(
+        self, target_namespace: str, status: RestoreStatus | None = None
+    ) -> list[Restore]:
+        results = [r for r in self.models if r.target_namespace == target_namespace]
+        if status is not None:
+            results = [r for r in results if r.status == status]
+        return results
+
 
 class FakePodStatusRepository(FakeRepository[PodStatus], PodStatusRepository):
     """Fake pod status repository for testing purposes."""
@@ -319,8 +327,8 @@ class FakeDeploymentStatusRepository(
 class FakeDeploymentRepository(DeploymentRepository):
     """Fake deployment repository for testing purposes."""
 
-    def __init__(self) -> None:
-        self._deployments: list[DeploymentEntity] = []
+    def __init__(self, deployments: list[DeploymentEntity] | None = None) -> None:
+        self._deployments: list[DeploymentEntity] = list(deployments or [])
 
     async def create(self, entity: Deployment) -> Deployment:
         return entity
@@ -451,6 +459,9 @@ class FakeUnitOfWork(UnitOfWork):
         )
         self.application_driver_versions = application_driver_versions
         self.instances = instances
+        # Alias matching the real UoW's attribute name so service code can
+        # use either accessor without divergence.
+        self.application_instances = instances
         self.actions = actions
         self.tasks = tasks
         self.deployments = deployments or FakeDeploymentRepository()

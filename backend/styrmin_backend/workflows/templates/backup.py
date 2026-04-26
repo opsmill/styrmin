@@ -234,15 +234,56 @@ async def execute_velero_restore_flow(
             interval=POLL_RETRY_DELAY_SECONDS,
         )
 
+        # Post-velero recovery: claim the CRD's lifecycle, strip kopf
+        # state annotations so on.create/on.resume can fire correctly in
+        # the future, and re-apply prerequisites + utility resources so
+        # NetworkPolicies / Secrets / Middlewares / Services converge.
+        # Velero restored the CRD without status, so the operator's timer
+        # would otherwise trip its 300 s readiness timeout — see
+        # operator/restore_recovery.py for the contract.
+        from styrmin_backend.operator.restore_recovery import (
+            mark_failed,
+            mark_restoring,
+            reapply_and_finalize,
+        )
+
+        velero_status = result.get("status", {})
+        velero_phase = velero_status.get("phase", "")
+        # CRD name matches the target namespace (one StyrminDeployment per
+        # deployment namespace).
+        crd_name = target_namespace
+
+        recovery_status: dict[str, Any] = {"recovered": False, "error": None}
+        if velero_phase == "Completed":
+            try:
+                await mark_restoring(api_client, target_namespace, crd_name)
+                await reapply_and_finalize(api_client, target_namespace, crd_name)
+                recovery_status["recovered"] = True
+            except Exception as exc:
+                error_msg = f"Restore reapply failed: {exc}"
+                logger.error(error_msg)
+                await mark_failed(api_client, target_namespace, crd_name, error_msg)
+                recovery_status["error"] = error_msg
+        else:
+            failure_reason = velero_status.get("failureReason") or (
+                f"Velero restore phase: {velero_phase}"
+            )
+            await mark_failed(
+                api_client,
+                target_namespace,
+                crd_name,
+                f"Velero restore failed: {failure_reason}",
+            )
+
         # Store result for cross-worker retrieval via Prefect Variable
-        status = result.get("status", {})
         await Variable.set(  # type: ignore[misc]
             name=f"velero-result-{flow_run_ctx.id}",
             value={
                 "status": {
-                    "phase": status.get("phase", ""),
-                    "failureReason": status.get("failureReason", ""),
-                }
+                    "phase": velero_phase,
+                    "failureReason": velero_status.get("failureReason", ""),
+                },
+                "recovery": recovery_status,
             },
             overwrite=True,
         )
@@ -536,25 +577,40 @@ async def execute_restore_workflow(
         # Clean up the temporary variable
         await Variable.unset(f"velero-result-{flow_run.id}")  # type: ignore[misc]
 
-        # Update status based on Velero phase
+        # Update status based on Velero phase + post-velero recovery result.
         status = result.get("status", {})
         velero_phase = status.get("phase", "")
+        recovery = result.get("recovery", {}) if isinstance(result, dict) else {}
 
         uow = await get_unit_of_work()
-        if velero_phase == "Completed":
+        if velero_phase == "Completed" and recovery.get("recovered"):
             await update_restore_status(
                 restore_id=restore_uuid,
                 status=RestoreStatus.COMPLETED,
                 uow=uow,
             )
+            await _set_deployment_status_running(
+                deployment_id=UUID(deployment_id), uow=uow
+            )
             logger.info(f"Restore {restore_uuid} completed successfully")
         else:
-            error_msg = status.get(
-                "failureReason", f"Velero restore phase: {velero_phase}"
-            )
+            if velero_phase == "Completed":
+                error_msg = (
+                    recovery.get("error")
+                    or "Velero completed but post-restore reapply failed"
+                )
+            else:
+                error_msg = status.get(
+                    "failureReason", f"Velero restore phase: {velero_phase}"
+                )
             await update_restore_status(
                 restore_id=restore_uuid,
                 status=RestoreStatus.FAILED,
+                uow=uow,
+                error_message=error_msg,
+            )
+            await _set_deployment_status_failed(
+                deployment_id=UUID(deployment_id),
                 uow=uow,
                 error_message=error_msg,
             )
@@ -569,4 +625,49 @@ async def execute_restore_workflow(
             uow=uow,
             error_message=str(e),
         )
+        await _set_deployment_status_failed(
+            deployment_id=UUID(deployment_id),
+            uow=uow,
+            error_message=str(e),
+        )
         raise
+
+
+async def _set_deployment_status_running(deployment_id: UUID, uow: Any) -> None:
+    """Move the deployment from RESTORING back to RUNNING after recovery.
+
+    Done inline so the UI sees the transition immediately rather than
+    waiting on the next agent status poll. Idempotent — if the deployment
+    is already RUNNING (e.g. status reporter beat us to it), this no-ops.
+    """
+    from styrmin_backend.db.models import DeploymentState
+
+    async with uow:
+        deployment = await uow.deployments.find(deployment_id)
+        if deployment is None:
+            return
+        if deployment.status != DeploymentState.RUNNING:
+            deployment.status = DeploymentState.RUNNING
+            await uow.deployments.save(deployment)
+            await uow.commit()
+
+
+async def _set_deployment_status_failed(
+    deployment_id: UUID, uow: Any, error_message: str
+) -> None:
+    """Move the deployment to FAILED after a restore error.
+
+    The error_message ends up in the deployment_status snapshot via the
+    operator's status reporter on the next poll; here we just ensure the
+    DB-side status reflects failure immediately.
+    """
+    from styrmin_backend.db.models import DeploymentState
+
+    async with uow:
+        deployment = await uow.deployments.find(deployment_id)
+        if deployment is None:
+            return
+        if deployment.status != DeploymentState.FAILED:
+            deployment.status = DeploymentState.FAILED
+            await uow.deployments.save(deployment)
+            await uow.commit()

@@ -20,6 +20,7 @@ class DeploymentPhase(StrEnum):
     CREATING_HELM_RELEASE = "CreatingHelmRelease"
     CREATING_SERVICES = "CreatingServices"
     READY = "Ready"
+    RESTORING = "Restoring"
     FAILED = "Failed"
     DELETING = "Deleting"
 
@@ -29,6 +30,7 @@ class DisplayState(StrEnum):
 
     DEPLOYING = "Deploying"
     RUNNING = "Running"
+    RESTORING = "Restoring"
     ERROR = "Error"
 
 

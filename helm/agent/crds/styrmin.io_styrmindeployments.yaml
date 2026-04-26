@@ -80,6 +80,7 @@ spec:
                     - CreatingHelmRelease
                     - CreatingServices
                     - Ready
+                    - Restoring
                     - Failed
                     - Deleting
                 displayState:
@@ -88,6 +89,7 @@ spec:
                   enum:
                     - Deploying
                     - Running
+                    - Restoring
                     - Error
                 message:
                   type: string

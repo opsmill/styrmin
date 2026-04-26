@@ -566,34 +566,24 @@ class Mutation:
         """Create a restore operation from a backup."""
         uow = info.context["uow"]
 
-        restore = await create_restore_service(
+        restore, deployment_id = await create_restore_service(
             backup_id=backup_id,
             target_namespace=target_namespace,
             target_instance_id=target_instance_id,
             uow=uow,
         )
 
-        # Look up backup -> instance -> deployment to get deployment_id
         try:
-            from styrmin_backend.db.models import ApplicationInstance
-
-            async with uow:
-                backup_record = await uow.backups.get(backup_id)
-                if backup_record:
-                    instance_record = await uow.session.get(
-                        ApplicationInstance, backup_record.instance_id
-                    )
-                    if instance_record and instance_record.deployment_id:
-                        prefect_manager = get_manager()
-                        await prefect_manager.run_action(
-                            action=PrefectAction.EXECUTE_RESTORE,
-                            parameters={
-                                "restore_id": str(restore.id),
-                                "backup_id": str(backup_id),
-                                "deployment_id": str(instance_record.deployment_id),
-                                "target_namespace": target_namespace,
-                            },
-                        )
+            prefect_manager = get_manager()
+            await prefect_manager.run_action(
+                action=PrefectAction.EXECUTE_RESTORE,
+                parameters={
+                    "restore_id": str(restore.id),
+                    "backup_id": str(backup_id),
+                    "deployment_id": str(deployment_id),
+                    "target_namespace": target_namespace,
+                },
+            )
         except Exception as exc:
             logger.warning(
                 f"Failed to submit restore workflow for restore {restore.id}, "

@@ -58,6 +58,7 @@ class DeploymentState(str, Enum):
     PENDING = "pending"
     DEPLOYING = "deploying"
     RUNNING = "running"
+    RESTORING = "restoring"
     FAILED = "failed"
 
 

@@ -185,6 +185,11 @@ export default function DeploymentDetailPage() {
     : [];
 
   const deployColors = getStatusColor(deployment.status);
+  // While the styrmin restore flow is in flight, the deployment status is
+  // 'restoring'. Block conflicting actions client-side; the API also rejects
+  // them with ALREADY_IN_PROGRESS, but greying the buttons matches the
+  // intent and avoids racing pop-ups.
+  const isRestoring = deployment.status === "restoring";
 
   return (
     <div
@@ -254,7 +259,7 @@ export default function DeploymentDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={!instanceId}
+            disabled={!instanceId || isRestoring}
             onClick={() => setUpgradeOpen(true)}
           >
             Upgrade
@@ -470,7 +475,9 @@ export default function DeploymentDetailPage() {
             </span>
             <Button
               size="sm"
-              disabled={!instanceId || createBackupMutation.isPending}
+              disabled={
+                !instanceId || createBackupMutation.isPending || isRestoring
+              }
               onClick={handleBackup}
             >
               <Archive className="h-4 w-4" />

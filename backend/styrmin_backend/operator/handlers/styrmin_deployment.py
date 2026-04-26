@@ -424,6 +424,12 @@ async def kopf_styrmin_deployment_timer(
     conditions = list(status.get("conditions", []))
     crd_spec = dict(spec)
 
+    # While the styrmin restore flow drives the lifecycle, the operator
+    # must not advance phases or trip the readiness timeout — let the
+    # workflow finish, strip the kopf annotations, and transition out.
+    if phase == DeploymentPhase.RESTORING.value:
+        return
+
     # --- displayState timeout check ---
     # If deployment hasn't reached Ready or Failed within the timeout, mark as Error.
     if phase not in (
