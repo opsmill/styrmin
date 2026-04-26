@@ -62,6 +62,11 @@ async def _read_crd(api_client: ApiClient, namespace: str, name: str) -> dict[st
 async def _patch_crd_status(
     api_client: ApiClient, namespace: str, name: str, status: dict[str, Any]
 ) -> None:
+    # kubernetes_asyncio's autodetect picks JSON-Patch (RFC 6902) for
+    # custom-object PATCH calls, so an object body is rejected with
+    # "cannot unmarshal object into []handlers.jsonPatchOp". Force
+    # merge-patch — same workaround as
+    # ``agent/service/kubernetes/primitives.py:apply_or_patch``.
     custom_api = k8s_client.CustomObjectsApi(api_client)
     await custom_api.patch_namespaced_custom_object_status(
         group=CRD_GROUP,
@@ -70,6 +75,7 @@ async def _patch_crd_status(
         plural=CRD_PLURAL,
         name=name,
         body={"status": status},
+        _content_type="application/merge-patch+json",  # type: ignore[call-arg]
     )
 
 
@@ -78,8 +84,9 @@ async def _strip_kopf_annotations(
 ) -> None:
     """Remove kopf state-tracking annotations from the CRD.
 
-    Uses a strategic-merge patch with ``null`` values, which is how the K8s
-    API removes annotations.
+    Uses a merge patch with ``null`` values, which is how the K8s API
+    removes annotations. See ``_patch_crd_status`` for the
+    ``_content_type`` workaround.
     """
     custom_api = k8s_client.CustomObjectsApi(api_client)
     body = {"metadata": {"annotations": {key: None for key in _KOPF_STATE_ANNOTATIONS}}}
@@ -90,6 +97,7 @@ async def _strip_kopf_annotations(
         plural=CRD_PLURAL,
         name=name,
         body=body,
+        _content_type="application/merge-patch+json",  # type: ignore[call-arg]
     )
 
 

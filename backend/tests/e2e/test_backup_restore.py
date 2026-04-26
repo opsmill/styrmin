@@ -353,9 +353,12 @@ async def test_restore_lifecycle_transitions(
     instance_id = deployed_simple_app["instance_id"]
     namespace = deployed_simple_app["namespace"]
 
-    initial = await client.deployments.get(deployment_id)
-    assert initial.status == "running", (
-        f"Expected initial status 'running', got {initial.status!r}"
+    # Wait for the agent's status reporter to propagate the deployed
+    # state to deployment.status. ``deployed_simple_app`` returns once
+    # the CRD reaches Ready, but the DB-side status is updated on the
+    # next status poll, which can lag a few seconds.
+    await _wait_for_deployment_status(
+        client, deployment_id, expected={"running"}, max_wait=30
     )
 
     backup = await driver.create_backup(instance_id=instance_id)
