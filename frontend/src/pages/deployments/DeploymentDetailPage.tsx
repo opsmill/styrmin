@@ -307,26 +307,30 @@ export default function DeploymentDetailPage() {
                   </div>
                   <div className="flex flex-col gap-1.5">
                     {service.humanReadableFqdn && (
-                      <div className="flex items-center gap-2 rounded-lg bg-primary/5 px-3 py-2">
-                        <ExternalLink className="h-3 w-3 text-primary" />
-                        <span className="font-mono text-xs font-medium text-primary">
-                          {service.humanReadableFqdn}
-                        </span>
-                        <span className="ml-auto rounded bg-primary px-1.5 py-px text-[10px] font-medium text-primary-foreground">
-                          PUBLIC
-                        </span>
-                      </div>
+                      <ServiceAddressRow
+                        url={service.humanReadableUrl}
+                        fqdn={service.humanReadableFqdn}
+                        port={service.port}
+                        icon={<ExternalLink className="h-3 w-3 text-primary" />}
+                        containerClass="bg-primary/5"
+                        textClass="font-medium text-primary"
+                        badgeLabel="PUBLIC"
+                        badgeClass="bg-primary text-primary-foreground"
+                      />
                     )}
                     {service.primaryFqdn && (
-                      <div className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2">
-                        <Lock className="h-3 w-3 text-muted-foreground" />
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {service.primaryFqdn}:{service.port}
-                        </span>
-                        <span className="ml-auto rounded bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">
-                          INTERNAL
-                        </span>
-                      </div>
+                      <ServiceAddressRow
+                        url={service.primaryUrl}
+                        fqdn={service.primaryFqdn}
+                        port={service.port}
+                        icon={
+                          <Lock className="h-3 w-3 text-muted-foreground" />
+                        }
+                        containerClass="bg-surface"
+                        textClass="text-muted-foreground"
+                        badgeLabel="INTERNAL"
+                        badgeClass="bg-muted text-muted-foreground"
+                      />
                     )}
                   </div>
                 </div>
@@ -673,6 +677,65 @@ export default function DeploymentDetailPage() {
         deploymentId={deploymentId}
         currentConfig={deployment.config}
       />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ServiceAddressRow
+// ---------------------------------------------------------------------------
+
+function ServiceAddressRow({
+  url,
+  fqdn,
+  port,
+  icon,
+  containerClass,
+  textClass,
+  badgeLabel,
+  badgeClass,
+}: {
+  url?: string | null;
+  fqdn: string;
+  port: number;
+  icon: React.ReactNode;
+  containerClass: string;
+  textClass: string;
+  badgeLabel: string;
+  badgeClass: string;
+}) {
+  // Display label: strip scheme from the URL so the visual density matches
+  // the previous bare-FQDN rendering, while still showing the port.
+  const displayLabel = url
+    ? url.replace(/^[a-z]+:\/\//, "")
+    : `${fqdn}:${port}`;
+
+  const content = (
+    <span className={`font-mono text-xs ${textClass}`}>{displayLabel}</span>
+  );
+
+  return (
+    <div
+      className={`flex items-center gap-2 rounded-lg ${containerClass} px-3 py-2`}
+    >
+      {icon}
+      {url ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:underline"
+        >
+          {content}
+        </a>
+      ) : (
+        content
+      )}
+      <span
+        className={`ml-auto rounded px-1.5 py-px text-[10px] font-medium ${badgeClass}`}
+      >
+        {badgeLabel}
+      </span>
     </div>
   );
 }

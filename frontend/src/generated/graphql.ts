@@ -200,10 +200,12 @@ export type DeployedService = {
   deploymentId: Scalars['UUID']['output'];
   driverServiceName: Scalars['String']['output'];
   humanReadableFqdn?: Maybe<Scalars['String']['output']>;
+  humanReadableUrl?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
   kind: Scalars['String']['output'];
   port: Scalars['Int']['output'];
   primaryFqdn?: Maybe<Scalars['String']['output']>;
+  primaryUrl?: Maybe<Scalars['String']['output']>;
   resolvedName: Scalars['String']['output'];
   scope: Scalars['String']['output'];
 };
@@ -847,7 +849,7 @@ export type GetDeploymentQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null }> } | null };
+export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
 
 export type GetDeploymentResolvedSchedulingQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -1328,6 +1330,8 @@ export const GetDeploymentDocument = `
       port
       primaryFqdn
       humanReadableFqdn
+      primaryUrl
+      humanReadableUrl
     }
   }
 }

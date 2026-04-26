@@ -666,6 +666,8 @@ async def styrmin_resources(
         name="test-cluster",
         config={
             "fqdn_suffix": "styrmin.com",
+            "external_url_scheme": "http",
+            "external_url_port": 8080,
             "ingress_class": "traefik",
             "dedicated_ingress": {
                 "implementation": "traefik",

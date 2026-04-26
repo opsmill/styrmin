@@ -29,6 +29,8 @@ query GetDeployment($deploymentId: UUID!) {
       port
       primaryFqdn
       humanReadableFqdn
+      primaryUrl
+      humanReadableUrl
     }
   }
 }

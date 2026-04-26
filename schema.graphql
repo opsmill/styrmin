@@ -169,6 +169,8 @@ type DeployedService {
   component: String!
   primaryFqdn: String
   humanReadableFqdn: String
+  primaryUrl: String
+  humanReadableUrl: String
   deploymentId: UUID!
 }
 

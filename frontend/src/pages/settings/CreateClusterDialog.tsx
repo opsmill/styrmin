@@ -28,6 +28,8 @@ const createClusterSchema = z
     ingress_class: z.string().optional(),
     fqdn_suffix: z.string().optional(),
     runtime_class: z.string().optional(),
+    external_url_scheme: z.union([z.enum(["http", "https"]), z.literal("")]),
+    external_url_port: z.string().optional(),
     dedicated_ingress_enabled: z.boolean(),
     dedicated_ingress_implementation: z.string(),
     dedicated_ingress_type: z.string(),
@@ -42,6 +44,17 @@ const createClusterSchema = z
       message: "Storage class is required when standard storage is enabled",
       path: ["standard_storage_class"],
     },
+  )
+  .refine(
+    (data) => {
+      if (!data.external_url_port) return true;
+      const n = Number(data.external_url_port);
+      return Number.isInteger(n) && n >= 1 && n <= 65535;
+    },
+    {
+      message: "External URL port must be an integer between 1 and 65535",
+      path: ["external_url_port"],
+    },
   );
 
 type CreateClusterValues = z.infer<typeof createClusterSchema>;
@@ -53,6 +66,10 @@ function buildClusterConfig(
   if (values.ingress_class) config.ingress_class = values.ingress_class;
   if (values.fqdn_suffix) config.fqdn_suffix = values.fqdn_suffix;
   if (values.runtime_class) config.runtime_class = values.runtime_class;
+  if (values.external_url_scheme)
+    config.external_url_scheme = values.external_url_scheme;
+  if (values.external_url_port)
+    config.external_url_port = Number(values.external_url_port);
   if (values.dedicated_ingress_enabled) {
     const di: Record<string, string> = {};
     if (values.dedicated_ingress_implementation)
@@ -81,6 +98,8 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
       ingress_class: "",
       fqdn_suffix: "",
       runtime_class: "",
+      external_url_scheme: "" as "" | "http" | "https",
+      external_url_port: "",
       dedicated_ingress_enabled: false,
       dedicated_ingress_implementation: "",
       dedicated_ingress_type: "",
@@ -242,6 +261,56 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                       onChange={(e) => field.handleChange(e.target.value)}
                       onBlur={field.handleBlur}
                     />
+                  </div>
+                )}
+              </form.Field>
+
+              <form.Field name="external_url_scheme">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="cluster-external-url-scheme">
+                      External URL Scheme
+                    </Label>
+                    <select
+                      id="cluster-external-url-scheme"
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      value={field.state.value}
+                      onChange={(e) =>
+                        field.handleChange(
+                          e.target.value as "" | "http" | "https",
+                        )
+                      }
+                      onBlur={field.handleBlur}
+                    >
+                      <option value="">(default)</option>
+                      <option value="http">http</option>
+                      <option value="https">https</option>
+                    </select>
+                  </div>
+                )}
+              </form.Field>
+
+              <form.Field name="external_url_port">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="cluster-external-url-port">
+                      External URL Port
+                    </Label>
+                    <Input
+                      id="cluster-external-url-port"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      placeholder="e.g. 8080"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                    {field.state.meta.errors.length > 0 && (
+                      <p className="text-sm text-destructive">
+                        {field.state.meta.errors[0]?.toString()}
+                      </p>
+                    )}
                   </div>
                 )}
               </form.Field>
