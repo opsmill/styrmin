@@ -375,6 +375,28 @@ class DeploymentDetailPage:
         value = await root.get_attribute("data-application-version")
         return value or None
 
+    async def read_driver_name(self) -> str | None:
+        """Read the deployment's driver name from the page attributes."""
+        root = self._page.locator("[data-testid=deployment-detail]").first
+        await root.wait_for()
+        value = await root.get_attribute("data-driver-name")
+        return value or None
+
+    async def read_header_driver_text(self) -> str:
+        """Return the text rendered next to the ``Driver`` label in the header.
+
+        Used to confirm the page shows a human-readable driver name rather
+        than the underlying ``applicationDriverVersionId`` UUID.
+        """
+        root = self._page.locator("[data-testid=deployment-detail]").first
+        await root.wait_for()
+        # The label and value are adjacent <span>s under the header — match
+        # the value span by anchoring on the "Driver " prefix.
+        driver_label = root.locator("span", has_text="Driver ").first
+        await driver_label.wait_for()
+        value = driver_label.locator("span").first
+        return (await value.inner_text()).strip()
+
     async def open_backups_tab(self) -> None:
         await self._page.get_by_role("button", name="Backups", exact=True).click()
 

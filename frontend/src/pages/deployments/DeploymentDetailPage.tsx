@@ -190,6 +190,8 @@ export default function DeploymentDetailPage() {
   // them with ALREADY_IN_PROGRESS, but greying the buttons matches the
   // intent and avoids racing pop-ups.
   const isRestoring = deployment.status === "restoring";
+  const driverName =
+    deployment.applicationDriverVersion?.applicationDriver?.name ?? null;
 
   return (
     <div
@@ -198,6 +200,7 @@ export default function DeploymentDetailPage() {
       data-deployment-id={deployment.id}
       data-instance-id={instanceId ?? ""}
       data-application-version={deployment.applicationVersion ?? ""}
+      data-driver-name={driverName ?? ""}
     >
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-xs">
@@ -237,7 +240,7 @@ export default function DeploymentDetailPage() {
             <span className="text-muted-foreground">
               Driver{" "}
               <span className="font-semibold text-foreground">
-                {deployment.applicationDriverVersionId}
+                {driverName ?? deployment.applicationDriverVersionId}
               </span>
             </span>
           </div>
