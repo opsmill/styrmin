@@ -129,11 +129,18 @@ async def reapply_and_finalize(
     Caller is responsible for catching exceptions and translating to the
     failure path (``mark_failed``) — this function lets exceptions
     propagate so the workflow can record the precise failure point.
+
+    Note: we deliberately do NOT strip kopf state-tracking annotations
+    here. The restored CRD carries a ``last-handled-configuration``
+    annotation from before the backup, which makes kopf treat it as
+    already-handled — which is exactly what we want, because this
+    function does the work ``on.create`` would have done. Stripping the
+    annotation would trigger kopf to fire ``on.create`` after we set
+    ``displayState=Running``, which then resets it back to ``Deploying``
+    and the deployment ends up oscillating.
     """
     crd = await _read_crd(api_client, namespace, name)
     crd_spec = crd.get("spec", {})
-
-    await _strip_kopf_annotations(api_client, namespace, name)
 
     prerequisites = await execute_phase_prerequisites(
         crd_spec=crd_spec, namespace=namespace
