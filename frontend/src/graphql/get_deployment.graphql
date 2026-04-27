@@ -7,6 +7,14 @@ query GetDeployment($deploymentId: UUID!) {
     parameters
     applicationVersion
     applicationDriverVersionId
+    applicationDriverVersion {
+      id
+      version
+      applicationDriver {
+        id
+        name
+      }
+    }
     environmentId
     applicationInstance {
       id
