@@ -46,10 +46,17 @@ service:
 {% if instance.config.dedicated_ingress.service.external_traffic_policy %}
   externalTrafficPolicy: "{{ instance.config.dedicated_ingress.service.external_traffic_policy }}"
 {% endif %}
-#ports:
-#  websecure:
-#    forwardedHeaders:
-#      insecure: true
-#    port: 443
-#    containerPort: 443
-#    hostPort: 443
+{% if instance.config.dedicated_ingress.service.ip_families %}
+  ipFamilies:
+{% for family in instance.config.dedicated_ingress.service.ip_families %}
+    - {{ family }}
+{% endfor %}
+{% endif %}
+{% if instance.config.dedicated_ingress.service.ip_family_policy %}
+  ipFamilyPolicy: {{ instance.config.dedicated_ingress.service.ip_family_policy }}
+{% endif %}
+{% if instance.config.dedicated_ingress.service.node_port %}
+ports:
+  websecure:
+    nodePort: {{ instance.config.dedicated_ingress.service.node_port }}
+{% endif %}

@@ -11,9 +11,9 @@ Covers:
 
 import asyncio
 import time
+import uuid
 
 import httpx
-
 import kr8s
 import kr8s.asyncio
 import pytest
@@ -313,6 +313,131 @@ async def test_traffic_routes_through_loadbalancer_ingress(
             timeout=10,
         )
         assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
+
+
+async def test_dedicated_ingress_service_overrides(
+    scenario_driver: ScenarioDriver,
+    styrmin_resources: dict,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    vcluster: dict,
+):
+    """End-to-end pass-through for the new IngressServiceConfig knobs.
+
+    Asserts that ``ip_families``, ``ip_family_policy``, and ``node_port`` set
+    on a fresh environment's ``dedicated_ingress.service`` flow all the way
+    through Styrmin → Helm → the Traefik Service object — and survive a
+    reconcile after the Service is deleted out from under us. The IP family
+    pair is ``["IPv4"]`` / ``SingleStack`` so the test runs on the existing
+    single-family vcluster (dual-stack *traffic* validation lives in
+    ``dev/guides/ingress-ipv6-dual-stack-validation.md``).
+
+    The platform enforces a one-cluster limit, so the test reuses the
+    cluster created by ``styrmin_resources`` and overrides ingress at the
+    environment level — env-level ``dedicated_ingress`` replaces the
+    cluster-level config (verified by ``TestConfigMergePrecedence``).
+    """
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    chosen_node_port = 31443
+    cluster_id = styrmin_resources["cluster_id"]
+
+    environment = await scenario_driver.create_environment(
+        name=f"overrides-env-{uuid.uuid4().hex[:8]}",
+        cluster_id=cluster_id,
+        config={
+            "ip_whitelist": ["127.0.0.1"],
+            "dedicated_ingress": {
+                "implementation": "traefik",
+                "type": "ingress",
+                "service": {
+                    "type": "NodePort",
+                    "node_port": chosen_node_port,
+                    "ip_families": ["IPv4"],
+                    "ip_family_policy": "SingleStack",
+                },
+            },
+        },
+    )
+
+    deployment = await scenario_driver.create_deployment(
+        driver="simple-app",
+        name="simple-app",
+        version="0.1.0",
+        environment_id=environment.id,
+    )
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
+
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+
+    async def _get_overrides_traefik_service() -> AsyncService | None:
+        """Find the Traefik Service that matches our override config.
+
+        The styrmin_resources cluster default deploys its own Traefik with
+        ``type: LoadBalancer``; ours is the one with ``type: NodePort`` and
+        the chosen ``nodePort``. Filter on both so the test cannot latch on
+        to an unrelated controller.
+        """
+        services: list[AsyncService] = [
+            svc
+            async for svc in AsyncService.list(
+                namespace=kr8s.ALL,
+                label_selector={"app.kubernetes.io/name": "traefik"},
+                api=kr8s_api,
+            )
+            if isinstance(svc, AsyncService)
+        ]
+        for svc in services:
+            spec = svc.raw.get("spec", {})
+            if spec.get("type") != "NodePort":
+                continue
+            ports = spec.get("ports", [])
+            if any(p.get("nodePort") == chosen_node_port for p in ports):
+                return svc
+        return None
+
+    async def _wait_for_overrides_applied(
+        *, timeout: float = 180.0, interval: float = 3.0
+    ) -> AsyncService:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            svc = await _get_overrides_traefik_service()
+            if svc is not None:
+                spec = svc.raw.get("spec", {})
+                ports = {
+                    p.get("name"): p.get("nodePort") for p in spec.get("ports", [])
+                }
+                if (
+                    ports.get("websecure") == chosen_node_port
+                    and spec.get("ipFamilies") == ["IPv4"]
+                    and spec.get("ipFamilyPolicy") == "SingleStack"
+                ):
+                    return svc
+            await asyncio.sleep(interval)
+        raise AssertionError(
+            f"Traefik Service did not reach expected overrides within {timeout}s"
+        )
+
+    # The requested overrides materialize on the live Service object. This
+    # exercises the full Styrmin → Helm → kube-apiserver path end-to-end on
+    # the existing single-family vcluster. ``node_port`` is pinned to
+    # ``websecure`` only — Kubernetes rejects a Service whose two ports share
+    # a nodePort, so ``web`` keeps its cluster-allocated value.
+    #
+    # Drift recovery (deleting the Service and watching it come back with the
+    # same NodePort) is NOT asserted here. Styrmin's HelmReleases use Flux's
+    # default reconcile mode, which diffs the helm release *secret* against
+    # the chart, not the live cluster state — so a manually-deleted Service
+    # logs "release in-sync with desired state" until the next chart/values
+    # change. Asserting drift recovery would require enabling
+    # ``spec.driftDetection.mode`` on every HelmRelease, which is a
+    # platform-wide change outside this feature's scope.
+    svc = await _wait_for_overrides_applied()
+    spec = svc.raw["spec"]
+    assert spec["type"] == "NodePort"
+    ports_by_name = {p["name"]: p["nodePort"] for p in spec["ports"]}
+    assert ports_by_name["websecure"] == chosen_node_port
+    assert ports_by_name["web"] != chosen_node_port
+    assert spec["ipFamilies"] == ["IPv4"]
+    assert spec["ipFamilyPolicy"] == "SingleStack"
 
 
 async def test_toggle_dedicated_ingress_on_off(

@@ -13,6 +13,22 @@ class IngressServiceConfig(BaseModel):
         annotations: Annotations to add to the Service (e.g., for LB reuse).
         load_balancer_ip: Static IP for the LoadBalancer.
         external_traffic_policy: External traffic policy (Cluster or Local).
+        ip_families: Optional list pinning the Service to specific IP families.
+            Use ``["IPv6"]`` + ``ip_family_policy="SingleStack"`` to publish a
+            v6-only Service on a dual-stack cluster. Set ``["IPv4", "IPv6"]``
+            with ``RequireDualStack`` only when the cluster has both families
+            configured; ``PreferDualStack`` opts into dual-stack with
+            single-family fallback.
+        ip_family_policy: Service dual-stack policy. One of ``"SingleStack"``,
+            ``"PreferDualStack"``, ``"RequireDualStack"``.
+        node_port: Fixed NodePort applied to the Traefik ``websecure``
+            entrypoint (HTTPS). Only meaningful when ``type == "NodePort"``.
+            Pinned to ``websecure`` only — Kubernetes does not allow two
+            ports on the same Service to share a ``nodePort``, and the
+            Cloudflare/Infrahub recipe terminates TLS at the cluster, so
+            ``websecure`` is the entrypoint the external origin actually
+            targets. Pinning ``web`` (or both entrypoints independently)
+            is a future extension.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -21,6 +37,36 @@ class IngressServiceConfig(BaseModel):
     annotations: dict[str, str] | None = None
     load_balancer_ip: str | None = None
     external_traffic_policy: str | None = None
+    ip_families: list[Literal["IPv4", "IPv6"]] | None = None
+    ip_family_policy: (
+        Literal["SingleStack", "PreferDualStack", "RequireDualStack"] | None
+    ) = None
+    node_port: int | None = Field(default=None, ge=1, le=65535)
+
+    @field_validator("ip_families", mode="after")
+    @classmethod
+    def _validate_ip_families(
+        cls, v: list[Literal["IPv4", "IPv6"]] | None
+    ) -> list[Literal["IPv4", "IPv6"]] | None:
+        if v is None:
+            return v
+        if len(v) == 0:
+            raise ValueError(
+                "ip_families must not be empty when set; "
+                "remove the field to use the cluster default."
+            )
+        if len(set(v)) != len(v):
+            raise ValueError(f"ip_families must not contain duplicates; got {v!r}.")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_node_port_requires_nodeport_type(self) -> "IngressServiceConfig":
+        if self.node_port is not None and self.type != "NodePort":
+            raise ValueError(
+                f"node_port is only valid when type == 'NodePort'; "
+                f"got type={self.type!r} with node_port={self.node_port}."
+            )
+        return self
 
 
 class DedicatedIngressConfig(BaseModel):
