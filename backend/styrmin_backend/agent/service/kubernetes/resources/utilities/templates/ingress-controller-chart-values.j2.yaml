@@ -1,11 +1,13 @@
 ingress:
   middlewares:
+{% if context.instance.config.ip_whitelist %}
     - name: acl
       spec:
         ipAllowList:
           sourceRange: {{ context.instance.config.ip_whitelist }}
           ipStrategy:
             depth: 1
+{% endif %}
     - name: auth
       spec:
         basicAuth:

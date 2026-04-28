@@ -9,6 +9,14 @@ ingressClass:
 globalArguments: "" # disable anonymous telemetry
 additionalArguments:
   - "--providers.kubernetesingress.labelselector=styrmin/environment_id={{ labels.environment_id }}"
+  # Trust X-Forwarded-* headers from any source on the public entrypoints so
+  # Traefik's IPStrategy (depth=N) can resolve the client IP for IPAllowList
+  # middlewares. Without this, the default behavior strips XFF and IPAllowList
+  # with depth>=1 always returns the empty string → blanket 403. Operators
+  # who want to restrict trust to specific upstream LBs/CDNs should replace
+  # ``insecure=true`` with ``trustedIPs=<comma-list>``.
+  - "--entryPoints.web.forwardedHeaders.insecure=true"
+  - "--entryPoints.websecure.forwardedHeaders.insecure=true"
 rbac:
   enabled: true
   namespaced: false

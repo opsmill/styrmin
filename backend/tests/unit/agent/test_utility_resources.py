@@ -259,6 +259,39 @@ class TestIngressUtilityBuildResources:
         )
         assert len(resources) == 9
 
+    @pytest.mark.parametrize("ip_whitelist", [None, []])
+    def test_ingress_utility_resources_omits_acl_middleware_when_ip_whitelist_unset(
+        self,
+        ingress_utility: IngressUtility,
+        global_context: GlobalContext,
+        ip_whitelist: list[str] | None,
+    ) -> None:
+        """T009: When ip_whitelist is None or empty, the acl Middleware is not
+        rendered, while the other resources (auth Middleware, Secret,
+        NetworkPolicies) remain present."""
+        global_context.instance.config.ip_whitelist = ip_whitelist
+        resources = ingress_utility.build_resources(
+            global_context, RELEASE_REF, NAMESPACE
+        )
+        acl_middlewares = [
+            r
+            for r in resources
+            if r["kind"] == "Middleware" and r["metadata"]["name"] == "acl"
+        ]
+        assert acl_middlewares == []
+        # Sanity-check that the other resources still render so we know the
+        # gating is targeted, not a wholesale skip of the utility.
+        auth_middlewares = [
+            r
+            for r in resources
+            if r["kind"] == "Middleware" and r["metadata"]["name"] == "auth"
+        ]
+        assert len(auth_middlewares) == 1
+        secrets = [r for r in resources if r["kind"] == "Secret"]
+        assert len(secrets) == 1
+        netpols = [r for r in resources if r["kind"] == "NetworkPolicy"]
+        assert len(netpols) == 6
+
 
 class TestIngressUtilityPostRenderingPatches:
     """T018: Test build_app_post_rendering_patches() produces correct TargetPatch list."""
@@ -319,6 +352,48 @@ class TestIngressUtilityPostRenderingPatches:
             ingress_utility.build_app_post_rendering_patches(
                 global_context, RELEASE_REF
             )
+
+    def test_ingress_utility_app_patches_includes_acl_annotation(
+        self, ingress_utility: IngressUtility, global_context: GlobalContext
+    ) -> None:
+        """T002: When ip_whitelist is non-empty, the AnnotationPatch carries the
+        router.middlewares annotation pointing at <namespace>-acl@kubernetescrd
+        where <namespace> = styrmin-<deployment_id> (the deployment's own namespace,
+        not the release reference)."""
+        global_context.instance.config.ip_whitelist = ["10.0.0.0/8"]
+        deployment_id = global_context.instance.deployment_id
+        patches = ingress_utility.build_app_post_rendering_patches(
+            global_context, RELEASE_REF
+        )
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        assert len(annotation_patches) == 1
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        assert (
+            annotations["traefik.ingress.kubernetes.io/router.middlewares"]
+            == f"styrmin-{deployment_id}-acl@kubernetescrd"
+        )
+
+    @pytest.mark.parametrize("ip_whitelist", [None, []])
+    def test_ingress_utility_app_patches_omits_acl_annotation_when_ip_whitelist_unset(
+        self,
+        ingress_utility: IngressUtility,
+        global_context: GlobalContext,
+        ip_whitelist: list[str] | None,
+    ) -> None:
+        """T008: When ip_whitelist is None or empty, no router.middlewares annotation
+        is added. FR-006's third branch ("ingress utility not enabled at all") is
+        enforced upstream by the caller iteration in
+        backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py,
+        which only invokes this method for utilities present in the deployment's
+        utility set; no additional unit coverage is needed for that scenario."""
+        global_context.instance.config.ip_whitelist = ip_whitelist
+        patches = ingress_utility.build_app_post_rendering_patches(
+            global_context, RELEASE_REF
+        )
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        assert len(annotation_patches) == 1
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        assert "traefik.ingress.kubernetes.io/router.middlewares" not in annotations
 
 
 class TestBuildExtraSpec:
