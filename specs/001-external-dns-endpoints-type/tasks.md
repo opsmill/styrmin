@@ -27,7 +27,7 @@ This is a **monorepo backend feature**. All paths are absolute from the repo roo
 
 **Purpose**: Confirm the Python toolchain has every package needed before editing.
 
-- [ ] T001 Run `uv sync --all-groups --all-packages` from the repo root and confirm it exits cleanly so subsequent `uv run` commands resolve all backend packages.
+- [X] T001 Run `uv sync --all-groups --all-packages` from the repo root and confirm it exits cleanly so subsequent `uv run` commands resolve all backend packages.
 
 ---
 
@@ -37,7 +37,7 @@ This is a **monorepo backend feature**. All paths are absolute from the repo roo
 
 **⚠️ CRITICAL**: No US1 or US2 task can begin until T002 lands.
 
-- [ ] T002 Add the `external_dns_endpoints_type: Literal["NodeExternalIP", "ClusterIP"] | None = None` field to `BaseConfigSection` in `backend/styrmin_backend/context/models/config.py` (after `external_url_port`, before `scheduling`). Use `Field(default=None, description="...")` whose description satisfies FR-006: explain that operators set this to `"NodeExternalIP"` on IPv6 / dual-stack clusters where external-dns must publish AAAA records that resolve to the node's external IP rather than the Service ClusterIP. Extend the class `Attributes:` docstring with a one-line entry for the new field.
+- [X] T002 Add the `external_dns_endpoints_type: Literal["NodeExternalIP", "ClusterIP"] | None = None` field to `BaseConfigSection` in `backend/styrmin_backend/context/models/config.py` (after `external_url_port`, before `scheduling`). Use `Field(default=None, description="...")` whose description satisfies FR-006: explain that operators set this to `"NodeExternalIP"` on IPv6 / dual-stack clusters where external-dns must publish AAAA records that resolve to the node's external IP rather than the Service ClusterIP. Extend the class `Attributes:` docstring with a one-line entry for the new field.
 
 **Checkpoint**: Foundation ready — both user stories can now be implemented.
 
@@ -51,19 +51,19 @@ This is a **monorepo backend feature**. All paths are absolute from the repo roo
 
 ### Implementation for User Story 1
 
-- [ ] T003 [US1] Modify `IngressUtility.build_app_post_rendering_patches` in `backend/styrmin_backend/agent/service/kubernetes/resources/utilities/ingress.py`. After the existing `annotations = {...}` literal (lines 32–37) and before the `if context.instance.config.dedicated_ingress:` branch, conditionally insert: `if context.instance.config.external_dns_endpoints_type is not None: annotations["external-dns.alpha.kubernetes.io/endpoints-type"] = context.instance.config.external_dns_endpoints_type`. Do not introduce a runtime default; do not alter any existing annotation key. Keep within the 120-char line limit.
+- [X] T003 [US1] Modify `IngressUtility.build_app_post_rendering_patches` in `backend/styrmin_backend/agent/service/kubernetes/resources/utilities/ingress.py`. After the existing `annotations = {...}` literal (lines 32–37) and before the `if context.instance.config.dedicated_ingress:` branch, conditionally insert: `if context.instance.config.external_dns_endpoints_type is not None: annotations["external-dns.alpha.kubernetes.io/endpoints-type"] = context.instance.config.external_dns_endpoints_type`. Do not introduce a runtime default; do not alter any existing annotation key. Keep within the 120-char line limit.
 
 ### Tests for User Story 1
 
-- [ ] T004 [US1] Add four test methods to `class TestIngressUtilityPostRenderingPatches` in `backend/tests/unit/agent/test_utility_resources.py`:
+- [X] T004 [US1] Add four test methods to `class TestIngressUtilityPostRenderingPatches` in `backend/tests/unit/agent/test_utility_resources.py`:
   - `test_includes_endpoints_type_when_node_external_ip` — set `global_context.instance.config.external_dns_endpoints_type = "NodeExternalIP"`, call `build_app_post_rendering_patches`, assert `annotations["external-dns.alpha.kubernetes.io/endpoints-type"] == "NodeExternalIP"`.
   - `test_includes_endpoints_type_when_cluster_ip` — same with `"ClusterIP"`.
   - `test_omits_endpoints_type_when_unset` — leave `external_dns_endpoints_type` at its `None` default (the existing `global_context` fixture already does), call `build_app_post_rendering_patches`, assert `"external-dns.alpha.kubernetes.io/endpoints-type" not in annotations`. Mirror the lookup pattern of the adjacent `test_includes_external_dns_hostname` and `test_includes_cloudflare_proxied`.
   - `test_deployment_overrides_cluster_endpoints_type` — build a `ClusterConfig(external_dns_endpoints_type="NodeExternalIP", ingress_class="traefik", fqdn_suffix="test.styrmin.com", dedicated_ingress=DedicatedIngressConfig())`, an `EnvironmentConfig()` (field unset), and a `DeploymentConfig(external_dns_endpoints_type="ClusterIP")`. Import `_resolve_instance_config` from `styrmin_backend.context.resolvers`; call it to produce a `ResolvedConfig`. Build a `GlobalContext` whose `instance.config` is that resolved value (reuse the rest of the existing `global_context` fixture's contexts). Run `build_app_post_rendering_patches` and assert `annotations["external-dns.alpha.kubernetes.io/endpoints-type"] == "ClusterIP"`. This test covers FR-002 (deepest-layer-wins merge), US1 Acceptance Scenario 3 (deployment override of cluster value), and the "Field set at multiple layers" edge case in one shot.
 
-- [ ] T005 [P] [US1] Update the session-scoped cluster fixture in `backend/tests/e2e/conftest.py` (the `await driver.create_cluster(...)` call around line 665, inside the `styrmin_resources` fixture). Add `"external_dns_endpoints_type": "NodeExternalIP"` to the cluster `config={...}` dict, alongside the existing `fqdn_suffix` / `ingress_class` / `dedicated_ingress` keys. This exercises the Cluster → Environment → Deployment merge end-to-end and is the single E2E injection point per the spec's clarification (do not add a new scenario).
+- [X] T005 [P] [US1] Update the session-scoped cluster fixture in `backend/tests/e2e/conftest.py` (the `await driver.create_cluster(...)` call around line 665, inside the `styrmin_resources` fixture). Add `"external_dns_endpoints_type": "NodeExternalIP"` to the cluster `config={...}` dict, alongside the existing `fqdn_suffix` / `ingress_class` / `dedicated_ingress` keys. This exercises the Cluster → Environment → Deployment merge end-to-end and is the single E2E injection point per the spec's clarification (do not add a new scenario).
 
-- [ ] T006 [US1] Extend the existing `test_deploy_with_dedicated_ingress` in `backend/tests/e2e/test_ingress_controller.py` with a single assertion. Inside the existing `for ing in ingresses:` loop (currently asserting `kubernetes.io/ingress.class == "traefik"` and `ingressClassName is None`), add `assert annotations.get("external-dns.alpha.kubernetes.io/endpoints-type") == "NodeExternalIP", f"Expected endpoints-type annotation 'NodeExternalIP', got: {annotations}"`. Do **not** create a new scenario.
+- [X] T006 [US1] Extend the existing `test_deploy_with_dedicated_ingress` in `backend/tests/e2e/test_ingress_controller.py` with a single assertion. Inside the existing `for ing in ingresses:` loop (currently asserting `kubernetes.io/ingress.class == "traefik"` and `ingressClassName is None`), add `assert annotations.get("external-dns.alpha.kubernetes.io/endpoints-type") == "NodeExternalIP", f"Expected endpoints-type annotation 'NodeExternalIP', got: {annotations}"`. Do **not** create a new scenario.
 
 **Checkpoint**: User Story 1 is complete and independently testable. Run unit tests (`uv run pytest backend/tests/unit/agent/test_utility_resources.py::TestIngressUtilityPostRenderingPatches -v`) and the extended E2E (`sleep infinity | uv run pytest backend/tests/e2e/test_ingress_controller.py::test_deploy_with_dedicated_ingress -v -s --pdb 2>&1 | tee /tmp/pdb.log`).
 
@@ -79,7 +79,7 @@ This is a **monorepo backend feature**. All paths are absolute from the repo roo
 
 ### Tests for User Story 2
 
-- [ ] T007 [US2] Create `backend/tests/unit/context/test_base_config_section.py` with two test functions exercising the new field's validation contract:
+- [X] T007 [US2] Create `backend/tests/unit/context/test_base_config_section.py` with two test functions exercising the new field's validation contract:
   - `test_validation_rejects_invalid_endpoints_type` — call `ClusterConfig(external_dns_endpoints_type="PodIP")`, assert it raises `pydantic.ValidationError`. Inspect `exc.errors()` (or the string form) to verify the offending field name (`external_dns_endpoints_type`) and both accepted values (`'NodeExternalIP'`, `'ClusterIP'`) appear in the error payload — this proves the Literal-rejection message satisfies FR-005's "names the offending field and lists accepted values" guarantee.
   - `test_validation_accepts_explicit_null` — call `ClusterConfig(external_dns_endpoints_type=None)`, assert it succeeds and the round-tripped instance has `.external_dns_endpoints_type is None`.
 
@@ -93,15 +93,15 @@ This is a **monorepo backend feature**. All paths are absolute from the repo roo
 
 **Purpose**: Hygiene and definition-of-done verification.
 
-- [ ] T008 [P] Run `uv run invoke format lint` from the repo root. Ensure both ruff format and ruff lint pass cleanly on every modified file (`backend/styrmin_backend/context/models/config.py`, `backend/styrmin_backend/agent/service/kubernetes/resources/utilities/ingress.py`, `backend/tests/unit/agent/test_utility_resources.py`, `backend/tests/unit/context/test_base_config_section.py`, `backend/tests/e2e/conftest.py`, `backend/tests/e2e/test_ingress_controller.py`). Per AGENTS.md, ruff and ty are authoritative; do not rely on visual inspection.
+- [X] T008 [P] Run `uv run invoke format lint` from the repo root. Ensure both ruff format and ruff lint pass cleanly on every modified file (`backend/styrmin_backend/context/models/config.py`, `backend/styrmin_backend/agent/service/kubernetes/resources/utilities/ingress.py`, `backend/tests/unit/agent/test_utility_resources.py`, `backend/tests/unit/context/test_base_config_section.py`, `backend/tests/e2e/conftest.py`, `backend/tests/e2e/test_ingress_controller.py`). Per AGENTS.md, ruff and ty are authoritative; do not rely on visual inspection.
 
-- [ ] T009 [P] Run `uv run invoke test` and confirm the full unit + integration suite passes. In particular, the pre-existing `test_includes_external_dns_hostname`, `test_includes_cloudflare_proxied`, `test_includes_traefik_entrypoints_annotation`, and `test_returns_target_patches` tests in `TestIngressUtilityPostRenderingPatches` MUST pass without modification — that's how SC-002 (zero existing-deployment behaviour change) is regression-protected.
+- [X] T009 [P] Run `uv run invoke test` and confirm the full unit + integration suite passes. In particular, the pre-existing `test_includes_external_dns_hostname`, `test_includes_cloudflare_proxied`, `test_includes_traefik_entrypoints_annotation`, and `test_returns_target_patches` tests in `TestIngressUtilityPostRenderingPatches` MUST pass without modification — that's how SC-002 (zero existing-deployment behaviour change) is regression-protected.
 
-- [ ] T010 Run the E2E entrypoint covering the dedicated-Traefik path: `sleep infinity | uv run pytest backend/tests/e2e/test_ingress_controller.py::test_deploy_with_dedicated_ingress -v -s --pdb 2>&1 | tee /tmp/pdb.log`. The `sleep infinity |` keeps pdb's stdin open per AGENTS.md. Confirm the test passes (no pdb breakpoint hit). If it fails, the breakpoint is the diagnostic — open a second shell and `kubectl get ingress -A -o yaml` against the vcluster's kubeconfig (`export KUBECONFIG=$(ls /tmp/pytest-of-*/pytest-*/vcluster0/kubeconfig | tail -1)`), inspect the rendered annotations, fix and re-run.
+- [X] T010 Run the E2E entrypoint covering the dedicated-Traefik path: `sleep infinity | uv run pytest backend/tests/e2e/test_ingress_controller.py::test_deploy_with_dedicated_ingress -v -s --pdb 2>&1 | tee /tmp/pdb.log`. The `sleep infinity |` keeps pdb's stdin open per AGENTS.md. Confirm the test passes (no pdb breakpoint hit). If it fails, the breakpoint is the diagnostic — open a second shell and `kubectl get ingress -A -o yaml` against the vcluster's kubeconfig (`export KUBECONFIG=$(ls /tmp/pytest-of-*/pytest-*/vcluster0/kubeconfig | tail -1)`), inspect the rendered annotations, fix and re-run.
 
-- [ ] T011 Verify no GraphQL or SDK regeneration is needed by running `uv run invoke validate-graphql` (no `.graphql` files were modified, so the validator should report no changes). Per the plan, `schema.graphql` and SDK types are intentionally untouched — this task confirms the invariant rather than performing a regen.
+- [X] T011 Verify no GraphQL or SDK regeneration is needed by running `uv run invoke validate-graphql` (no `.graphql` files were modified, so the validator should report no changes). Per the plan, `schema.graphql` and SDK types are intentionally untouched — this task confirms the invariant rather than performing a regen.
 
-- [ ] T012 Walk the operator quickstart in `specs/001-external-dns-endpoints-type/quickstart.md` end-to-end: confirm the rendered Ingress in Step 3 carries the new annotation, and confirm Step 2's "remove the field" rollback produces a byte-identical pre-feature annotation set.
+- [X] T012 Walk the operator quickstart in `specs/001-external-dns-endpoints-type/quickstart.md` end-to-end: confirm the rendered Ingress in Step 3 carries the new annotation, and confirm Step 2's "remove the field" rollback produces a byte-identical pre-feature annotation set.
 
 ---
 

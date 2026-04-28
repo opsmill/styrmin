@@ -395,6 +395,76 @@ class TestIngressUtilityPostRenderingPatches:
         annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
         assert "traefik.ingress.kubernetes.io/router.middlewares" not in annotations
 
+    def test_includes_endpoints_type_when_node_external_ip(
+        self, ingress_utility: IngressUtility, global_context: GlobalContext
+    ) -> None:
+        global_context.instance.config.external_dns_endpoints_type = "NodeExternalIP"
+        patches = ingress_utility.build_app_post_rendering_patches(
+            global_context, RELEASE_REF
+        )
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        assert (
+            annotations["external-dns.alpha.kubernetes.io/endpoints-type"]
+            == "NodeExternalIP"
+        )
+
+    def test_includes_endpoints_type_when_cluster_ip(
+        self, ingress_utility: IngressUtility, global_context: GlobalContext
+    ) -> None:
+        global_context.instance.config.external_dns_endpoints_type = "ClusterIP"
+        patches = ingress_utility.build_app_post_rendering_patches(
+            global_context, RELEASE_REF
+        )
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        assert (
+            annotations["external-dns.alpha.kubernetes.io/endpoints-type"]
+            == "ClusterIP"
+        )
+
+    def test_omits_endpoints_type_when_unset(
+        self, ingress_utility: IngressUtility, global_context: GlobalContext
+    ) -> None:
+        # Fixture leaves external_dns_endpoints_type at its None default.
+        patches = ingress_utility.build_app_post_rendering_patches(
+            global_context, RELEASE_REF
+        )
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        assert "external-dns.alpha.kubernetes.io/endpoints-type" not in annotations
+
+    def test_deployment_overrides_cluster_endpoints_type(
+        self, ingress_utility: IngressUtility, global_context: GlobalContext
+    ) -> None:
+        from styrmin_backend.context.resolvers import _resolve_instance_config
+
+        cluster_config = ClusterConfig(
+            external_dns_endpoints_type="NodeExternalIP",
+            ingress_class="traefik",
+            fqdn_suffix="test.styrmin.com",
+            dedicated_ingress=DedicatedIngressConfig(),
+        )
+        environment_config = EnvironmentConfig()
+        deployment_config = DeploymentConfig(external_dns_endpoints_type="ClusterIP")
+
+        resolved = _resolve_instance_config(
+            cluster=cluster_config,
+            environment=environment_config,
+            deployment=deployment_config,
+        )
+        global_context.instance.config = resolved
+
+        patches = ingress_utility.build_app_post_rendering_patches(
+            global_context, RELEASE_REF
+        )
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        assert (
+            annotations["external-dns.alpha.kubernetes.io/endpoints-type"]
+            == "ClusterIP"
+        )
+
 
 class TestBuildExtraSpec:
     """Verify build_extra_spec returns empty list (Traefik out of scope)."""

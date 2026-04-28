@@ -371,6 +371,11 @@ class BaseConfigSection(BaseModel):
             Omitted from rendered URLs when it matches the scheme default
             (80 for http, 443 for https). Used for local demos that expose
             the cluster on a non-default port (e.g. via `kubectl port-forward`).
+        external_dns_endpoints_type (Literal["NodeExternalIP", "ClusterIP"] | None):
+            Optional override of the external-dns endpoints-type. Set to
+            "NodeExternalIP" on IPv6 / dual-stack clusters where external-dns
+            must publish AAAA records that resolve to the node's external IP
+            rather than the Service ClusterIP.
         scheduling (SchedulingConfig): Optional hierarchical pod scheduling
             and resource configuration. Absent fields inherit from shallower
             levels during resolution.
@@ -383,6 +388,18 @@ class BaseConfigSection(BaseModel):
     fqdn_suffix: str | None = None
     external_url_scheme: Literal["http", "https"] | None = None
     external_url_port: int | None = Field(default=None, ge=1, le=65535)
+    external_dns_endpoints_type: Literal["NodeExternalIP", "ClusterIP"] | None = Field(
+        default=None,
+        description=(
+            "Optional value emitted as the "
+            "external-dns.alpha.kubernetes.io/endpoints-type annotation on "
+            "the application Ingress. Set to 'NodeExternalIP' on IPv6 / "
+            "dual-stack clusters where external-dns must publish AAAA "
+            "records that resolve to the node's external IP rather than "
+            "the Service ClusterIP. Leave unset to omit the annotation "
+            "entirely (external-dns falls back to its default behaviour)."
+        ),
+    )
     scheduling: SchedulingConfig | None = None
 
 
