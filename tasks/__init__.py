@@ -1,13 +1,42 @@
 """Replacement for Makefile."""
 
+import fcntl
+import struct
+import termios
 from pathlib import Path
+from typing import IO, Any
 
 from invoke import Collection, Context, task
+from invoke import terminals as _invoke_terminals
 
 from tasks import agent, cluster, demo, dev, graphql_validate
 from tasks import format as fmt
 
 from .utils import print_header
+
+
+# ---------------------------------------------------------------------------
+# Monkey-patch: invoke 2.2.1 + Python 3.14 stdin buffer overflow
+#
+# invoke.terminals.bytes_to_read calls
+#   fcntl.ioctl(input_, termios.FIONREAD, b"  ")
+# with a 2-byte buffer, but FIONREAD writes a 4-byte int. Python ≤3.13
+# silently tolerated the overrun; Python 3.14 raises
+#   SystemError: buffer overflow
+# from the stdin-forwarding thread, which kills any `context.run(..., pty=True)`
+# call (e.g. `uv run invoke start`) right after the subprocess exits.
+#
+# Upstream bug; no fix released yet. Once invoke ships a version with a
+# correctly-sized buffer, bump the pin and DELETE this block.
+# ---------------------------------------------------------------------------
+def _bytes_to_read_patched(input_: IO[Any]) -> int:
+    if not _invoke_terminals.WINDOWS and _invoke_terminals.isatty(input_) and _invoke_terminals.has_fileno(input_):
+        buf = fcntl.ioctl(input_, termios.FIONREAD, b"\x00\x00\x00\x00")
+        return int(struct.unpack("i", buf)[0])
+    return 1
+
+
+_invoke_terminals.bytes_to_read = _bytes_to_read_patched  # ty: ignore[invalid-assignment]
 
 MAIN_DIRECTORY_PATH = Path(__file__).parent.parent
 
