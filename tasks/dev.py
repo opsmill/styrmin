@@ -82,7 +82,7 @@ def _bootstrap_environment(console: Console, api_url: str, cluster_id: str) -> s
     result = graphql(
         api_url,
         load_query("create_environment"),
-        {"name": "local", "clusterId": cluster_id, "config": {"ip_whitelist": ["127.0.0.1"]}},
+        {"name": "local", "clusterId": cluster_id, "config": {}},
     )
     if result.get("errors"):
         error = result["errors"][0]

@@ -13,6 +13,7 @@ from styrmin_backend.agent.service.kubernetes.resources.utilities.base import Ut
 from styrmin_backend.agent.service.kubernetes.resources.utilities.environment import (
     get_jinja_environment,
 )
+from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.models.contexts import GlobalContext
 
 
@@ -33,8 +34,12 @@ class IngressUtility(Utility):
             "traefik.ingress.kubernetes.io/router.entrypoints": "web,websecure",
             "external-dns.alpha.kubernetes.io/hostname": f"{release_reference}-{context.app.name}.{context.instance.config.fqdn_suffix}",
             "external-dns.alpha.kubernetes.io/cloudflare-proxied": "true",
-            # "traefik.ingress.kubernetes.io/router.middlewares": f"{release_reference}-acl@kubernetescrd",
         }
+        if context.instance.config.ip_whitelist:
+            namespace = get_kubernetes_reference(context.instance.deployment_id)
+            annotations["traefik.ingress.kubernetes.io/router.middlewares"] = (
+                f"{namespace}-acl@kubernetescrd"
+            )
         if context.instance.config.dedicated_ingress:
             # Derive ingress class name from the dedicated ingress implementation
             ingress_class_name = (

@@ -682,7 +682,7 @@ async def styrmin_resources(
     environment = await driver.create_environment(
         name="test-environment",
         cluster_id=cluster.id,
-        config={"ip_whitelist": ["127.0.0.1"]},
+        config={},
     )
 
     bsl = await driver.create_backup_storage_location(
@@ -1059,7 +1059,7 @@ async def scenario_environment_id(
     env = await driver.create_environment(
         name=name,
         cluster_id=styrmin_resources["cluster_id"],
-        config={"ip_whitelist": ["127.0.0.1"]},
+        config={},
     )
     env_id = env.id
     try:

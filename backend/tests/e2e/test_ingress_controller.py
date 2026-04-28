@@ -11,6 +11,7 @@ Covers:
 
 import asyncio
 import time
+import uuid
 
 import httpx
 
@@ -20,6 +21,7 @@ import pytest
 from kr8s.asyncio.objects import Ingress as AsyncIngress
 from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
+from kr8s.asyncio.objects import new_class
 from styrmin_sdk import StyrminClient
 
 from tests.e2e.conftest import _portforward, _wait_for_http
@@ -115,7 +117,7 @@ async def test_deploy_without_dedicated_ingress(
     environment = await scenario_driver.create_environment(
         name="no-ingress-env",
         cluster_id=cluster.id,
-        config={"ip_whitelist": ["127.0.0.1"]},
+        config={},
     )
 
     # Deploy simple-app
@@ -197,6 +199,7 @@ async def test_second_app_reuses_ingress_controller(
 async def test_traffic_routes_through_dedicated_ingress(
     scenario_driver: ScenarioDriver,
     deployed_simple_app: dict,
+    scenario_environment_id: str,
     vcluster: dict,
 ):
     """T038: Send HTTP request through Traefik and verify 200 response.
@@ -210,18 +213,27 @@ async def test_traffic_routes_through_dedicated_ingress(
     deployment_id = deployed_simple_app["deployment_id"]
     await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
 
-    # Find the Traefik service
+    # Find the Traefik service. Filter by ``styrmin/environment_id`` because
+    # the cluster may host multiple per-env Traefik instances (one per env
+    # using ``dedicated_ingress``); picking ``traefik_services[0]`` without
+    # filtering is non-deterministic and intermittently routes to a Traefik
+    # whose ingress provider doesn't see this deployment's Ingress → 404.
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     traefik_services: list[AsyncService] = [
         svc
         async for svc in AsyncService.list(
             namespace=kr8s.ALL,
-            label_selector={"app.kubernetes.io/name": "traefik"},
+            label_selector={
+                "app.kubernetes.io/name": "traefik",
+                "styrmin/environment_id": scenario_environment_id,
+            },
             api=kr8s_api,
         )
         if isinstance(svc, AsyncService)
     ]
-    assert traefik_services, "Traefik Service not found"
+    assert traefik_services, (
+        f"Traefik Service not found for environment {scenario_environment_id}"
+    )
     traefik_svc = traefik_services[0]
 
     # Build the expected host from the deployment info
@@ -252,6 +264,7 @@ async def test_traffic_routes_through_dedicated_ingress(
 async def test_traffic_routes_through_loadbalancer_ingress(
     scenario_driver: ScenarioDriver,
     deployed_simple_app: dict,
+    scenario_environment_id: str,
     vcluster: dict,
 ):
     """T038b: Send HTTP request via Traefik's LoadBalancer external IP and verify 200.
@@ -266,6 +279,8 @@ async def test_traffic_routes_through_loadbalancer_ingress(
     await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
 
     # Find the Traefik LoadBalancer Service and wait for its external IP.
+    # See ``test_traffic_routes_through_dedicated_ingress`` for the rationale
+    # behind filtering by ``styrmin/environment_id``.
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     external_ip: str | None = None
     deadline = time.time() + 120
@@ -274,7 +289,10 @@ async def test_traffic_routes_through_loadbalancer_ingress(
             svc
             async for svc in AsyncService.list(
                 namespace=kr8s.ALL,
-                label_selector={"app.kubernetes.io/name": "traefik"},
+                label_selector={
+                    "app.kubernetes.io/name": "traefik",
+                    "styrmin/environment_id": scenario_environment_id,
+                },
                 api=kr8s_api,
             )
             if isinstance(svc, AsyncService)
@@ -340,7 +358,7 @@ async def test_toggle_dedicated_ingress_on_off(
     environment = await scenario_driver.create_environment(
         name="toggle-env",
         cluster_id=cluster.id,
-        config={"ip_whitelist": ["127.0.0.1"]},
+        config={},
     )
 
     # Deploy app — should trigger ingress controller creation
@@ -366,3 +384,224 @@ async def test_toggle_dedicated_ingress_on_off(
     assert len(traefik_pods) >= 1, (
         "Expected Traefik pod(s) after enabling dedicated_ingress"
     )
+
+
+@pytest.mark.e2e
+@pytest.mark.ci
+async def test_ip_whitelist_enforcement_allows_and_rejects(
+    scenario_driver: ScenarioDriver,
+    styrmin_resources: dict,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    vcluster: dict,
+):
+    """T003: Activate IP allowlist enforcement and observe allow + deny end-to-end.
+
+    The test sends a synthetic ``X-Forwarded-For`` header (``10.5.5.5``)
+    because the existing ``acl`` Middleware template uses
+    ``ipStrategy.depth=1`` — Traefik resolves the client IP from XFF, not
+    from the connection peer. Without the header, Traefik denies *every*
+    request including ones supposedly under ``0.0.0.0/0`` (the depth=1
+    strategy returns an error when XFF is absent). In production, an
+    upstream LB (e.g., Cloudflare) supplies XFF; in tests we supply it
+    manually so we can verify allow vs. deny semantics on the same client.
+
+    Round-trip pattern (allow → deny → allow) replaces the
+    "<observed-ip>/32" middle step from the original T003 wording because
+    the synthetic XFF lets us stably control the source IP under test
+    without discovering Traefik's view of an in-cluster connection.
+
+    Asserts:
+    - In-range XFF (``10.5.5.5`` ∈ ``10.0.0.0/8``) → HTTP 200.
+    - Out-of-range XFF (same client, narrow allowlist ``192.0.2.0/24``,
+      RFC 5737 TEST-NET-1) → HTTP 403 from Traefik.
+    - During the deny phase, the deployment namespace contains
+      ``Middleware/acl`` with the narrow ``sourceRange`` AND the application
+      Ingress carries the
+      ``traefik.ingress.kubernetes.io/router.middlewares: <namespace>-acl@kubernetescrd``
+      annotation (FR-003, FR-004).
+    - Application pod set is unchanged across the reconfigurations
+      (SC-005 — no app restart required): same pod UIDs and aggregate
+      ``restartCount`` invariant.
+    - Round-trip back to a matching allowlist returns 200 (dynamic update
+      takes effect).
+    """
+    client: StyrminClient = styrmin_resources["client"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+
+    # Create a fresh environment for this scenario instead of reusing
+    # ``styrmin_resources["environment_id"]``: that shared env is also used
+    # by ``test_deploy_with_dedicated_ingress`` to deploy a ``simple-app``,
+    # and Styrmin enforces per-env service-name uniqueness — two
+    # ``simple-app`` deployments in the same env would collide. A separate
+    # env also gets its own per-env Traefik (the dedicated ingress
+    # controller is per-env), which lets us pick "the" Traefik service
+    # without ambiguity below.
+    env_suffix = uuid.uuid4().hex[:8]
+    environment = await scenario_driver.create_environment(
+        name=f"acl-test-env-{env_suffix}",
+        cluster_id=styrmin_resources["cluster_id"],
+        config={},
+    )
+    environment_id = environment.id
+
+    deployment = await scenario_driver.create_deployment(
+        driver="simple-app",
+        name=f"simple-app-acl-{env_suffix}",
+        version="0.1.0",
+        environment_id=environment_id,
+    )
+    deployment = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment.id
+    )
+    deployment_id = deployment.id
+    namespace = f"styrmin-{deployment_id}"
+    # Traefik routes on the Ingress's spec.rules host, which the simple-app
+    # Helm chart renders as ``<driver-name>-<deployment-id>.<fqdn>`` —
+    # the *driver* name (``simple-app``), not the Styrmin deployment record's name.
+    expected_host = f"simple-app-{deployment_id}.styrmin.com"
+    expected_annotation = f"styrmin-{deployment_id}-acl@kubernetescrd"
+    synthetic_client_ip = "10.5.5.5"
+    in_range_cidr = "10.0.0.0/8"
+    deny_cidr = "192.0.2.0/24"  # RFC 5737 TEST-NET-1
+
+    base_headers = {"Host": expected_host, "X-Forwarded-For": synthetic_client_ip}
+
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+
+    async def app_pods() -> list[AsyncPod]:
+        return [
+            pod
+            async for pod in AsyncPod.list(
+                namespace=namespace,
+                label_selector={"app.kubernetes.io/name": "simple-app"},
+                api=kr8s_api,
+            )
+            if isinstance(pod, AsyncPod)
+        ]
+
+    async def app_pod_uids() -> set[str]:
+        return {p.metadata.get("uid", "") for p in await app_pods()}
+
+    async def aggregate_restart_count() -> int:
+        total = 0
+        for pod in await app_pods():
+            for cs in pod.raw.get("status", {}).get("containerStatuses", []) or []:
+                total += int(cs.get("restartCount", 0) or 0)
+        return total
+
+    async def probe_until(
+        local_port: int, expected: int, timeout_s: float = 60.0
+    ) -> int:
+        """Poll Traefik until it returns the expected status or we time out."""
+        deadline = time.time() + timeout_s
+        last: int | None = None
+        async with httpx.AsyncClient() as http:
+            while time.time() < deadline:
+                try:
+                    resp = await http.get(
+                        f"http://localhost:{local_port}/health",
+                        headers=base_headers,
+                        timeout=10,
+                    )
+                    last = resp.status_code
+                    if resp.status_code == expected:
+                        return resp.status_code
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(2)
+        msg = (
+            f"Traefik did not return {expected} within {timeout_s}s; "
+            f"last status was {last}"
+        )
+        raise AssertionError(msg)
+
+    traefik_services: list[AsyncService] = [
+        svc
+        async for svc in AsyncService.list(
+            namespace=kr8s.ALL,
+            label_selector={
+                "app.kubernetes.io/name": "traefik",
+                "styrmin/environment_id": environment_id,
+            },
+            api=kr8s_api,
+        )
+        if isinstance(svc, AsyncService)
+    ]
+    assert traefik_services, (
+        f"Traefik Service not found for environment {environment_id}"
+    )
+    traefik_svc = traefik_services[0]
+
+    Middleware = new_class(  # noqa: N806 — kr8s class factory mirrors K8s kind casing
+        kind="Middleware",
+        version="traefik.io/v1alpha1",
+        namespaced=True,
+        asyncio=True,
+    )
+
+    async with _portforward(traefik_svc, remote_port=8000) as local_port:
+        # Phase 1: configure an allowlist that matches our synthetic XFF → 200
+        await client.deployments.update(
+            deployment_id=deployment_id,
+            config={"ip_whitelist": [in_range_cidr]},
+        )
+        await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
+        # Active allowlist takes a few seconds to propagate to Traefik.
+        await probe_until(local_port, expected=200, timeout_s=120.0)
+
+        baseline_uids = await app_pod_uids()
+        baseline_restart = await aggregate_restart_count()
+
+        # Phase 2: narrow deny CIDR (XFF is outside it) → 403
+        await client.deployments.update(
+            deployment_id=deployment_id,
+            config={"ip_whitelist": [deny_cidr]},
+        )
+        await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
+        await probe_until(local_port, expected=403, timeout_s=60.0)
+
+        # Phase 3: resource invariants under the narrow CIDR
+        acl = await Middleware.get(name="acl", namespace=namespace, api=kr8s_api)
+        assert acl.raw["spec"]["ipAllowList"]["sourceRange"] == [deny_cidr], (
+            f"Middleware sourceRange should reflect the narrow CIDR; got "
+            f"{acl.raw['spec']['ipAllowList']['sourceRange']!r}"
+        )
+
+        ingresses: list[AsyncIngress] = [
+            ing
+            async for ing in AsyncIngress.list(namespace=namespace, api=kr8s_api)
+            if isinstance(ing, AsyncIngress)
+        ]
+        assert ingresses, "Application Ingress not found in deployment namespace"
+        for ing in ingresses:
+            annotations = ing.metadata.get("annotations", {})
+            assert (
+                annotations.get("traefik.ingress.kubernetes.io/router.middlewares")
+                == expected_annotation
+            ), (
+                f"Ingress {ing.metadata.get('name')} missing or wrong "
+                f"router.middlewares annotation; got {annotations!r}"
+            )
+
+        # Phase 4: round-trip back to a matching allowlist → 200
+        await client.deployments.update(
+            deployment_id=deployment_id,
+            config={"ip_whitelist": [in_range_cidr]},
+        )
+        await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
+        await probe_until(local_port, expected=200, timeout_s=60.0)
+
+        # SC-005: app pods are the same instances throughout — no restart
+        # disguised as a rolling replacement (which would reset restartCount).
+        final_uids = await app_pod_uids()
+        assert final_uids == baseline_uids, (
+            f"App pod set changed across ip_whitelist reconfiguration "
+            f"(baseline={baseline_uids}, final={final_uids}); "
+            "ip_whitelist must take effect without rolling the app"
+        )
+        final_restart = await aggregate_restart_count()
+        assert final_restart == baseline_restart, (
+            f"App pods restarted during ip_whitelist reconfiguration "
+            f"(baseline={baseline_restart}, final={final_restart}); "
+            "ip_whitelist must take effect without app restart"
+        )
