@@ -676,6 +676,7 @@ async def styrmin_resources(
             },
             "runtime_class": "default",
             "standard_storage": {"storage_class": "local-path"},
+            "external_dns_endpoints_type": "NodeExternalIP",
         },
     )
 

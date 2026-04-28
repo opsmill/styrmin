@@ -14,7 +14,7 @@ Add an optional `external_dns_endpoints_type` field (`Literal["NodeExternalIP", 
 **Storage**: Existing `JSON` columns on `Cluster`, `Environment`, `Deployment` rows store the config blob; **no migration required** — the new optional field round-trips through the existing JSON column unchanged.
 **Testing**: `uv run invoke test` (unit + integration); `uv run pytest backend/tests/e2e/test_ingress_controller.py::test_deploy_with_dedicated_ingress -v -s --pdb` for the E2E extension (per AGENTS.md `--pdb` rule).
 **Target Platform**: Linux server (Styrmin agent rendering Kubernetes manifests for downstream cluster apply).
-**Project Type**: Web service — monorepo with `backend/` and `frontend/`. **Only `backend/` is touched** (config models, ingress utility, unit + E2E tests).
+**Project Type**: Web service — monorepo with `backend/` and `frontend/`. Backend changes: config models, ingress utility, unit + E2E tests. Frontend changes: a single `<select>` form control on `CreateClusterDialog` (id `cluster-external-dns-endpoints-type`) with the two accepted values plus a "(default)" empty option, plus the matching plumbing in `buildClusterConfig` so the operator-set value reaches the GraphQL `createCluster` payload.
 **Performance Goals**: Sub-microsecond impact on rendering — one extra dict-key read per Ingress render; no new I/O.
 **Constraints**: Zero behaviour change when the field is unset (FR-004 / SC-002); zero DB schema or GraphQL schema change; existing snapshot-style annotation tests must pass without modification.
 **Scale/Scope**: Single field on a shared base model; one conditional annotation emission. ~6 LOC of production code, ~30 LOC of test code.
@@ -27,7 +27,7 @@ Add an optional `external_dns_endpoints_type` field (`Literal["NodeExternalIP", 
 |-----------|-----------|----------|
 | I. Declarative State Reconciliation | ✓ | Field is read at render time within the existing reconcile loop. Adding the annotation is idempotent: a second reconcile on a converged Ingress produces no diff. Unset state is byte-identical to pre-feature behaviour, so rerunning on existing deployments is a no-op (FR-004). |
 | II. Driver-Based Deployment | ✓ | Change lives in the *utility* layer (`IngressUtility`), not in driver specifications. No driver schema or driver-side logic changes. |
-| III. Layered Architecture | ✓ | Domain model change in `context/models/config.py`; rendering change in `agent/service/kubernetes/resources/utilities/ingress.py`. No cross-layer leakage. No new GraphQL fields, no new repository methods, no new service-layer functions. |
+| III. Layered Architecture | ✓ | Domain model change in `context/models/config.py`; rendering change in `agent/service/kubernetes/resources/utilities/ingress.py`; presentation change in `frontend/src/pages/settings/CreateClusterDialog.tsx` (a single `<select>` whose value rides through the existing `JSON | None` config payload). No cross-layer leakage. No new GraphQL fields, no new repository methods, no new service-layer functions. |
 | IV. Type Safety and Typed Errors | ✓ | Field typed `Literal["NodeExternalIP", "ClusterIP"] \| None`. Validation errors flow through Pydantic's existing ValidationError path, raised at config-load time before any service-layer call (FR-005). No new exception class needed; no Union-for-errors. |
 | V. Test-First Development | ✓ | Unit tests in `TestIngressUtilityPostRenderingPatches` cover the three-state render matrix (FR-001, FR-003, FR-004) plus a fourth merge-precedence test that builds layered configs, calls `_resolve_instance_config`, and asserts the rendered annotation reflects the deployment-level override (FR-002, US1 acceptance scenario 3). A new focused file `backend/tests/unit/context/test_base_config_section.py` covers Pydantic validation (FR-005, US2). E2E coverage achieved by extending `test_deploy_with_dedicated_ingress` per the spec's clarification (FR-008, SC-005) — explicit confirmation already recorded in `## Clarifications`, satisfying the constitution's "ask before skipping new E2E" rule for the no-new-scenario decision. |
 | VI. Format and Lint Before Commit | ✓ | Standard `uv run invoke format lint` will run before commit. Line-length 120 honoured in all touched files. |
@@ -61,7 +61,7 @@ specs/001-external-dns-endpoints-type/
 
 ### Source Code (repository root)
 
-The feature is backend-only and changes a tightly scoped slice of existing files. Nothing new is created in production code; one new file is added under `tests/unit` only if test organisation calls for it (the existing `test_utility_resources.py` already houses the relevant test class — preferred).
+The feature changes a tightly scoped slice of existing files across backend, frontend, and the e2e page object. One new test file is added under `tests/unit/context/`; everything else is an in-place modification.
 
 ```text
 backend/
@@ -83,10 +83,18 @@ backend/
     │       └── test_base_config_section.py               # CREATED: Pydantic validation tests for external_dns_endpoints_type (US2)
     └── e2e/
         ├── conftest.py                                   # MODIFIED: session cluster fixture sets external_dns_endpoints_type
+        ├── pages/
+        │   └── settings.py                               # MODIFIED: SettingsPage.create_cluster fills the new select; _needs_advanced includes the new key
         └── test_ingress_controller.py                    # MODIFIED: extend test_deploy_with_dedicated_ingress with annotation assertion
+
+frontend/
+└── src/
+    └── pages/
+        └── settings/
+            └── CreateClusterDialog.tsx                   # MODIFIED: add `external_dns_endpoints_type` field to the form schema, defaultValues, buildClusterConfig, and a `<select>` control under "Advanced Configuration" (id `cluster-external-dns-endpoints-type`)
 ```
 
-**Structure Decision**: Backend-only changes: two production files and three test files modified, plus one new test file (`backend/tests/unit/context/test_base_config_section.py`) for the US2 Pydantic-validation contract. No new modules, no frontend changes. The session-scoped cluster fixture in `backend/tests/e2e/conftest.py` is the single E2E injection point — setting the field at the cluster layer exercises the same Cluster → Environment → Deployment merge that already governs `fqdn_suffix` and `ingress_class` (mirroring the production opt-in path).
+**Structure Decision**: Backend production: two files (`config.py`, `ingress.py`). Backend tests: three files modified plus one new file. Frontend production: one file (`CreateClusterDialog.tsx`) — a single select alongside the existing `external_url_scheme` select, scoped to the Cluster-creation surface (operator opt-in flow per `quickstart.md`). E2E page object: `settings.py` updated so the UI driver fills the new control. The session-scoped cluster fixture in `backend/tests/e2e/conftest.py` is the E2E injection point — setting the field at the cluster layer exercises the same Cluster → Environment → Deployment merge that already governs `fqdn_suffix` and `ingress_class` end-to-end through both the API and the UI driver.
 
 ## Complexity Tracking
 

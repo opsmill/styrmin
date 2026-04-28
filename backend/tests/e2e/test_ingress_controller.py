@@ -91,6 +91,10 @@ async def test_deploy_with_dedicated_ingress(
         assert ing.spec.get("ingressClassName") is None, (
             f"ingressClassName should not be set with dedicated ingress, got: {ing.spec.get('ingressClassName')}"
         )
+        assert (
+            annotations.get("external-dns.alpha.kubernetes.io/endpoints-type")
+            == "NodeExternalIP"
+        ), f"Expected endpoints-type annotation 'NodeExternalIP', got: {annotations}"
 
     # Verify the user deployment is visible (the internal one is hidden)
     assert deployment is not None, "User deployment should be visible via API"

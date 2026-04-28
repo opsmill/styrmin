@@ -30,6 +30,10 @@ const createClusterSchema = z
     runtime_class: z.string().optional(),
     external_url_scheme: z.union([z.enum(["http", "https"]), z.literal("")]),
     external_url_port: z.string().optional(),
+    external_dns_endpoints_type: z.union([
+      z.enum(["NodeExternalIP", "ClusterIP"]),
+      z.literal(""),
+    ]),
     dedicated_ingress_enabled: z.boolean(),
     dedicated_ingress_implementation: z.string(),
     dedicated_ingress_type: z.string(),
@@ -70,6 +74,8 @@ function buildClusterConfig(
     config.external_url_scheme = values.external_url_scheme;
   if (values.external_url_port)
     config.external_url_port = Number(values.external_url_port);
+  if (values.external_dns_endpoints_type)
+    config.external_dns_endpoints_type = values.external_dns_endpoints_type;
   if (values.dedicated_ingress_enabled) {
     const di: Record<string, string> = {};
     if (values.dedicated_ingress_implementation)
@@ -100,6 +106,7 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
       runtime_class: "",
       external_url_scheme: "" as "" | "http" | "https",
       external_url_port: "",
+      external_dns_endpoints_type: "" as "" | "NodeExternalIP" | "ClusterIP",
       dedicated_ingress_enabled: false,
       dedicated_ingress_implementation: "",
       dedicated_ingress_type: "",
@@ -311,6 +318,31 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                         {field.state.meta.errors[0]?.toString()}
                       </p>
                     )}
+                  </div>
+                )}
+              </form.Field>
+
+              <form.Field name="external_dns_endpoints_type">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="cluster-external-dns-endpoints-type">
+                      external-dns Endpoints Type
+                    </Label>
+                    <select
+                      id="cluster-external-dns-endpoints-type"
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      value={field.state.value}
+                      onChange={(e) =>
+                        field.handleChange(
+                          e.target.value as "" | "NodeExternalIP" | "ClusterIP",
+                        )
+                      }
+                      onBlur={field.handleBlur}
+                    >
+                      <option value="">(default)</option>
+                      <option value="NodeExternalIP">NodeExternalIP</option>
+                      <option value="ClusterIP">ClusterIP</option>
+                    </select>
                   </div>
                 )}
               </form.Field>

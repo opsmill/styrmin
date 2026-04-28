@@ -40,6 +40,10 @@ class IngressUtility(Utility):
             annotations["traefik.ingress.kubernetes.io/router.middlewares"] = (
                 f"{namespace}-acl@kubernetescrd"
             )
+        if context.instance.config.external_dns_endpoints_type is not None:
+            annotations["external-dns.alpha.kubernetes.io/endpoints-type"] = (
+                context.instance.config.external_dns_endpoints_type
+            )
         if context.instance.config.dedicated_ingress:
             # Derive ingress class name from the dedicated ingress implementation
             ingress_class_name = (

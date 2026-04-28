@@ -103,6 +103,6 @@ The field has no lifecycle of its own. It is read-only at render time and has no
 
 ## Out of Scope (explicitly)
 
-- Frontend exposure of the field as a form control. Sibling fields (`fqdn_suffix`, `ingress_class`) are not rendered as form controls today and operators set them via cluster/environment configuration. Same applies here.
 - Additional external-dns endpoint types (`PodIP`, `HostIP`, …). The accepted set is exactly the two values needed for the IPv6/Cloudflare recipe (Assumptions §3 in spec).
 - Auto-detection of cluster IP-family to set the field automatically. Out of scope; operator opts in explicitly.
+- Exposing the field on `CreateEnvironmentDialog` and `CreateDeploymentDialog`. The Cluster-layer form control alone covers the IPv6/Cloudflare recipe documented in `quickstart.md`; per-environment / per-deployment overrides remain available via the JSON `config` payload accepted by the corresponding GraphQL mutations.

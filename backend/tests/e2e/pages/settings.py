@@ -58,6 +58,10 @@ class SettingsPage:
                 await dialog.locator("#cluster-external-url-port").fill(
                     str(config["external_url_port"])
                 )
+            if config.get("external_dns_endpoints_type"):
+                await dialog.locator(
+                    "#cluster-external-dns-endpoints-type"
+                ).select_option(config["external_dns_endpoints_type"])
             di = config.get("dedicated_ingress")
             if di:
                 # Base UI's <Checkbox> puts the id on a hidden <input>
@@ -99,6 +103,7 @@ def _needs_advanced(config: dict[str, Any]) -> bool:
         "runtime_class",
         "external_url_scheme",
         "external_url_port",
+        "external_dns_endpoints_type",
         "dedicated_ingress",
         "standard_storage",
     )
