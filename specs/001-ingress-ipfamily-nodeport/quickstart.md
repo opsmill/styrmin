@@ -15,13 +15,14 @@ dedicated_ingress:
     node_port: 30443     # any value in 1..65535; in practice 30000..32767 to fit the cluster's NodePort range
 ```
 
-After redeploy, both Traefik entrypoints (`web` and `websecure`) bind to NodePort `30443` on every node. Point Cloudflare's origin at `<node-ip>:30443` and leave it.
+After redeploy, the Traefik `websecure` (HTTPS) entrypoint binds to NodePort `30443` on every node. Point Cloudflare's origin at `<node-ip>:30443` and leave it. The `web` (HTTP) entrypoint keeps Kubernetes's auto-allocated NodePort — Kubernetes rejects a Service whose two ports share a `nodePort`, and the Cloudflare/Infrahub recipe terminates TLS at the cluster, so `websecure` is the entrypoint the external origin actually targets.
 
 Verify (single-family cluster works):
 
 ```bash
-kubectl get svc -n <ingress-controller-ns> styrmin-traefik -o jsonpath='{.spec.ports[*].nodePort}'
-# → "30443 30443" (one for web, one for websecure)
+kubectl get svc -n <ingress-controller-ns> styrmin-traefik \
+  -o jsonpath='{range .spec.ports[?(@.name=="websecure")]}{.nodePort}{end}'
+# → "30443"
 ```
 
 ## Scenario B — Pin the Service to IPv6 on a dual-stack cluster
@@ -84,6 +85,10 @@ You will see a `ValidationError` immediately at config load — before any clust
 | `ip_family_policy: "Whatever"` | Pydantic Literal mismatch — `Input should be 'SingleStack', 'PreferDualStack' or 'RequireDualStack'`. |
 | `node_port: 0` or `65536` or `-1` | Pydantic range error — `Input should be greater than or equal to 1 / less than or equal to 65535`. |
 | `type: "LoadBalancer"` + `node_port: 30443` | `node_port is only valid when type == 'NodePort'; got type='LoadBalancer' with node_port=30443.` |
+
+## Why `node_port` only pins `websecure`
+
+Kubernetes rejects a Service whose two ports share a `nodePort` (`spec.ports[1].nodePort: provided port is already allocated`). Traefik's chart packages both `web` (HTTP, container port `8000`) and `websecure` (HTTPS, container port `8443`) into one Service, so the platform can only fix one of them. The Cloudflare/Infrahub recipe terminates TLS at the cluster, so the external origin connects to `websecure` — that's the one this knob pins. `web` keeps the chart's default (Kubernetes-allocated) NodePort. Per-entrypoint `web_node_port` / `websecure_node_port` is tracked as a future extension.
 
 ## Backward compatibility
 

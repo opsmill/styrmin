@@ -11,9 +11,13 @@ Covers:
 - T020b: Retroactive reconciliation when dedicated_ingress is added
 """
 
+from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
+import jinja2
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from styrmin_backend.context.models.config import (
@@ -22,6 +26,10 @@ from styrmin_backend.context.models.config import (
     EnvironmentConfig,
     IngressServiceConfig,
     ResolvedConfig,
+)
+from styrmin_backend.db.models import (
+    Cluster,
+    Environment,
 )
 from styrmin_backend.domain.models import Deployment, DeploymentState
 from styrmin_backend.services.deployment import (
@@ -33,11 +41,6 @@ from styrmin_backend.services.exceptions import (
     IngressControllerNotHealthyError,
 )
 from styrmin_backend.services.ingress_controller.driver import INTERNAL_DRIVER_NAME
-
-from styrmin_backend.db.models import (
-    Cluster,
-    Environment,
-)
 from tests.unit.services.fakes import (
     FakeApplicationDriverRepository,
     FakeApplicationRepository,
@@ -51,6 +54,35 @@ from tests.unit.services.fakes import (
     FakeApplicationInstanceRepository,
     FakeTaskRepository,
 )
+
+_CHART_VALUES_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "styrmin_backend"
+    / "services"
+    / "ingress_controller"
+    / "templates"
+    / "chart_values.j2.yaml"
+)
+
+
+def _render_chart_values(service_config: IngressServiceConfig) -> dict:
+    """Render the dedicated-ingress chart-values template against a service config.
+
+    Mirrors the production rendering (``ApplicationHelmReleaseBuilder.render_value_template``)
+    but only supplies the ``instance.config.dedicated_ingress.service`` branch the
+    template inspects. Returns the parsed YAML as a dict.
+    """
+    template_text = _CHART_VALUES_TEMPLATE_PATH.read_text()
+    env = jinja2.Environment()
+    template = env.from_string(template_text)
+    instance = SimpleNamespace(
+        config=SimpleNamespace(
+            dedicated_ingress=SimpleNamespace(service=service_config)
+        )
+    )
+    labels = SimpleNamespace(environment_id="test-env")
+    rendered = template.render(instance=instance, labels=labels)
+    return yaml.safe_load(rendered)
 
 
 # ======================================================================
@@ -170,6 +202,182 @@ class TestIngressServiceConfigModel:
         assert config.service is not None
         assert config.service.annotations == {"cloud.google.com/l4-rbs": "disabled"}
         assert config.service.load_balancer_ip == "10.0.0.1"
+
+    # ------------------------------------------------------------------
+    # T002 [US1] — ip_families field validator
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            ["IPv6"],
+            ["IPv4", "IPv6"],
+            ["IPv6", "IPv4"],
+            ["IPv4"],
+        ],
+    )
+    def test_ip_families_accepts_valid_values(self, value):
+        config = IngressServiceConfig(ip_families=value)
+        assert config.ip_families == value
+
+    def test_ip_families_rejects_empty_list(self):
+        with pytest.raises(ValidationError) as exc_info:
+            IngressServiceConfig(ip_families=[])
+        assert "empty" in str(exc_info.value).lower()
+
+    def test_ip_families_rejects_duplicates(self):
+        with pytest.raises(ValidationError) as exc_info:
+            IngressServiceConfig(ip_families=["IPv6", "IPv6"])
+        assert "duplicate" in str(exc_info.value).lower()
+
+    def test_ip_families_rejects_unknown_member(self):
+        with pytest.raises(ValidationError):
+            IngressServiceConfig(ip_families=["foo"])  # type: ignore[list-item]
+
+    # ------------------------------------------------------------------
+    # T003 [US1] — ip_family_policy literal
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "policy",
+        ["SingleStack", "PreferDualStack", "RequireDualStack"],
+    )
+    def test_ip_family_policy_accepts_valid_values(self, policy):
+        config = IngressServiceConfig(ip_family_policy=policy)
+        assert config.ip_family_policy == policy
+
+    @pytest.mark.parametrize("policy", ["DualStack", "singlestack", "Whatever"])
+    def test_ip_family_policy_rejects_unknown(self, policy):
+        with pytest.raises(ValidationError):
+            IngressServiceConfig(ip_family_policy=policy)  # type: ignore[arg-type]
+
+    # ------------------------------------------------------------------
+    # T004 [US1] — chart-values rendering for IP family fields
+    # ------------------------------------------------------------------
+
+    def test_render_ipv6_singlestack_emits_keys(self):
+        config = IngressServiceConfig(
+            ip_families=["IPv6"], ip_family_policy="SingleStack"
+        )
+        rendered = _render_chart_values(config)
+        assert rendered["service"]["ipFamilies"] == ["IPv6"]
+        assert rendered["service"]["ipFamilyPolicy"] == "SingleStack"
+
+    def test_render_dual_stack_required_emits_keys(self):
+        config = IngressServiceConfig(
+            ip_families=["IPv4", "IPv6"], ip_family_policy="RequireDualStack"
+        )
+        rendered = _render_chart_values(config)
+        assert rendered["service"]["ipFamilies"] == ["IPv4", "IPv6"]
+        assert rendered["service"]["ipFamilyPolicy"] == "RequireDualStack"
+
+    def test_render_omits_ip_family_keys_when_unset(self):
+        config = IngressServiceConfig()
+        rendered = _render_chart_values(config)
+        assert "ipFamilies" not in rendered["service"]
+        assert "ipFamilyPolicy" not in rendered["service"]
+
+    # ------------------------------------------------------------------
+    # T009 [US2] — node_port range
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("value", [1, 30443, 65535])
+    def test_node_port_accepts_valid_range(self, value):
+        config = IngressServiceConfig(type="NodePort", node_port=value)
+        assert config.node_port == value
+
+    @pytest.mark.parametrize("value", [0, 65536, -1])
+    def test_node_port_rejects_out_of_range(self, value):
+        with pytest.raises(ValidationError):
+            IngressServiceConfig(type="NodePort", node_port=value)
+
+    # ------------------------------------------------------------------
+    # T010 [US2] — node_port requires type == NodePort (model validator)
+    # ------------------------------------------------------------------
+
+    def test_node_port_with_nodeport_type_accepted(self):
+        config = IngressServiceConfig(type="NodePort", node_port=30443)
+        assert config.type == "NodePort"
+        assert config.node_port == 30443
+
+    def test_nodeport_type_without_node_port_accepted(self):
+        # "Let Kubernetes pick" path: type=NodePort but no fixed port.
+        config = IngressServiceConfig(type="NodePort", node_port=None)
+        assert config.type == "NodePort"
+        assert config.node_port is None
+
+    def test_node_port_with_loadbalancer_type_rejected(self):
+        with pytest.raises(ValidationError) as exc_info:
+            IngressServiceConfig(type="LoadBalancer", node_port=30443)
+        message = str(exc_info.value)
+        assert "type" in message
+        assert "node_port" in message
+
+    # ------------------------------------------------------------------
+    # T011 [US2] — chart-values rendering for node_port
+    # ------------------------------------------------------------------
+
+    def test_render_node_port_emits_websecure_only(self):
+        """node_port is rendered onto websecure only.
+
+        Kubernetes rejects a Service whose two ports share a nodePort, so
+        only the entrypoint that fronts the Cloudflare/Infrahub origin
+        (websecure / HTTPS) gets the fixed value. ``web`` keeps the
+        chart's default (Kubernetes-allocated) nodePort.
+        """
+        config = IngressServiceConfig(type="NodePort", node_port=30443)
+        rendered = _render_chart_values(config)
+        assert rendered["ports"]["websecure"]["nodePort"] == 30443
+        # ``web`` must NOT carry the same fixed nodePort.
+        assert (
+            "web" not in rendered["ports"]
+            or rendered["ports"].get("web") is None
+            or rendered["ports"]["web"].get("nodePort") != 30443
+        )
+
+    def test_render_omits_ports_block_when_node_port_unset(self):
+        config = IngressServiceConfig(type="NodePort")
+        rendered = _render_chart_values(config)
+        assert "ports" not in rendered or rendered.get("ports") is None
+
+    # ------------------------------------------------------------------
+    # T017 [US3] — backward-compat: all three new fields unset
+    # ------------------------------------------------------------------
+
+    def test_render_byte_identical_when_new_fields_unset(self):
+        """All-three-new-fields-unset must render identically to the
+        equivalent config that never touches the new fields.
+
+        Asserts (a) parsed YAML has no ipFamilies/ipFamilyPolicy under
+        ``service`` and no top-level ``ports`` block; (b) the rendered
+        text matches the rendering of the same config built without ever
+        passing the new field names.
+        """
+        # Config that explicitly sets the new fields to None.
+        config_explicit_none = IngressServiceConfig(
+            type="LoadBalancer",
+            annotations=None,
+            load_balancer_ip=None,
+            external_traffic_policy=None,
+            ip_families=None,
+            ip_family_policy=None,
+            node_port=None,
+        )
+        # Config that doesn't even mention the new fields.
+        config_pre_feature = IngressServiceConfig(
+            type="LoadBalancer",
+            annotations=None,
+            load_balancer_ip=None,
+            external_traffic_policy=None,
+        )
+
+        rendered_explicit_none = _render_chart_values(config_explicit_none)
+        rendered_pre_feature = _render_chart_values(config_pre_feature)
+
+        assert "ipFamilies" not in rendered_pre_feature["service"]
+        assert "ipFamilyPolicy" not in rendered_pre_feature["service"]
+        assert "ports" not in rendered_pre_feature
+        assert rendered_explicit_none == rendered_pre_feature
 
     def test_config_merge_preserves_service(self):
         """Service config survives cluster/environment merge."""

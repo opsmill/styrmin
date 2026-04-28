@@ -21,7 +21,7 @@ The feature touches one Pydantic model and adds no new entities, no new database
 |-------|------|---------|------------|---------|
 | `ip_families` | `list[Literal["IPv4", "IPv6"]] \| None` | `None` | When set: non-empty, no duplicates. | Pin the Service to a specific IP family or families. Renders to chart key `service.ipFamilies`. |
 | `ip_family_policy` | `Literal["SingleStack", "PreferDualStack", "RequireDualStack"] \| None` | `None` | (Literal enforces value set.) | Express the dual-stack policy. Renders to chart key `service.ipFamilyPolicy`. |
-| `node_port` | `int \| None` | `Field(default=None, ge=1, le=65535)` | When set, requires `type == "NodePort"`. | Fixed NodePort applied to **both** Traefik entrypoints (`web` and `websecure`). |
+| `node_port` | `int \| None` | `Field(default=None, ge=1, le=65535)` | When set, requires `type == "NodePort"`. | Fixed NodePort applied to the Traefik `websecure` (HTTPS) entrypoint only. **`web` keeps the chart's default (Kubernetes-allocated) NodePort** — Kubernetes rejects a Service whose two ports share a `nodePort`, and the Cloudflare/Infrahub recipe terminates TLS at the cluster, so `websecure` is the entrypoint the external origin actually targets. Pinning `web` (or both entrypoints independently) is a future extension. |
 
 `model_config = ConfigDict(extra="forbid")` is already set on `IngressServiceConfig` and stays unchanged — adding three known fields is the only extension.
 
@@ -88,7 +88,7 @@ The model docstring on `IngressServiceConfig` is updated to document the two can
 - `ip_families: ["IPv6"]` + `ip_family_policy: "SingleStack"` — pin to IPv6 on a dual-stack cluster.
 - `ip_family_policy: "RequireDualStack"` — only on clusters that have both families configured; use `PreferDualStack` to opt into dual-stack with single-family fallback.
 
-The docstring also notes that `node_port` is only meaningful when `type == "NodePort"` and that it applies to **both** Traefik entrypoints.
+The docstring also notes that `node_port` is only meaningful when `type == "NodePort"` and that it applies to the **`websecure`** entrypoint only (with the rationale: Kubernetes rejects a Service whose two ports share a `nodePort`, and the spec's user stories all target the HTTPS origin).
 
 ## Out of scope
 
