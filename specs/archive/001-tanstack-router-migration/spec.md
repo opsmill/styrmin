@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-tanstack-router-migration`
 **Created**: 2026-04-01
-**Status**: Draft
+**Status**: Extracted
 **Input**: GitHub Issue #45 — Replace React Router v7 with TanStack Router for fully type-safe routing
 
 ## User Scenarios & Testing *(mandatory)*

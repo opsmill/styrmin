@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-base-ui-migration`  
 **Created**: 2026-04-05  
-**Status**: Draft  
+**Status**: Extracted  
 **Input**: User description: "refactor the frontend to use Base UI instead of Radix"
 
 ## User Scenarios & Testing *(mandatory)*

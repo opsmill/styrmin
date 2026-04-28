@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-tanstack-form-migration`
 **Created**: 2026-04-03
-**Status**: Draft
+**Status**: Extracted
 **Input**: GitHub Issue #54 — Refactor frontend forms from React Hook Form to TanStack Form
 
 ## User Scenarios & Testing *(mandatory)*

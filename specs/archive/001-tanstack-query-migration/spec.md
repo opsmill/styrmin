@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-tanstack-query-migration`
 **Created**: 2026-04-03
-**Status**: Draft
+**Status**: Extracted
 **Input**: GitHub Issue #55 — Replace urql with TanStack Query for frontend data fetching
 
 ## User Scenarios & Testing *(mandatory)*
