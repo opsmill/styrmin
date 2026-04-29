@@ -8,8 +8,21 @@ React 19 single-page application with TypeScript, Vite, and TanStack Query (Grap
 - **Build:** Vite 8, pnpm
 - **Styling:** Tailwind CSS 4, Base UI primitives, class-variance-authority
 - **GraphQL:** TanStack Query 5, graphql-codegen (auto-generated hooks in `src/generated/`)
-- **Forms:** React Hook Form 7, Zod 4
+- **Forms:** TanStack Form 1.28 (Standard Schema validation), Zod 4
 - **Testing:** Vitest, React Testing Library, jsdom
+
+## Frontend Documentation
+
+Detailed conventions and architecture live under `dev/`:
+
+| Topic | Knowledge (how it works) | Guidelines (how to write code) |
+|-------|--------------------------|-------------------------------|
+| Routing (TanStack Router) | [knowledge/frontend/routing.md](../dev/knowledge/frontend/routing.md) | [guidelines/frontend/routing.md](../dev/guidelines/frontend/routing.md) |
+| Data fetching (TanStack Query) | [knowledge/frontend/data-fetching.md](../dev/knowledge/frontend/data-fetching.md) | [guidelines/frontend/data-fetching.md](../dev/guidelines/frontend/data-fetching.md) |
+| Forms (TanStack Form) | [knowledge/frontend/forms.md](../dev/knowledge/frontend/forms.md) | [guidelines/frontend/forms.md](../dev/guidelines/frontend/forms.md) |
+| UI primitives (Base UI) | [knowledge/frontend/ui-primitives.md](../dev/knowledge/frontend/ui-primitives.md) | [guidelines/frontend/ui-primitives.md](../dev/guidelines/frontend/ui-primitives.md) |
+
+Migration rationale for each is captured as ADR-010 through ADR-013 in `dev/adr/`.
 
 ## File Structure
 

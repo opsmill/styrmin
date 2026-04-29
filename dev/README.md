@@ -38,6 +38,10 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 ## Current Guidelines
 
 - [backend/python.md](guidelines/backend/python.md) - Python coding standards, tooling, patterns
+- [frontend/routing.md](guidelines/frontend/routing.md) - TanStack Router conventions: `$param` syntax, type registration, navigation
+- [frontend/data-fetching.md](guidelines/frontend/data-fetching.md) - TanStack Query + GraphQL codegen: invalidation, polling, conditional fetch
+- [frontend/forms.md](guidelines/frontend/forms.md) - TanStack Form + Zod: field bindings, subscriptions, dynamic fields
+- [frontend/ui-primitives.md](guidelines/frontend/ui-primitives.md) - Base UI wrapper layer, data-attribute selectors, polymorphic Button
 - [cyclopts.md](guidelines/cyclopts.md) - Cyclopts CLI conventions: parameters, validators, type aliases, lazy loading
 - [markdown.md](guidelines/markdown.md) - Markdown conventions and document structure
 
@@ -52,6 +56,10 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [adr-007-ordered-phase-deployment-sub-handlers.md](adr/adr-007-ordered-phase-deployment-sub-handlers.md) - Ordered phase-based deployment via kopf sub-handlers
 - [adr-008-prefect-crd-intent-declaration.md](adr/adr-008-prefect-crd-intent-declaration.md) - Prefect flows declare intent via CRD instead of direct resource management
 - [adr-009-consolidate-typechecker-on-ty.md](adr/adr-009-consolidate-typechecker-on-ty.md) - Consolidate type checking on ty, removing mypy
+- [adr-010-migrate-frontend-router-to-tanstack.md](adr/adr-010-migrate-frontend-router-to-tanstack.md) - Migrate frontend routing from React Router to TanStack Router (code-based)
+- [adr-011-replace-urql-with-tanstack-query.md](adr/adr-011-replace-urql-with-tanstack-query.md) - Replace urql with TanStack Query for GraphQL data fetching
+- [adr-012-migrate-forms-to-tanstack-form.md](adr/adr-012-migrate-forms-to-tanstack-form.md) - Migrate frontend forms from React Hook Form to TanStack Form
+- [adr-013-migrate-ui-primitives-to-base-ui.md](adr/adr-013-migrate-ui-primitives-to-base-ui.md) - Migrate frontend UI primitives from Radix UI to Base UI
 
 ## Current Knowledge
 
@@ -69,6 +77,13 @@ Backend architecture documentation in [knowledge/backend/](knowledge/backend/):
 - [backup-restore.md](knowledge/backend/backup-restore.md) - Backup/restore system, Velero integration, strategies
 - [e2e-testing.md](knowledge/backend/e2e-testing.md) - E2E testing architecture, Kind cluster setup, fixture graph
 - [dead-code.md](knowledge/backend/dead-code.md) - Remaining dead code and cleanup tracking
+
+Frontend architecture documentation in [knowledge/frontend/](knowledge/frontend/):
+
+- [routing.md](knowledge/frontend/routing.md) - TanStack Router architecture, route tree, type registration, lazy routes
+- [data-fetching.md](knowledge/frontend/data-fetching.md) - TanStack Query + codegen pipeline, fetcher, cache invalidation, polling
+- [forms.md](knowledge/frontend/forms.md) - TanStack Form architecture, Zod integration, field bindings, dynamic fields
+- [ui-primitives.md](knowledge/frontend/ui-primitives.md) - Base UI wrapper layer, Slot utility, data-attribute conventions
 
 ## Current Guides
 
