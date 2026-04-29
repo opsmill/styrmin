@@ -11,6 +11,7 @@ query GetDeploymentPodStatuses($deploymentId: UUID!) {
             restartCount
             containerStatuses
             nodeName
+            componentName
             startedAt
             lastPolledAt
         }

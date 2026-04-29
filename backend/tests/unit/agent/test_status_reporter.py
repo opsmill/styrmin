@@ -79,9 +79,10 @@ def _make_pod(
     container_statuses: list | None = None,
     node_name: str | None = "node-1",
     start_time: str | None = "2026-01-01T00:00:00",
+    labels: dict[str, str] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        metadata=SimpleNamespace(name=name, namespace=namespace),
+        metadata=SimpleNamespace(name=name, namespace=namespace, labels=labels),
         status=SimpleNamespace(
             phase=phase,
             container_statuses=container_statuses,
@@ -241,6 +242,43 @@ class TestExtractPodData:
         result = _extract_pod_data(pod)
         assert result.node_name is None
         assert result.started_at is None
+
+    def test_extract_pod_data_reads_component_label(self) -> None:
+        pod = _make_pod(labels={"styrmin/component": "api"})
+        result = _extract_pod_data(pod)
+        assert result.component_name == "api"
+
+    def test_pod_status_data_serializes_component_name(self) -> None:
+        data = PodStatusData(
+            podName="p",
+            namespace="ns",
+            phase=PodPhase.RUNNING,
+            ready=True,
+            restartCount=0,
+            componentName="worker",
+        )
+        dumped = data.model_dump(by_alias=True)
+        assert dumped["componentName"] == "worker"
+
+    def test_extract_pod_data_returns_none_when_label_missing(self) -> None:
+        # All three "label is absent" shapes Kubernetes can return.
+        for labels in (None, {}, {"unrelated": "value"}):
+            pod = _make_pod(labels=labels)
+            result = _extract_pod_data(pod)
+            assert result.component_name is None, f"failed for labels={labels}"
+
+    def test_extract_pod_data_normalizes_blank_label_to_none(self) -> None:
+        for blank in ("", "   ", "\t\n"):
+            pod = _make_pod(labels={"styrmin/component": blank})
+            result = _extract_pod_data(pod)
+            assert result.component_name is None, f"failed for {blank!r}"
+
+    def test_extract_pod_data_passes_through_unknown_label_value(self) -> None:
+        # The agent does NOT validate against declared components — observed
+        # state is reported as-is, drift is recorded honestly.
+        pod = _make_pod(labels={"styrmin/component": "ghost"})
+        result = _extract_pod_data(pod)
+        assert result.component_name == "ghost"
 
 
 # ---------------------------------------------------------------------------

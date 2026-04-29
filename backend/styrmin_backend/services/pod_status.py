@@ -57,6 +57,7 @@ async def report_pod_statuses(
                     restart_count=pod_data["restart_count"],
                     container_statuses=pod_data.get("container_statuses"),
                     node_name=pod_data.get("node_name"),
+                    component_name=pod_data.get("component_name"),
                     started_at=pod_data.get("started_at"),
                     last_polled_at=now,
                 )

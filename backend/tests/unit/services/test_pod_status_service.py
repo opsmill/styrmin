@@ -356,3 +356,60 @@ async def test_get_pod_statuses_no_filter_empty_db() -> None:
     uow = _make_uow()
     result = await get_pod_statuses(uow)
     assert result == []
+
+
+@pytest.mark.anyio
+async def test_report_pod_statuses_persists_component_name() -> None:
+    uow = _make_uow()
+    deployment_id = uuid4()
+    pods = [
+        {
+            "pod_name": "api-pod",
+            "namespace": f"styrmin-{deployment_id}",
+            "phase": "running",
+            "ready": True,
+            "restart_count": 0,
+            "component_name": "api",
+        },
+    ]
+    await report_pod_statuses(_make_report(deployment_id, pods), uow)
+    assert uow.pod_statuses.models[0].component_name == "api"
+
+
+@pytest.mark.anyio
+async def test_report_pod_statuses_persists_unknown_component_name() -> None:
+    """The server records component_name as-is; no rejection or coercion when
+    the value doesn't correspond to a declared Component."""
+    uow = _make_uow()
+    deployment_id = uuid4()
+    pods = [
+        {
+            "pod_name": "rogue-pod",
+            "namespace": f"styrmin-{deployment_id}",
+            "phase": "running",
+            "ready": True,
+            "restart_count": 0,
+            "component_name": "ghost",
+        },
+    ]
+    updated, _ = await report_pod_statuses(_make_report(deployment_id, pods), uow)
+    assert updated == 1
+    assert uow.pod_statuses.models[0].component_name == "ghost"
+
+
+@pytest.mark.anyio
+async def test_report_pod_statuses_persists_absent_component_name() -> None:
+    """A pod without a component_name (omitted key) is stored with None."""
+    uow = _make_uow()
+    deployment_id = uuid4()
+    pods = [
+        {
+            "pod_name": "sidecar-pod",
+            "namespace": f"styrmin-{deployment_id}",
+            "phase": "running",
+            "ready": True,
+            "restart_count": 0,
+        },
+    ]
+    await report_pod_statuses(_make_report(deployment_id, pods), uow)
+    assert uow.pod_statuses.models[0].component_name is None

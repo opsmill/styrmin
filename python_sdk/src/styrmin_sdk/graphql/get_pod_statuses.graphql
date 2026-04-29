@@ -9,6 +9,7 @@ query GetPodStatuses($deploymentId: UUID, $environmentId: UUID, $clusterId: UUID
         restartCount
         containerStatuses
         nodeName
+        componentName
         startedAt
         lastPolledAt
     }

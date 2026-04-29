@@ -44,6 +44,12 @@ _CRD_GROUP = "styrmin.io"
 _CRD_VERSION = "v1alpha1"
 _CRD_PLURAL = "styrmindeployments"
 
+# Pod label key the platform's application builder writes onto every workload it
+# owns (see ``build_target_for_component_labels``). Pods without this label are
+# either system pods, sidecars, or in-flight rollouts — they're reported with
+# ``component_name = None`` rather than dropped or coerced.
+_COMPONENT_LABEL_KEY = "styrmin/component"
+
 
 def _extract_pod_data(pod) -> PodStatusData:  # type: ignore[no-untyped-def]
     """Extract relevant status fields from a V1Pod object."""
@@ -93,6 +99,12 @@ def _extract_pod_data(pod) -> PodStatusData:  # type: ignore[no-untyped-def]
     if status.start_time:
         started_at = status.start_time.isoformat()
 
+    labels = (pod.metadata.labels or {}) if pod.metadata else {}
+    raw_component = labels.get(_COMPONENT_LABEL_KEY)
+    component_name = (
+        raw_component.strip() if raw_component and raw_component.strip() else None
+    )
+
     return PodStatusData(
         podName=pod.metadata.name,
         namespace=pod.metadata.namespace,
@@ -101,6 +113,7 @@ def _extract_pod_data(pod) -> PodStatusData:  # type: ignore[no-untyped-def]
         restartCount=total_restarts,
         containerStatuses=container_statuses or None,
         nodeName=pod.spec.node_name if pod.spec else None,
+        componentName=component_name,
         startedAt=started_at,
     )
 

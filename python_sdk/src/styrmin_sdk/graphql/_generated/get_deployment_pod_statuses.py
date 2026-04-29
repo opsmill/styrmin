@@ -32,6 +32,7 @@ class GetDeploymentPodStatusesDeploymentPodStatuses(BaseModel):
     restart_count: int = Field(alias="restartCount")
     container_statuses: Any = Field(alias="containerStatuses")
     node_name: Optional[str] = Field(alias="nodeName")
+    component_name: Optional[str] = Field(alias="componentName")
     started_at: Optional[datetime] = Field(alias="startedAt")
     last_polled_at: Optional[datetime] = Field(alias="lastPolledAt")
 

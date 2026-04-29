@@ -54,6 +54,7 @@ class PodStatusInput(BaseModel):
     restart_count: int = Field(alias="restartCount")
     container_statuses: Optional[Any] = Field(alias="containerStatuses", default=None)
     node_name: Optional[str] = Field(alias="nodeName", default=None)
+    component_name: Optional[str] = Field(alias="componentName", default=None)
     started_at: Optional[datetime] = Field(alias="startedAt", default=None)
 
 

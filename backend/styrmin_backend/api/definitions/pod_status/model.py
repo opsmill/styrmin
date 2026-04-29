@@ -23,6 +23,7 @@ class PodStatus:
     restart_count: int
     container_statuses: JSON
     node_name: str | None = None
+    component_name: str | None = None
     started_at: datetime | None = None
     last_polled_at: datetime | None = None
     created_on: datetime | None = None
@@ -42,6 +43,7 @@ class PodStatus:
             restart_count=instance.restart_count,
             container_statuses=instance.container_statuses or [],
             node_name=instance.node_name,
+            component_name=instance.component_name,
             started_at=instance.started_at,
             last_polled_at=instance.last_polled_at,
             created_on=instance.created_on,
@@ -59,6 +61,7 @@ class PodStatusInput:
     restart_count: int
     container_statuses: JSON | None = None
     node_name: str | None = None
+    component_name: str | None = None
     started_at: datetime | None = None
 
 
