@@ -32,6 +32,7 @@ jobs:
       yaml: ${{ steps.changes.outputs.yaml_all }}
       markdown: ${{ steps.changes.outputs.markdown_all }}
       helm: ${{ steps.changes.outputs.helm_all }}
+      docs_only: ${{ steps.docs-only.outputs.docs_only }}
     steps:
       - uses: actions/checkout@v6
       - name: Check for file changes
@@ -39,6 +40,18 @@ jobs:
         id: changes
         with:
           filters: .github/file-filters.yml
+      # Returns 'true' only when *every* changed file matches a docs pattern.
+      # Used by the E2E jobs to skip on doc-only PRs.
+      - name: Check if only docs changed
+        uses: dorny/paths-filter@v3
+        id: docs-only
+        with:
+          predicate-quantifier: every
+          filters: |
+            docs_only:
+              - 'docs/**'
+              - '**/*.md'
+              - '**/*.mdx'
 
   python-lint:
     name: Python Linting
@@ -292,7 +305,8 @@ jobs:
 
   e2e-tests-api:
     name: E2E Tests (API entrypoint)
-    needs: ["python-lint", "yaml-lint", "markdown-lint", "graphql-schema-check"]
+    needs: ["files-changed", "python-lint", "yaml-lint", "markdown-lint", "graphql-schema-check"]
+    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.docs_only != 'true'
     runs-on:
       group: huge-runners
     timeout-minutes: 45
@@ -329,7 +343,8 @@ jobs:
 
   e2e-tests-ui:
     name: E2E Tests (UI entrypoint)
-    needs: ["python-lint", "yaml-lint", "markdown-lint", "graphql-schema-check"]
+    needs: ["files-changed", "python-lint", "yaml-lint", "markdown-lint", "graphql-schema-check"]
+    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.docs_only != 'true'
     runs-on:
       group: huge-runners
     timeout-minutes: 45
