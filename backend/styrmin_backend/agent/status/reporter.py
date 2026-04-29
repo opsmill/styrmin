@@ -104,6 +104,20 @@ def _extract_pod_data(pod) -> PodStatusData:  # type: ignore[no-untyped-def]
     component_name = (
         raw_component.strip() if raw_component and raw_component.strip() else None
     )
+    # TEMP DIAGNOSTIC (#133): the E2E test sees pods carrying
+    # styrmin/component labels via kr8s but the agent reports None. Log
+    # what kubernetes-asyncio's view of the labels actually contains so
+    # the next CI run tells us whether the keys are missing, mis-cased,
+    # or shaped differently than expected. Remove once the discrepancy
+    # is resolved.
+    logger.info(
+        "pod-component diagnostic: pod=%s namespace=%s labels=%r raw=%r resolved=%r",
+        pod.metadata.name if pod.metadata else "?",
+        pod.metadata.namespace if pod.metadata else "?",
+        labels,
+        raw_component,
+        component_name,
+    )
 
     return PodStatusData(
         podName=pod.metadata.name,
