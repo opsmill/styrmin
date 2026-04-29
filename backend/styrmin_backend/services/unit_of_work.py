@@ -116,6 +116,7 @@ class UnitOfWork(ABC):
     ) -> bool | None:
         if type_ is not None:
             await self.rollback()
+        await self.session.close()
         return None
 
 

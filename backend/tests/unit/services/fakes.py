@@ -404,8 +404,14 @@ class FakeBackupScheduleRepository(
 
 
 class _FakeSession:
+    def __init__(self) -> None:
+        self.closed = False
+
     async def refresh(self, obj: object) -> None:
         pass
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 class FakeUnitOfWork(UnitOfWork):
@@ -482,7 +488,7 @@ class FakeUnitOfWork(UnitOfWork):
         return self
 
     async def __aexit__(self, *args):
-        pass
+        await self.session.close()
 
     async def commit(self):
         self.committed = True
