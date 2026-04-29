@@ -46,8 +46,7 @@ async def _poll_pod_statuses_until(
     deadline = time.time() + timeout
     last_pods: list = []
     while time.time() < deadline:
-        result = await client.get_deployment_pod_statuses(deployment_id=deployment_id)
-        pods = result.deployment.pod_statuses if result.deployment else []
+        pods = await client.deployments.get_pod_statuses(deployment_id=deployment_id)
         outcome = predicate(pods)
         if outcome:
             return outcome

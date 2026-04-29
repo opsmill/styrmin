@@ -8,6 +8,10 @@ from uuid import UUID
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.graphql._generated.deploy import Deploy, DeployDeploy
 from styrmin_sdk.graphql._generated.get_deployment import GetDeployment, GetDeploymentDeployment
+from styrmin_sdk.graphql._generated.get_deployment_pod_statuses import (
+    GetDeploymentPodStatuses,
+    GetDeploymentPodStatusesDeploymentPodStatuses,
+)
 from styrmin_sdk.graphql._generated.get_deployment_timeline import (
     GetDeploymentTimeline,
     GetDeploymentTimelineDeploymentTimeline,
@@ -158,3 +162,12 @@ class DeploymentResource(BaseResource):
     async def get_context(self, deployment_id: str | UUID) -> Context:
         data = await self._transport.get(f"/deployments/{deployment_id}/context")
         return Context.model_validate({"context": data})
+
+    async def get_pod_statuses(self, deployment_id: str | UUID) -> list[GetDeploymentPodStatusesDeploymentPodStatuses]:
+        result = await self._transport.execute(
+            load_query("get_deployment_pod_statuses"),
+            {"deploymentId": str(deployment_id)},
+        )
+        self._check_graphql_errors(result)
+        validated = GetDeploymentPodStatuses.model_validate(result["data"])
+        return validated.deployment.pod_statuses if validated.deployment else []
