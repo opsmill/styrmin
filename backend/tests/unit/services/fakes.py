@@ -274,13 +274,24 @@ class FakePodStatusRepository(FakeRepository[PodStatus], PodStatusRepository):
         return [m for m in self.models if m.deployment_id == deployment_id]
 
     async def upsert(self, pod_status: PodStatus) -> PodStatus:
-        for i, m in enumerate(self.models):
+        # Mirror SQLModelPodStatusRepository.upsert: mutate the existing row's
+        # mutable fields rather than replacing it wholesale. This is the only
+        # way unit tests catch field-by-field omissions in the SQL upsert.
+        for existing in self.models:
             if (
-                m.deployment_id == pod_status.deployment_id
-                and m.pod_name == pod_status.pod_name
+                existing.deployment_id == pod_status.deployment_id
+                and existing.pod_name == pod_status.pod_name
             ):
-                self.models[i] = pod_status
-                return pod_status
+                existing.phase = pod_status.phase
+                existing.ready = pod_status.ready
+                existing.restart_count = pod_status.restart_count
+                existing.container_statuses = pod_status.container_statuses
+                existing.node_name = pod_status.node_name
+                existing.component_name = pod_status.component_name
+                existing.started_at = pod_status.started_at
+                existing.last_polled_at = pod_status.last_polled_at
+                existing.namespace = pod_status.namespace
+                return existing
         self.models.append(pod_status)
         return pod_status
 
