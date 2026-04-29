@@ -33,7 +33,7 @@ class IngressUtility(Utility):
             "traefik.ingress.kubernetes.io/router.entrypoints": "web,websecure",
             "external-dns.alpha.kubernetes.io/hostname": f"{release_reference}-{context.app.name}.{context.instance.config.fqdn_suffix}",
             "external-dns.alpha.kubernetes.io/cloudflare-proxied": "true",
-            # "traefik.ingress.kubernetes.io/router.middlewares": f"{release_reference}-acl@kubernetescrd",
+            "traefik.ingress.kubernetes.io/router.middlewares": f"{context.instance.namespace}-acl@kubernetescrd",
         }
         if context.instance.config.dedicated_ingress:
             # Derive ingress class name from the dedicated ingress implementation

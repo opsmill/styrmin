@@ -311,6 +311,18 @@ class TestIngressUtilityPostRenderingPatches:
             annotations["external-dns.alpha.kubernetes.io/cloudflare-proxied"] == "true"
         )
 
+    def test_includes_acl_middleware_annotation(
+        self, ingress_utility: IngressUtility, global_context: GlobalContext
+    ) -> None:
+        patches = ingress_utility.build_app_post_rendering_patches(
+            global_context, RELEASE_REF
+        )
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        assert len(annotation_patches) >= 1
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        expected = f"{NAMESPACE}-acl@kubernetescrd"
+        assert annotations["traefik.ingress.kubernetes.io/router.middlewares"] == expected
+
     def test_raises_without_fqdn_suffix(
         self, ingress_utility: IngressUtility, global_context: GlobalContext
     ) -> None:

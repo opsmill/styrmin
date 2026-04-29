@@ -115,7 +115,7 @@ async def test_deploy_without_dedicated_ingress(
     environment = await scenario_driver.create_environment(
         name="no-ingress-env",
         cluster_id=cluster.id,
-        config={"ip_whitelist": ["127.0.0.1"]},
+        config={"ip_whitelist": ["0.0.0.0/0"]},
     )
 
     # Deploy simple-app
@@ -340,7 +340,7 @@ async def test_toggle_dedicated_ingress_on_off(
     environment = await scenario_driver.create_environment(
         name="toggle-env",
         cluster_id=cluster.id,
-        config={"ip_whitelist": ["127.0.0.1"]},
+        config={"ip_whitelist": ["0.0.0.0/0"]},
     )
 
     # Deploy app — should trigger ingress controller creation

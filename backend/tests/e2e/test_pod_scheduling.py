@@ -163,7 +163,7 @@ async def scheduling_environment(
     env = await driver.create_environment(
         name=f"scheduling-e2e-{uuid.uuid4().hex[:8]}",
         cluster_id=cluster_id,
-        config={"ip_whitelist": ["127.0.0.1"]},
+        config={"ip_whitelist": ["0.0.0.0/0"]},
     )
     yield {
         "environment_id": str(env.id),
