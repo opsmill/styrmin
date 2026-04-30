@@ -24,7 +24,10 @@ Styrmin is a **deployment orchestration platform** that manages application depl
 
 ```bash
 uv sync --all-groups --all-packages   # Install Python dependencies add all packages are installed
+cd frontend && pnpm install           # Install frontend dependencies (required before `uv run invoke generate`)
 ```
+
+> **Note:** `uv run invoke generate` regenerates both Python SDK types **and** frontend TypeScript types. Without `frontend/node_modules/`, the frontend codegen step fails with `sh: graphql-codegen: command not found`. Run `pnpm install` once after cloning the repo.
 
 ### Testing
 
