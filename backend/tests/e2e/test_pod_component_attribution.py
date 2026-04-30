@@ -75,6 +75,11 @@ async def _poll_pod_statuses_until(
     )
 
 
+@pytest.mark.api_only(
+    reason="Reads pod statuses through the SDK and inspects pod metadata via "
+    "kr8s — no UI flow is exercised. The [ui-chromium] variant would re-run "
+    "the same SDK call paths without adding coverage."
+)
 @pytest.mark.ci
 async def test_pod_component_attribution(
     deployed_simple_app: dict,
