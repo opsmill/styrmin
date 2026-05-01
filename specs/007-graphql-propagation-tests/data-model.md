@@ -29,7 +29,7 @@ This feature does **not** add or change any persisted entity. The "data" produce
 
 ## Entity 2: Propagation Test Function
 
-**File**: `backend/tests/functional/graphql/test_<domain>_propagation.py`.
+**File**: `backend/tests/functional/graphql/test_<domain>.py`.
 **Shape** (write):
 
 ```python
@@ -85,7 +85,7 @@ async def test_<query>_projects_<fields>(
 
 ## Entity 3: Domain Test Module
 
-**File**: `backend/tests/functional/graphql/test_<domain>_propagation.py` (one per `Domain` value above).
+**File**: `backend/tests/functional/graphql/test_<domain>.py` (one per `Domain` value above).
 
 **Module invariants**:
 

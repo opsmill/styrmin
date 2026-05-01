@@ -113,7 +113,7 @@ mutation CreateCluster($name: String!, $config: JSON) {
 }
 ```
 
-`backend/tests/functional/graphql/test_cluster_propagation.py`:
+`backend/tests/functional/graphql/test_cluster.py`:
 
 ```python
 from ._queries import load_query

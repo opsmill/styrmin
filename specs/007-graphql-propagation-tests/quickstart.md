@@ -10,7 +10,7 @@ Open `coverage-matrix.md`. Find a row with verdict `gap` or `partial`. Note its 
 
 ## 2. Open the right test module
 
-Tests live under `backend/tests/functional/graphql/test_<domain>_propagation.py`. If the file does not exist yet, create it from this skeleton:
+Tests live under `backend/tests/functional/graphql/test_<domain>.py`. If the file does not exist yet, create it from this skeleton:
 
 ```python
 """Propagation tests for <domain> resolvers.
@@ -154,10 +154,10 @@ Patch the **import site** (`api.schema.mutation`), not the definition site (`ser
 
 ```bash
 # Just your new test
-uv run pytest backend/tests/functional/graphql/test_<domain>_propagation.py -v
+uv run pytest backend/tests/functional/graphql/test_<domain>.py -v
 
 # With pdb on the first failure (use `sleep infinity |` from non-interactive shells)
-uv run pytest backend/tests/functional/graphql/test_<domain>_propagation.py -v --pdb
+uv run pytest backend/tests/functional/graphql/test_<domain>.py -v --pdb
 
 # Full backend suite
 uv run invoke test

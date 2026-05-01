@@ -76,21 +76,21 @@ backend/
     │   ├── helpers.py                               # exists; new query/mutation strings added here
     │   └── propagation/                             # NEW: dedicated propagation test modules (HTTP-driven)
     │       ├── conftest.py                          # NEW: re-exports session/client + adds prefect/kube fakes
-    │       ├── test_cluster_propagation.py          # NEW
-    │       ├── test_environment_propagation.py     # NEW
-    │       ├── test_deployment_propagation.py      # NEW
-    │       ├── test_backup_propagation.py          # NEW
-    │       ├── test_backup_schedule_propagation.py # NEW
-    │       ├── test_backup_storage_location_propagation.py  # NEW
-    │       ├── test_application_driver_propagation.py       # NEW
-    │       ├── test_restore_propagation.py         # NEW
-    │       ├── test_task_propagation.py            # NEW
-    │       ├── test_pod_status_propagation.py      # NEW
-    │       ├── test_components_propagation.py      # NEW
-    │       ├── test_run_job_propagation.py         # NEW
-    │       ├── test_callback_propagation.py        # NEW
-    │       ├── test_deployment_timeline_propagation.py  # NEW
-    │       └── test_deployment_status_propagation.py    # NEW
+    │       ├── test_cluster.py          # NEW
+    │       ├── test_environment.py     # NEW
+    │       ├── test_deployment.py      # NEW
+    │       ├── test_backup.py          # NEW
+    │       ├── test_backup_schedule.py # NEW
+    │       ├── test_backup_storage_location.py  # NEW
+    │       ├── test_application_driver.py       # NEW
+    │       ├── test_restore.py         # NEW
+    │       ├── test_task.py            # NEW
+    │       ├── test_pod_status.py      # NEW
+    │       ├── test_components.py      # NEW
+    │       ├── test_run_job.py         # NEW
+    │       ├── test_callback.py        # NEW
+    │       ├── test_deployment_timeline.py  # NEW
+    │       └── test_deployment_status.py    # NEW
     └── unit/
         └── api/                                     # exists; reserved for resolver-direct tests when justified
 ```

@@ -49,9 +49,9 @@ This is a backend-only feature. New files live under `backend/tests/functional/g
 
 ## Phase 4: User Story 2 — Write-path propagation tests
 
-- [X] T009 [P] [US2] `test_cluster_propagation.py` — create/delete write paths.
-- [X] T010 [P] [US2] `test_environment_propagation.py` — create with cluster id/name lookups, delete by id and by name+cluster.
-- [X] T011 [P] [US2] `test_backup_storage_location_propagation.py::test_create_bsl_persists_all_credentials` — every input scalar lands on the BSL row.
+- [X] T009 [P] [US2] `test_cluster.py` — create/delete write paths.
+- [X] T010 [P] [US2] `test_environment.py` — create with cluster id/name lookups, delete by id and by name+cluster.
+- [X] T011 [P] [US2] `test_backup_storage_location.py::test_create_bsl_persists_all_credentials` — every input scalar lands on the BSL row.
 - [X] T012 [P] [US2] BSL update parametrized per Optional field; credentials-change DB write.
 - [X] T013 [P] [US2] BSL `test_delete_bsl_removes_row`.
 - [X] T014 [P] [US2] BSL assign/unassign env links.
@@ -75,8 +75,8 @@ This is a backend-only feature. New files live under `backend/tests/functional/g
 
 ## Phase 5: User Story 3 — Read-path propagation tests
 
-- [X] T030 [P] [US3] `test_cluster_propagation.py` — `clusters`, `cluster(id)`, `cluster(name)`, environments projection.
-- [X] T031 [P] [US3] `test_environment_propagation.py` — list, parametrized lookup-by-arg, cluster-relation projection.
+- [X] T030 [P] [US3] `test_cluster.py` — `clusters`, `cluster(id)`, `cluster(name)`, environments projection.
+- [X] T031 [P] [US3] `test_environment.py` — list, parametrized lookup-by-arg, cluster-relation projection.
 - [X] T032 [P] [US3] BSL list and `get(id)` with computed `environmentCount`.
 - [ ] T033 [P] [US3] `Backup` projection + filter-by-status/instance + `componentStatuses` nested. **Deferred**.
 - [ ] T034 [P] [US3] `Restore` projection + filter-by-status/backup. **Deferred**.
