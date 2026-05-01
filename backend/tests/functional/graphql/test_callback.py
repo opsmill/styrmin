@@ -10,7 +10,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import Task, TaskStatus, TaskType
 
-from ._queries import load_query
+from .conftest import gql
 from .seeds import seed_deployment, seed_task
 
 
@@ -27,22 +27,17 @@ async def test_callback_running_state_persists_task_status(
     )
     task_id = task.id
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("callback"),
-            "variables": {
-                "taskId": str(task_id),
-                "stateName": "RUNNING",
-                "stateMessage": "started running",
-                "stateType": "RUNNING",
-            },
+    data = await gql(
+        client,
+        "callback",
+        {
+            "taskId": str(task_id),
+            "stateName": "RUNNING",
+            "stateMessage": "started running",
+            "stateType": "RUNNING",
         },
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    assert payload["data"]["callback"]["success"] is not False
+    assert data["callback"]["success"] is True
 
     session.expire_all()
     refreshed = await session.get(Task, task_id)
@@ -63,21 +58,16 @@ async def test_callback_completed_state_persists_task_success(
     )
     task_id = task.id
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("callback"),
-            "variables": {
-                "taskId": str(task_id),
-                "stateName": "COMPLETED",
-                "stateMessage": None,
-                "stateType": "COMPLETED",
-            },
+    await gql(
+        client,
+        "callback",
+        {
+            "taskId": str(task_id),
+            "stateName": "COMPLETED",
+            "stateMessage": None,
+            "stateType": "COMPLETED",
         },
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
 
     session.expire_all()
     refreshed = await session.get(Task, task_id)
@@ -89,24 +79,19 @@ async def test_callback_completed_state_persists_task_success(
 async def test_callback_unknown_task_returns_error_response(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """Negative path: an unknown task_id surfaces a TaskNotFoundError that the
-    resolver converts to ``CallbackResponse(success=False)``. Asserts no
-    Task row was fabricated."""
+    """An unknown task_id surfaces a TaskNotFoundError that the resolver converts
+    to ``CallbackResponse(success=False)`` — the resolver itself does not raise,
+    so this stays inside the success-payload contract that ``gql`` enforces."""
     bogus_id = uuid4()
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("callback"),
-            "variables": {
-                "taskId": str(bogus_id),
-                "stateName": "RUNNING",
-                "stateMessage": None,
-                "stateType": "RUNNING",
-            },
+    data = await gql(
+        client,
+        "callback",
+        {
+            "taskId": str(bogus_id),
+            "stateName": "RUNNING",
+            "stateMessage": None,
+            "stateType": "RUNNING",
         },
     )
-    assert response.status_code == 200
-    payload = response.json()
-    data = payload["data"]["callback"]
-    assert data["success"] is False
+    assert data["callback"]["success"] is False
     assert await session.get(Task, bogus_id) is None

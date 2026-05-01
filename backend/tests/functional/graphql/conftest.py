@@ -1,16 +1,16 @@
 """Shared fixtures for GraphQL ↔ DB propagation tests.
 
-Re-exports the in-memory SQLite ``session`` and ASGI ``client`` fixtures from the
-existing functional test module so propagation tests live in a dedicated
-package without re-implementing the DB plumbing. Adds a ``prefect_manager_mock``
-fixture that overrides ``get_manager`` via ``fast_depends`` so propagation tests
-that exercise mutations dispatching Prefect workflows can run without touching
-the real Prefect runtime.
+Provides the in-memory SQLite ``session``, ASGI ``client``, and
+``prefect_manager_mock`` fixtures plus a small ``gql`` helper that posts an
+operation file by name, asserts a clean 200 response, and returns the
+``data`` payload — the four lines almost every propagation test repeats.
 
 See specs/007-graphql-propagation-tests/contracts/propagation-test-contract.md.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 from fast_depends import dependency_provider
@@ -24,6 +24,8 @@ from styrmin_backend.db.utils import get_session
 from styrmin_backend.server.app import app
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
+
+from ._queries import load_query
 
 
 @pytest.fixture(name="session")
@@ -71,3 +73,26 @@ def prefect_manager_mock(mocker):
     dependency_provider.override(get_manager.__wrapped__, get_fake_manager)
     yield manager_mock
     dependency_provider.clear()
+
+
+async def gql(
+    client: AsyncClient,
+    operation: str,
+    variables: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """POST a named operation and return ``data``, asserting clean success.
+
+    Loads ``operation`` from ``operations/<operation>.graphql``, posts it with
+    the given variables, asserts HTTP 200 and no GraphQL errors, and returns
+    ``payload["data"]``. Tests that need the full payload (e.g. negative-path
+    tests asserting on ``errors``) should call ``client.post`` directly.
+    """
+
+    response = await client.post(
+        "/graphql",
+        json={"query": load_query(operation), "variables": variables or {}},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+    return payload["data"]

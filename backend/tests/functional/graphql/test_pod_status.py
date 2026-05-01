@@ -9,7 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import PodPhase, PodStatus
 
-from ._queries import load_query
+from .conftest import gql
 from .seeds import seed_cluster, seed_deployment, seed_environment
 
 
@@ -20,7 +20,7 @@ async def test_report_pod_statuses_upserts_and_removes_stale(
     deployment = await seed_deployment(session)
     deployment_id = deployment.id
 
-    # Seed a stale pod that should be removed by the upsert.
+    # Stale row exercises the remove-stale branch of the upsert.
     stale = PodStatus(
         pod_name="stale-pod",
         namespace="ns",
@@ -32,35 +32,30 @@ async def test_report_pod_statuses_upserts_and_removes_stale(
     session.add(stale)
     await session.commit()
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("report_pod_statuses"),
-            "variables": {
-                "reports": [
-                    {
-                        "deploymentId": str(deployment_id),
-                        "pods": [
-                            {
-                                "podName": "fresh-pod",
-                                "namespace": "ns",
-                                "phase": "RUNNING",
-                                "ready": True,
-                                "restartCount": 2,
-                                "containerStatuses": None,
-                                "nodeName": "node-1",
-                                "startedAt": None,
-                            }
-                        ],
-                    }
-                ]
-            },
+    data = await gql(
+        client,
+        "report_pod_statuses",
+        {
+            "reports": [
+                {
+                    "deploymentId": str(deployment_id),
+                    "pods": [
+                        {
+                            "podName": "fresh-pod",
+                            "namespace": "ns",
+                            "phase": "RUNNING",
+                            "ready": True,
+                            "restartCount": 2,
+                            "containerStatuses": None,
+                            "nodeName": "node-1",
+                            "startedAt": None,
+                        }
+                    ],
+                }
+            ]
         },
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    response_data = payload["data"]["reportPodStatuses"]
+    response_data = data["reportPodStatuses"]
     assert response_data["success"] is True
     assert response_data["podsUpdated"] == 1
     assert response_data["podsRemoved"] == 1
@@ -118,15 +113,8 @@ async def test_pod_statuses_filters_by_each_arg(
     else:
         variables = {"clusterId": str(cluster_a.id)}
 
-    response = await client.post(
-        "/graphql",
-        json={"query": load_query("list_pod_statuses"), "variables": variables},
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    rows = payload["data"]["podStatuses"]
-    names = {row["podName"] for row in rows}
+    data = await gql(client, "list_pod_statuses", variables)
+    names = {row["podName"] for row in data["podStatuses"]}
     assert names == {"pod-a"}, (
         f"filter_arg={filter_arg} should restrict to pod-a; got {names}"
     )

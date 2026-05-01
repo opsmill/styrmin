@@ -1,8 +1,8 @@
-"""Foundational smoke test that proves the propagation conftest is wired up.
+"""Foundational smoke test that proves the conftest wiring works end-to-end.
 
-This is the canonical reference shape for every test under
-``backend/tests/functional/propagation/`` — drive the GraphQL HTTP boundary,
-then read the row back through the same DB session the resolver wrote to.
+Uses the raw ``client.post`` form — every other test in this package goes
+through the ``gql`` helper, so the smoke test's job is to prove the bare
+session/client/Strawberry path before any helper sits on top of it.
 """
 
 from __future__ import annotations

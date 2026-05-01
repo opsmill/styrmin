@@ -32,6 +32,22 @@ from styrmin_backend.db.models import (
 VALID_CLUSTER_CONFIG = {"runtime_class": "example_runtime_class"}
 
 
+async def seed_backup_storage_location(
+    session: AsyncSession, name: str | None = None
+) -> BackupStorageLocation:
+    bsl = BackupStorageLocation(
+        name=name or f"bsl-{uuid4().hex[:8]}",
+        endpoint="https://s3.example.com",
+        bucket="seed-bucket",
+        region="eu-west-1",
+        access_key_id="seed-key",
+        secret_access_key="seed-secret",
+    )
+    session.add(bsl)
+    await session.commit()
+    return bsl
+
+
 async def seed_cluster(session: AsyncSession, name: str | None = None) -> Cluster:
     cluster = Cluster(
         name=name or f"cluster-{uuid4().hex[:8]}",

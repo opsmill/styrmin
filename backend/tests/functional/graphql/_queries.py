@@ -16,11 +16,13 @@ operation no longer matches the schema.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
 _GRAPHQL_DIR = Path(__file__).parent / "operations"
 
 
+@lru_cache(maxsize=None)
 def load_query(name: str) -> str:
     """Load a GraphQL operation by snake_case file stem.
 

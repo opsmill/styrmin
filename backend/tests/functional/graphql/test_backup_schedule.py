@@ -10,7 +10,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import BackupSchedule
 
-from ._queries import load_query
+from .conftest import gql
 from .seeds import seed_deployment
 
 
@@ -21,23 +21,18 @@ async def test_create_schedule_persists_all_fields(
     deployment = await seed_deployment(session)
     deployment_id = deployment.id
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("create_backup_schedule"),
-            "variables": {
-                "deploymentId": str(deployment_id),
-                "name": "nightly",
-                "cronExpression": "0 2 * * *",
-                "retentionCount": 7,
-                "enabled": True,
-            },
+    data = await gql(
+        client,
+        "create_backup_schedule",
+        {
+            "deploymentId": str(deployment_id),
+            "name": "nightly",
+            "cronExpression": "0 2 * * *",
+            "retentionCount": 7,
+            "enabled": True,
         },
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    schedule_id = UUID(payload["data"]["createBackupSchedule"]["id"])
+    schedule_id = UUID(data["createBackupSchedule"]["id"])
 
     db_row = await session.get(BackupSchedule, schedule_id)
     assert db_row is not None
@@ -77,16 +72,11 @@ async def test_update_schedule_persists_field_changes(
     await session.commit()
     schedule_id = schedule.id
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("update_backup_schedule"),
-            "variables": {"scheduleId": str(schedule_id), field: value},
-        },
+    await gql(
+        client,
+        "update_backup_schedule",
+        {"scheduleId": str(schedule_id), field: value},
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
 
     session.expire_all()
     refreshed = await session.get(BackupSchedule, schedule_id)
@@ -108,18 +98,8 @@ async def test_delete_schedule_removes_row(
     await session.commit()
     schedule_id = schedule.id
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("delete_backup_schedule"),
-            "variables": {"scheduleId": str(schedule_id)},
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
+    await gql(client, "delete_backup_schedule", {"scheduleId": str(schedule_id)})
 
-    session.expire_all()
     assert await session.get(BackupSchedule, schedule_id) is None
 
 
@@ -138,22 +118,13 @@ async def test_schedule_projects_all_scalars(
     session.add(schedule)
     await session.commit()
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("get_backup_schedule"),
-            "variables": {"scheduleId": str(schedule.id)},
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    data = payload["data"]["backupSchedule"]
-    assert data["name"] == "seeded"
-    assert data["cronExpression"] == "0 4 * * *"
-    assert data["retentionCount"] == 5
-    assert data["enabled"] is False
-    assert data["deploymentId"] == str(deployment.id)
+    data = await gql(client, "get_backup_schedule", {"scheduleId": str(schedule.id)})
+    row = data["backupSchedule"]
+    assert row["name"] == "seeded"
+    assert row["cronExpression"] == "0 4 * * *"
+    assert row["retentionCount"] == 5
+    assert row["enabled"] is False
+    assert row["deploymentId"] == str(deployment.id)
 
 
 @pytest.mark.asyncio
@@ -171,16 +142,10 @@ async def test_schedules_filters_by_deployment(
     session.add_all([schedule_a, schedule_b])
     await session.commit()
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("list_backup_schedules"),
-            "variables": {"deploymentId": str(deployment_a.id)},
-        },
+    data = await gql(
+        client,
+        "list_backup_schedules",
+        {"deploymentId": str(deployment_a.id)},
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    rows = payload["data"]["backupSchedules"]
-    names = {row["name"] for row in rows}
+    names = {row["name"] for row in data["backupSchedules"]}
     assert names == {"sched-a"}

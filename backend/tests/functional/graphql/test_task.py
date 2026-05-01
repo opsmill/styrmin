@@ -8,7 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import TaskStatus, TaskType
 
-from ._queries import load_query
+from .conftest import gql
 from .seeds import seed_deployment, seed_task
 
 
@@ -25,24 +25,15 @@ async def test_task_projects_all_scalars(
         message="working on it",
     )
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("get_task"),
-            "variables": {"taskId": str(task.id)},
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    data = payload["data"]["task"]
-    assert data["id"] == str(task.id)
-    assert data["type"] == TaskType.CREATE_INSTANCE.value
-    assert data["status"] == TaskStatus.RUNNING.value
-    assert data["message"] == "working on it"
-    assert data["deploymentId"] == str(deployment.id)
-    assert data["deployment"]["id"] == str(deployment.id)
-    assert data["deployment"]["name"] == deployment.name
+    data = await gql(client, "get_task", {"taskId": str(task.id)})
+    row = data["task"]
+    assert row["id"] == str(task.id)
+    assert row["type"] == TaskType.CREATE_INSTANCE.value
+    assert row["status"] == TaskStatus.RUNNING.value
+    assert row["message"] == "working on it"
+    assert row["deploymentId"] == str(deployment.id)
+    assert row["deployment"]["id"] == str(deployment.id)
+    assert row["deployment"]["name"] == deployment.name
 
 
 @pytest.mark.asyncio
@@ -53,10 +44,7 @@ async def test_tasks_projects_seeded(
     await seed_task(session, deployment=deployment, task_type=TaskType.CREATE_INSTANCE)
     await seed_task(session, deployment=deployment, task_type=TaskType.UPDATE_INSTANCE)
 
-    response = await client.post("/graphql", json={"query": load_query("list_tasks")})
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    types = {row["type"] for row in payload["data"]["tasks"]}
+    data = await gql(client, "list_tasks")
+    types = {row["type"] for row in data["tasks"]}
     assert TaskType.CREATE_INSTANCE.value in types
     assert TaskType.UPDATE_INSTANCE.value in types

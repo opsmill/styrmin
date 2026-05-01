@@ -9,6 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from styrmin_backend.db.models import Deployment
 
 from ._queries import load_query
+from .conftest import gql
 from .seeds import seed_deployment
 
 
@@ -16,27 +17,16 @@ from .seeds import seed_deployment
 async def test_internal_deployment_returns_null(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """Seed an internal=True deployment, expect Query.deployment to project null
-    (the resolver explicitly returns None for internal deployments). Asserts
-    the row is in the DB but the projection is gated."""
+    """Internal deployments live in the DB but the resolver explicitly projects
+    null — verify both the DB row and the gated projection."""
     deployment = await seed_deployment(session, internal=True)
-    deployment_id = deployment.id
 
-    # Confirm the seed exists in DB
-    db_row = await session.get(Deployment, deployment_id)
+    db_row = await session.get(Deployment, deployment.id)
     assert db_row is not None
     assert db_row.internal is True
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("get_deployment"),
-            "variables": {"deploymentId": str(deployment_id)},
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["data"]["deployment"] is None
+    data = await gql(client, "get_deployment", {"deploymentId": str(deployment.id)})
+    assert data["deployment"] is None
 
 
 @pytest.mark.asyncio
@@ -44,29 +34,19 @@ async def test_non_internal_deployment_projects_fields(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     deployment = await seed_deployment(session, internal=False)
-    deployment_id = deployment.id
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("get_deployment"),
-            "variables": {"deploymentId": str(deployment_id)},
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    data = payload["data"]["deployment"]
-    assert data["id"] == str(deployment_id)
-    assert data["name"] == deployment.name
-    assert data["internal"] is False
+    data = await gql(client, "get_deployment", {"deploymentId": str(deployment.id)})
+    row = data["deployment"]
+    assert row["id"] == str(deployment.id)
+    assert row["name"] == deployment.name
+    assert row["internal"] is False
 
 
 @pytest.mark.asyncio
 async def test_update_internal_deployment_raises(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """Negative path: updating an internal=True deployment must raise the typed
+    """Updating an internal=True deployment must raise the typed
     InternalDeploymentError and MUST NOT mutate the DB row."""
     deployment = await seed_deployment(session, internal=True, name="internal-dep")
     deployment_id = deployment.id
@@ -80,7 +60,6 @@ async def test_update_internal_deployment_raises(
     )
     assert response.status_code == 200
     payload = response.json()
-    assert "errors" in payload
     assert any(
         err["extensions"].get("code") == "OPERATION_DENIED" for err in payload["errors"]
     ), payload["errors"]
@@ -88,7 +67,7 @@ async def test_update_internal_deployment_raises(
     session.expire_all()
     refreshed = await session.get(Deployment, deployment_id)
     assert refreshed is not None
-    assert refreshed.name == "internal-dep"  # unchanged
+    assert refreshed.name == "internal-dep"
 
 
 @pytest.mark.asyncio
@@ -108,7 +87,6 @@ async def test_update_version_internal_deployment_raises(
     )
     assert response.status_code == 200
     payload = response.json()
-    assert "errors" in payload
     assert any(
         err["extensions"].get("code") == "OPERATION_DENIED" for err in payload["errors"]
     ), payload["errors"]

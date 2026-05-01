@@ -8,42 +8,30 @@ import pytest
 from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from styrmin_backend.db.models import Cluster, Environment
+from styrmin_backend.db.models import Environment
 
-from ._queries import load_query
+from .conftest import gql
+from .seeds import seed_cluster, seed_environment
 
-VALID_CLUSTER_CONFIG = {"runtime_class": "example_runtime_class"}
 VALID_ENV_CONFIG = {"ip_whitelist": ["10.0.0.0/24"]}
-
-
-async def _seed_cluster(session: AsyncSession, name: str = "p-cluster") -> Cluster:
-    cluster = Cluster(name=name, config=VALID_CLUSTER_CONFIG)
-    session.add(cluster)
-    await session.commit()
-    return cluster
 
 
 @pytest.mark.asyncio
 async def test_create_environment_persists_with_cluster_id(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    cluster = await _seed_cluster(session)
+    cluster = await seed_cluster(session)
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("create_environment"),
-            "variables": {
-                "name": "p-env",
-                "clusterId": str(cluster.id),
-                "config": VALID_ENV_CONFIG,
-            },
+    data = await gql(
+        client,
+        "create_environment",
+        {
+            "name": "p-env",
+            "clusterId": str(cluster.id),
+            "config": VALID_ENV_CONFIG,
         },
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    env_id = UUID(payload["data"]["createEnvironment"]["id"])
+    env_id = UUID(data["createEnvironment"]["id"])
 
     db_row = await session.get(Environment, env_id)
     assert db_row is not None
@@ -57,22 +45,14 @@ async def test_create_environment_persists_with_cluster_id(
 async def test_create_environment_persists_with_cluster_name(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    cluster = await _seed_cluster(session, name="lookup-by-name")
+    cluster = await seed_cluster(session, name="lookup-by-name")
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("create_environment"),
-            "variables": {
-                "name": "env-with-name-lookup",
-                "clusterName": "lookup-by-name",
-            },
-        },
+    data = await gql(
+        client,
+        "create_environment",
+        {"name": "env-with-name-lookup", "clusterName": "lookup-by-name"},
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    env_id = UUID(payload["data"]["createEnvironment"]["id"])
+    env_id = UUID(data["createEnvironment"]["id"])
 
     db_row = await session.get(Environment, env_id)
     assert db_row is not None
@@ -83,21 +63,9 @@ async def test_create_environment_persists_with_cluster_name(
 async def test_delete_environment_by_id_removes_row(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    cluster = await _seed_cluster(session)
-    env = Environment(name="to-delete", cluster_id=cluster.id)
-    session.add(env)
-    await session.commit()
+    env = await seed_environment(session, name="to-delete")
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("delete_environment"),
-            "variables": {"environmentId": str(env.id)},
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
+    await gql(client, "delete_environment", {"environmentId": str(env.id)})
 
     session.expire_all()
     assert await session.get(Environment, env.id) is None
@@ -107,25 +75,15 @@ async def test_delete_environment_by_id_removes_row(
 async def test_delete_environment_by_name_and_cluster_name_removes_row(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    cluster = await _seed_cluster(session, name="delete-cluster")
-    env = Environment(name="delete-env", cluster_id=cluster.id)
-    session.add(env)
-    await session.commit()
+    cluster = await seed_cluster(session, name="delete-cluster")
+    env = await seed_environment(session, cluster=cluster, name="delete-env")
     env_id = env.id
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("delete_environment"),
-            "variables": {
-                "environmentName": "delete-env",
-                "clusterName": "delete-cluster",
-            },
-        },
+    await gql(
+        client,
+        "delete_environment",
+        {"environmentName": "delete-env", "clusterName": "delete-cluster"},
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
 
     session.expire_all()
     assert await session.get(Environment, env_id) is None
@@ -135,22 +93,12 @@ async def test_delete_environment_by_name_and_cluster_name_removes_row(
 async def test_environments_projects_seeded_rows(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    cluster = await _seed_cluster(session)
-    session.add_all(
-        [
-            Environment(name="env-a", cluster_id=cluster.id),
-            Environment(name="env-b", cluster_id=cluster.id),
-        ]
-    )
-    await session.commit()
+    cluster = await seed_cluster(session)
+    await seed_environment(session, cluster=cluster, name="env-a")
+    await seed_environment(session, cluster=cluster, name="env-b")
 
-    response = await client.post(
-        "/graphql", json={"query": load_query("list_environments")}
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    names = {row["name"] for row in payload["data"]["environments"]}
+    data = await gql(client, "list_environments")
+    names = {row["name"] for row in data["environments"]}
     assert {"env-a", "env-b"} <= names
 
 
@@ -166,10 +114,8 @@ async def test_environments_projects_seeded_rows(
 async def test_environment_by_each_lookup_arg(
     client: AsyncClient, session: AsyncSession, lookup: str
 ) -> None:
-    cluster = await _seed_cluster(session, name="lookup-cluster")
-    env = Environment(name="lookup-env", cluster_id=cluster.id)
-    session.add(env)
-    await session.commit()
+    cluster = await seed_cluster(session, name="lookup-cluster")
+    env = await seed_environment(session, cluster=cluster, name="lookup-env")
 
     if lookup == "by-id":
         variables = {"environmentId": str(env.id)}
@@ -181,37 +127,20 @@ async def test_environment_by_each_lookup_arg(
             "clusterName": "lookup-cluster",
         }
 
-    response = await client.post(
-        "/graphql",
-        json={"query": load_query("get_environment"), "variables": variables},
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    data = payload["data"]["environment"]
-    assert data["id"] == str(env.id)
-    assert data["name"] == "lookup-env"
+    data = await gql(client, "get_environment", variables)
+    row = data["environment"]
+    assert row["id"] == str(env.id)
+    assert row["name"] == "lookup-env"
 
 
 @pytest.mark.asyncio
 async def test_environment_projects_cluster_relation(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    cluster = await _seed_cluster(session, name="parent-cluster")
-    env = Environment(name="child-env", cluster_id=cluster.id)
-    session.add(env)
-    await session.commit()
+    cluster = await seed_cluster(session, name="parent-cluster")
+    env = await seed_environment(session, cluster=cluster, name="child-env")
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("get_environment"),
-            "variables": {"environmentId": str(env.id)},
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    cluster_data = payload["data"]["environment"]["cluster"]
+    data = await gql(client, "get_environment", {"environmentId": str(env.id)})
+    cluster_data = data["environment"]["cluster"]
     assert cluster_data["id"] == str(cluster.id)
     assert cluster_data["name"] == "parent-cluster"
