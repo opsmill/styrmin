@@ -6,55 +6,75 @@ The services layer contains the business logic of the application. It sits betwe
 
 ```text
 styrmin_backend/services/
-├── clusters.py              # Cluster management
-├── environments.py          # Environment management
-├── deployment.py            # Deployment orchestration
-├── applications.py          # Application driver management
-├── instances.py             # Instance lifecycle
-├── tasks.py                 # Task state management
-├── deployment_timeline.py   # Deployment history timeline with version correlation and context diffs
-├── context.py               # Context generation
-├── primitives.py            # Primitive operations
-├── user.py                  # User action workflows
-├── unit_of_work.py          # Repository coordination
-├── exceptions.py            # Service exceptions
-├── utils.py                 # Utilities
+├── clusters.py                    # Cluster management
+├── environments.py                # Environment management
+├── deployment.py                  # Deployment orchestration
+├── deployment_status.py           # Server-side handler for reportDeploymentStatuses
+├── deployment_timeline.py         # Deployment history with version correlation and context diffs
+├── applications.py                # Driver loading (Git, local, object) and application instantiation
+├── application_drivers.py         # Read-side accessors for application drivers
+├── instances.py                   # Instance lifecycle
+├── tasks.py                       # Task state management
+├── pod_status.py                  # Server-side handler for reportPodStatuses
+├── parameters.py                  # Driver parameter resolution
+├── services_discovery.py          # In-cluster service discovery
+├── capabilities.py                # Cluster/environment capability derivation
+├── backup_storage_locations.py    # Backup storage location (BSL) management
+├── context.py                     # Context generation (generate_context_from_deployment)
+├── primitives.py                  # run_job, stop_components, start_components
+├── user.py                        # User action workflow registration helpers
+├── unit_of_work.py                # Repository coordination (UnitOfWork + SqlModelUnitOfWork)
+├── exceptions.py                  # ServiceError hierarchy
+├── utils.py                       # Utilities
 │
-├── driver/                  # Application driver parsing
-│   ├── provider.py         # Git-based driver fetching
-│   ├── loaders.py          # Load from filesystem
-│   ├── deserializers.py    # Parse YAML/JSON
-│   ├── validators.py       # Validate driver structure
-│   ├── parsers.py          # Extract metadata
-│   └── models/             # Driver domain models
+├── driver/                        # Application driver parsing
+│   ├── provider.py                # Git-based driver fetching
+│   ├── loaders.py                 # Load from filesystem
+│   ├── deserializers.py           # Parse YAML/JSON
+│   ├── validators.py              # Validate driver structure
+│   ├── parsers.py                 # Extract metadata
+│   └── models/                    # Driver domain models
 │
-├── reconciliation/          # State reconciliation
-│   ├── diffs/              # Diff computation
+├── reconciliation/                # State reconciliation (see reconciliation.md)
+│   ├── diffs/                     # Diff computation
 │   │   ├── comparison.py
 │   │   ├── diffs.py
 │   │   └── serializer.py
-│   └── remediation.py      # Remediation strategies
+│   └── remediation.py             # Remediation strategies
 │
-├── helm/                    # Helm operations
-│   ├── renderer.py         # Template rendering
-│   └── _environment.py     # Environment setup
+├── backup/                        # Backup/restore (see backup-restore.md)
+│   ├── service.py                 # Backup/restore service functions and STRATEGY_MAP
+│   ├── scheduler.py               # Backup schedule management
+│   └── strategies/                # disk / postgres / mariadb / mongodb / neo4j / action
 │
-├── workflow/                # Workflow execution
-│   ├── worker.py           # Workflow executor
-│   └── utils.py            # Utilities
+├── helm/                          # Helm rendering helpers
+│   ├── renderer.py                # render_helm_repository_spec / render_helm_chart_spec
+│   └── _environment.py            # Jinja2 environment setup
 │
-└── utilities/               # Infrastructure utilities
-    └── utilities.py        # Utility management
+├── workflow/                      # Prefect workflow execution wrapper
+│   ├── __init__.py                # StyrminWorkflowExecutor (abstract)
+│   ├── worker.py                  # WorkflowWorkerExecutor (concrete impl)
+│   └── utils.py                   # Utilities
+│
+├── ingress_controller/            # Ingress controller lifecycle
+│
+├── scheduling/                    # Pod scheduling helpers
+│
+└── utilities/                     # Infrastructure utilities (ingress, etc.)
+    └── utilities.py               # Utility management
 ```
 
 ## Unit of Work Pattern
 
-The `UnitOfWork` pattern coordinates database operations across multiple repositories within a single transaction.
+The `UnitOfWork` pattern coordinates database operations across multiple repositories within a single async transaction. The abstract base lives in `services/unit_of_work.py`; the SQLModel implementation is `SqlModelUnitOfWork`, which is what the API layer wires up via dependency injection.
 
 ### Interface
 
 ```python
 class UnitOfWork(ABC):
+    session: AsyncSession
+
+    backup_storage_locations: BackupStorageLocationRepository
     clusters: ClusterRepository
     environments: EnvironmentRepository
     helm_repositories: HelmRepositoryRepository
@@ -62,24 +82,39 @@ class UnitOfWork(ABC):
     component_configs: ComponentConfigRepository
     application_drivers: ApplicationDriverRepository
     application_driver_versions: ApplicationDriverVersionRepository
+    application_instances: ApplicationInstanceRepository
     actions: ActionRepository
     utilities: UtilityRepository
     tasks: TaskRepository
     deployments: DeploymentRepository
+    deployed_services: DeployedServiceRepository
+    backups: BackupRepository
+    restores: RestoreRepository
+    backup_schedules: BackupScheduleRepository
+    pod_statuses: PodStatusRepository
+    deployment_statuses: DeploymentStatusRepository
 
-    def commit(self) -> None: ...
-    def rollback(self) -> None: ...
+    async def __aenter__(self) -> "UnitOfWork": ...
+    async def __aexit__(self, type_, value, traceback) -> bool | None: ...
+
+    @abstractmethod
+    async def commit(self) -> None: ...
+
+    @abstractmethod
+    async def rollback(self) -> None: ...
 ```
+
+`__aexit__` calls `rollback()` automatically when the `async with` block exits with an exception; otherwise services must call `await uow.commit()` explicitly.
 
 ### Usage Pattern
 
 ```python
 async def some_operation(uow: UnitOfWork) -> Result:
-    with uow:
-        entity = uow.repository.get(id)
+    async with uow:
+        entity = await uow.repository.get(id)
         entity.update(...)
-        uow.repository.save(entity)
-        uow.commit()
+        await uow.repository.save(entity)
+        await uow.commit()
         return entity
 ```
 
@@ -104,7 +139,7 @@ Manages environments within clusters.
 | Function | Description |
 |----------|-------------|
 | `resolve_environment(uow, environment_id?, environment_name?, cluster_id?, cluster_name?)` | Resolve environment by ID or name with cluster context |
-| `create_environment(name, cluster_id, config, uow)` | Create environment in cluster (name unique per cluster). Computes and persists capabilities. |
+| `create_environment(name, cluster_id, uow, config=None)` | Create environment in cluster (name unique per cluster). Computes and persists capabilities. |
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
 | `delete_environment(environment_id, uow)` | Delete an environment |
@@ -141,14 +176,25 @@ Orchestrates application deployments.
 5. Apply state via reconciliation
 6. Return task for tracking
 
-### Applications Service (`applications.py`)
+### Application Drivers Service (`application_drivers.py`)
 
-Manages application drivers and their versions.
+Read-side accessors for application drivers stored in the database.
 
 | Function | Description |
 |----------|-------------|
-| `create_application_driver(name, uow)` | Create application driver |
-| `load_application_driver_from_git_repository(repository_url, branch, uow)` | Load driver from Git |
+| `get_application_drivers(uow)` | List all application drivers |
+| `get_application_driver(driver_id, uow)` | Fetch a driver by ID |
+
+### Applications Service (`applications.py`)
+
+Driver loading and application instantiation. The "loaders" pull a driver spec from a source (Git, local directory, or in-memory object), validate it, register its actions with Prefect, and persist the resulting `ApplicationDriver` / `ApplicationDriverVersion` rows.
+
+| Function | Description |
+|----------|-------------|
+| `load_application_driver_from_object(driver_spec, uow, ...)` | Load a driver from an in-memory `DriverSpec` |
+| `load_application_driver_from_git_repository(repository_url, branch, uow, ...)` | Clone a driver from Git and load it |
+| `load_application_driver_from_local_directory(path, uow, ...)` | Load a driver from a local filesystem path |
+| `instantiate_application(...)` | Instantiate an application from a loaded driver |
 
 ### Tasks Service (`tasks.py`)
 
@@ -258,18 +304,33 @@ async def apply_state(
 
 ### Renderer (`renderer.py`)
 
-Renders Helm values templates using Jinja2:
+Renders Helm chart and repository specifications using Jinja2 templates loaded by `_environment.py`.
 
 ```python
-def render_values(template: str, context: GlobalContext) -> dict:
-    """Render Jinja2 template with context"""
+def render_helm_repository_spec(
+    repository_id: UUID,
+    repository_url: str,
+    repository_type: str = "oci",
+) -> dict:
+    """Render a Helm Repository specification."""
+
+def render_helm_chart_spec(
+    helm_chart_id: UUID,
+    name: str,
+    version: str,
+    repository_id: UUID,
+) -> dict:
+    """Render a Helm Chart specification."""
 ```
+
+These produce dicts ready to be embedded in a `HelmRelease` CRD spec. Driver values templates are rendered separately during context resolution.
 
 ## Workflow Services (`services/workflow/`)
 
-### Worker (`worker.py`)
+This package wraps Prefect for the rest of the backend.
 
-`StyrminWorkflowExecutor` submits workflows to Prefect for execution.
+- `services/workflow/__init__.py` defines the abstract `StyrminWorkflowExecutor`.
+- `services/workflow/worker.py` defines `WorkflowWorkerExecutor(StyrminWorkflowExecutor)`, the concrete implementation that submits flow runs via `arun_deployment` and waits for results.
 
 ## Utilities Service (`services/utilities/`)
 
@@ -282,20 +343,53 @@ def initialize_utilities():
 
 ## Exception Hierarchy
 
-```text
-styrmin_backend/services/exceptions.py
+All service-layer exceptions inherit from `ServiceError`, which carries an `error_code` (string) and a `default_message` and is mapped to GraphQL extensions by the `StructuredErrorExtension` middleware. Defined in `services/exceptions.py`:
 
+```text
 ServiceError (base)
-├── ClusterNotFoundError
-├── ClusterAlreadyExistsError
-├── EnvironmentNotFoundError
-├── EnvironmentAlreadyExistsError
-├── DeploymentNotFoundError
-├── ApplicationDriverNotFoundError
-├── InstanceNotFoundError
-├── TaskNotFoundError
+├── NoInstanceError
+├── ServiceUnexpectedError
 ├── InvalidContextError
-└── InvalidVersionError
+├── ApplicationDriverNotFoundError
+├── ApplicationDriverVersionNotFoundError
+├── ApplicationDriverVersionAlreadyExistsError
+├── ClusterLimitReachedError
+├── ClusterAlreadyExistsError
+├── ClusterNotFoundError
+├── EnvironmentAlreadyExistsError
+├── EnvironmentNotFoundError
+├── InvalidChartValuesError
+├── ChartValuesTemplateRenderingError
+├── InstanceNotFoundError
+├── InconsistentStateError
+├── InvalidVersionError
+├── InvalidVersionSyntaxError
+├── UnupgradableApplicationInstanceError
+├── TaskNotFoundError
+├── UnknownTaskStateError
+├── DeploymentNotFoundError
+├── DeploymentNameValidationError
+├── DeploymentNameConflictError
+├── IngressControllerNotHealthyError
+├── InternalDeploymentError
+├── ServiceNameConflictError
+├── InvalidServiceOverrideError
+├── BackupNotFoundError
+├── BackupAlreadyInProgressError
+├── BackupDuringUpgradeError
+├── BackupDeletionError
+├── RestoreNotFoundError
+├── RestoreAlreadyInProgressError
+├── BackupScheduleNotFoundError
+├── BackupScheduleAlreadyExistsError
+├── AmbiguousIdentifierError
+├── BackupStorageLocationNotFoundError
+├── BackupStorageLocationAlreadyExistsError
+├── BackupStorageLocationInUseError
+├── InvalidSchedulingConfigError
+├── UnknownComponentInConfigError
+├── UnresolvableAffinityReferenceError
+└── SchedulingPatchRenderingError
 ```
 
 ## Key Files
