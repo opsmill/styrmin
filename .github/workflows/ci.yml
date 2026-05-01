@@ -27,19 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      documentation: ${{ steps.changes.outputs.documentation_all }}
-      python: ${{ steps.changes.outputs.python_all }}
-      yaml: ${{ steps.changes.outputs.yaml_all }}
-      markdown: ${{ steps.changes.outputs.markdown_all }}
-      helm: ${{ steps.changes.outputs.helm_all }}
       docs_only: ${{ steps.docs-only.outputs.docs_only }}
     steps:
       - uses: actions/checkout@v6
-      - name: Check for file changes
-        uses: dorny/paths-filter@v3
-        id: changes
-        with:
-          filters: .github/file-filters.yml
       # Returns 'true' only when *every* changed file matches a docs pattern.
       # Used by the E2E jobs to skip on doc-only PRs.
       - name: Check if only docs changed
@@ -53,12 +43,13 @@ jobs:
               - '**/*.md'
               - '**/*.mdx'
 
-  python-lint:
-    name: Python Linting
-    # if: needs.files-changed.outputs.python == 'true'
-    # needs: ["files-changed"]
+  pre-commit-hooks:
+    name: Pre-Commit Hooks
+    # Runs both stages of .pre-commit-config.yaml on every PR. This is the
+    # canonical lint/format/freshness gate for the repo — every downstream
+    # job (tests, build, E2E) waits on it.
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - name: Set up Python
@@ -68,115 +59,6 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync --all-packages
-      - name: Check code formatting
-        run: uv run ruff format --check --diff
-      - name: Run linters
-        run: uv run ruff check
-      - name: Run type checker
-        run: uv run ty check
-
-  yaml-lint:
-    name: YAML Linting
-    # if: needs.files-changed.outputs.yaml == 'true'
-    # needs: ["files-changed"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - run: uv sync
-      - name: Run yamllint
-        run: uv run yamllint .
-
-  helm-lint:
-    name: Helm Lint
-    if: needs.files-changed.outputs.helm == 'true'
-    needs: ["files-changed"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-      - name: Lint agent chart
-        run: |
-          helm dependency update ./helm/agent
-          helm lint ./helm/agent
-      - name: Lint styrmin chart
-        run: |
-          helm dependency update ./helm/styrmin
-          helm lint ./helm/styrmin
-
-  graphql-schema-check:
-    name: GraphQL Schema Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - run: uv sync --all-packages
-      - name: Export GraphQL schema
-        run: uv run styrmin export graphql-schema schema-check.graphql
-      - name: Check schema is up to date
-        run: |
-          if ! diff schema.graphql schema-check.graphql; then
-            echo "::error::GraphQL schema is out of date. Run 'uv run styrmin export graphql-schema schema.graphql' and commit the result."
-            exit 1
-          fi
-
-  graphql-operations-check:
-    name: GraphQL Operations Validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - run: uv sync --all-packages
-      - name: Validate GraphQL operations against schema
-        run: uv run invoke validate-graphql
-
-  markdown-lint:
-    name: Markdown Linting
-    # if: needs.files-changed.outputs.markdown == 'true'
-    # needs: ["files-changed"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - run: uv sync
-      - name: Run rumdl
-        run: uv run rumdl check .
-
-  frontend-lint:
-    name: Frontend Linting
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -185,13 +67,31 @@ jobs:
           node-version: "22"
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - name: Run ESLint and Prettier check
-        run: pnpm lint
+      - name: Install frontend dependencies (needed by frontend-lint hook)
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - name: Install Helm (needed by helm-lint hooks)
+        uses: azure/setup-helm@v4
+      - name: Install prek
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/j178/prek/releases/download/v0.3.11/prek-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Cache prek environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/prek
+          key: prek-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml', 'uv.lock', 'frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            prek-${{ runner.os }}-
+      - name: Run pre-commit hooks (pre-commit stage)
+        run: prek run --all-files --show-diff-on-failure
+      - name: Run pre-commit hooks (pre-push stage)
+        run: prek run --hook-stage pre-push --all-files --show-diff-on-failure
 
   frontend-test:
     name: Frontend Tests
-    needs: ["frontend-lint"]
+    needs: ["pre-commit-hooks"]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -213,7 +113,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build
-    needs: ["frontend-lint", "frontend-test"]
+    needs: ["pre-commit-hooks", "frontend-test"]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -233,62 +133,9 @@ jobs:
       - name: Build frontend (includes tsc)
         run: pnpm build
 
-  sdk-codegen-check:
-    name: SDK GraphQL Codegen Check
-    needs: ["graphql-operations-check"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - run: uv sync --all-packages
-      - name: Run codegen
-        run: uv run ariadne-codegen
-      - name: Check generated types are up to date
-        run: |
-          if [ -n "$(git diff --name-only)" ]; then
-            echo "::error::SDK GraphQL generated types are out of date. Run 'uv run invoke generate' and commit the result."
-            git diff
-            exit 1
-          fi
-
-  frontend-codegen-check:
-    name: Frontend GraphQL Codegen Check
-    needs: ["frontend-lint"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - name: Run codegen
-        run: pnpm codegen
-      - name: Check generated types are up to date
-        run: |
-          if [ -n "$(git diff --name-only)" ]; then
-            echo "::error::Frontend GraphQL generated types are out of date. Run 'pnpm codegen' in frontend/ and commit the result."
-            git diff
-            exit 1
-          fi
-
   unit-tests:
     name: Unit Tests
-    needs: ["python-lint", "yaml-lint", "markdown-lint", "graphql-schema-check", "graphql-operations-check"]
+    needs: ["pre-commit-hooks"]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -305,7 +152,7 @@ jobs:
 
   e2e-tests-api:
     name: E2E Tests (API entrypoint)
-    needs: ["files-changed", "python-lint", "yaml-lint", "markdown-lint", "graphql-schema-check"]
+    needs: ["files-changed", "pre-commit-hooks"]
     if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.docs_only != 'true'
     runs-on:
       group: huge-runners
@@ -343,7 +190,7 @@ jobs:
 
   e2e-tests-ui:
     name: E2E Tests (UI entrypoint)
-    needs: ["files-changed", "python-lint", "yaml-lint", "markdown-lint", "graphql-schema-check"]
+    needs: ["files-changed", "pre-commit-hooks"]
     if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.docs_only != 'true'
     runs-on:
       group: huge-runners
