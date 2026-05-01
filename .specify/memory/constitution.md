@@ -33,7 +33,7 @@ For bug fixes and small changes (refactors, doc updates, config tweaks, internal
 - Tests MUST exercise the **real service and repository layers**. Mocking or substituting these internal layers defeats the purpose of the test. Only systems that live outside the layered architecture (Kubernetes, Prefect, helm, external HTTP services, etc.) may be faked.
 - Adding or modifying a GraphQL field, argument, or input type is **not "done"** until the corresponding propagation test exists, exercises the new path, and passes. Reviewers MUST block GraphQL changes that lack a matching propagation test, citing this clause.
 
-These tests live alongside other unit tests (e.g., `backend/tests/unit/`) and are independent of — and additive to — the E2E requirement above. E2E tests verify the user-visible flow; propagation tests verify that every schema element is wired through every layer. Both are required.
+These tests live alongside other unit tests (e.g., `backend/tests/unit/`) and are independent of — and additive to — the E2E requirement above. E2E tests verify the user-visible flow; propagation tests verify that every schema element is wired through every layer. Both are required. See `dev/guides/graphql-propagation-tests.md` for the procedure.
 
 ### VI. Format and Lint Before Commit
 

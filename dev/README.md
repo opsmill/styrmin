@@ -88,5 +88,6 @@ Frontend architecture documentation in [knowledge/frontend/](knowledge/frontend/
 ## Current Guides
 
 - [database-migrations.md](guides/database-migrations.md) - Alembic migration workflow: creating, applying, and rolling back migrations
+- [graphql-propagation-tests.md](guides/graphql-propagation-tests.md) - How to write the unit test that proves a GraphQL field is wired through every layer to the database
 - [local-demo.md](guides/local-demo.md) - Local vCluster demo lifecycle
 - [pod-scheduling.md](guides/pod-scheduling.md) - Pod scheduling configuration reference
