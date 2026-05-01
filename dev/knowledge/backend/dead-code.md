@@ -27,7 +27,7 @@ Four files contain FIXME comments indicating incomplete domain model refactoring
 """Obsolete payloads models. To be removed when extracted properly."""
 ```
 
-The module is actively used by `services/instances.py` and `services/utilities/utilities.py`. The docstring is misleading.
+The module is actively used by `services/instances.py`, `services/applications.py`, and `services/utilities/utilities.py`. The docstring is misleading.
 
 **Action:** Update the docstring to reflect current usage.
 
