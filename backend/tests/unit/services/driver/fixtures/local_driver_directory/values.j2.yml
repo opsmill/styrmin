@@ -147,7 +147,7 @@ spec:
             memory: 512Mi
       postgresql:
         enabled: true
-        # fullnameOverride: "cloud-postgresql" 
+        # fullnameOverride: "cloud-postgresql"
         architecture: standalone
         image:
           tag: 14.13.0

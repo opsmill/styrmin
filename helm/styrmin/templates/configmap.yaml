@@ -7,29 +7,29 @@ metadata:
 data:
   # General settings
   STYRMIN_LOG_LEVEL: {{ .Values.styrmin.logLevel | quote }}
-  
+
   # URL configuration
   STYRMIN_URL_API: {{ include "styrmin.apiUrl" . | quote }}
   STYRMIN_URL_API_K8S: {{ include "styrmin.apiUrlK8s" . | quote }}
-  
+
   # Prefect/Workflow configuration
   PREFECT_API_URL: {{ include "styrmin.prefect.apiUrl" . | quote }}
   STYRMIN_WORKFLOW_ENABLE: {{ .Values.styrmin.workflow.enable | quote }}
   STYRMIN_WORKFLOW_ADDRESS: {{ include "styrmin.prefect.apiUrl" . | quote }}
   STYRMIN_WORKFLOW_TLS_ENABLED: {{ .Values.styrmin.workflow.tlsEnabled | quote }}
-  
+
   # Kubernetes defaults
   STYRMIN_K8S_DEFAULT_RESOURCE_PREFIX: {{ .Values.styrmin.kubernetes.defaultResourcePrefix | quote }}
   STYRMIN_K8S_CLUSTER_DOMAIN: {{ .Values.styrmin.kubernetes.clusterDomain | quote }}
   STYRMIN_K8S_SERVICE_ACCOUNT: {{ include "styrmin.serviceAccountName" . | quote }}
   STYRMIN_K8S_WORKER_IMAGE: {{ include "styrmin.image" . | quote }}
-  
+
   # Database configuration
   STYRMIN_DB_TYPE: {{ .Values.styrmin.database.type | quote }}
   STYRMIN_DB_NAME: {{ .Values.styrmin.database.name | quote }}
   STYRMIN_DB_HOST: {{ include "styrmin.postgresql.host" . | quote }}
   STYRMIN_DB_PORT: {{ .Values.styrmin.database.port | quote }}
-  
+
   # Agent poll configuration
   STYRMIN_AGENT_POLL_RETRIES: {{ .Values.styrmin.agentPoll.retries | quote }}
   STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS: {{ .Values.styrmin.agentPoll.retryDelaySeconds | quote }}
