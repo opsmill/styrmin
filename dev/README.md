@@ -63,6 +63,8 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 
 ## Current Knowledge
 
+- [architecture.md](knowledge/architecture.md) - High-level system architecture: server↔agent topology, declarative state, context model. Companion to the constitution.
+
 Backend architecture documentation in [knowledge/backend/](knowledge/backend/):
 
 - [overview.md](knowledge/backend/overview.md) - Architecture overview, directory structure, request flow

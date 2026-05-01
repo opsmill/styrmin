@@ -59,6 +59,12 @@ styrmin_backend/
     │   ├── extra.py             # Additional/experimental tasks
     │   └── shared.py            # Shared utilities
     │
+    ├── status/                  # Periodic status reporter (see "Status Reporter")
+    │   ├── reporter.py          # Polling loop, GraphQL mutations
+    │   ├── models.py            # Wire-format DTOs (PodStatusData, DeploymentStatusReport, …)
+    │   ├── queries.py           # load_query() helper
+    │   └── *.graphql            # list_deployments_for_status, report_pod_statuses, report_deployment_statuses
+    │
     └── service/                 # Kubernetes service layer
         ├── exceptions.py
         └── kubernetes/
@@ -253,6 +259,37 @@ Graceful shutdown is coordinated: kopf's `@kopf.on.cleanup()` handler signals an
 
 See [operator.md](operator.md) for full operator documentation, ADR-004 for the shared event loop design, and ADR-008 for the responsibility split between Prefect and the operator.
 
+## Status Reporter
+
+The status reporter is a **third coroutine** in the agent's shared event loop, alongside the Prefect worker and the kopf operator. It is the mechanism by which the database reflects what is actually running in the cluster — separate from Prefect's flow-state callbacks, which only describe *workflow* progress.
+
+### What it does
+
+Every poll cycle, the reporter:
+
+1. Calls the `listDeploymentsForStatus` GraphQL query against the server to discover all non-internal deployments grouped by environment.
+2. For each deployment, in its namespace:
+   - Lists pods via `kr8s` and extracts phase, readiness, restart count, container statuses, node, start time, and the `styrmin/component` label (recorded as-is — see [ADR-014](../adr/adr-014-pod-status-records-observed-state-not-declared-state.md)). Pods without the component label are reported with `component_name = None` rather than dropped.
+   - Fetches the `StyrminDeployment` CRD (`styrmin.io/v1alpha1`) and reads `spec.instanceId`, `status.phase`, `status.displayState`, `status.message`, `status.conditions`, and `status.managedResources`. A missing CRD is not an error — that deployment is simply skipped this cycle.
+3. Posts two independent GraphQL mutations to the server's `/graphql` endpoint:
+   - `reportPodStatuses(reports: [DeploymentPodStatusReport!]!)` — server upserts pod rows and deletes stale ones (handled by `services/pod_status.py::report_pod_statuses`).
+   - `reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!)` — server snapshots CRD status and, when `displayState` maps to a known `DeploymentState`, updates `Deployment.status` (subject to the instance-mismatch guard described in [`reconciliation.md`](reconciliation.md) and `services/deployment_status.py`).
+
+Pod and CRD collection are wrapped in independent `try` blocks: a failure in one does not block reporting of the other.
+
+### Cadence and lifecycle
+
+- **Cadence**: configurable via `STYRMIN_AGENT_STATUS_POLL_INTERVAL` (seconds, default `5`).
+- **Backend address**: `STYRMIN_URL_API` (default `http://localhost:8000`); the reporter posts to `${STYRMIN_URL_API}/graphql`.
+- **Connection failures**: backend unreachable → log at `debug` and retry next cycle; never fatal.
+- **Shutdown**: `run_status_reporter(shutdown_event)` shares the same `asyncio.Event` as the Prefect worker. When kopf signals shutdown, the reporter exits its loop cleanly.
+
+Entry point wiring lives in `entrypoint/combined.py`, where `asyncio.gather()` runs `kopf.operator(...)`, the Prefect worker, and `run_status_reporter(...)` together.
+
+### Why polling, not watching
+
+The reporter polls rather than streaming Kubernetes watches because the design favours coalesced, deployment-scoped reports over per-event delivery: one network round-trip per deployment per cycle, with the server doing batch upserts and stale-row pruning. ADR-014 documents the related decision that observed state is *recorded as observed* and not validated against declared state.
+
 ## Kubernetes Integration
 
 ### Primitives (`kubernetes/primitives.py`)
@@ -335,3 +372,8 @@ class WorkflowInfo(BaseModel):
 | [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | Orchestration flows |
 | [agent/service/kubernetes/resources/custom_resource.py](backend/styrmin_backend/agent/service/kubernetes/resources/custom_resource.py) | HelmRelease CRD |
 | [agent/service/kubernetes/resources/builders/application.py](backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py) | Application builder |
+| [agent/status/reporter.py](backend/styrmin_backend/agent/status/reporter.py) | Periodic pod + CRD status reporter (`run_status_reporter`) |
+| [agent/status/models.py](backend/styrmin_backend/agent/status/models.py) | Wire-format DTOs for the status reporter |
+| [services/pod_status.py](backend/styrmin_backend/services/pod_status.py) | Server-side handler for `reportPodStatuses` (upsert + `delete_stale`) |
+| [services/deployment_status.py](backend/styrmin_backend/services/deployment_status.py) | Server-side handler for `reportDeploymentStatuses` (snapshot + `displayState` → `Deployment.status`) |
+| [entrypoint/combined.py](backend/styrmin_backend/entrypoint/combined.py) | Shared event loop: kopf + Prefect worker + status reporter |

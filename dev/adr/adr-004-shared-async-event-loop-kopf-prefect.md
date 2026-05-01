@@ -22,6 +22,7 @@ The Prefect worker runs its internals (`get_and_submit_flow_runs`, `sync_with_ba
 - Both components start and stop together — no orphaned processes.
 - kopf registers SIGTERM/SIGINT handlers in `spawn_tasks()` when running in the main thread, which overwrites any previously registered signal handlers.
 - Prefect's anyio task groups are compatible with asyncio event loops.
+- The agent's **status reporter** (`agent/status/reporter.py`) joins the same `asyncio.gather()` as a third tenant of this loop and shares the same shutdown `asyncio.Event`. See `dev/knowledge/backend/agent.md` → "Status Reporter".
 
 ## Alternatives Considered
 
