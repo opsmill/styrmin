@@ -2,7 +2,7 @@
 
 **Feature Branch**: `005-match-pod-component`
 **Created**: 2026-04-29
-**Status**: Draft
+**Status**: Extracted
 **Input**: GitHub issue [#133](https://github.com/opsmill/styrmin/issues/133) — "feat: Match pod statuses to driver components"
 
 ## User Scenarios & Testing *(mandatory)*

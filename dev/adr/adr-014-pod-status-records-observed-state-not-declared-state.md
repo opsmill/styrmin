@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-04-29
-**Source**: specs/005-match-pod-component/research.md (§2)
+**Source**: specs/archive/005-match-pod-component/research.md (§2)
 
 ## Context
 
