@@ -16,7 +16,7 @@
 
 ## Phase 1: Setup (shared infrastructure)
 
-- [ ] **T001** Confirm `prek` is installable on developer machines and the CI runner. The chosen install paths are: `brew install j178/prek/prek` on macOS, the upstream installer script on Linux, and the `j178/setup-prek@v1` GitHub Action on CI.
+- [ ] **T001** Confirm `prek` is installable on developer machines and the CI runner. The chosen install paths are: `brew install j178/prek/prek` on macOS, the upstream installer script on Linux, and the same upstream installer script (pinned to a tagged release) on CI.
 
 ---
 
@@ -51,7 +51,7 @@
 
 **Independent test**: Push a branch with a deliberate `ruff format` violation. Confirm the new `Pre-Commit Hooks` job fails on the PR with the same hook output a contributor would have seen locally. Push a fix; confirm the job goes green.
 
-- [ ] **T008** [US3] Add a `pre-commit-hooks` job to `.github/workflows/ci.yml`. It checks out the repo, sets up Python 3.14, installs `uv`, runs `uv sync --all-packages`, sets up pnpm/Node, runs `pnpm install --frozen-lockfile` in `frontend/`, sets up Helm, installs prek via `j178/setup-prek@v1`, restores `~/.cache/prek` cached on `${{ hashFiles('.pre-commit-config.yaml', 'uv.lock', 'frontend/pnpm-lock.yaml') }}`, runs `prek run --all-files --show-diff-on-failure` for the `pre-commit` stage, and runs `prek run --hook-stage pre-push --all-files --show-diff-on-failure` for the pre-push stage. Triggers must match the existing CI workflow (PR + push to `develop`). Set `timeout-minutes: 10`. Do **not** remove or modify the existing per-tool jobs — they stay in place per spec FR-013.
+- [ ] **T008** [US3] Add a `pre-commit-hooks` job to `.github/workflows/ci.yml`. It checks out the repo, sets up Python 3.14, installs `uv`, runs `uv sync --all-packages`, sets up pnpm/Node, runs `pnpm install --frozen-lockfile` in `frontend/`, sets up Helm, installs prek by piping `prek-installer.sh` (pinned to a tagged release) into `sh` and prepending `$HOME/.local/bin` to `GITHUB_PATH`, restores `~/.cache/prek` cached on `${{ hashFiles('.pre-commit-config.yaml', 'uv.lock', 'frontend/pnpm-lock.yaml') }}`, runs `prek run --all-files --show-diff-on-failure` for the `pre-commit` stage, and runs `prek run --hook-stage pre-push --all-files --show-diff-on-failure` for the pre-push stage. Triggers must match the existing CI workflow (PR + push to `develop`). Set `timeout-minutes: 10`. Do **not** remove or modify the existing per-tool jobs — they stay in place per spec FR-013.
 - [ ] **T009** [US3] Add the new job to the `needs:` list of any downstream job that should wait on lint signal (mirroring how the existing per-tool jobs gate `frontend-test`, etc.) **only if** doing so does not change which jobs run in parallel meaningfully. If unsure, leave `needs:` alone and rely on the new job running independently. Document the choice inline in the workflow.
 - [ ] **T010** [US3] Open a sacrificial commit on this branch with one deliberate violation, push, observe CI catch it, then revert the violation. Capture a screenshot or short note of the failing job in the PR description so reviewers can see the new check working.
 

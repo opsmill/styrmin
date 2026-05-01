@@ -52,17 +52,18 @@
 - *No pinning*: rejected — non-reproducible builds.
 - *Pin via `pre-commit autoupdate` cron*: deferred to a follow-up. We can add a routine later that bumps the pins via PR.
 
-## R4. CI installation: `prek` via setup-prek action
+## R4. CI installation: `prek` via the upstream installer script
 
-**Decision**: CI installs `prek` via the official `j178/setup-prek@v1` GitHub Action and runs `prek run --all-files` for both stages.
+**Decision**: CI installs `prek` by piping the upstream `prek-installer.sh` (pinned to a tagged release) into `sh`, then prepends `$HOME/.local/bin` to `GITHUB_PATH`. The job runs `prek run --all-files` for both stages.
 
 **Rationale**:
 - Using the same runner in CI as locally means CI exercises the exact path contributors hit, and parity is by construction.
-- The setup-prek action handles platform detection, version pinning, and caching; an inline `curl` of the release tarball is also possible but is more code to maintain.
-- Adopting the third-party action is a small supply-chain dependency, judged acceptable given the simplicity gain over dual-runner support.
+- The installer script is the upstream-blessed, platform-aware install path. It auto-detects the runner's OS/arch and installs the appropriate binary. Pinning to a tagged release keeps the install reproducible.
+- A third-party "setup-prek" GitHub Action would be cleaner cosmetically, but no such action is published (`j178/setup-prek` does not exist as of 2026-05-01). Inline `curl | sh` is the next-best option and keeps the supply-chain surface small.
 
 **Alternatives considered**:
-- *Inline `curl` of the prek release tarball*: viable; rejected for cosmetic reasons (more YAML, manual platform branching). Trivial to switch to if the action ever becomes unavailable.
+- *Hypothetical `j178/setup-prek` action*: would have been preferred for ergonomics; rejected on the simple basis that it does not exist. If it ships in the future, switching is a one-line change.
+- *Manual `curl` of the architecture-specific tarball + `tar -xzf`*: more YAML and brittle (we'd hardcode the runner architecture); rejected.
 - *Use `pre-commit` (Python) on CI as a fallback*: rejected — see R1.
 
 ## R5. Caching the pre-commit environment in CI

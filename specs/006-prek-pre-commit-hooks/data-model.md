@@ -62,7 +62,7 @@ A new job alongside the existing per-tool jobs:
 | `name` | `Pre-Commit Hooks` |
 | `runs-on` | `ubuntu-latest` |
 | `timeout-minutes` | `10` (covers cold-cache install + run) |
-| `steps` | 1) checkout, 2) setup Python 3.14 + uv + `uv sync --all-packages` (so the local hooks shelling out via `uv run` find their tools), 3) setup pnpm + Node + `pnpm install` in `frontend/` (for `frontend-lint`), 4) setup Helm (for `helm-lint-*`), 5) install `prek` via `j178/setup-prek@v1`, 6) restore `~/.cache/prek` cache keyed on `.pre-commit-config.yaml` + `uv.lock` + `frontend/pnpm-lock.yaml`, 7) `prek run --all-files --show-diff-on-failure`, 8) `prek run --hook-stage pre-push --all-files --show-diff-on-failure`, 9) save cache. |
+| `steps` | 1) checkout, 2) setup Python 3.14 + uv + `uv sync --all-packages` (so the local hooks shelling out via `uv run` find their tools), 3) setup pnpm + Node + `pnpm install` in `frontend/` (for `frontend-lint`), 4) setup Helm (for `helm-lint-*`), 5) install `prek` by piping the upstream `prek-installer.sh` (pinned to a tagged release) into `sh` and adding `$HOME/.local/bin` to `GITHUB_PATH`, 6) restore `~/.cache/prek` cache keyed on `.pre-commit-config.yaml` + `uv.lock` + `frontend/pnpm-lock.yaml`, 7) `prek run --all-files --show-diff-on-failure`, 8) `prek run --hook-stage pre-push --all-files --show-diff-on-failure`, 9) save cache. |
 
 The job runs on every `pull_request` and on `push` to `develop` (matches the existing CI triggers).
 

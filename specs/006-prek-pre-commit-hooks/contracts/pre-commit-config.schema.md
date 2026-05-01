@@ -56,7 +56,7 @@ The following hooks MUST be present in `.pre-commit-config.yaml` and assigned to
 
 ## CI invocation contract
 
-The CI job in `.github/workflows/ci.yml` MUST install `prek` via `j178/setup-prek@v1` and invoke it via:
+The CI job in `.github/workflows/ci.yml` MUST install `prek` (via the upstream `prek-installer.sh`, pinned to a tagged release) and invoke it via:
 
 ```text
 prek run --all-files --show-diff-on-failure                            # pre-commit stage

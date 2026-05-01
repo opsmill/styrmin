@@ -198,7 +198,10 @@ jobs:
       - name: Install Helm (needed by helm-lint hooks)
         uses: azure/setup-helm@v4
       - name: Install prek
-        uses: j178/setup-prek@v1
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/j178/prek/releases/download/v0.3.11/prek-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Cache prek environments
         uses: actions/cache@v4
         with:

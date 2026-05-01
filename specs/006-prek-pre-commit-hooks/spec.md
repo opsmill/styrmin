@@ -133,7 +133,7 @@ Expensive checks (full GraphQL schema regeneration, full SDK + frontend type reg
 ## Assumptions
 
 - Contributors already have `uv` and `pnpm` installed (these are existing project prerequisites). `prek` is added as a new prerequisite, installed out-of-band via `brew`, the project's release tarball, or a distro package.
-- The CI runner installs `prek` via the official `j178/setup-prek` GitHub Action.
+- The CI runner installs `prek` by piping the upstream `prek-installer.sh` (pinned to a tagged release) into `sh`.
 - Generated directories (`python_sdk/src/styrmin_sdk/graphql/_generated/`, frontend GraphQL generated types, build artifacts) are well-known and stable enough to add to `exclude` patterns up front.
 - The existing per-tool CI jobs remain in place for at least one release cycle after this feature ships, to validate parity before any deduplication.
 - The acceptable per-commit time budget is "fast enough that contributors do not routinely use `--no-verify`". Ten seconds is the working target; checks that exceed this go to `pre-push`.
