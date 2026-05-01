@@ -2,11 +2,11 @@
 
 ## Overview
 
-End-to-end tests validate the complete deployment pipeline: from an API call that requests a deployment, through the orchestration engine, all the way to a running application on Kubernetes with reachable HTTP endpoints. The tests run against a real (local) Kubernetes cluster with all Styrmin components deployed via Helm.
+End-to-end tests validate the complete deployment pipeline: from an API call (or a UI flow) that requests a deployment, through the orchestration engine, all the way to a running application on Kubernetes with reachable HTTP endpoints. The tests run against a real (local) Kubernetes cluster with all Styrmin components deployed via Helm.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│                        Kind Cluster                                  │
+│                         vCluster (Docker driver)                     │
 │                                                                      │
 │  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────────┐ │
 │  │ Chart Server │   │  Git Server  │   │    Styrmin (Helm)        │ │
@@ -23,52 +23,94 @@ End-to-end tests validate the complete deployment pipeline: from an API call tha
 │                                        └──────────────────────────┘ │
 │                                                                      │
 │  ┌────────────────────────────────────────┐                         │
-│  │  Deployed Application (simple-app)     │                         │
+│  │  Deployed Application                  │                         │
 │  │  namespace: styrmin-{deployment_id}    │                         │
-│  │  ┌──────────┐  ┌────────────────────┐  │                         │
-│  │  │ FastAPI  │  │   PostgreSQL       │  │                         │
-│  │  │  :8000   │  │                    │  │                         │
-│  │  └──────────┘  └────────────────────┘  │                         │
 │  └────────────────────────────────────────┘                         │
 └──────────────────────────────────────────────────────────────────────┘
          ▲                                          ▲
-         │ port-forward (kr8s)                      │ port-forward
+         │ port-forward (kr8s)                      │ port-forward / Playwright
          │                                          │
 ┌────────┴──────────────────────────────────────────┴─────────────────┐
 │                         Test Runner (pytest)                         │
 │                                                                      │
-│  1. Create resources via StyrminClient (Python SDK)                  │
-│  2. Trigger deployment                                               │
-│  3. Poll deployment status until "deployed"                          │
-│  4. Port-forward to deployed service                                 │
-│  5. Verify HTTP endpoints (/health, /count)                          │
+│  ScenarioDriver (api or ui mode):                                    │
+│   - api: drives the SDK (StyrminClient)                              │
+│   - ui:  drives the frontend via Playwright                          │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Tests are marked with `@pytest.mark.e2e` and live under `backend/tests/e2e/`.
+Tests live under `backend/tests/e2e/` and are marked with the markers below.
+
+## Markers
+
+Defined in the root `pyproject.toml` under `[tool.pytest.ini_options]`:
+
+| Marker | Meaning |
+|--------|---------|
+| `e2e` | End-to-end tests requiring a vCluster and external dependencies |
+| `ci` | E2E tests included in the CI pipeline |
+| `api_only(reason)` | Scenario runs only through the API entrypoint; the `[ui]` variant is skipped with the given reason |
+| `ui_only(reason)` | Scenario runs only through the UI entrypoint; the `[api]` variant is skipped with the given reason |
+
+The dual-entrypoint design is the reason every E2E scenario runs **twice by default** in CI — once as `[api-chromium]` (driver = SDK) and once as `[ui-chromium]` (driver = Playwright). Use `api_only` / `ui_only` to opt out of one variant when the same code path would be exercised redundantly. See `backend/tests/AGENTS.md` for the full rationale.
+
+`pytest-rerunfailures` is intentionally not in the dependency set — it is incompatible with `--pdb` (the project's standard E2E debugging workflow); see `dev/CLAUDE.md` (Debugging E2E Tests).
 
 ## Test Environment
 
-E2e tests use [Kind](https://kind.sigs.k8s.io/) (Kubernetes-in-Docker) to create a disposable single-node cluster per test session. Kind was chosen because it runs entirely in Docker, requires no cloud resources, and provides a real Kubernetes API.
+### vCluster (not Kind)
 
-The cluster is created with a unique name (`pytest-{uuid}`) and a temporary kubeconfig. A finalizer deletes the cluster after the session completes, regardless of test outcome.
+E2E tests use [vCluster](https://www.vcluster.com/) with the Docker driver to create a disposable virtual Kubernetes cluster per session. The session fixture creates and tears down the cluster:
 
 ```python
 # backend/tests/conftest.py
 @pytest.fixture(scope="session")
-async def kind_cluster(request, tmp_path_factory):
+async def vcluster(request, tmp_path_factory):
     cluster_name = f"pytest-{uuid.uuid4()}"
-    # kind create cluster --name <name> --kubeconfig <path>
+    kubeconfig_path = str(tmp_path_factory.mktemp("vcluster") / "kubeconfig")
+    # vcluster create <name> --driver=docker
+    # vcluster connect <name> --print --driver=docker  -> kubeconfig
     ...
     yield {"api": api, "cluster_name": cluster_name, "kubeconfig_path": kubeconfig_path}
-    # finalizer: kind delete cluster --name <name>
+    # finalizer: vcluster delete <name> --driver=docker
 ```
 
-All e2e fixtures are **session-scoped** so the expensive cluster setup happens only once.
+`VCLUSTER_DIR` may be set to point at a vCluster config directory; the fixture passes it via `--config` to both `create`, `connect`, and `delete`.
+
+The cluster is created with a unique name (`pytest-{uuid}`) and a temporary kubeconfig in `tmp_path_factory`. A finalizer deletes it after the session, regardless of test outcome (and may be skipped by passing `--keep-vcluster` for post-mortem debugging).
+
+### Fixture scopes
+
+Most cluster, image, and platform fixtures are session-scoped so the expensive setup happens only once. The notable exceptions:
+
+- `_dump_k8s_logs_on_failure` is **function-scoped** and `autouse` — it dumps pod logs after every failing test (see Debugging below).
+- `scenario_driver` is **function-scoped** so each test gets a fresh driver. It inherits its mode (`api` vs `ui`) from the session-scoped `driver_mode` fixture.
+
+## Dual-entrypoint architecture
+
+Every E2E scenario can be driven through either the SDK or the UI without changing the test code. The driver protocol lives in `tests/e2e/drivers/protocol.py`:
+
+```python
+class ScenarioDriver(Protocol):
+    async def create_deployment(...) -> Deployment: ...
+    async def upgrade_deployment(...) -> ...: ...
+    async def create_backup(...) -> ...: ...
+    async def start_components(...) -> ...: ...
+    # ... etc
+```
+
+Two implementations:
+
+| Driver | Module | What it drives |
+|--------|--------|----------------|
+| `ApiScenarioDriver` | `tests/e2e/drivers/api_driver.py` | The Python SDK (`StyrminClient`) |
+| `UiScenarioDriver` | `tests/e2e/drivers/ui_driver.py` | The frontend via Playwright (`Page` + page objects under `tests/e2e/pages/`) |
+
+The session-scoped `driver_mode` fixture is parametrised with `["api", "ui"]`, which is what produces the `[api-chromium]` and `[ui-chromium]` test variants. `session_scenario_driver` constructs the matching driver and wires the SDK client / Playwright page through. Tests consume the function-scoped `scenario_driver` fixture and call `await scenario_driver.create_deployment(...)` without caring about which entrypoint is in use.
 
 ## Supporting Services
 
-Two lightweight services are deployed inside the Kind cluster to simulate the external infrastructure that Styrmin depends on in production.
+Two lightweight services are deployed inside the vCluster to simulate the external infrastructure that Styrmin depends on in production.
 
 ### Chart Server
 
@@ -103,115 +145,105 @@ At setup time, the fixture:
 
 ## Styrmin Deployment
 
-Styrmin itself is deployed into the Kind cluster via its Helm chart, following the same path a real deployment would take.
+Styrmin itself is deployed into the vCluster via its Helm chart, following the same path a real deployment would take.
 
-### Image Preloading
-
-Kind clusters cannot pull images from the internet by default. All dependency images are pre-pulled on the host and loaded into the cluster node using `docker save | kind load image-archive`:
-
-```text
-busybox:1.36                                    # task-worker init container
-bitnamilegacy/postgresql:17.6.0-debian-12-r4    # database
-prefecthq/prefect:3.6.25-python3.11             # Prefect server
-prefecthq/prefect:3.6.25-python3.11-kubernetes  # Prefect worker
-fluxcd/helm-controller:v1.1.0                   # FluxCD agent subchart
-fluxcd/source-controller:v1.4.0                 # FluxCD agent subchart
-```
-
-### Helm Installation
-
-The styrmin Docker image is built via `docker compose build`, loaded into Kind, then installed:
+The styrmin Docker image is built via `docker compose build` in the test setup, and the chart is installed with values loaded from `tests/e2e/fixtures/styrmin-values.yaml`:
 
 ```bash
 helm upgrade --install styrmin \
   --dependency-update --create-namespace -n styrmin \
   helm/styrmin/ \
-  --set image.tag=latest \
-  --set image.pullPolicy=Never \
-  --set styrmin.driver.token=dummy \
-  --set styrmin.agentSource.token=$GITHUB_PAT \
+  -f tests/e2e/fixtures/styrmin-values.yaml \
   --wait --timeout 5m
 ```
 
-The `--wait` flag ensures Helm blocks until all pods are ready. After installation, the fixture port-forwards the `styrmin-server` service and waits for its `/health` endpoint to return 200.
+After installation, the fixture port-forwards the `styrmin-server` service and waits for its `/health` endpoint to return 200.
 
 ## Test Data Setup
 
-The `styrmin_resources` fixture uses the Python SDK (`styrmin_sdk.StyrminClient`) to create the resources needed for a deployment test:
+The session-scoped `styrmin_resources` fixture uses `session_scenario_driver` to register the cluster, environment, and driver through whichever entrypoint the run is using (SDK or UI):
 
 ```text
-StyrminClient
-  ├── clusters.create("test-cluster", config={...})
+ScenarioDriver
+  ├── create_cluster (config={...})
   │     fqdn_suffix, ingress_class, runtime_class, storage_class
   │
-  ├── environments.create("test-environment", cluster_id=...)
+  ├── create_environment (cluster_id=...)
   │     ip_whitelist
   │
-  ├── drivers.create("simple-app")
-  │
-  └── drivers.load_version(git_url, "master")
+  └── load_driver_version (git_url, "master")
         Fetches driver spec from git server
 ```
 
-This mirrors what a user would do through the API: register a cluster, create an environment, register a driver, and load a version from a git repository.
+This mirrors what a user would do through the API or the UI: register a cluster, create an environment, register a driver, and load a version from a git repository.
 
 ## Test Flow
 
-The main test (`test_deploy_simple_app`) exercises the complete deployment lifecycle:
+A typical scenario (`test_deploy_app.py`) exercises the complete deployment lifecycle:
 
 ```text
-1. Deploy          client.deployments.create("simple-app", "0.1.0", environment_id)
-                   └─ Returns a task with deployment_id
+1. Deploy          await scenario_driver.create_deployment(
+                      app="simple-app", version="0.1.0", environment_id=...)
+                   └─ Returns when the deployment is "running"
 
-2. Poll            client.deployments.get(deployment_id)
-                   └─ Loop until status is "deployed" or "running" (3 min timeout)
-
-3. Discover        kr8s list services in namespace styrmin-{deployment_id}
+2. Discover        kr8s list services in namespace styrmin-{deployment_id}
                    └─ Find the service matching "simple-app"
 
-4. Port-forward    service.portforward(remote_port=8000)
+3. Port-forward    service.portforward(remote_port=8000)
                    └─ Opens local tunnel to the deployed app
 
-5. Verify          GET /health  → 200
+4. Verify          GET /health  → 200
                    GET /count   → 200
 ```
 
-Behind the scenes, the deployment triggers Styrmin's full orchestration pipeline: Prefect workflows render the Helm values, the agent creates a FluxCD HelmRelease, and Flux reconciles it into running pods.
+Behind the scenes, the deployment triggers Styrmin's full orchestration pipeline: Prefect writes a `StyrminDeployment` CRD, the kopf operator reconciles HelmRelease + supporting resources, and FluxCD installs the chart into running pods.
 
 ## Fixture Dependency Graph
 
-All fixtures are session-scoped. The dependency chain determines initialization order:
+The dependency chain determines initialization order:
 
 ```text
-kind_cluster ─────────────────────────────┐
-  │                                       │
-  ├── styrmin_images                      │
-  │     └── styrmin_deployment            │
-  │           └── styrmin_resources ──────┤
-  │                                       │
-  ├── chart_server                        │
-  │     └── git_server ───────────────────┤
-  │                                       │
-  └── simple_app_image                    │
-                                          │
-                              test_deploy_simple_app
+vcluster ──────────────────────────────────┐
+  │                                        │
+  ├── chart_server                         │
+  │     └── git_server ────────────────┐   │
+  │                                    │   │
+  ├── styrmin_deployment ──────────────┤   │
+  │                                    │   │
+  └── _dump_k8s_logs_on_failure        │   │
+       (autouse, function-scoped)      │   │
+                                       │   │
+                              session_scenario_driver
+                                       │
+                              styrmin_resources
+                                       │
+                              scenario_driver (function-scoped)
+                                       │
+                                  test_*
 ```
 
-| Fixture | Depends on | What it provides |
-|---------|-----------|-----------------|
-| `kind_cluster` | — | K8s API client, cluster name, kubeconfig path |
-| `styrmin_images` | `kind_cluster` | Dependency images loaded into cluster |
-| `chart_server` | `kind_cluster` | Cluster-internal chart server URL |
-| `git_server` | `kind_cluster`, `chart_server` | Cluster-internal git URL |
-| `styrmin_deployment` | `kind_cluster`, `styrmin_images` | Port-forwarded Styrmin server URL |
-| `styrmin_resources` | `styrmin_deployment`, `git_server` | Cluster/environment/driver IDs + SDK client |
-| `simple_app_image` | `kind_cluster` | simple-app image loaded into cluster |
+| Fixture | Scope | Depends on | What it provides |
+|---------|-------|------------|------------------|
+| `vcluster` | session | — | K8s API client, cluster name, kubeconfig path |
+| `chart_server` | session | `vcluster` | Cluster-internal chart server URL |
+| `git_server` | session | `vcluster`, `chart_server` | Cluster-internal git URL |
+| `styrmin_deployment` | session | `vcluster` | Port-forwarded Styrmin server URL |
+| `driver_mode` | session | — (parametrised) | "api" or "ui" |
+| `session_ui_page` | session | `driver_mode`, `styrmin_deployment` | Playwright Page (in ui mode), else None |
+| `session_scenario_driver` | session | `driver_mode`, `styrmin_deployment`, `session_ui_page` | `(ScenarioDriver, StyrminClient)` |
+| `styrmin_resources` | session | `session_scenario_driver`, `git_server` | Cluster/environment/driver IDs |
+| `scenario_driver` | function | `styrmin_resources` | Per-test ScenarioDriver |
+| `_dump_k8s_logs_on_failure` | function (autouse) | `vcluster` | Auto-logging on failure |
 
 ## Debugging
 
+### Always run with `--pdb`
+
+The project standard is to run E2E tests with `--pdb`. See `dev/CLAUDE.md` (Debugging E2E Tests) for the full workflow, including the `sleep infinity |` trick for non-interactive shells.
+
 ### Automatic Log Dump on Failure
 
-An autouse fixture (`_dump_k8s_logs_on_failure`) hooks into pytest's test reporting. When a test fails, it automatically:
+The autouse function-scoped `_dump_k8s_logs_on_failure` fixture hooks into pytest's test reporting. When a test fails, it automatically:
 
 1. Lists all namespaces matching `styrmin*`
 2. For each namespace, prints pod statuses (`kubectl get pods -o wide`)
@@ -221,40 +253,56 @@ This runs via a `pytest_runtest_makereport` hook that stores the test result on 
 
 ### Manual Investigation
 
-Since the Kind cluster persists for the session, you can interact with it directly if a test is paused or using `--pdb`:
+Since the vCluster persists for the session, you can interact with it directly if a test is paused (e.g. via `--pdb`):
 
 ```bash
-export KUBECONFIG=/tmp/pytest-xxx/kind0/kubeconfig
+export KUBECONFIG=$(ls /tmp/pytest-of-*/pytest-*/vcluster0/kubeconfig | tail -1)
 kubectl get pods -A
 kubectl logs -n styrmin deploy/styrmin-server
+kubectl get styrmindeployments -A
 kubectl get helmreleases -A
 ```
 
-## Prerequisites
+### UI-variant troubleshooting
 
-### System Tools
+When diagnosing a `[ui-chromium]` failure, drive the investigation through the Playwright MCP server rather than adding screenshot/HTML-dump instrumentation to the page object — see `dev/CLAUDE.md` for the full loop.
+
+## Prerequisites
 
 | Tool | Purpose |
 |------|---------|
-| `docker` | Build images, run Kind |
-| `kind` | Create/manage local K8s clusters |
+| `docker` | Build images, run vCluster |
+| `vcluster` | Create/manage vClusters |
 | `kubectl` | Debug access and log dumping |
 | `helm` | Deploy Styrmin into the cluster |
 
-### Running
+## Running
 
 ```bash
 cd backend && uv run pytest tests/e2e -v
 ```
 
+Or, for a single scenario in both variants:
+
+```bash
+cd backend && uv run pytest tests/e2e/test_deploy_app.py -v
+# Produces: test_deploy_app.py::test_deploy[api-chromium]
+#           test_deploy_app.py::test_deploy[ui-chromium]
+```
+
+For debugging, prefer `-v -s --pdb` (see `dev/CLAUDE.md`).
+
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| [tests/e2e/test_deploy_app.py](backend/tests/e2e/test_deploy_app.py) | Main e2e test |
-| [tests/e2e/conftest.py](backend/tests/e2e/conftest.py) | E2e fixtures (chart server, git server, Styrmin deployment) |
-| [tests/conftest.py](backend/tests/conftest.py) | Root fixtures (Kind cluster, config loading) |
-| [tests/e2e/fixtures/chart-server/](backend/tests/e2e/fixtures/chart-server/) | Chart server Dockerfile and K8s manifests |
-| [tests/e2e/fixtures/git-server/](backend/tests/e2e/fixtures/git-server/) | Git server Dockerfile and K8s manifests |
+| [tests/conftest.py](backend/tests/conftest.py) | Root fixtures (`vcluster`, config loading, log-dump hook) |
+| [tests/e2e/conftest.py](backend/tests/e2e/conftest.py) | E2E fixtures (chart server, git server, Styrmin deployment, dual-entrypoint driver wiring) |
+| [tests/e2e/drivers/protocol.py](backend/tests/e2e/drivers/protocol.py) | `ScenarioDriver` Protocol |
+| [tests/e2e/drivers/api_driver.py](backend/tests/e2e/drivers/api_driver.py) | `ApiScenarioDriver` (SDK driver) |
+| [tests/e2e/drivers/ui_driver.py](backend/tests/e2e/drivers/ui_driver.py) | `UiScenarioDriver` (Playwright driver) |
+| [tests/e2e/pages/](backend/tests/e2e/pages/) | Playwright page objects (deploy form, deployment detail, etc.) |
+| [tests/e2e/fixtures/](backend/tests/e2e/fixtures/) | Chart-server, git-server, MinIO, and Helm values |
+| [tests/e2e/test_deploy_app.py](backend/tests/e2e/test_deploy_app.py) | Canonical end-to-end deploy test |
 | [driver/examples/simple-app/](driver/examples/simple-app/) | Test application (FastAPI + PostgreSQL + Helm chart) |
-| [python_sdk/](python_sdk/) | Python SDK used by tests to interact with Styrmin API |
+| [python_sdk/](python_sdk/) | Python SDK used by the api driver |
