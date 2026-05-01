@@ -347,6 +347,37 @@
       },
       "registered_skills": [],
       "installed_at": "2026-05-01T12:42:33.601273+00:00"
+    },
+    "retrospect": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:74c63bd7789936fbcfff092d1d0ec10cfb6d71dc4482427d46f15834cf598ae9",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.retrospect.run",
+          "speckit.retrospect"
+        ],
+        "amp": [
+          "speckit.retrospect.run",
+          "speckit.retrospect"
+        ],
+        "claude": [
+          "speckit.retrospect.run",
+          "speckit.retrospect"
+        ],
+        "codex": [
+          "speckit.retrospect.run",
+          "speckit.retrospect"
+        ],
+        "copilot": [
+          "speckit.retrospect.run",
+          "speckit.retrospect"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-05-01T12:49:09.167724+00:00"
     }
   }
 }
