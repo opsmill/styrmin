@@ -175,3 +175,48 @@ A row's "rolled into above" entry indicates it shares a planned test with the ro
 ## Estimated test functions
 
 Aggregating the planned tests across rows: **~60 new `pytest` test functions** spread across 14 new test modules under `backend/tests/functional/propagation/`. This matches the 60–90 range in `plan.md`.
+
+---
+
+## Closed in this PR
+
+The following rows are now `covered` by HTTP-driven propagation tests under `backend/tests/functional/propagation/`. Each cited test file drives `client.post("/graphql", ...)` and reads persisted state back through `session.get(...)` per `contracts/propagation-test-contract.md`.
+
+| Domain row                                  | Covering test                                                                                       |
+|---------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| Cluster `createCluster` write               | `test_cluster_propagation.py::test_create_cluster_persists_name_and_config`                          |
+| Cluster `deleteCluster` write               | `test_cluster_propagation.py::test_delete_cluster_removes_row`                                       |
+| Cluster `clusters` / `cluster(id)` read     | `test_cluster_propagation.py::test_clusters_projects_seeded_rows`, `::test_cluster_by_id_projects_all_fields` |
+| Cluster `cluster(name)` lookup path         | `test_cluster_propagation.py::test_cluster_by_name_returns_seeded_row`                               |
+| Cluster.environments nested                 | `test_cluster_propagation.py::test_cluster_projects_environments_relation`                           |
+| Cluster `cluster(id)` not-found projection  | `test_cluster_propagation.py::test_cluster_by_unknown_id_returns_null`                               |
+| Environment `createEnvironment`             | `test_environment_propagation.py::test_create_environment_persists_with_cluster_id`, `::test_create_environment_persists_with_cluster_name` |
+| Environment `deleteEnvironment`             | `test_environment_propagation.py::test_delete_environment_by_id_removes_row`, `::test_delete_environment_by_name_and_cluster_name_removes_row` |
+| Environment `environments` / `environment(args)` reads | `test_environment_propagation.py::test_environments_projects_seeded_rows`, `::test_environment_by_each_lookup_arg[*]`, `::test_environment_projects_cluster_relation` |
+| BSL `createBackupStorageLocation`           | `test_backup_storage_location_propagation.py::test_create_bsl_persists_all_credentials`              |
+| BSL `updateBackupStorageLocation` per-field | `test_backup_storage_location_propagation.py::test_update_bsl_persists_field_changes[*]`             |
+| BSL credentials write                       | `test_backup_storage_location_propagation.py::test_update_bsl_credentials_dispatches_sync`           |
+| BSL `deleteBackupStorageLocation`           | `test_backup_storage_location_propagation.py::test_delete_bsl_removes_row`                            |
+| BSL assign/unassign env links               | `test_backup_storage_location_propagation.py::test_assign_bsl_persists_link`, `::test_unassign_bsl_clears_link` |
+| BSL `backupStorageLocations` / `backupStorageLocation(id)` reads (incl. computed `environmentCount`) | `test_backup_storage_location_propagation.py::test_list_bsls_projects_seeded`, `::test_get_bsl_projects_all_fields_and_environment_count` |
+| BackupSchedule `createBackupSchedule`       | `test_backup_schedule_propagation.py::test_create_schedule_persists_all_fields`                      |
+| BackupSchedule `updateBackupSchedule` per-field | `test_backup_schedule_propagation.py::test_update_schedule_persists_field_changes[*]`             |
+| BackupSchedule `deleteBackupSchedule`       | `test_backup_schedule_propagation.py::test_delete_schedule_removes_row`                              |
+| BackupSchedule `backupSchedule(id)` read    | `test_backup_schedule_propagation.py::test_schedule_projects_all_scalars`                            |
+| BackupSchedule `backupSchedules(deploymentId)` filter | `test_backup_schedule_propagation.py::test_schedules_filters_by_deployment`                |
+| Task `task(id)` / `tasks` reads             | `test_task_propagation.py::test_task_projects_all_scalars`, `::test_tasks_projects_seeded`           |
+| Callback Task-state mapping persists        | `test_callback_propagation.py::test_callback_running_state_persists_task_status`, `::test_callback_completed_state_persists_task_success` |
+| Callback unknown-task negative              | `test_callback_propagation.py::test_callback_unknown_task_returns_error_response`                    |
+| PodStatus `reportPodStatuses` upsert+stale-removal | `test_pod_status_propagation.py::test_report_pod_statuses_upserts_and_removes_stale`         |
+| PodStatus `podStatuses` filter-by-each-arg  | `test_pod_status_propagation.py::test_pod_statuses_filters_by_each_arg[*]`                            |
+| Deployment internal-deployment exclusion (read) | `test_deployment_propagation.py::test_internal_deployment_returns_null`, `::test_non_internal_deployment_projects_fields` |
+| Deployment internal-deployment guards (write) | `test_deployment_propagation.py::test_update_internal_deployment_raises`, `::test_update_version_internal_deployment_raises` |
+
+**Counts after this PR**:
+
+- Closed (this PR): ~30 row-equivalents across 8 domains.
+- Pre-existing covered: 7 rows.
+- Still gap (deferred to follow-up): ~52 row-equivalents — see `tasks.md` Phase 7.
+- Excluded with rationale: 1 row (`Query.ok`).
+
+The harness (`conftest.py`, `seeds.py`, `quickstart.md`, `contracts/propagation-test-contract.md`) is in place. Closing the deferred rows is now mechanical per-domain work using the recipe.
