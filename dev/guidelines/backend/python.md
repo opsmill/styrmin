@@ -202,3 +202,36 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 - Test naming: `test_<function>_<scenario>`
 - `assert` statements allowed in tests (S101 ignored)
 - Type hints optional in test files
+
+### GraphQL ↔ Database Propagation Tests
+
+Per Constitution §V, every GraphQL field, argument, input type, and mutation
+under `backend/styrmin_backend/api/schema/` MUST be covered by a unit test that
+asserts full-stack propagation across the layered architecture (Principle III).
+This is non-negotiable: a schema change is not "done" until the propagation
+test exists and passes.
+
+**What to assert:**
+
+- **Mutations / write arguments**: drive the resolver with the input value and
+  read the persisted state back through the real repository (or directly from
+  the database session). Asserting only on the resolver's return value is not
+  sufficient — the test must prove the value reached the database.
+- **Queries / output fields**: seed state through the real repository, execute
+  the query, and assert the resolver projects the persisted state correctly.
+
+**What to use:**
+
+- Real service functions and real repository implementations (the same
+  `SQLModel*Repository` classes used in production).
+- A real database session (the test database fixture), not fake repos. Fake
+  repositories from `tests/unit/services/fakes.py` are appropriate for service
+  logic tests, but propagation tests specifically exercise the repository
+  ↔ database edge and therefore require the real implementation.
+- Fakes/stubs are allowed only for systems outside the layered architecture
+  (Kubernetes, Prefect, helm, external HTTP services).
+
+**When to skip:** never, for a new or modified schema element. If you believe
+an existing propagation test already covers the change, name it explicitly in
+the PR description and request reviewer confirmation — don't decide on your
+own.

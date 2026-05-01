@@ -26,6 +26,15 @@ Tests are required for all new functionality. The project uses three test tiers:
 
 For bug fixes and small changes (refactors, doc updates, config tweaks, internal behaviour that is already exercised end-to-end), writing a new E2E test is not always proportionate. In those cases the implementer MUST ask for confirmation before skipping E2E coverage, describing what existing tests already cover the affected path; the reviewer's explicit approval is what authorises skipping, not the implementer's own judgment.
 
+**GraphQL ↔ Database Propagation Tests (NON-NEGOTIABLE).** Every GraphQL field, argument, input type, and mutation exposed under `backend/styrmin_backend/api/schema/` MUST be covered by a unit test that asserts full-stack propagation across the layered architecture (Principle III):
+
+- For **writes** (mutations and write arguments): the test MUST drive the resolver with the input value and assert that the value reaches the database — not by inspecting the resolver's return value alone, but by reading the persisted state through the repository layer (or a direct database query).
+- For **reads** (queries and output fields): the test MUST seed database state through the repository layer and assert that the resolver returns the expected projection of that state.
+- Tests MUST exercise the **real service and repository layers**. Mocking or substituting these internal layers defeats the purpose of the test. Only systems that live outside the layered architecture (Kubernetes, Prefect, helm, external HTTP services, etc.) may be faked.
+- Adding or modifying a GraphQL field, argument, or input type is **not "done"** until the corresponding propagation test exists, exercises the new path, and passes. Reviewers MUST block GraphQL changes that lack a matching propagation test, citing this clause.
+
+These tests live alongside other unit tests (e.g., `backend/tests/unit/`) and are independent of — and additive to — the E2E requirement above. E2E tests verify the user-visible flow; propagation tests verify that every schema element is wired through every layer. Both are required.
+
 ### VI. Format and Lint Before Commit
 
 `uv run invoke format lint` MUST pass before any commit. Line length is 120 characters. Ruff handles formatting and linting. This is non-negotiable and applies to all contributions.
@@ -54,4 +63,4 @@ Changes to these areas require explicit discussion before implementation:
 
 This constitution defines the non-negotiable principles for the Styrmin project. All specifications, plans, and implementations MUST be validated against these principles. Amendments require updating this file, incrementing the version, and propagating changes to dependent templates.
 
-**Version**: 1.1.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-04-23
+**Version**: 1.2.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-05-01
