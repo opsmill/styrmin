@@ -27,21 +27,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      docs_only: ${{ steps.docs-only.outputs.docs_only }}
+      non_runtime_only: ${{ steps.non-runtime-only.outputs.non_runtime_only }}
     steps:
       - uses: actions/checkout@v6
-      # Returns 'true' only when *every* changed file matches a docs pattern.
-      # Used by the E2E jobs to skip on doc-only PRs.
-      - name: Check if only docs changed
+      # Returns 'true' only when *every* changed file matches a non-runtime pattern.
+      # Used by the E2E jobs to skip on tooling-only PRs (docs, agent config, etc.).
+      - name: Check if only non-runtime files changed
         uses: dorny/paths-filter@v3
-        id: docs-only
+        id: non-runtime-only
         with:
           predicate-quantifier: every
           filters: |
-            docs_only:
+            non_runtime_only:
               - 'docs/**'
               - '**/*.md'
               - '**/*.mdx'
+              - '.specify/**'
+              - '.agents/**'
+              - '.github/prompts/**'
+              - 'LICENSE*'
+              - 'CODEOWNERS'
 
   pre-commit-hooks:
     name: Pre-Commit Hooks
@@ -153,7 +158,7 @@ jobs:
   e2e-tests-api:
     name: E2E Tests (API entrypoint)
     needs: ["files-changed", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.docs_only != 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
     runs-on:
       group: huge-runners
     timeout-minutes: 45
@@ -191,7 +196,7 @@ jobs:
   e2e-tests-ui:
     name: E2E Tests (UI entrypoint)
     needs: ["files-changed", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.docs_only != 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
     runs-on:
       group: huge-runners
     timeout-minutes: 45
