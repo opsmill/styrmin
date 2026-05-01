@@ -38,8 +38,8 @@ uv run pytest backend/tests/e2e/<node_id> -v -s --pdb
 | Reconciliation | `dev/knowledge/backend/reconciliation.md` |
 | Hooks and user actions | `dev/knowledge/backend/hooks-and-actions.md` |
 | Prefect orchestration | `dev/knowledge/backend/orchestration-flows.md` |
-| Kubernetes agent | `dev/knowledge/backend/agent.md` |
-| Kopf operator | `dev/knowledge/backend/operator.md` |
+| Kubernetes agent | `dev/knowledge/agent/overview.md` |
+| Kopf operator | `dev/knowledge/agent/operator.md` |
 | Backup and restore | `dev/knowledge/backend/backup-restore.md` |
 | E2E test architecture | `dev/knowledge/backend/e2e-testing.md` |
 | Python style | `dev/guidelines/backend/python.md` |

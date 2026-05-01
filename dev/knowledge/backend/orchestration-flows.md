@@ -1,8 +1,10 @@
 # Orchestration Flows
 
+> **Where this runs.** Prefect spans both processes. The **server** registers workflows and submits flow runs through `PrefectManager` (this doc). The **agent** runs the Prefect *worker* that picks up internal flow runs and executes them — see [`../agent/overview.md`](../agent/overview.md). User-defined driver actions execute as separate Kubernetes Jobs in the user work pool, not on the agent's worker.
+
 ## Overview
 
-Orchestration flows are Prefect `@flow` functions that execute multi-step deployment operations. They live in `agent/tasks/orchestration.py` and are submitted via the `PrefectManager`.
+Orchestration flows are Prefect `@flow` functions that execute multi-step deployment operations. They live in `agent/tasks/orchestration.py` (executed by the agent's Prefect worker) and are submitted via the `PrefectManager` (server-side).
 
 ```text
                         PrefectManager.run_action(APPLY_STATE)
@@ -341,7 +343,7 @@ Note: The enum values are used as Prefect deployment tags for lookup.
 
 <!-- Extracted from specs/001-deployment-crd on 2026-04-06 -->
 
-For new deployments, Prefect flows create/update/delete `StyrminDeployment` CRDs instead of directly managing HelmReleases and utility resources. The kopf operator handles all Kubernetes resource lifecycle from the CRD (see [operator.md](operator.md) for details).
+For new deployments, Prefect flows create/update/delete `StyrminDeployment` CRDs instead of directly managing HelmReleases and utility resources. The kopf operator handles all Kubernetes resource lifecycle from the CRD (see [`../agent/operator.md`](../agent/operator.md) for details).
 
 **What the Prefect flow does:**
 1. Compute GlobalContext from deployment configuration

@@ -63,7 +63,9 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 
 ## Current Knowledge
 
-Backend architecture documentation in [knowledge/backend/](knowledge/backend/):
+- [architecture.md](knowledge/architecture.md) - High-level system architecture: server↔agent topology, declarative state, context model. Companion to the constitution.
+
+Backend (server) architecture documentation in [knowledge/backend/](knowledge/backend/):
 
 - [overview.md](knowledge/backend/overview.md) - Architecture overview, directory structure, request flow
 - [api.md](knowledge/backend/api.md) - GraphQL API (public and internal), types, response patterns
@@ -71,12 +73,15 @@ Backend architecture documentation in [knowledge/backend/](knowledge/backend/):
 - [services.md](knowledge/backend/services.md) - Service layer, unit of work, business logic
 - [reconciliation.md](knowledge/backend/reconciliation.md) - Reconciliation engine, diff computation, remediation strategies
 - [hooks-and-actions.md](knowledge/backend/hooks-and-actions.md) - Hook system, driver actions, setup/upgrade hooks
-- [orchestration-flows.md](knowledge/backend/orchestration-flows.md) - Prefect orchestration flows, callbacks, execution patterns
-- [agent.md](knowledge/backend/agent.md) - Kubernetes agent, resource builders, FluxCD integration
-- [operator.md](knowledge/backend/operator.md) - Kopf operator, StyrminDeployment CRD, phase-based deployment, drift reconciliation
+- [orchestration-flows.md](knowledge/backend/orchestration-flows.md) - Prefect orchestration flows, callbacks, execution patterns (the agent runs the Prefect worker that executes these flows)
 - [backup-restore.md](knowledge/backend/backup-restore.md) - Backup/restore system, Velero integration, strategies
 - [e2e-testing.md](knowledge/backend/e2e-testing.md) - E2E testing architecture, Kind cluster setup, fixture graph
 - [dead-code.md](knowledge/backend/dead-code.md) - Remaining dead code and cleanup tracking
+
+Agent (in-cluster) architecture documentation in [knowledge/agent/](knowledge/agent/):
+
+- [overview.md](knowledge/agent/overview.md) - Agent process layout, where Prefect lives, Kubernetes resource builders, status reporter
+- [operator.md](knowledge/agent/operator.md) - Kopf operator, StyrminDeployment CRD, phase-based deployment, drift reconciliation
 
 Frontend architecture documentation in [knowledge/frontend/](knowledge/frontend/):
 

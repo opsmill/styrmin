@@ -240,7 +240,7 @@ class PodStatus(StyrminModel, table=True):
     deployment_id: UUID
 ```
 
-- One row per `(deployment_id, pod_name)`, refreshed every reporting cycle. Stale rows (pods no longer present) are deleted by `delete_stale`.
+- One row per `(deployment_id, pod_name)`, refreshed every reporting cycle. Rows are upserted by the `reportPodStatuses` GraphQL mutation, which is invoked by the agent's status reporter (see [`../agent/overview.md`](../agent/overview.md) → Status Reporter). Stale rows (pods no longer present in the agent's snapshot for a deployment) are removed **server-side** by `services/pod_status.py::report_pod_statuses`, which calls `delete_stale` on the repository — the agent only sends the active set.
 - `component_name` is populated by the agent reading the `styrmin/component` label off pod metadata. It is recorded as-is — see [ADR-014](../../adr/adr-014-pod-status-records-observed-state-not-declared-state.md) for why the server does not validate it against declared `Component` rows.
 - `last_polled_at` is rewritten on every upsert; downstream consumers can use it to detect stale data if the agent stops reporting.
 
@@ -259,8 +259,11 @@ class DeploymentStatus(StyrminModel, table=True):
     deployment_id: UUID  # unique=True (one snapshot per deployment)
 ```
 
-- One row per deployment. Mirrors the latest `StyrminDeployment` CRD `.status` block observed by the agent.
+- One row per deployment. Mirrors the latest `StyrminDeployment` CRD `.status` block observed by the agent and written by the `reportDeploymentStatuses` mutation (handler: `services/deployment_status.py`).
 - `phase`, `conditions`, `managed_resource_counts` are pass-through views of the CRD — the server does not interpret them.
+- The wire payload from the agent carries two additional fields that are **not** persisted on this row but drive other state:
+  - `displayState` — the operator's user-facing state (`Deploying`, `Running`, `Restoring`, `Error`). Mapped to a `DeploymentState` and written to the parent `Deployment.status` (sole source of truth for that column).
+  - `instanceId` — the `spec.instanceId` from the CRD at poll time. Used as a stale-instance guard: if it does not match `deployment.active_application_instance_id`, the `Deployment.status` update is skipped so a superseded instance cannot overwrite the status of the new one rolling out.
 
 ### Status Enums
 
