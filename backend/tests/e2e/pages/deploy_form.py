@@ -39,11 +39,9 @@ class DeployFormPage:
             )
         await self._page.get_by_label("Deployment Name").fill(name)
 
-        # Radix SelectTrigger has no id, so get_by_label doesn't match it —
-        # target the combobox by its placeholder text.
-        trigger = self._page.get_by_role("combobox").filter(
-            has_text="Select a driver version"
-        )
+        # Base UI SelectTrigger has no id, so get_by_label doesn't match it —
+        # target by its data-testid.
+        trigger = self._page.locator("[data-testid=driver-version-select]")
         await trigger.click()
         # After the trigger opens, options render (possibly in a portal).
         # Each option renders as `"<driverName> v<driverVersionVersion>"`.
@@ -65,6 +63,17 @@ class DeployFormPage:
                 override_name = override.get("overrideName", "")
                 await row.get_by_label("Driver service").fill(driver_service)
                 await row.get_by_label("Override name").fill(override_name)
+
+    async def read_selected_driver_label(self) -> str:
+        """Return the text currently displayed inside the driver-version trigger.
+
+        Used to verify the trigger shows a human-readable label (e.g.
+        ``simple-app v0.1.0``) rather than the raw ``applicationDriverVersionId``
+        UUID after an option is selected.
+        """
+        trigger = self._page.locator("[data-testid=driver-version-select]")
+        await trigger.wait_for()
+        return (await trigger.inner_text()).strip()
 
     async def submit(self) -> DeploymentRef:
         await self._page.get_by_role("button", name="Deploy", exact=True).click()
