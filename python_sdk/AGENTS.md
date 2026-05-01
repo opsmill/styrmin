@@ -18,7 +18,7 @@ backups, schedules, backup-storage-locations) on a single `StyrminClient`.
 | `src/styrmin_sdk/client.py` | `StyrminClient` — public entry point. Constructs the transport and instantiates one resource per area, exposed as attributes (`client.clusters`, `client.deployments`, …). |
 | `src/styrmin_sdk/_transport.py` | Internal HTTP + GraphQL transport over `httpx.AsyncClient`. Owns the connection lifetime; wraps HTTP errors into `StyrminTransportError`. |
 | `src/styrmin_sdk/_queries.py` | `load_query(name)` helper — reads `graphql/<name>.graphql` from disk and returns the query string. |
-| `src/styrmin_sdk/exceptions.py` | `StyrminError` and typed subclasses (`StyrminTransportError`, `OperationFailedError`, `ResourceNotFoundError`, `ResourceAlreadyExistsError`). |
+| `src/styrmin_sdk/exceptions.py` | `StyrminError` hierarchy: `StyrminTransportError` (HTTP failures), `StyrminGraphQLError` (raw GraphQL `errors`), and `StyrminAPIError` with three concrete subclasses (`ResourceNotFoundError`, `ResourceAlreadyExistsError`, `OperationFailedError`) raised by `_check_graphql_errors` based on `extensions.code`. |
 | `src/styrmin_sdk/resources/` | One `*Resource` class per area; each method maps to one GraphQL operation. |
 | `src/styrmin_sdk/resources/_base.py` | `BaseResource` — holds the transport reference and provides `_check_graphql_errors()` and `_parse()` helpers. |
 | `src/styrmin_sdk/graphql/*.graphql` | One operation per file; file name is snake_case of the GraphQL operation name. |
