@@ -35,7 +35,7 @@ Current Instance ─┘                            |
 Located in `services/reconciliation/__init__.py`.
 
 ```python
-@inject
+@inject(cast_result=False)  # type: ignore[arg-type]
 async def apply_state(
     deployment: Deployment,
     current_instance: Instance | None,
@@ -57,21 +57,26 @@ Steps:
 2. Create a `Comparator(current_instance, new_instance)`
 3. Call `comparator.compare()` to get a `DiffReport`
 4. Create a `Remediator(uow)` and call `generate_remediation(diff_report)`
-5. Create a `Task` with the remediation type
-6. Submit `PrefectAction.APPLY_STATE` to Prefect with `task_id`, `deployment_id`, and `remediation`
-7. Return the task
+5. Create a `Task` with `type=TaskType(remediation.type.value)` if a remediation was generated, otherwise `type=TaskType.NOOP`
+6. Submit `PrefectAction.APPLY_STATE` to Prefect with parameters `{deployment_id, remediation, task_id}`
+7. Set `task.prefect_flow_run_id = flow_info.id` from the submission result
+8. Return the task
 
-The companion function `generate_instance_from_deployment()` creates a new `Instance` by resolving the deployment context:
+The companion function `generate_instance_from_deployment()` creates a new `Instance` by resolving the deployment context and tagging the context with the instance id so the CRD can carry it for status correlation:
 
 ```python
 async def generate_instance_from_deployment(deployment: Deployment, uow: UnitOfWork) -> Instance:
     context = await generate_context_from_deployment(deployment=deployment, uow=uow)
-    return Instance.create(
+    instance = Instance.create(
         application_version=deployment.application_version,
         deployment_id=deployment.id,
         application_driver_version_id=deployment.application_driver_version_id,
         context=context,
     )
+    # Tag the context with the instance id so the CRD carries it and the server
+    # can correlate agent status reports to the active instance.
+    instance.context.instance.id = instance.id
+    return instance
 ```
 
 ## Diff Computation
@@ -206,7 +211,7 @@ class Remediation(BaseModel):
     type: RemediationType  # CREATE_INSTANCE, UPDATE_INSTANCE, UPGRADE_INSTANCE, etc.
 
     async def apply(self) -> FlowRun:
-        """Call arun_deployment(name=self.flow_id, parameters=self.parameters)"""
+        """Call run_deployment_or_fail(name=self.flow_id, parameters=self.parameters)"""
 ```
 
 ### RemediationType Enum
@@ -217,19 +222,23 @@ class RemediationType(str, Enum):
     DELETE_INSTANCE = "delete_instance"
     UPDATE_INSTANCE = "update_instance"
     UPGRADE_INSTANCE = "upgrade_instance"
-    DOWGRADE_INSTANCE = "downgrade_instance"
+    DOWNGRADE_INSTANCE = "downgrade_instance"
 ```
+
+### Strategy interface
+
+All concrete strategies implement `RemediationStrategy.execute(diff, prefect_manager) -> Remediation | None` (decorated with `@inject` to bind the manager). `Remediator._handle_diff` looks up the strategy for the diff type and calls `execute`. Strategies that don't apply to the given diff return `None`.
 
 ### InstanceCreationStrategy
 
-Handles `InstanceCreation` diffs. Looks up setup hooks from Prefect:
+Handles `InstanceCreation` diffs. The CRD flow only needs setup hooks — the operator handles HelmRelease creation and utility resource management — so no "core" HelmRelease hook is resolved here.
 
 1. Gets the driver version from `diff.instance.application_driver_version_id`
 2. Gets the application from the driver version
-3. Looks up the `CREATE_INSTANCE` internal flow
-4. Looks up setup hooks: pre-hook, post-hook (via `get_user_action_deployment_id` with `hook=HookKind.SETUP`)
-5. Looks up the core hook (`CREATE_HELM_RELEASE`)
-6. Returns `Remediation(type=CREATE_INSTANCE, parameters={instance, corehook, prehook, posthook})`
+3. Looks up the `CREATE_INSTANCE` internal flow via `prefect_manager.get_action_deployment_id`
+4. Looks up setup hooks in parallel: `get_user_action_deployment_id(hook=HookKind.SETUP, mode="pre"/"post", version=driver_version.application_supported_versions)`
+5. Reads the parent deployment's `internal` flag (e.g., for ingress controller deployments)
+6. Returns `Remediation(type=CREATE_INSTANCE, instance=…, flow_id=create_instance_flow, parameters={instance, prehook, posthook, internal})`
 
 ### InstanceUpdateStrategy
 
@@ -238,16 +247,16 @@ Handles `InstanceUpdate` diffs. Routes version changes to the upgrade path when 
 1. Checks if any diff entry is an `ApplicationVersionChange`
 2. If yes, calls `_handle_upgrade()`:
    - Looks up the driver's upgrade core hook from Prefect (`hook=UPGRADE, mode="core"`)
-   - If found: resolves pre/post hooks and returns `Remediation(type=UPGRADE_INSTANCE)` with full hook parameters
-   - If not found: falls back to regular update (no error)
+   - If not found: returns `None` and the strategy falls back to `_handle_update()`
+   - If found: looks up `PrefectAction.UPGRADE_INSTANCE` plus the upgrade pre/post hooks (in parallel), then returns `Remediation(type=UPGRADE_INSTANCE, parameters={instance, upgrade_hook, target_version, prehook, posthook})`
 3. If no version change (or upgrade fallback), calls `_handle_update()`:
-   - Returns `Remediation(type=UPDATE_INSTANCE)` with Helm release update and utility update flows
+   - Iterates the diff entries; for any actionable entry (`ApplicationVersionChange`, `ApplicationDriverVersionChange`, or `ContextChange`), looks up `PrefectAction.UPDATE_INSTANCE` and returns `Remediation(type=UPDATE_INSTANCE, parameters={instance})`. The CRD flow only needs the instance — the operator handles HelmRelease and utility resource reconciliation.
 
-This means drivers with upgrade hooks get the full upgrade lifecycle (pre → core → utilities → Helm → post), while drivers without upgrade hooks simply get a Helm release update.
+Drivers with upgrade hooks get the lifecycle pre → driver core hook → post; drivers without upgrade hooks fall back to a regular update where the CRD spec is updated and the operator reconciles the HelmRelease.
 
 ### InstanceDeletionStrategy
 
-Not implemented. Raises `NotImplementedError`.
+Not implemented. `execute` raises `NotImplementedError`.
 
 ## Version Change Scenarios
 
