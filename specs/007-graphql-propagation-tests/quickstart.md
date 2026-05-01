@@ -26,27 +26,46 @@ from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import <DBModel>
+
+from ._queries import load_query
 ```
 
-## 3. Add the GraphQL operation string to `helpers.py`
+## 3. Add the GraphQL operation as a `.graphql` file
 
-Append the query/mutation string to `backend/tests/functional/helpers.py` next to the existing strings. Operations MUST be named:
+GraphQL operations used by propagation tests **must** live in
+`backend/tests/functional/propagation/graphql/<operation_name>.graphql` — never
+inline in the test module. Inline strings bypass `uv run invoke validate-graphql`,
+which means a schema change can break a test silently.
 
-```python
-create_widget_mutation = """
-    mutation CreateWidget($name: String!, $config: JSON) {
-        createWidget(name: $name, config: $config) {
-            id
-            name
-            config
-        }
+Create `backend/tests/functional/propagation/graphql/create_widget.graphql`:
+
+```graphql
+mutation CreateWidget($name: String!, $config: JSON) {
+    createWidget(name: $name, config: $config) {
+        id
+        name
+        config
     }
-"""
+}
 ```
 
-Then import it in your test module: `from tests.functional.helpers import create_widget_mutation`.
+Rules:
+- One operation per file. Snake_case file stem matches the operation name.
+- Operations **must** be named (`mutation CreateWidget`, never anonymous `mutation { ... }`).
+- The file is auto-discovered by `validate-graphql` via `rglob`. No registration step is needed.
+
+Confirm the operation validates:
+
+```bash
+uv run invoke validate-graphql
+```
+
+The relevant line should appear as `OK    backend/tests/functional/propagation/graphql/create_widget.graphql`.
 
 ## 4. Write the test
+
+Load the operation via `load_query("<file_stem>")` from the package-local
+`_queries` module — never paste GraphQL into the test module.
 
 ### Write recipe
 
@@ -59,7 +78,7 @@ async def test_create_widget_persists_name_and_config(
     response = await client.post(
         "/graphql",
         json={
-            "query": create_widget_mutation,
+            "query": load_query("create_widget"),
             "variables": {"name": "my-widget", "config": {"k": "v"}},
         },
     )
@@ -88,7 +107,10 @@ async def test_widget_projects_all_scalars(
 
     response = await client.post(
         "/graphql",
-        json={"query": get_widget_query, "variables": {"widgetId": str(seeded.id)}},
+        json={
+            "query": load_query("get_widget"),
+            "variables": {"widgetId": str(seeded.id)},
+        },
     )
     assert response.status_code == 200
     data = response.json()["data"]["widget"]
@@ -163,6 +185,8 @@ Open `coverage-matrix.md`, find the row(s) you closed, and update **Verdict** fr
 
 ## Common pitfalls
 
+- **Inlining the GraphQL string in the test.** Bypasses `validate-graphql`. Always extract to `graphql/<name>.graphql` and load via `load_query("<name>")`.
+- **Using an anonymous operation.** `query { cluster(...) { id } }` is invalid here — name every operation (`query GetCluster { ... }`) so `validate-graphql` discovers and reports it correctly.
 - **Asserting only on the GraphQL response.** Read back through `session.get(...)`. The resolver may have correctly returned the value while never persisting it — that is the exact regression §V is designed to catch.
 - **Mocking the repository.** The repository is the layer under test; mocking it deletes the propagation contract.
 - **Mocking the service function.** Same as above — the service is what wires the resolver to the repository, so mocking it removes the integration the test exists to verify.

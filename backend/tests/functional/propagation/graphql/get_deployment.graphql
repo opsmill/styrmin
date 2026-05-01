@@ -1,0 +1,8 @@
+query GetDeployment($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        name
+        internal
+        status
+    }
+}

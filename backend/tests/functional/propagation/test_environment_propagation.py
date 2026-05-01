@@ -10,81 +10,10 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import Cluster, Environment
 
+from ._queries import load_query
+
 VALID_CLUSTER_CONFIG = {"runtime_class": "example_runtime_class"}
 VALID_ENV_CONFIG = {"ip_whitelist": ["10.0.0.0/24"]}
-
-
-create_environment_query = """
-    mutation CreateEnvironment(
-        $name: String!,
-        $clusterId: UUID,
-        $clusterName: String,
-        $config: JSON
-    ) {
-        createEnvironment(
-            name: $name,
-            clusterId: $clusterId,
-            clusterName: $clusterName,
-            config: $config
-        ) {
-            id
-            name
-            config
-            cluster {
-                id
-                name
-            }
-        }
-    }
-"""
-
-delete_environment_query = """
-    mutation DeleteEnvironment(
-        $environmentId: UUID,
-        $environmentName: String,
-        $clusterId: UUID,
-        $clusterName: String
-    ) {
-        deleteEnvironment(
-            environmentId: $environmentId,
-            environmentName: $environmentName,
-            clusterId: $clusterId,
-            clusterName: $clusterName
-        )
-    }
-"""
-
-get_environment_query = """
-    query GetEnvironment(
-        $environmentId: UUID,
-        $environmentName: String,
-        $clusterId: UUID,
-        $clusterName: String
-    ) {
-        environment(
-            environmentId: $environmentId,
-            environmentName: $environmentName,
-            clusterId: $clusterId,
-            clusterName: $clusterName
-        ) {
-            id
-            name
-            cluster {
-                id
-                name
-            }
-        }
-    }
-"""
-
-list_environments_query = """
-    query ListEnvironments {
-        environments {
-            id
-            name
-        }
-    }
-"""
 
 
 async def _seed_cluster(session: AsyncSession, name: str = "p-cluster") -> Cluster:
@@ -103,7 +32,7 @@ async def test_create_environment_persists_with_cluster_id(
     response = await client.post(
         "/graphql",
         json={
-            "query": create_environment_query,
+            "query": load_query("create_environment"),
             "variables": {
                 "name": "p-env",
                 "clusterId": str(cluster.id),
@@ -133,7 +62,7 @@ async def test_create_environment_persists_with_cluster_name(
     response = await client.post(
         "/graphql",
         json={
-            "query": create_environment_query,
+            "query": load_query("create_environment"),
             "variables": {
                 "name": "env-with-name-lookup",
                 "clusterName": "lookup-by-name",
@@ -162,7 +91,7 @@ async def test_delete_environment_by_id_removes_row(
     response = await client.post(
         "/graphql",
         json={
-            "query": delete_environment_query,
+            "query": load_query("delete_environment"),
             "variables": {"environmentId": str(env.id)},
         },
     )
@@ -187,7 +116,7 @@ async def test_delete_environment_by_name_and_cluster_name_removes_row(
     response = await client.post(
         "/graphql",
         json={
-            "query": delete_environment_query,
+            "query": load_query("delete_environment"),
             "variables": {
                 "environmentName": "delete-env",
                 "clusterName": "delete-cluster",
@@ -215,7 +144,9 @@ async def test_environments_projects_seeded_rows(
     )
     await session.commit()
 
-    response = await client.post("/graphql", json={"query": list_environments_query})
+    response = await client.post(
+        "/graphql", json={"query": load_query("list_environments")}
+    )
     assert response.status_code == 200
     payload = response.json()
     assert "errors" not in payload, payload
@@ -252,7 +183,7 @@ async def test_environment_by_each_lookup_arg(
 
     response = await client.post(
         "/graphql",
-        json={"query": get_environment_query, "variables": variables},
+        json={"query": load_query("get_environment"), "variables": variables},
     )
     assert response.status_code == 200
     payload = response.json()
@@ -274,7 +205,7 @@ async def test_environment_projects_cluster_relation(
     response = await client.post(
         "/graphql",
         json={
-            "query": get_environment_query,
+            "query": load_query("get_environment"),
             "variables": {"environmentId": str(env.id)},
         },
     )

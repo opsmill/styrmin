@@ -2,6 +2,22 @@
 
 Every test added under `backend/tests/functional/propagation/` MUST satisfy this contract. A test that fails any clause is not a valid propagation test for purposes of the Constitution §V verdict in `coverage-matrix.md`.
 
+## C0. GraphQL operation lives in a `.graphql` file
+
+Every GraphQL operation used by a propagation test MUST live in
+`backend/tests/functional/propagation/graphql/<operation>.graphql` and be
+loaded via `load_query("<operation>")` from
+`backend.tests.functional.propagation._queries`. Inline GraphQL strings in
+test modules are not allowed — they bypass `uv run invoke validate-graphql`,
+which means a schema change can silently break the test against a dead
+string.
+
+Operations MUST be named (`query GetX { ... }`, `mutation CreateY { ... }`).
+Anonymous operations break discovery.
+
+`validate-graphql` finds these files automatically via `rglob` — no
+registration is required, but the discovery is what enforces the contract.
+
 ## C1. Drives the GraphQL boundary
 
 The test issues a request through the same boundary a real client would. Acceptable forms:

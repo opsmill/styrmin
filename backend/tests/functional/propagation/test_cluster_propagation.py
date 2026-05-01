@@ -15,12 +15,8 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import Cluster, Environment
-from tests.functional.helpers import (
-    create_cluster_query,
-    delete_cluster_query,
-    get_cluster_query,
-    get_clusters_query,
-)
+
+from ._queries import load_query
 
 VALID_CLUSTER_CONFIG = {"runtime_class": "example_runtime_class"}
 
@@ -32,7 +28,7 @@ async def test_create_cluster_persists_name_and_config(
     response = await client.post(
         "/graphql",
         json={
-            "query": create_cluster_query,
+            "query": load_query("create_cluster"),
             "variables": {"name": "p-cluster", "config": VALID_CLUSTER_CONFIG},
         },
     )
@@ -60,7 +56,7 @@ async def test_delete_cluster_removes_row(
     response = await client.post(
         "/graphql",
         json={
-            "query": delete_cluster_query,
+            "query": load_query("delete_cluster"),
             "variables": {"clusterId": str(seeded.id)},
         },
     )
@@ -82,7 +78,9 @@ async def test_clusters_projects_seeded_rows(
     session.add_all([seeded_a, seeded_b])
     await session.commit()
 
-    response = await client.post("/graphql", json={"query": get_clusters_query})
+    response = await client.post(
+        "/graphql", json={"query": load_query("list_clusters")}
+    )
     assert response.status_code == 200
     payload = response.json()
     assert "errors" not in payload, payload
@@ -101,7 +99,7 @@ async def test_cluster_by_id_projects_all_fields(
     response = await client.post(
         "/graphql",
         json={
-            "query": get_cluster_query,
+            "query": load_query("get_cluster"),
             "variables": {"clusterId": str(seeded.id)},
         },
     )
@@ -124,17 +122,12 @@ async def test_cluster_by_name_returns_seeded_row(
     session.add(seeded)
     await session.commit()
 
-    query = """
-        query GetClusterByName($clusterName: String!) {
-            cluster(clusterName: $clusterName) {
-                id
-                name
-            }
-        }
-    """
     response = await client.post(
         "/graphql",
-        json={"query": query, "variables": {"clusterName": "seed-by-name"}},
+        json={
+            "query": load_query("get_cluster_by_name"),
+            "variables": {"clusterName": "seed-by-name"},
+        },
     )
     assert response.status_code == 200
     payload = response.json()
@@ -157,7 +150,7 @@ async def test_cluster_projects_environments_relation(
     response = await client.post(
         "/graphql",
         json={
-            "query": get_cluster_query,
+            "query": load_query("get_cluster"),
             "variables": {"clusterId": str(cluster.id)},
         },
     )
@@ -183,7 +176,10 @@ async def test_cluster_by_unknown_id_returns_null(
 
     response = await client.post(
         "/graphql",
-        json={"query": get_cluster_query, "variables": {"clusterId": str(bogus_id)}},
+        json={
+            "query": load_query("get_cluster"),
+            "variables": {"clusterId": str(bogus_id)},
+        },
     )
     assert response.status_code == 200
     payload = response.json()

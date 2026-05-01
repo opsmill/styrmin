@@ -1,0 +1,13 @@
+mutation DeleteEnvironment(
+    $environmentId: UUID,
+    $environmentName: String,
+    $clusterId: UUID,
+    $clusterName: String
+) {
+    deleteEnvironment(
+        environmentId: $environmentId,
+        environmentName: $environmentName,
+        clusterId: $clusterId,
+        clusterName: $clusterName
+    )
+}

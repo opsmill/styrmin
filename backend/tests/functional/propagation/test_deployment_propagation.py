@@ -2,41 +2,14 @@
 
 from __future__ import annotations
 
-
 import pytest
 from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import Deployment
 
+from ._queries import load_query
 from .seeds import seed_deployment
-
-get_deployment_query = """
-    query GetDeployment($deploymentId: UUID!) {
-        deployment(deploymentId: $deploymentId) {
-            id
-            name
-            internal
-            status
-        }
-    }
-"""
-
-update_deployment_mutation = """
-    mutation UpdateDeployment($deploymentId: UUID!, $name: String) {
-        updateDeployment(deploymentId: $deploymentId, name: $name) {
-            id
-        }
-    }
-"""
-
-update_deployment_version_mutation = """
-    mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!) {
-        updateDeploymentVersion(deploymentId: $deploymentId, version: $version) {
-            id
-        }
-    }
-"""
 
 
 @pytest.mark.asyncio
@@ -57,7 +30,7 @@ async def test_internal_deployment_returns_null(
     response = await client.post(
         "/graphql",
         json={
-            "query": get_deployment_query,
+            "query": load_query("get_deployment"),
             "variables": {"deploymentId": str(deployment_id)},
         },
     )
@@ -76,7 +49,7 @@ async def test_non_internal_deployment_projects_fields(
     response = await client.post(
         "/graphql",
         json={
-            "query": get_deployment_query,
+            "query": load_query("get_deployment"),
             "variables": {"deploymentId": str(deployment_id)},
         },
     )
@@ -101,7 +74,7 @@ async def test_update_internal_deployment_raises(
     response = await client.post(
         "/graphql",
         json={
-            "query": update_deployment_mutation,
+            "query": load_query("update_deployment"),
             "variables": {"deploymentId": str(deployment_id), "name": "renamed"},
         },
     )
@@ -129,7 +102,7 @@ async def test_update_version_internal_deployment_raises(
     response = await client.post(
         "/graphql",
         json={
-            "query": update_deployment_version_mutation,
+            "query": load_query("update_deployment_version"),
             "variables": {"deploymentId": str(deployment_id), "version": "9.9.9"},
         },
     )

@@ -1,0 +1,6 @@
+query GetClusterByName($clusterName: String!) {
+    cluster(clusterName: $clusterName) {
+        id
+        name
+    }
+}

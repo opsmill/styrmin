@@ -1,0 +1,19 @@
+query ListPodStatuses(
+    $deploymentId: UUID,
+    $environmentId: UUID,
+    $clusterId: UUID
+) {
+    podStatuses(
+        deploymentId: $deploymentId,
+        environmentId: $environmentId,
+        clusterId: $clusterId
+    ) {
+        id
+        podName
+        namespace
+        phase
+        ready
+        restartCount
+        nodeName
+    }
+}

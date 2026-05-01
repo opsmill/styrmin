@@ -2,32 +2,16 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import Task, TaskStatus, TaskType
 
+from ._queries import load_query
 from .seeds import seed_deployment, seed_task
-
-callback_mutation = """
-    mutation Callback(
-        $taskId: UUID!,
-        $stateName: String!,
-        $stateMessage: String,
-        $stateType: String!
-    ) {
-        callback(
-            taskId: $taskId,
-            stateName: $stateName,
-            stateMessage: $stateMessage,
-            stateType: $stateType
-        ) {
-            message
-            success
-        }
-    }
-"""
 
 
 @pytest.mark.asyncio
@@ -46,7 +30,7 @@ async def test_callback_running_state_persists_task_status(
     response = await client.post(
         "/graphql",
         json={
-            "query": callback_mutation,
+            "query": load_query("callback"),
             "variables": {
                 "taskId": str(task_id),
                 "stateName": "RUNNING",
@@ -82,7 +66,7 @@ async def test_callback_completed_state_persists_task_success(
     response = await client.post(
         "/graphql",
         json={
-            "query": callback_mutation,
+            "query": load_query("callback"),
             "variables": {
                 "taskId": str(task_id),
                 "stateName": "COMPLETED",
@@ -108,13 +92,11 @@ async def test_callback_unknown_task_returns_error_response(
     """Negative path: an unknown task_id surfaces a TaskNotFoundError that the
     resolver converts to ``CallbackResponse(success=False)``. Asserts no
     Task row was fabricated."""
-    from uuid import uuid4
-
     bogus_id = uuid4()
     response = await client.post(
         "/graphql",
         json={
-            "query": callback_mutation,
+            "query": load_query("callback"),
             "variables": {
                 "taskId": str(bogus_id),
                 "stateName": "RUNNING",

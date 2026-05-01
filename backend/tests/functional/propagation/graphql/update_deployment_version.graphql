@@ -1,0 +1,5 @@
+mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!) {
+    updateDeploymentVersion(deploymentId: $deploymentId, version: $version) {
+        id
+    }
+}

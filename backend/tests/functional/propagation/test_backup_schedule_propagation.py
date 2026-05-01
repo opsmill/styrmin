@@ -10,76 +10,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import BackupSchedule
 
+from ._queries import load_query
 from .seeds import seed_deployment
-
-create_schedule_mutation = """
-    mutation CreateSchedule(
-        $deploymentId: UUID!,
-        $name: String!,
-        $cronExpression: String!,
-        $retentionCount: Int!,
-        $enabled: Boolean!
-    ) {
-        createBackupSchedule(
-            deploymentId: $deploymentId,
-            name: $name,
-            cronExpression: $cronExpression,
-            retentionCount: $retentionCount,
-            enabled: $enabled
-        ) {
-            id
-            name
-        }
-    }
-"""
-
-update_schedule_mutation = """
-    mutation UpdateSchedule(
-        $scheduleId: UUID!,
-        $name: String,
-        $cronExpression: String,
-        $retentionCount: Int,
-        $enabled: Boolean
-    ) {
-        updateBackupSchedule(
-            scheduleId: $scheduleId,
-            name: $name,
-            cronExpression: $cronExpression,
-            retentionCount: $retentionCount,
-            enabled: $enabled
-        ) {
-            id
-        }
-    }
-"""
-
-delete_schedule_mutation = """
-    mutation DeleteSchedule($scheduleId: UUID!) {
-        deleteBackupSchedule(scheduleId: $scheduleId)
-    }
-"""
-
-get_schedule_query = """
-    query GetSchedule($scheduleId: UUID!) {
-        backupSchedule(scheduleId: $scheduleId) {
-            id
-            name
-            enabled
-            cronExpression
-            retentionCount
-            deploymentId
-        }
-    }
-"""
-
-list_schedules_query = """
-    query ListSchedules($deploymentId: UUID!) {
-        backupSchedules(deploymentId: $deploymentId) {
-            id
-            name
-        }
-    }
-"""
 
 
 @pytest.mark.asyncio
@@ -92,7 +24,7 @@ async def test_create_schedule_persists_all_fields(
     response = await client.post(
         "/graphql",
         json={
-            "query": create_schedule_mutation,
+            "query": load_query("create_backup_schedule"),
             "variables": {
                 "deploymentId": str(deployment_id),
                 "name": "nightly",
@@ -148,7 +80,7 @@ async def test_update_schedule_persists_field_changes(
     response = await client.post(
         "/graphql",
         json={
-            "query": update_schedule_mutation,
+            "query": load_query("update_backup_schedule"),
             "variables": {"scheduleId": str(schedule_id), field: value},
         },
     )
@@ -179,7 +111,7 @@ async def test_delete_schedule_removes_row(
     response = await client.post(
         "/graphql",
         json={
-            "query": delete_schedule_mutation,
+            "query": load_query("delete_backup_schedule"),
             "variables": {"scheduleId": str(schedule_id)},
         },
     )
@@ -209,7 +141,7 @@ async def test_schedule_projects_all_scalars(
     response = await client.post(
         "/graphql",
         json={
-            "query": get_schedule_query,
+            "query": load_query("get_backup_schedule"),
             "variables": {"scheduleId": str(schedule.id)},
         },
     )
@@ -242,7 +174,7 @@ async def test_schedules_filters_by_deployment(
     response = await client.post(
         "/graphql",
         json={
-            "query": list_schedules_query,
+            "query": load_query("list_backup_schedules"),
             "variables": {"deploymentId": str(deployment_a.id)},
         },
     )

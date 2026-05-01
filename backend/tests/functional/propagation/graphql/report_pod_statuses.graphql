@@ -1,0 +1,7 @@
+mutation ReportPodStatuses($reports: [DeploymentPodStatusReport!]!) {
+    reportPodStatuses(reports: $reports) {
+        success
+        podsUpdated
+        podsRemoved
+    }
+}

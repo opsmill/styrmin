@@ -1,0 +1,10 @@
+query GetBackupSchedule($scheduleId: UUID!) {
+    backupSchedule(scheduleId: $scheduleId) {
+        id
+        name
+        enabled
+        cronExpression
+        retentionCount
+        deploymentId
+    }
+}

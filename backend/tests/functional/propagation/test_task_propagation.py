@@ -8,33 +8,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import TaskStatus, TaskType
 
+from ._queries import load_query
 from .seeds import seed_deployment, seed_task
-
-get_task_query = """
-    query GetTask($taskId: UUID!) {
-        task(taskId: $taskId) {
-            id
-            type
-            status
-            message
-            deploymentId
-            deployment {
-                id
-                name
-            }
-        }
-    }
-"""
-
-list_tasks_query = """
-    query ListTasks {
-        tasks {
-            id
-            type
-            status
-        }
-    }
-"""
 
 
 @pytest.mark.asyncio
@@ -52,7 +27,10 @@ async def test_task_projects_all_scalars(
 
     response = await client.post(
         "/graphql",
-        json={"query": get_task_query, "variables": {"taskId": str(task.id)}},
+        json={
+            "query": load_query("get_task"),
+            "variables": {"taskId": str(task.id)},
+        },
     )
     assert response.status_code == 200
     payload = response.json()
@@ -75,7 +53,7 @@ async def test_tasks_projects_seeded(
     await seed_task(session, deployment=deployment, task_type=TaskType.CREATE_INSTANCE)
     await seed_task(session, deployment=deployment, task_type=TaskType.UPDATE_INSTANCE)
 
-    response = await client.post("/graphql", json={"query": list_tasks_query})
+    response = await client.post("/graphql", json={"query": load_query("list_tasks")})
     assert response.status_code == 200
     payload = response.json()
     assert "errors" not in payload, payload

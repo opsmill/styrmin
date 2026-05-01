@@ -10,110 +10,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import BackupStorageLocation, Cluster, Environment
 
+from ._queries import load_query
+
 VALID_CLUSTER_CONFIG = {"runtime_class": "example_runtime_class"}
-
-create_bsl_mutation = """
-    mutation CreateBSL(
-        $name: String!,
-        $endpoint: String!,
-        $bucket: String!,
-        $region: String!,
-        $accessKeyId: String!,
-        $secretAccessKey: String!
-    ) {
-        createBackupStorageLocation(
-            name: $name,
-            endpoint: $endpoint,
-            bucket: $bucket,
-            region: $region,
-            accessKeyId: $accessKeyId,
-            secretAccessKey: $secretAccessKey
-        ) {
-            id
-            name
-            endpoint
-            bucket
-            region
-        }
-    }
-"""
-
-update_bsl_mutation = """
-    mutation UpdateBSL(
-        $backupStorageLocationId: UUID!,
-        $name: String,
-        $endpoint: String,
-        $bucket: String,
-        $region: String,
-        $accessKeyId: String,
-        $secretAccessKey: String
-    ) {
-        updateBackupStorageLocation(
-            backupStorageLocationId: $backupStorageLocationId,
-            name: $name,
-            endpoint: $endpoint,
-            bucket: $bucket,
-            region: $region,
-            accessKeyId: $accessKeyId,
-            secretAccessKey: $secretAccessKey
-        ) {
-            id
-            name
-        }
-    }
-"""
-
-delete_bsl_mutation = """
-    mutation DeleteBSL($backupStorageLocationId: UUID!) {
-        deleteBackupStorageLocation(backupStorageLocationId: $backupStorageLocationId)
-    }
-"""
-
-assign_bsl_mutation = """
-    mutation AssignBSL($environmentId: UUID!, $backupStorageLocationId: UUID!) {
-        assignBackupStorageLocation(
-            environmentId: $environmentId,
-            backupStorageLocationId: $backupStorageLocationId
-        ) {
-            id
-        }
-    }
-"""
-
-unassign_bsl_mutation = """
-    mutation UnassignBSL($environmentId: UUID!) {
-        unassignBackupStorageLocation(environmentId: $environmentId) {
-            id
-        }
-    }
-"""
-
-list_bsls_query = """
-    query ListBSLs {
-        backupStorageLocations {
-            id
-            name
-            endpoint
-            bucket
-            region
-            environmentCount
-        }
-    }
-"""
-
-get_bsl_query = """
-    query GetBSL($backupStorageLocationId: UUID!) {
-        backupStorageLocation(backupStorageLocationId: $backupStorageLocationId) {
-            id
-            name
-            endpoint
-            bucket
-            region
-            createdOn
-            environmentCount
-        }
-    }
-"""
 
 DEFAULT_VARS = {
     "name": "p-bsl",
@@ -167,7 +66,10 @@ async def test_create_bsl_persists_all_credentials(
 ) -> None:
     response = await client.post(
         "/graphql",
-        json={"query": create_bsl_mutation, "variables": DEFAULT_VARS},
+        json={
+            "query": load_query("create_backup_storage_location"),
+            "variables": DEFAULT_VARS,
+        },
     )
     assert response.status_code == 200
     payload = response.json()
@@ -207,7 +109,7 @@ async def test_update_bsl_persists_field_changes(
     response = await client.post(
         "/graphql",
         json={
-            "query": update_bsl_mutation,
+            "query": load_query("update_backup_storage_location"),
             "variables": {
                 "backupStorageLocationId": str(bsl_id),
                 field: new_value,
@@ -237,7 +139,7 @@ async def test_update_bsl_credentials_dispatches_sync(
     response = await client.post(
         "/graphql",
         json={
-            "query": update_bsl_mutation,
+            "query": load_query("update_backup_storage_location"),
             "variables": {
                 "backupStorageLocationId": str(bsl_id),
                 "accessKeyId": "NEW-KEY",
@@ -269,7 +171,7 @@ async def test_delete_bsl_removes_row(
     response = await client.post(
         "/graphql",
         json={
-            "query": delete_bsl_mutation,
+            "query": load_query("delete_backup_storage_location"),
             "variables": {"backupStorageLocationId": str(bsl.id)},
         },
     )
@@ -293,7 +195,7 @@ async def test_assign_bsl_persists_link(
     response = await client.post(
         "/graphql",
         json={
-            "query": assign_bsl_mutation,
+            "query": load_query("assign_backup_storage_location"),
             "variables": {
                 "environmentId": str(env_id),
                 "backupStorageLocationId": str(bsl_id),
@@ -322,7 +224,7 @@ async def test_unassign_bsl_clears_link(
     response = await client.post(
         "/graphql",
         json={
-            "query": unassign_bsl_mutation,
+            "query": load_query("unassign_backup_storage_location"),
             "variables": {"environmentId": str(env_id)},
         },
     )
@@ -343,7 +245,9 @@ async def test_list_bsls_projects_seeded(
     await _seed_bsl(session, name="bsl-a")
     await _seed_bsl(session, name="bsl-b")
 
-    response = await client.post("/graphql", json={"query": list_bsls_query})
+    response = await client.post(
+        "/graphql", json={"query": load_query("list_backup_storage_locations")}
+    )
     assert response.status_code == 200
     payload = response.json()
     assert "errors" not in payload, payload
@@ -369,7 +273,7 @@ async def test_get_bsl_projects_all_fields_and_environment_count(
     response = await client.post(
         "/graphql",
         json={
-            "query": get_bsl_query,
+            "query": load_query("get_backup_storage_location"),
             "variables": {"backupStorageLocationId": str(bsl.id)},
         },
     )

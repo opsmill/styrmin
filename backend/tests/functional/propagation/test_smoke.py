@@ -14,7 +14,8 @@ from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import Cluster
-from tests.functional.helpers import create_cluster_query
+
+from ._queries import load_query
 
 
 @pytest.mark.asyncio
@@ -24,7 +25,7 @@ async def test_create_cluster_persists_to_db(
     response = await client.post(
         "/graphql",
         json={
-            "query": create_cluster_query,
+            "query": load_query("create_cluster"),
             "variables": {
                 "name": "smoke-cluster",
                 "config": {"runtime_class": "example_runtime_class"},

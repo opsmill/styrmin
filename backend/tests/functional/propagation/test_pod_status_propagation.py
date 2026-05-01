@@ -9,39 +9,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import PodPhase, PodStatus
 
+from ._queries import load_query
 from .seeds import seed_cluster, seed_deployment, seed_environment
-
-report_pod_statuses_mutation = """
-    mutation ReportPodStatuses($reports: [DeploymentPodStatusReport!]!) {
-        reportPodStatuses(reports: $reports) {
-            success
-            podsUpdated
-            podsRemoved
-        }
-    }
-"""
-
-list_pod_statuses_query = """
-    query ListPodStatuses(
-        $deploymentId: UUID,
-        $environmentId: UUID,
-        $clusterId: UUID
-    ) {
-        podStatuses(
-            deploymentId: $deploymentId,
-            environmentId: $environmentId,
-            clusterId: $clusterId
-        ) {
-            id
-            podName
-            namespace
-            phase
-            ready
-            restartCount
-            nodeName
-        }
-    }
-"""
 
 
 @pytest.mark.asyncio
@@ -66,7 +35,7 @@ async def test_report_pod_statuses_upserts_and_removes_stale(
     response = await client.post(
         "/graphql",
         json={
-            "query": report_pod_statuses_mutation,
+            "query": load_query("report_pod_statuses"),
             "variables": {
                 "reports": [
                     {
@@ -151,7 +120,7 @@ async def test_pod_statuses_filters_by_each_arg(
 
     response = await client.post(
         "/graphql",
-        json={"query": list_pod_statuses_query, "variables": variables},
+        json={"query": load_query("list_pod_statuses"), "variables": variables},
     )
     assert response.status_code == 200
     payload = response.json()
