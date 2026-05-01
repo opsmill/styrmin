@@ -225,7 +225,7 @@ Located in `actions/primitives.py`. These are Prefect `@task` functions that dri
 |-----------|-----------|-------------|
 | `stop_components` | `(components: list[str], context: GlobalContext)` | Calls internal GraphQL to disable components |
 | `start_components` | `(components: list[str], context: GlobalContext)` | Calls internal GraphQL to enable components |
-| `execute_commands` | `(commands: list[str], context: GlobalContext)` | Runs commands as a Kubernetes Job |
+| `execute_commands` | `(commands: list[str], image: str, context: GlobalContext, env_from_component: str \| None = None, labels_from_component: str \| None = None)` | Runs commands as a Kubernetes Job. `image` is required; the optional `*_from_component` arguments copy env vars and labels from a named component pod. |
 
 Drivers import these from `styrmin_backend.actions`:
 
@@ -244,7 +244,7 @@ User actions run in the Kubernetes work pool, meaning they execute as K8s Jobs w
 
 ## Setup Hooks - IMPLEMENTED
 
-The setup hook lifecycle is fully implemented for instance creation.
+The setup hook lifecycle is fully implemented for instance creation. Under the CRD-based flow ([ADR-008](../adr/adr-008-prefect-crd-intent-declaration.md)), Prefect no longer creates the HelmRelease directly — the kopf operator does, by reconciling the `StyrminDeployment` CRD that the flow writes. Driver pre/post hooks remain Prefect-managed.
 
 ### Remediation (`InstanceCreationStrategy`)
 
@@ -256,26 +256,30 @@ When a new deployment is created (no current instance):
    - `PrefectAction.CREATE_INSTANCE` flow
    - Setup pre-hook: `get_user_action_deployment_id(hook=SETUP, mode="pre")`
    - Setup post-hook: `get_user_action_deployment_id(hook=SETUP, mode="post")`
-   - Core hook: `get_action_deployment_id(CREATE_HELM_RELEASE)`
-4. Returns `Remediation(type=CREATE_INSTANCE, parameters={instance, corehook, prehook, posthook})`
+4. Reads the parent deployment's `internal` flag (e.g. for the ingress controller).
+5. Returns `Remediation(type=CREATE_INSTANCE, parameters={instance, prehook, posthook, internal})`. There is no separate "core HelmRelease hook" lookup — the CRD flow does not need one.
 
-### Orchestration (`create_instance` flow)
+### Orchestration (`create_instance_crd` flow)
 
-Execution order:
+The catalogue registers the CRD variant. Execution order:
 
 ```text
-1. Render Helm chart, repository, and release specs
-2. Run pre-hook (if exists)     ──> User's pre_setup function
-3. Run core hook                ──> CREATE_HELM_RELEASE (installs chart)
-4. Run post-hook (if exists)    ──> User's post_setup function
-5. Install utilities            ──> Helm releases for ingress, etc.
+1. Run pre-hook (if exists)             ──> User's pre_setup function
+2. Build StyrminDeployment CRD body from the resolved context
+3. Apply the deployment namespace with labels
+4. Upsert the StyrminDeployment CRD     ──> operator reconciles
+                                            NetworkPolicies, Secrets,
+                                            HelmRelease, Services,
+                                            Middlewares in ordered phases
+5. Apply cross-namespace service aliases (if any)
+6. Run post-hook (if exists)            ──> User's post_setup function
 ```
 
-The core hook for setup is an INTERNAL action (`CREATE_HELM_RELEASE`), not a user action. Pre/post hooks are user-defined and optional.
+Pre/post hooks are user-defined and optional. Utilities (ingress, service-discovery) are part of the CRD spec and are reconciled by the operator, not orchestrated as separate Helm releases by Prefect.
 
 ## Upgrade Hooks - IMPLEMENTED
 
-The upgrade hook lifecycle is fully implemented, mirroring the setup hook pattern with pre/core/post hooks.
+The upgrade hook lifecycle is fully implemented. Like setup, the CRD-based flow lets the operator reconcile resources; Prefect only runs the driver hooks and updates the CRD spec.
 
 ### Remediation (`InstanceUpdateStrategy`)
 
@@ -287,46 +291,48 @@ When an `InstanceUpdate` diff contains an `ApplicationVersionChange`, the strate
    - Driver version and application from the NEW instance
    - Upgrade core hook: `get_user_action_deployment_id(hook=UPGRADE, mode="core")`
    - If no core hook found → **falls back to regular update** (no error)
-   - If core hook found, also looks up:
+   - If core hook found, also looks up (in parallel):
      - `PrefectAction.UPGRADE_INSTANCE` flow
-     - `PrefectAction.UPDATE_HELM_RELEASE` flow
-     - `PrefectAction.APPLY_UTILITY_RESOURCES` flow
      - Upgrade pre-hook: `get_user_action_deployment_id(hook=UPGRADE, mode="pre")`
      - Upgrade post-hook: `get_user_action_deployment_id(hook=UPGRADE, mode="post")`
-4. Returns `Remediation(type=UPGRADE_INSTANCE, parameters={instance, upgrade_hook, update_flow, apply_utility_flow, target_version, prehook, posthook})`
+4. Returns `Remediation(type=UPGRADE_INSTANCE, parameters={instance, upgrade_hook, target_version, prehook, posthook})`. The CRD flow does not need separate `update_flow` / `apply_utility_flow` parameters — those concerns now live on the operator side.
 
-### Orchestration (`upgrade_instance` flow)
+### Orchestration (`upgrade_instance_crd` flow)
 
-Located in `agent/tasks/orchestration.py`:
+The catalogue registers the CRD variant. Located in `agent/tasks/orchestration.py`:
 
 ```python
-@flow(flow_run_name="Upgrade instance")
-async def upgrade_instance(
+@flow(flow_run_name="Upgrade instance (CRD)")
+async def upgrade_instance_crd(
     instance: Instance,
-    upgrade_hook: UUID,          # Prefect deployment ID for driver's core upgrade action
-    update_flow: UUID,           # UPDATE_HELM_RELEASE deployment ID
-    target_version: str,         # Application version being upgraded to
-    apply_utility_flow: UUID | None = None,  # APPLY_UTILITY_RESOURCES deployment ID
-    prehook: UUID | None = None, # Optional driver pre-upgrade hook
-    posthook: UUID | None = None,# Optional driver post-upgrade hook
+    upgrade_hook: UUID,           # Prefect deployment ID for driver's core upgrade action
+    target_version: str,          # Application version being upgraded to
+    prehook: UUID | None = None,  # Optional driver pre-upgrade hook
+    posthook: UUID | None = None, # Optional driver post-upgrade hook
 ) -> None
 ```
 
 Execution order:
 
 ```text
-1. Run pre-hook (if exists)     ──> User's pre-upgrade function
-2. Run core upgrade hook        ──> User's upgrade function (e.g., stop, migrate, start)
-3. Update utilities (parallel)  ──> Helm releases for each utility
-4. Update Helm release          ──> Sync chart values with new version
-5. Run post-hook (if exists)    ──> User's post-upgrade function
+1. Build and upsert StyrminDeployment CRD body (the new spec)
+2. Patch CRD status to displayState=Deploying / phase=Pending atomically
+   with the spec change so a stale "Running" displayState cannot race
+   the agent into reporting the new instance as already healthy.
+3. Run pre-hook (if exists)              ──> User's pre-upgrade function
+4. Run core upgrade hook                 ──> User's upgrade function
+                                              (e.g. stop, migrate, start)
+5. Apply cross-namespace service aliases (if any)
+6. Run post-hook (if exists)             ──> User's post-upgrade function
 ```
 
-The core hook for upgrade is a USER action (not internal), unlike setup where the core hook is `CREATE_HELM_RELEASE`. Pre/post hooks are also user-defined and optional.
+The CRD spec is written *before* the hooks run because driver upgrade hooks frequently call back into the server (e.g. `stop_components`, `upgrade_deployment_version`), and each callback spawns a nested `update_instance_crd` flow. Writing the CRD up front lets those nested updates layer correctly; writing it at the end would stomp them with this flow's older instance.
+
+The core hook for upgrade is a USER action (the driver's upgrade function). Pre/post hooks are also user-defined and optional.
 
 ### Fallback Behavior
 
-If no upgrade core hook is defined for the application version, the upgrade path is skipped entirely and the change is handled as a regular update via `_handle_update()`. This means drivers without upgrade actions still work — version changes just trigger a Helm release update.
+If no upgrade core hook is defined for the application version, `_handle_upgrade` returns `None` and the strategy falls back to `_handle_update()`, which returns `Remediation(type=UPDATE_INSTANCE, parameters={instance})`. The catalogue maps this to `update_instance_crd`, which simply rewrites the CRD spec and lets the operator reconcile the new HelmRelease. Drivers without upgrade actions still work; version changes just trigger a CRD-driven Helm release update.
 
 ## Key Files
 
@@ -340,5 +346,5 @@ If no upgrade core hook is defined for the application version, the upgrade path
 | [workflows/manager.py](backend/styrmin_backend/workflows/manager.py) | `register_user_action`, `get_user_action_deployment_id` |
 | [workflows/catalogue.py](backend/styrmin_backend/workflows/catalogue.py) | Workflow registry (UPGRADE_INSTANCE definition) |
 | [actions/primitives.py](backend/styrmin_backend/actions/primitives.py) | `stop_components`, `start_components`, `execute_commands` |
-| [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | `create_instance`, `upgrade_instance` flows |
+| [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | `create_instance_crd`, `update_instance_crd`, `upgrade_instance_crd` flows |
 | [services/reconciliation/remediation.py](backend/styrmin_backend/services/reconciliation/remediation.py) | `InstanceCreationStrategy`, `InstanceUpdateStrategy` |
