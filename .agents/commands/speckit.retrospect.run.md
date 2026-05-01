@@ -3,6 +3,7 @@ description: Run a session retrospective that surfaces context-management gaps a
   routes them to approved follow-up actions.
 ---
 
+
 <!-- Extension: retrospect -->
 <!-- Config: .specify/extensions/retrospect/ -->
 ## User Input

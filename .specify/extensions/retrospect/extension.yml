@@ -18,7 +18,6 @@ provides:
     - name: "speckit.retrospect.run"
       file: "commands/retrospect.md"
       description: "Run a session retrospective that surfaces context-management gaps"
-      aliases: ["speckit.retrospect"]
 
 tags:
   - "retrospective"

@@ -6,15 +6,14 @@ A [spec-kit](https://github.com/github/spec-kit) extension that runs a session r
 
 Agent sessions often uncover missing instructions, stale docs, weak templates, or architecture friction while the full session history is still fresh. Without a structured closeout step, those observations are easy to lose or keep as private notes instead of improving the shared repository.
 
-`spec-kit-retrospect` provides `/speckit.retrospect.run` and the shorter `/speckit.retrospect` alias, a read-only-first workflow that reports findings, assigns dispositions, and waits for approval before writing files, creating issues, or preparing PR work.
+`spec-kit-retrospect` provides `/speckit.retrospect.run`, a read-only-first workflow that reports findings, assigns dispositions, and waits for approval before writing files, creating issues, or preparing PR work.
 
 ## How It Works
 
-The extension provides one primary command and one alias:
+The extension provides a single command:
 
 ```text
 /speckit.retrospect.run [optional focus area]
-/speckit.retrospect [optional focus area]
 ```
 
 The command:
@@ -42,8 +41,7 @@ specify extension add /path/to/spec-kit-retrospect --dev
 
 ```text
 /speckit.retrospect.run
-/speckit.retrospect
-/speckit.retrospect focus on GraphQL propagation friction
+/speckit.retrospect.run focus on GraphQL propagation friction
 ```
 
 ## Report Location
