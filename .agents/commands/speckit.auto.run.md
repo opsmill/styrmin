@@ -20,11 +20,13 @@ You are running the **full speckit pipeline** end-to-end. The user's input (abov
 
 Execute every phase below **in order**, making all decisions autonomously. Do not stop to ask the user for input between phases — if a phase requires choices (e.g., clarification questions in specify, research decisions in plan), use your best judgment and proceed. The user expects a hands-off, one-shot execution.
 
-After **each phase**, invoke `/speckit.checkpoint.commit` to commit the artifacts produced by that phase before moving on.
+After **each phase**, invoke the `speckit-checkpoint-commit` skill to commit the artifacts produced by that phase before moving on.
+
+> Each phase below is executed by invoking the named skill (e.g. via the agent's Skill tool). Skills are agent-agnostic, so this workflow runs identically across any harness that supports skill discovery — not only those exposing speckit slash commands.
 
 ### Phase 1 — Specify
 
-Invoke `/speckit.specify` with the user's feature description (`$ARGUMENTS`).
+Invoke the `speckit-specify` skill with the user's feature description (`$ARGUMENTS`).
 
 - Complete the full specify workflow: generate a short name, create the spec directory, write `spec.md`, run quality checks.
 - If clarification questions arise, answer them yourself based on context and best judgment — do **not** pause for user input.
@@ -32,7 +34,7 @@ Invoke `/speckit.specify` with the user's feature description (`$ARGUMENTS`).
 
 ### Phase 2 — Plan
 
-Invoke `/speckit.plan`.
+Invoke the `speckit-plan` skill.
 
 - Complete the full plan workflow: research unknowns, generate `plan.md`, `research.md`, `data-model.md`, API contracts, `quickstart.md`.
 - Make all design decisions autonomously.
@@ -40,15 +42,15 @@ Invoke `/speckit.plan`.
 
 ### Phase 3 — Tasks
 
-Invoke `/speckit.tasks`.
+Invoke the `speckit-tasks` skill.
 
 - Generate the full `tasks.md` with dependency-ordered, actionable tasks.
-- Skip the optional analysis (`speckit.analyze`) unless something looks inconsistent — use your judgment.
+- Skip the optional `speckit-analyze` skill unless something looks inconsistent — use your judgment.
 - Commit the tasks artifact.
 
 ### Phase 4 — Implement
 
-Invoke `/speckit.implement`.
+Invoke the `speckit-implement` skill.
 
 - Execute all tasks from `tasks.md` phase by phase.
 - Commit at natural implementation checkpoints (after each task or logical group of tasks).
@@ -57,7 +59,7 @@ Invoke `/speckit.implement`.
 
 ### Phase 5 — Review
 
-Invoke `/speckit.review`.
+Invoke the `speckit-review-run` skill.
 
 - Run the comprehensive review across all enabled agents.
 - For any findings rated **high severity or above**, fix them immediately and commit the fixes.
@@ -65,7 +67,7 @@ Invoke `/speckit.review`.
 
 ### Phase 6 — Extract
 
-Invoke `/speckit.extract.run`.
+Invoke the `speckit-extract-run` skill.
 
 - Extract ADRs, knowledge, and guidelines from the completed spec into `dev/`.
 - Commit the extracted documentation.
