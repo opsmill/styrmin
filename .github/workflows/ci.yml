@@ -197,17 +197,19 @@ jobs:
         working-directory: frontend
       - name: Install Helm (needed by helm-lint hooks)
         uses: azure/setup-helm@v4
-      - name: Cache pre-commit environments
+      - name: Install prek
+        uses: j178/setup-prek@v1
+      - name: Cache prek environments
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml', 'uv.lock', 'frontend/pnpm-lock.yaml') }}
+          path: ~/.cache/prek
+          key: prek-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml', 'uv.lock', 'frontend/pnpm-lock.yaml') }}
           restore-keys: |
-            pre-commit-${{ runner.os }}-
+            prek-${{ runner.os }}-
       - name: Run pre-commit hooks (pre-commit stage)
-        run: uv run pre-commit run --all-files --show-diff-on-failure
+        run: prek run --all-files --show-diff-on-failure
       - name: Run pre-commit hooks (pre-push stage)
-        run: uv run pre-commit run --hook-stage pre-push --all-files --show-diff-on-failure
+        run: prek run --hook-stage pre-push --all-files --show-diff-on-failure
 
   frontend-lint:
     name: Frontend Linting

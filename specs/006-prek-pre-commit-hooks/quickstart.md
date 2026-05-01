@@ -5,25 +5,19 @@ This is the contributor-facing onboarding flow once this feature ships.
 ## First time on a fresh clone
 
 ```bash
-# 1. Install Python and JS dependencies (existing prerequisite — not specific to this feature).
+# 1. Install prek (required).
+brew install j178/prek/prek                                                            # macOS
+curl -LsSf https://github.com/j178/prek/releases/latest/download/prek-installer.sh | sh # Linux
+
+# 2. Install Python and JS dependencies (existing prerequisite — not specific to this feature).
 uv sync --all-groups --all-packages
 cd frontend && pnpm install --frozen-lockfile && cd ..
 
-# 2. Install the git hooks (this feature).
+# 3. Install the git hooks (this feature).
 uv run invoke pre-commit-install
 ```
 
 That's it. From the next commit onward, the configured checks will run automatically.
-
-### Optional: install `prek` for faster local runs
-
-```bash
-# macOS / Linux — see https://github.com/j178/prek for the latest install command.
-brew install j178/prek/prek         # macOS
-curl -LsSf https://github.com/j178/prek/releases/latest/download/prek-installer.sh | sh   # Linux
-```
-
-If `prek` is on your `PATH`, the invoke tasks pick it up automatically. Nothing else changes.
 
 ## Day-to-day
 
@@ -61,7 +55,7 @@ Use sparingly. CI will still run all the per-tool jobs and fail the PR if anythi
 - **Stale hook environment** (after a tool version bump):
 
   ```bash
-  uv run pre-commit clean
+  prek clean
   uv run invoke pre-commit-install
   ```
 

@@ -25,21 +25,6 @@ A contributor edits Python, frontend, or YAML files and runs `git commit`. Befor
 
 ---
 
-### User Story 2 — Drop-in compatibility with `pre-commit` for contributors who can't install `prek` (Priority: P1)
-
-A contributor who already has the `pre-commit` Python tool installed (or cannot install Rust binaries on their machine) clones the repo, runs `pre-commit install`, and gets exactly the same enforcement that `prek` users get.
-
-**Why this priority**: Forcing every contributor onto a new tool is friction we don't need. The config format is identical, so supporting both runners is essentially free if we avoid prek-only features. This must be P1 because failing to support `pre-commit` would split the team or block adoption.
-
-**Independent Test**: From a fresh clone, run `pre-commit install` (without `prek`). Make a clean and a dirty commit and confirm both behave the same as with `prek`.
-
-**Acceptance Scenarios**:
-
-1. **Given** a contributor has only `pre-commit` installed, **When** they run `pre-commit run --all-files`, **Then** every hook executes and produces the same pass/fail result as `prek run --all-files` would.
-2. **Given** the `.pre-commit-config.yaml` is updated, **When** a contributor pulls and runs either runner, **Then** the new hooks are picked up without manual intervention beyond `prek install`/`pre-commit install` if hook stages changed.
-
----
-
 ### User Story 3 — CI parity job that runs the same hooks (Priority: P2)
 
 The CI pipeline runs `prek run --all-files` on every PR, so the hook config itself is enforced and stays in sync with whatever local contributors run.
@@ -103,22 +88,22 @@ Expensive checks (full GraphQL schema regeneration, full SDK + frontend type reg
 #### Hook configuration
 
 - **FR-001**: The repository MUST contain a `.pre-commit-config.yaml` at the root that defines all mandatory pre-commit and pre-push hooks for the project.
-- **FR-002**: The hook config MUST cover every mandatory check currently enforced in `.github/workflows/ci.yml`: Python format check (`ruff format --check`), Python lint (`ruff check`), Python type check (`ty`), YAML lint (`yamllint`), Markdown lint (`markdownlint`), frontend lint (ESLint/Prettier via `pnpm lint`), GraphQL operations validation (`uv run invoke validate-graphql`), GraphQL schema freshness (`schema.graphql` matches `styrmin export graphql-schema`), generated SDK + frontend type freshness, and Helm chart lint.
+- **FR-002**: The hook config MUST cover every mandatory check currently enforced in `.github/workflows/ci.yml`: Python format check (`ruff format --check`), Python lint (`ruff check`), Python type check (`ty`), YAML lint (`yamllint`), Markdown lint (the project uses `rumdl`), frontend lint (ESLint/Prettier via `pnpm lint`), GraphQL operations validation (`uv run invoke validate-graphql`), GraphQL schema freshness (`schema.graphql` matches `styrmin export graphql-schema`), generated SDK + frontend type freshness, and Helm chart lint.
 - **FR-003**: The hook config MUST include standard hygiene hooks: trailing-whitespace, end-of-file-fixer, large-files guard, merge-conflict marker detection, and a basic secrets scan.
 - **FR-004**: Every hook MUST be scoped via `files:` and/or `exclude:` patterns so it runs only on files it can meaningfully check (e.g., Python hooks skip frontend files, frontend lint skips Python files, generated directories are excluded).
 - **FR-005**: Hooks whose runtime exceeds an acceptable per-commit budget — specifically the GraphQL schema freshness check and the generated-type freshness check — MUST be assigned to `stages: [pre-push]` (or `manual`) so they do not run on every commit.
-- **FR-006**: The hook config format MUST be valid for both `prek` and upstream `pre-commit`; no prek-only extensions may be used.
+- **FR-006**: The hook config MUST use only standard `.pre-commit-config.yaml` syntax (no prek-only extensions). This keeps the format portable in case the project ever revisits the runner choice.
 
 #### Tooling and onboarding
 
 - **FR-007**: An invoke task MUST exist to install the git hooks (e.g., `uv run invoke pre-commit-install`) and another to run them against all files (e.g., `uv run invoke pre-commit-run`).
 - **FR-008**: The invoke install task MUST install hooks for every relevant stage (`pre-commit` and `pre-push`).
-- **FR-009**: The invoke tasks MUST work whether the contributor has `prek`, `pre-commit`, or both installed, preferring `prek` when available and falling back to `pre-commit` otherwise. If neither is available, the task MUST fail with a clear pointer to install instructions.
+- **FR-009**: The invoke tasks MUST shell out to `prek`. If `prek` is not on PATH, the task MUST fail fast with a clear pointer to install instructions (no silent fallback).
 - **FR-010**: `AGENTS.md` MUST be updated so the "Always Do" section instructs contributors to install hooks once after cloning, and a contributor-facing note MUST describe how (and when) to bypass hooks via `git commit --no-verify`.
 
 #### CI integration
 
-- **FR-011**: A new CI job MUST run `prek run --all-files` (or `pre-commit run --all-files` if prek is unavailable in the runner) on every pull request.
+- **FR-011**: A new CI job MUST run `prek run --all-files` on every pull request, for both the `pre-commit` and `pre-push` stages.
 - **FR-012**: The pre-commit CI job MUST fail the PR check suite if any hook fails, with the same exit semantics as the per-tool jobs.
 - **FR-013**: The pre-commit CI job MUST run in addition to the existing per-tool jobs initially. Whether to dedupe (remove redundant per-tool jobs) is a follow-up decision once the new job has demonstrated stable parity; if the team chooses to keep both, the rationale MUST be documented in the CI workflow.
 - **FR-014**: The pre-commit CI job MUST cache hook environments between runs so cold-start cost is paid at most once per dependency change.
@@ -133,7 +118,7 @@ Expensive checks (full GraphQL schema regeneration, full SDK + frontend type reg
 - **`.pre-commit-config.yaml`**: The single declarative source of truth for what "clean" means. Each entry pairs a hook id (from a published or local repo) with file globs, excludes, optional args, and a stage.
 - **Mandatory check set**: The list of checks the project considers blocking — currently encoded across CI jobs and the `lint` invoke task. After this feature ships, the hook config is the canonical list and CI/invoke must agree with it.
 - **Hook stage (`pre-commit` vs `pre-push` vs `manual`)**: The lifecycle gate at which a hook fires. Fast hooks fire on commit; slow hooks fire on push or only when explicitly invoked.
-- **Hook runner (`prek` or `pre-commit`)**: The tool that interprets the config and executes hooks. Both must produce identical pass/fail results on the same config.
+- **Hook runner (`prek`)**: The tool that interprets the config and executes hooks. Required on every contributor's machine and on the CI runner.
 
 ## Success Criteria *(mandatory)*
 
@@ -147,8 +132,8 @@ Expensive checks (full GraphQL schema regeneration, full SDK + frontend type reg
 
 ## Assumptions
 
-- Contributors already have `uv` and `pnpm` installed (these are existing project prerequisites).
-- The CI runner can install `prek` (or fall back to `pre-commit`) without significant friction; either binary install or `pip install pre-commit` is acceptable.
+- Contributors already have `uv` and `pnpm` installed (these are existing project prerequisites). `prek` is added as a new prerequisite, installed out-of-band via `brew`, the project's release tarball, or a distro package.
+- The CI runner installs `prek` via the official `j178/setup-prek` GitHub Action.
 - Generated directories (`python_sdk/src/styrmin_sdk/graphql/_generated/`, frontend GraphQL generated types, build artifacts) are well-known and stable enough to add to `exclude` patterns up front.
 - The existing per-tool CI jobs remain in place for at least one release cycle after this feature ships, to validate parity before any deduplication.
 - The acceptable per-commit time budget is "fast enough that contributors do not routinely use `--no-verify`". Ten seconds is the working target; checks that exceed this go to `pre-push`.

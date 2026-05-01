@@ -1,6 +1,6 @@
 ---
-# Pre-commit hook configuration for Styrmin. See dev/guides/pre-commit-hooks.md.
-# Works with both prek and pre-commit; no prek-only extensions.
+# Pre-commit hook configuration for Styrmin. Run via prek.
+# See dev/guides/pre-commit-hooks.md.
 
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]

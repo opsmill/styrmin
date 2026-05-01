@@ -141,7 +141,7 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 
 ### Always Do
 
-- Install the pre-commit hooks once after cloning (`uv run invoke pre-commit-install`). Hooks run the project's mandatory checks locally before each commit; see `dev/guides/pre-commit-hooks.md`.
+- Install the pre-commit hooks once after cloning (`uv run invoke pre-commit-install`). Requires `prek` on PATH. Hooks run the project's mandatory checks locally before each commit; see `dev/guides/pre-commit-hooks.md`.
 - Run formatters before committing (`uv run invoke format lint`)
 - Regenerate `schema.graphql` after any GraphQL schema change (`uv run styrmin export graphql-schema schema.graphql`)
 - Regenerate SDK types after any GraphQL schema or query change (`uv run invoke generate`)

@@ -1,19 +1,20 @@
 # Phase 0 — Research
 
-## R1. Hook runner: prek vs pre-commit
+## R1. Hook runner: prek (only)
 
-**Decision**: Use `prek` as the **recommended** runner; support `pre-commit` (upstream Python tool) as an officially-tested fallback. The hook config format is a strict subset that works on both.
+**Decision**: Use `prek` as the sole runner, both locally and in CI. The config uses standard `.pre-commit-config.yaml` syntax with no prek-only extensions, so the format remains portable.
 
 **Rationale**:
-- `prek` is a drop-in reimplementation in Rust with parallel hook execution and no per-hook Python virtualenv bootstrap, so the per-commit latency target (≤10 s) is realistic.
-- The config syntax is identical, so there is no lock-in.
-- Some contributors (corporate machines, restricted shells) will not be able to install `prek`. Falling back to `pre-commit` keeps them productive.
-- CI uses `pre-commit` (installed via `uv`) for reproducibility — `prek` requires fetching a binary from GitHub releases, which adds a network failure mode we don't need on the runner. Local users benefit from the speed; CI is not latency-sensitive.
+- `prek` is a Rust reimplementation of pre-commit with parallel hook execution and no per-hook Python virtualenv bootstrap, so the per-commit latency target (≤10 s) is realistic.
+- One runner everywhere means no `_resolve_runner` branching, no version-skew between two implementations, and one fewer dev dependency.
+- For this team the inclusion concern (contributors who can't install Rust binaries) is theoretical; the cost of dual-runner support is real.
+
+**Initial draft and reversal**: An earlier version of this research supported `pre-commit` (Python) as an interchangeable fallback. The reversal is documented in ADR-014; the spec's FR-006/FR-009 reflect the final decision.
 
 **Alternatives considered**:
-- *prek only*: rejected — locks out contributors who can't install Rust binaries.
+- *Dual-runner support (prek + pre-commit)*: rejected on simplicity grounds. Documented in ADR-014.
 - *pre-commit only*: rejected — too slow per-commit; defeats the "fast feedback" motivation of the feature.
-- *Custom invoke script that wraps the same checks*: rejected — duplicates the declarative config that pre-commit / prek already provide; we'd lose the published-hook ecosystem (e.g., `pre-commit-hooks` for hygiene checks).
+- *Custom invoke script that wraps the same checks*: rejected — duplicates the declarative config that prek already provides; we'd lose the published-hook ecosystem (e.g., `pre-commit-hooks` for hygiene checks).
 
 ## R2. Which hooks to enable, and at which stage
 
@@ -51,18 +52,18 @@
 - *No pinning*: rejected — non-reproducible builds.
 - *Pin via `pre-commit autoupdate` cron*: deferred to a follow-up. We can add a routine later that bumps the pins via PR.
 
-## R4. CI installation: `pre-commit` via uv vs `prek` binary
+## R4. CI installation: `prek` via setup-prek action
 
-**Decision**: CI installs `pre-commit` from `[dependency-groups].dev` via `uv sync` (same path as the existing per-tool jobs use to get `ruff`/`yamllint`/`rumdl`). The CI job runs `uv run pre-commit run --all-files`.
+**Decision**: CI installs `prek` via the official `j178/setup-prek@v1` GitHub Action and runs `prek run --all-files` for both stages.
 
 **Rationale**:
-- `uv sync` is already on the critical path of every CI job that needs Python tools — adding `pre-commit` to the dev group costs ~zero extra time.
-- Using `pre-commit` (not `prek`) on CI means we test the Python runner — the *fallback* path. If `pre-commit` works, `prek` (which is a drop-in clone of the same config grammar) will also work for any contributor who chooses it locally.
-- We avoid an extra "fetch GitHub release of prek" step that could fail in restricted runner environments.
+- Using the same runner in CI as locally means CI exercises the exact path contributors hit, and parity is by construction.
+- The setup-prek action handles platform detection, version pinning, and caching; an inline `curl` of the release tarball is also possible but is more code to maintain.
+- Adopting the third-party action is a small supply-chain dependency, judged acceptable given the simplicity gain over dual-runner support.
 
 **Alternatives considered**:
-- *Install `prek` on CI*: rejected — adds a moving piece (binary fetch from GitHub releases) without measurable benefit on a runner that runs once and is throwaway.
-- *Use the official `pre-commit/action` GitHub Action*: rejected — we already have `uv sync` running; adding a third-party action is unnecessary surface.
+- *Inline `curl` of the prek release tarball*: viable; rejected for cosmetic reasons (more YAML, manual platform branching). Trivial to switch to if the action ever becomes unavailable.
+- *Use `pre-commit` (Python) on CI as a fallback*: rejected — see R1.
 
 ## R5. Caching the pre-commit environment in CI
 
@@ -93,10 +94,10 @@
 
 **Decision**: Add two tasks under the new `tasks/pre_commit.py` module:
 
-- `pre-commit-install` — installs git hooks for both the `pre-commit` and `pre-push` stages. Tries `prek install --hook-type pre-commit --hook-type pre-push` first; falls back to `uv run pre-commit install --hook-type pre-commit --hook-type pre-push`.
-- `pre-commit-run` — runs all hooks against all files. Tries `prek run --all-files` first; falls back to `uv run pre-commit run --all-files`.
+- `pre-commit-install` — installs git hooks for both the `pre-commit` and `pre-push` stages. Shells out to `prek install` (which honours `default_install_hook_types: [pre-commit, pre-push]` from the YAML).
+- `pre-commit-run` — runs all hooks against all files. Shells out to `prek run --all-files`.
 
-**Rationale**: Mirrors the existing `format` / `lint` task pattern (one verb, one entry point). Auto-detecting `prek` keeps power users on the fast path without forcing it.
+**Rationale**: Mirrors the existing `format` / `lint` task pattern (one verb, one entry point). The wrapper short-circuits with a clear install hint if `prek` is missing, keeping the failure mode obvious instead of cryptic.
 
 **Alternatives considered**:
 - *Single `pre-commit` task with subcommands*: invoke doesn't model subcommands as cleanly as separate `@task` entries; reject for consistency with rest of `tasks/`.

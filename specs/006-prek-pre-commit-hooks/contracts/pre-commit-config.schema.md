@@ -56,13 +56,14 @@ The following hooks MUST be present in `.pre-commit-config.yaml` and assigned to
 
 ## CI invocation contract
 
-The CI job in `.github/workflows/ci.yml` MUST invoke the runner via:
+The CI job in `.github/workflows/ci.yml` MUST install `prek` via `j178/setup-prek@v1` and invoke it via:
 
 ```text
-uv run pre-commit run --all-files --show-diff-on-failure
+prek run --all-files --show-diff-on-failure                            # pre-commit stage
+prek run --hook-stage pre-push --all-files --show-diff-on-failure      # pre-push stage
 ```
 
-It MUST cache `~/.cache/pre-commit` keyed on `${{ hashFiles('.pre-commit-config.yaml') }}`.
+It MUST cache `~/.cache/prek` keyed on `${{ hashFiles('.pre-commit-config.yaml', 'uv.lock', 'frontend/pnpm-lock.yaml') }}`.
 
 ## Invoke task contract
 
@@ -73,11 +74,9 @@ Two tasks are exposed under the project's existing `invoke` namespace:
 
 Both tasks MUST:
 
-1. Prefer `prek` if it is on PATH.
-2. Fall back to `uv run pre-commit ...` otherwise.
-3. Exit non-zero with a clear instruction if neither runner is available.
+1. Shell out to `prek`.
+2. If `prek` is not on PATH, exit non-zero with a clear pointer to the install instructions in `dev/guides/pre-commit-hooks.md`. No silent fallback.
 
 ## Backwards-compatibility commitments
 
-- The hook config MUST remain valid for both `prek` (latest stable) and `pre-commit` (latest stable, as pinned in `pyproject.toml`'s dev group).
-- No prek-only YAML extensions may be used.
+- The hook config MUST use only standard `.pre-commit-config.yaml` syntax (no prek-only YAML extensions). This keeps the format portable in case the project ever revisits the runner choice.

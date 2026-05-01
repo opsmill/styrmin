@@ -48,8 +48,8 @@ A new Python module with two `@task` entries, registered in `tasks/__init__.py`:
 
 | Task | Purpose | Behaviour |
 |---|---|---|
-| `pre-commit-install` | Install git hooks for `pre-commit` and `pre-push` stages. | Detect `prek` on PATH; if present, run `prek install --hook-type pre-commit --hook-type pre-push`. Else run `uv run pre-commit install --hook-type pre-commit --hook-type pre-push`. If neither runner is available, exit non-zero with a pointer to the install instructions. |
-| `pre-commit-run` | Run all hooks against the entire repo. | Same detection logic; runs `<runner> run --all-files`. |
+| `pre-commit-install` | Install git hooks for `pre-commit` and `pre-push` stages. | Shells out to `prek install` (which honours `default_install_hook_types` from the YAML). If `prek` is not on PATH, exit non-zero with a pointer to the install instructions. |
+| `pre-commit-run` | Run all hooks against the entire repo. | Shells out to `prek run --all-files`. Same `prek`-required failure path. |
 
 **Type contract**: Both functions accept `(context: Context)` and return `None`. They use `# noqa: ARG001` because they don't read `context` directly — they shell out via the project's `print_header`/`context.run` helpers, matching `tasks/format.py`.
 
@@ -62,7 +62,7 @@ A new job alongside the existing per-tool jobs:
 | `name` | `Pre-Commit Hooks` |
 | `runs-on` | `ubuntu-latest` |
 | `timeout-minutes` | `10` (covers cold-cache install + run) |
-| `steps` | 1) checkout, 2) setup Python 3.14, 3) `uv sync`, 4) restore `~/.cache/pre-commit` cache keyed on `.pre-commit-config.yaml` hash, 5) `uv run pre-commit run --all-files --show-diff-on-failure`, 6) save cache. |
+| `steps` | 1) checkout, 2) setup Python 3.14 + uv + `uv sync --all-packages` (so the local hooks shelling out via `uv run` find their tools), 3) setup pnpm + Node + `pnpm install` in `frontend/` (for `frontend-lint`), 4) setup Helm (for `helm-lint-*`), 5) install `prek` via `j178/setup-prek@v1`, 6) restore `~/.cache/prek` cache keyed on `.pre-commit-config.yaml` + `uv.lock` + `frontend/pnpm-lock.yaml`, 7) `prek run --all-files --show-diff-on-failure`, 8) `prek run --hook-stage pre-push --all-files --show-diff-on-failure`, 9) save cache. |
 
 The job runs on every `pull_request` and on `push` to `develop` (matches the existing CI triggers).
 
@@ -86,11 +86,11 @@ A standalone contributor-facing reference covering:
 ```text
 .pre-commit-config.yaml  <-- single source of truth
    │
-   ├── consumed by:  prek (preferred) or pre-commit (fallback)
+   ├── consumed by:  prek (the only supported runner)
    │
    ├── invoked by:   tasks/pre_commit.py  ───► uv run invoke pre-commit-{install,run}
    │
-   └── enforced by:  .github/workflows/ci.yml ::pre-commit-hooks job (uv run pre-commit run --all-files)
+   └── enforced by:  .github/workflows/ci.yml ::pre-commit-hooks job (prek run --all-files, both stages)
 
 AGENTS.md (Always Do)  ───►  points contributors to dev/guides/pre-commit-hooks.md
 ```

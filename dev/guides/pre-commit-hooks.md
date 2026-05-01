@@ -1,6 +1,6 @@
 # Pre-Commit Hooks
 
-This project enforces its mandatory lint, format, and validation checks locally via [pre-commit](https://pre-commit.com/) hooks. The same hook config is also enforced on every PR by the CI `Pre-Commit Hooks` job, so what runs on your machine matches what runs in CI.
+This project enforces its mandatory lint, format, and validation checks locally via [prek](https://github.com/j178/prek) — a fast, Rust-based runner for the standard `.pre-commit-config.yaml` format. The same hook config is also enforced on every PR by the CI `Pre-Commit Hooks` job, so what runs on your machine matches what runs in CI.
 
 ## Why
 
@@ -8,24 +8,23 @@ Without local hooks, contributors regularly push commits that fail `ruff`, `yaml
 
 ## Install
 
-After cloning and running `uv sync --all-groups --all-packages` and `cd frontend && pnpm install`:
+First-time setup on a fresh clone:
 
 ```bash
+# 1. Install prek (one of these).
+brew install j178/prek/prek                                                            # macOS
+curl -LsSf https://github.com/j178/prek/releases/latest/download/prek-installer.sh | sh # Linux
+# Or fetch the binary directly from https://github.com/j178/prek/releases.
+
+# 2. Install Python and JS dependencies.
+uv sync --all-groups --all-packages
+cd frontend && pnpm install --frozen-lockfile && cd ..
+
+# 3. Install the git hooks.
 uv run invoke pre-commit-install
 ```
 
-This installs git hooks for both the `pre-commit` and `pre-push` stages.
-
-### Optional: install `prek` for faster runs
-
-[`prek`](https://github.com/j178/prek) is a Rust-based drop-in reimplementation of `pre-commit`. It runs hooks in parallel and skips the per-hook Python virtualenv bootstrap, so local commits are noticeably faster.
-
-```bash
-brew install j178/prek/prek    # macOS
-# or fetch the binary from https://github.com/j178/prek/releases
-```
-
-If `prek` is on `PATH`, the invoke tasks pick it up automatically. Nothing else changes — the same `.pre-commit-config.yaml` works for both runners.
+That's it. From the next commit onward, the configured checks run automatically. The invoke task installs hooks for both the `pre-commit` and `pre-push` stages.
 
 ## What runs and when
 
@@ -91,18 +90,19 @@ Not acceptable: skipping hooks because "the lint failure is annoying". Fix it. C
 
 ## Troubleshooting
 
-- **"command not found: pnpm/helm"** — install the missing system tool. Pre-commit doesn't manage system binaries; see the project's `AGENTS.md` for prerequisites.
+- **"command not found: prek"** — install prek (see [Install](#install) above).
+- **"command not found: pnpm/helm"** — install the missing system tool; prek doesn't manage system binaries. See the project's `AGENTS.md` for prerequisites.
 - **Frontend lint fails with `eslint: command not found`** — run `cd frontend && pnpm install --frozen-lockfile` first.
 - **`ty` reports unresolved imports for workspace packages** — run `uv sync --all-packages` (not just `uv sync`) so the workspace members are installed editably.
 - **Stale hook environment after a tool version bump**:
 
   ```bash
-  uv run pre-commit clean
+  prek clean
   uv run invoke pre-commit-install
   ```
 
 - **"works locally, fails in CI"** — usually a generated-file drift. Run `uv run invoke generate` and `uv run styrmin export graphql-schema schema.graphql`, commit the result, push.
-- **Hook output is unclear** — run the hook in isolation with `uv run pre-commit run <hook-id> --all-files --verbose` to see the exact command and its full output.
+- **Hook output is unclear** — run the hook in isolation with `prek run <hook-id> --all-files --verbose` to see the exact command and its full output.
 
 ## Reference
 
@@ -110,4 +110,4 @@ Not acceptable: skipping hooks because "the lint failure is annoying". Fix it. C
 - Invoke wrappers: [`tasks/pre_commit.py`](../../tasks/pre_commit.py)
 - CI job: `pre-commit-hooks` in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
 - Spec: [`specs/006-prek-pre-commit-hooks/`](../../specs/006-prek-pre-commit-hooks/)
-- Upstream docs: <https://pre-commit.com/> and <https://github.com/j178/prek>
+- Upstream: <https://github.com/j178/prek> (runner) and <https://pre-commit.com/> (config-format reference)

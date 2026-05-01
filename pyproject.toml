@@ -47,7 +47,6 @@ dev = [
     "rumdl>=0.1.50",
     "ariadne-codegen>=0.14",
     "ty>=0.0.24",
-    "pre-commit>=3.7,<5.0",
 ]
 
 [tool.ty]
