@@ -1,0 +1,23 @@
+mutation CreateBackupStorageLocation(
+    $name: String!,
+    $endpoint: String!,
+    $bucket: String!,
+    $region: String!,
+    $accessKeyId: String!,
+    $secretAccessKey: String!
+) {
+    createBackupStorageLocation(
+        name: $name,
+        endpoint: $endpoint,
+        bucket: $bucket,
+        region: $region,
+        accessKeyId: $accessKeyId,
+        secretAccessKey: $secretAccessKey
+    ) {
+        id
+        name
+        endpoint
+        bucket
+        region
+    }
+}

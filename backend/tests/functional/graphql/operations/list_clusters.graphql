@@ -1,0 +1,13 @@
+query ListClusters {
+    clusters {
+        id
+        name
+        config
+        createdOn
+        updatedOn
+        environments {
+            id
+            name
+        }
+    }
+}

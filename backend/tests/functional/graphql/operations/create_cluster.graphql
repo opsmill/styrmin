@@ -1,0 +1,7 @@
+mutation CreateCluster($name: String!, $config: JSON) {
+    createCluster(name: $name, config: $config) {
+        id
+        name
+        config
+    }
+}

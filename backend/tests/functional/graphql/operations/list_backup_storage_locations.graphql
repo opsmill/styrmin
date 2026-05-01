@@ -1,0 +1,10 @@
+query ListBackupStorageLocations {
+    backupStorageLocations {
+        id
+        name
+        endpoint
+        bucket
+        region
+        environmentCount
+    }
+}

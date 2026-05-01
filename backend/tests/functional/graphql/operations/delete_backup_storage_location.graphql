@@ -1,0 +1,3 @@
+mutation DeleteBackupStorageLocation($backupStorageLocationId: UUID!) {
+    deleteBackupStorageLocation(backupStorageLocationId: $backupStorageLocationId)
+}

@@ -51,22 +51,82 @@ must prove the value reached the database.
 
 ## Test Location
 
-Place propagation tests under `backend/tests/unit/api/` (or
-`backend/tests/functional/` if the test drives the GraphQL HTTP endpoint
-end-to-end against an in-memory database). The existing functional API tests
-in `backend/tests/functional/test_api.py` are good reference points: they
-boot the ASGI app with an SQLite session and POST GraphQL queries against
-it.
+Place propagation tests under `backend/tests/functional/graphql/`. The
+package is dedicated to Constitution §V coverage and ships a `conftest.py`
+with `session`, `client`, and `prefect_manager_mock` fixtures, a
+`seeds.py` module with helpers for building minimum-viable persisted
+graphs, and a `graphql/` directory for the operation files (see next
+section).
+
+Resolver-direct tests under `backend/tests/unit/api/` are acceptable when
+there is a documented reason to bypass the Strawberry transport, but they
+are the exception. Default to the HTTP-driven recipes below.
+
+## GraphQL operation files (no inline strings)
+
+Every GraphQL operation used by a propagation test MUST live in its own
+`.graphql` file and be loaded via the `load_query` helper. Inline GraphQL
+strings inside a test module are not allowed — they bypass
+`uv run invoke validate-graphql`, which means a schema change could remove a
+field and the test would still pass against the dead string until somebody
+notices at runtime.
+
+- **Location**: `backend/tests/functional/graphql/operations/<operation>.graphql`
+- **One operation per file**, named with the GraphQL operation (e.g.
+  `query GetCluster {...}`, never anonymous `query {...}`).
+- **File naming**: snake_case derived from the operation name (e.g.
+  `GetClusterByName` → `get_cluster_by_name.graphql`).
+- **Loading**: import `load_query` from
+  `backend.tests.functional.graphql._queries` (or, inside the package,
+  `from ._queries import load_query`) and call it with the file stem:
+
+  ```python
+  from ._queries import load_query
+
+  response = await client.post(
+      "/graphql",
+      json={
+          "query": load_query("create_cluster"),
+          "variables": {...},
+      },
+  )
+  ```
+
+`uv run invoke validate-graphql` discovers every `.graphql` file under the
+repository (excluding `.venv`, `node_modules`, and `specs/`) and validates
+it against `schema.graphql`. The propagation `graphql/` directory is
+covered automatically — no extra wiring needed. CI runs the same task,
+so a schema change that breaks any operation file fails the build before
+the test ever runs.
 
 ## Recipe: HTTP-driven propagation test (write)
 
+`backend/tests/functional/graphql/operations/create_cluster.graphql`:
+
+```graphql
+mutation CreateCluster($name: String!, $config: JSON) {
+    createCluster(name: $name, config: $config) {
+        id
+        name
+        config
+    }
+}
+```
+
+`backend/tests/functional/graphql/test_cluster.py`:
+
 ```python
+from ._queries import load_query
+
+
 @pytest.mark.asyncio
-async def test_create_cluster_persists_name(client: AsyncClient, session: AsyncSession):
+async def test_create_cluster_persists_name(
+    client: AsyncClient, session: AsyncSession
+):
     response = await client.post(
         "/graphql",
         json={
-            "query": create_cluster_query,
+            "query": load_query("create_cluster"),
             "variables": {"name": "my-cluster"},
         },
     )
@@ -81,16 +141,28 @@ async def test_create_cluster_persists_name(client: AsyncClient, session: AsyncS
     assert db_cluster.name == "my-cluster"
 ```
 
-Reuse the `session` and `client` fixtures from
-`backend/tests/functional/test_api.py` (or the equivalent in your test
-module). They wire the in-memory SQLite engine through the
-`get_session` dependency override.
+The `session` and `client` fixtures come from
+`backend/tests/functional/graphql/conftest.py` and wire the in-memory
+SQLite engine through the `get_session` dependency override.
 
 ## Recipe: HTTP-driven propagation test (read)
 
+`backend/tests/functional/graphql/operations/get_cluster.graphql`:
+
+```graphql
+query GetCluster($clusterId: UUID!) {
+    cluster(clusterId: $clusterId) {
+        id
+        name
+    }
+}
+```
+
 ```python
 @pytest.mark.asyncio
-async def test_get_cluster_projects_db_state(client: AsyncClient, session: AsyncSession):
+async def test_get_cluster_projects_db_state(
+    client: AsyncClient, session: AsyncSession
+):
     seeded = Cluster(name="seeded-cluster")
     session.add(seeded)
     await session.commit()
@@ -98,7 +170,7 @@ async def test_get_cluster_projects_db_state(client: AsyncClient, session: Async
     response = await client.post(
         "/graphql",
         json={
-            "query": get_cluster_query,
+            "query": load_query("get_cluster"),
             "variables": {"clusterId": str(seeded.id)},
         },
     )
@@ -121,6 +193,19 @@ Never skip the propagation test for a new or modified schema element. If you
 believe an existing propagation test already covers the change, name the
 test explicitly in the PR description and request reviewer confirmation —
 don't decide on your own.
+
+## Common mistakes
+
+- **Inlining the GraphQL string in the test module.** The string bypasses
+  `validate-graphql`. Move it to
+  `backend/tests/functional/graphql/operations/<name>.graphql` and load
+  with `load_query("<name>")`.
+- **Anonymous operation names.** Every operation must be named
+  (`query GetCluster`, `mutation CreateCluster`) — anonymous operations
+  break the `validate-graphql` discovery.
+- **Asserting only on the GraphQL response.** Read back through
+  `session.get(...)`. The resolver may have correctly returned the value
+  while never persisting it — that's the regression §V exists to catch.
 
 ## See Also
 

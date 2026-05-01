@@ -1,0 +1,16 @@
+mutation Callback(
+    $taskId: UUID!,
+    $stateName: String!,
+    $stateMessage: String,
+    $stateType: String!
+) {
+    callback(
+        taskId: $taskId,
+        stateName: $stateName,
+        stateMessage: $stateMessage,
+        stateType: $stateType
+    ) {
+        message
+        success
+    }
+}

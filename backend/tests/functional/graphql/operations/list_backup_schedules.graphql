@@ -1,0 +1,6 @@
+query ListBackupSchedules($deploymentId: UUID!) {
+    backupSchedules(deploymentId: $deploymentId) {
+        id
+        name
+    }
+}
