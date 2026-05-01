@@ -356,3 +356,130 @@ async def test_get_pod_statuses_no_filter_empty_db() -> None:
     uow = _make_uow()
     result = await get_pod_statuses(uow)
     assert result == []
+
+
+@pytest.mark.anyio
+async def test_report_pod_statuses_persists_component_name() -> None:
+    uow = _make_uow()
+    deployment_id = uuid4()
+    pods = [
+        {
+            "pod_name": "api-pod",
+            "namespace": f"styrmin-{deployment_id}",
+            "phase": "running",
+            "ready": True,
+            "restart_count": 0,
+            "component_name": "api",
+        },
+    ]
+    await report_pod_statuses(_make_report(deployment_id, pods), uow)
+    assert uow.pod_statuses.models[0].component_name == "api"
+
+
+@pytest.mark.anyio
+async def test_report_pod_statuses_persists_unknown_component_name() -> None:
+    """The server records component_name as-is; no rejection or coercion when
+    the value doesn't correspond to a declared Component."""
+    uow = _make_uow()
+    deployment_id = uuid4()
+    pods = [
+        {
+            "pod_name": "rogue-pod",
+            "namespace": f"styrmin-{deployment_id}",
+            "phase": "running",
+            "ready": True,
+            "restart_count": 0,
+            "component_name": "ghost",
+        },
+    ]
+    updated, _ = await report_pod_statuses(_make_report(deployment_id, pods), uow)
+    assert updated == 1
+    assert uow.pod_statuses.models[0].component_name == "ghost"
+
+
+@pytest.mark.anyio
+async def test_report_pod_statuses_persists_absent_component_name() -> None:
+    """A pod without a component_name (omitted key) is stored with None."""
+    uow = _make_uow()
+    deployment_id = uuid4()
+    pods = [
+        {
+            "pod_name": "sidecar-pod",
+            "namespace": f"styrmin-{deployment_id}",
+            "phase": "running",
+            "ready": True,
+            "restart_count": 0,
+        },
+    ]
+    await report_pod_statuses(_make_report(deployment_id, pods), uow)
+    assert uow.pod_statuses.models[0].component_name is None
+
+
+@pytest.mark.anyio
+async def test_report_pod_statuses_updates_component_name_on_re_report() -> None:
+    """FR-006 / SC-005: when a previously-reported pod is re-reported with a
+    different component_name (label rename, label removal, or first label
+    after labelless creation), the persisted value reflects the latest
+    observation. Guards against field-by-field upsert omissions in the SQL
+    repository — the fake mirrors that field-by-field mutation pattern."""
+    uow = _make_uow()
+    deployment_id = uuid4()
+    namespace = f"styrmin-{deployment_id}"
+
+    # First report: no component label.
+    await report_pod_statuses(
+        _make_report(
+            deployment_id,
+            [
+                {
+                    "pod_name": "p1",
+                    "namespace": namespace,
+                    "phase": "running",
+                    "ready": True,
+                    "restart_count": 0,
+                },
+            ],
+        ),
+        uow,
+    )
+    assert uow.pod_statuses.models[0].component_name is None
+
+    # Second report: label has propagated, component_name is now "api".
+    await report_pod_statuses(
+        _make_report(
+            deployment_id,
+            [
+                {
+                    "pod_name": "p1",
+                    "namespace": namespace,
+                    "phase": "running",
+                    "ready": True,
+                    "restart_count": 0,
+                    "component_name": "api",
+                },
+            ],
+        ),
+        uow,
+    )
+    assert len(uow.pod_statuses.models) == 1
+    assert uow.pod_statuses.models[0].component_name == "api"
+
+    # Third report: label was removed (rename mid-rollout, etc.) — must
+    # revert to None, not stick at "api".
+    await report_pod_statuses(
+        _make_report(
+            deployment_id,
+            [
+                {
+                    "pod_name": "p1",
+                    "namespace": namespace,
+                    "phase": "running",
+                    "ready": True,
+                    "restart_count": 0,
+                    "component_name": None,
+                },
+            ],
+        ),
+        uow,
+    )
+    assert uow.pod_statuses.models[0].component_name is None

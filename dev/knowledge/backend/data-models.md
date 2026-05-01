@@ -28,11 +28,12 @@ class StyrminModel(SQLModel):
 │     Cluster     │──1:N─│   Environment    │──1:N─│   Deployment     │
 └─────────────────┘      └──────────────────┘      └────────┬─────────┘
                                                             │
-                                    ┌───────────────────────┼───────────────────────┐
-                                    │                       │                       │
-                              ┌─────▼─────┐          ┌─────▼─────┐          ┌──────▼──────┐
-                              │ Component │          │   Task    │          │ApplicationInstance│
-                              └───────────┘          └───────────┘          └─────────────┘
+                ┌───────────────────┬───────────────────┬───┴────────────┬─────────────────────┐
+                │                   │                   │                │                     │
+          ┌─────▼─────┐       ┌─────▼─────┐       ┌────▼────────┐  ┌────▼────────┐    ┌───────▼────────┐
+          │ Component │       │   Task    │       │ApplicationIns│  │ PodStatus   │    │DeploymentStatus│
+          └───────────┘       └───────────┘       │    tance     │  │ (observed)  │    │  (observed)    │
+                                                  └──────────────┘  └─────────────┘    └────────────────┘
 
 ┌─────────────────┐      ┌──────────────────────┐      ┌───────────────┐
 │ApplicationDriver│──1:N─│ApplicationDriverVersion│──1:N─│    Action     │
@@ -215,6 +216,52 @@ class Utility(StyrminModel, table=True):
     helm_chart_id: UUID
 ```
 
+### Observed State Models
+
+These records capture *observed* runtime state — what the agent sees in the cluster — as opposed to the *declared* intent expressed by `Deployment` / `Component`. They are written by the agent's status reporter on each poll cycle (~5 s) and are intentionally decoupled from declared state: the server records what was observed and does not validate it against the deployment's current configuration. Drift between observed values and declared values is expected (rollouts, renames) and is not an error.
+
+#### PodStatus
+
+```python
+class PodStatus(StyrminModel, table=True):
+    __table_args__ = (UniqueConstraint("deployment_id", "pod_name"),)
+
+    pod_name: str
+    namespace: str
+    phase: PodPhase
+    ready: bool = False
+    restart_count: int = 0
+    container_statuses: list[dict] | None
+    node_name: str | None
+    component_name: str | None  # From the styrmin/component label, observed as-is
+    started_at: datetime | None
+    last_polled_at: datetime  # Server-set on every upsert
+
+    deployment_id: UUID
+```
+
+- One row per `(deployment_id, pod_name)`, refreshed every reporting cycle. Stale rows (pods no longer present) are deleted by `delete_stale`.
+- `component_name` is populated by the agent reading the `styrmin/component` label off pod metadata. It is recorded as-is — see [ADR-014](../../adr/adr-014-pod-status-records-observed-state-not-declared-state.md) for why the server does not validate it against declared `Component` rows.
+- `last_polled_at` is rewritten on every upsert; downstream consumers can use it to detect stale data if the agent stops reporting.
+
+#### DeploymentStatus
+
+```python
+class DeploymentStatus(StyrminModel, table=True):
+    """Latest StyrminDeployment CRD status snapshot per deployment."""
+
+    phase: str
+    message: str | None
+    conditions: list[dict] | None
+    managed_resource_counts: dict | None
+    last_polled_at: datetime
+
+    deployment_id: UUID  # unique=True (one snapshot per deployment)
+```
+
+- One row per deployment. Mirrors the latest `StyrminDeployment` CRD `.status` block observed by the agent.
+- `phase`, `conditions`, `managed_resource_counts` are pass-through views of the CRD — the server does not interpret them.
+
 ### Status Enums
 
 ```python
@@ -244,6 +291,13 @@ class TaskType(str, Enum):
     STOP_COMPONENTS = "stop_components"
     START_COMPONENTS = "start_components"
     RUN_JOB = "run_job"
+
+class PodPhase(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    UNKNOWN = "unknown"  # Used when the observed phase doesn't match a known value
 ```
 
 ## Domain Models

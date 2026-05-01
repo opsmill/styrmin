@@ -536,6 +536,7 @@ export type PodPhase =
 
 export type PodStatus = {
   __typename?: 'PodStatus';
+  componentName?: Maybe<Scalars['String']['output']>;
   containerStatuses: Scalars['JSON']['output'];
   createdOn?: Maybe<Scalars['DateTime']['output']>;
   deploymentId: Scalars['UUID']['output'];
@@ -552,6 +553,7 @@ export type PodStatus = {
 };
 
 export type PodStatusInput = {
+  componentName?: InputMaybe<Scalars['String']['input']>;
   containerStatuses?: InputMaybe<Scalars['JSON']['input']>;
   namespace: Scalars['String']['input'];
   nodeName?: InputMaybe<Scalars['String']['input']>;

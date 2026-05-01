@@ -321,6 +321,7 @@ type PodStatus {
   restartCount: Int!
   containerStatuses: JSON!
   nodeName: String
+  componentName: String
   startedAt: DateTime
   lastPolledAt: DateTime
   createdOn: DateTime
@@ -335,6 +336,7 @@ input PodStatusInput {
   restartCount: Int!
   containerStatuses: JSON = null
   nodeName: String = null
+  componentName: String = null
   startedAt: DateTime = null
 }
 

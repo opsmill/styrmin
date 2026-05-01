@@ -70,6 +70,7 @@ class SQLModelPodStatusRepository(
             existing.restart_count = pod_status.restart_count
             existing.container_statuses = pod_status.container_statuses
             existing.node_name = pod_status.node_name
+            existing.component_name = pod_status.component_name
             existing.started_at = pod_status.started_at
             existing.last_polled_at = pod_status.last_polled_at
             existing.namespace = pod_status.namespace

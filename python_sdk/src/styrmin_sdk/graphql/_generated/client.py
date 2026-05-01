@@ -617,6 +617,7 @@ class Client(AsyncBaseClient):
                   restartCount
                   containerStatuses
                   nodeName
+                  componentName
                   startedAt
                   lastPolledAt
                 }
@@ -851,6 +852,7 @@ class Client(AsyncBaseClient):
                 restartCount
                 containerStatuses
                 nodeName
+                componentName
                 startedAt
                 lastPolledAt
               }

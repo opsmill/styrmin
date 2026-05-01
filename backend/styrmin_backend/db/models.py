@@ -429,6 +429,7 @@ class PodStatus(StyrminModel, table=True):
     restart_count: int = Field(default=0)
     container_statuses: list[dict] | None = Field(default=None, sa_column=Column(JSON))
     node_name: str | None = Field(default=None)
+    component_name: str | None = Field(default=None)
     started_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
     last_polled_at: datetime = Field(  # type: ignore[call-overload]
         sa_type=DateTime(timezone=True),

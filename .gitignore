@@ -212,3 +212,6 @@ playwright-report/
 
 # Local demo runtime state (port-forward PID, etc.)
 .vcluster/
+
+# Speckit per-checkout pointer to the active feature directory
+.specify/feature.json

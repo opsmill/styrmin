@@ -24,7 +24,10 @@ Styrmin is a **deployment orchestration platform** that manages application depl
 
 ```bash
 uv sync --all-groups --all-packages   # Install Python dependencies add all packages are installed
+cd frontend && pnpm install           # Install frontend dependencies (required before `uv run invoke generate`)
 ```
+
+> **Note:** `uv run invoke generate` regenerates both Python SDK types **and** frontend TypeScript types. Without `frontend/node_modules/`, the frontend codegen step fails with `sh: graphql-codegen: command not found`. Run `pnpm install` once after cloning the repo.
 
 ### Testing
 
@@ -119,6 +122,26 @@ Pytest stays paused indefinitely on failure. Inspect with `kubectl` from a separ
 Use `.agents/skills/e2e-troubleshoot/SKILL.md` for the structured multi-iteration variant of this `--pdb` workflow.
 
 `--reruns` from ``pytest-rerunfailures`` is incompatible with ``--pdb``, which is why the plugin and its auto-retry markers were removed in bce37c1. Do not reintroduce them.
+
+### Dual-entrypoint scope — mark `api_only` when there's no UI flow
+
+E2E tests run twice by default: once as `[api-chromium]` (driver = SDK) and once as `[ui-chromium]` (driver = Playwright). Each variant adds ~20 minutes of CI time, so running both should be a deliberate choice tied to actually exercising the UI.
+
+**Use `@pytest.mark.api_only(reason=...)`** when the test only consumes the SDK / GraphQL / Kubernetes APIs and does not drive a UI flow — for example, reading pod statuses, asserting on cluster state, or seeding data through the SDK with no page navigation. These tests would behave identically under `[ui-chromium]` (the SDK call path is the same), so the second variant burns CI time without adding coverage.
+
+```python
+@pytest.mark.api_only(
+    reason="Reads pod statuses through the SDK; no UI flow exercised — "
+    "the [ui-chromium] variant would just re-run the same SDK call.",
+)
+@pytest.mark.ci
+async def test_<name>(...):
+    ...
+```
+
+**Use `@pytest.mark.ui_only(reason=...)`** for the inverse — tests that assert on UI-specific behaviour (rendering, click flows, accessibility) that has no SDK equivalent.
+
+**Heuristic for whether a test is `api_only`:** if every action you take in the test goes through `client.X.Y()`, `kubectl`, or `kr8s`, and the test never calls `scenario_driver.create_deployment` / `upgrade_deployment` / `create_backup` / `start_components` / etc. (the dual-entrypoint methods), it's an `api_only` candidate. Tests that *do* call those methods exercise both the UI and API code paths and should run under both variants.
 
 ### UI-variant troubleshooting — use the Playwright MCP server
 

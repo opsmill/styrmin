@@ -46,6 +46,7 @@ class PodStatusData(BaseModel):
         default=None, alias="containerStatuses"
     )
     node_name: str | None = Field(default=None, alias="nodeName")
+    component_name: str | None = Field(default=None, alias="componentName")
     started_at: str | None = Field(default=None, alias="startedAt")
 
 

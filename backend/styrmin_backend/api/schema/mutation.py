@@ -773,6 +773,7 @@ class Mutation:
                         "restart_count": pod.restart_count,
                         "container_statuses": pod.container_statuses,
                         "node_name": pod.node_name,
+                        "component_name": pod.component_name,
                         "started_at": pod.started_at,
                     }
                     for pod in report.pods
