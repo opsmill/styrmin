@@ -36,6 +36,8 @@ Each component in a driver can define a backup kind. The strategy pattern maps k
 |------|----------|-----------|
 | `disk` | `DiskSnapshotStrategy` | Direct Velero volume snapshot |
 | `postgres` | `PostgresBackupStrategy` | `pg_dump` to extra volume, then Velero snapshot |
+| `mariadb` | `MariadbBackupStrategy` | `mariadb-dump` to extra volume, then Velero snapshot |
+| `mongodb` | `MongodbBackupStrategy` | `mongodump` to extra volume, then Velero snapshot |
 | `neo4j` | `Neo4jBackupStrategy` | `neo4j-admin dump` to extra volume, then Velero snapshot |
 | `action` | `ActionBackupStrategy` | Custom driver action via Prefect (no Velero hooks) |
 
@@ -51,7 +53,7 @@ class BackupStrategy(ABC):
 ```
 
 - **Disk:** No hooks needed, extracts volume names from `volume`/`volumes` config fields
-- **Postgres/Neo4j:** Pre-backup hooks run dump commands, post-restore hooks run restore commands. Default backup volume is `"backup"`
+- **Postgres / Mariadb / Mongodb / Neo4j:** Pre-backup hooks run a dump command (e.g. `pg_dump`, `mariadb-dump`, `mongodump`, `neo4j-admin dump`) into an extra volume mounted at `backup_mount_path` (default `/backup`); post-restore hooks run the corresponding restore command. Default backup volume is `"backup"`.
 - **Action:** No hooks or volumes — backup is handled entirely by the driver's Prefect action
 
 ## Data Models
@@ -202,7 +204,7 @@ backupSchedules(deploymentId: UUID!): [BackupSchedule!]!
 ### Mutations
 
 ```graphql
-createBackup(instanceId: UUID!, name: String, timeout: Int): Backup!
+createBackup(instanceId: UUID!, name: String): Backup!
 deleteBackup(backupId: UUID!): String!
 createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID): Restore!
 createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int, enabled: Boolean): BackupSchedule!
