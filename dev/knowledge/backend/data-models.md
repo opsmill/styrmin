@@ -240,7 +240,7 @@ class PodStatus(StyrminModel, table=True):
     deployment_id: UUID
 ```
 
-- One row per `(deployment_id, pod_name)`, refreshed every reporting cycle. Rows are upserted by the `reportPodStatuses` GraphQL mutation, which is invoked by the agent's status reporter (see [agent.md](agent.md) → Status Reporter). Stale rows (pods no longer present in the agent's snapshot for a deployment) are removed **server-side** by `services/pod_status.py::report_pod_statuses`, which calls `delete_stale` on the repository — the agent only sends the active set.
+- One row per `(deployment_id, pod_name)`, refreshed every reporting cycle. Rows are upserted by the `reportPodStatuses` GraphQL mutation, which is invoked by the agent's status reporter (see [`../agent/overview.md`](../agent/overview.md) → Status Reporter). Stale rows (pods no longer present in the agent's snapshot for a deployment) are removed **server-side** by `services/pod_status.py::report_pod_statuses`, which calls `delete_stale` on the repository — the agent only sends the active set.
 - `component_name` is populated by the agent reading the `styrmin/component` label off pod metadata. It is recorded as-is — see [ADR-014](../../adr/adr-014-pod-status-records-observed-state-not-declared-state.md) for why the server does not validate it against declared `Component` rows.
 - `last_polled_at` is rewritten on every upsert; downstream consumers can use it to detect stale data if the agent stops reporting.
 

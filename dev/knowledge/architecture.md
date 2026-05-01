@@ -12,7 +12,7 @@ wins and this document is what gets corrected.
 
 **Audience.** Contributors and agents who want a single place to understand
 how the pieces fit together before reading the per-component knowledge docs in
-[`backend/`](backend/) and [`frontend/`](frontend/).
+[`agent/`](agent/), [`backend/`](backend/), and [`frontend/`](frontend/).
 
 ---
 
@@ -60,23 +60,23 @@ The agent is a single process but fulfils several distinct functions:
 
 - **Workflow orchestration.** The `PrefectManager` registers, schedules,
   and runs internal and user-defined workflows.
-  → details: [`backend/agent.md`](backend/agent.md)
+  → details: [`agent/overview.md`](agent/overview.md)
 - **Context resolution and CRD authorship.** Orchestration flows resolve a
   full `GlobalContext` from the database and embed it in the
   `StyrminDeployment` CRD.
   → details: [`backend/orchestration-flows.md`](backend/orchestration-flows.md)
 - **Helm rendering.** Tasks render `HelmRelease` specs from driver-supplied
   templates against the resolved context.
-  → details: [`backend/agent.md`](backend/agent.md)
+  → details: [`agent/overview.md`](agent/overview.md)
 - **Kubernetes resource reconciliation.** The kopf operator drives
   `StyrminDeployment` resources through ordered phases (prerequisites →
   HelmRelease → services), guaranteeing that dependencies exist before
   dependents — see [ADR-007](../adr/adr-007-ordered-phase-deployment-sub-handlers.md).
-  → details: [`backend/operator.md`](backend/operator.md)
+  → details: [`agent/operator.md`](agent/operator.md)
 - **Drift detection and correction.** A timer handler re-checks managed
   resources on a fixed cadence and corrects anything that has drifted from
   the CRD spec.
-  → details: [`backend/operator.md`](backend/operator.md)
+  → details: [`agent/operator.md`](agent/operator.md)
 - **Driver hook execution.** Pre / core / post hooks defined by an
   application driver run inside Prefect as part of the create, update, and
   upgrade flows.
@@ -84,7 +84,7 @@ The agent is a single process but fulfils several distinct functions:
 - **Utility resource management.** Cluster-level utilities (ingress,
   service discovery) are managed by the same builders that produce
   application resources.
-  → details: [`backend/agent.md`](backend/agent.md)
+  → details: [`agent/overview.md`](agent/overview.md)
 - **Status reporting.** A third coroutine in the shared event loop polls
   Kubernetes every ~5 s (configurable via
   `STYRMIN_AGENT_STATUS_POLL_INTERVAL`) for pod state and
@@ -93,7 +93,7 @@ The agent is a single process but fulfils several distinct functions:
   This is distinct from Prefect's flow-state callbacks: the reporter
   describes *what is running in the cluster*, not *what workflows are
   doing*.
-  → details: [`backend/agent.md`](backend/agent.md) (Status Reporter section)
+  → details: [`agent/overview.md`](agent/overview.md) (Status Reporter section)
 
 ---
 
@@ -262,7 +262,7 @@ amend the constitution — and update this document accordingly.
 
 - **Agent** — single container running the Prefect worker and the kopf
   operator. Reconciles intent into Kubernetes resources. See
-  [`backend/agent.md`](backend/agent.md).
+  [`agent/overview.md`](agent/overview.md).
 - **ApplicationDriver** — versioned spec defining how an application is
   deployed (helm chart, components, hooks). See
   [ADR-002](../adr/adr-002-consolidate-driver-single-yaml.md) and the
@@ -283,7 +283,7 @@ amend the constitution — and update this document accordingly.
 - **Instance** (`ApplicationInstance`) — current-state snapshot generated
   from a Deployment, carrying a frozen `GlobalContext`.
 - **Operator** — the kopf-based controller running inside the agent that
-  watches `StyrminDeployment` CRDs. See [`backend/operator.md`](backend/operator.md).
+  watches `StyrminDeployment` CRDs. See [`agent/operator.md`](agent/operator.md).
 - **Phase-based deployment** — kopf sub-handler ordering that guarantees
   prerequisites land before HelmReleases and services. See
   [ADR-007](../adr/adr-007-ordered-phase-deployment-sub-handlers.md).
