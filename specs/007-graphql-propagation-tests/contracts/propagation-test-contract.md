@@ -1,13 +1,13 @@
 # Propagation Test Contract
 
-Every test added under `backend/tests/functional/propagation/` MUST satisfy this contract. A test that fails any clause is not a valid propagation test for purposes of the Constitution §V verdict in `coverage-matrix.md`.
+Every test added under `backend/tests/functional/graphql/` MUST satisfy this contract. A test that fails any clause is not a valid propagation test for purposes of the Constitution §V verdict in `coverage-matrix.md`.
 
 ## C0. GraphQL operation lives in a `.graphql` file
 
 Every GraphQL operation used by a propagation test MUST live in
-`backend/tests/functional/propagation/graphql/<operation>.graphql` and be
+`backend/tests/functional/graphql/operations/<operation>.graphql` and be
 loaded via `load_query("<operation>")` from
-`backend.tests.functional.propagation._queries`. Inline GraphQL strings in
+`backend.tests.functional.graphql._queries`. Inline GraphQL strings in
 test modules are not allowed — they bypass `uv run invoke validate-graphql`,
 which means a schema change can silently break the test against a dead
 string.
@@ -72,7 +72,7 @@ For queries with filter arguments (e.g. `backups(instanceId, status)`, `podStatu
 
 ## C7. Independent, isolated, fast
 
-- The test is independently runnable: `uv run pytest backend/tests/functional/propagation/<module>::<test>` passes in isolation.
+- The test is independently runnable: `uv run pytest backend/tests/functional/graphql/<module>::<test>` passes in isolation.
 - The test does not depend on order, on other tests' fixtures, or on session-scoped state.
 - The test completes in under 1 second on a developer laptop.
 - The test does not touch the network, Kubernetes, Prefect, helm, git, or any subprocess.

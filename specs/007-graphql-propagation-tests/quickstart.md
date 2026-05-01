@@ -10,7 +10,7 @@ Open `coverage-matrix.md`. Find a row with verdict `gap` or `partial`. Note its 
 
 ## 2. Open the right test module
 
-Tests live under `backend/tests/functional/propagation/test_<domain>_propagation.py`. If the file does not exist yet, create it from this skeleton:
+Tests live under `backend/tests/functional/graphql/test_<domain>_propagation.py`. If the file does not exist yet, create it from this skeleton:
 
 ```python
 """Propagation tests for <domain> resolvers.
@@ -33,11 +33,11 @@ from ._queries import load_query
 ## 3. Add the GraphQL operation as a `.graphql` file
 
 GraphQL operations used by propagation tests **must** live in
-`backend/tests/functional/propagation/graphql/<operation_name>.graphql` — never
+`backend/tests/functional/graphql/operations/<operation_name>.graphql` — never
 inline in the test module. Inline strings bypass `uv run invoke validate-graphql`,
 which means a schema change can break a test silently.
 
-Create `backend/tests/functional/propagation/graphql/create_widget.graphql`:
+Create `backend/tests/functional/graphql/operations/create_widget.graphql`:
 
 ```graphql
 mutation CreateWidget($name: String!, $config: JSON) {
@@ -60,7 +60,7 @@ Confirm the operation validates:
 uv run invoke validate-graphql
 ```
 
-The relevant line should appear as `OK    backend/tests/functional/propagation/graphql/create_widget.graphql`.
+The relevant line should appear as `OK    backend/tests/functional/graphql/operations/create_widget.graphql`.
 
 ## 4. Write the test
 
@@ -120,7 +120,7 @@ async def test_widget_projects_all_scalars(
 
 ## 5. Workflow-dispatching mutations
 
-If your mutation calls `prefect_manager.run_action(...)`, add the `prefect_manager_mock` fixture (defined in `backend/tests/functional/propagation/conftest.py`) to your test signature. The mock prevents real Prefect calls and lets you optionally assert on the dispatched parameters.
+If your mutation calls `prefect_manager.run_action(...)`, add the `prefect_manager_mock` fixture (defined in `backend/tests/functional/graphql/conftest.py`) to your test signature. The mock prevents real Prefect calls and lets you optionally assert on the dispatched parameters.
 
 ```python
 @pytest.mark.asyncio
@@ -154,10 +154,10 @@ Patch the **import site** (`api.schema.mutation`), not the definition site (`ser
 
 ```bash
 # Just your new test
-uv run pytest backend/tests/functional/propagation/test_<domain>_propagation.py -v
+uv run pytest backend/tests/functional/graphql/test_<domain>_propagation.py -v
 
 # With pdb on the first failure (use `sleep infinity |` from non-interactive shells)
-uv run pytest backend/tests/functional/propagation/test_<domain>_propagation.py -v --pdb
+uv run pytest backend/tests/functional/graphql/test_<domain>_propagation.py -v --pdb
 
 # Full backend suite
 uv run invoke test
@@ -171,7 +171,7 @@ Temporarily comment out the resolver-to-service wiring (or change one field assi
 
 ```bash
 uv run invoke format lint
-git add backend/tests/functional/propagation/<module>.py backend/tests/functional/helpers.py
+git add backend/tests/functional/graphql/<module>.py backend/tests/functional/helpers.py
 git commit -m "test(<domain>): add propagation tests for <element>"
 ```
 
@@ -179,7 +179,7 @@ Pre-commit hooks must pass. Do not use `--no-verify`.
 
 ## 10. Update the matrix
 
-Open `coverage-matrix.md`, find the row(s) you closed, and update **Verdict** from `gap`/`partial` to `covered` and **Existing coverage** to point at your new test (`backend/tests/functional/propagation/<module>.py::<test>`).
+Open `coverage-matrix.md`, find the row(s) you closed, and update **Verdict** from `gap`/`partial` to `covered` and **Existing coverage** to point at your new test (`backend/tests/functional/graphql/<module>.py::<test>`).
 
 ---
 

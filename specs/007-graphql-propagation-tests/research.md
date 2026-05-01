@@ -27,7 +27,7 @@ This file resolves all open decisions for the implementation. There are no `NEED
 
 **Decision**:
 
-- **Prefect**: Override `get_manager` via `fast_depends.dependency_provider.override(get_manager.__wrapped__, get_fake_manager)` returning a `mocker.Mock(spec=PrefectManager)`. This is the established pattern at `backend/tests/unit/services/conftest.py:45–53` and `backend/tests/unit/services/reconciliation/test_remediation.py:42–48`. Reuse it from a new `backend/tests/functional/propagation/conftest.py`.
+- **Prefect**: Override `get_manager` via `fast_depends.dependency_provider.override(get_manager.__wrapped__, get_fake_manager)` returning a `mocker.Mock(spec=PrefectManager)`. This is the established pattern at `backend/tests/unit/services/conftest.py:45–53` and `backend/tests/unit/services/reconciliation/test_remediation.py:42–48`. Reuse it from a new `backend/tests/functional/graphql/conftest.py`.
 - **Kubernetes / helm / git / external HTTP**: Mock at the service-boundary call sites the relevant mutation crosses (e.g. `load_application_driver_from_local_directory`, `load_application_driver_from_git_repository`) using `pytest-mock`'s `mocker.patch(...)`. The propagation test asserts the *DB row* the resolver+service committed, so the external call only needs to return a value that lets the service reach its DB write.
 
 **Rationale**: Faking at the boundary preserves Constitution III layering and matches the existing fakes used in `tests/unit/services/`. We do not pull in the unit-services `FakeUnitOfWork` because the whole point of a propagation test is to exercise the *real* repositories, not the fakes.

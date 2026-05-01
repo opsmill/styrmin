@@ -174,13 +174,13 @@ A row's "rolled into above" entry indicates it shares a planned test with the ro
 
 ## Estimated test functions
 
-Aggregating the planned tests across rows: **~60 new `pytest` test functions** spread across 14 new test modules under `backend/tests/functional/propagation/`. This matches the 60–90 range in `plan.md`.
+Aggregating the planned tests across rows: **~60 new `pytest` test functions** spread across 14 new test modules under `backend/tests/functional/graphql/`. This matches the 60–90 range in `plan.md`.
 
 ---
 
 ## Closed in this PR
 
-The following rows are now `covered` by HTTP-driven propagation tests under `backend/tests/functional/propagation/`. Each cited test file drives `client.post("/graphql", ...)` and reads persisted state back through `session.get(...)` per `contracts/propagation-test-contract.md`.
+The following rows are now `covered` by HTTP-driven propagation tests under `backend/tests/functional/graphql/`. Each cited test file drives `client.post("/graphql", ...)` and reads persisted state back through `session.get(...)` per `contracts/propagation-test-contract.md`.
 
 | Domain row                                  | Covering test                                                                                       |
 |---------------------------------------------|-----------------------------------------------------------------------------------------------------|

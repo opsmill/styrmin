@@ -95,7 +95,7 @@ backend/
         └── api/                                     # exists; reserved for resolver-direct tests when justified
 ```
 
-**Structure Decision**: Place propagation tests under `backend/tests/functional/propagation/` rather than `backend/tests/unit/api/`. The decisive factor: `dev/guides/graphql-propagation-tests.md` recipe 1 ("HTTP-driven propagation test") is the canonical shape, and the existing fixtures that wire SQLite through the `get_session` dependency override live in `backend/tests/functional/test_api.py`. Co-locating with those fixtures avoids re-implementing them and keeps a single source of truth for "drive the GraphQL HTTP endpoint against an in-memory DB". The `unit/api/` tree remains available for narrow resolver-direct tests when there is a specific reason to bypass the transport (none planned for this feature).
+**Structure Decision**: Place propagation tests under `backend/tests/functional/graphql/` rather than `backend/tests/unit/api/`. The decisive factor: `dev/guides/graphql-propagation-tests.md` recipe 1 ("HTTP-driven propagation test") is the canonical shape, and the existing fixtures that wire SQLite through the `get_session` dependency override live in `backend/tests/functional/test_api.py`. Co-locating with those fixtures avoids re-implementing them and keeps a single source of truth for "drive the GraphQL HTTP endpoint against an in-memory DB". The `unit/api/` tree remains available for narrow resolver-direct tests when there is a specific reason to bypass the transport (none planned for this feature).
 
 The split into per-domain modules makes `tasks.md` mappable 1:1 to files (one task group per file), keeps individual files under ~300 lines, and makes parallel work mergeable without contention.
 

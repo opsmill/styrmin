@@ -20,21 +20,21 @@ description: "Tasks for GraphQL ↔ Database Propagation Test Coverage"
 
 ## Path Conventions
 
-This is a backend-only feature. New files live under `backend/tests/functional/propagation/`. No production code is touched.
+This is a backend-only feature. New files live under `backend/tests/functional/graphql/`. No production code is touched.
 
 ---
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [X] T001 Create `backend/tests/functional/propagation/` and `__init__.py`.
-- [X] T002 Add `backend/tests/functional/propagation/conftest.py` with `session`, `client`, and `prefect_manager_mock` fixtures.
+- [X] T001 Create `backend/tests/functional/graphql/` and `__init__.py`.
+- [X] T002 Add `backend/tests/functional/graphql/conftest.py` with `session`, `client`, and `prefect_manager_mock` fixtures.
 - [X] T003 GraphQL operation strings live per-domain inside the propagation test modules.
 
 ---
 
 ## Phase 2: Foundational
 
-- [X] T004 `backend/tests/functional/propagation/test_smoke.py` — `createCluster` end-to-end, reads back via `session.get(Cluster, id)`. Canonical reference shape.
+- [X] T004 `backend/tests/functional/graphql/test_smoke.py` — `createCluster` end-to-end, reads back via `session.get(Cluster, id)`. Canonical reference shape.
 - [X] T005 Smoke test passes.
 - [X] T006 `ruff check`/`ruff format` clean. (`ty` shows 46 pre-existing `styrmin_sdk` errors on develop, unrelated.)
 
@@ -93,7 +93,7 @@ This is a backend-only feature. New files live under `backend/tests/functional/p
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [X] T043 `uv run pytest backend/tests/functional/propagation/` — **49 passed**. Full suite (`uv run pytest backend/tests/functional/ backend/tests/unit/`) shows 4 pre-existing failures on develop, unrelated to this feature (verified via `git stash` round-trip).
+- [X] T043 `uv run pytest backend/tests/functional/graphql/` — **49 passed**. Full suite (`uv run pytest backend/tests/functional/ backend/tests/unit/`) shows 4 pre-existing failures on develop, unrelated to this feature (verified via `git stash` round-trip).
 - [X] T044 `ruff check`/`ruff format` clean on all new files. Pre-commit hooks pass.
 - [ ] T045 [P] Spot-check by deliberate regression. **Deferred** to PR-review time.
 - [X] T046 [P] `coverage-matrix.md` updated to reflect closed rows in this PR (see "Closed in this PR" section appended to the matrix).

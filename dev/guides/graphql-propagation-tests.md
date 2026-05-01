@@ -51,7 +51,7 @@ must prove the value reached the database.
 
 ## Test Location
 
-Place propagation tests under `backend/tests/functional/propagation/`. The
+Place propagation tests under `backend/tests/functional/graphql/`. The
 package is dedicated to Constitution §V coverage and ships a `conftest.py`
 with `session`, `client`, and `prefect_manager_mock` fixtures, a
 `seeds.py` module with helpers for building minimum-viable persisted
@@ -71,13 +71,13 @@ strings inside a test module are not allowed — they bypass
 field and the test would still pass against the dead string until somebody
 notices at runtime.
 
-- **Location**: `backend/tests/functional/propagation/graphql/<operation>.graphql`
+- **Location**: `backend/tests/functional/graphql/operations/<operation>.graphql`
 - **One operation per file**, named with the GraphQL operation (e.g.
   `query GetCluster {...}`, never anonymous `query {...}`).
 - **File naming**: snake_case derived from the operation name (e.g.
   `GetClusterByName` → `get_cluster_by_name.graphql`).
 - **Loading**: import `load_query` from
-  `backend.tests.functional.propagation._queries` (or, inside the package,
+  `backend.tests.functional.graphql._queries` (or, inside the package,
   `from ._queries import load_query`) and call it with the file stem:
 
   ```python
@@ -101,7 +101,7 @@ the test ever runs.
 
 ## Recipe: HTTP-driven propagation test (write)
 
-`backend/tests/functional/propagation/graphql/create_cluster.graphql`:
+`backend/tests/functional/graphql/operations/create_cluster.graphql`:
 
 ```graphql
 mutation CreateCluster($name: String!, $config: JSON) {
@@ -113,7 +113,7 @@ mutation CreateCluster($name: String!, $config: JSON) {
 }
 ```
 
-`backend/tests/functional/propagation/test_cluster_propagation.py`:
+`backend/tests/functional/graphql/test_cluster_propagation.py`:
 
 ```python
 from ._queries import load_query
@@ -142,12 +142,12 @@ async def test_create_cluster_persists_name(
 ```
 
 The `session` and `client` fixtures come from
-`backend/tests/functional/propagation/conftest.py` and wire the in-memory
+`backend/tests/functional/graphql/conftest.py` and wire the in-memory
 SQLite engine through the `get_session` dependency override.
 
 ## Recipe: HTTP-driven propagation test (read)
 
-`backend/tests/functional/propagation/graphql/get_cluster.graphql`:
+`backend/tests/functional/graphql/operations/get_cluster.graphql`:
 
 ```graphql
 query GetCluster($clusterId: UUID!) {
@@ -198,7 +198,7 @@ don't decide on your own.
 
 - **Inlining the GraphQL string in the test module.** The string bypasses
   `validate-graphql`. Move it to
-  `backend/tests/functional/propagation/graphql/<name>.graphql` and load
+  `backend/tests/functional/graphql/operations/<name>.graphql` and load
   with `load_query("<name>")`.
 - **Anonymous operation names.** Every operation must be named
   (`query GetCluster`, `mutation CreateCluster`) — anonymous operations
