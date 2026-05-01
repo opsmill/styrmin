@@ -16,12 +16,12 @@ Orchestration flows are Prefect `@flow` functions that execute multi-step deploy
                                     v
                             remediation.apply()
                                     │
-                    ┌───────────────┼───────────────┐
-                    │               │               │
-            ┌───────▼──────┐ ┌─────▼──────┐ ┌─────▼──────────┐
-            │create_instance│ │update_     │ │upgrade_        │
-            │              │ │instance    │ │instance        │
-            └──────────────┘ └────────────┘ └────────────────┘
+                ┌───────────────────┼───────────────────┐
+                │                   │                   │
+        ┌───────▼──────────┐ ┌─────▼──────────┐ ┌─────▼──────────────┐
+        │create_instance_  │ │update_instance_│ │upgrade_instance_   │
+        │       crd        │ │      crd       │ │       crd          │
+        └──────────────────┘ └────────────────┘ └────────────────────┘
 
     Standalone (not wrapped by apply_state):
             ┌──────────────┐
@@ -29,17 +29,18 @@ Orchestration flows are Prefect `@flow` functions that execute multi-step deploy
             └──────────────┘
 ```
 
+The non-CRD variants (`create_instance`, `update_instance`, `upgrade_instance`) still exist in `agent/tasks/orchestration.py` for now but are not registered in the catalogue and are not on the live execution path. The CRD variants are what the operator actually drives — see [ADR-008](../adr/adr-008-prefect-crd-intent-declaration.md).
+
 ## Callback Mechanism
 
 ### orchestration_callback
 
-Located at the top of `agent/tasks/orchestration.py`. POSTs to the internal GraphQL API to update task state:
+Located at the top of `agent/tasks/orchestration.py`. POSTs to the server's GraphQL API to update task state:
 
 ```python
 async def orchestration_callback(flow, flow_run: FlowRun, state: State) -> None:
-    styrmin_server_url = os.environ.get(
-        "STYRMIN_URL_INTERNAL_API", "http://localhost:8000/internal/graphql"
-    )
+    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
+    styrmin_server_url = f"{api_url}/graphql"
     async with httpx.AsyncClient() as client:
         await client.post(
             styrmin_server_url,
@@ -96,17 +97,17 @@ The `remediation.apply()` method calls `arun_deployment(name=self.flow_id, param
 
 **Key**: Only `apply_state` has callbacks. Inner flows do NOT register callbacks because they run as sub-flows within `apply_state`.
 
-## Flow: create_instance
+## Flow: create_instance_crd
 
-Creates a new application instance with setup hooks.
+Creates a new application instance by writing a `StyrminDeployment` CRD; the kopf operator reconciles all Kubernetes resources from the CRD spec.
 
 ```python
-@flow
-async def create_instance(
+@flow(flow_run_name="Create instance (CRD)")
+async def create_instance_crd(
     instance: Instance,
-    corehook: UUID,             # CREATE_HELM_RELEASE deployment ID
-    prehook: UUID | None,       # Optional user pre-setup hook
-    posthook: UUID | None,      # Optional user post-setup hook
+    prehook: UUID | None,        # Optional user pre-setup hook
+    posthook: UUID | None,       # Optional user post-setup hook
+    internal: bool = False,      # True for system deployments (e.g. ingress controller)
 ) -> None
 ```
 
@@ -114,37 +115,27 @@ Execution order:
 
 ```text
 1. Extract context, release_reference, namespace from instance.context
-2. Render specs in parallel:
-   - render_helm_chart_specifications(helm)
-   - render_helm_repository_specifications(helm)
-   - render_application_helm_release_specifications(context)
-3. Run pre-hook (if prehook is not None):
-   arun_deployment(name=prehook, parameters={"context": context})
-4. Run core hook (CREATE_HELM_RELEASE):
-   arun_deployment(name=corehook, parameters={
-       "namespace": namespace,
-       "reference": release_reference,
-       "release_spec": release_spec,
-       "helm_repositories": [helm_repo_spec],
-       "charts": [chart_spec],
-   })
-5. Run post-hook (if posthook is not None):
-   arun_deployment(name=posthook, parameters={"context": context})
-6. Install utilities in parallel:
-   asyncio.gather(*[install_utility(...) for utility in context.utilities])
+2. Run pre-hook (if prehook is not None)
+3. Build the StyrminDeployment CRD body from the resolved context
+4. Apply the deployment namespace with labels
+5. Upsert the StyrminDeployment CRD       ──> operator reconciles in
+                                              ordered phases (NetworkPolicies,
+                                              Secrets -> HelmRelease ->
+                                              Services, Middlewares)
+6. Apply cross-namespace ExternalName service aliases (if any)
+7. Run post-hook (if posthook is not None)
 ```
 
-Called via `Remediation(type=CREATE_INSTANCE, flow_id=<CREATE_INSTANCE deployment>, parameters={instance, corehook, prehook, posthook})`.
+Called via `Remediation(type=CREATE_INSTANCE, flow_id=<CREATE_INSTANCE deployment>, parameters={instance, prehook, posthook, internal})`.
 
-## Flow: update_instance
+## Flow: update_instance_crd
 
-Updates an existing instance (config change, no version change).
+Updates an existing instance (config change, no version change) by rewriting the CRD spec.
 
 ```python
-@flow
-async def update_instance(
+@flow(flow_run_name="Update instance (CRD)")
+async def update_instance_crd(
     instance: Instance,
-    update_flow: UUID,          # UPDATE_HELM_RELEASE deployment ID
 ) -> None
 ```
 
@@ -152,62 +143,53 @@ Execution order:
 
 ```text
 1. Extract context, release_reference, namespace from instance.context
-2. Update utilities in parallel:
-   asyncio.gather(*[update_utility(...) for utility in context.utilities])
-3. Render application Helm release specs:
-   render_application_helm_release_specifications(context)
-4. Update Helm release:
-   arun_deployment(name=update_flow, parameters={
-       "namespace": namespace,
-       "release_spec": release_spec,
-       "reference": f"extra-{release_reference}",
-   })
+2. Build the new StyrminDeployment CRD body
+3. Upsert the CRD                          ──> operator reconciles
+                                              the new HelmRelease and
+                                              utility resources
+4. Apply cross-namespace service aliases (if any)
 ```
 
-Called via `Remediation(type=UPDATE_INSTANCE, flow_id=<UPDATE_INSTANCE deployment>, parameters={instance, update_flow})`.
+Called via `Remediation(type=UPDATE_INSTANCE, flow_id=<UPDATE_INSTANCE deployment>, parameters={instance})`. No hooks are involved in updates.
 
-No hooks are involved in updates.
-
-## Flow: upgrade_instance
+## Flow: upgrade_instance_crd
 
 Upgrades an application instance when a version change is detected and the driver defines upgrade hooks.
 
 ```python
-@flow(flow_run_name="Upgrade instance")
-async def upgrade_instance(
+@flow(flow_run_name="Upgrade instance (CRD)")
+async def upgrade_instance_crd(
     instance: Instance,
-    upgrade_hook: UUID,                    # Driver's core upgrade action
-    update_flow: UUID,                     # UPDATE_HELM_RELEASE deployment ID
-    target_version: str,                   # Application version being upgraded to
-    apply_utility_flow: UUID | None = None,# APPLY_UTILITY_RESOURCES deployment ID
-    prehook: UUID | None = None,           # Optional driver pre-upgrade hook
-    posthook: UUID | None = None,          # Optional driver post-upgrade hook
+    upgrade_hook: UUID,           # Driver's core upgrade action
+    target_version: str,          # Application version being upgraded to
+    prehook: UUID | None = None,  # Optional driver pre-upgrade hook
+    posthook: UUID | None = None, # Optional driver post-upgrade hook
 ) -> None
 ```
 
 Execution order:
 
 ```text
-1. Run pre-hook (if prehook is not None):
-   arun_deployment(name=prehook, parameters={"context": context, "target_version": target_version})
-2. Run core upgrade hook:
-   arun_deployment(name=upgrade_hook, parameters={"context": context, "target_version": target_version})
-3. Update utilities in parallel (if any):
-   asyncio.gather(*[update_utility(...) for utility in context.utilities])
-4. Render and update Helm release:
-   render_application_helm_release_specifications(context)
-   arun_deployment(name=update_flow, parameters={namespace, release_spec, reference, namespace_labels})
-5. Run post-hook (if posthook is not None):
-   arun_deployment(name=posthook, parameters={"context": context, "target_version": target_version})
+1. Build and upsert StyrminDeployment CRD (the new spec)
+2. Patch CRD status to displayState=Deploying / phase=Pending atomically
+   with the spec change. Without this, a stale "Running" displayState
+   could race the agent into reporting the new instance as healthy
+   before the new rollout has even started.
+3. Run pre-hook (if prehook is not None)
+4. Run core upgrade hook (driver's upgrade function — e.g. stop, migrate, start)
+5. Apply cross-namespace service aliases (if any)
+6. Run post-hook (if posthook is not None)
 ```
 
-Called via `Remediation(type=UPGRADE_INSTANCE, flow_id=<UPGRADE_INSTANCE deployment>, parameters={instance, upgrade_hook, update_flow, apply_utility_flow, target_version, prehook, posthook})`.
+Called via `Remediation(type=UPGRADE_INSTANCE, flow_id=<UPGRADE_INSTANCE deployment>, parameters={instance, upgrade_hook, target_version, prehook, posthook})`.
 
-**Key differences from `create_instance`:**
-- Core hook is a USER action (driver's upgrade function), not an internal action
-- Passes `target_version` to all hooks so driver code knows what version it's upgrading to
-- Updates Helm release AFTER the upgrade hook (so chart values reflect the new version)
-- Follows the same utility update pattern as `update_instance`
+The CRD spec is written *before* the hooks run because driver upgrade hooks frequently call back into the server (e.g. `stop_components`, `upgrade_deployment_version`), each of which spawns a nested `update_instance_crd` flow. Writing the CRD up front lets nested updates layer correctly; writing it at the end would stomp them with this flow's older instance.
+
+**Key differences from `create_instance_crd`:**
+
+- Core hook is a USER action (driver's upgrade function); setup has no separate core hook in the CRD path.
+- Passes `target_version` to all hooks so driver code knows what version it's upgrading to.
+- Writes the CRD spec at the very start so hook-driven nested CRD updates layer correctly.
 
 ## Flow: run_job
 
@@ -301,20 +283,23 @@ async def update_utility(utility, release_reference, context, namespace, update_
 
 ## Workflow Catalogue
 
-Located in `workflows/catalogue.py`. Maps `PrefectAction` enums to `WorkflowDefinition` objects:
+Located in `workflows/catalogue.py`. Maps `PrefectAction` enums to `WorkflowDefinition` objects. Every entry today uses `LocalSourceWorkflowDefinition` (no Git pull at flow-run time):
 
-| PrefectAction | Flow Function | Module | Work Pool |
+| PrefectAction | Flow Function | Module | Type |
 |---|---|---|---|
-| `APPLY_STATE` | `apply_state` | `agent.tasks.orchestration` | Internal |
-| `RUN_JOB` | `run_job` | `agent.tasks.orchestration` | User |
-| `CREATE_HELM_RELEASE` | `create_helm_release` | `agent.tasks.application` | User (Git) |
-| `UPDATE_HELM_RELEASE` | `update_helm_release` | `agent.tasks.application` | User (Git) |
-| `CREATE_INSTANCE` | `create_instance` | `agent.tasks.orchestration` | Internal |
-| `UPDATE_INSTANCE` | `update_instance` | `agent.tasks.orchestration` | Internal |
-| `UPGRADE_INSTANCE` | `upgrade_instance` | `agent.tasks.orchestration` | Internal |
+| `APPLY_STATE` | `apply_state` | `agent.tasks.orchestration` | INTERNAL |
+| `RUN_JOB` | `run_job` | `agent.tasks.orchestration` | USER |
+| `CREATE_HELM_RELEASE` | `create_helm_release` | `agent.tasks.application` | USER |
+| `UPDATE_HELM_RELEASE` | `update_helm_release` | `agent.tasks.application` | USER |
+| `CREATE_INSTANCE` | `create_instance_crd` | `agent.tasks.orchestration` | USER |
+| `UPDATE_INSTANCE` | `update_instance_crd` | `agent.tasks.orchestration` | USER |
+| `UPGRADE_INSTANCE` | `upgrade_instance_crd` | `agent.tasks.orchestration` | USER |
+| `EXECUTE_BACKUP` | `execute_backup_workflow` | `workflows.templates.backup` | INTERNAL |
+| `EXECUTE_RESTORE` | `execute_restore_workflow` | `workflows.templates.backup` | INTERNAL |
+| `EXECUTE_VELERO_BACKUP` | `execute_velero_backup_flow` | `workflows.templates.backup` | USER |
+| `EXECUTE_VELERO_RESTORE` | `execute_velero_restore_flow` | `workflows.templates.backup` | USER |
 
-**Internal** flows use `LocalSourceWorkflowDefinition` (run in-process).
-**User/Git** flows use `GitSourceWorkflowDefinition` (pull from Git, run in K8s).
+The `WorkflowType` distinction (`INTERNAL` vs `USER`) controls which Prefect work pool the flow runs on (`styrmin-work-pool` vs `user-work-pool`). User-defined driver actions, registered separately at driver-load time, use `GitSourceWorkflowDefinition` so the worker pulls the driver's repo at runtime.
 
 ## PrefectAction Enum
 
@@ -323,13 +308,19 @@ Located in `workflows/models.py`:
 ```python
 class PrefectAction(Enum):
     APPLY_STATE = "apply_state"
+
     CREATE_HELM_RELEASE = "create_instance"
     UPDATE_HELM_RELEASE = "update_instance"
-    PATCH_INSTANCE = "patch_instance"
+
     CREATE_INSTANCE = "orchestrate_instance_creation"
     UPDATE_INSTANCE = "orchestrate_instance_update"
     UPGRADE_INSTANCE = "orchestrate_instance_upgrade"
     RUN_JOB = "run_job"
+
+    EXECUTE_BACKUP = "execute_backup"
+    EXECUTE_RESTORE = "execute_restore"
+    EXECUTE_VELERO_BACKUP = "execute_velero_backup"
+    EXECUTE_VELERO_RESTORE = "execute_velero_restore"
 
     def to_tag(self) -> str:
         return f"action/{self.value}"
@@ -363,7 +354,7 @@ See ADR-008 for the rationale behind this responsibility shift.
 
 | File | Purpose |
 |------|---------|
-| [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | `apply_state`, `create_instance`, `update_instance`, `upgrade_instance`, `run_job` |
+| [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | `apply_state`, `create_instance_crd`, `update_instance_crd`, `upgrade_instance_crd`, `run_job` (plus the legacy `create_instance` / `update_instance` / `upgrade_instance` flows, currently unregistered) |
 | [agent/tasks/application.py](backend/styrmin_backend/agent/tasks/application.py) | `create_helm_release`, `update_helm_release` |
 | [agent/tasks/core.py](backend/styrmin_backend/agent/tasks/core.py) | `render_application_helm_release_specifications` |
 | [agent/tasks/shared.py](backend/styrmin_backend/agent/tasks/shared.py) | `get_context`, `render_helm_chart_specifications`, `render_helm_repository_specifications` |
