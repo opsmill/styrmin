@@ -28,8 +28,8 @@ Styrmin MVP is a **deployment orchestration platform** that manages application 
               ┌───────────────────────────┼───────────────────────────┐
               │                           │                           │
     ┌─────────▼─────────┐    ┌───────────▼───────────┐    ┌─────────▼─────────┐
-    │   Public GraphQL   │    │   Internal GraphQL    │    │    Lifespan       │
-    │    /graphql        │    │  /internal/graphql    │    │   Management      │
+    │     GraphQL        │    │     REST routes       │    │    Lifespan       │
+    │     /graphql       │    │      /api/*           │    │   Management      │
     └─────────┬─────────┘    └───────────┬───────────┘    └───────────────────┘
               │                           │
               └─────────────┬─────────────┘
@@ -47,8 +47,8 @@ Styrmin MVP is a **deployment orchestration platform** that manages application 
 └───────┬───────┘  └───────┬───────┘  └───────────────┘
         │                   │
         │          ┌───────▼───────┐
-        │          │  Agent Tasks  │
-        │          │ (Kubernetes)  │
+        │          │  Agent Tasks  │ ──> StyrminDeployment CRD
+        │          │   (Prefect)   │     (operator reconciles)
         │          └───────────────┘
         │
 ┌───────▼───────┐
@@ -57,6 +57,8 @@ Styrmin MVP is a **deployment orchestration platform** that manages application 
 └───────────────┘
 ```
 
+The server has a single GraphQL endpoint at `/graphql`; there is no separate `/internal/graphql` mount. The kopf operator and the agent's Prefect worker run in a sibling process — see [`../agent/overview.md`](../agent/overview.md).
+
 ## Directory Structure
 
 ```text
@@ -64,12 +66,14 @@ backend/styrmin_backend/
 ├── server/              # Application entry point and lifecycle
 │   └── app.py          # FastAPI app creation, startup/shutdown
 │
-├── api/                 # GraphQL API layer
-│   ├── schema/         # Query and Mutation definitions
-│   ├── definitions/    # GraphQL types by domain
-│   ├── fragments/      # Reusable response types
-│   ├── dependency.py   # Context injection (UnitOfWork)
-│   └── scalars.py      # Custom GraphQL scalars (JSON)
+├── api/                 # API layer
+│   ├── schema/         # GraphQL Query and Mutation definitions
+│   ├── definitions/    # GraphQL types per domain (cluster/, deployment/, task/, ...)
+│   ├── rest/           # REST endpoints (legacy/internal HTTP routes)
+│   ├── dependency.py   # Context injection (UnitOfWork via get_context)
+│   ├── errors.py       # StructuredErrorExtension middleware
+│   ├── resolvers.py    # Shared resolver helpers
+│   └── scalars.py      # Custom GraphQL scalars (JSON, etc.)
 │
 ├── db/                  # Database layer
 │   ├── models.py       # SQLModel ORM models
@@ -80,39 +84,52 @@ backend/styrmin_backend/
 │   ├── base.py         # Abstract BaseRepository
 │   └── [entity].py     # Repository per entity
 │
-├── services/            # Business logic layer
+├── services/            # Business logic layer (see services.md for the full list)
 │   ├── [entity].py     # Core CRUD services
 │   ├── unit_of_work.py # UnitOfWork pattern
 │   ├── driver/         # Application driver parsing
 │   ├── reconciliation/ # State diff and remediation
-│   ├── helm/           # Helm chart rendering
-│   ├── workflow/       # Workflow execution
-│   └── utilities/      # Infrastructure utilities
+│   ├── backup/         # Backup/restore (see backup-restore.md)
+│   ├── helm/           # Helm chart rendering helpers
+│   ├── workflow/       # Workflow executor (Prefect wrapper)
+│   ├── ingress_controller/, scheduling/, utilities/
 │
-├── workflows/           # Prefect workflow management
-│   ├── manager.py      # PrefectManager
-│   ├── catalogue.py    # Workflow registry
-│   └── models.py       # Workflow data models
+├── workflows/           # Prefect workflow registry (server-side)
+│   ├── manager.py      # PrefectManager (submit, register, lookup)
+│   ├── catalogue.py    # Workflow registry (registers *_crd flows)
+│   ├── models.py       # PrefectAction, WorkflowDefinition
+│   └── templates/      # Backup/restore workflow templates
 │
-├── agent/               # Kubernetes agent
+├── agent/               # Agent code (lives in this package but runs in the agent process)
 │   ├── service/        # K8s resource builders
-│   └── tasks/          # Prefect task definitions
+│   ├── tasks/          # Prefect flow definitions executed by the agent's worker
+│   └── status/         # Periodic pod + CRD status reporter
+│   # See dev/knowledge/agent/overview.md
+│
+├── operator/            # Kopf operator (runs in the agent process)
+│   # See dev/knowledge/agent/operator.md
 │
 ├── context/             # Deployment context resolution
-│   ├── models/         # Context data models
+│   ├── models/         # Context data models (GlobalContext, ChartInfo, ...)
 │   ├── resolvers.py    # Context resolution logic
 │   └── validators.py   # Context validation
 │
 ├── domain/              # Domain models
-│   ├── models.py       # Core business objects
+│   ├── models.py       # Core business objects (Deployment, Instance, ...)
 │   └── payloads.py     # Inter-module payloads
 │
-├── actions/             # Action primitives
-│   └── primitives.py
+├── actions/             # Action primitives importable from driver actions
+│   └── primitives.py   # stop_components, start_components, execute_commands
 │
-└── config/              # Configuration
-    └── config.py       # Pydantic Settings
+├── cli/                 # styrminctl CLI (Cyclopts-based)
+│
+├── entrypoint/          # Process entrypoints
+│   └── combined.py     # Shared event loop: kopf + Prefect worker + status reporter
+│
+└── config.py            # Pydantic Settings (top-level module, not a package)
 ```
+
+For the agent-side details (status reporter, operator, Kubernetes resource builders), see [`../agent/overview.md`](../agent/overview.md) and [`../agent/operator.md`](../agent/operator.md).
 
 ## Request Flow
 
@@ -185,9 +202,10 @@ The **runtime representation** of a deployed application. Created when a deploym
 
 ### Task
 
-An async operation tracked by the system:
+An async operation tracked by the system. `TaskType` values:
 
-- DEPLOYMENT, CREATE_INSTANCE, DELETE_INSTANCE
+- NOOP (reconciliation produced no remediation)
+- CREATE_INSTANCE, DELETE_INSTANCE
 - UPDATE_INSTANCE, UPGRADE_INSTANCE
 - STOP_COMPONENTS, START_COMPONENTS, RUN_JOB
 
@@ -207,8 +225,8 @@ The application starts in `server/app.py`:
 ```python
 def create_app() -> FastAPI:
     app = FastAPI(title="OpsMill Styrmin-MVP Platform", lifespan=lifespan)
+    app.include_router(init_rest_router())
     app.include_router(init_graphql_router(), prefix="/graphql")
-    app.include_router(init_internal_graphql_router(), prefix="/internal/graphql")
     return app
 ```
 
@@ -219,3 +237,5 @@ Startup sequence:
 3. Configure logging with Loguru
 4. Initialize Prefect workflow manager
 5. Initialize infrastructure utilities
+
+The agent process is a separate entrypoint (`entrypoint/combined.py`) that runs the kopf operator, the Prefect worker, and the status reporter together — see [`../agent/overview.md`](../agent/overview.md).
