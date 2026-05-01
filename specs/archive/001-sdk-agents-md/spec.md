@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-sdk-agents-md`
 **Created**: 2026-05-01
-**Status**: Draft
+**Status**: Extracted
 **Input**: User description: "Add `python_sdk/AGENTS.md` documenting the SDK's architecture, the manual Python wiring required when adding/changing GraphQL operations, and standard Always Do/Ask First/Never Do boundaries; update top-level `AGENTS.md` to reference it. Tracks GitHub issue opsmill/styrmin#150."
 
 ## User Scenarios & Testing *(mandatory)*
