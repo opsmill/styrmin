@@ -17,7 +17,7 @@ Adopt a single `.pre-commit-config.yaml` at the repo root and use `prek` as the 
 1. `prek` is installed by contributors out-of-band (`brew install j178/prek/prek`, `curl` from releases, or distro package). It is required — there is no Python fallback.
 2. CI installs prek by piping the upstream `prek-installer.sh` (pinned to a tagged release) into `sh` and runs the hooks with `prek run --all-files` for both the `pre-commit` and `pre-push` stages.
 3. Slow checks (GraphQL schema freshness, generated-type freshness) are gated to the `pre-push` stage so per-commit latency stays under the 10-second target. CI runs both stages.
-4. The existing per-tool CI jobs (`python-lint`, `yaml-lint`, `markdown-lint`, `frontend-lint`, `graphql-schema-check`, `graphql-operations-check`, `helm-lint`) are kept in place during a parity-validation period before any deduplication, so signal cannot regress.
+4. The pre-commit CI job is the canonical lint/format/freshness gate; the per-tool jobs it subsumes (`python-lint`, `yaml-lint`, `markdown-lint`, `frontend-lint`, `helm-lint`, `graphql-schema-check`, `graphql-operations-check`, `sdk-codegen-check`, `frontend-codegen-check`) are removed in the same change. Downstream jobs (`unit-tests`, `frontend-test`, `frontend-build`, `e2e-tests-*`) `needs:` the hook job. Parity was validated by running both layers side-by-side on this PR before deduplication.
 5. The hook config uses no prek-only YAML extensions — the `.pre-commit-config.yaml` format is the public, documented superset that prek consumes. This keeps the door open if we ever revisit using `pre-commit` directly.
 6. An invoke task wrapper (`uv run invoke pre-commit-install` / `pre-commit-run`) keeps the onboarding command consistent with the rest of the project's invoke-driven workflow.
 
@@ -38,7 +38,7 @@ The original draft of this ADR supported both `prek` and `pre-commit` (Python) a
 **Harder:**
 
 - Contributors who cannot install prek on their machine are blocked from running the hooks. The fallback is `git commit --no-verify`, which delays the failure to CI but does not block contribution outright.
-- The hook config and the per-tool CI jobs run the same checks during the parity-validation period — this is intentional duplication, but it does cost a small amount of CI time. After a parity period, the per-tool jobs the hook job fully subsumes can be removed.
+- A single misconfiguration in the hook job becomes a single point of failure for the lint/format gate, since the per-tool jobs no longer act as a backstop. Mitigated by the hook job running the same tools the per-tool jobs ran, so any regression is functionally identical to one in the old layout.
 - Contributors must run `uv sync` and `pnpm install` before the hooks fire; otherwise hooks that shell out to `uv run …` or `pnpm` produce confusing "command not found" errors. Mitigated by the dev guide.
 - Hook-version pins (`rev:` in `.pre-commit-config.yaml`) need periodic bumping; floating refs are forbidden, so this is a manual maintenance task (a future routine could automate it).
 
@@ -48,4 +48,4 @@ The original draft of this ADR supported both `prek` and `pre-commit` (Python) a
 - **`pre-commit` (Python) only**: Rejected — too slow per-commit on a project with many hooks; would push contributors toward `git commit --no-verify`.
 - **A custom invoke task that wraps each check**: Rejected — duplicates the declarative config that pre-commit / prek already provide and forfeits the published-hook ecosystem (e.g., the `pre-commit-hooks` repo for hygiene checks).
 - **All hooks on `pre-commit` stage (no `pre-push` gating)**: Rejected — the GraphQL schema regen and generated-type regen each take several seconds and would push contributors toward bypass.
-- **Drop the per-tool CI jobs immediately when the hook job lands**: Rejected — silent CI signal loss is a much larger risk than the small cost of running both jobs during the parity-validation period.
+- **Keep the per-tool CI jobs in place alongside the hook job for a parity-validation period**: Initially planned, then reversed. Both layers ran together for one CI cycle on this PR and produced identical pass/fail signal; the duplicate cost outweighed the marginal insurance value, so the per-tool jobs were removed in the same change. If a regression is later attributed to the dedupe, restoring the per-tool jobs is a single-revert operation.

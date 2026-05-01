@@ -104,8 +104,8 @@ Expensive checks (full GraphQL schema regeneration, full SDK + frontend type reg
 #### CI integration
 
 - **FR-011**: A new CI job MUST run `prek run --all-files` on every pull request, for both the `pre-commit` and `pre-push` stages.
-- **FR-012**: The pre-commit CI job MUST fail the PR check suite if any hook fails, with the same exit semantics as the per-tool jobs.
-- **FR-013**: The pre-commit CI job MUST run in addition to the existing per-tool jobs initially. Whether to dedupe (remove redundant per-tool jobs) is a follow-up decision once the new job has demonstrated stable parity; if the team chooses to keep both, the rationale MUST be documented in the CI workflow.
+- **FR-012**: The pre-commit CI job MUST fail the PR check suite if any hook fails.
+- **FR-013**: The pre-commit CI job is the canonical lint/format/freshness gate for the repo. Per-tool CI jobs that the hook job fully subsumes (`python-lint`, `yaml-lint`, `markdown-lint`, `frontend-lint`, `helm-lint`, `graphql-schema-check`, `graphql-operations-check`, `sdk-codegen-check`, `frontend-codegen-check`) MUST be removed; downstream jobs (`unit-tests`, `frontend-test`, `frontend-build`, `e2e-tests-*`) MUST `needs:` the hook job instead.
 - **FR-014**: The pre-commit CI job MUST cache hook environments between runs so cold-start cost is paid at most once per dependency change.
 
 #### Behavior on bypass and failure
@@ -127,7 +127,7 @@ Expensive checks (full GraphQL schema regeneration, full SDK + frontend type reg
 - **SC-001**: After this feature ships, the rate of CI runs that fail purely on the checks now covered by hooks (formatting, lint, yaml-lint, markdown-lint, GraphQL validation, frontend lint) drops by at least 75% on the `develop` branch over the following month, measured against the prior month.
 - **SC-002**: A new contributor can go from `git clone` to "ready to commit compliant code" in a single documented command, taking under 60 seconds on a warm machine (excluding `uv sync` and `pnpm install` time).
 - **SC-003**: A clean `git commit` on a typical change runs all configured pre-commit hooks in under 10 seconds on a warm cache.
-- **SC-004**: The pre-commit CI job and the corresponding per-tool CI jobs agree on pass/fail for 100% of PRs over a one-month observation window. Any disagreement is treated as a bug and fixed.
+- **SC-004**: The pre-commit CI job is the only enforcement gate for the checks it covers; no per-tool CI duplicates remain. Any regression in coverage (a check that previously failed CI but now passes) is treated as a bug and fixed.
 - **SC-005**: The number of "fix lint" / "fix format" follow-up commits merged into `develop` drops by at least 50% in the month after rollout, measured against the prior month.
 
 ## Assumptions
@@ -135,7 +135,7 @@ Expensive checks (full GraphQL schema regeneration, full SDK + frontend type reg
 - Contributors already have `uv` and `pnpm` installed (these are existing project prerequisites). `prek` is added as a new prerequisite, installed out-of-band via `brew`, the project's release tarball, or a distro package.
 - The CI runner installs `prek` by piping the upstream `prek-installer.sh` (pinned to a tagged release) into `sh`.
 - Generated directories (`python_sdk/src/styrmin_sdk/graphql/_generated/`, frontend GraphQL generated types, build artifacts) are well-known and stable enough to add to `exclude` patterns up front.
-- The existing per-tool CI jobs remain in place for at least one release cycle after this feature ships, to validate parity before any deduplication.
+- The per-tool CI jobs that the hook job fully subsumes are removed in the same change. Parity is validated by running the hook job on this PR alongside the prior per-tool jobs (one CI run is judged sufficient given the small, additive nature of the change).
 - The acceptable per-commit time budget is "fast enough that contributors do not routinely use `--no-verify`". Ten seconds is the working target; checks that exceed this go to `pre-push`.
 - Helm lint applies only when `helm/**` files change; other contributors should not need Helm installed locally.
 - The `ty` type checker is already an established part of the project's mandatory check set per `AGENTS.md` and is fast enough to run on every commit when scoped to changed files.

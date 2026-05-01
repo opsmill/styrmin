@@ -92,15 +92,23 @@ def generate_types(context: Context) -> None:
 
 @task(name="generate-validate")
 def generate_validate(context: Context) -> None:
-    """Validate that generated types are up to date."""
+    """Validate that generated types are up to date (Python SDK + frontend)."""
     print_header("Validating generated types are up to date...")
-    generated_dir = MAIN_DIRECTORY_PATH / "python_sdk" / "src" / "styrmin_sdk" / "graphql" / "_generated"
+    sdk_generated = MAIN_DIRECTORY_PATH / "python_sdk" / "src" / "styrmin_sdk" / "graphql" / "_generated"
+    frontend_generated = MAIN_DIRECTORY_PATH / "frontend" / "src" / "generated"
+
     context.run("ariadne-codegen", hide=True)
-    result = context.run(f"git diff --exit-code {generated_dir}", warn=True, hide=True)
-    if result is not None and result.failed:
-        # Restore the committed state so the working tree stays clean
-        context.run(f"git checkout -- {generated_dir}", hide=True)
-        raise SystemExit("Generated types are out of date. Run 'uv run invoke generate' to update them.")
+    sdk_result = context.run(f"git diff --exit-code {sdk_generated}", warn=True, hide=True)
+    if sdk_result is not None and sdk_result.failed:
+        context.run(f"git checkout -- {sdk_generated}", hide=True)
+        raise SystemExit("SDK generated types are out of date. Run 'uv run invoke generate' to update them.")
+
+    with context.cd("frontend"):
+        context.run("pnpm codegen", hide=True)
+    frontend_result = context.run(f"git diff --exit-code {frontend_generated}", warn=True, hide=True)
+    if frontend_result is not None and frontend_result.failed:
+        context.run(f"git checkout -- {frontend_generated}", hide=True)
+        raise SystemExit("Frontend generated types are out of date. Run 'uv run invoke generate' to update them.")
 
 
 ns.add_task(local_run)

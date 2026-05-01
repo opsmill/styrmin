@@ -109,11 +109,11 @@
 
 **Rationale**: Bypass is a safety valve. We don't try to block it; we instead document when it's the right tool.
 
-## R9. Drift between hook job and per-tool jobs
+## R9. Dedupe vs parity-validation period
 
-**Decision**: Keep both for at least one release cycle. After a month of clean parity (per spec SC-004), we open a follow-up PR to remove the per-tool jobs that the hook job has fully subsumed. The CI job names match the underlying tool ("Pre-Commit Hooks") so it's obvious from the check list when both pass.
+**Decision**: Run both layers (per-tool jobs + hook job) for one CI cycle on this PR to validate parity, then remove the per-tool jobs that the hook job fully subsumes in the same PR. The single observed parity run is judged sufficient — the hook job invokes the same underlying tools (`ruff`, `ty`, `yamllint`, `rumdl`, `pnpm lint`, `helm lint`, `validate-graphql`, `ariadne-codegen`, `pnpm codegen`) that the per-tool jobs invoked, so any divergence would be a CLI-flag-level bug, not a semantic one.
 
-**Rationale**: The cost of running the hook job alongside is small; the cost of accidentally deleting CI signal is large.
+**Rationale**: A multi-week parity-validation period was initially planned (see ADR-014's "Alternatives Considered"). On reflection: the duplicate-CI cost (multiple Python+uv+pnpm setups, repeated lints) outweighs the marginal insurance, and reverting the dedupe is a single-revert operation if a regression surfaces.
 
 ## R10. Markdown linter
 
