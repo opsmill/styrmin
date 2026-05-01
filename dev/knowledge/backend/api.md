@@ -2,98 +2,125 @@
 
 ## Overview
 
-The backend exposes two GraphQL APIs:
+The backend exposes a single GraphQL endpoint at **`/graphql`** plus a small REST router under **`/api/*`**. There is no separate "internal" GraphQL endpoint — agent callbacks (`callback`, `reportPodStatuses`, `reportDeploymentStatuses`) and read-only operations live on the same `Mutation` / `Query` types as the user-facing operations.
 
-- **Public API** (`/graphql`) - User-facing operations for managing clusters, environments, and deployments
-- **Internal API** (`/internal/graphql`) - Agent callbacks and internal operations
+The GraphQL schema is defined with [Strawberry GraphQL](https://strawberry.rocks/) and exported to `schema.graphql` at the repo root via:
 
-Both APIs use [Strawberry GraphQL](https://strawberry.rocks/) for schema definition.
+```bash
+uv run styrmin export graphql-schema schema.graphql
+```
+
+`schema.graphql` is the authoritative inventory of types, fields, queries, mutations, scalars, and enums. This document is a higher-level guide; when in doubt, read the schema file.
+
+### Field naming
+
+Strawberry's default `auto_camel_case` is in effect — Python `snake_case` field names on `@strawberry.type` classes are exposed as `camelCase` in the GraphQL schema. So `created_on` becomes `createdOn`, `application_version` becomes `applicationVersion`, etc.
 
 ## API Architecture
 
 ```text
 styrmin_backend/api/
-├── __init__.py           # Router initialization
-├── dependency.py         # Context injection (UnitOfWork)
-├── scalars.py           # Custom scalars (JSON)
+├── __init__.py           # init_graphql_router, init_rest_router, schema construction
+├── dependency.py         # Context injection (UnitOfWork) — see get_context
+├── errors.py             # StructuredErrorExtension middleware
+├── resolvers.py          # Shared resolver helpers
+├── scalars.py            # Custom scalars (JSON, ...)
+├── rest/                 # REST endpoints (legacy + utility routes)
 ├── schema/
-│   ├── query.py         # Query, InternalQuery
-│   └── mutation.py      # Mutation, InternalMutation
-├── definitions/         # GraphQL type definitions
-│   ├── cluster/
-│   ├── environment/
-│   ├── deployment/
-│   ├── task/
-│   ├── deployment_timeline/
-│   ├── application_driver/
-│   ├── context/
-│   ├── callback/
-│   ├── action/
-│   └── helm_chart/
-└── fragments/           # Response union types
-    ├── cluster.py
-    ├── environment.py
-    ├── deployment.py
-    ├── task.py
-    ├── application.py
-    └── context.py
+│   ├── __init__.py
+│   ├── query.py          # The single Query type
+│   └── mutation.py       # The single Mutation type
+└── definitions/          # GraphQL type definitions, one subpackage per domain
+    ├── action/
+    ├── application_driver/
+    ├── backup/
+    ├── backup_storage_location/
+    ├── callback/
+    ├── cluster/
+    ├── context/
+    ├── deployment/
+    ├── deployment_status/
+    ├── deployment_timeline/
+    ├── environment/
+    ├── helm_chart/
+    ├── pod_status/
+    ├── service/
+    └── task/
 ```
 
-## Public API
+## Queries
 
-### Queries
+The full list, in the order they appear on `type Query` in `schema.graphql`:
 
-| Query | Description | Return Type |
-|-------|-------------|-------------|
-| `clusters` | Get all clusters | `[Cluster]` |
-| `cluster(cluster_id?, cluster_name?)` | Get cluster by ID or name | `Cluster \| ClusterNotFound` |
-| `environments` | Get all environments | `[Environment]` |
-| `environment(environment_id?, environment_name?, cluster_id?, cluster_name?)` | Get environment by ID or name (with cluster context) | `Environment \| EnvironmentNotFound` |
-| `deployment(deployment_id)` | Get deployment by ID (async) | `Deployment \| DeploymentNotFound` |
-| `tasks` | Get all tasks | `[Task]` |
-| `task(task_id)` | Get task by ID | `Task \| TaskNotFound` |
-| `deploymentTimeline(deployment_id)` | Get deployment history timeline with version info and context diffs | `[DeploymentTimelineEntry]` |
+| Query | Arguments | Return |
+|-------|-----------|--------|
+| `clusters` | — | `[Cluster!]!` |
+| `cluster` | `clusterId?, clusterName?` | `Cluster` |
+| `backupStorageLocations` | — | `[BackupStorageLocation!]!` |
+| `backupStorageLocation` | `backupStorageLocationId` | `BackupStorageLocation` |
+| `task` | `taskId` | `Task` |
+| `tasks` | — | `[Task!]!` |
+| `environments` | — | `[Environment!]!` |
+| `environment` | `environmentId?, environmentName?, clusterId?, clusterName?` | `Environment` |
+| `deployment` | `deploymentId` | `Deployment` |
+| `backup` | `backupId` | `Backup` |
+| `backups` | `instanceId, status?` | `[Backup!]!` |
+| `restore` | `restoreId` | `Restore` |
+| `restores` | `backupId, status?` | `[Restore!]!` |
+| `backupSchedule` | `scheduleId` | `BackupSchedule` |
+| `backupSchedules` | `deploymentId` | `[BackupSchedule!]!` |
+| `applicationDrivers` | — | `[ApplicationDriver!]!` |
+| `applicationDriver` | `applicationDriverId` | `ApplicationDriver` |
+| `environmentServices` | `environmentId` | `[DeployedService!]!` |
+| `deploymentServices` | `deploymentId` | `[DeployedService!]!` |
+| `deploymentTimeline` | `deploymentId` | `[DeploymentTimelineEntry!]!` |
+| `podStatuses` | `deploymentId?, environmentId?, clusterId?` | `[PodStatus!]!` |
+| `ok` | — | `Boolean!` (health probe) |
 
-### Mutations
+## Mutations
 
-| Mutation | Description | Return Type |
-|----------|-------------|-------------|
-| `create_cluster(name="default", config?)` | Create a cluster (only one allowed) | `ClusterCreated \| ClusterLimitReached \| ClusterCreationFailed` |
-| `delete_cluster(cluster_id?, cluster_name?)` | Delete a cluster by ID or name | `ClusterDeleted \| ClusterNotFound` |
-| `create_environment(name, cluster_id?, cluster_name?, config?)` | Create environment in cluster (by ID or name) | `EnvironmentCreated \| EnvironmentAlreadyExists \| EnvironmentCreationFailed` |
-| `delete_environment(environment_id?, environment_name?, cluster_id?, cluster_name?)` | Delete an environment by ID or name | `EnvironmentDeleted \| EnvironmentNotFound` |
-| `create_application_driver(name)` | Create application driver (async) | `ApplicationDriverCreated \| ApplicationDriverCreationFailed` |
-| `load_remote_application_driver_version(repository_url, branch)` | Load driver from Git (async) | `ApplicationDriverVersionCreated \| ApplicationDriverVersionCreationFailed` |
-| `deploy(driver, version?, environment_id?, environment_name?, cluster_id?, cluster_name?, name?, config?)` | Deploy application (async) | `DeploymentInProgress \| DeploymentFailed` |
-| `update_deployment(deployment_id, config)` | Update deployment config (async) | `DeploymentUpdateInProgress \| DeploymentUpdateFailed` |
+Defined on `type Mutation`:
 
-## Internal API
+| Mutation | Arguments | Return |
+|----------|-----------|--------|
+| `createCluster` | `name="default", config?` | `Cluster` |
+| `deleteCluster` | `clusterId?, clusterName?` | `String` |
+| `createEnvironment` | `name, clusterId?, clusterName?, config?` | `Environment` |
+| `deleteEnvironment` | `environmentId?, environmentName?, clusterId?, clusterName?` | `String` |
+| `createBackupStorageLocation` | `name, endpoint, bucket, region, accessKeyId, secretAccessKey` | `BackupStorageLocation` |
+| `updateBackupStorageLocation` | `backupStorageLocationId, name?, endpoint?, bucket?, region?, accessKeyId?, secretAccessKey?` | `BackupStorageLocation` |
+| `deleteBackupStorageLocation` | `backupStorageLocationId` | `String` |
+| `assignBackupStorageLocation` | `environmentId, backupStorageLocationId` | `Environment` |
+| `unassignBackupStorageLocation` | `environmentId` | `Environment` |
+| `loadLocalApplicationDriverVersion` | `path` | `ApplicationDriverVersion` |
+| `loadRemoteApplicationDriverVersion` | `repositoryUrl, branch` | `ApplicationDriverVersion` |
+| `deploy` | `driver, environmentId?, environmentName?, clusterId?, clusterName?, version?, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
+| `updateDeployment` | `deploymentId, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
+| `createBackup` | `instanceId, name?` | `Backup` |
+| `deleteBackup` | `backupId` | `String` |
+| `createRestore` | `backupId, targetNamespace, targetInstanceId?` | `Restore` |
+| `createBackupSchedule` | `deploymentId, name, cronExpression, retentionCount=10, enabled=true` | `BackupSchedule` |
+| `updateBackupSchedule` | `scheduleId, name?, cronExpression?, retentionCount?, enabled?` | `BackupSchedule` |
+| `deleteBackupSchedule` | `scheduleId` | `String` |
+| `callback` | `taskId, stateName, stateMessage?, stateType` | `CallbackResponse!` (Prefect → server) |
+| `stopComponents` | `deploymentId, components` | `Task` |
+| `startComponents` | `deploymentId, components` | `Task` |
+| `runJob` | `deploymentId, commands, env, image` | `Task` |
+| `updateDeploymentVersion` | `deploymentId, version, parameters?` | `Task` |
+| `reportPodStatuses` | `reports: [DeploymentPodStatusReport!]!` | `ReportPodStatusesResponse!` (agent → server) |
+| `reportDeploymentStatuses` | `reports: [DeploymentStatusReportInput!]!` | `ReportDeploymentStatusesResponse!` (agent → server) |
 
-Used by agents and internal services for callbacks and privileged operations.
-
-### Internal Queries
-
-| Query | Description | Return Type |
-|-------|-------------|-------------|
-| `context(instance_id)` | Get deployment context for instance | `Context \| ApplicationInstanceNotFound` |
-
-### Internal Mutations
-
-| Mutation | Description | Return Type |
-|----------|-------------|-------------|
-| `callback(task_id, state_name, state_message?, state_type)` | Update task state from Prefect | `CallbackResponse` |
-| `stop_components(deployment_id, components)` | Stop specific components (async) | `DeploymentUpdateInProgress \| DeploymentUpdateFailed` |
-| `start_components(deployment_id, components)` | Start specific components (async) | `DeploymentUpdateInProgress \| DeploymentUpdateFailed` |
-| `run_job(deployment_id, commands, env, image)` | Run job in deployment context (async) | `JobRunInProgress \| JobRunFailed` |
-| `update_deployment_version(deployment_id, version)` | Update application version (async) | `DeploymentUpdateInProgress \| DeploymentUpdateFailed` |
+The agent callbacks (`callback`, `reportPodStatuses`, `reportDeploymentStatuses`) are documented in [`../agent/overview.md`](../agent/overview.md) and [`reconciliation.md`](reconciliation.md).
 
 ## Context Injection
 
-The API uses dependency injection to provide database access:
+The API uses dependency injection to provide a `UnitOfWork` to every resolver:
 
 ```python
 # api/dependency.py
-async def get_graphql_context(uow: SqlModelUnitOfWork = Depends(get_uow)):
+async def get_context(
+    uow: SqlModelUnitOfWork = Depends(get_unit_of_work_dependency),
+) -> dict[str, SqlModelUnitOfWork]:
     return {"uow": uow}
 ```
 
@@ -101,32 +128,25 @@ Every resolver receives the `UnitOfWork` via `info.context["uow"]`.
 
 ## Response Patterns
 
-Mutations return the resource type directly (nullable) and let service-layer
-exceptions propagate. The `StructuredErrorExtension` (see `api/errors.py`)
-catches any `ServiceError` and converts it into a GraphQL error with a
-structured `extensions.code` field (e.g. `NOT_FOUND`, `ALREADY_EXISTS`,
-`IN_USE`). Additional metadata from `ServiceError.error_metadata` is merged
-into the extensions object.
+Mutations return the resource type directly (nullable) and let service-layer exceptions propagate. The `StructuredErrorExtension` middleware in `api/errors.py` catches any `ServiceError` and converts it into a GraphQL error with a structured `extensions.code` field (e.g. `NOT_FOUND`, `ALREADY_EXISTS`, `IN_USE`). Additional metadata from `ServiceError.error_metadata` is merged into `extensions`.
 
 ```python
-# Mutation — return the resource directly, let exceptions propagate
 @strawberry.mutation
 async def create_cluster(
     self, info: strawberry.Info, name: str = "default"
 ) -> Cluster | None:
     uow = info.context["uow"]
-    cluster = await create_cluster(uow=uow, name=name)
+    cluster = await create_cluster_service(uow=uow, name=name)
     return Cluster.from_instance(cluster)
 ```
 
-On the client side, errors arrive as standard GraphQL errors with
-`extensions.code` for programmatic handling.
+On the client side, errors arrive as standard GraphQL errors with `extensions.code` for programmatic handling. See [`../guides/graphql-propagation-tests.md`](../guides/graphql-propagation-tests.md) for the per-field test pattern.
 
 ## GraphQL Types
 
-### Core Types
+Below is a sample of the most-frequently-touched types; consult `schema.graphql` for the full set.
 
-#### Cluster
+### Cluster
 
 ```graphql
 type Cluster {
@@ -140,7 +160,7 @@ type Cluster {
 }
 ```
 
-#### Environment
+### Environment
 
 ```graphql
 type Environment {
@@ -149,76 +169,133 @@ type Environment {
   config: JSON
   capabilities: JSON
   clusterId: UUID!
+  cluster: Cluster!
   deployments: [Deployment!]!
+  backupStorageLocation: BackupStorageLocation
 }
 ```
 
-#### Deployment
+### Deployment
 
 ```graphql
 type Deployment {
   id: UUID!
   name: String!
+  status: String!                # See "Status strings" below
+  config: JSON!
+  parameters: JSON!
   applicationVersion: String!
-  config: JSON
-  status: String!
+  applicationDriverVersionId: UUID!
+  environmentId: UUID!
+  internal: Boolean!             # True for system deployments (e.g. ingress controller)
+  applicationInstance: ApplicationInstance
   components: [Component!]!
-  tasks: [Task!]!
+  environment: Environment!
+  applicationDriverVersion: ApplicationDriverVersion!
+  deployedServices: [DeployedService!]!
+  podStatuses: [PodStatus!]!
+  resolvedScheduling: [ResolvedComponentScheduling!]!
+  crdStatus: DeploymentStatusType
 }
 ```
 
-#### Task
+There is no `tasks` field on `Deployment` — query `tasks` at the root and filter by `deploymentId` if you need a deployment's task history.
+
+### Task
 
 ```graphql
 type Task {
   id: UUID!
-  type: TaskType!
-  status: TaskStatus!
+  type: String!                  # Stored as TaskType enum value (see below)
+  status: String!                # Stored as TaskStatus enum value (see below)
   message: String
-  deploymentId: UUID!
+  deploymentId: UUID
+  createdOn: DateTime
+  updatedOn: DateTime
+  deployment: Deployment
 }
 ```
 
-### Enums
+`type` and `status` are exposed as `String!` (not GraphQL enums), but they always carry one of the database enum values — see "Status strings" below.
 
-**Deployment state values** (string): `pending`, `deploying`, `running`, `failed`
+### PodStatus
 
-**TaskStatus**: `PENDING`, `RUNNING`, `SUCCESS`, `FAILED`
+```graphql
+type PodStatus {
+  id: UUID!
+  deploymentId: UUID!
+  podName: String!
+  namespace: String!
+  phase: PodPhase!               # GraphQL enum (PENDING/RUNNING/SUCCEEDED/FAILED/UNKNOWN)
+  ready: Boolean!
+  restartCount: Int!
+  containerStatuses: JSON!
+  nodeName: String
+  componentName: String          # styrmin/component label, recorded as observed
+  startedAt: DateTime
+  lastPolledAt: DateTime
+  createdOn: DateTime
+  updatedOn: DateTime
+}
+```
 
-**TaskType**: `DEPLOYMENT`, `CREATE_INSTANCE`, `DELETE_INSTANCE`, `UPDATE_INSTANCE`, `UPGRADE_INSTANCE`, `STOP_COMPONENTS`, `START_COMPONENTS`, `RUN_JOB`
+## Enums
+
+The schema exposes only a handful of GraphQL enums; most "enum-shaped" fields are `String!` carrying a value from one of the DB-level enums in [`data-models.md`](data-models.md).
+
+GraphQL enums in the schema:
+
+- `PodPhase` — `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `UNKNOWN` (uppercase wire format; the agent's `agent/status/models.py::PodPhase` mirrors these values).
+- `BackupStatus` — `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`.
+- `RestoreStatus` — `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`.
+
+### Status strings
+
+Fields typed `String!` that carry well-known enum values:
+
+- `Deployment.status` — `pending`, `deploying`, `running`, `restoring`, `failed` (lowercase; values come from `DeploymentState` in `db/models.py`).
+- `Task.status` — `pending`, `running`, `success`, `failed` (`TaskStatus`).
+- `Task.type` — `noop`, `create_instance`, `delete_instance`, `update_instance`, `upgrade_instance`, `stop_components`, `start_components`, `run_job` (`TaskType`).
+- `Backup.status` / `Restore.status` — same casing as the corresponding GraphQL enums above.
+
+The DB-level enum casing is intentionally lowercase; the agent-side `PodPhase` happens to be uppercase to match the GraphQL wire format. See [`data-models.md`](data-models.md) for the authoritative list of database enum values.
 
 ## Nested Object Resolvers
 
-<!-- Extracted from specs/001-graphql-nested-resolvers on 2026-04-01 -->
+GraphQL types expose nested object fields that allow clients to traverse entity relationships in a single query. Each nested field resolves the related entity on demand.
 
-GraphQL types expose nested object fields that allow clients to traverse entity relationships in a single query, eliminating follow-up requests. Each nested field resolves the related entity on demand.
-
-### Available Nested Relationships
+A representative subset:
 
 | Parent Type | Field | Return Type | Nullable | Notes |
 |-------------|-------|-------------|----------|-------|
 | `Deployment` | `environment` | `Environment` | No | Via `environment_id` FK |
 | `Deployment` | `applicationDriverVersion` | `ApplicationDriverVersion` | No | Via `application_driver_version_id` FK |
+| `Deployment` | `applicationInstance` | `ApplicationInstance` | Yes | Active instance only |
 | `ApplicationDriverVersion` | `applicationDriver` | `ApplicationDriver` | No | Sync resolver (eager-loaded) |
-| `ApplicationInstance` | `applicationDriverVersion` | `ApplicationDriverVersion` | No | Via `application_driver_version_id` FK |
+| `ApplicationInstance` | `applicationDriverVersion` | `ApplicationDriverVersion` | No | Via FK |
 | `Task` | `deployment` | `Deployment` | Yes | `deployment_id` may be null |
 | `BackupSchedule` | `deployment` | `Deployment` | No | Via `deployment_id` FK |
 | `Backup` | `instance` | `ApplicationInstance` | No | Via `instance_id` FK |
 | `Restore` | `backup` | `Backup` | No | Via `backup_id` FK |
 
-All existing `*Id` scalar fields are preserved alongside the new nested object fields for backward compatibility.
-
-Clients can chain nested fields for deep traversal (e.g., `restore → backup → instance → applicationDriverVersion → applicationDriver`). No depth limit is enforced.
+All `*Id` scalar fields are preserved alongside the nested object fields for backward compatibility. Clients can chain nested fields for deep traversal (e.g., `restore → backup → instance → applicationDriverVersion → applicationDriver`); no depth limit is enforced.
 
 ## Custom Scalars
 
-**JSON** (`api/scalars.py`) - Allows passing arbitrary JSON objects for configuration.
+| Scalar | Purpose |
+|--------|---------|
+| `JSON` (`api/scalars.py`) | Arbitrary JSON for configuration / parameter / status fields |
+| `UUID` | Standard UUID string |
+| `DateTime` | ISO-8601 timestamp |
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| [api/**init**.py](backend/styrmin_backend/api/__init__.py) | Router initialization |
-| [api/schema/query.py](backend/styrmin_backend/api/schema/query.py) | Query definitions |
-| [api/schema/mutation.py](backend/styrmin_backend/api/schema/mutation.py) | Mutation definitions |
-| [api/dependency.py](backend/styrmin_backend/api/dependency.py) | Context injection |
+| [api/__init__.py](backend/styrmin_backend/api/__init__.py) | Schema construction, `init_graphql_router`, `init_rest_router` |
+| [api/schema/query.py](backend/styrmin_backend/api/schema/query.py) | The `Query` type |
+| [api/schema/mutation.py](backend/styrmin_backend/api/schema/mutation.py) | The `Mutation` type (includes agent callbacks) |
+| [api/dependency.py](backend/styrmin_backend/api/dependency.py) | `get_context` (DI for `UnitOfWork`) |
+| [api/errors.py](backend/styrmin_backend/api/errors.py) | `StructuredErrorExtension` middleware |
+| [api/definitions/](backend/styrmin_backend/api/definitions/) | One subpackage per domain (cluster, deployment, task, ...) |
+| [schema.graphql](schema.graphql) | Generated schema; the authoritative inventory |
