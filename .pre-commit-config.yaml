@@ -1,20 +1,14 @@
 ---
-# Pre-commit hook configuration for Styrmin.
-#
-# Local enforcement of the mandatory checks the CI workflow runs in
-# `.github/workflows/ci.yml`. See `dev/guides/pre-commit-hooks.md` for
-# contributor docs and `specs/006-prek-pre-commit-hooks/` for the spec.
-#
-# Runners: works with both `prek` (preferred, Rust, fast) and `pre-commit`
-# (Python fallback). No prek-only extensions are used.
+# Pre-commit hook configuration for Styrmin. See dev/guides/pre-commit-hooks.md.
+# Works with both prek and pre-commit; no prek-only extensions.
 
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
 
-# Top-level exclude — generated artefacts, lockfiles, and example projects
-# whose own pyproject.toml configs the root project explicitly excludes via
-# `[tool.ruff].exclude = ["examples", ...]`. The hook would otherwise pick up
-# the nested pyproject and lint files the project intentionally does not enforce.
+# `driver/examples/` is excluded because nested pyproject.toml files there have
+# their own ruff configs without the root project's ignore list, so the hook
+# would lint files the project deliberately does not enforce. Other entries are
+# generated artefacts and lockfiles.
 exclude: |
   (?x)^(
       python_sdk/src/styrmin_sdk/graphql/_generated/.*
@@ -33,9 +27,6 @@ exclude: |
   )$
 
 repos:
-  # ---------------------------------------------------------------------------
-  # Hygiene — fast, file-level checks
-  # ---------------------------------------------------------------------------
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -46,9 +37,6 @@ repos:
         args: [--maxkb=500]
       - id: detect-private-key
 
-  # ---------------------------------------------------------------------------
-  # Python — ruff format + lint (ty is run as a local hook, see below)
-  # ---------------------------------------------------------------------------
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.14
     hooks:
@@ -56,11 +44,8 @@ repos:
         args: [--check, --diff]
       - id: ruff-check
 
-  # ---------------------------------------------------------------------------
-  # Local hooks — invoke project-pinned tools via `uv run` so contributors
-  # don't need a parallel virtualenv, and the version is the same locally
-  # and in CI.
-  # ---------------------------------------------------------------------------
+  # Local hooks shell out via `uv run` so versions stay aligned with
+  # [dependency-groups].dev and CI; contributors don't need a parallel venv.
   - repo: local
     hooks:
       - id: ty
@@ -111,16 +96,12 @@ repos:
         files: ^helm/styrmin/
         pass_filenames: false
 
-      # -----------------------------------------------------------------------
-      # Slow checks — gated to pre-push so they don't run on every commit.
-      # CI still runs them via the existing per-tool jobs even if a contributor
-      # never installs the pre-push hook.
-      # -----------------------------------------------------------------------
+      # Slow checks — pre-push only so they don't run on every commit.
       - id: graphql-schema-freshness
         name: GraphQL schema freshness (regenerate + diff)
         language: system
         entry: bash -c 'uv run styrmin export graphql-schema schema-check.graphql && diff schema.graphql schema-check.graphql && rm -f schema-check.graphql'
-        files: \.(graphql|py)$
+        files: ^(backend/styrmin_backend/api/schema/.*\.py|.*\.graphql)$
         pass_filenames: false
         stages: [pre-push]
 

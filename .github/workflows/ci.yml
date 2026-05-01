@@ -170,10 +170,9 @@ jobs:
 
   pre-commit-hooks:
     name: Pre-Commit Hooks
-    # Runs the full .pre-commit-config.yaml (pre-commit + pre-push stages) on
-    # every PR so the hook config can't drift from the per-tool jobs above.
-    # See specs/006-prek-pre-commit-hooks/ for context. The per-tool jobs are
-    # kept in place during the parity-validation period (spec FR-013).
+    # Runs both stages of .pre-commit-config.yaml on every PR so the hook
+    # config cannot drift from the per-tool jobs above. The per-tool jobs are
+    # kept in place during the parity-validation period.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -202,7 +201,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml', 'uv.lock', 'frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-
       - name: Run pre-commit hooks (pre-commit stage)
         run: uv run pre-commit run --all-files --show-diff-on-failure
       - name: Run pre-commit hooks (pre-push stage)
