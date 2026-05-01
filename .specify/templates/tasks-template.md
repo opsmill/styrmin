@@ -10,15 +10,6 @@ description: "Task list template for feature implementation"
 
 **Tests**: The examples below include test tasks. Tests are OPTIONAL - only include them if explicitly requested in the feature specification.
 
-**GraphQL propagation tests (NON-OPTIONAL)**: Per Constitution §V, any feature
-that adds or modifies a GraphQL field, argument, input type, or mutation under
-`backend/styrmin_backend/api/schema/` MUST include a task for a unit test that
-asserts full-stack propagation across the layered architecture (resolver →
-service → repository → database for writes; the reverse for reads). Real
-service and repository layers MUST be exercised; only external systems
-(Kubernetes, Prefect, etc.) may be faked. This task is required regardless of
-whether other tests are explicitly requested.
-
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
 ## Format: `[ID] [P?] [Story] Description`
@@ -94,7 +85,6 @@ Examples of foundational tasks (adjust based on your project):
 
 - [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
 - [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
-- [ ] T0XX [P] [US1] **GraphQL propagation test** for [field/mutation] in backend/tests/unit/api/test_[name]_propagation.py — drives the resolver through the real service/repository layers and asserts the value reaches the database (writes) or that DB state is projected to the resolver output (reads). REQUIRED for any GraphQL schema change per Constitution §V; do NOT omit even if other tests are not requested.
 
 ### Implementation for User Story 1
 
