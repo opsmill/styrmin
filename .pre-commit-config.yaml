@@ -1,0 +1,133 @@
+---
+# Pre-commit hook configuration for Styrmin.
+#
+# Local enforcement of the mandatory checks the CI workflow runs in
+# `.github/workflows/ci.yml`. See `dev/guides/pre-commit-hooks.md` for
+# contributor docs and `specs/006-prek-pre-commit-hooks/` for the spec.
+#
+# Runners: works with both `prek` (preferred, Rust, fast) and `pre-commit`
+# (Python fallback). No prek-only extensions are used.
+
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+# Top-level exclude — generated artefacts, lockfiles, and example projects
+# whose own pyproject.toml configs the root project explicitly excludes via
+# `[tool.ruff].exclude = ["examples", ...]`. The hook would otherwise pick up
+# the nested pyproject and lint files the project intentionally does not enforce.
+exclude: |
+  (?x)^(
+      python_sdk/src/styrmin_sdk/graphql/_generated/.*
+    | frontend/src/generated/.*
+    | .*/__pycache__/.*
+    | pnpm-lock\.yaml
+    | uv\.lock
+    | schema\.graphql
+    | helm/.+/charts/.*
+    | driver/examples/.*
+    | specs/.*
+    | \.specify/.*
+    | \.agents/.*
+    | \.claude/.*
+    | api-collection/.*
+  )$
+
+repos:
+  # ---------------------------------------------------------------------------
+  # Hygiene — fast, file-level checks
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+
+  # ---------------------------------------------------------------------------
+  # Python — ruff format + lint (ty is run as a local hook, see below)
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.14
+    hooks:
+      - id: ruff-format
+        args: [--check, --diff]
+      - id: ruff-check
+
+  # ---------------------------------------------------------------------------
+  # Local hooks — invoke project-pinned tools via `uv run` so contributors
+  # don't need a parallel virtualenv, and the version is the same locally
+  # and in CI.
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty type-check
+        language: system
+        entry: uv run ty check
+        types: [python]
+        pass_filenames: false
+
+      - id: yamllint
+        name: yamllint
+        language: system
+        entry: uv run yamllint
+        types: [yaml]
+
+      - id: rumdl
+        name: rumdl markdown lint
+        language: system
+        entry: uv run rumdl check
+        types: [markdown]
+        pass_filenames: false
+
+      - id: frontend-lint
+        name: frontend lint (eslint + prettier)
+        language: system
+        entry: bash -c 'cd frontend && pnpm lint'
+        files: ^frontend/.*\.(ts|tsx|js|jsx|css)$
+        pass_filenames: false
+
+      - id: validate-graphql
+        name: validate GraphQL operations
+        language: system
+        entry: uv run invoke validate-graphql
+        files: \.graphql$
+        pass_filenames: false
+
+      - id: helm-lint-agent
+        name: helm lint (agent chart)
+        language: system
+        entry: bash -c 'helm lint ./helm/agent'
+        files: ^helm/agent/
+        pass_filenames: false
+
+      - id: helm-lint-styrmin
+        name: helm lint (styrmin chart)
+        language: system
+        entry: bash -c 'helm lint ./helm/styrmin'
+        files: ^helm/styrmin/
+        pass_filenames: false
+
+      # -----------------------------------------------------------------------
+      # Slow checks — gated to pre-push so they don't run on every commit.
+      # CI still runs them via the existing per-tool jobs even if a contributor
+      # never installs the pre-push hook.
+      # -----------------------------------------------------------------------
+      - id: graphql-schema-freshness
+        name: GraphQL schema freshness (regenerate + diff)
+        language: system
+        entry: bash -c 'uv run styrmin export graphql-schema schema-check.graphql && diff schema.graphql schema-check.graphql && rm -f schema-check.graphql'
+        files: \.(graphql|py)$
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: generated-types-freshness
+        name: Generated SDK + frontend types freshness
+        language: system
+        entry: uv run invoke generate-validate
+        files: \.graphql$
+        pass_filenames: false
+        stages: [pre-push]

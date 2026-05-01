@@ -141,6 +141,7 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 
 ### Always Do
 
+- Install the pre-commit hooks once after cloning (`uv run invoke pre-commit-install`). Hooks run the project's mandatory checks locally before each commit; see `dev/guides/pre-commit-hooks.md`.
 - Run formatters before committing (`uv run invoke format lint`)
 - Regenerate `schema.graphql` after any GraphQL schema change (`uv run styrmin export graphql-schema schema.graphql`)
 - Regenerate SDK types after any GraphQL schema or query change (`uv run invoke generate`)
@@ -163,6 +164,10 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 - Edit generated files manually
 - Skip linting in CI
 - Force push to `stable` or `develop`
+
+### Bypassing the pre-commit hooks
+
+Use `git commit --no-verify` only for genuine emergencies — e.g., a hook that needs network when the network is down, or a hotfix to `develop`/`stable` from automation that has already run the equivalent checks. Routine "skip lint" commits are not appropriate; fix the violation and commit normally instead. CI's `Pre-Commit Hooks` job runs the same checks regardless, so bypassing locally only delays the failure. See `dev/guides/pre-commit-hooks.md` for the full bypass policy.
 
 ## Navigation
 
