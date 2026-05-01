@@ -67,7 +67,7 @@ Invoke `/speckit.review`.
 
 ### Phase 6 — Extract
 
-Invoke `/speckit.extract`.
+Invoke `/speckit.extract.run`.
 
 - Extract ADRs, knowledge, and guidelines from the completed spec into `dev/`.
 - Commit the extracted documentation.

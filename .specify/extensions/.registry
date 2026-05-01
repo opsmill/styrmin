@@ -259,6 +259,32 @@
       },
       "registered_skills": [],
       "installed_at": "2026-05-01T05:36:48.735769+00:00"
+    },
+    "extract": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:3b7ec8ca29124b931cdbe1e255e06d7bcfe071fab3f4cbd0362b3d5f1c49b69a",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.extract.run"
+        ],
+        "amp": [
+          "speckit.extract.run"
+        ],
+        "claude": [
+          "speckit.extract.run"
+        ],
+        "codex": [
+          "speckit.extract.run"
+        ],
+        "copilot": [
+          "speckit.extract.run"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-05-01T05:42:46.360580+00:00"
     }
   }
 }
