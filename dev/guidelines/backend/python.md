@@ -202,3 +202,5 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 - Test naming: `test_<function>_<scenario>`
 - `assert` statements allowed in tests (S101 ignored)
 - Type hints optional in test files
+- **GraphQL schema changes require a propagation test** — see
+  [`dev/guides/graphql-propagation-tests.md`](../../guides/graphql-propagation-tests.md).

@@ -26,6 +26,8 @@ Tests are required for all new functionality. The project uses three test tiers:
 
 For bug fixes and small changes (refactors, doc updates, config tweaks, internal behaviour that is already exercised end-to-end), writing a new E2E test is not always proportionate. In those cases the implementer MUST ask for confirmation before skipping E2E coverage, describing what existing tests already cover the affected path; the reviewer's explicit approval is what authorises skipping, not the implementer's own judgment.
 
+**GraphQL ↔ Database Propagation Tests (NON-NEGOTIABLE).** Every GraphQL field, argument, input type, and mutation under `backend/styrmin_backend/api/schema/` MUST be covered by a unit test that asserts full-stack propagation through the real service and repository layers — value reaches the database for writes, database state is projected to the resolver for reads. A schema change is not "done" until the propagation test passes. Procedure: `dev/guides/graphql-propagation-tests.md`.
+
 ### VI. Format and Lint Before Commit
 
 `uv run invoke format lint` MUST pass before any commit. Line length is 120 characters. Ruff handles formatting and linting. This is non-negotiable and applies to all contributions.
@@ -54,4 +56,4 @@ Changes to these areas require explicit discussion before implementation:
 
 This constitution defines the non-negotiable principles for the Styrmin project. All specifications, plans, and implementations MUST be validated against these principles. Amendments require updating this file, incrementing the version, and propagating changes to dependent templates.
 
-**Version**: 1.1.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-04-23
+**Version**: 1.2.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-05-01
