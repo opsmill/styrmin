@@ -91,3 +91,4 @@ Frontend architecture documentation in [knowledge/frontend/](knowledge/frontend/
 - [graphql-propagation-tests.md](guides/graphql-propagation-tests.md) - How to write the unit test that proves a GraphQL field is wired through every layer to the database
 - [local-demo.md](guides/local-demo.md) - Local vCluster demo lifecycle
 - [pod-scheduling.md](guides/pod-scheduling.md) - Pod scheduling configuration reference
+- [session-retrospectives.md](guides/session-retrospectives.md) - End-of-session workflow for turning agent friction into approved context-management improvements
