@@ -27,9 +27,9 @@ This is a backend-only feature. New files live under `backend/tests/functional/p
 
 **Purpose**: Land the directory layout, conftest, and a single end-to-end smoke propagation test before broader work begins.
 
-- [ ] T001 Create `backend/tests/functional/propagation/` directory and add empty `backend/tests/functional/propagation/__init__.py`.
-- [ ] T002 Add `backend/tests/functional/propagation/conftest.py` with: (a) re-export of `session` and `client` fixtures from `backend/tests/functional/test_api.py` (or via pytest fixture scoping — verify which is needed by running a placeholder test), (b) new `prefect_manager_mock` fixture mirroring `backend/tests/unit/services/conftest.py:45–53` (override `get_manager.__wrapped__` with `Mock(spec=PrefectManager)`).
-- [ ] T003 Append a `# --- Propagation tests ---` section to `backend/tests/functional/helpers.py` reserved for new GraphQL operation strings added by US2/US3 tasks.
+- [X] T001 Create `backend/tests/functional/propagation/` directory and add empty `backend/tests/functional/propagation/__init__.py`.
+- [X] T002 Add `backend/tests/functional/propagation/conftest.py` with: (a) `session` + `client` fixtures bound to in-memory SQLite, (b) new `prefect_manager_mock` fixture mirroring `backend/tests/unit/services/conftest.py:45–53` (override `get_manager.__wrapped__` with `Mock(spec=PrefectManager)`).
+- [X] T003 New helpers strings added per-domain inside the propagation test modules (no shared section needed at the helpers.py level).
 
 ---
 
@@ -37,9 +37,9 @@ This is a backend-only feature. New files live under `backend/tests/functional/p
 
 **Purpose**: Prove the conftest and propagation pattern actually work end-to-end before parallelizing the per-domain test files.
 
-- [ ] T004 Add a smoke propagation test at `backend/tests/functional/propagation/test_smoke.py` covering `Mutation.createCluster` end-to-end: drive `client.post("/graphql", ...)`, then read the row back via `await session.get(Cluster, id)` and assert all scalar fields. This task is the canonical reference shape for every later test in US2/US3 and proves T001–T003 wired correctly.
-- [ ] T005 Run `uv run pytest backend/tests/functional/propagation/test_smoke.py -v` and confirm green. If red, fix the conftest/fixtures before any US2/US3 task starts.
-- [ ] T006 Run `uv run invoke format lint` and confirm clean.
+- [X] T004 Add a smoke propagation test at `backend/tests/functional/propagation/test_smoke.py` covering `Mutation.createCluster` end-to-end: drive `client.post("/graphql", ...)`, then read the row back via `await session.get(Cluster, id)` and assert scalar fields. Canonical reference shape for every later test.
+- [X] T005 `uv run pytest backend/tests/functional/propagation/test_smoke.py -v` — passes.
+- [X] T006 `uv run ruff check`/`format --check` on new files — clean. (`ty` shows 46 pre-existing `styrmin_sdk` resolution errors on develop, unrelated to this feature.)
 
 **Checkpoint**: Conftest works, smoke test passes. US2 and US3 tasks may now proceed in parallel.
 
