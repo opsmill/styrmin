@@ -5,7 +5,7 @@ extension:
   name: "Spec Auto"
   version: "1.0.0"
   description: "Run the full speckit workflow end-to-end — specify, plan, tasks, implement, review, extract — making all decisions autonomously."
-  author: "Damien Garros"
+  author: "OpsMill"
   license: "MIT"
 
 requires:
@@ -17,7 +17,7 @@ requires:
     - "speckit.tasks"
     - "speckit.implement"
     - "speckit.review"
-    - "speckit.extract"
+    - "speckit.extract.run"
     - "speckit.checkpoint.commit"
 
 provides:
@@ -25,7 +25,6 @@ provides:
     - name: "speckit.auto.run"
       file: "commands/run.md"
       description: "Run the full speckit pipeline end-to-end with autonomous decision-making"
-      aliases: ["speckit.auto"]
 
 tags:
   - "automation"

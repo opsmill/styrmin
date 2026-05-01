@@ -2,8 +2,8 @@
 description: Comprehensive code review using specialized agents — orchestrates code,
   comments, tests, errors, types, and simplify agents sequentially.
 scripts:
-  sh: scripts/bash/detect-changed-files.sh
-  ps: scripts/powershell/detect-changed-files.ps1
+  sh: .specify/scripts/bash/detect-changed-files.sh
+  ps: .specify/scripts/powershell/detect-changed-files.ps1
 ---
 
 
@@ -41,7 +41,7 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 4. **Identify Changed Files**
 
    - If the user provided a file list or explicit instructions on how to retrieve files (e.g., only staged, only unstaged, a specific folder, etc.), follow those instructions directly.
-   - Otherwise, fall back to the default: execute the `{SCRIPT}` with `--json` to detect changed files.
+   - Otherwise, fall back to the default: execute the `.specify/scripts/bash/detect-changed-files.sh` with `--json` to detect changed files.
      - The script automatically picks the best detection mode:
        - **Mode A (feature branch):** diffs the current branch against the default branch (`main`/`master`) from the merge-base, plus any staged and unstaged changes.
        - **Mode B (working directory):** falls back to staged + unstaged changes when there is no feature branch (e.g., working directly on the default branch).

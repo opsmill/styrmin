@@ -1,52 +1,6 @@
 {
   "schema_version": "1.0",
   "extensions": {
-    "checkpoint": {
-      "version": "1.0.0",
-      "source": "local",
-      "manifest_hash": "sha256:f1f8587fcfee109d13e5fd2837df498439695218b32d00083f6e98095fca64c0",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "claude": [
-          "speckit.checkpoint.commit"
-        ],
-        "copilot": [
-          "speckit.checkpoint.commit"
-        ]
-      },
-      "installed_at": "2026-03-24T20:40:29.222127+00:00"
-    },
-    "review": {
-      "version": "1.0.0",
-      "source": "local",
-      "manifest_hash": "sha256:0cbd39c71fbf9274e2d313d2ec8470c758759dea9e15ca162be2ae94612fc3f8",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "claude": [
-          "speckit.review.run",
-          "speckit.review",
-          "speckit.review.code",
-          "speckit.review.comments",
-          "speckit.review.tests",
-          "speckit.review.errors",
-          "speckit.review.types",
-          "speckit.review.simplify"
-        ],
-        "copilot": [
-          "speckit.review.run",
-          "speckit.review",
-          "speckit.review.code",
-          "speckit.review.comments",
-          "speckit.review.tests",
-          "speckit.review.errors",
-          "speckit.review.types",
-          "speckit.review.simplify"
-        ]
-      },
-      "installed_at": "2026-03-24T20:42:00.195386+00:00"
-    },
     "git": {
       "version": "1.0.0",
       "source": "local",
@@ -162,37 +116,6 @@
       "registered_skills": [],
       "installed_at": "2026-04-25T14:14:43.947712+00:00"
     },
-    "auto": {
-      "version": "1.0.0",
-      "source": "local",
-      "manifest_hash": "sha256:8f863e4857cfa852bc1fe6730fa7cf7fbf549e9813597c2b5a17bb0ae86fb57c",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "agy": [
-          "speckit.auto.run",
-          "speckit.auto"
-        ],
-        "amp": [
-          "speckit.auto.run",
-          "speckit.auto"
-        ],
-        "claude": [
-          "speckit.auto.run",
-          "speckit.auto"
-        ],
-        "codex": [
-          "speckit.auto.run",
-          "speckit.auto"
-        ],
-        "copilot": [
-          "speckit.auto.run",
-          "speckit.auto"
-        ]
-      },
-      "registered_skills": [],
-      "installed_at": "2026-04-25T14:21:06.854950+00:00"
-    },
     "archive": {
       "version": "1.0.0",
       "source": "local",
@@ -259,6 +182,145 @@
       },
       "registered_skills": [],
       "installed_at": "2026-05-01T05:36:48.735769+00:00"
+    },
+    "extract": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:3b7ec8ca29124b931cdbe1e255e06d7bcfe071fab3f4cbd0362b3d5f1c49b69a",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.extract.run"
+        ],
+        "amp": [
+          "speckit.extract.run"
+        ],
+        "claude": [
+          "speckit.extract.run"
+        ],
+        "codex": [
+          "speckit.extract.run"
+        ],
+        "copilot": [
+          "speckit.extract.run"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-05-01T05:42:46.360580+00:00"
+    },
+    "auto": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:db7af56efaba4381fe7234923eb02f807e52415c2dc76bb4c8bf5fc875e43b51",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.auto.run"
+        ],
+        "amp": [
+          "speckit.auto.run"
+        ],
+        "claude": [
+          "speckit.auto.run"
+        ],
+        "codex": [
+          "speckit.auto.run"
+        ],
+        "copilot": [
+          "speckit.auto.run"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-05-01T06:06:13.367178+00:00"
+    },
+    "review": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:0cbd39c71fbf9274e2d313d2ec8470c758759dea9e15ca162be2ae94612fc3f8",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.review.run",
+          "speckit.review",
+          "speckit.review.code",
+          "speckit.review.comments",
+          "speckit.review.tests",
+          "speckit.review.errors",
+          "speckit.review.types",
+          "speckit.review.simplify"
+        ],
+        "amp": [
+          "speckit.review.run",
+          "speckit.review",
+          "speckit.review.code",
+          "speckit.review.comments",
+          "speckit.review.tests",
+          "speckit.review.errors",
+          "speckit.review.types",
+          "speckit.review.simplify"
+        ],
+        "claude": [
+          "speckit.review.run",
+          "speckit.review",
+          "speckit.review.code",
+          "speckit.review.comments",
+          "speckit.review.tests",
+          "speckit.review.errors",
+          "speckit.review.types",
+          "speckit.review.simplify"
+        ],
+        "codex": [
+          "speckit.review.run",
+          "speckit.review",
+          "speckit.review.code",
+          "speckit.review.comments",
+          "speckit.review.tests",
+          "speckit.review.errors",
+          "speckit.review.types",
+          "speckit.review.simplify"
+        ],
+        "copilot": [
+          "speckit.review.run",
+          "speckit.review",
+          "speckit.review.code",
+          "speckit.review.comments",
+          "speckit.review.tests",
+          "speckit.review.errors",
+          "speckit.review.types",
+          "speckit.review.simplify"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-05-01T06:13:24.937001+00:00"
+    },
+    "checkpoint": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:f1f8587fcfee109d13e5fd2837df498439695218b32d00083f6e98095fca64c0",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.checkpoint.commit"
+        ],
+        "amp": [
+          "speckit.checkpoint.commit"
+        ],
+        "claude": [
+          "speckit.checkpoint.commit"
+        ],
+        "codex": [
+          "speckit.checkpoint.commit"
+        ],
+        "copilot": [
+          "speckit.checkpoint.commit"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-05-01T06:13:25.069686+00:00"
     }
   }
 }
