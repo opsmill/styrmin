@@ -54,10 +54,10 @@ delivered as an independent increment.
 
 ### Implementation for User Story 1
 
-- [ ] T003 [US1] Create `python_sdk/AGENTS.md` with the title, one-line description, **Tech Stack**, **File Structure** (table covering `client.py`, `_transport.py`, `_queries.py`, `exceptions.py`, `resources/`, `resources/_base.py`, `graphql/*.graphql`, `graphql/_generated/`, `tests/`), and **Commands** sections from `contracts/agents-md-outline.md`. Use module roles from `research.md` R3.
-- [ ] T004 [US1] Append the **Worked example** section to `python_sdk/AGENTS.md`, copying the `ClusterResource.get` snippet from `python_sdk/src/styrmin_sdk/resources/clusters.py` and a one-paragraph explanation of how `load_query()` and the generated Pydantic types fit together (FR-009)
-- [ ] T005 [P] [US1] Edit the repo-root `AGENTS.md`: in the **File Structure** section, insert `python_sdk/ – Python client SDK - see [python_sdk/AGENTS.md](python_sdk/AGENTS.md)` between the existing `frontend/` and `dev/` entries (FR-006)
-- [ ] T006 [P] [US1] Edit the repo-root `AGENTS.md`: in the **Component Maps** section, insert a `Python SDK: python_sdk/AGENTS.md` bullet between the existing Frontend and Drivers entries (FR-007)
+- [X] T003 [US1] Create `python_sdk/AGENTS.md` with the title, one-line description, **Tech Stack**, **File Structure** (table covering `client.py`, `_transport.py`, `_queries.py`, `exceptions.py`, `resources/`, `resources/_base.py`, `graphql/*.graphql`, `graphql/_generated/`, `tests/`), and **Commands** sections from `contracts/agents-md-outline.md`. Use module roles from `research.md` R3.
+- [X] T004 [US1] Append the **Worked example** section to `python_sdk/AGENTS.md`, copying the `ClusterResource.get` snippet from `python_sdk/src/styrmin_sdk/resources/clusters.py` and a one-paragraph explanation of how `load_query()` and the generated Pydantic types fit together (FR-009)
+- [X] T005 [P] [US1] Edit the repo-root `AGENTS.md`: in the **File Structure** section, insert `python_sdk/ – Python client SDK - see [python_sdk/AGENTS.md](python_sdk/AGENTS.md)` between the existing `frontend/` and `dev/` entries (FR-006)
+- [X] T006 [P] [US1] Edit the repo-root `AGENTS.md`: in the **Component Maps** section, insert a `Python SDK: python_sdk/AGENTS.md` bullet between the existing Frontend and Drivers entries (FR-007)
 
 **Checkpoint**: `python_sdk/AGENTS.md` exists with architecture map + example, and the root `AGENTS.md` links to it from two sections. The doc is discoverable but does not yet contain the GraphQL operation workflow or boundaries — those are User Story 2 and 3.
 
@@ -71,8 +71,8 @@ delivered as an independent increment.
 
 ### Implementation for User Story 2
 
-- [ ] T007 [US2] Append the **Adding or changing a GraphQL operation** section to `python_sdk/AGENTS.md`. Lead with the standalone warning callout (`> ⚠️ Regenerating types is not enough.` …) per `contracts/agents-md-outline.md` and `research.md` R4. The callout MUST state that `.graphql` + `uv run invoke generate` does not auto-wire `client.py` or `resources/<area>.py` (FR-003).
-- [ ] T008 [US2] In the same section, add the numbered step-by-step workflow: (1) create/edit `.graphql` file (one operation per file, snake_case, named operation; reference root `AGENTS.md` for repo-wide rules — do not duplicate); (2) run `uv run styrmin export graphql-schema schema.graphql` then `uv run invoke generate`; (3) run `uv run invoke validate-graphql`; (4) wire Python — split into "existing area" (add method to `resources/<area>.py`) vs "new area" (new resource module + instantiate in `StyrminClient.__init__`); (5) add tests under `python_sdk/tests/`; (6) `uv run invoke format lint` (FR-004, FR-008).
+- [X] T007 [US2] Append the **Adding or changing a GraphQL operation** section to `python_sdk/AGENTS.md`. Lead with the standalone warning callout (`> ⚠️ Regenerating types is not enough.` …) per `contracts/agents-md-outline.md` and `research.md` R4. The callout MUST state that `.graphql` + `uv run invoke generate` does not auto-wire `client.py` or `resources/<area>.py` (FR-003).
+- [X] T008 [US2] In the same section, add the numbered step-by-step workflow: (1) create/edit `.graphql` file (one operation per file, snake_case, named operation; reference root `AGENTS.md` for repo-wide rules — do not duplicate); (2) run `uv run styrmin export graphql-schema schema.graphql` then `uv run invoke generate`; (3) run `uv run invoke validate-graphql`; (4) wire Python — split into "existing area" (add method to `resources/<area>.py`) vs "new area" (new resource module + instantiate in `StyrminClient.__init__`); (5) add tests under `python_sdk/tests/`; (6) `uv run invoke format lint` (FR-004, FR-008).
 
 **Checkpoint**: A reader following the doc end-to-end produces a fully wired new operation without missing the Python step.
 
@@ -86,7 +86,7 @@ delivered as an independent increment.
 
 ### Implementation for User Story 3
 
-- [ ] T009 [US3] Append the **Always Do / Ask First / Never Do** section to `python_sdk/AGENTS.md` per `contracts/agents-md-outline.md`. Required entries:
+- [X] T009 [US3] Append the **Always Do / Ask First / Never Do** section to `python_sdk/AGENTS.md` per `contracts/agents-md-outline.md`. Required entries:
   - **Always Do**: run `validate-graphql` after touching `.graphql`; regenerate types after `.graphql` change; update both `.graphql` AND Python wiring in the same change; run `uv run invoke format lint` before commit; write tests for new resource methods.
   - **Ask First**: changes to `_transport.py`; breaking the public client API surface (`StyrminClient` or `*Resource` public method signatures); new third-party dependencies in `python_sdk/pyproject.toml`; reorganizing `resources/`.
   - **Never Do**: hand-edit `src/styrmin_sdk/graphql/_generated/`; inline GraphQL strings in Python; add unnamed operations; skip `validate-graphql` after `.graphql` changes (FR-005).
@@ -99,9 +99,9 @@ delivered as an independent increment.
 
 **Purpose**: Final verification.
 
-- [ ] T010 Run `uv run invoke format lint` from the repo root and confirm clean (Constitution §VI)
-- [ ] T011 Walk `quickstart.md`'s mechanical checks (1–6) and review checklist (US1-S1 through US3-S3); confirm every item passes
-- [ ] T012 [P] Verify markdown links from the root `AGENTS.md` resolve (`python_sdk/AGENTS.md` exists at the linked path) and that internal anchors in `python_sdk/AGENTS.md` (if any) match heading slugs
+- [X] T010 Run `uv run invoke format lint` from the repo root and confirm clean (Constitution §VI). Result: 46 pre-existing diagnostics on the branch baseline; this docs-only change adds zero new diagnostics (verified via `git stash`/`stash pop` baseline comparison).
+- [X] T011 Walk `quickstart.md`'s mechanical checks (1–6) and review checklist (US1-S1 through US3-S3); confirm every item passes. All five mechanical greps return expected counts; all eight review-checklist items satisfied by the produced doc.
+- [X] T012 [P] Verify markdown links from the root `AGENTS.md` resolve (`python_sdk/AGENTS.md` exists at the linked path) and that internal anchors in `python_sdk/AGENTS.md` (if any) match heading slugs
 
 ---
 

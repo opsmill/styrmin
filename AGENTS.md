@@ -15,6 +15,7 @@ Styrmin is a **deployment orchestration platform** that manages application depl
 
 - `backend/` – Python backend (GraphQL, core logic) - see [backend/AGENTS.md](backend/AGENTS.md)
 - `frontend/` – React frontend (SPA) - see [frontend/AGENTS.md](frontend/AGENTS.md)
+- `python_sdk/` – Async Python client SDK - see [python_sdk/AGENTS.md](python_sdk/AGENTS.md)
 - `dev/` – Internal developer documentation - see [dev/README.md](dev/README.md)
 
 ## Commands
@@ -179,6 +180,7 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 
 - Backend: `backend/AGENTS.md`
 - Frontend: `frontend/AGENTS.md`
+- Python SDK: `python_sdk/AGENTS.md`
 - Drivers: `driver/DRIVERS.md`
 
 <!-- SPECKIT START -->
