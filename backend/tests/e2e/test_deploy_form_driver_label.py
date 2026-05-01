@@ -37,9 +37,9 @@ async def test_deploy_form_shows_driver_label_after_selection(
     # Open and pick the first simple-app version without submitting the form.
     trigger = session_ui_page.locator("[data-testid=driver-version-select]")
     await trigger.click()
-    option = session_ui_page.get_by_role("option").filter(
-        has_text=f"{driver_name} v"
-    ).first
+    option = (
+        session_ui_page.get_by_role("option").filter(has_text=f"{driver_name} v").first
+    )
     await option.click()
 
     label = await page.read_selected_driver_label()
