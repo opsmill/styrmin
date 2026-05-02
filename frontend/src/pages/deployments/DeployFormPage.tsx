@@ -261,8 +261,14 @@ export default function DeployFormPage() {
                   setDynamicParams({});
                 }}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a driver version" />
+                <SelectTrigger data-testid="driver-version-select">
+                  {selectedVersion ? (
+                    <span>
+                      {selectedVersion.driverName} v{selectedVersion.version}
+                    </span>
+                  ) : (
+                    <SelectValue placeholder="Select a driver version" />
+                  )}
                 </SelectTrigger>
                 <SelectContent>
                   {allVersions.map((v) => (
