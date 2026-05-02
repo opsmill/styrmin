@@ -30,6 +30,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "styrmin-sdk",
+    "cli",
     "infrahub-sdk>=0.16",
     "invoke>=2.2.0",
     "kr8s>=0.20.15",
@@ -104,13 +106,15 @@ invalid-type-form = "ignore" # Upstream: ty bug — method named `list` shadows 
 
 [tool.uv]
 package = false
+default-groups = ["dev"]
 
 [tool.uv.sources]
-styrmin-backend = { path = "backend", editable = true }
+styrmin-backend = { workspace = true }
 styrmin-sdk = { workspace = true }
+cli = { workspace = true }
 
 [tool.uv.workspace]
-members = ["cli", "styrmin-backend", "python_sdk"]
+members = ["cli", "backend", "python_sdk"]
 
 [tool.ruff]
 line-length = 120

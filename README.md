@@ -16,7 +16,7 @@ In order to run the demo, you must have the following tools installed locally
 ### 1. Install the Python environment
 
 ```shell
-uv sync --all-groups --all-packages
+uv sync
 ```
 
 This installs all dependencies (including dev tools) and ensures the CLI and SDK workspace packages are available locally.

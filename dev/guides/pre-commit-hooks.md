@@ -17,7 +17,7 @@ curl -LsSf https://github.com/j178/prek/releases/latest/download/prek-installer.
 # Or fetch the binary directly from https://github.com/j178/prek/releases.
 
 # 2. Install Python and JS dependencies.
-uv sync --all-groups --all-packages
+uv sync
 cd frontend && pnpm install --frozen-lockfile && cd ..
 
 # 3. Install the git hooks.
@@ -93,7 +93,7 @@ Not acceptable: skipping hooks because "the lint failure is annoying". Fix it. C
 - **"command not found: prek"** — install prek (see [Install](#install) above).
 - **"command not found: pnpm/helm"** — install the missing system tool; prek doesn't manage system binaries. See the project's `AGENTS.md` for prerequisites.
 - **Frontend lint fails with `eslint: command not found`** — run `cd frontend && pnpm install --frozen-lockfile` first.
-- **`ty` reports unresolved imports for workspace packages** — run `uv sync --all-packages` (not just `uv sync`) so the workspace members are installed editably.
+- **`ty` reports unresolved imports for workspace packages** — run `uv sync` to ensure all workspace members (declared in the root `dev` group with `workspace = true` sources) are installed editably.
 - **Stale hook environment after a tool version bump**:
 
   ```bash

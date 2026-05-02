@@ -34,7 +34,7 @@ apply here verbatim and are not restated.
 Run from the repository root unless noted otherwise.
 
 ```bash
-uv sync --all-groups --all-packages          # Install dependencies
+uv sync                                      # Install dependencies
 uv run pytest python_sdk/tests               # SDK tests
 uv run invoke validate-graphql               # Validate every .graphql file
 uv run styrmin export graphql-schema schema.graphql  # Re-export the schema
