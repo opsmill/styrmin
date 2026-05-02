@@ -2,7 +2,7 @@
 
 **Feature Branch**: `008-deployment-deletion`
 **Created**: 2026-05-01
-**Status**: Draft
+**Status**: Extracted
 **Input**: PRD comment on issue #94 (https://github.com/opsmill/styrmin/issues/94#issuecomment-4360661060)
 
 ## User Scenarios & Testing *(mandatory)*

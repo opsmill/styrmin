@@ -166,6 +166,7 @@ Orchestrates application deployments.
 | `update_deployment(deployment_id, config, uow)` | Update deployment configuration |
 | `update_deployment_version(deployment_id, version, uow)` | Change application version |
 | `refresh_deployment(deployment_id, uow)` | Re-reconcile deployment state |
+| `delete_deployment(deployment_id, uow)` | Request platform-driven teardown — see lifecycle below |
 
 **Deployment Flow:**
 
@@ -175,6 +176,26 @@ Orchestrates application deployments.
 4. Generate instance from deployment
 5. Apply state via reconciliation
 6. Return task for tracking
+
+**Deployment Lifecycle (incl. tombstoning):**
+
+<!-- Extracted from specs/008-deployment-deletion on 2026-05-02 -->
+
+The platform-driven delete flow is intentionally **state-driven, not orchestration-driven** — no Prefect flow, no long-running task. The mutation is thin and every state transition is observed off the existing reconciliation cadence:
+
+1. **Resolver** — `deleteDeployment(id)` calls `services.deployment.delete_deployment(uow)`, which:
+   - Guards against `RESTORING` (raises `DeploymentRestoringError` → `DEPLOYMENT_RESTORING`).
+   - Returns the existing in-flight `DELETE_DEPLOYMENT` task if the row is already `DELETING` (idempotent).
+   - Raises `DeploymentNotFoundError` if the row is unknown OR `deleted_at IS NOT NULL` (intentional conflation, see ADR-017).
+   - Otherwise patches `spec.deletionRequested = true` on the cluster-side `StyrminDeployment` CR via `kr8s` and creates a born-complete `DELETE_DEPLOYMENT` task (`status=success`, no `prefect_flow_run_id`) in the same UnitOfWork.
+2. **Operator** — a `@kopf.on.update(field="spec.deletionRequested", new=True)` handler observes the flip and runs `_teardown_owned_resources` in reverse order (Services → HelmRelease → NetworkPolicies/Secrets), then issues a namespace delete.
+3. **Reporter (active CR path)** — while teardown is in progress, the operator reports `displayState: Deleting`; the agent's status reporter (`agent/status/reporter.py`) maps it to `DeploymentState.DELETING`. The DB row's `deleted_at` is still NULL — `DELETING` rows remain visible in the default deployment list.
+4. **Reporter (terminal transition)** — the `StyrminDeployment` CR is `scope: Namespaced` and lives in the deployment's own namespace, so deleting the namespace deletes the CR with it (see `dev/knowledge/agent/operator.md` § "Namespace co-location"). When the reporter sees DB `status == "deleting"` AND no CR present in the cluster, it synthesises a final `displayState: Deleted` report. The reporter is the **sole writer** of `Deployment.deleted_at`: it stamps `deleted_at = now()` atomically with the `DELETED` state flip in the same UnitOfWork commit, so readers cannot observe `status == DELETED` with `deleted_at IS NULL`.
+5. **Janitor** — a separate `@kopf.timer` in `operator/janitor.py` reaps CRs that reached `phase: Deleted` more than `DELETED_CR_TTL_HOURS` (default 6h) ago. CRs stuck in `Deleting` are NEVER auto-reaped — they remain visible until human action resolves them.
+
+A row with `deleted_at IS NOT NULL` is **tombstoned**: the cluster-side workload is gone, but the row, its timeline (Tasks), and any associated backups remain queryable. `Environment.deployments(includeDeleted: false)` excludes tombstoned rows by default; `deployment(id)` is unfiltered so direct-id lookups always succeed (forensic interface).
+
+Name uniqueness is per `(environment_id, name)` and ignores tombstoned rows — see ADR-018 / `dev/knowledge/backend/data-models.md`.
 
 ### Application Drivers Service (`application_drivers.py`)
 

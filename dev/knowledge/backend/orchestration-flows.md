@@ -33,6 +33,23 @@ Orchestration flows are Prefect `@flow` functions that execute multi-step deploy
 
 The non-CRD variants (`create_instance`, `update_instance`, `upgrade_instance`) still exist in `agent/tasks/orchestration.py` for now but are not registered in the catalogue and are not on the live execution path. The CRD variants are what the operator actually drives — see [ADR-008](../adr/adr-008-prefect-crd-intent-declaration.md).
 
+## Lifecycles without Prefect
+
+<!-- Extracted from specs/008-deployment-deletion on 2026-05-02 -->
+
+Not every lifecycle action goes through a Prefect flow. Two patterns coexist:
+
+- **Orchestration-driven** (most lifecycle actions documented in this file): the mutation creates a `Task` with `status=PENDING` and a `prefect_flow_run_id`, dispatches a Prefect flow that runs the multi-step operation, and the flow's lifecycle callbacks (`on_completion`, `on_failure`, …) flip the task to its terminal state via the `callback` mutation.
+- **State-driven** (added by the deployment-deletion feature): the mutation patches a single field on the cluster-side CRD, creates a **born-complete** `Task` (`status=SUCCESS`, `prefect_flow_run_id=None`) as the audit record, and returns immediately. There is no flow. Every subsequent state transition is observed off the existing reconciliation cadence — the operator drives the cluster work, and the agent's status reporter projects the resulting CRD state back to the DB.
+
+Use state-driven when:
+
+- The work to do is fundamentally one cluster patch (or a small set of synchronous calls) plus an asynchronous wait for the cluster to converge.
+- The reconciler / status reporter already exists and can observe the relevant transitions without new instrumentation.
+- The Task's role is to record "this was requested, by whom, when" (timeline / audit), not to track progress.
+
+The current example is `delete_deployment` — see `dev/knowledge/backend/services.md` § "Deployment Lifecycle (incl. tombstoning)" for the full path. The pattern avoids reintroducing a long-running flow when the operator already has the same observation loop.
+
 ## Callback Mechanism
 
 ### orchestration_callback
@@ -337,6 +354,7 @@ Note: The enum values are used as Prefect deployment tags for lookup.
 For new deployments, Prefect flows create/update/delete `StyrminDeployment` CRDs instead of directly managing HelmReleases and utility resources. The kopf operator handles all Kubernetes resource lifecycle from the CRD (see [`../agent/operator.md`](../agent/operator.md) for details).
 
 **What the Prefect flow does:**
+
 1. Compute GlobalContext from deployment configuration
 2. Render Helm chart/repository specifications
 3. Serialize context into StyrminDeployment CRD spec
@@ -345,6 +363,7 @@ For new deployments, Prefect flows create/update/delete `StyrminDeployment` CRDs
 6. Callback to update task status (unchanged)
 
 **What is no longer done by Prefect:**
+
 - Direct HelmRelease creation/update
 - Direct utility resource creation/update (`install_utility`, `update_utility`)
 - Namespace label management
