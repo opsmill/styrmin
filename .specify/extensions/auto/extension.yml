@@ -4,7 +4,7 @@ extension:
   id: "auto"
   name: "Spec Auto"
   version: "1.0.0"
-  description: "Run the full speckit workflow end-to-end — specify, plan, tasks, implement, review, extract — making all decisions autonomously."
+  description: "Run the full speckit workflow end-to-end — specify, plan, critique, tasks, implement, review, extract — making all decisions autonomously."
   author: "OpsMill"
   license: "MIT"
 
@@ -14,6 +14,7 @@ requires:
   commands:
     - "speckit.specify"
     - "speckit.plan"
+    - "speckit.critique.run"
     - "speckit.tasks"
     - "speckit.implement"
     - "speckit.review"

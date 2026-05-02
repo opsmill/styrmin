@@ -1,7 +1,7 @@
 ---
 name: speckit-auto-run
-description: Run the full speckit workflow end-to-end — specify, plan, tasks, implement,
-  review, extract — making all decisions autonomously.
+description: Run the full speckit workflow end-to-end — specify, plan, critique, tasks,
+  implement, review, extract — making all decisions autonomously.
 compatibility: Requires spec-kit project structure with .specify/ directory
 metadata:
   author: github-spec-kit
@@ -42,7 +42,18 @@ Invoke the `speckit-plan` skill.
 - Make all design decisions autonomously.
 - Commit the plan artifacts.
 
-### Phase 3 — Tasks
+### Phase 3 — Critique
+
+Invoke the `speckit-critique-run` skill.
+
+- Run the dual-lens (Product + Engineering) critique against `spec.md` and `plan.md` before any tasks are generated.
+- For any 🎯 **Must-Address** findings, apply the suggested fixes to `spec.md` / `plan.md` autonomously and commit them — do not pause for user approval.
+- For 💡 Recommendations, apply them when the fix is clear and low-risk; otherwise note and move on.
+- 🤔 Questions: resolve with your best judgment based on context (same rule as the Specify phase).
+- If the verdict is 🛑 **RETHINK**, loop back to `speckit-plan` (or `speckit-specify` if the spec itself is the problem), re-run the critique, then continue.
+- Commit the critique report and any spec/plan updates before moving on.
+
+### Phase 4 — Tasks
 
 Invoke the `speckit-tasks` skill.
 
@@ -50,7 +61,7 @@ Invoke the `speckit-tasks` skill.
 - Skip the optional `speckit-analyze` skill unless something looks inconsistent — use your judgment.
 - Commit the tasks artifact.
 
-### Phase 4 — Implement
+### Phase 5 — Implement
 
 Invoke the `speckit-implement` skill.
 
@@ -59,7 +70,7 @@ Invoke the `speckit-implement` skill.
 - Run formatters and linters as required by the project.
 - If tests fail, fix them before moving on.
 
-### Phase 5 — Review
+### Phase 6 — Review
 
 Invoke the `speckit-review-run` skill.
 
@@ -67,7 +78,7 @@ Invoke the `speckit-review-run` skill.
 - For any findings rated **high severity or above**, fix them immediately and commit the fixes.
 - For lower-severity findings, note them but do not block progress.
 
-### Phase 6 — Extract
+### Phase 7 — Extract
 
 Invoke the `speckit-extract-run` skill.
 
