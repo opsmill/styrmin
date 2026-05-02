@@ -366,14 +366,35 @@ class FakeDeploymentRepository(DeploymentRepository):
                 return d
         return None
 
-    async def get_by_name(self, name: str) -> DeploymentEntity | None:
+    async def get_by_name(
+        self,
+        name: str,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> DeploymentEntity | None:
         for d in self._deployments:
-            if d.name == name:
-                return d
+            if d.name != name or d.environment_id != environment_id:
+                continue
+            if not include_deleted and d.deleted_at is not None:
+                continue
+            return d
         return None
 
-    async def find_names_with_prefix(self, prefix: str) -> list[str]:
-        return [d.name for d in self._deployments if d.name.startswith(prefix)]
+    async def find_names_with_prefix(
+        self,
+        prefix: str,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> list[str]:
+        return [
+            d.name
+            for d in self._deployments
+            if d.name.startswith(prefix)
+            and d.environment_id == environment_id
+            and (include_deleted or d.deleted_at is None)
+        ]
 
     async def find_internal_by_environment(
         self, environment_id: UUID

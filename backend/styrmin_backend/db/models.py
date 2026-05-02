@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, text
 from sqlmodel import JSON, Column, DateTime, Field, Relationship, SQLModel, func
 from sqlmodel import Enum as SQLModelEnum
 
@@ -210,9 +210,27 @@ class DeploymentState(str, Enum):
 class Deployment(StyrminModel, table=True):
     """The deployment represents the intention to deploy an application instance.
     Its attributes reflect the desired state of the service it is responsible for.
+
+    Name uniqueness is scoped per ``(environment_id, name)`` and only
+    applies to non-tombstoned rows (``deleted_at IS NULL``) — see the
+    ``uq_deployment_env_name_active`` partial index in ``__table_args__``.
+    Tombstoned (soft-deleted) deployments do not block name reuse, which
+    is the user-visible behaviour an operator expects after retiring a
+    deployment with ``deleteDeployment``.
     """
 
-    name: str = Field(unique=True)
+    __table_args__ = (
+        Index(
+            "uq_deployment_env_name_active",
+            "environment_id",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    name: str  # unique scope: (environment_id, name) WHERE deleted_at IS NULL
     application_version: str
     config: dict | None = Field(default=None, sa_column=Column(JSON))
     parameters: dict | None = Field(default=None, sa_column=Column(JSON))

@@ -184,12 +184,18 @@ async def update_deployment(
             except ValueError as e:
                 raise DeploymentNameValidationError(str(e)) from e
 
-            # Allow same-name no-op
+            # Allow same-name no-op. Conflict check is scoped to the
+            # current environment and ignores tombstoned deployments
+            # (so an operator can rename onto the name of a previously-
+            # deleted deployment in the same env).
             if validated_name != deployment.name:
-                existing = await uow.deployments.get_by_name(validated_name)
+                existing = await uow.deployments.get_by_name(
+                    validated_name, deployment.environment_id
+                )
                 if existing is not None:
                     raise DeploymentNameConflictError(
-                        f"A deployment named '{validated_name}' already exists"
+                        f"A deployment named '{validated_name}' already exists "
+                        "in this environment"
                     )
                 deployment.name = validated_name
 
@@ -577,7 +583,9 @@ async def _ensure_ingress_controller(
         environment_id,
     )
 
-    existing_names = await uow.deployments.find_names_with_prefix(INTERNAL_DRIVER_NAME)
+    existing_names = await uow.deployments.find_names_with_prefix(
+        INTERNAL_DRIVER_NAME, environment_id
+    )
     ingress_name = generate_deployment_name(INTERNAL_DRIVER_NAME, existing_names)
 
     ingress_deployment = Deployment.create(
@@ -699,23 +707,29 @@ async def deploy_application(
             values=deployment_parameters,
         )
 
-        # Resolve deployment name
+        # Resolve deployment name. Uniqueness scope is per-environment
+        # and ignores tombstoned deployments (so operators can reuse
+        # the name of a previously-deleted deployment in the same env).
         resolved_name: str
         if deployment_name and deployment_name.strip():
-            # User provided a custom name — validate and check uniqueness
             try:
                 resolved_name = validate_deployment_name(deployment_name)
             except ValueError as e:
                 raise DeploymentNameValidationError(str(e)) from e
 
-            existing = await uow.deployments.get_by_name(resolved_name)
+            existing = await uow.deployments.get_by_name(resolved_name, environment_id)
             if existing is not None:
                 raise DeploymentNameConflictError(
-                    f"A deployment named '{resolved_name}' already exists"
+                    f"A deployment named '{resolved_name}' already exists "
+                    "in this environment"
                 )
         else:
-            # Auto-generate name from driver name
-            existing_names = await uow.deployments.find_names_with_prefix(driver_name)
+            # Auto-generate name from driver name. Tombstoned names are
+            # excluded from the prefix search so the auto-generator can
+            # reclaim the lowest free suffix.
+            existing_names = await uow.deployments.find_names_with_prefix(
+                driver_name, environment_id
+            )
             resolved_name = generate_deployment_name(driver_name, existing_names)
 
         # Create the deployment

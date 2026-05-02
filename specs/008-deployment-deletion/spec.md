@@ -117,6 +117,7 @@ After a deployment is reported as deleted to the platform, its cluster-side reco
 - **Race between the action and visibility**: An operator who has just confirmed deletion must see the row reflect "deleting" without needing to refresh the list manually.
 - **Reverting deletion**: Once a deletion has been requested, it cannot be cancelled or reversed. The cluster-side trigger is monotonic.
 - **Deleted deployment URL navigation**: Direct links to a deleted deployment must always resolve to its read-only detail page, not 404. This is the primary forensic interface.
+- **Name reuse after deletion**: After deleting a deployment named `ansible`, an operator must be able to create a new deployment with the same name in the same environment. A tombstoned record does NOT occupy the name slot. (This implies name uniqueness is scoped per-environment AND ignores tombstoned rows; see FR-034 / FR-035.)
 
 ## Requirements *(mandatory)*
 
@@ -169,6 +170,11 @@ After a deployment is reported as deleted to the platform, its cluster-side reco
 - **FR-031**: Deleted rows in the list MUST render visually de-emphasised, must show a relative-time deletion indicator, and MUST NOT offer inline action affordances.
 - **FR-032**: The detail page of a deleted deployment MUST be reachable by direct id forever and MUST display a clear banner indicating deletion and when it occurred.
 - **FR-033**: On the detail page of a deployment in the "deleting" or "deleted" state, every lifecycle action button MUST be disabled with an explanatory tooltip.
+
+#### Name uniqueness scope
+
+- **FR-034**: Deployment name uniqueness MUST be scoped per-environment. The same name MAY be used by different deployments in different environments.
+- **FR-035**: A tombstoned deployment (one whose status is "deleted") MUST NOT block the creation of a new deployment with the same name in the same environment. Operators who retire a deployment named `ansible` MUST be able to immediately create a fresh `ansible` in the same environment.
 
 ### Key Entities
 

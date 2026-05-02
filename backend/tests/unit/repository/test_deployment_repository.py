@@ -221,3 +221,185 @@ async def test_save_preserves_active_instance_on_round_trip(
     assert db_deployment.active_application_instance_id == instance_id, (
         "active_application_instance_id was nulled out after a find() -> save() round-trip"
     )
+
+
+# ---------------------------------------------------------------------------
+# Scoped + tombstone-aware uniqueness queries (spec 008 follow-up)
+# ---------------------------------------------------------------------------
+
+
+def _seed_deployment(
+    *,
+    name: str,
+    env_id,
+    adv_id,
+    deleted_at=None,
+    status: DeploymentStateEntity = DeploymentStateEntity.PENDING,
+) -> DeploymentEntity:
+    return DeploymentEntity(
+        id=uuid4(),
+        name=name,
+        application_version="1.0.0",
+        config={},
+        application_driver_version_id=adv_id,
+        environment_id=env_id,
+        status=status,
+        deleted_at=deleted_at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_by_name_scopes_to_environment(session: AsyncSession, prerequisites):
+    """``ansible`` in env A must not be returned when querying env B —
+    name uniqueness is per-environment after spec 008's follow-up."""
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env_a = prerequisites["environment"]
+
+    cluster_b = Cluster(id=uuid4(), name="cluster-b")
+    session.add(cluster_b)
+    env_b = Environment(id=uuid4(), name="env-b", cluster_id=cluster_b.id)
+    session.add(env_b)
+    await session.flush()
+
+    await repo.save(_seed_deployment(name="ansible", env_id=env_a.id, adv_id=adv.id))
+    await session.commit()
+
+    found_in_a = await repo.get_by_name("ansible", env_a.id)
+    assert found_in_a is not None
+
+    found_in_b = await repo.get_by_name("ansible", env_b.id)
+    assert found_in_b is None, (
+        "name lookup must not leak across environments — uniqueness is "
+        "scoped per (environment_id, name)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_by_name_excludes_tombstoned_by_default(
+    session: AsyncSession, prerequisites
+):
+    """A tombstoned deployment named ``ansible`` does NOT block a fresh
+    ``ansible`` from being created — get_by_name returns None for the
+    name-conflict check by default."""
+    from datetime import datetime, timezone
+
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env = prerequisites["environment"]
+
+    tombstoned = _seed_deployment(
+        name="ansible",
+        env_id=env.id,
+        adv_id=adv.id,
+        deleted_at=datetime.now(tz=timezone.utc),
+        status=DeploymentStateEntity.DELETED,
+    )
+    await repo.save(tombstoned)
+    await session.commit()
+
+    # Default lookup (used for name-conflict checks): tombstone is invisible.
+    assert await repo.get_by_name("ansible", env.id) is None
+
+    # Forensic / cleanup lookup with include_deleted=True: tombstone is found.
+    forensic = await repo.get_by_name("ansible", env.id, include_deleted=True)
+    assert forensic is not None
+    assert forensic.id == tombstoned.id
+
+
+@pytest.mark.asyncio
+async def test_find_names_with_prefix_scopes_to_environment_and_excludes_tombstones(
+    session: AsyncSession, prerequisites
+):
+    from datetime import datetime, timezone
+
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env_a = prerequisites["environment"]
+
+    cluster_b = Cluster(id=uuid4(), name="cluster-b-2")
+    session.add(cluster_b)
+    env_b = Environment(id=uuid4(), name="env-b-2", cluster_id=cluster_b.id)
+    session.add(env_b)
+    await session.flush()
+
+    # env A: one active "ansible-1", one tombstoned "ansible-2"
+    await repo.save(_seed_deployment(name="ansible-1", env_id=env_a.id, adv_id=adv.id))
+    await repo.save(
+        _seed_deployment(
+            name="ansible-2",
+            env_id=env_a.id,
+            adv_id=adv.id,
+            deleted_at=datetime.now(tz=timezone.utc),
+            status=DeploymentStateEntity.DELETED,
+        )
+    )
+    # env B: one active "ansible-99" — must not show up in env A's prefix search.
+    await repo.save(_seed_deployment(name="ansible-99", env_id=env_b.id, adv_id=adv.id))
+    await session.commit()
+
+    names_in_a = await repo.find_names_with_prefix("ansible", env_a.id)
+    assert names_in_a == ["ansible-1"], (
+        f"prefix search in env A must exclude tombstones AND env-B rows; "
+        f"got {names_in_a}"
+    )
+
+    names_in_a_with_deleted = await repo.find_names_with_prefix(
+        "ansible", env_a.id, include_deleted=True
+    )
+    assert sorted(names_in_a_with_deleted) == ["ansible-1", "ansible-2"]
+
+
+@pytest.mark.asyncio
+async def test_partial_unique_index_blocks_active_collisions(
+    session: AsyncSession, prerequisites
+):
+    """The DB-level partial index must reject two active deployments
+    sharing (environment_id, name). This is the authoritative gate
+    against races between concurrent service-layer checks."""
+    from sqlalchemy.exc import IntegrityError
+
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env = prerequisites["environment"]
+
+    await repo.save(_seed_deployment(name="ansible", env_id=env.id, adv_id=adv.id))
+    await session.commit()
+
+    # The IntegrityError can fire on either the repo.save() (which
+    # flushes) or the commit() — either way the partial unique index
+    # is doing its job. Wrap both so the test captures the violation
+    # regardless of when SQLite chooses to enforce it.
+    with pytest.raises(IntegrityError):
+        await repo.save(_seed_deployment(name="ansible", env_id=env.id, adv_id=adv.id))
+        await session.commit()
+    await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_partial_unique_index_allows_tombstone_then_recreate(
+    session: AsyncSession, prerequisites
+):
+    """The user-visible promise: after deleting ``ansible``, an operator
+    can create a new ``ansible`` in the same env. The partial index lets
+    a tombstoned row coexist with a fresh active row of the same name."""
+    from datetime import datetime, timezone
+
+    repo = SQLModelDeploymentRepository(session)
+    adv = prerequisites["app_driver_version"]
+    env = prerequisites["environment"]
+
+    tombstoned = _seed_deployment(
+        name="ansible",
+        env_id=env.id,
+        adv_id=adv.id,
+        deleted_at=datetime.now(tz=timezone.utc),
+        status=DeploymentStateEntity.DELETED,
+    )
+    await repo.save(tombstoned)
+    await session.commit()
+
+    # New active deployment with the same name — must succeed.
+    fresh = _seed_deployment(name="ansible", env_id=env.id, adv_id=adv.id)
+    await repo.save(fresh)
+    await session.commit()  # would raise IntegrityError if the index was wrong

@@ -29,6 +29,14 @@ class DeploymentState(str, Enum):
 2. Transitions into `DELETED` go through `DELETING`. The status reporter is the single writer of both transitions.
 3. `DELETED` is terminal — no path back to any other state.
 
+**Name uniqueness** is enforced at the DB level by a partial unique index `uq_deployment_env_name_active` on `(environment_id, name) WHERE deleted_at IS NULL` (migration `c9d0e1f2a3b4_deployment_name_scoped_uniqueness`):
+
+1. Different environments may host deployments with the same name.
+2. A tombstoned deployment (`deleted_at IS NOT NULL`) does NOT block a fresh active deployment of the same name in the same environment.
+3. The partial index is the **authoritative race-free guard**. Service-layer name-conflict checks (`uow.deployments.get_by_name(name, environment_id)`) are best-effort pre-flights that map an `IntegrityError` to a typed `DeploymentNameConflictError` with a clear message.
+
+The original schema declared `Deployment.name` as globally unique. After spec 008 introduced soft-delete tombstoning, that constraint would have prevented operators from reusing the name of a deleted deployment — a UX regression. The migration drops the global unique constraint and replaces it with the partial index above. A pre-flight check on the migration refuses to run if any pair of currently-active deployments share `(environment_id, name)`, so a corrupt input cannot silently produce a corrupt index.
+
 ### `task` table
 
 #### `TaskType` enum (additions)

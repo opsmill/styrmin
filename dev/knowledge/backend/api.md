@@ -133,6 +133,8 @@ Mutations return the resource type directly (nullable) and let service-layer exc
 
 `deleteDeployment` deserves a note: a delete on a tombstoned deployment surfaces `NOT_FOUND` (intentionally conflated with unknown id so automation can treat both identically as "already gone"); a delete during a restore raises the typed `DEPLOYMENT_RESTORING` so callers can specifically recover. A repeat delete on a deployment that's already `DELETING` returns the existing in-flight `DELETE_DEPLOYMENT` task without re-issuing the cluster patch (idempotent retry).
 
+`deploy` and `updateDeployment` enforce **per-environment** name uniqueness: an `ALREADY_EXISTS` error fires when an active deployment with the chosen name already lives in the target environment. Names are reusable across environments, and a tombstoned deployment in the same environment does **not** block reuse — operators who delete `ansible` can immediately deploy a new `ansible` in the same env. The DB-side gate is a partial unique index on `(environment_id, name) WHERE deleted_at IS NULL` (see [`data-models.md`](data-models.md) → Deployment).
+
 ```python
 @strawberry.mutation
 async def create_cluster(
