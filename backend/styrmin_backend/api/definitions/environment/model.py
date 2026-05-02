@@ -33,6 +33,7 @@ def _db_deployment_to_domain(db_deployment: DeploymentDBModel) -> DeploymentEnti
         application_driver_version_id=db_deployment.application_driver_version_id,
         environment_id=db_deployment.environment_id,
         status=DeploymentStateEntity(db_deployment.status.value),
+        deleted_at=db_deployment.deleted_at,
     )
     for component in db_deployment.components:
         entity.add_component(
@@ -97,10 +98,19 @@ class Environment:
         )
 
     @strawberry.field
-    def deployments(self) -> list[Deployment]:
+    def deployments(self, include_deleted: bool = False) -> list[Deployment]:
+        """List deployments in this environment.
+
+        By default, tombstoned deployments (``deleted_at IS NOT NULL``) are
+        excluded. Pass ``includeDeleted: true`` to surface them — they
+        appear with a non-null ``deletedAt`` field. ``DELETING`` rows have
+        ``deleted_at IS NULL`` until the terminal ``DELETED`` transition,
+        so they remain visible by default.
+        """
         return [
             Deployment.from_instance(_db_deployment_to_domain(deployment))
             for deployment in self.instance.deployments
+            if include_deleted or deployment.deleted_at is None
         ]
 
     @classmethod

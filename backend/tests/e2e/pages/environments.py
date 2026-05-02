@@ -16,7 +16,7 @@ from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
 from tests.e2e.drivers.refs import EnvironmentRef
 
 if TYPE_CHECKING:
-    from playwright.async_api import Page
+    from playwright.async_api import Locator, Page
 
 
 class EnvironmentsListPage:
@@ -109,6 +109,65 @@ class EnvironmentDetailPage:
             f"[data-testid=environment-detail][data-environment-id='{environment_id}']"
         ).first
         await root.wait_for()
+
+    # ------------------------------------------------------------------
+    # Deletion-aware list helpers (spec 008)
+    # ------------------------------------------------------------------
+
+    def _row(self, deployment_id: str) -> Locator:
+        return self._page.locator(
+            f"[data-testid=deployment-row][data-deployment-id='{deployment_id}']"
+        ).first
+
+    async def read_row_status(self, *, deployment_id: str) -> str | None:
+        """Return ``data-deployment-status`` from the row, or None if absent."""
+        row = self._row(deployment_id)
+        if await row.count() == 0:
+            return None
+        return await row.get_attribute("data-deployment-status")
+
+    async def row_has_deleting_badge(self, *, deployment_id: str) -> bool:
+        """Return True if the row shows the amber 'Deleting…' badge."""
+        row = self._row(deployment_id)
+        if await row.count() == 0:
+            return False
+        return await row.locator("[data-testid=deleting-badge]").count() > 0
+
+    async def wait_for_row_to_vanish(
+        self, *, deployment_id: str, timeout: float = 300.0
+    ) -> None:
+        """Block until the deployment row leaves the rendered list.
+
+        Tombstoned deployments are hidden from the default view (FR-029)
+        — once the status flips to DELETED and the urql cache invalidates,
+        the row should disappear.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if await self._row(deployment_id).count() == 0:
+                return
+            await asyncio.sleep(2.0)
+        raise ScenarioTimeout(
+            f"deployment row {deployment_id} did not vanish from default "
+            f"list within {timeout}s"
+        )
+
+    async def wait_for_row_to_appear(
+        self, *, deployment_id: str, timeout: float = 30.0
+    ) -> None:
+        """Block until the deployment row is present in the rendered list."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if await self._row(deployment_id).count() > 0:
+                return
+            await asyncio.sleep(1.0)
+        raise ScenarioTimeout(
+            f"deployment row {deployment_id} did not appear within {timeout}s"
+        )
+
+    async def toggle_show_deleted(self) -> None:
+        """Click the 'Show deleted' toggle in the list header."""
+        await self._page.locator("[data-testid=show-deleted-toggle]").first.click()
 
     async def assign_bsl(self, *, environment_id: str, bsl_id: str) -> None:
         """Open the Parameters tab and pick the BSL from the selector."""

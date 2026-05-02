@@ -2,6 +2,7 @@ query ListDeploymentsForStatus {
     environments {
         deployments {
             id
+            status
             internal
         }
     }

@@ -68,3 +68,13 @@ PEERING_PRIORITY = int(os.environ.get("STYRMIN_OPERATOR_PEERING_PRIORITY", "100"
 # --- Backoff ---
 BACKOFF_BASE_SECONDS = 5
 BACKOFF_MAX_SECONDS = 300
+
+# --- Forensic retention of deleted CRs ---
+# After a StyrminDeployment reaches phase: Deleted, the CR lingers for
+# this many hours so operators can inspect cluster-side state. The
+# janitor (operator/janitor.py) reaps CRs older than this threshold;
+# CRs stuck in phase: Deleting are NEVER auto-reaped.
+DELETED_CR_TTL_HOURS = int(os.environ.get("DELETED_CR_TTL_HOURS", "6"))
+
+# --- Janitor sweep interval ---
+JANITOR_INTERVAL_SECONDS = int(os.environ.get("STYRMIN_JANITOR_INTERVAL", "1800"))

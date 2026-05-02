@@ -23,6 +23,7 @@ class DeploymentPhase(StrEnum):
     RESTORING = "Restoring"
     FAILED = "Failed"
     DELETING = "Deleting"
+    DELETED = "Deleted"
 
 
 class DisplayState(StrEnum):
@@ -32,6 +33,8 @@ class DisplayState(StrEnum):
     RUNNING = "Running"
     RESTORING = "Restoring"
     ERROR = "Error"
+    DELETING = "Deleting"
+    DELETED = "Deleted"
 
 
 class ConditionStatus(StrEnum):
@@ -49,6 +52,7 @@ class ConditionType(StrEnum):
     SERVICES_READY = "ServicesReady"
     MIDDLEWARES_READY = "MiddlewaresReady"
     READY = "Ready"
+    DELETED = "Deleted"
 
 
 class DeploymentCondition(BaseModel):
@@ -114,6 +118,7 @@ class StyrminDeploymentSpec(BaseModel):
     app_name: str = Field(alias="appName")
     app_version: str = Field(alias="appVersion")
     internal: bool = False
+    deletion_requested: bool = Field(default=False, alias="deletionRequested")
     context: dict[str, Any] = Field(default_factory=dict)
     helm: HelmSpec = Field(default_factory=HelmSpec)
     labels: dict[str, Any] = Field(default_factory=dict)

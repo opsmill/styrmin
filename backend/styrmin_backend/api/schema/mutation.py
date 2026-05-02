@@ -53,6 +53,7 @@ from styrmin_backend.services.clusters import (
     resolve_cluster,
 )
 from styrmin_backend.services.deployment import (
+    delete_deployment,
     deploy_application,
     update_deployment,
     update_deployment_version,
@@ -465,6 +466,31 @@ class Mutation:
             deployment_parameters=parameters,
             deployment_name=name,
             service_name_overrides=overrides_dict,
+            uow=uow,
+        )
+        return Task.from_instance(task)
+
+    @strawberry.mutation
+    async def delete_deployment(
+        self,
+        deployment_id: UUID,
+        info: strawberry.Info,
+    ) -> Task:
+        """Request deletion of a deployment.
+
+        Patches the cluster-side StyrminDeployment CR to flip
+        ``spec.deletionRequested`` to ``true`` (immutable once true).
+        Returns immediately with a born-complete ``DELETE_DEPLOYMENT`` task
+        that serves as the timeline audit record. The cluster-side operator
+        drives teardown asynchronously; clients observe completion via
+        ``Deployment.status`` transitioning to ``DELETED``.
+        """
+        uow = info.context["uow"]
+        deployment = await get_deployment(deployment_id=deployment_id, uow=uow)
+        if deployment.internal:
+            raise InternalDeploymentError()
+        task = await delete_deployment(
+            deployment_id=deployment_id,
             uow=uow,
         )
         return Task.from_instance(task)

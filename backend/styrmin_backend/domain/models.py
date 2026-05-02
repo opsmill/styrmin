@@ -60,6 +60,8 @@ class DeploymentState(str, Enum):
     RUNNING = "running"
     RESTORING = "restoring"
     FAILED = "failed"
+    DELETING = "deleting"
+    DELETED = "deleted"
 
 
 class Deployment(BaseModel):
@@ -79,6 +81,8 @@ class Deployment(BaseModel):
     environment_id: UUID
 
     status: DeploymentState = Field(default=DeploymentState.PENDING)
+
+    deleted_at: datetime | None = None
 
     _components: Dict[str, Component] = PrivateAttr(default_factory=dict)
 
@@ -247,6 +251,7 @@ class TaskType(str, Enum):
     UPGRADE_INSTANCE = "upgrade_instance"
     STOP_COMPONENTS = "stop_components"
     START_COMPONENTS = "start_components"
+    DELETE_DEPLOYMENT = "delete_deployment"
 
 
 class Task(BaseModel):

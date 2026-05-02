@@ -19,6 +19,8 @@ _DISPLAY_STATE_TO_STATUS: dict[str, DeploymentState] = {
     "Running": DeploymentState.RUNNING,
     "Restoring": DeploymentState.RESTORING,
     "Error": DeploymentState.FAILED,
+    "Deleting": DeploymentState.DELETING,
+    "Deleted": DeploymentState.DELETED,
 }
 
 
@@ -95,6 +97,15 @@ async def report_deployment_statuses(
                 continue
 
             if deployment.status != target_state.value:
+                # On the transition into DELETED, atomically tombstone the
+                # deployment by stamping deleted_at. This is the *only* code
+                # path that writes deleted_at, ensuring readers cannot observe
+                # status == DELETED with a NULL deleted_at.
+                if (
+                    target_state == DeploymentState.DELETED
+                    and deployment.deleted_at is None
+                ):
+                    deployment.deleted_at = now
                 deployment.status = target_state
                 await uow.deployments.save(deployment)
                 deployments_updated += 1

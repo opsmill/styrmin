@@ -24,7 +24,7 @@ from styrmin_backend.agent.status.models import (
 from styrmin_backend.agent.status.reporter import (
     _collect_crd_status,
     _extract_pod_data,
-    _get_active_deployment_ids,
+    _get_active_deployments,
     _poll_once,
     _report_deployment_statuses_to_backend,
     _report_pod_statuses_to_backend,
@@ -479,52 +479,13 @@ class TestGetActiveDeployments:
             {
                 "data": {
                     "environments": [
-                        {"deployments": [{"id": dep_id, "internal": False}]}
-                    ]
-                }
-            }
-        )
-        with patch("styrmin_backend.agent.status.reporter.httpx.AsyncClient") as mock:
-            mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
-            mock.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock.return_value.post = AsyncMock(return_value=mock_resp)
-            ids = await _get_active_deployment_ids(GRAPHQL_URL)
-        assert len(ids) == 1
-        assert str(ids[0]) == dep_id
-
-    @pytest.mark.anyio
-    async def test_backend_down_returns_empty(self) -> None:
-        with patch("styrmin_backend.agent.status.reporter.httpx.AsyncClient") as mock:
-            mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
-            mock.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock.return_value.post = AsyncMock(
-                side_effect=httpx.ConnectError("refused")
-            )
-            ids = await _get_active_deployment_ids(GRAPHQL_URL)
-        assert ids == []
-
-    @pytest.mark.anyio
-    async def test_data_null_returns_empty(self) -> None:
-        mock_resp = _mock_response(
-            {"data": None, "errors": [{"message": "internal error"}]}
-        )
-        with patch("styrmin_backend.agent.status.reporter.httpx.AsyncClient") as mock:
-            mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
-            mock.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock.return_value.post = AsyncMock(return_value=mock_resp)
-            ids = await _get_active_deployment_ids(GRAPHQL_URL)
-        assert ids == []
-
-    @pytest.mark.anyio
-    async def test_filters_internal(self) -> None:
-        mock_resp = _mock_response(
-            {
-                "data": {
-                    "environments": [
                         {
                             "deployments": [
-                                {"id": str(uuid4()), "internal": True},
-                                {"id": str(uuid4()), "internal": False},
+                                {
+                                    "id": dep_id,
+                                    "status": "running",
+                                    "internal": False,
+                                }
                             ]
                         }
                     ]
@@ -535,8 +496,64 @@ class TestGetActiveDeployments:
             mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
             mock.return_value.__aexit__ = AsyncMock(return_value=False)
             mock.return_value.post = AsyncMock(return_value=mock_resp)
-            ids = await _get_active_deployment_ids(GRAPHQL_URL)
-        assert len(ids) == 1
+            results = await _get_active_deployments(GRAPHQL_URL)
+        assert len(results) == 1
+        assert str(results[0][0]) == dep_id
+        assert results[0][1] == "running"
+
+    @pytest.mark.anyio
+    async def test_backend_down_returns_empty(self) -> None:
+        with patch("styrmin_backend.agent.status.reporter.httpx.AsyncClient") as mock:
+            mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
+            mock.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock.return_value.post = AsyncMock(
+                side_effect=httpx.ConnectError("refused")
+            )
+            results = await _get_active_deployments(GRAPHQL_URL)
+        assert results == []
+
+    @pytest.mark.anyio
+    async def test_data_null_returns_empty(self) -> None:
+        mock_resp = _mock_response(
+            {"data": None, "errors": [{"message": "internal error"}]}
+        )
+        with patch("styrmin_backend.agent.status.reporter.httpx.AsyncClient") as mock:
+            mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
+            mock.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock.return_value.post = AsyncMock(return_value=mock_resp)
+            results = await _get_active_deployments(GRAPHQL_URL)
+        assert results == []
+
+    @pytest.mark.anyio
+    async def test_filters_internal(self) -> None:
+        mock_resp = _mock_response(
+            {
+                "data": {
+                    "environments": [
+                        {
+                            "deployments": [
+                                {
+                                    "id": str(uuid4()),
+                                    "status": "running",
+                                    "internal": True,
+                                },
+                                {
+                                    "id": str(uuid4()),
+                                    "status": "running",
+                                    "internal": False,
+                                },
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+        with patch("styrmin_backend.agent.status.reporter.httpx.AsyncClient") as mock:
+            mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
+            mock.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock.return_value.post = AsyncMock(return_value=mock_resp)
+            results = await _get_active_deployments(GRAPHQL_URL)
+        assert len(results) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +565,7 @@ class TestPollOnce:
     @pytest.mark.anyio
     async def test_no_deployments(self) -> None:
         with patch(
-            "styrmin_backend.agent.status.reporter._get_active_deployment_ids",
+            "styrmin_backend.agent.status.reporter._get_active_deployments",
             new_callable=AsyncMock,
             return_value=[],
         ):
@@ -559,9 +576,9 @@ class TestPollOnce:
         dep_id = uuid4()
         with (
             patch(
-                "styrmin_backend.agent.status.reporter._get_active_deployment_ids",
+                "styrmin_backend.agent.status.reporter._get_active_deployments",
                 new_callable=AsyncMock,
-                return_value=[dep_id],
+                return_value=[(dep_id, "running")],
             ),
             patch(
                 "styrmin_backend.agent.status.reporter._collect_pod_statuses",
@@ -601,9 +618,9 @@ class TestPollOnce:
         dep_id = uuid4()
         with (
             patch(
-                "styrmin_backend.agent.status.reporter._get_active_deployment_ids",
+                "styrmin_backend.agent.status.reporter._get_active_deployments",
                 new_callable=AsyncMock,
-                return_value=[dep_id],
+                return_value=[(dep_id, "running")],
             ),
             patch(
                 "styrmin_backend.agent.status.reporter._collect_pod_statuses",

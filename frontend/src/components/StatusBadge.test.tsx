@@ -27,4 +27,14 @@ describe("StatusBadge", () => {
     await render(<StatusBadge status="UNKNOWN" />);
     expect(screen.getByText("UNKNOWN")).toBeInTheDocument();
   });
+
+  it("renders Deleting for the deleting status", async () => {
+    await render(<StatusBadge status="deleting" />);
+    expect(screen.getByText("Deleting")).toBeInTheDocument();
+  });
+
+  it("renders Deleted for the deleted terminal status", async () => {
+    await render(<StatusBadge status="deleted" />);
+    expect(screen.getByText("Deleted")).toBeInTheDocument();
+  });
 });

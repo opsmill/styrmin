@@ -39,9 +39,10 @@ export default function EnvironmentDetailPage() {
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
   const [showInternal, setShowInternal] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
   const { data, isLoading, error, refetch, dataUpdatedAt } =
     useGetEnvironmentQuery(
-      { environmentId },
+      { environmentId, includeDeleted: showDeleted },
       { refetchInterval: autoRefreshEnabled ? 10_000 : false },
     );
 
@@ -198,25 +199,45 @@ export default function EnvironmentDetailPage() {
                   ` · ${internalDeployments.length} internal`}
               </span>
             </div>
-            {internalDeployments.length > 0 && (
+            <div className="flex items-center gap-2">
+              {internalDeployments.length > 0 && (
+                <button
+                  onClick={() => setShowInternal((prev) => !prev)}
+                  className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    showInternal
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <div
+                    className={`flex h-4 w-7 items-center rounded-full p-0.5 transition-colors ${
+                      showInternal ? "justify-end bg-primary" : "bg-border"
+                    }`}
+                  >
+                    <div className="h-3 w-3 rounded-full bg-white" />
+                  </div>
+                  Show internal
+                </button>
+              )}
               <button
-                onClick={() => setShowInternal((prev) => !prev)}
+                onClick={() => setShowDeleted((prev) => !prev)}
                 className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  showInternal
+                  showDeleted
                     ? "border-primary bg-primary/5 text-primary"
                     : "border-border text-muted-foreground hover:text-foreground"
                 }`}
+                data-testid="show-deleted-toggle"
               >
                 <div
                   className={`flex h-4 w-7 items-center rounded-full p-0.5 transition-colors ${
-                    showInternal ? "justify-end bg-primary" : "bg-border"
+                    showDeleted ? "justify-end bg-primary" : "bg-border"
                   }`}
                 >
                   <div className="h-3 w-3 rounded-full bg-white" />
                 </div>
-                Show internal
+                Show deleted
               </button>
-            )}
+            </div>
           </div>
 
           {userDeployments.length === 0 && !showInternal ? (
@@ -346,6 +367,19 @@ export default function EnvironmentDetailPage() {
 // DeploymentRow
 // ---------------------------------------------------------------------------
 
+function relativeTimeFromNow(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const seconds = Math.floor((Date.now() - then) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 function DeploymentRow({
   deployment,
   environmentId,
@@ -358,12 +392,21 @@ function DeploymentRow({
     status: string;
     applicationVersion: string;
     components: { id: string }[];
+    deletedAt?: string | null;
   };
   environmentId: string;
   index: number;
   internal?: boolean;
 }) {
   const dc = getStatusColor(deployment.status);
+  const isDeleting = deployment.status === "deleting";
+  const isDeleted =
+    deployment.status === "deleted" ||
+    (deployment.deletedAt !== null && deployment.deletedAt !== undefined);
+  // Tombstoned rows render visually de-emphasised with no inline action
+  // affordances. The detail page is still reachable by clicking the row
+  // (US7 — direct id lookup is unfiltered).
+  const isTombstoned = isDeleted;
 
   return (
     <Link
@@ -372,16 +415,27 @@ function DeploymentRow({
         environmentId,
         deploymentId: deployment.id,
       }}
+      data-testid="deployment-row"
+      data-deployment-id={deployment.id}
+      data-deployment-status={deployment.status}
     >
       <div
         className={`flex items-center gap-4 rounded-lg border-l-[3px] px-4 py-3 transition-colors hover:bg-accent/50 ${
-          internal ? "border-border opacity-70" : dc.border
+          isTombstoned
+            ? "border-border opacity-50 grayscale"
+            : internal
+              ? "border-border opacity-70"
+              : dc.border
         } ${index % 2 === 0 ? "bg-surface" : ""}`}
       >
         <div className="flex w-[180px] items-center gap-2">
           <div className={`h-2 w-2 flex-shrink-0 rounded-full ${dc.dot}`} />
           <span
-            className={`text-[13px] font-medium ${internal ? "text-muted-foreground" : "text-foreground"}`}
+            className={`text-[13px] font-medium ${
+              isTombstoned || internal
+                ? "text-muted-foreground"
+                : "text-foreground"
+            }`}
           >
             {deployment.name}
           </span>
@@ -390,9 +444,17 @@ function DeploymentRow({
               INT
             </span>
           )}
+          {isDeleting && (
+            <span
+              className="rounded bg-amber-500/10 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:text-amber-400"
+              data-testid="deleting-badge"
+            >
+              Deleting…
+            </span>
+          )}
         </div>
         <span
-          className={`w-[100px] font-mono text-[13px] ${internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+          className={`w-[100px] font-mono text-[13px] ${isTombstoned || internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
         >
           {deployment.applicationVersion}
         </span>
@@ -400,10 +462,18 @@ function DeploymentRow({
           <StatusBadge status={deployment.status} />
         </div>
         <span
-          className={`flex-1 text-[13px] ${internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+          className={`flex-1 text-[13px] ${isTombstoned || internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
         >
-          {deployment.components.length} component
-          {deployment.components.length !== 1 ? "s" : ""}
+          {isDeleted && deployment.deletedAt ? (
+            <span data-testid="deleted-at-relative">
+              Deleted {relativeTimeFromNow(deployment.deletedAt)}
+            </span>
+          ) : (
+            <>
+              {deployment.components.length} component
+              {deployment.components.length !== 1 ? "s" : ""}
+            </>
+          )}
         </span>
       </div>
     </Link>

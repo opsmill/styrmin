@@ -184,6 +184,7 @@ type Deployment {
   applicationDriverVersionId: UUID!
   environmentId: UUID!
   internal: Boolean!
+  deletedAt: DateTime
   applicationInstance: ApplicationInstance
   components: [Component!]!
   environment: Environment!
@@ -234,7 +235,7 @@ type Environment {
   capabilities: JSON!
   cluster: Cluster!
   backupStorageLocation: BackupStorageLocation
-  deployments: [Deployment!]!
+  deployments(includeDeleted: Boolean! = false): [Deployment!]!
 }
 
 type HelmChart {
@@ -280,6 +281,7 @@ type Mutation {
   loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!): ApplicationDriverVersion
   deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task
   updateDeployment(deploymentId: UUID!, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task
+  deleteDeployment(deploymentId: UUID!): Task!
   createBackup(instanceId: UUID!, name: String = null): Backup
   deleteBackup(backupId: UUID!): String
   createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore

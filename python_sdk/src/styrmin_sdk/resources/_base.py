@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
-from styrmin_sdk.exceptions import OperationFailedError, ResourceAlreadyExistsError, ResourceNotFoundError
+from styrmin_sdk.exceptions import (
+    DeploymentRestoringError,
+    OperationFailedError,
+    ResourceAlreadyExistsError,
+    ResourceNotFoundError,
+)
 
 if TYPE_CHECKING:
     from styrmin_sdk._transport import Transport
@@ -51,4 +56,6 @@ class BaseResource:
             raise ResourceNotFoundError(message, code)
         if code == "ALREADY_EXISTS":
             raise ResourceAlreadyExistsError(message, code)
+        if code == "DEPLOYMENT_RESTORING":
+            raise DeploymentRestoringError(message, code)
         raise OperationFailedError(message, code)

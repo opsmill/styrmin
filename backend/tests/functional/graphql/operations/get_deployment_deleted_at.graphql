@@ -1,0 +1,7 @@
+query GetDeploymentDeletedAt($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        status
+        deletedAt
+    }
+}

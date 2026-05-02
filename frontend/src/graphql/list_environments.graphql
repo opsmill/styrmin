@@ -1,4 +1,4 @@
-query ListEnvironments {
+query ListEnvironments($includeDeleted: Boolean = false) {
   environments {
     id
     name
@@ -7,10 +7,11 @@ query ListEnvironments {
       id
       name
     }
-    deployments {
+    deployments(includeDeleted: $includeDeleted) {
       id
       name
       status
+      deletedAt
       internal
       applicationVersion
       components {

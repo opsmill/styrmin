@@ -203,6 +203,8 @@ class DeploymentState(str, Enum):
     RUNNING = "running"
     RESTORING = "restoring"
     FAILED = "failed"
+    DELETING = "deleting"
+    DELETED = "deleted"
 
 
 class Deployment(StyrminModel, table=True):
@@ -217,6 +219,12 @@ class Deployment(StyrminModel, table=True):
     internal: bool = Field(default=False)
 
     status: DeploymentState = Field(sa_column=Column(SQLModelEnum(DeploymentState)))
+
+    deleted_at: datetime | None = Field(  # type: ignore[call-overload]
+        sa_type=DateTime(timezone=True),
+        default=None,
+        index=True,
+    )
 
     # ==============
     # Relationships
@@ -399,6 +407,7 @@ class TaskType(str, Enum):
     STOP_COMPONENTS = "stop_components"
     START_COMPONENTS = "start_components"
     RUN_JOB = "run_job"
+    DELETE_DEPLOYMENT = "delete_deployment"
 
 
 class TaskStatus(str, Enum):

@@ -5,7 +5,12 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from styrmin_sdk import OperationFailedError, ResourceNotFoundError, StyrminClient
+from styrmin_sdk import (
+    DeploymentRestoringError,
+    OperationFailedError,
+    ResourceNotFoundError,
+    StyrminClient,
+)
 
 
 async def test_create_deployment_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -48,14 +53,18 @@ async def test_get_deployment_success(client: StyrminClient, mock_transport: Asy
                 "id": "11111111-2222-3333-4444-555555555555",
                 "name": "my-app",
                 "status": "deployed",
+                "deletedAt": None,
                 "config": {},
+                "parameters": {},
                 "applicationVersion": "1.0.0",
                 "applicationDriverVersionId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "applicationDriverVersion": None,
                 "environmentId": "22222222-3333-4444-5555-666666666666",
                 "applicationInstance": {"id": "33333333-4444-5555-6666-777777777777", "status": "running"},
                 "components": [
                     {"id": "44444444-5555-6666-7777-888888888888", "name": "web", "enabled": True},
                 ],
+                "deployedServices": [],
             }
         }
     }
@@ -63,6 +72,7 @@ async def test_get_deployment_success(client: StyrminClient, mock_transport: Asy
     deployment = await client.deployments.get("11111111-2222-3333-4444-555555555555")
 
     assert deployment.status == "deployed"
+    assert deployment.deleted_at is None
     assert deployment.application_version == "1.0.0"
     assert deployment.application_instance is not None
     assert deployment.application_instance.status == "running"
@@ -95,3 +105,57 @@ async def test_update_deployment_success(client: StyrminClient, mock_transport: 
 
     task = await client.deployments.update("11111111-2222-3333-4444-555555555555", config={"replicas": 3})
     assert task.status == "pending"
+
+
+# ---------------------------------------------------------------------------
+# delete_deployment (spec 008)
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_deployment_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {
+        "data": {
+            "deleteDeployment": {
+                "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "type": "delete_deployment",
+                "status": "success",
+                "message": None,
+                "deploymentId": "11111111-2222-3333-4444-555555555555",
+            },
+        }
+    }
+
+    task = await client.deployments.delete("11111111-2222-3333-4444-555555555555")
+
+    assert task.type_ == "delete_deployment"
+    assert task.status == "success"
+    assert str(task.deployment_id) == "11111111-2222-3333-4444-555555555555"
+
+
+async def test_delete_deployment_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """Conflated with already-deleted; both surface NOT_FOUND. Scripts
+    treat this as the natural success outcome for a no-op cleanup."""
+    mock_transport.execute.return_value = {
+        "data": {"deleteDeployment": None},
+        "errors": [{"message": "Deployment not found", "extensions": {"code": "NOT_FOUND"}}],
+    }
+
+    with pytest.raises(ResourceNotFoundError, match="Deployment not found"):
+        await client.deployments.delete("11111111-2222-3333-4444-555555555555")
+
+
+async def test_delete_deployment_restoring_raises_typed_error(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """A restore-in-progress deployment refuses delete with a code that
+    automation can specifically catch (rather than swallowing all errors)."""
+    mock_transport.execute.return_value = {
+        "data": {"deleteDeployment": None},
+        "errors": [
+            {
+                "message": "Cannot delete a deployment while a restore is in progress",
+                "extensions": {"code": "DEPLOYMENT_RESTORING"},
+            }
+        ],
+    }
+
+    with pytest.raises(DeploymentRestoringError, match="restore is in progress"):
+        await client.deployments.delete("11111111-2222-3333-4444-555555555555")
