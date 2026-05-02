@@ -214,12 +214,23 @@ async def _wait_for_service_ready(
         msg = f"pods matching '{label_selector}' in {namespace} did not become ready"
         raise TimeoutError(msg)
 
+    # The legacy v1 Endpoints API is deprecated in k8s 1.33+ and the
+    # auto-creation/mirroring behavior has become unreliable on newer
+    # control planes (k8s 1.35 returns 404 here). Read EndpointSlices
+    # directly via discovery.k8s.io/v1 instead — that's the source of truth.
+    discovery_api = kubeclient.DiscoveryV1Api(core_api.api_client)
     deadline = time.time() + endpoint_timeout
     while time.time() < deadline:
-        endpoints = await core_api.read_namespaced_endpoints(
-            name=name, namespace=namespace
+        slices = await discovery_api.list_namespaced_endpoint_slice(
+            namespace=namespace,
+            label_selector=f"kubernetes.io/service-name={name}",
         )
-        if endpoints.subsets and any(subset.addresses for subset in endpoints.subsets):
+        if any(
+            endpoint.addresses
+            and (endpoint.conditions is None or endpoint.conditions.ready is not False)
+            for slice_ in slices.items
+            for endpoint in (slice_.endpoints or [])
+        ):
             break
         await asyncio.sleep(2)
     else:
