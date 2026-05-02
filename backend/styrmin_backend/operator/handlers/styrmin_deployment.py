@@ -312,6 +312,21 @@ async def kopf_on_styrmin_deployment_update(
     """Handle StyrminDeployment spec changes — re-run ordered pipeline."""
     ns = namespace or ""
     crd_spec = dict(spec)
+
+    # Spec 008: when the spec change *is* the deletion request, the
+    # deletion-observer handler (kopf_on_styrmin_deployment_deletion_requested)
+    # owns this update — it tears resources down. Re-running the full
+    # deploy pipeline here would be wasted work and would briefly flip
+    # displayState to Deploying mid-teardown (confusing for the UI).
+    if crd_spec.get("deletionRequested", False):
+        logger.info(
+            "StyrminDeployment spec updated for %s/%s with deletionRequested=true — "
+            "deferring to deletion handler",
+            ns,
+            name,
+        )
+        return
+
     logger.info("StyrminDeployment spec updated: %s/%s, re-reconciling", ns, name)
 
     patch.status["displayState"] = DisplayState.DEPLOYING.value
@@ -428,6 +443,28 @@ async def kopf_styrmin_deployment_timer(
     # must not advance phases or trip the readiness timeout — let the
     # workflow finish, strip the kopf annotations, and transition out.
     if phase == DeploymentPhase.RESTORING.value:
+        return
+
+    # If teardown was requested (spec.deletionRequested == True), advance
+    # to phase: Deleted as soon as the namespace is gone. The timer is
+    # the only path that can set the terminal phase — the field-update
+    # handler kicks teardown off but does not block on namespace
+    # finalisers (which can take minutes).
+    if phase == DeploymentPhase.DELETING.value or crd_spec.get(
+        "deletionRequested", False
+    ):
+        if await _advance_to_phase_deleted(
+            status=dict(status), patch=patch, namespace=ns, name=name, logger=logger
+        ):
+            return
+        # Still tearing down — don't run the rest of the phase advancement.
+        if phase == DeploymentPhase.DELETING.value:
+            return
+
+    # Once terminal, the timer has nothing more to do for this CR — the
+    # janitor (kopf_styrmin_deployment_janitor) is responsible for the
+    # eventual TTL-based cleanup.
+    if phase == DeploymentPhase.DELETED.value:
         return
 
     # --- displayState timeout check ---
@@ -620,7 +657,198 @@ async def kopf_styrmin_deployment_timer(
                 )
 
 
-# --- Ordered deletion (US3) ---
+# --- Ordered deletion (US3 + spec 008) ---
+
+
+async def _teardown_owned_resources(
+    *,
+    namespace: str,
+    release_reference: str,
+    name: str,
+    logger: Any,
+) -> None:
+    """Reverse-order teardown of resources owned by a StyrminDeployment.
+
+    Order: Services/Middlewares -> HelmRelease -> NetworkPolicies/Secrets.
+    Errors are logged and swallowed — teardown is best-effort and
+    finalisers / 404s should not block the lifecycle.
+
+    Reused by both the platform-driven path (``spec.deletionRequested``
+    flip, observed by ``kopf_on_styrmin_deployment_deletion_requested``)
+    and the manual safety-net path (``kubectl delete styrmindeployment``,
+    handled by ``kopf_on_styrmin_deployment_delete``).
+    """
+    from styrmin_backend.operator.reconciler import (
+        delete_kubernetes_resource,
+        list_managed_resources,
+    )
+
+    # Step 1: Services and Middlewares.
+    logger.info("Teardown step 1: Services / Middlewares for %s/%s", namespace, name)
+    for kind in ("Service",):
+        resources = await list_managed_resources(
+            namespace=namespace, release_reference=release_reference, kind=kind
+        )
+        for resource in resources:
+            try:
+                await delete_kubernetes_resource(resource=resource, namespace=namespace)
+            except Exception:
+                logger.exception(
+                    "Failed to delete %s/%s",
+                    kind,
+                    resource.get("metadata", {}).get("name"),
+                )
+
+    # Step 2: HelmRelease.
+    logger.info("Teardown step 2: HelmRelease for %s/%s", namespace, name)
+    from kubernetes_asyncio import client as kubeclient
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
+
+    try:
+        async with get_kubernetes_client() as client:
+            custom_api = kubeclient.CustomObjectsApi(client)
+            await custom_api.delete_namespaced_custom_object(
+                group="helm.toolkit.fluxcd.io",
+                version="v2",
+                namespace=namespace,
+                plural="helmreleases",
+                name=release_reference,
+            )
+            logger.info("HelmRelease %s deleted", release_reference)
+    except Exception:
+        logger.warning("HelmRelease %s not found or already deleted", release_reference)
+
+    # Step 3: NetworkPolicies and Secrets.
+    logger.info("Teardown step 3: NetworkPolicies / Secrets for %s/%s", namespace, name)
+    for kind in ("NetworkPolicy", "Secret"):
+        resources = await list_managed_resources(
+            namespace=namespace, release_reference=release_reference, kind=kind
+        )
+        for resource in resources:
+            try:
+                await delete_kubernetes_resource(resource=resource, namespace=namespace)
+            except Exception:
+                logger.exception(
+                    "Failed to delete %s/%s",
+                    kind,
+                    resource.get("metadata", {}).get("name"),
+                )
+
+
+async def _request_namespace_deletion(*, namespace: str, logger: Any) -> None:
+    """Issue a delete on the deployment's own namespace.
+
+    Idempotent — a 404 from the API server is treated as already-gone.
+    The actual finalisers may take time; ``_namespace_is_gone`` polls
+    for the eventual disappearance.
+    """
+    from kubernetes_asyncio import client as kubeclient
+    from kubernetes_asyncio.client.api_client import ApiException
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
+
+    try:
+        async with get_kubernetes_client() as client:
+            core_api = kubeclient.CoreV1Api(client)
+            await core_api.delete_namespace(name=namespace)
+            logger.info("Namespace %s delete requested", namespace)
+    except ApiException as exc:
+        if exc.status == 404:
+            logger.info("Namespace %s already gone", namespace)
+            return
+        raise
+
+
+async def _namespace_is_gone(*, namespace: str) -> bool:
+    """Return True iff the namespace no longer exists (API server 404)."""
+    from kubernetes_asyncio import client as kubeclient
+    from kubernetes_asyncio.client.api_client import ApiException
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
+
+    try:
+        async with get_kubernetes_client() as client:
+            core_api = kubeclient.CoreV1Api(client)
+            await core_api.read_namespace(name=namespace)
+            return False
+    except ApiException as exc:
+        if exc.status == 404:
+            return True
+        raise
+
+
+async def _advance_to_phase_deleted(
+    *,
+    status: dict[str, Any],
+    patch: kopf.Patch,
+    namespace: str,
+    name: str,
+    logger: Any,
+) -> bool:
+    """If the namespace is gone, advance the CR to phase: Deleted.
+
+    Returns True if the advancement was applied (caller should not run
+    the timer's other phase logic for this tick), False otherwise.
+    """
+    if not await _namespace_is_gone(namespace=namespace):
+        return False
+
+    set_phase(patch.status, DeploymentPhase.DELETED, "Namespace removed")
+    patch.status["displayState"] = DisplayState.DELETED.value
+
+    conditions = list(status.get("conditions", []))
+    set_condition(
+        conditions,
+        ConditionType.DELETED,
+        ConditionStatus.TRUE,
+        "NamespaceGone",
+        f"All owned resources removed; namespace {namespace} no longer exists",
+    )
+    patch.status["conditions"] = conditions
+    logger.info("StyrminDeployment %s/%s reached phase: Deleted", namespace, name)
+    return True
+
+
+@kopf.on.update(
+    CRD_GROUP,
+    CRD_VERSION,
+    CRD_PLURAL,
+    field="spec.deletionRequested",
+    new=True,
+)
+async def kopf_on_styrmin_deployment_deletion_requested(
+    spec: kopf.Spec,
+    status: kopf.Status,
+    name: str,
+    namespace: str | None,
+    patch: kopf.Patch,
+    logger: kopf.Logger,
+    **_: Any,
+) -> None:
+    """Observe ``spec.deletionRequested`` flip true and run the teardown
+    pipeline platform-side (no CR delete — the CR lingers until the
+    janitor reaps it after ``DELETED_CR_TTL_HOURS``)."""
+
+    ns = namespace or ""
+    release_ref = spec.get("releaseReference", "")
+
+    current_phase = status.get("phase")
+    if current_phase == DeploymentPhase.DELETED.value:
+        # Already terminal — nothing to do (defensive; CEL rule prevents
+        # un-setting the flag, so we should not see updates after Deleted).
+        return
+
+    logger.info("Deletion requested via spec for %s/%s — running teardown", ns, name)
+
+    set_phase(patch.status, DeploymentPhase.DELETING, "Cleaning up resources")
+    patch.status["displayState"] = DisplayState.DELETING.value
+
+    await _teardown_owned_resources(
+        namespace=ns, release_reference=release_ref, name=name, logger=logger
+    )
+    await _request_namespace_deletion(namespace=ns, logger=logger)
+
+    # The namespace finaliser may take time; the periodic timer
+    # (kopf_styrmin_deployment_timer) advances to phase: Deleted once
+    # the API server reports 404 for the namespace.
 
 
 @kopf.on.delete(CRD_GROUP, CRD_VERSION, CRD_PLURAL)
@@ -633,70 +861,23 @@ async def kopf_on_styrmin_deployment_delete(
     logger: kopf.Logger,
     **_: Any,
 ) -> None:
-    """Reverse-order cleanup: Services/Middlewares -> HelmRelease -> NetworkPolicies/Secrets."""
+    """Manual ``kubectl delete styrmindeployment`` safety-net.
+
+    Runs the teardown pipeline; does NOT produce a backend tombstone
+    (out of scope per spec 008). The platform-driven path is handled by
+    ``kopf_on_styrmin_deployment_deletion_requested`` instead.
+    """
     ns = namespace or ""
     release_ref = spec.get("releaseReference", "")
     logger.info(
-        "Deleting StyrminDeployment %s/%s, cleaning up resources in reverse order",
+        "Deleting StyrminDeployment %s/%s (safety-net path), cleaning up resources",
         ns,
         name,
     )
     set_phase(patch.status, DeploymentPhase.DELETING, "Cleaning up resources")
 
-    from styrmin_backend.operator.reconciler import (
-        delete_kubernetes_resource,
-        list_managed_resources,
+    await _teardown_owned_resources(
+        namespace=ns, release_reference=release_ref, name=name, logger=logger
     )
-
-    # Step 1: Delete Services and Middlewares
-    logger.info("Step 1: Deleting Services and Middlewares for %s/%s", ns, name)
-    for kind in ("Service",):
-        resources = await list_managed_resources(
-            namespace=ns, release_reference=release_ref, kind=kind
-        )
-        for resource in resources:
-            try:
-                await delete_kubernetes_resource(resource=resource, namespace=ns)
-            except Exception:
-                logger.exception(
-                    "Failed to delete %s/%s",
-                    kind,
-                    resource.get("metadata", {}).get("name"),
-                )
-
-    # Step 2: Delete HelmRelease
-    logger.info("Step 2: Deleting HelmRelease for %s/%s", ns, name)
-    from kubernetes_asyncio import client as kubeclient
-    from styrmin_backend.operator.kubernetes import get_kubernetes_client
-
-    try:
-        async with get_kubernetes_client() as client:
-            custom_api = kubeclient.CustomObjectsApi(client)
-            await custom_api.delete_namespaced_custom_object(
-                group="helm.toolkit.fluxcd.io",
-                version="v2",
-                namespace=ns,
-                plural="helmreleases",
-                name=release_ref,
-            )
-            logger.info("HelmRelease %s deleted", release_ref)
-    except Exception:
-        logger.warning("HelmRelease %s not found or already deleted", release_ref)
-
-    # Step 3: Delete NetworkPolicies and Secrets
-    logger.info("Step 3: Deleting NetworkPolicies and Secrets for %s/%s", ns, name)
-    for kind in ("NetworkPolicy", "Secret"):
-        resources = await list_managed_resources(
-            namespace=ns, release_reference=release_ref, kind=kind
-        )
-        for resource in resources:
-            try:
-                await delete_kubernetes_resource(resource=resource, namespace=ns)
-            except Exception:
-                logger.exception(
-                    "Failed to delete %s/%s",
-                    kind,
-                    resource.get("metadata", {}).get("name"),
-                )
 
     logger.info("Cleanup complete for StyrminDeployment %s/%s", ns, name)

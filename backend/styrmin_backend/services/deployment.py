@@ -1,9 +1,11 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from loguru import logger
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
+from styrmin_backend.agent.service.kubernetes.primitives import patch_custom_resource
+from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.exceptions import InvalidDeploymentContextError
 from styrmin_backend.context.validators import validate_deployment_config
 from styrmin_backend.domain.models import (
@@ -11,17 +13,21 @@ from styrmin_backend.domain.models import (
     Deployment,
     DeploymentState,
     Task,
+    TaskStatus,
+    TaskType,
 )
 from styrmin_backend.domain.utils import (
     generate_deployment_name,
     validate_deployment_name,
 )
 from styrmin_backend.context.models.config import DedicatedIngressConfig
+from styrmin_backend.operator.config import CRD_GROUP, CRD_PLURAL, CRD_VERSION
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
     DeploymentNameConflictError,
     DeploymentNameValidationError,
     DeploymentNotFoundError,
+    DeploymentRestoringError,
     EnvironmentNotFoundError,
     IngressControllerNotHealthyError,
     InvalidContextError,
@@ -178,12 +184,18 @@ async def update_deployment(
             except ValueError as e:
                 raise DeploymentNameValidationError(str(e)) from e
 
-            # Allow same-name no-op
+            # Allow same-name no-op. Conflict check is scoped to the
+            # current environment and ignores tombstoned deployments
+            # (so an operator can rename onto the name of a previously-
+            # deleted deployment in the same env).
             if validated_name != deployment.name:
-                existing = await uow.deployments.get_by_name(validated_name)
+                existing = await uow.deployments.get_by_name(
+                    validated_name, deployment.environment_id
+                )
                 if existing is not None:
                     raise DeploymentNameConflictError(
-                        f"A deployment named '{validated_name}' already exists"
+                        f"A deployment named '{validated_name}' already exists "
+                        "in this environment"
                     )
                 deployment.name = validated_name
 
@@ -571,7 +583,9 @@ async def _ensure_ingress_controller(
         environment_id,
     )
 
-    existing_names = await uow.deployments.find_names_with_prefix(INTERNAL_DRIVER_NAME)
+    existing_names = await uow.deployments.find_names_with_prefix(
+        INTERNAL_DRIVER_NAME, environment_id
+    )
     ingress_name = generate_deployment_name(INTERNAL_DRIVER_NAME, existing_names)
 
     ingress_deployment = Deployment.create(
@@ -693,23 +707,29 @@ async def deploy_application(
             values=deployment_parameters,
         )
 
-        # Resolve deployment name
+        # Resolve deployment name. Uniqueness scope is per-environment
+        # and ignores tombstoned deployments (so operators can reuse
+        # the name of a previously-deleted deployment in the same env).
         resolved_name: str
         if deployment_name and deployment_name.strip():
-            # User provided a custom name — validate and check uniqueness
             try:
                 resolved_name = validate_deployment_name(deployment_name)
             except ValueError as e:
                 raise DeploymentNameValidationError(str(e)) from e
 
-            existing = await uow.deployments.get_by_name(resolved_name)
+            existing = await uow.deployments.get_by_name(resolved_name, environment_id)
             if existing is not None:
                 raise DeploymentNameConflictError(
-                    f"A deployment named '{resolved_name}' already exists"
+                    f"A deployment named '{resolved_name}' already exists "
+                    "in this environment"
                 )
         else:
-            # Auto-generate name from driver name
-            existing_names = await uow.deployments.find_names_with_prefix(driver_name)
+            # Auto-generate name from driver name. Tombstoned names are
+            # excluded from the prefix search so the auto-generator can
+            # reclaim the lowest free suffix.
+            existing_names = await uow.deployments.find_names_with_prefix(
+                driver_name, environment_id
+            )
             resolved_name = generate_deployment_name(driver_name, existing_names)
 
         # Create the deployment
@@ -766,6 +786,107 @@ async def deploy_application(
 
         await uow.tasks.save(task=task)
 
+        await uow.commit()
+
+        result = await uow.tasks.find(id=task.id)
+        assert result is not None, "Task not found"
+        return result
+
+
+_DELETE_ALLOWED_STATES = {
+    DeploymentState.PENDING,
+    DeploymentState.DEPLOYING,
+    DeploymentState.RUNNING,
+    DeploymentState.FAILED,
+}
+
+
+async def delete_deployment(
+    deployment_id: UUID,
+    uow: UnitOfWork,
+) -> Task:
+    """Request deletion of a deployment.
+
+    Patches ``spec.deletionRequested = true`` on the cluster-side
+    StyrminDeployment CRD and creates a born-complete ``DELETE_DEPLOYMENT``
+    task as the audit record. The operator drives teardown asynchronously;
+    callers observe ``Deployment.status`` transition through ``DELETING``
+    to ``DELETED`` via the existing reconciliation status reporter.
+
+    Idempotent: a second call while the deployment is already ``DELETING``
+    returns the most recent existing ``DELETE_DEPLOYMENT`` task without
+    re-issuing the patch. A call against a deployment in ``DELETED`` raises
+    ``DeploymentNotFoundError`` (intentional conflation with unknown id).
+
+    Raises:
+        DeploymentNotFoundError: id is unknown OR the deployment is already
+            tombstoned (status DELETED / deleted_at set).
+        DeploymentRestoringError: the deployment is currently restoring;
+            deletion is refused for data-integrity reasons.
+    """
+    async with uow:
+        deployment = await uow.deployments.find(id=deployment_id)
+        if deployment is None or deployment.deleted_at is not None:
+            raise DeploymentNotFoundError(
+                f"Deployment with ID {deployment_id} not found"
+            )
+
+        if deployment.status == DeploymentState.DELETED:
+            # Defence in depth: deleted_at IS NULL was the primary guard
+            # above; this branch covers the (impossible-but-cheap) case
+            # where status is DELETED with deleted_at unset.
+            raise DeploymentNotFoundError(
+                f"Deployment with ID {deployment_id} not found"
+            )
+
+        if deployment.status == DeploymentState.RESTORING:
+            raise DeploymentRestoringError()
+
+        if deployment.status == DeploymentState.DELETING:
+            # Idempotent: return the most recent existing DELETE_DEPLOYMENT
+            # task without issuing a new patch. find_by_deployment is
+            # ordered newest-first (see repository/tasks.py).
+            existing_tasks = await uow.tasks.find_by_deployment(deployment_id)
+            for prior in existing_tasks:
+                if prior.type == TaskType.DELETE_DEPLOYMENT:
+                    return prior
+            # Fall through if no prior task exists (e.g. legacy migrated row).
+
+        if deployment.status not in _DELETE_ALLOWED_STATES and (
+            deployment.status != DeploymentState.DELETING
+        ):
+            # This should not happen given the enum is closed, but keep an
+            # explicit guard so future state additions surface a clear error.
+            raise DeploymentNotFoundError(
+                f"Deployment with ID {deployment_id} cannot be deleted from "
+                f"state {deployment.status.value}"
+            )
+
+        # Patch the CRD spec. The CR name and namespace both follow the
+        # `styrmin-{deployment_id}` convention (CR name == namespace for
+        # platform-managed deployments).
+        crd_name = get_kubernetes_reference(deployment_id)
+        await patch_custom_resource(
+            plural=CRD_PLURAL,
+            reference=crd_name,
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=crd_name,
+            patch=[{"op": "add", "path": "/spec/deletionRequested", "value": True}],
+        )
+
+        # Create a born-complete DELETE_DEPLOYMENT task. This is the audit
+        # record on the deployment timeline, not a progress channel — the
+        # mutation acks immediately; cluster-side teardown is observed via
+        # the status reporter (see services/deployment_status.py).
+        task = Task(
+            id=uuid4(),
+            type=TaskType.DELETE_DEPLOYMENT,
+            deployment_id=deployment_id,
+            status=TaskStatus.SUCCESS,
+            prefect_flow_run_id=None,
+        )
+        await uow.tasks.save(task=task)
         await uow.commit()
 
         result = await uow.tasks.find(id=task.id)

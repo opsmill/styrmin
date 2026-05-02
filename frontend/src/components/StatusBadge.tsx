@@ -44,6 +44,7 @@ const statusConfig: Record<string, StatusConfig> = {
   // Inactive / neutral states
   inactive: { label: "Inactive", variant: "secondary" },
   stopped: { label: "Stopped", variant: "secondary" },
+  deleted: { label: "Deleted", variant: "secondary" },
   unknown: { label: "Unknown", variant: "default" },
 };
 

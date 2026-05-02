@@ -164,6 +164,16 @@ class DeploymentNotFoundError(ServiceError):
     default_message = "Deployment not found"
 
 
+class DeploymentRestoringError(ServiceError):
+    """Deletion was attempted on a deployment that is currently restoring."""
+
+    error_code = "DEPLOYMENT_RESTORING"
+    default_message = (
+        "Cannot delete a deployment while a restore is in progress. "
+        "Wait for the restore to finish or fail before retrying."
+    )
+
+
 class DeploymentNameValidationError(ServiceError):
     """The deployment name is invalid."""
 

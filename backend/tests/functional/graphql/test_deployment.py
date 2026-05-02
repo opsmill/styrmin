@@ -95,3 +95,49 @@ async def test_update_version_internal_deployment_raises(
     refreshed = await session.get(Deployment, deployment_id)
     assert refreshed is not None
     assert refreshed.application_version == original_version
+
+
+# ---------------------------------------------------------------------------
+# Scoped + tombstone-aware name uniqueness (spec 008 follow-up)
+# ---------------------------------------------------------------------------
+#
+# The rename success cases (cross-env reuse, tombstone reuse) flow
+# through the full reconciliation pipeline and are heavy to exercise at
+# the GraphQL level — the underlying contracts (per-env scope,
+# tombstone-ignored uniqueness, partial-index enforcement) are proven
+# end-to-end by the repository-level tests in
+# ``backend/tests/unit/repository/test_deployment_repository.py``. The
+# one assertion worth pinning at the GraphQL boundary is the
+# conflict-error code, since the structured-error extension is what
+# clients see — that's the test below.
+
+
+@pytest.mark.asyncio
+async def test_rename_to_active_name_in_same_env_raises_conflict(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """Two active deployments cannot share a name in the same env —
+    the rename mutation surfaces ``ALREADY_EXISTS`` via the structured-
+    error extension."""
+    from unittest.mock import AsyncMock
+
+    from .seeds import seed_environment
+
+    prefect_manager_mock.run_action = AsyncMock()
+
+    env = await seed_environment(session, name="env-rename-conflict")
+    await seed_deployment(session, environment=env, name="ansible")
+    target = await seed_deployment(session, environment=env, name="other")
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {"deploymentId": str(target.id), "name": "ansible"},
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(
+        err["extensions"].get("code") == "ALREADY_EXISTS" for err in payload["errors"]
+    ), payload["errors"]

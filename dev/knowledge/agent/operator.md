@@ -41,15 +41,21 @@ The operator watches `StyrminDeployment` custom resources (`styrmin.io/v1alpha1`
 | `helm` | object | Yes | Chart and repository specs |
 | `labels` | object | No | Custom labels for managed resources |
 | `parameters` | object | No | User-provided parameters |
+| `deletionRequested` | boolean | No (default `false`) | Set to `true` by the backend's `deleteDeployment` mutation to request operator-driven teardown. Immutable once `true` (CEL transition rule `oldSelf == false \|\| self == true` enforced by the API server). |
 
 The context is embedded directly in the CRD (see ADR-006), making the operator autonomous — no backend API calls needed during reconciliation.
+
+### Namespace co-location (load-bearing constraint)
+
+The CRD is `scope: Namespaced` and lives **inside the deployment's own namespace** (`styrmin-{deployment_id}`). Deleting that namespace deletes the CR with it. Any state transition you want observed must complete BEFORE the namespace is gone, OR you must rely on a separate "DB DELETING + CR absent → infer terminal" path (this is what the agent's status reporter does for the platform-driven delete flow — see [`overview.md`](overview.md) → Status Reporter and `services/deployment_status.py`). New work that needs a phase change to land after namespace deletion will silently fail without this callout — design accordingly.
 
 ### Status
 
 | Field | Description |
 |-------|-------------|
-| `phase` | `Pending` / `CreatingPrerequisites` / `CreatingHelmRelease` / `CreatingServices` / `Ready` / `Failed` / `Deleting` |
-| `conditions` | K8s-standard condition array: `NetworkPoliciesReady`, `SecretsReady`, `HelmReleaseReady`, `ServicesReady`, `MiddlewaresReady`, `Ready` |
+| `phase` | `Pending` / `CreatingPrerequisites` / `CreatingHelmRelease` / `CreatingServices` / `Ready` / `Failed` / `Deleting` / `Deleted` |
+| `displayState` | User-facing state surfaced to the UI: `Deploying` / `Running` / `Restoring` / `Error` / `Deleting` / `Deleted` |
+| `conditions` | K8s-standard condition array: `NetworkPoliciesReady`, `SecretsReady`, `HelmReleaseReady`, `ServicesReady`, `MiddlewaresReady`, `Ready`, `Deleted` |
 | `managedResources` | Counts by type (networkPolicies, secrets, helmReleases, services, middlewares) |
 
 Printer columns for `kubectl get styrmindeployments`: Phase, App, Version, Age.
@@ -76,7 +82,13 @@ Sub-handlers provide automatic idempotency — completed phases are never re-exe
 
 ### Deletion
 
-Reverse order: Services/Middlewares → HelmRelease (wait for termination) → NetworkPolicies/Secrets. kopf adds a finalizer to prevent garbage collection until all sub-handlers succeed. Owner references provide a safety net.
+Two paths exist:
+
+**Platform-driven (preferred)**: the backend's `deleteDeployment` mutation patches `spec.deletionRequested = true`. A `@kopf.on.update(field="spec.deletionRequested", new=True)` handler observes the flip and runs `_teardown_owned_resources` in reverse order (Services/Middlewares → HelmRelease → NetworkPolicies/Secrets), then issues a namespace delete. The periodic timer advances `phase` to `Deleted` once the namespace returns 404. Because the StyrminDeployment CR lives inside the deployment's own namespace, the CR is garbage-collected with the namespace; the agent's status reporter detects "DB DELETING + CR absent" and synthesises a final `displayState: Deleted` report so the DB is tombstoned race-free.
+
+**Manual safety-net**: `kubectl delete styrmindeployment ...` triggers the existing `@kopf.on.delete` handler, which runs the same `_teardown_owned_resources` helper. This path does **not** produce a DB tombstone — it's a recovery mechanism for when the platform-driven path is unavailable.
+
+After the platform-driven path completes, the StyrminDeployment CR remains in `phase: Deleted` for `DELETED_CR_TTL_HOURS` (default 6h, env-configurable) so operators can inspect cluster-side state. A `@kopf.timer` janitor in `operator/janitor.py` reaps CRs whose `Deleted` condition's `lastTransitionTime` is past the TTL. CRs stuck in `Deleting` are NEVER auto-reaped.
 
 ## Drift Detection and Reconciliation
 

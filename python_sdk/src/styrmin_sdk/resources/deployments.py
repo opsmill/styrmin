@@ -6,6 +6,10 @@ from typing import Any
 from uuid import UUID
 
 from styrmin_sdk._queries import load_query
+from styrmin_sdk.graphql._generated.delete_deployment import (
+    DeleteDeployment,
+    DeleteDeploymentDeleteDeployment,
+)
 from styrmin_sdk.graphql._generated.deploy import Deploy, DeployDeploy
 from styrmin_sdk.graphql._generated.get_deployment import GetDeployment, GetDeploymentDeployment
 from styrmin_sdk.graphql._generated.get_deployment_pod_statuses import (
@@ -97,6 +101,40 @@ class DeploymentResource(BaseResource):
         )
         self._check_graphql_errors(result)
         return self._parse(UpdateDeployment, result["data"], "update_deployment", UpdateDeploymentUpdateDeployment)
+
+    async def delete(self, deployment_id: str | UUID) -> DeleteDeploymentDeleteDeployment:
+        """Request deletion of a deployment.
+
+        Patches the cluster-side StyrminDeployment CR to flip
+        ``spec.deletionRequested`` to ``true``. Returns immediately
+        with a born-complete ``DELETE_DEPLOYMENT`` task — poll
+        ``Deployment.status`` to observe the lifecycle's
+        ``DELETING -> DELETED`` progression.
+
+        Idempotent: a second call against an already-DELETING
+        deployment returns the existing in-flight task without
+        duplicating side effects.
+
+        Raises:
+            ResourceNotFoundError: id is unknown OR the deployment is
+                already DELETED (intentional conflation with unknown
+                id; check ``error_code == "NOT_FOUND"`` to distinguish
+                from a transport-level 404).
+            DeploymentRestoringError: a restore is in progress on this
+                deployment; deletion is refused for data-integrity
+                reasons.
+        """
+        result = await self._transport.execute(
+            load_query("delete_deployment"),
+            {"deploymentId": str(deployment_id)},
+        )
+        self._check_graphql_errors(result)
+        return self._parse(
+            DeleteDeployment,
+            result["data"],
+            "delete_deployment",
+            DeleteDeploymentDeleteDeployment,
+        )
 
     async def update_version(
         self, deployment_id: str | UUID, version: str

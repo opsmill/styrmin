@@ -49,7 +49,11 @@ async def resolve_deployment_reference(
         if ref.deployment_id is not None:
             target = await uow.deployments.find(ref.deployment_id)
         elif ref.deployment_name is not None:
-            target = await uow.deployments.get_by_name(ref.deployment_name)
+            # Affinity references resolve within the caller's env, and
+            # tombstoned deployments are not valid targets.
+            target = await uow.deployments.get_by_name(
+                ref.deployment_name, environment_id
+            )
 
         if target is None or target.environment_id != environment_id:
             raise UnresolvableAffinityReferenceError(

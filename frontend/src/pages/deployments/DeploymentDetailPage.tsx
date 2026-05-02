@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { useParams, Link } from "@tanstack/react-router";
+import { useParams, Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetDeploymentQuery,
   useGetDeploymentTimelineQuery,
   useCreateBackupMutation,
   useDeleteBackupMutation,
+  useDeleteDeploymentMutation,
   useListBackupsQuery,
   useCreateRestoreMutation,
   useListRestoresQuery,
@@ -56,6 +57,7 @@ export default function DeploymentDetailPage() {
   const { environmentId, deploymentId } = useParams({
     from: "/environments/$environmentId/deployments/$deploymentId",
   });
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
@@ -92,6 +94,14 @@ export default function DeploymentDetailPage() {
   const [newVersion, setNewVersion] = useState("");
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
   const [schedulingOpen, setSchedulingOpen] = useState(false);
+
+  // Deployment-deletion state (spec 008).
+  const deleteDeploymentMutation = useDeleteDeploymentMutation();
+  const [deleteDeploymentOpen, setDeleteDeploymentOpen] = useState(false);
+  const [deleteDeploymentConfirm, setDeleteDeploymentConfirm] = useState("");
+  const [deleteDeploymentError, setDeleteDeploymentError] = useState<
+    string | null
+  >(null);
 
   const { data: backupsData, isLoading: backupsFetching } = useListBackupsQuery(
     { instanceId: instanceId ?? "" },
@@ -171,6 +181,29 @@ export default function DeploymentDetailPage() {
     }
   }
 
+  async function handleDeleteDeployment() {
+    setDeleteDeploymentError(null);
+    try {
+      await deleteDeploymentMutation.mutateAsync({ deploymentId });
+      // Invalidate any cached views so the row re-fetches with the new
+      // (Deleting...) status badge before vanishing once tombstoned.
+      queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
+      queryClient.invalidateQueries({ queryKey: ["ListEnvironments"] });
+      setDeleteDeploymentOpen(false);
+      setDeleteDeploymentConfirm("");
+      navigate({
+        to: "/environments/$environmentId",
+        params: { environmentId },
+        replace: true,
+      });
+    } catch (err) {
+      console.error("[delete-deployment] mutation failed", err);
+      setDeleteDeploymentError(
+        err instanceof Error ? err.message : "Unknown error",
+      );
+    }
+  }
+
   if (isLoading && !data)
     return <LoadingState message="Loading deployment..." />;
   if (error)
@@ -190,6 +223,10 @@ export default function DeploymentDetailPage() {
   // them with ALREADY_IN_PROGRESS, but greying the buttons matches the
   // intent and avoids racing pop-ups.
   const isRestoring = deployment.status === "restoring";
+  const isDeleting = deployment.status === "deleting";
+  const isDeleted =
+    deployment.status === "deleted" || deployment.deletedAt !== null;
+  const isTerminal = isDeleting || isDeleted;
   const driverName =
     deployment.applicationDriverVersion?.applicationDriver?.name ?? null;
 
@@ -255,21 +292,66 @@ export default function DeploymentDetailPage() {
           <Button
             variant="outline"
             size="sm"
+            disabled={isTerminal}
             onClick={() => setSchedulingOpen(true)}
+            title={isTerminal ? "This deployment is retired" : undefined}
           >
             Scheduling
           </Button>
           <Button
             variant="outline"
             size="sm"
-            disabled={!instanceId || isRestoring}
+            disabled={!instanceId || isRestoring || isTerminal}
             onClick={() => setUpgradeOpen(true)}
+            title={isTerminal ? "This deployment is retired" : undefined}
           >
             Upgrade
           </Button>
-          <Button size="sm">Redeploy</Button>
+          <Button
+            size="sm"
+            disabled={isTerminal}
+            title={isTerminal ? "This deployment is retired" : undefined}
+          >
+            Redeploy
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={isRestoring || isTerminal}
+            onClick={() => setDeleteDeploymentOpen(true)}
+            title={
+              isTerminal
+                ? "This deployment is retired"
+                : isRestoring
+                  ? "Deletion is refused while a restore is in progress"
+                  : undefined
+            }
+            data-testid="delete-deployment-button"
+          >
+            Delete
+          </Button>
         </div>
       </div>
+
+      {isDeleted && deployment.deletedAt && (
+        <Alert variant="destructive" data-testid="deleted-banner">
+          <AlertDescription>
+            Deleted at{" "}
+            <span className="font-mono">
+              {new Date(deployment.deletedAt).toLocaleString()}
+            </span>
+            . This deployment is read-only — actions are disabled.
+          </AlertDescription>
+        </Alert>
+      )}
+      {isDeleting && (
+        <Alert data-testid="deleting-banner">
+          <AlertDescription>
+            Deleting… The cluster is tearing down resources. This deployment
+            cannot be modified.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {backupError && (
         <Alert variant="destructive">
@@ -479,9 +561,13 @@ export default function DeploymentDetailPage() {
             <Button
               size="sm"
               disabled={
-                !instanceId || createBackupMutation.isPending || isRestoring
+                !instanceId ||
+                createBackupMutation.isPending ||
+                isRestoring ||
+                isTerminal
               }
               onClick={handleBackup}
+              title={isTerminal ? "This deployment is retired" : undefined}
             >
               <Archive className="h-4 w-4" />
               {createBackupMutation.isPending ? "Creating..." : "Create Backup"}
@@ -528,6 +614,7 @@ export default function DeploymentDetailPage() {
                     setDeleteOpen(true);
                   }}
                   autoRefreshEnabled={autoRefreshEnabled}
+                  deploymentTerminal={isTerminal}
                 />
               ))}
             </>
@@ -687,6 +774,73 @@ export default function DeploymentDetailPage() {
         deploymentId={deploymentId}
         currentConfig={deployment.config}
       />
+
+      {/* Delete deployment dialog (spec 008) — type-to-confirm. */}
+      <Dialog
+        open={deleteDeploymentOpen}
+        onOpenChange={(open) => {
+          setDeleteDeploymentOpen(open);
+          if (!open) {
+            setDeleteDeploymentConfirm("");
+            setDeleteDeploymentError(null);
+          }
+        }}
+      >
+        <DialogContent data-testid="delete-deployment-dialog">
+          <DialogHeader>
+            <DialogTitle>Delete deployment</DialogTitle>
+            <DialogDescription>
+              This will tear down all workload resources for{" "}
+              <code className="font-mono">{deployment.name}</code> and remove
+              its namespace. Backups are retained against this deployment. The
+              retired deployment will appear in the deleted view for the
+              configured forensic-retention window.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteDeploymentError && (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteDeploymentError}</AlertDescription>
+            </Alert>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="delete-deployment-confirm">
+              Type the deployment name to confirm:{" "}
+              <code className="font-mono">{deployment.name}</code>
+            </Label>
+            <Input
+              id="delete-deployment-confirm"
+              value={deleteDeploymentConfirm}
+              onChange={(e) => setDeleteDeploymentConfirm(e.target.value)}
+              placeholder={deployment.name}
+              autoComplete="off"
+              data-testid="delete-deployment-confirm-input"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteDeploymentOpen(false);
+                setDeleteDeploymentConfirm("");
+                setDeleteDeploymentError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteDeployment}
+              disabled={
+                deleteDeploymentConfirm !== deployment.name ||
+                deleteDeploymentMutation.isPending
+              }
+              data-testid="delete-deployment-confirm-button"
+            >
+              {deleteDeploymentMutation.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -762,6 +916,7 @@ function BackupRow({
   onRestore,
   onDelete,
   autoRefreshEnabled,
+  deploymentTerminal,
 }: {
   backup: {
     id: string;
@@ -775,6 +930,13 @@ function BackupRow({
   onRestore: (backupId: string) => void;
   onDelete: (backupId: string) => void;
   autoRefreshEnabled: boolean;
+  /**
+   * True when the parent deployment is DELETING or DELETED. Disables
+   * restore + delete-backup actions on the row even though the backup
+   * row itself is still available (per spec 008 US12: action buttons
+   * disabled while the deployment is being deleted or already deleted).
+   */
+  deploymentTerminal: boolean;
 }) {
   const { data: restoresData } = useListRestoresQuery(
     { backupId: backup.id },
@@ -789,7 +951,11 @@ function BackupRow({
     (r: { status: string }) =>
       r.status === "pending" || r.status === "in_progress",
   );
-  const isRestoreDisabled = backup.status !== "completed" || hasActiveRestore;
+  const isRestoreDisabled =
+    backup.status !== "completed" || hasActiveRestore || deploymentTerminal;
+  const terminalTooltip = deploymentTerminal
+    ? "This deployment is retired"
+    : undefined;
 
   const bc = getStatusColor(backup.status);
 
@@ -825,13 +991,16 @@ function BackupRow({
             disabled={isRestoreDisabled}
             onClick={() => onRestore(backup.id)}
             className="text-xs font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+            title={terminalTooltip}
           >
             Restore
           </button>
           <span className="text-muted-foreground/30">|</span>
           <button
+            disabled={deploymentTerminal}
             onClick={() => onDelete(backup.id)}
-            className="text-xs font-medium text-destructive hover:underline"
+            className="text-xs font-medium text-destructive hover:underline disabled:text-muted-foreground disabled:no-underline"
+            title={terminalTooltip}
           >
             Delete
           </button>

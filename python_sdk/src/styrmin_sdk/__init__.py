@@ -3,6 +3,7 @@
 from styrmin_sdk._transport import Transport
 from styrmin_sdk.client import StyrminClient
 from styrmin_sdk.exceptions import (
+    DeploymentRestoringError,
     OperationFailedError,
     ResourceAlreadyExistsError,
     ResourceNotFoundError,
@@ -43,6 +44,7 @@ __all__ = [
     "ComponentConfig",
     "Context",
     "Deployment",
+    "DeploymentRestoringError",
     "Environment",
     "HelmChart",
     "OperationFailedError",

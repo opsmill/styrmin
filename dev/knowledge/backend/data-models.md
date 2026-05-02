@@ -175,6 +175,7 @@ class Deployment(StyrminModel, table=True):
     parameters: dict | None = Field(sa_column=Column(JSON))
     internal: bool = Field(default=False)         # True for system deployments (e.g. ingress controller)
     status: DeploymentState
+    deleted_at: datetime | None  # set ONLY on the DELETED transition (soft-delete tombstone)
 
     application_driver_version_id: UUID
     environment_id: UUID
@@ -185,6 +186,10 @@ class Deployment(StyrminModel, table=True):
     deployed_services: list["DeployedService"]    # Relationship
     tasks: list["Task"]                           # Relationship
 ```
+
+A deployment with `deleted_at IS NOT NULL` is **tombstoned**: the cluster-side workload (HelmRelease, services, namespace) has been torn down by the operator, but the platform record is retained so the timeline, backups, and audit trail remain queryable. The default `deployments(includeDeleted: false)` GraphQL filter excludes tombstoned rows from the deployment list while keeping `DELETING` rows visible (their `deleted_at` is `NULL` until the terminal transition).
+
+**Name uniqueness scope**: `(environment_id, name)` only — and only among non-tombstoned rows. The DB-level gate is a partial unique index `uq_deployment_env_name_active` predicated on `deleted_at IS NULL`. This means: (a) the same name can be reused across different environments, (b) deleting `ansible` frees the name for a fresh `ansible` in the same env, and (c) the constraint is the authoritative race-free guard — service-layer name-conflict checks (`uow.deployments.get_by_name(name, environment_id)`) are best-effort pre-flights that map a constraint violation to a typed `DeploymentNameConflictError` instead of letting an `IntegrityError` bubble up.
 
 #### ApplicationInstance
 
@@ -276,10 +281,12 @@ class DeploymentStatus(StyrminModel, table=True):
 - One row per deployment. Mirrors the latest `StyrminDeployment` CRD `.status` block observed by the agent and written by the `reportDeploymentStatuses` mutation (handler: `services/deployment_status.py`).
 - `phase`, `conditions`, `managed_resource_counts` are pass-through views of the CRD — the server does not interpret them.
 - The wire payload from the agent carries two additional fields that are **not** persisted on this row but drive other state:
-  - `displayState` — the operator's user-facing state (`Deploying`, `Running`, `Restoring`, `Error`). Mapped to a `DeploymentState` and written to the parent `Deployment.status` (sole source of truth for that column).
+  - `displayState` — the operator's user-facing state (`Deploying`, `Running`, `Restoring`, `Error`, `Deleting`, `Deleted`). Mapped to a `DeploymentState` and written to the parent `Deployment.status` (sole source of truth for that column). On the terminal `Deleted` transition, the status reporter atomically stamps `Deployment.deleted_at = now()` — that is the ONLY code path that writes `deleted_at`.
   - `instanceId` — the `spec.instanceId` from the CRD at poll time. Used as a stale-instance guard: if it does not match `deployment.active_application_instance_id`, the `Deployment.status` update is skipped so a superseded instance cannot overwrite the status of the new one rolling out.
 
 ### Status Enums
+
+> **Source of truth**: `backend/styrmin_backend/db/models.py` (DB) and `backend/styrmin_backend/domain/models.py` (domain). When you add, rename, or remove a value in either of those files, update this snippet too — propagation tests catch wire-format drift but not stale documentation.
 
 ```python
 class DeploymentState(str, Enum):
@@ -288,6 +295,8 @@ class DeploymentState(str, Enum):
     RUNNING = "running"
     RESTORING = "restoring"
     FAILED = "failed"
+    DELETING = "deleting"  # platform-driven teardown in progress
+    DELETED = "deleted"    # terminal — Deployment.deleted_at is set
 
 class InstanceStatus(str, Enum):
     PENDING = "pending"
@@ -309,6 +318,7 @@ class TaskType(str, Enum):
     STOP_COMPONENTS = "stop_components"
     START_COMPONENTS = "start_components"
     RUN_JOB = "run_job"
+    DELETE_DEPLOYMENT = "delete_deployment"  # born-complete audit record
 
 class PodPhase(str, Enum):
     PENDING = "pending"

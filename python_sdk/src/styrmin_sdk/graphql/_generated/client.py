@@ -17,6 +17,7 @@ from .delete_backup import DeleteBackup
 from .delete_backup_schedule import DeleteBackupSchedule
 from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
+from .delete_deployment import DeleteDeployment
 from .delete_environment import DeleteEnvironment
 from .deploy import Deploy
 from .enums import BackupStatus, RestoreStatus
@@ -371,6 +372,30 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return DeleteCluster.model_validate(data)
 
+    async def delete_deployment(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> DeleteDeployment:
+        query = gql("""
+            mutation DeleteDeployment($deploymentId: UUID!) {
+              deleteDeployment(deploymentId: $deploymentId) {
+                id
+                type
+                status
+                message
+                deploymentId
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="DeleteDeployment",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return DeleteDeployment.model_validate(data)
+
     async def delete_environment(
         self,
         environment_id: Union[Optional[UUID], UnsetType] = UNSET,
@@ -564,6 +589,7 @@ class Client(AsyncBaseClient):
                 id
                 name
                 status
+                deletedAt
                 config
                 applicationVersion
                 applicationDriverVersionId

@@ -576,3 +576,78 @@ class DeploymentDetailPage:
         # their parent backup in the Backups tab. Alias for clarity in
         # scenarios that expect one.
         await self.open_backups_tab()
+
+    # ------------------------------------------------------------------
+    # Deletion (spec 008)
+    # ------------------------------------------------------------------
+
+    def _delete_button(self) -> Locator:
+        return self._page.locator("[data-testid=delete-deployment-button]")
+
+    def _delete_dialog(self) -> Locator:
+        return self._page.locator("[data-testid=delete-deployment-dialog]")
+
+    def _delete_confirm_input(self) -> Locator:
+        return self._page.locator("[data-testid=delete-deployment-confirm-input]")
+
+    def _delete_confirm_button(self) -> Locator:
+        return self._page.locator("[data-testid=delete-deployment-confirm-button]")
+
+    async def open_delete_dialog(self) -> None:
+        """Click the header Delete button and wait for the type-to-confirm dialog."""
+        await self._delete_button().click()
+        await self._delete_dialog().wait_for()
+
+    async def delete_confirm_button_is_disabled(self) -> bool:
+        """Return True if the destructive confirm button is currently disabled."""
+        return await self._delete_confirm_button().is_disabled()
+
+    async def fill_delete_confirm(self, text: str) -> None:
+        """Type *text* into the type-to-confirm input."""
+        await self._delete_confirm_input().fill(text)
+
+    async def confirm_delete(self) -> None:
+        """Click the dialog's destructive Delete button. Dialog must close."""
+        await self._delete_confirm_button().click()
+        await self._delete_dialog().wait_for(state="hidden")
+
+    async def has_deleted_banner(self) -> bool:
+        """Return True if the tombstone banner ('Deleted at <ts>') is rendered."""
+        return await self._page.locator("[data-testid=deleted-banner]").count() > 0
+
+    async def wait_for_deleted_banner(self, *, timeout: float = 30.0) -> None:
+        """Block until the tombstone banner is visible.
+
+        ``goto()`` only triggers navigation; the page's GraphQL query is
+        still in flight when control returns. Without this wait,
+        ``has_deleted_banner()`` races the data fetch and reads the
+        empty DOM before the banner mounts.
+        """
+        banner = self._page.locator("[data-testid=deleted-banner]")
+        try:
+            await expect(banner).to_be_visible(timeout=int(timeout * 1000))
+        except AssertionError as exc:
+            raise ScenarioTimeout(
+                f"'Deleted at …' banner did not render within {timeout}s"
+            ) from exc
+
+    async def has_deleting_banner(self) -> bool:
+        """Return True if the in-progress banner ('Deleting...') is rendered."""
+        return await self._page.locator("[data-testid=deleting-banner]").count() > 0
+
+    async def assert_action_buttons_disabled(self) -> None:
+        """Assert every header action button is disabled.
+
+        Spec 008 US12 / FR-033: a tombstoned deployment's detail page MUST
+        disable every lifecycle action button (Delete, Upgrade, Redeploy,
+        Scheduling, Create Backup, etc.). The dialog's per-backup
+        Restore / Delete buttons are also expected to be disabled, but are
+        only present once the Backups tab is opened — covered by a separate
+        helper so callers can scope the assertion.
+        """
+        for button_name in ("Delete", "Upgrade", "Redeploy", "Scheduling"):
+            btn = self._page.get_by_role("button", name=button_name, exact=True).first
+            assert await btn.is_disabled(), (
+                f"{button_name} button should be disabled on tombstoned "
+                "deployment detail page"
+            )

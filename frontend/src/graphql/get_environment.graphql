@@ -1,4 +1,4 @@
-query GetEnvironment($environmentId: UUID!) {
+query GetEnvironment($environmentId: UUID!, $includeDeleted: Boolean = false) {
   environment(environmentId: $environmentId) {
     id
     name
@@ -11,10 +11,11 @@ query GetEnvironment($environmentId: UUID!) {
       id
       name
     }
-    deployments {
+    deployments(includeDeleted: $includeDeleted) {
       id
       name
       status
+      deletedAt
       internal
       applicationVersion
       applicationDriverVersionId

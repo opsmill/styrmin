@@ -36,13 +36,25 @@ class DeploymentRepository(BaseRepository[DeploymentModel], ABC):
         )
 
     @abstractmethod
-    async def get_by_name(self, name: str) -> DeploymentEntity | None:
+    async def get_by_name(
+        self,
+        name: str,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> DeploymentEntity | None:
         raise NotImplementedError(
             "The get_by_name method must be implemented in the subclass."
         )
 
     @abstractmethod
-    async def find_names_with_prefix(self, prefix: str) -> list[str]:
+    async def find_names_with_prefix(
+        self,
+        prefix: str,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> list[str]:
         raise NotImplementedError(
             "The find_names_with_prefix method must be implemented in the subclass."
         )
@@ -105,6 +117,7 @@ class SQLModelDeploymentRepository(
             parameters=deployment.parameters or None,
             internal=deployment.internal,
             status=DeploymentStateModel(deployment.status.value),
+            deleted_at=deployment.deleted_at,
             application_driver_version_id=deployment.application_driver_version_id,
             environment_id=deployment.environment_id,
             components=components,
@@ -139,6 +152,7 @@ class SQLModelDeploymentRepository(
             application_driver_version_id=entity.application_driver_version_id,
             environment_id=entity.environment_id,
             status=DeploymentStateEntity(entity.status.value),
+            deleted_at=entity.deleted_at,
         )
         for component in entity.components:
             deployment.add_component(
@@ -167,26 +181,56 @@ class SQLModelDeploymentRepository(
 
         return deployment
 
-    async def get_by_name(self, name: str) -> DeploymentEntity | None:
-        """Get a deployment by its name."""
-        result = await self.session.exec(
+    async def get_by_name(
+        self,
+        name: str,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> DeploymentEntity | None:
+        """Get a deployment by ``(environment_id, name)`` scope.
+
+        Tombstoned (soft-deleted) deployments are excluded by default
+        so callers performing name-conflict checks see only the
+        currently-occupying row. Pass ``include_deleted=True`` for
+        forensic / cleanup paths that need the full history.
+        """
+        statement = (
             select(self.model_class)
             .where(self.model_class.name == name)
+            .where(self.model_class.environment_id == environment_id)
             .options(*self._eager_load_options())
         )
+        if not include_deleted:
+            statement = statement.where(self.model_class.deleted_at.is_(None))  # type: ignore[union-attr]
+        result = await self.session.exec(statement)
         entity = result.first()
         if entity is None:
             return None
         return self._to_entity(entity)
 
-    async def find_names_with_prefix(self, prefix: str) -> list[str]:
-        """Find all deployment names matching <prefix>-<digits> pattern."""
+    async def find_names_with_prefix(
+        self,
+        prefix: str,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> list[str]:
+        """Find deployment names matching ``<prefix>-<digits>`` within an env.
+
+        Used by the auto-name generator to compute the next free suffix
+        for a driver-derived name. Tombstoned rows are excluded by
+        default — once a deployment is retired, its auto-generated name
+        is freed for reuse.
+        """
         like_pattern = f"{prefix}-%"
-        result = await self.session.exec(
-            select(self.model_class.name).where(
-                self.model_class.name.like(like_pattern)  # type: ignore[union-attr,attr-defined]
-            )
+        statement = select(self.model_class.name).where(
+            self.model_class.name.like(like_pattern)  # type: ignore[union-attr,attr-defined]
         )
+        statement = statement.where(self.model_class.environment_id == environment_id)
+        if not include_deleted:
+            statement = statement.where(self.model_class.deleted_at.is_(None))  # type: ignore[union-attr]
+        result = await self.session.exec(statement)
         return list(result.all())
 
     async def find(self, id: UUID) -> DeploymentEntity | None:
@@ -228,6 +272,7 @@ class SQLModelDeploymentRepository(
             application_driver_version_id=entity.application_driver_version_id,
             environment_id=entity.environment_id,
             status=DeploymentStateEntity(entity.status.value),
+            deleted_at=entity.deleted_at,
         )
         for component in entity.components:
             deployment.add_component(

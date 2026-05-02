@@ -219,6 +219,7 @@ export type Deployment = {
   components: Array<Component>;
   config: Scalars['JSON']['output'];
   crdStatus?: Maybe<DeploymentStatusType>;
+  deletedAt?: Maybe<Scalars['DateTime']['output']>;
   deployedServices: Array<DeployedService>;
   environment: Environment;
   environmentId: Scalars['UUID']['output'];
@@ -277,6 +278,11 @@ export type Environment = {
   name: Scalars['String']['output'];
 };
 
+
+export type EnvironmentDeploymentsArgs = {
+  includeDeleted?: Scalars['Boolean']['input'];
+};
+
 export type HelmChart = {
   __typename?: 'HelmChart';
   id: Scalars['UUID']['output'];
@@ -317,6 +323,7 @@ export type Mutation = {
   deleteBackupSchedule?: Maybe<Scalars['String']['output']>;
   deleteBackupStorageLocation?: Maybe<Scalars['String']['output']>;
   deleteCluster?: Maybe<Scalars['String']['output']>;
+  deleteDeployment: Task;
   deleteEnvironment?: Maybe<Scalars['String']['output']>;
   deploy?: Maybe<Task>;
   loadLocalApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
@@ -412,6 +419,11 @@ export type MutationDeleteBackupStorageLocationArgs = {
 export type MutationDeleteClusterArgs = {
   clusterId?: InputMaybe<Scalars['UUID']['input']>;
   clusterName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationDeleteDeploymentArgs = {
+  deploymentId: Scalars['UUID']['input'];
 };
 
 
@@ -819,6 +831,13 @@ export type DeleteBackupStorageLocationMutationVariables = Exact<{
 
 export type DeleteBackupStorageLocationMutation = { __typename?: 'Mutation', deleteBackupStorageLocation?: string | null };
 
+export type DeleteDeploymentMutationVariables = Exact<{
+  deploymentId: Scalars['UUID']['input'];
+}>;
+
+
+export type DeleteDeploymentMutation = { __typename?: 'Mutation', deleteDeployment: { __typename?: 'Task', id: string, type: string, status: string, deploymentId?: string | null } };
+
 export type DeployMutationVariables = Exact<{
   version?: InputMaybe<Scalars['String']['input']>;
   driver: Scalars['String']['input'];
@@ -851,7 +870,7 @@ export type GetDeploymentQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
+export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
 
 export type GetDeploymentResolvedSchedulingQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -876,10 +895,11 @@ export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typ
 
 export type GetEnvironmentQueryVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
+  includeDeleted?: InputMaybe<Scalars['Boolean']['input']>;
 }>;
 
 
-export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, internal: boolean, applicationVersion: string, applicationDriverVersionId: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
+export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, applicationDriverVersionId: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
 
 export type GetRestoreQueryVariables = Exact<{
   restoreId: Scalars['UUID']['input'];
@@ -922,10 +942,12 @@ export type ListDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null }> }> };
 
-export type ListEnvironmentsQueryVariables = Exact<{ [key: string]: never; }>;
+export type ListEnvironmentsQueryVariables = Exact<{
+  includeDeleted?: InputMaybe<Scalars['Boolean']['input']>;
+}>;
 
 
-export type ListEnvironmentsQuery = { __typename?: 'Query', environments: Array<{ __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, internal: boolean, applicationVersion: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }> }> }> };
+export type ListEnvironmentsQuery = { __typename?: 'Query', environments: Array<{ __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }> }> }> };
 
 export type ListRestoresQueryVariables = Exact<{
   backupId: Scalars['UUID']['input'];
@@ -1200,6 +1222,30 @@ export const useDeleteBackupStorageLocationMutation = <
   }
     )};
 
+export const DeleteDeploymentDocument = `
+    mutation DeleteDeployment($deploymentId: UUID!) {
+  deleteDeployment(deploymentId: $deploymentId) {
+    id
+    type
+    status
+    deploymentId
+  }
+}
+    `;
+
+export const useDeleteDeploymentMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeleteDeploymentMutation, TError, DeleteDeploymentMutationVariables, TContext>) => {
+    
+    return useMutation<DeleteDeploymentMutation, TError, DeleteDeploymentMutationVariables, TContext>(
+      {
+    mutationKey: ['DeleteDeployment'],
+    mutationFn: (variables?: DeleteDeploymentMutationVariables) => graphqlFetcher<DeleteDeploymentMutation, DeleteDeploymentMutationVariables>(DeleteDeploymentDocument, variables)(),
+    ...options
+  }
+    )};
+
 export const DeployDocument = `
     mutation Deploy($version: String, $driver: String!, $name: String, $environmentId: UUID!, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
   deploy(
@@ -1306,6 +1352,7 @@ export const GetDeploymentDocument = `
     id
     name
     status
+    deletedAt
     config
     parameters
     applicationVersion
@@ -1502,7 +1549,7 @@ export const useGetDriverQuery = <
 useGetDriverQuery.getKey = (variables: GetDriverQueryVariables) => ['GetDriver', variables];
 
 export const GetEnvironmentDocument = `
-    query GetEnvironment($environmentId: UUID!) {
+    query GetEnvironment($environmentId: UUID!, $includeDeleted: Boolean = false) {
   environment(environmentId: $environmentId) {
     id
     name
@@ -1515,10 +1562,11 @@ export const GetEnvironmentDocument = `
       id
       name
     }
-    deployments {
+    deployments(includeDeleted: $includeDeleted) {
       id
       name
       status
+      deletedAt
       internal
       applicationVersion
       applicationDriverVersionId
@@ -1793,7 +1841,7 @@ export const useListDriversQuery = <
 useListDriversQuery.getKey = (variables?: ListDriversQueryVariables) => variables === undefined ? ['ListDrivers'] : ['ListDrivers', variables];
 
 export const ListEnvironmentsDocument = `
-    query ListEnvironments {
+    query ListEnvironments($includeDeleted: Boolean = false) {
   environments {
     id
     name
@@ -1802,10 +1850,11 @@ export const ListEnvironmentsDocument = `
       id
       name
     }
-    deployments {
+    deployments(includeDeleted: $includeDeleted) {
       id
       name
       status
+      deletedAt
       internal
       applicationVersion
       components {

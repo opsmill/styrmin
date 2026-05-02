@@ -167,6 +167,88 @@ async def test_error_sets_failed() -> None:
 
 
 @pytest.mark.anyio
+async def test_deleting_sets_deleting() -> None:
+    """displayState=Deleting projects to DeploymentState.DELETING and
+    must NOT touch deleted_at — the row stays "live" until the terminal
+    transition."""
+    dep = _make_deployment(status=DeploymentState.RUNNING)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Deleting",
+            "display_state": "Deleting",
+        }
+    ]
+    _, deployments_updated = await report_deployment_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.DELETING
+    assert found.deleted_at is None
+
+
+@pytest.mark.anyio
+async def test_deleted_sets_deleted_and_stamps_deleted_at() -> None:
+    """displayState=Deleted projects to DeploymentState.DELETED and
+    atomically stamps deleted_at — this is the SOLE writer of
+    deleted_at, so readers cannot see DELETED with a NULL timestamp."""
+    dep = _make_deployment(status=DeploymentState.DELETING)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Deleted",
+            "display_state": "Deleted",
+        }
+    ]
+    _, deployments_updated = await report_deployment_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.DELETED
+    assert found.deleted_at is not None
+
+
+@pytest.mark.anyio
+async def test_deleted_does_not_overwrite_deleted_at_on_redundant_report() -> None:
+    """If a report comes in for an already-DELETED deployment (e.g. a
+    duplicate event from the reconciler), we must not stomp the existing
+    deleted_at with a fresh now()."""
+    from datetime import datetime, timezone
+
+    original_ts = datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
+    dep = _make_deployment(status=DeploymentState.DELETED)
+    dep.deleted_at = original_ts
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Deleted",
+            "display_state": "Deleted",
+        }
+    ]
+    _, deployments_updated = await report_deployment_statuses(reports, uow)
+
+    # Already at the target state, so no update fires.
+    assert deployments_updated == 0
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.deleted_at == original_ts
+
+
+@pytest.mark.anyio
 async def test_no_display_state_defaults_to_deploying() -> None:
     dep = _make_deployment()
     dep_repo = FakeDeploymentRepository()

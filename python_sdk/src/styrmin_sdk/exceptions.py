@@ -40,3 +40,7 @@ class ResourceAlreadyExistsError(StyrminAPIError):
 
 class OperationFailedError(StyrminAPIError):
     """A mutation operation failed."""
+
+
+class DeploymentRestoringError(StyrminAPIError):
+    """The deployment is restoring; deletion was refused for data integrity."""

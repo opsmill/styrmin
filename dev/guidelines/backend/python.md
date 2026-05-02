@@ -121,6 +121,42 @@ raise InvalidContextError() from e
 - JSON columns: `Field(sa_column=Column(JSON))`
 - Relationships: `Relationship(back_populates="...")`
 
+### Soft-delete and partial unique indexes
+
+<!-- Extracted from specs/008-deployment-deletion on 2026-05-02 -->
+
+When a column makes a row "tombstoned" (e.g., `deleted_at: datetime | None` set after soft-delete), unique constraints involving that table MUST be expressed as **partial unique indexes** predicated on `deleted_at IS NULL` — not as plain `Field(unique=True)` or `UniqueConstraint(...)`. Otherwise tombstoned rows continue to occupy the name slot and prevent operators from reusing names after deletion.
+
+The pattern uses SQLAlchemy's `Index` in `__table_args__` so the constraint is dialect-portable (Postgres in production, SQLite in unit tests):
+
+```python
+from sqlalchemy import Index, text
+
+class Deployment(StyrminModel, table=True):
+    __table_args__ = (
+        Index(
+            "uq_deployment_env_name_active",
+            "environment_id",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    name: str  # do NOT pass unique=True — the partial index above is the gate
+    environment_id: UUID = Field(foreign_key="environment.id")
+    deleted_at: datetime | None = Field(default=None, index=True)
+```
+
+Companion conventions for the surrounding code:
+
+- The DB-level partial index is the **authoritative race-free guard**. Service-layer name-conflict checks are best-effort pre-flights that produce a friendly typed error; they do not replace the index. Wrap the eventual commit and map `sqlalchemy.exc.IntegrityError` to a typed `*ConflictError` so concurrent callers see consistent semantics.
+- Repository helpers that resolve names (`get_by_name`, `find_names_with_prefix`) MUST take the relevant scope key (e.g., `environment_id`) as a required parameter and accept an optional `include_deleted: bool = False`. Default behaviour is "active rows in this scope only".
+- The migration that introduces the partial index SHOULD include a defensive pre-flight: refuse to apply if any pair of currently-active rows already collide on the index columns. This catches corrupt input before the index is created. See migration `c9d0e1f2a3b4_deployment_name_scoped_uniqueness` for the worked pattern.
+
+Worked example: `Deployment.name` (ADR-018). Rationale: ADR-015 (soft-delete tombstoning).
+
 ## Domain Models (Pydantic)
 
 - Use `BaseModel` for domain objects

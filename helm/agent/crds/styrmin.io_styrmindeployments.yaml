@@ -42,6 +42,16 @@ spec:
                   type: boolean
                   default: false
                   description: Whether this is an internal deployment (e.g., ingress controller)
+                deletionRequested:
+                  type: boolean
+                  default: false
+                  description: |
+                    Set to true by the Styrmin backend to request teardown of all owned
+                    resources. The operator reconciles the flip and progresses the CR
+                    through phase Deleting -> Deleted. Immutable once true (CEL rule).
+                  x-kubernetes-validations:
+                    - rule: "oldSelf == false || self == true"
+                      message: "deletionRequested cannot be set back to false once true"
                 context:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
@@ -83,6 +93,7 @@ spec:
                     - Restoring
                     - Failed
                     - Deleting
+                    - Deleted
                 displayState:
                   type: string
                   description: User-facing deployment state, distinct from internal phase
@@ -91,6 +102,8 @@ spec:
                     - Running
                     - Restoring
                     - Error
+                    - Deleting
+                    - Deleted
                 message:
                   type: string
                 conditions:

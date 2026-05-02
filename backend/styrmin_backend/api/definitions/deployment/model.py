@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -120,6 +121,7 @@ class Deployment:
     application_driver_version_id: UUID
     environment_id: UUID
     internal: bool
+    deleted_at: datetime | None = None
 
     instance: strawberry.Private[DeploymentEntity]
 
@@ -329,5 +331,6 @@ class Deployment:
             application_driver_version_id=instance.application_driver_version_id,
             environment_id=instance.environment_id,
             internal=instance.internal,
+            deleted_at=instance.deleted_at,
             instance=instance,
         )

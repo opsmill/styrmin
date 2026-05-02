@@ -170,8 +170,16 @@ async def _collect_crd_status(namespace: str, crd_name: str) -> dict | None:
         return None
 
 
-async def _get_active_deployment_ids(graphql_url: str) -> list[UUID]:
-    """Query the backend for all active non-internal deployment IDs."""
+async def _get_active_deployments(graphql_url: str) -> list[tuple[UUID, str]]:
+    """Query the backend for active non-internal deployments.
+
+    Returns tuples of ``(deployment_id, status)`` so the caller can decide
+    how to handle each based on its current lifecycle state — in
+    particular, a deployment in the ``DELETING`` state with no live CR
+    on the cluster gets a synthetic ``displayState=Deleted`` report so
+    the DB-side terminal transition is not lost when the namespace
+    deletion takes the StyrminDeployment CR with it.
+    """
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -186,13 +194,13 @@ async def _get_active_deployment_ids(graphql_url: str) -> list[UUID]:
                 logger.warning("Deployment list GraphQL errors: %s", gql.errors)
                 return []
 
-            deployment_ids: list[UUID] = []
+            results: list[tuple[UUID, str]] = []
             for env_data in (gql.data or {}).get("environments", []):
                 env = EnvironmentForStatus.model_validate(env_data)
                 for dep in env.deployments:
                     if not dep.internal:
-                        deployment_ids.append(UUID(dep.id))
-            return deployment_ids
+                        results.append((UUID(dep.id), dep.status))
+            return results
     except httpx.ConnectError, httpx.ConnectTimeout:
         logger.debug("Backend unreachable at %s, will retry next cycle", graphql_url)
         return []
@@ -277,15 +285,15 @@ async def _report_deployment_statuses_to_backend(
 
 async def _poll_once(graphql_url: str) -> None:
     """Run a single poll cycle: fetch deployments, collect pods and CRD status, report."""
-    deployment_ids = await _get_active_deployment_ids(graphql_url)
-    if not deployment_ids:
+    deployments = await _get_active_deployments(graphql_url)
+    if not deployments:
         logger.debug("No active deployments found, skipping poll cycle")
         return
 
     pod_reports: list[DeploymentPodStatusReport] = []
     crd_reports: list[DeploymentStatusReport] = []
 
-    for deployment_id in deployment_ids:
+    for deployment_id, db_status in deployments:
         namespace = get_kubernetes_reference(deployment_id)
         crd_name = namespace  # CRD name matches namespace (styrmin-{deployment_id})
 
@@ -313,6 +321,32 @@ async def _poll_once(graphql_url: str) -> None:
                     managedResourceCounts=crd_status.get("managedResourceCounts"),
                 )
             )
+        elif db_status == "deleting":
+            # Spec 008: the StyrminDeployment CRD is namespaced and lives in
+            # the deployment's own namespace, so the platform-driven delete
+            # path takes the CR out with the namespace before the operator
+            # timer can advance it to phase: Deleted. When the DB still
+            # thinks the deployment is DELETING but the CR is gone, we
+            # synthesise a final ``displayState: Deleted`` report so the
+            # backend's status reporter flips the row to DELETED and
+            # atomically stamps deleted_at. This is the race-free terminal
+            # transition for the platform-driven path.
+            logger.info(
+                "Deployment %s is DELETING and its CR is gone — emitting "
+                "synthetic Deleted status report",
+                deployment_id,
+            )
+            crd_reports.append(
+                DeploymentStatusReport(
+                    deploymentId=str(deployment_id),
+                    instanceId=None,
+                    phase="Deleted",
+                    displayState="Deleted",
+                    message="Namespace removed; CR garbage-collected with it",
+                    conditions=None,
+                    managedResourceCounts=None,
+                )
+            )
 
     # Report independently — a failure in one must not block the other
     try:
@@ -328,7 +362,7 @@ async def _poll_once(graphql_url: str) -> None:
     total_pods = sum(len(r.pods) for r in pod_reports)
     logger.info(
         "Status poll: %d deployments, %d pods, %d CRD statuses reported",
-        len(deployment_ids),
+        len(deployments),
         total_pods,
         len(crd_reports),
     )

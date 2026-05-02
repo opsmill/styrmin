@@ -23,6 +23,7 @@ from prefect.workers.process import ProcessWorker
 import styrmin_backend.operator.handlers.helmrelease  # noqa: F401
 import styrmin_backend.operator.handlers.styrmin_deployment  # noqa: F401
 import styrmin_backend.operator.handlers.utility_resources  # noqa: F401
+import styrmin_backend.operator.janitor  # noqa: F401
 from styrmin_backend.agent.status.reporter import run_status_reporter
 from styrmin_backend.operator.config import PEERING_NAME, PEERING_PRIORITY
 
