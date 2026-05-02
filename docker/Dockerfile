@@ -45,8 +45,9 @@ WORKDIR /source
 # --------------------------------------------
 COPY uv.lock pyproject.toml ./
 COPY backend ./backend
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-install-project
-RUN uv pip install -e .
+COPY python_sdk ./python_sdk
+COPY cli ./cli
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-install-project --no-default-groups
 
 # --------------------------------------------
 # Copy in the rest of the source code and install the project
