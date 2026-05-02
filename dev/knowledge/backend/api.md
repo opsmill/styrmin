@@ -96,6 +96,7 @@ Defined on `type Mutation`:
 | `loadRemoteApplicationDriverVersion` | `repositoryUrl, branch` | `ApplicationDriverVersion` |
 | `deploy` | `driver, environmentId?, environmentName?, clusterId?, clusterName?, version?, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
 | `updateDeployment` | `deploymentId, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
+| `deleteDeployment` | `deploymentId` | `Task!` (born-complete `DELETE_DEPLOYMENT` audit record; patches `spec.deletionRequested` on the CR — operator drives teardown asynchronously) |
 | `createBackup` | `instanceId, name?` | `Backup` |
 | `deleteBackup` | `backupId` | `String` |
 | `createRestore` | `backupId, targetNamespace, targetInstanceId?` | `Restore` |
@@ -128,7 +129,9 @@ Every resolver receives the `UnitOfWork` via `info.context["uow"]`.
 
 ## Response Patterns
 
-Mutations return the resource type directly (nullable) and let service-layer exceptions propagate. The `StructuredErrorExtension` middleware in `api/errors.py` catches any `ServiceError` and converts it into a GraphQL error with a structured `extensions.code` field (e.g. `NOT_FOUND`, `ALREADY_EXISTS`, `IN_USE`). Additional metadata from `ServiceError.error_metadata` is merged into `extensions`.
+Mutations return the resource type directly (nullable) and let service-layer exceptions propagate. The `StructuredErrorExtension` middleware in `api/errors.py` catches any `ServiceError` and converts it into a GraphQL error with a structured `extensions.code` field (e.g. `NOT_FOUND`, `ALREADY_EXISTS`, `IN_USE`, `DEPLOYMENT_RESTORING`). Additional metadata from `ServiceError.error_metadata` is merged into `extensions`.
+
+`deleteDeployment` deserves a note: a delete on a tombstoned deployment surfaces `NOT_FOUND` (intentionally conflated with unknown id so automation can treat both identically as "already gone"); a delete during a restore raises the typed `DEPLOYMENT_RESTORING` so callers can specifically recover. A repeat delete on a deployment that's already `DELETING` returns the existing in-flight `DELETE_DEPLOYMENT` task without re-issuing the cluster patch (idempotent retry).
 
 ```python
 @strawberry.mutation
