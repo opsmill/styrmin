@@ -286,6 +286,8 @@ class DeploymentStatus(StyrminModel, table=True):
 
 ### Status Enums
 
+> **Source of truth**: `backend/styrmin_backend/db/models.py` (DB) and `backend/styrmin_backend/domain/models.py` (domain). When you add, rename, or remove a value in either of those files, update this snippet too — propagation tests catch wire-format drift but not stale documentation.
+
 ```python
 class DeploymentState(str, Enum):
     PENDING = "pending"

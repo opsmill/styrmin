@@ -45,6 +45,10 @@ The operator watches `StyrminDeployment` custom resources (`styrmin.io/v1alpha1`
 
 The context is embedded directly in the CRD (see ADR-006), making the operator autonomous — no backend API calls needed during reconciliation.
 
+### Namespace co-location (load-bearing constraint)
+
+The CRD is `scope: Namespaced` and lives **inside the deployment's own namespace** (`styrmin-{deployment_id}`). Deleting that namespace deletes the CR with it. Any state transition you want observed must complete BEFORE the namespace is gone, OR you must rely on a separate "DB DELETING + CR absent → infer terminal" path (this is what the agent's status reporter does for the platform-driven delete flow — see [`overview.md`](overview.md) → Status Reporter and `services/deployment_status.py`). New work that needs a phase change to land after namespace deletion will silently fail without this callout — design accordingly.
+
 ### Status
 
 | Field | Description |

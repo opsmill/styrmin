@@ -108,6 +108,23 @@ Two implementations:
 
 The session-scoped `driver_mode` fixture is parametrised with `["api", "ui"]`, which is what produces the `[api-chromium]` and `[ui-chromium]` test variants. `session_scenario_driver` constructs the matching driver and wires the SDK client / Playwright page through. Tests consume the function-scoped `scenario_driver` fixture and call `await scenario_driver.create_deployment(...)` without caring about which entrypoint is in use.
 
+### Ref type surface
+
+ScenarioDriver methods return **driver-neutral ref dataclasses**, not SDK models or Playwright Locators. The refs live in `tests/e2e/drivers/refs.py` and intentionally expose a minimal surface — anything beyond what's listed below has to be looked up via the SDK directly (`client.deployments.get(id).name`, etc.). When a test relies on a field that isn't on the ref, it'll fail with a confusing AttributeError; this list is the contract.
+
+| Ref | Fields | Notes |
+|---|---|---|
+| `ClusterRef` | `id`, `name` | |
+| `EnvironmentRef` | `id`, `name`, `cluster_id` | |
+| `BSLRef` | `id`, `name` | Backup storage location. |
+| `DriverVersionRef` | `id`, `application_driver_id`, `version` | |
+| `DeploymentRef` | `id`, `status`, `application_version`, `instance_id` | **No `name`.** Look up via `client.deployments.get(id).name` if you need it. |
+| `BackupRef` | `id`, `name`, `status` | |
+| `RestoreRef` | `id`, `status` | |
+| `TimelineEntry` | `task_id`, `task_type`, `task_status`, `application_version`, `created_on` | Returned from `get_deployment_timeline`. |
+
+Refer to `tests/e2e/drivers/refs.py` for the canonical definitions; treat that file (not this table) as the source of truth.
+
 ## Supporting Services
 
 Two lightweight services are deployed inside the vCluster to simulate the external infrastructure that Styrmin depends on in production.
