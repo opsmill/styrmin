@@ -27,6 +27,11 @@ class StyrminModel(SQLModel):
 ┌─────────────────┐      ┌──────────────────┐      ┌──────────────────┐
 │     Cluster     │──1:N─│   Environment    │──1:N─│   Deployment     │
 └─────────────────┘      └──────────────────┘      └────────┬─────────┘
+                                ▲                           │
+                                │ N:1 (optional)            │
+                  ┌─────────────┴────────────┐              │
+                  │ BackupStorageLocation    │              │
+                  └──────────────────────────┘              │
                                                             │
                 ┌───────────────────┬───────────────────┬───┴────────────┬─────────────────────┐
                 │                   │                   │                │                     │
@@ -37,17 +42,16 @@ class StyrminModel(SQLModel):
 
 ┌─────────────────┐      ┌──────────────────────┐      ┌───────────────┐
 │ApplicationDriver│──1:N─│ApplicationDriverVersion│──1:N─│    Action     │
-└─────────────────┘      └───────────┬───────────┘      └───────────────┘
-                                     │
-                              ┌──────▼──────┐
-                              │ComponentConfig│
-                              └──────┬──────┘
-                                     │
-                              ┌──────▼──────┐
-                              │  HelmChart  │──N:1─┌─────────────────┐
-                              └─────────────┘      │ HelmRepository  │
-                                                   └─────────────────┘
+└─────────────────┘      └─────┬─────────┬──────┘      └───────────────┘
+                               │         │
+                               │ 1:N     │ N:1
+                               ▼         ▼
+                       ┌─────────────┐ ┌─────────────┐      ┌─────────────────┐
+                       │ComponentCfg │ │  HelmChart  │──N:1─│ HelmRepository  │
+                       └─────────────┘ └─────────────┘      └─────────────────┘
 ```
+
+`ApplicationDriverVersion` references a single `HelmChart` (N:1) and owns its own `ComponentConfig` rows (1:N). The chart and repository have no direct link to `ComponentConfig`.
 
 ### Infrastructure Models
 
@@ -93,29 +97,36 @@ class ApplicationDriver(StyrminModel, table=True):
 ```python
 class ApplicationDriverVersion(StyrminModel, table=True):
     version: str
-    application_supported_versions: str  # Semver specifier
+    application_supported_versions: str          # Semver specifier
+    default_version: str | None = None           # Default app version when unspecified
+    source_type: str = "git"                     # "git", "local", ...
     source_repository: str
-    source_branch: str
+    source_branch: str | None = None
+    source_path: str | None = None               # Path within the source repo/dir
     components: dict | None = Field(sa_column=Column(JSON))
+    parameters: list | None = Field(sa_column=Column(JSON))
+    services: list | None = Field(sa_column=Column(JSON))
 
     application_driver_id: UUID
     helm_chart_id: UUID
 
-    component_configs: list[ComponentConfig]  # Relationship
-    actions: list[Action]  # Relationship
-    deployments: list["Deployment"]  # Relationship
+    component_configs: list[ComponentConfig]    # Relationship
+    actions: list[Action]                        # Relationship
+    deployments: list["Deployment"]              # Relationship
 ```
 
 #### Action
 
 ```python
 class Action(StyrminModel, table=True):
-    name: str = Field(unique=True)
+    __table_args__ = (UniqueConstraint("name", "application_driver_version_id"),)
+
+    name: str                                    # Unique per driver version (not globally)
     description: str
-    location: str  # Path to action code
+    location: str                                # Path to action code
     image: str | None
-    hook: str | None  # pre, core, post
-    mode: str | None
+    hook: str | None                             # "setup" or "upgrade"
+    mode: str | None                             # "pre", "core", or "post"
 
     application_driver_version_id: UUID
 ```
@@ -161,15 +172,18 @@ class Deployment(StyrminModel, table=True):
     name: str = Field(unique=True)
     application_version: str
     config: dict | None = Field(sa_column=Column(JSON))
+    parameters: dict | None = Field(sa_column=Column(JSON))
+    internal: bool = Field(default=False)         # True for system deployments (e.g. ingress controller)
     status: DeploymentState
 
     application_driver_version_id: UUID
     environment_id: UUID
     active_application_instance_id: UUID | None
 
-    components: list[Component]  # Relationship
+    components: list[Component]                   # Relationship
     application_instances: list["ApplicationInstance"]  # Relationship
-    tasks: list["Task"]  # Relationship
+    deployed_services: list["DeployedService"]    # Relationship
+    tasks: list["Task"]                           # Relationship
 ```
 
 #### ApplicationInstance
@@ -212,8 +226,8 @@ class Task(StyrminModel, table=True):
 
 ```python
 class Utility(StyrminModel, table=True):
-    kind: str  # e.g., "ingress"
-    helm_chart_id: UUID
+    kind: str                                    # e.g., "ingress", "service-discovery"
+    resource_template: str = Field(default="")   # Jinja2 template producing K8s manifest(s)
 ```
 
 ### Observed State Models
@@ -272,6 +286,7 @@ class DeploymentState(str, Enum):
     PENDING = "pending"
     DEPLOYING = "deploying"
     RUNNING = "running"
+    RESTORING = "restoring"
     FAILED = "failed"
 
 class InstanceStatus(str, Enum):
@@ -286,7 +301,7 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 class TaskType(str, Enum):
-    DEPLOYMENT = "deployment"
+    NOOP = "noop"                                # Reconciliation produced no remediation
     CREATE_INSTANCE = "create_instance"
     DELETE_INSTANCE = "delete_instance"
     UPDATE_INSTANCE = "update_instance"
@@ -393,9 +408,12 @@ class GlobalContext(BaseModel):
     deployment: DeploymentContext
     instance: InstanceContext
     app: ApplicationContext
-    labels: dict[str, Any]
-    components: ComponentsContext | None
-    utilities: list[UtilityContext]
+    labels: dict[str, Any] = {}
+    components: ComponentsContext | None = None
+    utilities: list[UtilityContext] = []
+    parameters: dict[str, Any] = {}
+    services: dict[str, Any] = {}
+    deployed_services: list[dict[str, Any]] = []
 ```
 
 ### Context Hierarchy
@@ -406,12 +424,14 @@ GlobalContext
 │   ├── config: ClusterConfig
 │   └── capabilities: dict[str, Any]
 ├── EnvironmentContext
+│   ├── name: str
 │   ├── config: EnvironmentConfig
 │   └── capabilities: dict[str, Any]
 ├── DeploymentContext
 │   └── config: DeploymentConfig
 ├── InstanceContext
 │   ├── config: ResolvedConfig (merged from all levels)
+│   ├── id: UUID | None       (set when the CRD is authored — used for status correlation)
 │   ├── deployment_id: UUID
 │   ├── namespace: str
 │   └── release_reference: str
@@ -420,7 +440,10 @@ GlobalContext
 │   ├── version: str
 │   └── helm: HelmInfo
 ├── ComponentsContext
-└── utilities: list[UtilityContext]
+├── utilities: list[UtilityContext]
+├── parameters: dict[str, Any]
+├── services: dict[str, Any]
+└── deployed_services: list[dict[str, Any]]
 ```
 
 ### Configuration Models
@@ -441,11 +464,22 @@ class ResolvedConfig(BaseModel):
 
 ### HelmInfo
 
+`HelmInfo` is composed of two nested objects rather than three plain strings:
+
 ```python
-class HelmInfo(BaseModel):
-    repository: str
-    chart: str
+class ChartInfo(BaseModel):
+    id: UUID
+    name: str
     version: str
+    values_template: str
+
+class RepositoryInfo(BaseModel):
+    id: UUID
+    url: str
+
+class HelmInfo(BaseModel):
+    chart: ChartInfo
+    repository: RepositoryInfo
 ```
 
 ### UtilityContext
@@ -453,11 +487,13 @@ class HelmInfo(BaseModel):
 ```python
 class UtilityKind(str, Enum):
     INGRESS = "ingress"
+    SERVICE_DISCOVERY = "service-discovery"
 
 class UtilityContext(BaseModel):
     kind: UtilityKind
-    helm: HelmInfo
 ```
+
+`UtilityContext` carries only the kind. The corresponding utility row in the database (`Utility`) holds the `resource_template` used to render manifests; there is no `helm` field on `UtilityContext`.
 
 ## Key Files
 
