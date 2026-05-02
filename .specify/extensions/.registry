@@ -209,32 +209,6 @@
       "registered_skills": [],
       "installed_at": "2026-05-01T05:42:46.360580+00:00"
     },
-    "auto": {
-      "version": "1.0.0",
-      "source": "local",
-      "manifest_hash": "sha256:db7af56efaba4381fe7234923eb02f807e52415c2dc76bb4c8bf5fc875e43b51",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "agy": [
-          "speckit.auto.run"
-        ],
-        "amp": [
-          "speckit.auto.run"
-        ],
-        "claude": [
-          "speckit.auto.run"
-        ],
-        "codex": [
-          "speckit.auto.run"
-        ],
-        "copilot": [
-          "speckit.auto.run"
-        ]
-      },
-      "registered_skills": [],
-      "installed_at": "2026-05-01T06:06:13.367178+00:00"
-    },
     "review": {
       "version": "1.0.0",
       "source": "local",
@@ -373,6 +347,32 @@
       },
       "registered_skills": [],
       "installed_at": "2026-05-01T12:58:13.359758+00:00"
+    },
+    "auto": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:188c671952825fda5e05bab47347bbe483b0f35cf60bcb5daf21a6fafc663883",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.auto.run"
+        ],
+        "amp": [
+          "speckit.auto.run"
+        ],
+        "claude": [
+          "speckit.auto.run"
+        ],
+        "codex": [
+          "speckit.auto.run"
+        ],
+        "copilot": [
+          "speckit.auto.run"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-05-02T14:49:35.534746+00:00"
     }
   }
 }
