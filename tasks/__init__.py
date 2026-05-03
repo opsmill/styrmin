@@ -7,12 +7,8 @@ from pathlib import Path
 from typing import IO, Any
 
 from invoke import Collection, Context, task
+from invoke import runners as _invoke_runners
 from invoke import terminals as _invoke_terminals
-
-from tasks import agent, cluster, demo, dev, graphql_validate, pre_commit
-from tasks import format as fmt
-
-from .utils import print_header
 
 
 # ---------------------------------------------------------------------------
@@ -26,6 +22,11 @@ from .utils import print_header
 # from the stdin-forwarding thread, which kills any `context.run(..., pty=True)`
 # call (e.g. `uv run invoke start`) right after the subprocess exits.
 #
+# invoke.runners does `from .terminals import bytes_to_read` at import time,
+# so we must rebind the name on `invoke.runners` as well — patching
+# `invoke.terminals.bytes_to_read` alone leaves the runners module still
+# pointing at the original buggy function.
+#
 # Upstream bug; no fix released yet. Once invoke ships a version with a
 # correctly-sized buffer, bump the pin and DELETE this block.
 # ---------------------------------------------------------------------------
@@ -37,6 +38,12 @@ def _bytes_to_read_patched(input_: IO[Any]) -> int:
 
 
 _invoke_terminals.bytes_to_read = _bytes_to_read_patched  # ty: ignore[invalid-assignment]
+_invoke_runners.bytes_to_read = _bytes_to_read_patched  # ty: ignore[invalid-assignment]
+
+from tasks import agent, cluster, demo, dev, graphql_validate, pre_commit  # noqa: E402
+from tasks import format as fmt  # noqa: E402
+
+from .utils import print_header  # noqa: E402
 
 MAIN_DIRECTORY_PATH = Path(__file__).parent.parent
 
