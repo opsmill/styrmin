@@ -33,6 +33,7 @@ from styrmin_backend.api.definitions.service.model import (
     DeployedService as DeployedServiceType,
 )
 from styrmin_backend.api.definitions.task.model import Task
+from styrmin_backend.api.definitions.user.model import User as UserType
 from styrmin_backend.services.application_drivers import (
     get_application_driver,
     get_application_drivers,
@@ -70,6 +71,13 @@ from styrmin_backend.services.tasks import get_task, get_tasks
 
 @strawberry.type
 class Query:
+    @strawberry.field
+    async def current_user(self, info: strawberry.Info) -> UserType | None:
+        user = info.context.get("current_user")
+        if user is None:
+            return None
+        return UserType.from_instance(user)
+
     @strawberry.field
     async def clusters(self, info: strawberry.Info) -> list[Cluster]:
         uow = info.context["uow"]

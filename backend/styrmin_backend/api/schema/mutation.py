@@ -37,6 +37,8 @@ from styrmin_backend.api.definitions.environment.inputs import (
     update_environment_input_to_dict,
 )
 from styrmin_backend.api.definitions.environment.model import Environment
+from styrmin_backend.api.definitions.user.model import LoginResult, User as UserType
+from styrmin_backend.api.dependency import SESSION_COOKIE_NAME
 from styrmin_backend.api.definitions.service.model import ServiceNameOverride
 from styrmin_backend.api.definitions.task.model import Task
 from styrmin_backend.api.scalars import JSON
@@ -44,6 +46,7 @@ from styrmin_backend.services.applications import (
     load_application_driver_from_git_repository,
     load_application_driver_from_local_directory,
 )
+from styrmin_backend.services.auth.login import authenticate
 from styrmin_backend.services.backup_storage_locations import (
     assign_backup_storage_location as assign_bsl_service,
     create_backup_storage_location as create_bsl_service,
@@ -99,6 +102,25 @@ from styrmin_backend.workflows.models import PrefectAction
 
 @strawberry.type
 class Mutation:
+    @strawberry.mutation
+    async def login(
+        self, info: strawberry.Info, username: str, password: str
+    ) -> LoginResult:
+        uow = info.context["uow"]
+        response = info.context["response"]
+        user, _session, raw_token = await authenticate(
+            uow, username=username, password=password
+        )
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=raw_token,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
+        return LoginResult(token=raw_token, user=UserType.from_instance(user))
+
     @strawberry.mutation
     async def create_cluster(
         self, info: strawberry.Info, name: str = "default", config: JSON | None = None

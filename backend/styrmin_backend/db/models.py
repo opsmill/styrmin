@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import Index, UniqueConstraint, text
+from sqlalchemy import ForeignKey, Index, LargeBinary, UniqueConstraint, text
 from sqlmodel import JSON, Column, DateTime, Field, Relationship, SQLModel, func
 from sqlmodel import Enum as SQLModelEnum
 
@@ -26,6 +26,41 @@ class StyrminModel(SQLModel):
         sa_type=DateTime(timezone=True),
         sa_column_kwargs={"onupdate": func.now(), "server_default": func.now()},
     )
+
+
+class User(StyrminModel, table=True):
+    """User account. See ADR-019."""
+
+    username: str = Field(unique=True)
+    password_hash: str
+    display_name: str
+    active: bool = Field(default=True, nullable=False)
+
+    sessions: list["Session"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+
+class Session(StyrminModel, table=True):
+    """Server-side opaque session row. See ADR-019."""
+
+    __table_args__ = (Index("ix_session_expires_at", "expires_at"),)
+
+    user_id: UUID = Field(
+        sa_column=Column(
+            ForeignKey("user.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    token_hash: bytes = Field(
+        sa_column=Column(LargeBinary, nullable=False, unique=True),
+    )
+    created_at: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)  # type: ignore[call-overload]
+    last_used_at: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)  # type: ignore[call-overload]
+    expires_at: datetime = Field(sa_type=DateTime(timezone=True), nullable=False)  # type: ignore[call-overload]
+
+    user: User = Relationship(back_populates="sessions")
 
 
 # Note: Requires repository

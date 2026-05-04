@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from typing import Self
 
 from styrmin_sdk._transport import Transport
+from styrmin_sdk.resources.auth import AuthResource
 from styrmin_sdk.resources.backup_storage_locations import BackupStorageLocationResource
 from styrmin_sdk.resources.backups import BackupResource
 from styrmin_sdk.resources.clusters import ClusterResource
@@ -22,6 +24,9 @@ class StyrminClient:
 
         async with StyrminClient(server_address="http://localhost:8000") as client:
             cluster = await client.clusters.create(name="prod")
+
+    Authentication: pass ``token=...`` to authenticate, or set the
+    ``STYRMIN_TOKEN`` env var. The explicit kwarg wins when both are present.
     """
 
     def __init__(
@@ -29,12 +34,19 @@ class StyrminClient:
         server_address: str = "http://localhost:8000",
         timeout: float = 30.0,
         headers: dict[str, str] | None = None,
+        token: str | None = None,
     ) -> None:
+        if token is None:
+            token = os.environ.get("STYRMIN_TOKEN")
+        merged_headers = dict(headers or {})
+        if token:
+            merged_headers["Authorization"] = f"Bearer {token}"
         self._transport = Transport(
             server_address=server_address,
             timeout=timeout,
-            headers=headers,
+            headers=merged_headers,
         )
+        self.auth = AuthResource(self._transport)
         self.backup_storage_locations = BackupStorageLocationResource(self._transport)
         self.clusters = ClusterResource(self._transport)
         self.environments = EnvironmentResource(self._transport)

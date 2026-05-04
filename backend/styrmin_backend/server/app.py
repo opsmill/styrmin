@@ -15,6 +15,7 @@ from styrmin_backend import config
 from styrmin_backend.api import init_graphql_router
 from styrmin_backend.api.rest import init_rest_router
 from styrmin_backend.db.utils import init_db, wait_for_database
+from styrmin_backend.server.logging import redact
 from styrmin_backend.services.ingress_controller.driver import (
     initialize_internal_drivers,
 )
@@ -37,8 +38,10 @@ async def app_initialization(_: FastAPI) -> None:
 
     config.SETTINGS.initialize_and_exit()
 
-    # Configure logging
+    # Configure logging — install the redaction patcher before any sink so
+    # sensitive fields (passwords, tokens) never reach stderr.
     logger.remove(0)
+    logger.configure(patcher=redact)
     logger.add(sys.stderr, level=config.SETTINGS.log_level)
 
     # Wait for the database to become available, then initialize

@@ -24,6 +24,20 @@ class NoInstanceError(ServiceError):
     default_message = "Application instance not found"
 
 
+class InvalidCredentialsError(ServiceError):
+    """Authentication failed: nonexistent user, wrong password, or deactivated account."""
+
+    error_code = "INVALID_CREDENTIALS"
+    default_message = "Invalid credentials"
+
+
+class PasswordPolicyError(ServiceError):
+    """Password fails the length policy (12-256 chars)."""
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "Password does not meet the password policy"
+
+
 class ServiceUnexpectedError(ServiceError):
     """An unexpected error occurred."""
 

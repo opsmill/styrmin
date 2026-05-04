@@ -42,5 +42,9 @@ class OperationFailedError(StyrminAPIError):
     """A mutation operation failed."""
 
 
+class StyrminAuthenticationError(StyrminAPIError):
+    """Authentication failed (UNAUTHENTICATED or INVALID_CREDENTIALS)."""
+
+
 class DeploymentRestoringError(StyrminAPIError):
     """The deployment is restoring; deletion was refused for data integrity."""

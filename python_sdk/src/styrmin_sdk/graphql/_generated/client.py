@@ -13,6 +13,7 @@ from .create_backup_storage_location import CreateBackupStorageLocation
 from .create_cluster import CreateCluster
 from .create_environment import CreateEnvironment
 from .create_restore import CreateRestore
+from .current_user import CurrentUser
 from .delete_backup import DeleteBackup
 from .delete_backup_schedule import DeleteBackupSchedule
 from .delete_backup_storage_location import DeleteBackupStorageLocation
@@ -54,6 +55,7 @@ from .list_restores import ListRestores
 from .list_tasks import ListTasks
 from .load_local_application_driver_version import LoadLocalApplicationDriverVersion
 from .load_remote_application_driver_version import LoadRemoteApplicationDriverVersion
+from .login import Login
 from .report_deployment_statuses import ReportDeploymentStatuses
 from .report_pod_statuses import ReportPodStatuses
 from .run_job import RunJob
@@ -322,6 +324,23 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return CreateBackupSchedule.model_validate(data)
+
+    async def current_user(self, **kwargs: Any) -> CurrentUser:
+        query = gql("""
+            query CurrentUser {
+              currentUser {
+                id
+                username
+                displayName
+              }
+            }
+            """)
+        variables: dict[str, object] = {}
+        response = await self.execute(
+            query=query, operation_name="CurrentUser", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return CurrentUser.model_validate(data)
 
     async def delete_backup(self, backup_id: UUID, **kwargs: Any) -> DeleteBackup:
         query = gql("""
@@ -1330,6 +1349,26 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return LoadRemoteApplicationDriverVersion.model_validate(data)
+
+    async def login(self, username: str, password: str, **kwargs: Any) -> Login:
+        query = gql("""
+            mutation Login($username: String!, $password: String!) {
+              login(username: $username, password: $password) {
+                token
+                user {
+                  id
+                  username
+                  displayName
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"username": username, "password": password}
+        response = await self.execute(
+            query=query, operation_name="Login", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return Login.model_validate(data)
 
     async def report_deployment_statuses(
         self, reports: list[DeploymentStatusReportInput], **kwargs: Any
