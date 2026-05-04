@@ -129,7 +129,19 @@ Every resolver receives the `UnitOfWork` via `info.context["uow"]`.
 
 ## Response Patterns
 
-Mutations return the resource type directly (nullable) and let service-layer exceptions propagate. The `StructuredErrorExtension` middleware in `api/errors.py` catches any `ServiceError` and converts it into a GraphQL error with a structured `extensions.code` field (e.g. `NOT_FOUND`, `ALREADY_EXISTS`, `IN_USE`, `DEPLOYMENT_RESTORING`). Additional metadata from `ServiceError.error_metadata` is merged into `extensions`.
+Mutations return the resource type directly (nullable) and let service-layer exceptions propagate. The `StructuredErrorExtension` middleware in `api/errors.py` shapes the error envelope; see [Error envelope](#error-envelope) below for the per-category contract.
+
+### Error envelope
+
+`StructuredErrorExtension` classifies every GraphQL error into one of three categories based on the `original_error` attached to the `GraphQLError` (graphql-core sets this when the error wraps a Python exception). The detection rule is *what raised it*, not *where* it was raised.
+
+| Category | Triggered when `original_error` is… | Client-facing `message` | `extensions.code` | Extra `extensions` | Log level |
+|----------|-------------------------------------|-------------------------|-------------------|--------------------|-----------|
+| Service error | a `ServiceError` subclass | `str(exc)` (the exception's own message) | `exc.error_code` (e.g. `NOT_FOUND`, `ALREADY_EXISTS`, `DEPLOYMENT_RESTORING`) | merged from `exc.error_metadata` | `warning` |
+| Request validation | `None` or another `GraphQLError` (parse / validate / variable coercion produced by graphql-core itself) | preserved verbatim from graphql-core | `VALIDATION_ERROR` (set only if not already present) | preserved if graphql-core attached any | `info` |
+| Unexpected | any other Python exception | masked as `"An internal error occurred"` | `INTERNAL_ERROR` | none | `error` (with `exc_info`) |
+
+The "request validation" branch is what surfaces messages like `Variable '$status' got invalid value 'NOT_A_REAL_STATUS'; Value 'NOT_A_REAL_STATUS' does not exist in 'BackupStatus' enum.` — a resolver that explicitly raises a `GraphQLError` will also flow through this branch (intentional: explicit `GraphQLError` is a deliberate choice to expose). Any other resolver-raised exception is masked.
 
 `deleteDeployment` deserves a note: a delete on a tombstoned deployment surfaces `NOT_FOUND` (intentionally conflated with unknown id so automation can treat both identically as "already gone"); a delete during a restore raises the typed `DEPLOYMENT_RESTORING` so callers can specifically recover. A repeat delete on a deployment that's already `DELETING` returns the existing in-flight `DELETE_DEPLOYMENT` task without re-issuing the cluster patch (idempotent retry).
 
