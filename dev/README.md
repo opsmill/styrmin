@@ -71,6 +71,8 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [adr-021-driver-env-var-consumption.md](adr/adr-021-driver-env-var-consumption.md) - Driver-side env var consumption via the values template, replacing platform post-render injection
 - [adr-022-schema-walking-input-propagation-tests.md](adr/adr-022-schema-walking-input-propagation-tests.md) - Schema-walking propagation tests for Strawberry input completeness against Pydantic config models
 - [adr-023-frontend-value-transform-boundary.md](adr/adr-023-frontend-value-transform-boundary.md) - Frontend value-transform layer at the GraphQL submit boundary for full-replacement inputs
+- [adr-024-authentication-and-sessions.md](adr/adr-024-authentication-and-sessions.md) - Opaque server-side session tokens with dual transport (HttpOnly cookie + bearer header), 30-day absolute / 7-day idle lifetime, argon2id passwords
+- [adr-025-authorization-model.md](adr/adr-025-authorization-model.md) - Three-tier role-based authorization (`READ_ONLY` / `READ_WRITE` / `ADMIN`) with default-deny `RequiresAuthentication` extension and per-resolver `RequiresRole`
 
 ## Current Knowledge
 
