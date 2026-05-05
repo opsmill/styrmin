@@ -5,6 +5,7 @@ requires-python = ">=3.14"
 [manifest]
 members = [
     "cli",
+    "styrmin-backend",
     "styrmin-mvp",
     "styrmin-sdk",
 ]
@@ -2679,6 +2680,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "ariadne-codegen" },
+    { name = "cli" },
     { name = "infrahub-sdk" },
     { name = "invoke" },
     { name = "kr8s" },
@@ -2692,6 +2694,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "rumdl" },
+    { name = "styrmin-sdk" },
     { name = "testcontainers" },
     { name = "ty" },
     { name = "yamllint" },
@@ -2723,6 +2726,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "ariadne-codegen", specifier = ">=0.14" },
+    { name = "cli", editable = "cli" },
     { name = "infrahub-sdk", specifier = ">=0.16" },
     { name = "invoke", specifier = ">=2.2.0" },
     { name = "kr8s", specifier = ">=0.20.15" },
@@ -2736,6 +2740,7 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.6.1" },
     { name = "ruff", specifier = ">=0.14.14" },
     { name = "rumdl", specifier = ">=0.1.50" },
+    { name = "styrmin-sdk", editable = "python_sdk" },
     { name = "testcontainers", specifier = ">=4.14.0" },
     { name = "ty", specifier = ">=0.0.24" },
     { name = "yamllint", specifier = ">=1.35.1" },

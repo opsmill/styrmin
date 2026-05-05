@@ -61,7 +61,7 @@ Fail fast if required tools are missing. No point starting a 5-minute setup if D
    If `.venv` does not exist, run:
 
    ```bash
-   uv sync --all-groups --all-packages
+   uv sync
    ```
 
 5. Verify frontend dependencies are installed:

@@ -51,12 +51,7 @@ repos:
       - id: ty
         name: ty type-check
         language: system
-        # --all-packages syncs every workspace member (styrmin_sdk, styrminctl,
-        # styrmin_backend) into the venv before ty runs, so imports resolve
-        # against editable installs even if the venv was bootstrapped with bare
-        # `uv sync` (which only installs the current package). --all-groups
-        # ensures dev/test groups are present. Both flags are idempotent.
-        entry: uv run --all-packages --all-groups ty check
+        entry: uv run ty check
         types: [python]
         pass_filenames: false
 
