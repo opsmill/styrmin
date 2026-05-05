@@ -214,42 +214,17 @@ async def _wait_for_service_ready(
         msg = f"pods matching '{label_selector}' in {namespace} did not become ready"
         raise TimeoutError(msg)
 
-    # The legacy v1 Endpoints API is deprecated in k8s 1.33+ and the
-    # auto-creation/mirroring behavior has become unreliable on newer
-    # control planes (k8s 1.35 returns 404 here). Read EndpointSlices
-    # directly via discovery.k8s.io/v1 instead — that's the source of truth.
-    #
-    # Disable kubernetes_asyncio client-side validation: a freshly-created
-    # service can return a slice with endpoints=null before any pod has
-    # registered, and the strict V1EndpointSlice setter rejects None.
-    api_client = core_api.api_client
-    config = api_client.configuration
-    prev_validation = config.client_side_validation
-    config.client_side_validation = False
-    try:
-        discovery_api = kubeclient.DiscoveryV1Api(api_client)
-        deadline = time.time() + endpoint_timeout
-        while time.time() < deadline:
-            slices = await discovery_api.list_namespaced_endpoint_slice(
-                namespace=namespace,
-                label_selector=f"kubernetes.io/service-name={name}",
-            )
-            if any(
-                endpoint.addresses
-                and (
-                    endpoint.conditions is None
-                    or endpoint.conditions.ready is not False
-                )
-                for slice_ in slices.items
-                for endpoint in (slice_.endpoints or [])
-            ):
-                break
-            await asyncio.sleep(2)
-        else:
-            msg = f"service {name} in {namespace} has no ready endpoints"
-            raise TimeoutError(msg)
-    finally:
-        config.client_side_validation = prev_validation
+    deadline = time.time() + endpoint_timeout
+    while time.time() < deadline:
+        endpoints = await core_api.read_namespaced_endpoints(
+            name=name, namespace=namespace
+        )
+        if endpoints.subsets and any(subset.addresses for subset in endpoints.subsets):
+            break
+        await asyncio.sleep(2)
+    else:
+        msg = f"service {name} in {namespace} has no ready endpoints"
+        raise TimeoutError(msg)
 
 
 async def _wait_for_http(
