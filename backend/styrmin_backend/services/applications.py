@@ -187,6 +187,17 @@ async def load_application_driver_from_object(
                         f"{sorted(component_names)}"
                     )
             services = [s.model_dump() for s in driver_object.driver_spec.spec.services]
+        # 008 / US4: persist doc-only env var declarations, mode="json"
+        # so the enum serialises to its string value (matches the JSON
+        # column shape and the GraphQL resolver's expectations).
+        env_vars_payload = (
+            [
+                doc.model_dump(mode="json")
+                for doc in driver_object.driver_spec.spec.env_vars
+            ]
+            if driver_object.driver_spec.spec.env_vars
+            else None
+        )
         application_driver_version = await uow.application_driver_versions.create(
             ApplicationDriverVersion(
                 version=driver_object.driver_spec.spec.version,
@@ -196,6 +207,7 @@ async def load_application_driver_from_object(
                 components=components,
                 parameters=parameters,
                 services=services,
+                env_vars=env_vars_payload,
                 helm_chart_id=helm_chart.id,
                 source_type=source_type,
                 source_repository=source_repository,

@@ -79,6 +79,7 @@ from pydantic import (
 
 from ._shared import Kind
 from .actions import ActionDefinition
+from .env_vars import DriverEnvVarDoc, validate_env_var_doc_names_unique
 from .parameters import DriverParameterDefinition, validate_parameter_names_unique
 from .services import ServiceDefinition, validate_service_names_unique
 
@@ -149,6 +150,7 @@ class Specification(BaseModel):
     parameters: list[DriverParameterDefinition] | None = None
     services: list[ServiceDefinition] | None = None
     actions: list[ActionDefinition] = Field(default_factory=list)
+    env_vars: list[DriverEnvVarDoc] | None = None
 
     @field_validator("services", mode="after")
     @classmethod
@@ -168,6 +170,17 @@ class Specification(BaseModel):
     ) -> list[DriverParameterDefinition] | None:
         if value is not None:
             validate_parameter_names_unique(value)
+        return value
+
+    @field_validator("env_vars", mode="after")
+    @classmethod
+    def validate_env_var_doc_names(
+        cls, value: list[DriverEnvVarDoc] | None
+    ) -> list[DriverEnvVarDoc] | None:
+        # FR-013: names within ``spec.env_vars`` MUST be unique. Mirror of
+        # ``validate_parameter_names`` — uniqueness across the list.
+        if value is not None:
+            validate_env_var_doc_names_unique(value)
         return value
 
     @field_validator("supported_versions", mode="after")

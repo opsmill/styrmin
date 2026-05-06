@@ -184,3 +184,81 @@ class UnknownComponentEnvVarError(ServiceError):
             "component_name": self.component_name,
             "known_components": self.known_components,
         }
+
+
+class DriverEnvVarDocComponentMismatchError(ServiceError):
+    """A driver's ``spec.env_vars`` doc references a component the driver does not declare.
+
+    Raised at driver load time (FR-013 / FR-014) — registration aborts so
+    the driver author fixes the typo before the bad declaration reaches
+    consumers. ``known_components`` lists the driver's declared component
+    names so the error message is actionable.
+    """
+
+    error_code = "DRIVER_ENV_VAR_DOC_COMPONENT_MISMATCH"
+    default_message = (
+        "Driver env var doc references a component the driver does not declare"
+    )
+
+    def __init__(
+        self,
+        message: str = "",
+        name: str = "",
+        component_name: str = "",
+        known_components: list[str] | None = None,
+    ) -> None:
+        self.name = name
+        self.component_name = component_name
+        self.known_components = known_components or []
+        super().__init__(
+            message
+            or (
+                f"env var doc {name!r} references component "
+                f"{component_name!r} which is not declared by the driver. "
+                f"Known components: {self.known_components}"
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "component_name": self.component_name,
+            "known_components": self.known_components,
+        }
+
+
+class DriverEnvVarDocLevelMismatchError(ServiceError):
+    """A driver env var doc's ``level`` does not match its ``components`` list.
+
+    ``level=component`` requires a non-empty ``components`` list;
+    ``level=deployment`` MUST NOT carry component references (FR-013).
+    Raised at driver load time when a YAML payload bypasses the Pydantic
+    model-level validator and a structured error is needed (e.g. when the
+    loader catches the ``ValidationError`` and converts it to a typed
+    failure for the operator).
+    """
+
+    error_code = "DRIVER_ENV_VAR_DOC_LEVEL_MISMATCH"
+    default_message = "Driver env var doc level does not match its components list"
+
+    def __init__(
+        self,
+        message: str = "",
+        name: str = "",
+        level: str = "",
+    ) -> None:
+        self.name = name
+        self.level = level
+        super().__init__(
+            message
+            or (
+                f"env var doc {name!r}: level={level!r} is inconsistent "
+                "with the components list (level='component' requires "
+                "non-empty components; level='deployment' forbids them)."
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"name": self.name, "level": self.level}

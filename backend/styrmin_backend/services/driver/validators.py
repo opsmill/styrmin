@@ -14,7 +14,14 @@ from styrmin_backend.services.driver.models.resources.backup import (
     BackupKind,
     ComponentBackupConfig,
 )
+from styrmin_backend.services.driver.models.resources.driver import Specification
+from styrmin_backend.services.driver.models.resources.env_vars import (
+    DriverEnvVarLevel,
+)
 from styrmin_backend.services.driver.models.structure.resource import Role
+from styrmin_backend.services.env_vars.exceptions import (
+    DriverEnvVarDocComponentMismatchError,
+)
 
 
 class Validator:
@@ -234,6 +241,43 @@ def validate_driver_backup_configs(
         action_hooks=action_hooks,
     )
     validator.validate(backup_configs)
+
+
+def validate_driver_env_var_docs(specification: Specification) -> None:
+    """Cross-validate ``spec.env_vars`` doc entries against the driver's components.
+
+    FR-013 / FR-014: every component referenced by an ``env_vars`` doc whose
+    ``level=component`` MUST exist in ``Specification.components.root``. The
+    Pydantic field/model validators on :class:`DriverEnvVarDoc` already
+    enforce per-entry shape (name regex, level/components consistency, name
+    uniqueness within the list); this function runs the **cross-field**
+    rule that needs the parent ``Specification``.
+
+    Raises:
+        DriverEnvVarDocComponentMismatchError: when a component reference
+            does not resolve to a declared component. The error metadata
+            carries the offending env var name, the bad component name,
+            and the driver's known component names so the failure message
+            is actionable.
+    """
+    if not specification.env_vars:
+        return
+
+    declared_components: set[str] = set()
+    if specification.components is not None:
+        declared_components = set(specification.components.root.keys())
+
+    known_sorted = sorted(declared_components)
+    for doc in specification.env_vars:
+        if doc.level is not DriverEnvVarLevel.COMPONENT:
+            continue
+        for component_name in doc.components:
+            if component_name not in declared_components:
+                raise DriverEnvVarDocComponentMismatchError(
+                    name=doc.name,
+                    component_name=component_name,
+                    known_components=known_sorted,
+                )
 
 
 def build_user_actions_validator(
