@@ -30,6 +30,19 @@ spec:
         kind: postgres
         database_name: simple_app
 
+  env_vars:
+    - name: LOG_LEVEL
+      description: >-
+        Application log verbosity. Doc-only — actual value comes from
+        operator-set deployment / environment env vars.
+      level: deployment
+    - name: DB_POOL_SIZE
+      description: >-
+        Connection pool size for the PostgreSQL database component.
+      level: component
+      components:
+        - database
+
   services:
     - name: simple-app
       kind: http

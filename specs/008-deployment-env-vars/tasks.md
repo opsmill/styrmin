@@ -122,15 +122,15 @@ This is a **web service** project (backend = Python; frontend = React, untouched
 
 **Independent Test**: Quickstart Step 5.
 
-- [ ] T047 [US4] Implement `DriverEnvVarLevel` enum and `DriverEnvVarDoc` model with field/model validators in `backend/styrmin_backend/services/driver/models/resources/env_vars.py` per `data-model.md` §3 (name regex, level/components consistency, name uniqueness within the list).
-- [ ] T048 [US4] Add `env_vars: list[DriverEnvVarDoc] | None = None` field to `Specification` in `backend/styrmin_backend/services/driver/models/resources/driver.py`. Add a `@field_validator` that enforces name uniqueness across the list (mirror the existing `validate_parameter_names` validator).
-- [ ] T049 [US4] Add a model validator (or external function in `backend/styrmin_backend/services/driver/validators.py`) that cross-validates: every `components` entry in every `env_vars` doc must exist in `Specification.components.root`. Raise a precise validation error on mismatch (`DriverEnvVarDocComponentMismatchError`). Wire it into the driver loader at `backend/styrmin_backend/services/driver/loaders.py` so registration aborts on failure (FR-014).
-- [ ] T050 [US4] [P] Add `DriverEnvVarDoc` Strawberry type and `ApplicationDriverVersion.envVars: [DriverEnvVarDoc!]!` resolver in `backend/styrmin_backend/api/definitions/application_driver/model.py`. Convert the `DriverEnvVarLevel` Pydantic enum to a Strawberry enum.
-- [ ] T051 [US4] [P] Regenerate `schema.graphql` and SDK types.
-- [ ] T052 [US4] [P] Write unit test bundle at `backend/tests/unit/services/driver/test_env_var_doc_validator.py`: name regex, level=component requires non-empty components, level=deployment must NOT name components, name uniqueness, components-must-exist cross-field validation, registration-fails-on-bad-doc.
-- [ ] T053 [US4] Add propagation test for `ApplicationDriverVersion.envVars`: load a driver YAML with `spec.env_vars: [...]` → query returns the doc list shaped per `DriverEnvVarDoc`.
-- [ ] T054 [US4] Update `driver/examples/simple-app/driver.styrmin.yml` with a representative `spec.env_vars` block (one deployment-level entry, one component-level entry referencing `server` or `database`) so the E2E test has real data.
-- [ ] T055 [US4] Extend the E2E test with Quickstart Step 5: query `applicationDriverVersion.envVars` and assert the seeded entries are returned with correct `level` / `components`.
+- [X] T047 [US4] Implement `DriverEnvVarLevel` enum and `DriverEnvVarDoc` model with field/model validators in `backend/styrmin_backend/services/driver/models/resources/env_vars.py` per `data-model.md` §3 (name regex, level/components consistency, name uniqueness within the list).
+- [X] T048 [US4] Add `env_vars: list[DriverEnvVarDoc] | None = None` field to `Specification` in `backend/styrmin_backend/services/driver/models/resources/driver.py`. Add a `@field_validator` that enforces name uniqueness across the list (mirror the existing `validate_parameter_names` validator).
+- [X] T049 [US4] Add a model validator (or external function in `backend/styrmin_backend/services/driver/validators.py`) that cross-validates: every `components` entry in every `env_vars` doc must exist in `Specification.components.root`. Raise a precise validation error on mismatch (`DriverEnvVarDocComponentMismatchError`). Wire it into the driver loader at `backend/styrmin_backend/services/driver/loaders.py` so registration aborts on failure (FR-014).
+- [X] T050 [US4] [P] Add `DriverEnvVarDoc` Strawberry type and `ApplicationDriverVersion.envVars: [DriverEnvVarDoc!]!` resolver in `backend/styrmin_backend/api/definitions/application_driver/model.py`. Convert the `DriverEnvVarLevel` Pydantic enum to a Strawberry enum.
+- [X] T051 [US4] [P] Regenerate `schema.graphql` and SDK types.
+- [X] T052 [US4] [P] Write unit test bundle at `backend/tests/unit/services/driver/test_env_var_doc_validator.py`: name regex, level=component requires non-empty components, level=deployment must NOT name components, name uniqueness, components-must-exist cross-field validation, registration-fails-on-bad-doc.
+- [X] T053 [US4] Add propagation test for `ApplicationDriverVersion.envVars`: load a driver YAML with `spec.env_vars: [...]` → query returns the doc list shaped per `DriverEnvVarDoc`.
+- [X] T054 [US4] Update `driver/examples/simple-app/driver.styrmin.yml` with a representative `spec.env_vars` block (one deployment-level entry, one component-level entry referencing `server` or `database`) so the E2E test has real data.
+- [X] T055 [US4] Extend the E2E test with Quickstart Step 5: query `applicationDriverVersion.envVars` and assert the seeded entries are returned with correct `level` / `components`.
 
 **Checkpoint**: US4 is shippable. SDK consumers of the driver detail can see documented env vars.
 

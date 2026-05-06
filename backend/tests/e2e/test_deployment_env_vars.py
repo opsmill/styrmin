@@ -455,3 +455,76 @@ async def test_us3_per_component_env_var_overrides_deployment_level(
     assert {"name": "DB_POOL_SIZE", "value": "5"} in database_envs
     # The deployment-scope LOG_LEVEL=info must NOT linger on database pods.
     assert {"name": "LOG_LEVEL", "value": "info"} not in database_envs
+
+
+# ---------------------------------------------------------------------------
+# US4 — Driver-side env var documentation surfaced via GraphQL (T055 / Step 5)
+# ---------------------------------------------------------------------------
+
+
+_DRIVER_ENV_VAR_DOCS_QUERY = """
+query GetDriverEnvVarDocs($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        id
+        name
+        versions {
+            id
+            version
+            envVars {
+                name
+                description
+                level
+                components
+            }
+        }
+    }
+}
+"""
+
+
+@pytest.mark.api_only(
+    reason=(
+        "API/SDK-only flow (Quickstart Step 5); the assertion is on the "
+        "GraphQL response shape for ``ApplicationDriverVersion.envVars`` — "
+        "no UI page navigation. The [ui-chromium] variant would just "
+        "re-run the same SDK call."
+    )
+)
+@pytest.mark.ci
+async def test_us4_driver_env_var_docs_surfaced_via_graphql(
+    styrmin_resources: dict,
+) -> None:
+    """Quickstart Step 5: query the driver detail and assert the seeded
+    ``spec.env_vars`` block (one deployment-level + one component-level
+    entry, see ``driver/examples/simple-app/driver.styrmin.yml``) is
+    returned with correct ``level`` / ``components`` per
+    :class:`DriverEnvVarDoc` (FR-018).
+
+    Drives the raw GraphQL transport because the SDK exposes no high-level
+    ``get_driver`` helper today; mirrors the pattern in
+    ``test_pod_scheduling.py``.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+    driver_id = styrmin_resources["driver_id"]
+    raw = await client._transport.execute(
+        _DRIVER_ENV_VAR_DOCS_QUERY,
+        {"applicationDriverId": str(driver_id)},
+    )
+    assert "errors" not in raw, raw
+    versions = raw["data"]["applicationDriver"]["versions"]
+    assert len(versions) >= 1
+    # The fixture loads exactly one version of the simple-app driver.
+    docs = versions[0]["envVars"]
+    by_name = {d["name"]: d for d in docs}
+    assert "LOG_LEVEL" in by_name
+    assert "DB_POOL_SIZE" in by_name
+
+    log_level = by_name["LOG_LEVEL"]
+    assert log_level["level"] == "DEPLOYMENT"
+    assert log_level["components"] == []
+    assert "log verbosity" in log_level["description"].lower()
+
+    db_pool = by_name["DB_POOL_SIZE"]
+    assert db_pool["level"] == "COMPONENT"
+    assert db_pool["components"] == ["database"]
+    assert "pool size" in db_pool["description"].lower()

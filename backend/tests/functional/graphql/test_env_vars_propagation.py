@@ -21,6 +21,7 @@ from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import (
+    ApplicationDriverVersion,
     Component,
     ComponentConfig,
     Deployment,
@@ -493,3 +494,90 @@ async def test_deployment_component_env_vars_pre_seeded_persists_block(
     # appear in the result (the resolver omits components whose merged dict
     # is empty to keep the surface tidy).
     assert "api" not in rows
+
+
+# ---------------------------------------------------------------------------
+# US4 — ApplicationDriverVersion.envVars propagation (T053)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_application_driver_version_env_vars_projects_persisted_docs(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Seed an ``ApplicationDriverVersion`` with persisted env var docs and
+    assert ``ApplicationDriverVersion.envVars`` projects them shaped per
+    :class:`DriverEnvVarDoc`.
+
+    The doc list is stored on the row's ``env_vars`` JSON column at driver
+    registration time (see ``services/applications.py``: the loaded
+    :class:`DriverEnvVarDoc` instances are dumped via
+    ``model_dump(mode="json")`` so the enum becomes its string value).
+    The resolver in ``api/definitions/application_driver/model.py`` reads
+    that payload back and projects it as ``[DriverEnvVarDoc!]!``.
+    """
+    adv = await seed_application_driver_version(session)
+    adv.env_vars = [
+        {
+            "name": "LOG_LEVEL",
+            "description": "Application log verbosity.",
+            "level": "deployment",
+            "components": [],
+        },
+        {
+            "name": "DB_POOL_SIZE",
+            "description": "Connection pool size for the database component.",
+            "level": "component",
+            "components": ["database"],
+        },
+    ]
+    session.add(adv)
+    await session.commit()
+
+    # Read back through the real DB session — proves the value reached the
+    # database, not just the resolver.
+    db_row = await session.get(ApplicationDriverVersion, adv.id)
+    assert db_row is not None
+    assert db_row.env_vars is not None
+    assert len(db_row.env_vars) == 2
+
+    data = await gql(
+        client,
+        "get_application_driver_env_var_docs",
+        {"applicationDriverId": str(adv.application_driver_id)},
+    )
+    versions = data["applicationDriver"]["versions"]
+    matching = [v for v in versions if v["id"] == str(adv.id)]
+    assert len(matching) == 1
+    docs = matching[0]["envVars"]
+    by_name = {d["name"]: d for d in docs}
+    assert set(by_name) == {"LOG_LEVEL", "DB_POOL_SIZE"}
+    assert by_name["LOG_LEVEL"] == {
+        "name": "LOG_LEVEL",
+        "description": "Application log verbosity.",
+        "level": "DEPLOYMENT",
+        "components": [],
+    }
+    assert by_name["DB_POOL_SIZE"] == {
+        "name": "DB_POOL_SIZE",
+        "description": "Connection pool size for the database component.",
+        "level": "COMPONENT",
+        "components": ["database"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_application_driver_version_env_vars_empty_when_unset(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """A driver version without a ``spec.env_vars`` block surfaces ``[]``."""
+    adv = await seed_application_driver_version(session)
+    data = await gql(
+        client,
+        "get_application_driver_env_var_docs",
+        {"applicationDriverId": str(adv.application_driver_id)},
+    )
+    versions = data["applicationDriver"]["versions"]
+    matching = [v for v in versions if v["id"] == str(adv.id)]
+    assert len(matching) == 1
+    assert matching[0]["envVars"] == []
