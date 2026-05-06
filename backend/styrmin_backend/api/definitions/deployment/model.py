@@ -411,9 +411,9 @@ class Deployment:
             "(``isOrphaned=true``). Component-level entries override "
             "deployment- and environment-level entries on a per-key basis "
             "(FR-002 deepest-wins). Orphaned blocks (component renamed or "
-            "removed by a driver upgrade) are visible here but skipped by "
-            "the post-render injector — orphan handling lands in Phase 7 "
-            "(US5); for US3 every entry has ``isOrphaned=False``."
+            "removed by a driver upgrade — FR-029..FR-033) are visible here "
+            "but skipped by the post-render injector so no env entries reach "
+            "rendered pods."
         )
     )
     async def component_env_vars(self, info: strawberry.Info) -> list[ComponentEnvVars]:
@@ -424,8 +424,10 @@ class Deployment:
         the environment + deployment scopes via :class:`EnvVarsResolver`.
         Components without an explicit block still appear in the result with
         the deployment-level merged dict (the merge falls through to the
-        ``deployment`` layer). Components for which the merged dict is empty
-        are omitted to keep the surface tidy.
+        ``deployment`` layer). Live components for which the merged dict is
+        empty are omitted to keep the surface tidy. Orphaned blocks
+        (US5 / FR-029..FR-033) are always surfaced regardless of dict size —
+        their whole purpose is operator visibility after a driver upgrade.
         """
         from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
 
@@ -465,7 +467,11 @@ class Deployment:
 
         results: list[ComponentEnvVars] = []
         for entry in resolved.components:
-            if not entry.resolved.config:
+            # Live entries with an empty merged dict are dropped so the
+            # surface stays tidy (a component declared by the driver but
+            # carrying no env vars at any layer adds no signal). Orphans are
+            # always surfaced — their visibility is the whole point of US5.
+            if not entry.resolved.is_orphaned and not entry.resolved.config:
                 continue
             results.append(
                 ComponentEnvVars(

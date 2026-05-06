@@ -69,6 +69,17 @@ def _validate_component_env_var_targets(
     The known-components list is sourced from the deployment's current
     driver and surfaced in the error metadata so operators can fix the typo
     without a round-trip.
+
+    Read-vs-write asymmetry (US5 / FR-029..FR-033): this validator runs on
+    the **write** path only (``deploy``, ``update_deployment``,
+    ``update_deployment_config``). The read path
+    (``EnvVarsResolver.resolve_for_deployment`` consumed by
+    ``Deployment.componentEnvVars``) does NOT raise on unknown components —
+    it tolerates orphan state and exposes ``ComponentEnvVars.isOrphaned=true``
+    for blocks whose target component the current driver no longer declares.
+    This split lets a driver upgrade that renames or removes a component
+    succeed (the existing block becomes visibly orphaned and stops being
+    injected) while still blocking new typos at the boundary.
     """
     if not deployment_config:
         return

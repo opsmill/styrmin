@@ -142,15 +142,15 @@ This is a **web service** project (backend = Python; frontend = React, untouched
 
 **Independent Test**: Quickstart Step 6.
 
-- [ ] T056 [US5] Extend `EnvVarsResolver.resolve_for_deployment` in `backend/styrmin_backend/services/env_vars/resolver.py` to:
+- [X] T056 [US5] Extend `EnvVarsResolver.resolve_for_deployment` in `backend/styrmin_backend/services/env_vars/resolver.py` to:
   - Accept stored per-component env var blocks regardless of whether they target current driver components.
   - Emit a `ResolvedComponentEnvVars(is_orphaned=True)` for any block whose target component is NOT in the current driver's component map. Provenance for orphaned keys is `"component"`.
   - Skip orphaned blocks when computing effective per-component dicts (so they are not injected).
-- [ ] T057 [US5] Update `backend/styrmin_backend/services/deployment.py` mutation validators so `UnknownComponentEnvVarError` is raised **only on write** — reads (resolution) tolerate orphan state by exposing `isOrphaned`. Document the asymmetry in the function docstring.
-- [ ] T058 [US5] [P] Update `Deployment.componentEnvVars` resolver in `backend/styrmin_backend/api/definitions/deployment/model.py` to surface orphan blocks with `isOrphaned=true`.
-- [ ] T059 [US5] [P] Extend `test_resolver.py` (T018 file) with: orphan detection (component renamed + removed), orphan-and-live-mixed, orphan-only-block, orphan-then-driver-rolls-back-to-make-it-live-again (FR-033 / Edge Case).
-- [ ] T060 [US5] Add propagation test for `ComponentEnvVars.isOrphaned=true`: stage a deployment with a `componentEnvVars` block on `worker`, then update `application_driver_version` to a version without `worker`; query asserts `isOrphaned: true` and rendered patches contain no `worker` env entries.
-- [ ] T061 [US5] Extend the E2E test with Quickstart Step 6: full upgrade scenario including the timeline-entry assertion (`context_diff` records the orphan once for the upgrade Task).
+- [X] T057 [US5] Update `backend/styrmin_backend/services/deployment.py` mutation validators so `UnknownComponentEnvVarError` is raised **only on write** — reads (resolution) tolerate orphan state by exposing `isOrphaned`. Document the asymmetry in the function docstring.
+- [X] T058 [US5] [P] Update `Deployment.componentEnvVars` resolver in `backend/styrmin_backend/api/definitions/deployment/model.py` to surface orphan blocks with `isOrphaned=true`.
+- [X] T059 [US5] [P] Extend `test_resolver.py` (T018 file) with: orphan detection (component renamed + removed), orphan-and-live-mixed, orphan-only-block, orphan-then-driver-rolls-back-to-make-it-live-again (FR-033 / Edge Case).
+- [X] T060 [US5] Add propagation test for `ComponentEnvVars.isOrphaned=true`: stage a deployment with a `componentEnvVars` block on `worker`, then update `application_driver_version` to a version without `worker`; query asserts `isOrphaned: true` and rendered patches contain no `worker` env entries.
+- [X] T061 [US5] Extend the E2E test with Quickstart Step 6: full upgrade scenario including the timeline-entry assertion (`context_diff` records the orphan once for the upgrade Task).
 
 **Checkpoint**: US5 is shippable. Operators can audit orphans through the existing query and timeline surfaces.
 
