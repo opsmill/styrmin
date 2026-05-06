@@ -105,16 +105,28 @@ Validation is enforced by the Pydantic models (`EnvironmentConfig`, `DeploymentC
 
 ## 4. Propagation test matrix (Constitution §V)
 
-Each row below maps a new schema element to one mandatory propagation test assertion. The full list lives in `backend/tests/unit/api/schema/test_env_vars_propagation.py`. **A schema element is not "done" until its row is green** (Constitution §V, non-negotiable).
+Each row below maps a new schema element to one mandatory propagation test assertion. The full list lives in `backend/tests/functional/graphql/test_env_vars_propagation.py` (per `dev/guides/graphql-propagation-tests.md`; the path noted in earlier drafts of `tasks.md` was stale). **A schema element is not "done" until its row is green** (Constitution §V, non-negotiable).
 
-| Schema element | Propagation test assertion |
-|---|---|
-| `Environment.envVars` (read) | `updateEnvironmentConfig(config: { env_vars: { X: "y" } })` → query `Environment.envVars` returns `[{name: "X", value: "y"}]`. |
-| `Deployment.envVars` (read) | `updateDeployment(config: { env_vars: { X: "y" } })` → query `Deployment.envVars` returns `[{name: "X", value: "y"}]`. |
-| `Deployment.componentEnvVars` (read) | `updateDeployment(config: { components: { worker: { env_vars: { X: "y" } } } })` → query returns `[{component: "worker", envVars: [{name: "X", value: "y"}], isOrphaned: false}]`. |
-| `ComponentEnvVars.isOrphaned` (read) | After driver upgrade removes "worker": query returns `[{component: "worker", envVars: [...], isOrphaned: true}]` and the resolved post-render patches contain no `worker` env entries. |
-| `ApplicationDriverVersion.envVars` (read) | Driver YAML with `spec.env_vars: [{name: LOG_LEVEL, ...}]` → query returns the doc list shaped per `DriverEnvVarDoc`. |
-| `DeploymentTimelineEntry.envVarCollisions` (read) | A reconcile where chart sets `LOG_LEVEL=warn` and operator sets `LOG_LEVEL=debug` → query exposes `envVarCollisions` with one entry; rendered pod has only `LOG_LEVEL=debug`. |
+The matrix is split by user story so reviewers can match each row to the user story that lands the supporting type. **MVP rows (US1–US3) ship as part of the MVP slice; non-MVP rows ship with their respective user stories** and are not required to be green for the MVP merge.
+
+### MVP rows (US1–US3)
+
+| Schema element | User story | Propagation test assertion |
+|---|---|---|
+| `Environment.envVars` (read + write round-trip) | US2 | `updateEnvironment(config: { env_vars: { X: "y" } })` → query `Environment.envVars` returns `[{name: "X", value: "y"}]`. |
+| `Deployment.envVars` (read + write round-trip) | US1 | `updateDeployment(config: { env_vars: { X: "y" } })` → query `Deployment.envVars` returns `[{name: "X", value: "y"}]`. |
+| `Deployment.componentEnvVars` (read + write round-trip) | US3 | `updateDeployment(config: { components: { worker: { env_vars: { X: "y" } } } })` → query returns `[{component: "worker", envVars: [{name: "X", value: "y"}], isOrphaned: false}]`. |
+| `UNKNOWN_COMPONENT_ENV_VAR` mutation rejection | US3 | `updateDeployment(config: { components: { does_not_exist: { env_vars: { X: "y" } } } })` → response carries one error with `extensions.code = "UNKNOWN_COMPONENT_ENV_VAR"` and `known_components` listing the driver's components (FR-010). |
+
+### Post-MVP rows (US4 / US5 / US7)
+
+These rows depend on schema additions that have not landed in the MVP slice. They become green as their user stories ship; until then, the corresponding `contracts/graphql.md` types (`DriverEnvVarDoc`, `EnvVarCollision`) are intentionally absent from the live schema.
+
+| Schema element | User story | Propagation test assertion |
+|---|---|---|
+| `ComponentEnvVars.isOrphaned = true` | US5 | After driver upgrade removes "worker": query returns `[{component: "worker", envVars: [...], isOrphaned: true}]` and the resolved post-render patches contain no `worker` env entries. |
+| `ApplicationDriverVersion.envVars` (read) | US4 | Driver YAML with `spec.env_vars: [{name: LOG_LEVEL, ...}]` → query returns the doc list shaped per `DriverEnvVarDoc`. |
+| `DeploymentTimelineEntry.envVarCollisions` (read) | US7 | A reconcile where chart sets `LOG_LEVEL=warn` and operator sets `LOG_LEVEL=debug` → query exposes `envVarCollisions` with one entry; rendered pod has only `LOG_LEVEL=debug`. |
 
 The propagation tests use the helper recipes in `dev/guides/graphql-propagation-tests.md` and run against the real service + repository layers per the project's mandatory rule.
 
