@@ -11,6 +11,11 @@ class BackupStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class DriverEnvVarLevel(str, Enum):
+    DEPLOYMENT = "DEPLOYMENT"
+    COMPONENT = "COMPONENT"
+
+
 class PodPhase(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"

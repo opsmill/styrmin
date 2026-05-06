@@ -45,6 +45,8 @@ export type ApplicationDriverVersion = {
   componentConfigs: Array<ComponentConfig>;
   components?: Maybe<Scalars['JSON']['output']>;
   defaultVersion?: Maybe<Scalars['String']['output']>;
+  /** Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block. */
+  envVars: Array<DriverEnvVarDoc>;
   helmChart: HelmChart;
   id: Scalars['UUID']['output'];
   parameters: Array<ParameterDefinition>;
@@ -281,6 +283,19 @@ export type DeploymentTimelineEntry = {
   contextDiff?: Maybe<ContextDiff>;
   task: Task;
 };
+
+/** Doc-only declaration of an env var the driver's app respects. Surfaces in the driver detail view; does not validate, default, or constrain operator-set values (FR-015). */
+export type DriverEnvVarDoc = {
+  __typename?: 'DriverEnvVarDoc';
+  components: Array<Scalars['String']['output']>;
+  description: Scalars['String']['output'];
+  level: DriverEnvVarLevel;
+  name: Scalars['String']['output'];
+};
+
+export type DriverEnvVarLevel =
+  | 'COMPONENT'
+  | 'DEPLOYMENT';
 
 /**
  * A single environment variable to inject into rendered containers.

@@ -30,7 +30,7 @@ from .delete_cluster import DeleteCluster
 from .delete_deployment import DeleteDeployment, DeleteDeploymentDeleteDeployment
 from .delete_environment import DeleteEnvironment
 from .deploy import Deploy, DeployDeploy
-from .enums import BackupStatus, PodPhase, RestoreStatus
+from .enums import BackupStatus, DriverEnvVarLevel, PodPhase, RestoreStatus
 from .exceptions import (
     GraphQLClientError,
     GraphQLClientGraphQLError,
@@ -195,6 +195,7 @@ __all__ = [
     "DeployDeploy",
     "DeploymentPodStatusReport",
     "DeploymentStatusReportInput",
+    "DriverEnvVarLevel",
     "GetBackup",
     "GetBackupBackup",
     "GetBackupSchedule",
