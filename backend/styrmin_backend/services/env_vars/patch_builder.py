@@ -12,8 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from loguru import logger
-
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     EnvVarsPatch,
     Target,
@@ -89,24 +87,16 @@ def build_env_vars_post_rendering_patches(
     if not resolved:
         return []
 
-    # FR-027/FR-028 degradation path: emit a structured warning per
-    # operator-set env var key so support can correlate against
-    # chart-rendered values when triaging. We do NOT have line-of-sight
-    # into the rendered manifest at this layer (v1 architecture: the
-    # patch is handed to FluxCD/Kustomize and applied on-cluster), so
-    # we cannot record :class:`ChartEnvCollision` instances with real
-    # chart values. The log entry is the always-on signal; the timeline
-    # field exposes ``[]`` until a real detection seam exists.
-    for name, value in resolved.items():
-        logger.warning(
-            "env_var_potentially_chart_colliding "
-            "deployment_id={deployment_id} component={component} "
-            "name={name} user_value={user_value}",
-            deployment_id=str(deployment_id) if deployment_id is not None else None,
-            component=component,
-            name=name,
-            user_value=value,
-        )
+    # FR-027/FR-028: detect chart-vs-user env collisions and emit a
+    # structured warning per detected collision. v1 lacks line-of-sight
+    # into the rendered manifest at the patch layer (the patch is handed
+    # to FluxCD/Kustomize and applied on-cluster), so real collision
+    # detection is deferred to a follow-up agent-side rendered-manifest
+    # diff path. Until that seam exists, no collision data is produced
+    # here and the timeline field surfaces ``[]``. Emitting a warning per
+    # operator-set key (without checking for an actual collision) would
+    # be log noise rather than an FR-028 signal — we deliberately do
+    # NOT do that. See ADR-019 §3.
 
     return [
         TargetPatch(

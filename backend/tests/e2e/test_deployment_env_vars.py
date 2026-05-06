@@ -22,6 +22,7 @@ from typing import Any, AsyncGenerator, Callable
 import pytest
 from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
+from styrmin_sdk._queries import load_query
 
 from tests.e2e.drivers import ScenarioDriver
 
@@ -462,26 +463,6 @@ async def test_us3_per_component_env_var_overrides_deployment_level(
 # ---------------------------------------------------------------------------
 
 
-_DRIVER_ENV_VAR_DOCS_QUERY = """
-query GetDriverEnvVarDocs($applicationDriverId: UUID!) {
-    applicationDriver(applicationDriverId: $applicationDriverId) {
-        id
-        name
-        versions {
-            id
-            version
-            envVars {
-                name
-                description
-                level
-                components
-            }
-        }
-    }
-}
-"""
-
-
 @pytest.mark.api_only(
     reason=(
         "API/SDK-only flow (Quickstart Step 5); the assertion is on the "
@@ -507,7 +488,7 @@ async def test_us4_driver_env_var_docs_surfaced_via_graphql(
     client: StyrminClient = styrmin_resources["client"]
     driver_id = styrmin_resources["driver_id"]
     raw = await client._transport.execute(
-        _DRIVER_ENV_VAR_DOCS_QUERY,
+        load_query("get_driver_env_var_docs"),
         {"applicationDriverId": str(driver_id)},
     )
     assert "errors" not in raw, raw
@@ -533,36 +514,6 @@ async def test_us4_driver_env_var_docs_surfaced_via_graphql(
 # ---------------------------------------------------------------------------
 # US5 — Visible orphan tracking across driver upgrades (T061 / Step 6)
 # ---------------------------------------------------------------------------
-
-
-_DEPLOYMENT_COMPONENT_ENV_VARS_QUERY = """
-query GetDeploymentComponentEnvVars($deploymentId: UUID!) {
-    deployment(deploymentId: $deploymentId) {
-        id
-        componentEnvVars {
-            component
-            isOrphaned
-            envVars { name value }
-        }
-    }
-}
-"""
-
-
-_DEPLOYMENT_TIMELINE_CONTEXT_DIFF_QUERY = """
-query GetDeploymentTimelineContextDiff($deploymentId: UUID!) {
-    deployment(deploymentId: $deploymentId) {
-        id
-        timeline {
-            task { id type status }
-            applicationVersion
-            contextDiff {
-                changes { path action }
-            }
-        }
-    }
-}
-"""
 
 
 @pytest.mark.skip(
@@ -638,7 +589,7 @@ async def test_us5_orphan_visible_across_driver_upgrade(
     # 3) Query ``componentEnvVars`` — the ``database`` block must surface
     #    as orphaned with the stored values intact.
     raw = await client._transport.execute(
-        _DEPLOYMENT_COMPONENT_ENV_VARS_QUERY,
+        load_query("get_deployment_component_env_vars_full"),
         {"deploymentId": deployment_id},
     )
     assert "errors" not in raw, raw
@@ -672,11 +623,11 @@ async def test_us5_orphan_visible_across_driver_upgrade(
     #    upgrade Task. ``contextDiff`` is the existing machinery — no new
     #    event type for orphans.
     raw_timeline = await client._transport.execute(
-        _DEPLOYMENT_TIMELINE_CONTEXT_DIFF_QUERY,
+        load_query("get_deployment_timeline_context_diff"),
         {"deploymentId": deployment_id},
     )
     assert "errors" not in raw_timeline, raw_timeline
-    entries = raw_timeline["data"]["deployment"]["timeline"]
+    entries = raw_timeline["data"]["deploymentTimeline"]
     upgrade_entries = [
         e
         for e in entries
