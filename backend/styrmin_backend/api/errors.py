@@ -1,12 +1,20 @@
 """Structured error handling extension for the GraphQL API.
 
-This module defines:
-- ErrorCode: A StrEnum of machine-readable error codes for GraphQL responses.
-- StructuredErrorExtension: A Strawberry SchemaExtension that enriches GraphQL
-  errors with structured extensions.code fields.
+GraphQL errors fall into three categories, each handled differently by
+``StructuredErrorExtension``:
 
-Error codes are defined on each ServiceError subclass via the `error_code`
-class attribute (see services/exceptions.py).
+1. ``ServiceError`` raised from a resolver — message + ``error_code`` +
+   ``error_metadata`` are surfaced verbatim via ``extensions``.
+2. Request-validation errors from graphql-core (parse / validate /
+   variable coercion). These are spec-defined as client-safe; their
+   message is preserved and ``extensions.code`` defaults to
+   ``VALIDATION_ERROR``.
+3. Any other Python exception bubbling out of a resolver — masked as
+   ``"An internal error occurred"`` with ``INTERNAL_ERROR`` so internal
+   details never reach the client.
+
+Error codes for ServiceError-driven responses are declared on each
+subclass via the ``error_code`` attribute (see services/exceptions.py).
 """
 
 from __future__ import annotations
@@ -15,9 +23,8 @@ import logging
 from enum import StrEnum
 from typing import Any, Iterator
 
-from graphql import GraphQLError
+from graphql import ExecutionResult, GraphQLError
 from strawberry.extensions import SchemaExtension
-from graphql import ExecutionResult
 
 from styrmin_backend.services.exceptions import ServiceError
 
@@ -57,7 +64,16 @@ class StructuredErrorExtension(SchemaExtension):
                 extensions={"code": code, **metadata},
             )
 
-        # Unexpected error — mask internal details
+        if original is None or isinstance(original, GraphQLError):
+            # Request-validation / parse / variable-coercion error from
+            # graphql-core — the message is spec-defined as client-safe.
+            self._log_validation_error(error)
+            existing = dict(error.extensions or {})
+            existing.setdefault("code", ErrorCode.VALIDATION_ERROR)
+            error.extensions = existing
+            return error
+
+        # Unexpected resolver exception — mask internal details
         self._log_unexpected_error(error)
         return GraphQLError(
             message="An internal error occurred",
@@ -75,6 +91,9 @@ class StructuredErrorExtension(SchemaExtension):
             str(exc),
             metadata,
         )
+
+    def _log_validation_error(self, error: GraphQLError) -> None:
+        logger.info("GraphQL validation error: %s", error.message)
 
     def _log_unexpected_error(self, error: GraphQLError) -> None:
         logger.error(
