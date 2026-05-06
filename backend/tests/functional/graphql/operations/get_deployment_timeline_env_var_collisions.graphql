@@ -1,0 +1,14 @@
+query GetDeploymentTimelineEnvVarCollisions($deploymentId: UUID!) {
+    deploymentTimeline(deploymentId: $deploymentId) {
+        task {
+            id
+        }
+        envVarCollisions {
+            component
+            container
+            name
+            chartValue
+            userValue
+        }
+    }
+}

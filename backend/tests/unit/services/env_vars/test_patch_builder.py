@@ -8,22 +8,46 @@ Covers:
   mirroring :class:`ResourcesPatch`. Multi-container per-pod fan-out is out
   of scope for v1 (see spec.md §Assumptions / data-model.md §5.1).
 * CronJob path variant — patch nests under ``spec.jobTemplate``.
+* ``ChartEnvCollision`` dataclass shape and the FR-027/FR-028 structured
+  warning emission for every operator-set env var key.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
+import pytest
 import yaml
+from loguru import logger
 
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     EnvVarsPatch,
 )
 from styrmin_backend.context.models.config import PostRenderInjection
 from styrmin_backend.services.env_vars.patch_builder import (
+    ChartEnvCollision,
     build_env_vars_post_rendering_patches,
 )
 from styrmin_backend.services.scheduling.patch_builder import (
     POD_TEMPLATE_BEARING_KINDS,
 )
+
+
+@pytest.fixture
+def loguru_caplog(
+    caplog: pytest.LogCaptureFixture,
+) -> Iterator[pytest.LogCaptureFixture]:
+    """Bridge ``loguru`` records into pytest's ``caplog`` so the structured
+    warning emitted by the patch builder can be asserted on directly.
+    """
+    handler_id = logger.add(
+        caplog.handler,
+        format="{message}",
+        level=0,
+        filter=lambda record: True,
+    )
+    yield caplog
+    logger.remove(handler_id)
 
 
 class TestEnvVarsPatchRendering:
@@ -274,3 +298,145 @@ class TestUS6ComponentLevelOptOut:
             label_selector=None,
         )
         assert patches == []
+
+
+class TestUS7ChartEnvCollision:
+    """T071 / US7: chart-vs-user env var collision dataclass + structured
+    warning emission per FR-027/FR-028.
+
+    v1 NOTE — degradation path: the backend has no line-of-sight into the
+    post-rendered manifest at the patch layer (the env-var patch is shipped
+    to FluxCD as a JSON-patch document and Kustomize processes it
+    on-cluster). FR-028 explicitly authorises the structured-log fallback
+    when timeline emission is not feasible. These tests pin the shape of
+    :class:`ChartEnvCollision` and the unconditional log emission per
+    operator-set env var key — the always-on signal support uses to
+    correlate against chart-rendered values when triaging. The
+    "user value wins in the rendered output" assertion called out in the
+    task description is intentionally out of scope here: it requires real
+    Helm rendering against a live cluster and is exercised by the E2E
+    suite (T073 — currently skipped pending the rendered-manifest seam).
+    """
+
+    def test_chart_env_collision_dataclass_shape(self) -> None:
+        """The dataclass mirrors the GraphQL ``EnvVarCollision`` field
+        order so the ``EnvVarCollision.from_data`` projection is a
+        straight-through pass-through.
+        """
+        collision = ChartEnvCollision(
+            component="worker",
+            container="app",
+            name="LOG_LEVEL",
+            chart_value="warn",
+            user_value="debug",
+        )
+        assert collision.component == "worker"
+        assert collision.container == "app"
+        assert collision.name == "LOG_LEVEL"
+        assert collision.chart_value == "warn"
+        assert collision.user_value == "debug"
+
+    def test_chart_env_collision_component_optional(self) -> None:
+        """``component`` is ``None`` for FR-004 broadcast scenarios where
+        the workload is not under any component (driver declares zero
+        components).
+        """
+        collision = ChartEnvCollision(
+            component=None,
+            container="app",
+            name="LOG_LEVEL",
+            chart_value="warn",
+            user_value="debug",
+        )
+        assert collision.component is None
+
+    def test_emits_structured_warning_per_operator_set_key(
+        self, loguru_caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Per FR-027/FR-028: every operator-set env var key triggers an
+        ``env_var_potentially_chart_colliding`` warning carrying the
+        deployment id, optional component, name, and user value. Support
+        correlates these log lines against chart values when triaging,
+        which is the v1 substitute for the rendered-manifest collision
+        diff.
+        """
+        loguru_caplog.set_level("WARNING")
+        build_env_vars_post_rendering_patches(
+            {"LOG_LEVEL": "debug", "FOO": "bar"},
+            label_selector="styrmin/component=worker",
+            component="worker",
+            deployment_id="dep-123",
+        )
+        warning_records = [r for r in loguru_caplog.records if r.levelname == "WARNING"]
+        collision_records = [
+            r
+            for r in warning_records
+            if "env_var_potentially_chart_colliding" in r.getMessage()
+        ]
+        assert len(collision_records) == 2, [r.getMessage() for r in warning_records]
+        # Each operator-set name MUST appear in exactly one warning record.
+        emitted_names = {
+            name
+            for name in ("LOG_LEVEL", "FOO")
+            for r in collision_records
+            if f"name={name}" in r.getMessage()
+        }
+        assert emitted_names == {"LOG_LEVEL", "FOO"}
+        # Deployment id and component are threaded through so triage can
+        # correlate against the right rendered manifest.
+        assert all("deployment_id=dep-123" in r.getMessage() for r in collision_records)
+        assert all("component=worker" in r.getMessage() for r in collision_records)
+
+    def test_warning_emitted_with_no_component_for_broadcast_path(
+        self, loguru_caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """FR-004 broadcast (no components): ``component`` is ``None`` in
+        the structured log entry; the operator-set key is still surfaced.
+        """
+        loguru_caplog.set_level("WARNING")
+        build_env_vars_post_rendering_patches(
+            {"LOG_LEVEL": "debug"},
+            deployment_id="dep-broadcast",
+        )
+        collision_records = [
+            r
+            for r in loguru_caplog.records
+            if "env_var_potentially_chart_colliding" in r.getMessage()
+        ]
+        assert len(collision_records) == 1
+        assert "component=None" in collision_records[0].getMessage()
+        assert "name=LOG_LEVEL" in collision_records[0].getMessage()
+
+    def test_no_warning_when_inject_opted_out(
+        self, loguru_caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When ``inject.env_vars=False`` the patch builder short-circuits
+        BEFORE the warning emission — there is no operator-set entry
+        making it onto the rendered pod, so no triage signal is needed.
+        """
+        loguru_caplog.set_level("WARNING")
+        build_env_vars_post_rendering_patches(
+            {"LOG_LEVEL": "debug"},
+            inject=PostRenderInjection(env_vars=False),
+        )
+        collision_records = [
+            r
+            for r in loguru_caplog.records
+            if "env_var_potentially_chart_colliding" in r.getMessage()
+        ]
+        assert collision_records == []
+
+    def test_no_warning_when_resolved_dict_empty(
+        self, loguru_caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An empty resolved dict carries no operator-set entries, so no
+        triage signal is emitted.
+        """
+        loguru_caplog.set_level("WARNING")
+        build_env_vars_post_rendering_patches({})
+        collision_records = [
+            r
+            for r in loguru_caplog.records
+            if "env_var_potentially_chart_colliding" in r.getMessage()
+        ]
+        assert collision_records == []

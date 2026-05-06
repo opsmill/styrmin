@@ -783,3 +783,104 @@ async def test_us6_component_inject_opt_out(
         "opted-out component must not receive operator-set env vars; "
         f"observed env on database pods: {database_envs}"
     )
+
+
+# ---------------------------------------------------------------------------
+# US7 — Chart conflict warning (T073 / Quickstart Step 8)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skip(
+    reason=(
+        "v1 lacks a rendered-manifest collision-detection seam; per FR-028 "
+        "the chart-vs-user conflict warning degrades to a structured log "
+        "entry (`env_var_potentially_chart_colliding`) rather than a real "
+        "`DeploymentTimelineEntry.envVarCollisions` payload. The patch "
+        "builder cannot diff against the chart's rendered env block at "
+        "this layer because the env-var patch is shipped to FluxCD as a "
+        "JSON-patch document and Kustomize processes it on-cluster — the "
+        "backend never reads the post-rendered manifest. Unskipping this "
+        "test is one-line once a future iteration adds the post-apply "
+        "fetch + diff seam (the agent reads rendered manifests, diffs "
+        "against operator-set env vars, and reports collisions back onto "
+        "the per-task timeline). The test body is written to that future "
+        "shape so the work surface is obvious."
+    )
+)
+@pytest.mark.api_only(
+    reason=(
+        "API/SDK-only flow (Quickstart Step 8); the assertion is on the "
+        "rendered pod template plus a GraphQL timeline query — no UI page "
+        "navigation. The [ui-chromium] variant would just re-run the same "
+        "SDK calls."
+    )
+)
+@pytest.mark.ci
+async def test_us7_chart_conflict_warning(
+    env_vars_environment: dict,  # noqa: ARG001 — keeps fixture chain wired
+    env_vars_deployment: dict,
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    _env_vars_driver_bound: None,  # noqa: ARG001
+) -> None:
+    """Quickstart Step 8: a chart that renders a colliding env entry plus
+    an operator-set env var of the same name.
+
+    Asserts (FR-027 / SC-007 / Acceptance Scenario 7.1):
+
+    1. The rendered pod's container has exactly one entry for the
+       colliding name with the operator-set value (post-render replaces
+       chart value).
+    2. The deployment timeline carries a single ``EnvVarCollision``
+       record naming the colliding entry.
+
+    The simple-app driver currently does NOT render a chart-default
+    ``LOG_LEVEL`` entry, so this test is skipped pending either a chart
+    that does or the rendered-manifest fetch + diff seam that would let
+    the platform synthesise the collision record from a static
+    ``env_vars`` set against a template. See the ``@pytest.mark.skip``
+    reason above.
+    """
+    deployment_id = env_vars_deployment["deployment_id"]
+    namespace = env_vars_deployment["namespace"]
+    _, client = await scenario_driver.context()
+
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_id,
+        config={"env_vars": {"LOG_LEVEL": "debug"}},
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+
+    # 1) Operator-set value wins on the rendered pod.
+    dep = await _wait_for_pod_template(
+        vcluster,
+        namespace=namespace,
+        label_selector="app.kubernetes.io/name=simple-app",
+        predicate=lambda d: any(
+            entry.name == "LOG_LEVEL" and entry.value == "debug"
+            for container in d.spec.template.spec.containers or []
+            for entry in container.env or []
+        ),
+        description="LOG_LEVEL=debug overriding chart-rendered LOG_LEVEL=warn",
+    )
+    log_level_entries = [
+        entry for entry in _container_envs(dep) if entry["name"] == "LOG_LEVEL"
+    ]
+    assert len(log_level_entries) == 1
+    assert log_level_entries[0]["value"] == "debug"
+
+    # 2) Timeline surfaces the collision. NOTE: this assertion is the
+    #    half that requires the rendered-manifest detection seam — until
+    #    that lands, the field is exposed as `[]` and the assertion
+    #    will fail (which is why the whole test is skipped).
+    timeline = await client.deployment.timeline(deployment_id=uuid.UUID(deployment_id))
+    collisions = [
+        c
+        for entry in timeline
+        for c in (getattr(entry, "env_var_collisions", []) or [])
+        if c.name == "LOG_LEVEL"
+    ]
+    assert len(collisions) >= 1
+    assert any(c.user_value == "debug" for c in collisions)

@@ -229,7 +229,7 @@ export type Deployment = {
   applicationDriverVersionId: Scalars['UUID']['output'];
   applicationInstance?: Maybe<ApplicationInstance>;
   applicationVersion: Scalars['String']['output'];
-  /** Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Orphaned blocks (component renamed or removed by a driver upgrade) are visible here but skipped by the post-render injector — orphan handling lands in Phase 7 (US5); for US3 every entry has ``isOrphaned=False``. */
+  /** Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Orphaned blocks (component renamed or removed by a driver upgrade — FR-029..FR-033) are visible here but skipped by the post-render injector so no env entries reach rendered pods. */
   componentEnvVars: Array<ComponentEnvVars>;
   components: Array<Component>;
   config: Scalars['JSON']['output'];
@@ -281,6 +281,8 @@ export type DeploymentTimelineEntry = {
   __typename?: 'DeploymentTimelineEntry';
   applicationVersion?: Maybe<Scalars['String']['output']>;
   contextDiff?: Maybe<ContextDiff>;
+  /** Chart-vs-user env var collisions detected during the reconcile this entry represents. Empty in v1 — see :type:`EnvVarCollision` for the FR-028 degradation rationale; structured log entries are the authoritative source until the rendered-manifest detection seam lands. */
+  envVarCollisions: Array<EnvVarCollision>;
   task: Task;
 };
 
@@ -308,6 +310,16 @@ export type EnvVar = {
   name: Scalars['String']['output'];
   /** The value to set. May be the empty string. NOT for secret material; see the EnvVar type description. */
   value: Scalars['String']['output'];
+};
+
+/** Collision between an operator-set env var and a chart-rendered env entry of the same name. The operator-set value wins; this record exposes the chart value for audit. v1 NOTE: the backend has no line-of-sight into the post-rendered manifest at the patch layer (Kustomize processes the post-render patch on-cluster), so the field is exposed for forward-compatibility but always returns an empty list in v1; the authoritative collision signal in v1 is the `env_var_potentially_chart_colliding` structured log entry emitted by the patch builder per operator-set env var key (FR-027/FR-028). */
+export type EnvVarCollision = {
+  __typename?: 'EnvVarCollision';
+  chartValue: Scalars['String']['output'];
+  component?: Maybe<Scalars['String']['output']>;
+  container: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+  userValue: Scalars['String']['output'];
 };
 
 export type Environment = {
