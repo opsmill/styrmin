@@ -63,6 +63,26 @@ class ResolvedComponentScheduling(BaseModel):
     provenance: dict[str, ProvenanceLevel] = Field(default_factory=dict)
 
 
+class ResolvedComponentEnvVars(BaseModel):
+    """Per-component effective env vars plus provenance.
+
+    Mirrors :class:`ResolvedComponentScheduling`: ``config`` is the fully
+    merged ``dict[str, str]`` for one component (env → deployment → component
+    layers combined, per-key deepest-wins per data-model.md §2.2);
+    ``provenance`` maps each effective env var name to the level that
+    contributed its final value. ``is_orphaned`` is set when the targeted
+    component is no longer declared by the deployment's current driver
+    (FR-029..FR-033). Orphaned blocks are kept in the resolved context so
+    the GraphQL surface can expose them, but the patch builder skips them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    config: dict[str, str]
+    provenance: dict[str, ProvenanceLevel] = Field(default_factory=dict)
+    is_orphaned: bool = False
+
+
 class ComponentContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -70,6 +90,7 @@ class ComponentContext(BaseModel):
     name: str
     enabled: bool
     scheduling: ResolvedComponentScheduling | None = None
+    env_vars: ResolvedComponentEnvVars | None = None
 
 
 class ComponentsContext(RootModel):
