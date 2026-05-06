@@ -216,5 +216,5 @@ Use `git commit --no-verify` only for genuine emergencies — e.g., a hook that 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/007-graphql-propagation-tests/plan.md`.
+at `specs/008-deployment-env-vars/plan.md`.
 <!-- SPECKIT END -->
