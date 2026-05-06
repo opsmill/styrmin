@@ -461,6 +461,38 @@ class EnvironmentConfig(BaseConfigSection):
         return validate_env_vars_dict("environment", v)
 
 
+class ComponentConfigBlock(BaseModel):
+    """Per-component override block carried under ``DeploymentConfig.components``.
+
+    For US3 (008-deployment-env-vars) this slot only carries ``env_vars`` —
+    the per-component free-form env var dict (FR-001 component scope, FR-002
+    deepest-wins precedence). Future iterations may add per-component
+    ``scheduling`` or ``inject`` overrides under the same block; only
+    ``env_vars`` is wired today.
+
+    The ``env_vars`` dict is validated against the same caps as the
+    deployment-scope dict via :func:`validate_env_vars_dict` with
+    ``scope="component"``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    env_vars: dict[str, str] | None = None
+
+    @field_validator("env_vars")
+    @classmethod
+    def _validate_component_env_vars(
+        cls, v: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        if v is None:
+            return v
+        from styrmin_backend.services.env_vars.validator import (
+            validate_env_vars_dict,
+        )
+
+        return validate_env_vars_dict("component", v)
+
+
 class DeploymentConfig(ClusterConfig, EnvironmentConfig):
     """Deployment context.
 
@@ -472,9 +504,16 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
         env_vars (dict[str, str] | None): Deployment-scope free-form env vars
             (008-deployment-env-vars). Overrides matching keys from the
             environment scope per FR-002 deepest-wins precedence.
+        components (dict[str, ComponentConfigBlock] | None): Per-component
+            override blocks keyed by component name (US3). Each block carries
+            the component-scope ``env_vars`` dict. Component names that do
+            not match a driver-declared component are rejected at the service
+            boundary with ``UnknownComponentEnvVarError`` (FR-010).
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    components: dict[str, ComponentConfigBlock] | None = None
 
     @field_validator("env_vars")
     @classmethod

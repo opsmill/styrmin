@@ -83,6 +83,31 @@ class EnvVar:
     )
 
 
+@strawberry.type(
+    description=(
+        "A bundle of environment variables targeting one component, plus an "
+        "``isOrphaned`` flag that becomes true when the deployment's current "
+        "driver no longer declares the targeted component (008-deployment-env-vars "
+        "/ US3 + US5). Orphaned blocks remain visible in the API but are NOT "
+        "injected into rendered pods. For US3 (Phase 5) every entry has "
+        "``isOrphaned=False``; the orphan transition lands in Phase 7 (US5)."
+    )
+)
+class ComponentEnvVars:
+    component: str = strawberry.field(description="Name of the targeted component.")
+    env_vars: list[EnvVar] = strawberry.field(
+        description="The effective env vars set on this component (env+dep+component merged)."
+    )
+    is_orphaned: bool = strawberry.field(
+        description=(
+            "True when the deployment's current driver no longer declares "
+            "this component. Orphaned blocks are visible in the API but are "
+            "NOT injected into rendered pods. Lands with US5 (Phase 7); "
+            "always False in US3."
+        )
+    )
+
+
 @strawberry.type
 class ResolvedComponentScheduling:
     """Per-component effective scheduling configuration plus provenance.
@@ -379,6 +404,80 @@ class Deployment:
         return [
             EnvVar(name=k, value=v) for k, v in resolved.deployment_effective.items()
         ]
+
+    @strawberry.field(
+        description=(
+            "Per-component effective env vars, including orphaned blocks "
+            "(``isOrphaned=true``). Component-level entries override "
+            "deployment- and environment-level entries on a per-key basis "
+            "(FR-002 deepest-wins). Orphaned blocks (component renamed or "
+            "removed by a driver upgrade) are visible here but skipped by "
+            "the post-render injector — orphan handling lands in Phase 7 "
+            "(US5); for US3 every entry has ``isOrphaned=False``."
+        )
+    )
+    async def component_env_vars(self, info: strawberry.Info) -> list[ComponentEnvVars]:
+        """Resolve effective env vars per declared component.
+
+        Pulls per-component blocks from
+        ``DeploymentConfig.components[<name>].env_vars`` and merges them with
+        the environment + deployment scopes via :class:`EnvVarsResolver`.
+        Components without an explicit block still appear in the result with
+        the deployment-level merged dict (the merge falls through to the
+        ``deployment`` layer). Components for which the merged dict is empty
+        are omitted to keep the surface tidy.
+        """
+        from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
+
+        uow = info.context["uow"]
+        async with uow:
+            deployment = await uow.deployments.find(self.id)
+            if deployment is None:
+                logger.warning(
+                    "component_env_vars: deployment {} not found (likely "
+                    "deleted between parent query and sub-field resolution)",
+                    self.id,
+                )
+                return []
+            environment = await uow.environments.get(deployment.environment_id)
+            env_config_raw = environment.config if environment is not None else None
+            dep_config_raw = deployment.config
+            driver_components = [c.name for c in (deployment.components or [])]
+
+        env_cfg = (
+            EnvironmentConfig.model_validate(env_config_raw) if env_config_raw else None
+        )
+        dep_cfg = (
+            DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None
+        )
+
+        component_env_vars: dict[str, dict[str, str] | None] = {}
+        if dep_cfg is not None:
+            for name, block in (dep_cfg.components or {}).items():
+                component_env_vars[name] = block.env_vars
+
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=env_cfg,
+            deployment=dep_cfg,
+            component_env_vars=component_env_vars,
+            driver_components=driver_components,
+        )
+
+        results: list[ComponentEnvVars] = []
+        for entry in resolved.components:
+            if not entry.resolved.config:
+                continue
+            results.append(
+                ComponentEnvVars(
+                    component=entry.component_name,
+                    env_vars=[
+                        EnvVar(name=k, value=v)
+                        for k, v in entry.resolved.config.items()
+                    ],
+                    is_orphaned=entry.resolved.is_orphaned,
+                )
+            )
+        return results
 
     @strawberry.field
     async def crd_status(self, info: strawberry.Info) -> DeploymentStatusType | None:

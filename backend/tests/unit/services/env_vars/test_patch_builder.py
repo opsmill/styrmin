@@ -127,3 +127,89 @@ class TestBuildEnvVarsPatches:
             containers = spec_path["containers"]
             assert containers[0]["name"] == "*"
             assert {"name": "LOG_LEVEL", "value": "debug"} in containers[0]["env"]
+
+
+class TestComponentLevelInvocations:
+    """T043 / US3: component-only and mixed deployment+component invocations.
+
+    The patch builder is a primitive that takes a resolved dict and an
+    optional ``label_selector``. The per-component path drives multiple
+    calls — one per declared component, each with its own selector. These
+    tests pin down the invariants the application builder relies on:
+    every call narrows by the supplied selector, and disjoint dicts produce
+    disjoint patch sets that can be concatenated without overlap.
+    """
+
+    def test_component_only_dict_emits_narrowed_patches(self) -> None:
+        """Component-level only — every emitted patch must carry the
+        component's label selector so the patch never bleeds onto peer
+        components."""
+        patches = build_env_vars_post_rendering_patches(
+            {"WORKER_QUEUE": "orders"},
+            label_selector="styrmin/component=worker",
+        )
+        assert len(patches) == len(POD_TEMPLATE_BEARING_KINDS)
+        for tp in patches:
+            assert tp.target.label_selector == "styrmin/component=worker"
+            doc = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
+            spec_path = (
+                doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+                if tp.target.kind == "CronJob"
+                else doc["spec"]["template"]["spec"]
+            )
+            assert {"name": "WORKER_QUEUE", "value": "orders"} in spec_path[
+                "containers"
+            ][0]["env"]
+
+    def test_mixed_deployment_and_component_dicts_are_disjoint(self) -> None:
+        """Mixed deployment + component — when the application builder
+        invokes the primitive once per component with the merged dict,
+        every component's patch set carries that component's selector and
+        the entries the resolver assembled. Peer components do not see
+        each other's patches."""
+        api_patches = build_env_vars_post_rendering_patches(
+            {"LOG_LEVEL": "info"},
+            label_selector="styrmin/component=api",
+        )
+        worker_patches = build_env_vars_post_rendering_patches(
+            {"LOG_LEVEL": "debug", "WORKER_QUEUE": "orders"},
+            label_selector="styrmin/component=worker",
+        )
+        # Selectors are mutually exclusive — concatenation never broadcasts.
+        api_selectors = {tp.target.label_selector for tp in api_patches}
+        worker_selectors = {tp.target.label_selector for tp in worker_patches}
+        assert api_selectors == {"styrmin/component=api"}
+        assert worker_selectors == {"styrmin/component=worker"}
+        # api patches do NOT carry WORKER_QUEUE.
+        for tp in api_patches:
+            doc = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
+            spec_path = (
+                doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+                if tp.target.kind == "CronJob"
+                else doc["spec"]["template"]["spec"]
+            )
+            names = {entry["name"] for entry in spec_path["containers"][0]["env"]}
+            assert "WORKER_QUEUE" not in names
+            assert "LOG_LEVEL" in names
+        # worker patches carry both names.
+        for tp in worker_patches:
+            doc = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
+            spec_path = (
+                doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+                if tp.target.kind == "CronJob"
+                else doc["spec"]["template"]["spec"]
+            )
+            names = {entry["name"] for entry in spec_path["containers"][0]["env"]}
+            assert names >= {"LOG_LEVEL", "WORKER_QUEUE"}
+
+    def test_component_inject_false_short_circuits_emission(self) -> None:
+        """Component-scope ``inject.env_vars=False`` (T015 / US6 surface)
+        must short-circuit the per-component branch the same way it does the
+        deployment-level branch — peer components are unaffected."""
+        inject = PostRenderInjection(env_vars=False)
+        patches = build_env_vars_post_rendering_patches(
+            {"WORKER_QUEUE": "orders"},
+            inject=inject,
+            label_selector="styrmin/component=worker",
+        )
+        assert patches == []

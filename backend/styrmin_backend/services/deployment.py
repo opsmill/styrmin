@@ -22,6 +22,9 @@ from styrmin_backend.domain.utils import (
 )
 from styrmin_backend.context.models.config import DedicatedIngressConfig
 from styrmin_backend.operator.config import CRD_GROUP, CRD_PLURAL, CRD_VERSION
+from styrmin_backend.services.env_vars.exceptions import (
+    UnknownComponentEnvVarError,
+)
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
     DeploymentNameConflictError,
@@ -48,6 +51,41 @@ from styrmin_backend.services.services_discovery import (
     reconcile_services_on_upgrade,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
+
+
+def _validate_component_env_var_targets(
+    deployment_config: dict | None,
+    known_component_names: list[str],
+) -> None:
+    """Reject ``config.components.<name>.env_vars`` targeting unknown components.
+
+    Raised at the service-layer entry point ahead of Pydantic-driven
+    ``DeploymentConfig`` validation so the typed
+    :class:`UnknownComponentEnvVarError` surfaces directly to the GraphQL
+    caller (mapped to ``extensions.code = "UNKNOWN_COMPONENT_ENV_VAR"``)
+    instead of being collapsed into ``ValidationError`` and re-wrapped as the
+    generic ``INVALID_CONTEXT`` error code (008-deployment-env-vars / FR-010).
+    The known-components list is sourced from the deployment's current
+    driver and surfaced in the error metadata so operators can fix the typo
+    without a round-trip.
+    """
+    if not deployment_config:
+        return
+    components_block = deployment_config.get("components")
+    if not isinstance(components_block, dict) or not components_block:
+        return
+    known = set(known_component_names)
+    for name, block in components_block.items():
+        if name in known:
+            continue
+        # Only fail when the offending block actually carries env vars (the
+        # block could be empty in transient client payloads); other future
+        # per-component slots will get their own typed errors.
+        if isinstance(block, dict) and block.get("env_vars"):
+            raise UnknownComponentEnvVarError(
+                component_name=name,
+                known_components=sorted(known),
+            )
 
 
 async def get_deployment(
@@ -157,12 +195,6 @@ async def update_deployment(
             "At least one of config, parameters, name, or serviceNameOverrides must be provided"
         )
 
-    if deployment_config is not None:
-        try:
-            validate_deployment_config(context=deployment_config)
-        except InvalidDeploymentContextError as e:
-            raise InvalidContextError() from e
-
     async with uow:
         # Get the deployment
         deployment = await uow.deployments.find(id=deployment_id)
@@ -176,6 +208,23 @@ async def update_deployment(
             deployment.id,
             deployment.application_version,
         )
+
+        if deployment_config is not None:
+            # Reject component-level env var blocks targeting components the
+            # deployment's current driver does not declare (FR-010). Run this
+            # ahead of Pydantic validation so the typed error reaches the
+            # GraphQL caller intact.
+            adv = await uow.application_driver_versions.get(
+                id=deployment.application_driver_version_id
+            )
+            assert adv is not None, "Application driver version not found"
+            known_names = [cc.name for cc in (adv.component_configs or [])]
+            _validate_component_env_var_targets(deployment_config, known_names)
+
+            try:
+                validate_deployment_config(context=deployment_config)
+            except InvalidDeploymentContextError as e:
+                raise InvalidContextError() from e
 
         # Update deployment name if provided
         if deployment_name is not None:
@@ -648,10 +697,9 @@ async def deploy_application(
     if deployment_config is None:
         deployment_config = {}
 
-    try:
-        validate_deployment_config(context=deployment_config)
-    except InvalidDeploymentContextError as e:
-        raise InvalidContextError(str(e)) from e
+    # Pydantic validation runs after driver lookup so we can surface the
+    # typed ``UnknownComponentEnvVarError`` (FR-010) ahead of the generic
+    # context-validation error.
 
     # Treat empty string as no version provided
     if version is not None and version.strip() == "":
@@ -689,6 +737,21 @@ async def deploy_application(
             raise InvalidVersionError(
                 f"Version {version} is not supported by the application driver {driver_name}"
             )
+
+        # Reject component-level env var blocks targeting components the
+        # selected driver does not declare (FR-010). Surface
+        # ``UnknownComponentEnvVarError`` with ``UNKNOWN_COMPONENT_ENV_VAR``
+        # ahead of Pydantic-driven config validation so the typed error
+        # reaches the GraphQL caller.
+        known_names = [
+            cc.name for cc in (application_driver_version.component_configs or [])
+        ]
+        _validate_component_env_var_targets(deployment_config, known_names)
+
+        try:
+            validate_deployment_config(context=deployment_config)
+        except InvalidDeploymentContextError as e:
+            raise InvalidContextError(str(e)) from e
 
         # Get the environment
         environment = await uow.environments.get(environment_id)

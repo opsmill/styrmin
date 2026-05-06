@@ -1,0 +1,13 @@
+query GetDeploymentComponentEnvVars($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        componentEnvVars {
+            component
+            isOrphaned
+            envVars {
+                name
+                value
+            }
+        }
+    }
+}
