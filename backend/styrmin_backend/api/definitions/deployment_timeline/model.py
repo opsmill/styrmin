@@ -10,6 +10,9 @@ from styrmin_backend.services.deployment_timeline import (
     ContextDiff as ContextDiffData,
     TimelineEntry as TimelineEntryData,
 )
+from styrmin_backend.services.env_vars.patch_builder import (
+    ChartEnvCollision as ChartEnvCollisionData,
+)
 
 
 @strawberry.type
@@ -42,6 +45,39 @@ class ContextDiff:
         return cls(changes=[ContextChange.from_data(c) for c in data.changes])
 
 
+@strawberry.type(
+    description=(
+        "Collision between an operator-set env var and a chart-rendered env "
+        "entry of the same name. The operator-set value wins; this record "
+        "exposes the chart value for audit. v1 NOTE: the backend has no "
+        "line-of-sight into the post-rendered manifest at the patch layer "
+        "(Kustomize processes the post-render patch on-cluster), so the "
+        "field is exposed for forward-compatibility but always returns an "
+        "empty list in v1; the authoritative collision signal in v1 is the "
+        "`env_var_potentially_chart_colliding` structured log entry emitted "
+        "by the patch builder per operator-set env var key (FR-027/FR-028)."
+    )
+)
+class EnvVarCollision:
+    """GraphQL projection of :class:`ChartEnvCollision`."""
+
+    component: str | None
+    container: str
+    name: str
+    chart_value: str
+    user_value: str
+
+    @classmethod
+    def from_data(cls, data: ChartEnvCollisionData) -> EnvVarCollision:
+        return cls(
+            component=data.component,
+            container=data.container,
+            name=data.name,
+            chart_value=data.chart_value,
+            user_value=data.user_value,
+        )
+
+
 @strawberry.type
 class DeploymentTimelineEntry:
     """A task enriched with version and diff data for the deployment timeline."""
@@ -49,6 +85,16 @@ class DeploymentTimelineEntry:
     task: Task
     application_version: str | None = None
     context_diff: ContextDiff | None = None
+    env_var_collisions: list[EnvVarCollision] = strawberry.field(
+        default_factory=list,
+        description=(
+            "Chart-vs-user env var collisions detected during the reconcile "
+            "this entry represents. Empty in v1 — see :type:`EnvVarCollision` "
+            "for the FR-028 degradation rationale; structured log entries "
+            "are the authoritative source until the rendered-manifest "
+            "detection seam lands."
+        ),
+    )
 
     @classmethod
     def from_data(cls, entry: TimelineEntryData) -> DeploymentTimelineEntry:
@@ -60,4 +106,7 @@ class DeploymentTimelineEntry:
                 if entry.context_diff
                 else None
             ),
+            env_var_collisions=[
+                EnvVarCollision.from_data(c) for c in entry.env_var_collisions
+            ],
         )
