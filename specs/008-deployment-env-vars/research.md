@@ -39,6 +39,8 @@
 
 **Reference**: `backend/styrmin_backend/context/models/config.py:424-461` (`EnvironmentConfig`, `DeploymentConfig`), ADR-006 deployment CRD context embedding.
 
+**Cap rationale (FR-008 + FR-008a)**: The Kubernetes `etcd` per-resource size limit is **1.5 MiB** (default `--max-request-bytes`). The deployment CRD context-embedding mechanism (ADR-006) co-locates the resolved env vars with the rest of the resolved context inside that single resource; the resolved config also flows through the GraphQL Pydantic validation path which has comparable practical limits. The chosen caps leave room: with FR-008 enforcing 256 KiB per scope and FR-008a enforcing 256 KiB per resolved per-component dict and 1 MiB total resolved bytes per deployment, the worst-case env vars contribution stays under 1 MiB — leaving 500+ KiB for the rest of the resolved context (parameters, scheduling, networking, etc.). These numbers are tunable via configuration if a real workload demands it; v1 ships them hard-coded.
+
 ## 4. Conflict detection between operator-set env vars and chart-rendered env
 
 **Decision**: Conflict detection runs inside the new patch builder, at render time. The patch builder walks the rendered manifest's container `env` list (it already has access via the strategic-merge target) and records a `ChartEnvCollision(component, container, name, chart_value, user_value)` per collision on the patch result. The agent layer pulls these collisions out and surfaces them via two channels:

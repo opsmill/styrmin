@@ -17,6 +17,8 @@ Conflict detection between operator-set env vars and chart-rendered env entries 
 
 Driver upgrades that orphan stored per-component env vars succeed without user intervention. Orphan detection runs inside `EnvVarsResolver` at resolution time: any stored `componentEnvVars` block targeting a component the current driver does not declare is exposed via `ComponentEnvVars.isOrphaned = true` and is **not** injected. The orphan transition is naturally captured by the existing `context_diff` machinery — no new event type is introduced.
 
+**Known v1 asymmetry** (acknowledged in critique 20260506-065007 §X1): the driver-side documentation (`spec.env_vars` block + `ApplicationDriverVersion.envVars` query field) and the orphan-tracking surface (`ComponentEnvVars.isOrphaned`) ship in v1, but the frontend UI that surfaces them is explicitly out of scope (PRD §"Out of Scope"). This is a deliberate trade-off: the driver loader and resolver have to know about both paths, and splitting them across two tickets would force the loader/resolver work to live on a half-finished branch. SDK and GraphQL consumers benefit immediately; UI consumers benefit when the UI ticket lands.
+
 ## Technical Context
 
 **Language/Version**: Python 3.12+ (backend), TypeScript 5+ / React 19 (frontend; UI changes deferred per spec FR-036 and PRD "Out of Scope")

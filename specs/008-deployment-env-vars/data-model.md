@@ -8,7 +8,7 @@ A `dict[str, str] | None` field named `env_vars` is added to:
 
 - `EnvironmentConfig` (`backend/styrmin_backend/context/models/config.py`)
 - `DeploymentConfig` (inherits from `ClusterConfig` + `EnvironmentConfig`; gains the field)
-- The per-component `ArbitrarySectionModel.env_vars` slot (already `extra="allow"`; the field is *also* added explicitly to the typed surface so resolvers don't have to dig through `__pydantic_extra__`)
+- **Per-component slot**: the field lives on the **deployment-side context model** at `backend/styrmin_backend/context/models/components.py` — specifically, the user-set per-component config block stored under `DeploymentConfig.components[<name>].env_vars`. The data path is the existing component-config JSON sub-block carried by `ApplicationInstance.context`. The driver-side `ArbitrarySectionModel` (in `backend/styrmin_backend/services/driver/models/resources/driver.py`) is **not** touched here: driver-side components carry only the doc-only `DriverEnvVarDoc` declarations on `Specification.env_vars` (see §3 below). User-set values never live on the driver model.
 
 ```python
 # context/models/config.py (additions, condensed)
@@ -28,6 +28,8 @@ class EnvironmentConfig(BaseConfigSection):
 | Per-scope dict serialised ≤ 256 KiB | dict-level validator | `EnvVarSizeLimitExceededError(scope=..., bytes=..., cap=262144)` |
 | Empty-string values | accepted | — |
 | Duplicate-name in input list before dict construction | input-shape validator | `DuplicateEnvVarNameError(name=..., scope=...)` |
+| Resolved per-component dict ≤ 256 KiB; total resolved bytes per deployment ≤ 1 MiB | resolver post-merge check (FR-008a) | `EnvVarSizeLimitExceededError(scope="resolved", component=..., bytes=...)` |
+| Soft-warn (no rejection) on names matching the risky family `^(PATH|LD_.*|PYTHONPATH|RUBYLIB|NODE_PATH|JAVA_TOOL_OPTIONS)$` | per-key validator | `logger.warning("env_var_potentially_risky_name", name=..., scope=...)` |
 
 ### 1.2 `PostRenderInjection.env_vars` flag
 
