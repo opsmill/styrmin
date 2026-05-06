@@ -52,6 +52,7 @@ from .get_deployment import (
     GetDeploymentDeployment,
     GetDeploymentDeploymentApplicationInstance,
     GetDeploymentDeploymentComponents,
+    GetDeploymentDeploymentCreatedBy,
     GetDeploymentDeploymentDeployedServices,
 )
 from .get_deployment_pod_statuses import (
@@ -209,6 +210,7 @@ __all__ = [
     "GetDeploymentDeployment",
     "GetDeploymentDeploymentApplicationInstance",
     "GetDeploymentDeploymentComponents",
+    "GetDeploymentDeploymentCreatedBy",
     "GetDeploymentDeploymentDeployedServices",
     "GetDeploymentPodStatuses",
     "GetDeploymentPodStatusesDeployment",

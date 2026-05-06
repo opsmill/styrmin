@@ -78,6 +78,7 @@ def make_chain(
         environment_id=uuid4(),
         status=deployment_status,
         internal=deployment_internal,
+        created_by_user_id=uuid4(),
     )
     instance = ApplicationInstance(
         application_version="1.0.0",

@@ -110,6 +110,35 @@ async def test_upgrade_simple_app(
             )
 
 
+@pytest.mark.api_only(
+    reason=(
+        "Asserts createdBy attribution by reading the deployment through the SDK; "
+        "no UI flow exercised — the [ui-chromium] variant would just re-run the "
+        "same SDK call."
+    ),
+)
+@pytest.mark.ci
+async def test_deployment_records_created_by(
+    deployed_simple_app: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+) -> None:
+    """Issue #190: createDeployment records the calling user as
+    ``Deployment.createdBy``. The session-scoped client is the seeded
+    admin (per ``authenticated_styrmin_client``), so ``createdBy`` should
+    surface that user's id and username through the SDK projection.
+    """
+    _, client = session_scenario_driver
+    deployment_id = deployed_simple_app["deployment_id"]
+
+    deployment = await client.deployments.get(deployment_id)
+    me = await client.auth.current_user()
+    assert me is not None, "session client must be authenticated"
+    assert deployment.created_by is not None
+    assert deployment.created_by.id == me.id
+    assert deployment.created_by.username == me.username
+    assert deployment.created_by.display_name == me.display_name
+
+
 @pytest.mark.ci
 async def test_deployed_service_external_url_includes_port(
     deployed_simple_app: dict,

@@ -195,6 +195,7 @@ type Deployment {
   podStatuses: [PodStatus!]!
   resolvedScheduling: [ResolvedComponentScheduling!]!
   crdStatus: DeploymentStatusType
+  createdBy: User!
 }
 
 input DeploymentPodStatusReport {

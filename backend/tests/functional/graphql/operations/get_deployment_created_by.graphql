@@ -1,0 +1,10 @@
+query GetDeploymentCreatedBy($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        createdBy {
+            id
+            username
+            displayName
+        }
+    }
+}

@@ -1,0 +1,18 @@
+query GetDeploymentCreatedByAdminFields($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        createdBy {
+            id
+            username
+            displayName
+            role
+            effectiveRole
+            active
+            groups {
+                id
+                name
+                role
+            }
+        }
+    }
+}

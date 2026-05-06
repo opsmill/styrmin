@@ -537,6 +537,13 @@ class Mutation:
     ) -> Task | None:
         """Deploy an application in an environment."""
         uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        # RequiresAuthentication + RequiresRole(READ_WRITE) above guarantee a
+        # user is present; assert defensively rather than UnboundLocalError
+        # if the chain is ever reordered.
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
         environment = await resolve_environment(
             uow,
             environment_id=environment_id,
@@ -558,6 +565,7 @@ class Mutation:
             deployment_name=name,
             service_name_overrides=overrides_dict,
             uow=uow,
+            created_by_user_id=current_user.id,
         )
         return Task.from_instance(task)
 

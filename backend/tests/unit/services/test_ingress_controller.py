@@ -620,7 +620,9 @@ class TestEnsureIngressController:
             environments=fake_env_repo,
             deployments=fake_deployment_repo,
         )
-        await _ensure_ingress_controller(env_without_ingress.id, uow)
+        await _ensure_ingress_controller(
+            env_without_ingress.id, uow, created_by_user_id=uuid4()
+        )
         # No deployment should have been created
         result = await fake_deployment_repo.find_internal_by_environment(
             env_without_ingress.id
@@ -641,7 +643,9 @@ class TestEnsureIngressController:
             deployments=fake_deployment_repo,
         )
         with pytest.raises(ApplicationDriverNotFoundError):
-            await _ensure_ingress_controller(env_with_ingress.id, uow)
+            await _ensure_ingress_controller(
+                env_with_ingress.id, uow, created_by_user_id=uuid4()
+            )
 
     async def test_reuses_running_controller(
         self,
@@ -657,6 +661,7 @@ class TestEnsureIngressController:
             application_version="1.0.0",
             application_driver_version_id=uuid4(),
             environment_id=env_with_ingress.id,
+            created_by_user_id=uuid4(),
             internal=True,
         )
         existing.set_status(DeploymentState.RUNNING)
@@ -668,7 +673,9 @@ class TestEnsureIngressController:
             deployments=fake_deployment_repo,
         )
         # Should not raise, should not create a new deployment
-        await _ensure_ingress_controller(env_with_ingress.id, uow)
+        await _ensure_ingress_controller(
+            env_with_ingress.id, uow, created_by_user_id=uuid4()
+        )
         assert len(fake_deployment_repo._deployments) == 1
 
     async def test_raises_when_controller_failed(
@@ -684,6 +691,7 @@ class TestEnsureIngressController:
             application_version="1.0.0",
             application_driver_version_id=uuid4(),
             environment_id=env_with_ingress.id,
+            created_by_user_id=uuid4(),
             internal=True,
         )
         existing.set_status(DeploymentState.FAILED)
@@ -695,7 +703,9 @@ class TestEnsureIngressController:
             deployments=fake_deployment_repo,
         )
         with pytest.raises(IngressControllerNotHealthyError):
-            await _ensure_ingress_controller(env_with_ingress.id, uow)
+            await _ensure_ingress_controller(
+                env_with_ingress.id, uow, created_by_user_id=uuid4()
+            )
 
 
 # ======================================================================
@@ -714,6 +724,7 @@ class TestDeprovisioning:
             application_version="1.0.0",
             application_driver_version_id=uuid4(),
             environment_id=env_id,
+            created_by_user_id=uuid4(),
             internal=True,
         )
         await fake_deployment_repo.save(deployment)
@@ -732,6 +743,7 @@ class TestDeprovisioning:
             application_version="1.0.0",
             application_driver_version_id=uuid4(),
             environment_id=env_id,
+            created_by_user_id=uuid4(),
             internal=True,
         )
         await fake_deployment_repo.save(deployment)
@@ -756,6 +768,7 @@ class TestRetroactiveReconciliation:
             application_version="1.0.0",
             application_driver_version_id=uuid4(),
             environment_id=env_id,
+            created_by_user_id=uuid4(),
             internal=False,
         )
         await fake_deployment_repo.save(deployment)
@@ -776,6 +789,7 @@ class TestDeploymentInternalField:
             application_version="1.0.0",
             application_driver_version_id=uuid4(),
             environment_id=uuid4(),
+            created_by_user_id=uuid4(),
         )
         assert deployment.internal is False
 
@@ -785,6 +799,7 @@ class TestDeploymentInternalField:
             application_version="1.0.0",
             application_driver_version_id=uuid4(),
             environment_id=uuid4(),
+            created_by_user_id=uuid4(),
             internal=True,
         )
         assert deployment.internal is True

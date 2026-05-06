@@ -19,6 +19,7 @@ from styrmin_backend.api.definitions.pod_status.model import (
 from styrmin_backend.api.definitions.service.model import (
     DeployedService as DeployedServiceType,
 )
+from styrmin_backend.api.definitions.user.model import User as UserType
 from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.api.scalars import JSON
 from styrmin_backend.context.fqdn import (
@@ -172,6 +173,7 @@ class Deployment:
     environment_id: UUID
     internal: bool
     deleted_at: datetime | None = None
+    created_by_user_id: strawberry.Private[UUID]
 
     instance: strawberry.Private[DeploymentEntity]
 
@@ -497,6 +499,36 @@ class Deployment:
             return None
         return DeploymentStatusType.from_instance(status)
 
+    @strawberry.field
+    async def created_by(self, info: strawberry.Info) -> UserType:
+        """The user who created this deployment.
+
+        The returned ``User`` type role-gates its admin-only fields per
+        ADR-020: a non-admin caller selecting ``role`` / ``effectiveRole``
+        / ``active`` / ``groups`` / ``createdOn`` / ``updatedOn`` receives
+        a field-level ``FORBIDDEN`` error, while ``id`` / ``username`` /
+        ``displayName`` always resolve.
+        """
+        from sqlalchemy.orm import selectinload
+        from sqlmodel import select
+
+        from styrmin_backend.db.models import User as UserDBModel
+
+        uow = info.context["uow"]
+        # Eager-load groups for ``effectiveRole`` so the User serialiser
+        # does not trigger a lazy load on a closed async session.
+        result = await uow.session.exec(
+            select(UserDBModel)
+            .where(UserDBModel.id == self.created_by_user_id)
+            .options(selectinload(UserDBModel.groups))  # type: ignore[arg-type]
+        )
+        user = result.first()
+        assert user is not None, (
+            "Deployment.created_by_user_id is a non-null FK; the user row "
+            "must exist for any deployment that resolves this field."
+        )
+        return UserType.from_instance(user)
+
     @classmethod
     def from_instance(cls, instance: DeploymentEntity) -> Deployment:
         return cls(
@@ -510,5 +542,6 @@ class Deployment:
             environment_id=instance.environment_id,
             internal=instance.internal,
             deleted_at=instance.deleted_at,
+            created_by_user_id=instance.created_by_user_id,
             instance=instance,
         )

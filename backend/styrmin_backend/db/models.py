@@ -345,6 +345,13 @@ class Deployment(StyrminModel, table=True):
         index=True,
     )
 
+    created_by_user_id: UUID = Field(
+        sa_column=Column(
+            ForeignKey("user.id"),
+            nullable=False,
+        ),
+    )
+
     # ==============
     # Relationships
     # ==============

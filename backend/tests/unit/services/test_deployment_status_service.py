@@ -59,6 +59,7 @@ def _make_deployment(
         application_driver_version_id=uuid4(),
         environment_id=uuid4(),
         status=status,
+        created_by_user_id=uuid4(),
     )
 
 

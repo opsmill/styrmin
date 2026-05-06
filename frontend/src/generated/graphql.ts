@@ -219,6 +219,7 @@ export type Deployment = {
   components: Array<Component>;
   config: Scalars['JSON']['output'];
   crdStatus?: Maybe<DeploymentStatusType>;
+  createdBy: User;
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
   deployedServices: Array<DeployedService>;
   environment: Environment;

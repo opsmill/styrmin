@@ -588,10 +588,13 @@ async def resolver_data_fixture(session: AsyncSession) -> dict:
         InstanceStatus,
         Restore as RestoreModel,
         RestoreStatus,
+        Role,
         Task as TaskModel,
         TaskStatus,
         TaskType,
+        User as UserModel,
     )
+    from styrmin_backend.services.auth.password import hash_password as _hash_password
 
     cluster = ClusterModel(name="resolver-test-cluster")
     session.add(cluster)
@@ -628,12 +631,23 @@ async def resolver_data_fixture(session: AsyncSession) -> dict:
     session.add(adv)
     await session.flush()
 
+    creator = UserModel(
+        username="resolver-test-creator",
+        password_hash=_hash_password("seed-password-not-used"),
+        display_name="Resolver Test Creator",
+        active=True,
+        role=Role.ADMIN,
+    )
+    session.add(creator)
+    await session.flush()
+
     deployment = DeploymentModel(
         name="resolver-test-deployment",
         application_version="1.0.0",
         status=DeploymentState.RUNNING,
         application_driver_version_id=adv.id,
         environment_id=env.id,
+        created_by_user_id=creator.id,
     )
     session.add(deployment)
     await session.flush()

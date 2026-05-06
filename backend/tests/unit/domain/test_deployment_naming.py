@@ -120,6 +120,7 @@ class TestDeploymentCreateWithName:
             application_version="1.0.0",
             application_driver_version_id=uuid4(),
             environment_id=uuid4(),
+            created_by_user_id=uuid4(),
             name="my-deployment",
         )
         assert deployment.name == "my-deployment"
@@ -130,6 +131,7 @@ class TestDeploymentCreateWithName:
                 application_version="1.0.0",
                 application_driver_version_id=uuid4(),
                 environment_id=uuid4(),
+                created_by_user_id=uuid4(),
                 name="My Deployment",
             )
 
@@ -139,6 +141,7 @@ class TestDeploymentCreateWithName:
                 application_version="1.0.0",
                 application_driver_version_id=uuid4(),
                 environment_id=uuid4(),
+                created_by_user_id=uuid4(),
             )
 
     def test_create_with_empty_name_raises(self) -> None:
@@ -147,6 +150,7 @@ class TestDeploymentCreateWithName:
                 application_version="1.0.0",
                 application_driver_version_id=uuid4(),
                 environment_id=uuid4(),
+                created_by_user_id=uuid4(),
                 name="",
             )
 
@@ -156,6 +160,7 @@ class TestDeploymentCreateWithName:
                 application_version="1.0.0",
                 application_driver_version_id=uuid4(),
                 environment_id=uuid4(),
+                created_by_user_id=uuid4(),
                 name="   ",
             )
 

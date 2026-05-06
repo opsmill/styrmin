@@ -8,6 +8,11 @@ query GetDeployment($deploymentId: UUID!) {
         applicationVersion
         applicationDriverVersionId
         environmentId
+        createdBy {
+            id
+            username
+            displayName
+        }
         applicationInstance {
             id
             status

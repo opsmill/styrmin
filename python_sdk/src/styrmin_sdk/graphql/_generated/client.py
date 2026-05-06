@@ -638,6 +638,11 @@ class Client(AsyncBaseClient):
                 applicationVersion
                 applicationDriverVersionId
                 environmentId
+                createdBy {
+                  id
+                  username
+                  displayName
+                }
                 applicationInstance {
                   id
                   status
