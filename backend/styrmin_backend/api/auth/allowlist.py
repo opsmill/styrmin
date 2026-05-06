@@ -13,6 +13,11 @@ from __future__ import annotations
 #:
 #: ``login`` is the entry point; gating it would lock everyone out.
 #:
+#: ``logout`` is allow-listed per ADR-020 — a deactivated user must still
+#: be able to terminate their existing session. Gating logout behind
+#: ``RequiresAuthentication`` would defeat deactivation; idempotent for
+#: pre-auth callers (returns true and clears the cookie regardless).
+#:
 #: ``callback``, ``report_pod_statuses``, ``report_deployment_statuses`` are
 #: agent-to-server endpoints called from Prefect workflows and the in-cluster
 #: status reporter. They have no caller user identity in v1; a follow-up
@@ -22,6 +27,7 @@ from __future__ import annotations
 MUTATION_ALLOW_LIST: frozenset[str] = frozenset(
     {
         "login",
+        "logout",
         "callback",
         "reportPodStatuses",
         "reportDeploymentStatuses",

@@ -50,6 +50,9 @@ from styrmin_backend.services.applications import (
     load_application_driver_from_local_directory,
 )
 from styrmin_backend.services.auth.login import authenticate
+from styrmin_backend.services.auth.password_change import (
+    change_password as change_password_service,
+)
 from styrmin_backend.services.backup_storage_locations import (
     assign_backup_storage_location as assign_bsl_service,
     create_backup_storage_location as create_bsl_service,
@@ -130,6 +133,57 @@ class Mutation:
             path="/",
         )
         return LoginResult(token=raw_token, user=UserType.from_instance(user))
+
+    # logout is on the documented allow-list (api/auth/allowlist.py).
+    # ADR-020: a deactivated user must still be able to log out of their
+    # existing session — gating logout behind RequiresAuthentication or
+    # RequiresRole would defeat deactivation. Idempotent: with no session
+    # the call still clears the cookie and returns True.
+    @strawberry.mutation
+    async def logout(self, info: strawberry.Info) -> bool:
+        uow = info.context["uow"]
+        response = info.context["response"]
+        current_session = info.context.get("current_session")
+        if current_session is not None:
+            await uow.session.delete(current_session)
+            await uow.session.commit()
+            logger.info(
+                "logout user_id={} session_id={}",
+                current_session.user_id,
+                current_session.id,
+            )
+        # Always clear the cookie, regardless of whether a session row was
+        # present — idempotent by design.
+        response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+        return True
+
+    # changePassword needs only the authenticated baseline (any role can
+    # rotate their own password). RequiresRole(READ_ONLY) is the lowest
+    # gate the schema-walk completeness test accepts and is always
+    # satisfied for an authenticated caller.
+    @strawberry.mutation(extensions=[_requires(Role.READ_ONLY)])
+    async def change_password(
+        self,
+        info: strawberry.Info,
+        current_password: str,
+        new_password: str,
+    ) -> bool:
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        current_session = info.context["current_session"]
+        # Both are guaranteed non-None by RequiresAuthentication, but we
+        # defensively bail rather than UnboundLocalError further down.
+        assert current_user is not None and current_session is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        await change_password_service(
+            uow.session,
+            user=current_user,
+            current_password=current_password,
+            new_password=new_password,
+            calling_session_id=current_session.id,
+        )
+        return True
 
     @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def create_cluster(

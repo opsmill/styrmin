@@ -123,6 +123,28 @@ async def delete_all_sessions_for_user(db_session: AsyncSession, user_id: UUID) 
     return len(rows)
 
 
+async def delete_other_sessions_for_user(
+    db_session: AsyncSession, user_id: UUID, *, except_session_id: UUID
+) -> int:
+    """Delete every session for ``user_id`` other than ``except_session_id``.
+
+    Caller-preserving variant used by ``changePassword``: rotating credentials
+    must kick off any other device whose token might already be compromised
+    without logging the user out of the device they're rotating from.
+    """
+    result = await db_session.exec(
+        select(SessionModel)
+        .where(SessionModel.user_id == user_id)
+        .where(SessionModel.id != except_session_id)
+    )
+    rows = list(result.all())
+    for row in rows:
+        await db_session.delete(row)
+    if rows:
+        await db_session.commit()
+    return len(rows)
+
+
 def _ensure_aware(value: datetime) -> datetime:
     """SQLite drops tzinfo; reattach UTC so comparisons against now() work."""
     if value.tzinfo is None:

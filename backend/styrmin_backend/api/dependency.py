@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend.db.models import Session as SessionModel
 from styrmin_backend.db.models import User
 from styrmin_backend.db.utils import get_session
 from styrmin_backend.services.auth.session import lookup_session, touch_session
@@ -38,13 +39,20 @@ def _extract_token(request: Request) -> str | None:
     return None
 
 
-async def _resolve_current_user(request: Request, session: AsyncSession) -> User | None:
+async def _resolve_current_user(
+    request: Request, session: AsyncSession
+) -> tuple[User | None, SessionModel | None]:
+    """Returns ``(user, session_row)`` for the current request.
+
+    ``session_row`` is exposed so resolvers like ``logout`` and
+    ``changePassword`` can target the calling session specifically.
+    """
     token = _extract_token(request)
     if token is None:
-        return None
+        return None, None
     session_row = await lookup_session(session, token)
     if session_row is None:
-        return None
+        return None, None
     await touch_session(session, session_row)
     # Eager-load groups so RequiresRole(effective_role) and the User
     # serialiser can read the membership without an async lazy-load.
@@ -53,7 +61,7 @@ async def _resolve_current_user(request: Request, session: AsyncSession) -> User
         .where(User.id == session_row.user_id)
         .options(selectinload(User.groups))  # type: ignore[arg-type]
     )
-    return result.first()
+    return result.first(), session_row
 
 
 async def get_context(
@@ -61,10 +69,11 @@ async def get_context(
     response: Response,
     uow: SqlModelUnitOfWork = Depends(get_unit_of_work_dependency),
 ) -> dict[str, Any]:
-    current_user = await _resolve_current_user(request, uow.session)
+    current_user, current_session = await _resolve_current_user(request, uow.session)
     return {
         "uow": uow,
         "request": request,
         "response": response,
         "current_user": current_user,
+        "current_session": current_session,
     }

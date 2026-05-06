@@ -7,6 +7,7 @@ from uuid import UUID
 from .assign_backup_storage_location import AssignBackupStorageLocation
 from .async_base_client import AsyncBaseClient
 from .base_model import UNSET, UnsetType
+from .change_password import ChangePassword
 from .create_backup import CreateBackup
 from .create_backup_schedule import CreateBackupSchedule
 from .create_backup_storage_location import CreateBackupStorageLocation
@@ -56,6 +57,7 @@ from .list_tasks import ListTasks
 from .load_local_application_driver_version import LoadLocalApplicationDriverVersion
 from .load_remote_application_driver_version import LoadRemoteApplicationDriverVersion
 from .login import Login
+from .logout import Logout
 from .report_deployment_statuses import ReportDeploymentStatuses
 from .report_pod_statuses import ReportPodStatuses
 from .run_job import RunJob
@@ -100,6 +102,24 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return AssignBackupStorageLocation.model_validate(data)
+
+    async def change_password(
+        self, current_password: str, new_password: str, **kwargs: Any
+    ) -> ChangePassword:
+        query = gql("""
+            mutation ChangePassword($currentPassword: String!, $newPassword: String!) {
+              changePassword(currentPassword: $currentPassword, newPassword: $newPassword)
+            }
+            """)
+        variables: dict[str, object] = {
+            "currentPassword": current_password,
+            "newPassword": new_password,
+        }
+        response = await self.execute(
+            query=query, operation_name="ChangePassword", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return ChangePassword.model_validate(data)
 
     async def create_backup(
         self,
@@ -1369,6 +1389,19 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return Login.model_validate(data)
+
+    async def logout(self, **kwargs: Any) -> Logout:
+        query = gql("""
+            mutation Logout {
+              logout
+            }
+            """)
+        variables: dict[str, object] = {}
+        response = await self.execute(
+            query=query, operation_name="Logout", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return Logout.model_validate(data)
 
     async def report_deployment_statuses(
         self, reports: list[DeploymentStatusReportInput], **kwargs: Any

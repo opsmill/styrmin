@@ -282,6 +282,8 @@ type ManagedResourceCountsType {
 
 type Mutation {
   login(username: String!, password: String!): LoginResult!
+  logout: Boolean!
+  changePassword(currentPassword: String!, newPassword: String!): Boolean! @requiresRole
   createCluster(name: String! = "default", config: JSON = null): Cluster @requiresRole
   deleteCluster(clusterId: UUID = null, clusterName: String = null): String @requiresRole
   createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment @requiresRole

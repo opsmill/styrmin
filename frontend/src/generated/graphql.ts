@@ -326,6 +326,7 @@ export type Mutation = {
   __typename?: 'Mutation';
   assignBackupStorageLocation?: Maybe<Environment>;
   callback: CallbackResponse;
+  changePassword: Scalars['Boolean']['output'];
   createBackup?: Maybe<Backup>;
   createBackupSchedule?: Maybe<BackupSchedule>;
   createBackupStorageLocation?: Maybe<BackupStorageLocation>;
@@ -342,6 +343,7 @@ export type Mutation = {
   loadLocalApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
   loadRemoteApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
   login: LoginResult;
+  logout: Scalars['Boolean']['output'];
   reportDeploymentStatuses: ReportDeploymentStatusesResponse;
   reportPodStatuses: ReportPodStatusesResponse;
   runJob?: Maybe<Task>;
@@ -366,6 +368,12 @@ export type MutationCallbackArgs = {
   stateName: Scalars['String']['input'];
   stateType: Scalars['String']['input'];
   taskId: Scalars['UUID']['input'];
+};
+
+
+export type MutationChangePasswordArgs = {
+  currentPassword: Scalars['String']['input'];
+  newPassword: Scalars['String']['input'];
 };
 
 

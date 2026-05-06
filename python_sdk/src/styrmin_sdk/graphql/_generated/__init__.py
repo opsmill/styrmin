@@ -6,6 +6,7 @@ from .assign_backup_storage_location import (
 )
 from .async_base_client import AsyncBaseClient
 from .base_model import BaseModel, Upload
+from .change_password import ChangePassword
 from .client import Client
 from .create_backup import CreateBackup, CreateBackupCreateBackup
 from .create_backup_schedule import (
@@ -134,6 +135,7 @@ from .load_remote_application_driver_version import (
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart,
 )
 from .login import Login, LoginLogin, LoginLoginUser
+from .logout import Logout
 from .report_deployment_statuses import (
     ReportDeploymentStatuses,
     ReportDeploymentStatusesReportDeploymentStatuses,
@@ -166,6 +168,7 @@ __all__ = [
     "AsyncBaseClient",
     "BackupStatus",
     "BaseModel",
+    "ChangePassword",
     "Client",
     "CrdConditionInput",
     "CreateBackup",
@@ -270,6 +273,7 @@ __all__ = [
     "Login",
     "LoginLogin",
     "LoginLoginUser",
+    "Logout",
     "ManagedResourceCountsInput",
     "PodPhase",
     "PodStatusInput",

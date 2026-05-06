@@ -103,6 +103,44 @@ async def test_forbidden_raises_authorization_error(client: StyrminClient, mock_
         await client.auth.current_user()
 
 
+async def test_logout_returns_true_and_clears_token(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {"data": {"logout": True}}
+    result = await client.auth.logout()
+    assert result is True
+    mock_transport.set_authorization.assert_called_once_with(None)
+
+
+async def test_change_password_returns_true_and_keeps_token(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """The calling session is preserved server-side; the SDK keeps its
+    bearer header so the next call still authenticates."""
+    mock_transport.execute.return_value = {"data": {"changePassword": True}}
+    result = await client.auth.change_password(
+        current_password="old-password-12345",
+        new_password="new-password-67890",
+    )
+    assert result is True
+    mock_transport.set_authorization.assert_not_called()
+
+
+async def test_change_password_invalid_credentials_raises_authentication_error(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.return_value = {
+        "data": {"changePassword": None},
+        "errors": [
+            {
+                "message": "Invalid credentials",
+                "extensions": {"code": "INVALID_CREDENTIALS"},
+            }
+        ],
+    }
+    with pytest.raises(StyrminAuthenticationError):
+        await client.auth.change_password(
+            current_password="wrong-password-here",
+            new_password="new-password-67890",
+        )
+
+
 async def test_current_user_returns_user_when_authenticated(client: StyrminClient, mock_transport: AsyncMock) -> None:
     mock_transport.execute.return_value = {
         "data": {

@@ -64,6 +64,7 @@ def test_allow_list_only_contains_documented_entries() -> None:
     """
     expected = {
         "login",
+        "logout",
         "callback",
         "reportPodStatuses",
         "reportDeploymentStatuses",
