@@ -1,8 +1,11 @@
 from uuid import uuid4
 
 import pytest
+from styrmin_backend.db.models import Role, User
 from styrmin_backend.db.utils import get_session
 from styrmin_backend.server.app import app
+from styrmin_backend.services.auth.password import hash_password
+from styrmin_backend.services.auth.session import create_session
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
@@ -47,13 +50,33 @@ async def session_fixture():
 
 @pytest.fixture(name="client")
 async def graphql_fixture(session: AsyncSession):
+    """Authenticated-as-admin ASGI client.
+
+    Default-deny is on (ADR-020); this seeds an admin user and a session
+    token and pre-attaches the bearer header so existing tests keep
+    exercising the production auth path without each having to log in.
+    """
+    user = User(
+        username="test-admin",
+        password_hash=hash_password("test-admin-password"),
+        display_name="Test Admin",
+        active=True,
+        role=Role.ADMIN,
+    )
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    _row, raw_token = await create_session(session, user.id)
+
     async def get_session_override():
         yield session
 
     app.dependency_overrides[get_session] = get_session_override
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {raw_token}"},
     ) as client:
         yield client
     app.dependency_overrides.clear()

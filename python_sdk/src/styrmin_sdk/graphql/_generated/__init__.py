@@ -31,18 +31,7 @@ from .delete_cluster import DeleteCluster
 from .delete_deployment import DeleteDeployment, DeleteDeploymentDeleteDeployment
 from .delete_environment import DeleteEnvironment
 from .deploy import Deploy, DeployDeploy
-from .enums import (
-    BackupStatus,
-    DriverEnvVarLevel,
-    ExternalDnsEndpointsType,
-    ExternalUrlScheme,
-    LabelSelectorOperator,
-    PodPhase,
-    RestoreStatus,
-    TolerationEffect,
-    TolerationOperator,
-    WhenUnsatisfiable,
-)
+from .enums import BackupStatus, PodPhase, RestoreStatus, Role
 from .exceptions import (
     GraphQLClientError,
     GraphQLClientGraphQLError,
@@ -63,12 +52,6 @@ from .get_deployment import (
     GetDeploymentDeploymentApplicationInstance,
     GetDeploymentDeploymentComponents,
     GetDeploymentDeploymentDeployedServices,
-)
-from .get_deployment_component_env_vars_full import (
-    GetDeploymentComponentEnvVarsFull,
-    GetDeploymentComponentEnvVarsFullDeployment,
-    GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVars,
-    GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVarsEnvVars,
 )
 from .get_deployment_pod_statuses import (
     GetDeploymentPodStatuses,
@@ -98,19 +81,6 @@ from .get_deployment_timeline import (
     GetDeploymentTimelineDeploymentTimelineContextDiffChanges,
     GetDeploymentTimelineDeploymentTimelineTask,
 )
-from .get_deployment_timeline_context_diff import (
-    GetDeploymentTimelineContextDiff,
-    GetDeploymentTimelineContextDiffDeploymentTimeline,
-    GetDeploymentTimelineContextDiffDeploymentTimelineContextDiff,
-    GetDeploymentTimelineContextDiffDeploymentTimelineContextDiffChanges,
-    GetDeploymentTimelineContextDiffDeploymentTimelineTask,
-)
-from .get_driver_env_var_docs import (
-    GetDriverEnvVarDocs,
-    GetDriverEnvVarDocsApplicationDriver,
-    GetDriverEnvVarDocsApplicationDriverVersions,
-    GetDriverEnvVarDocsApplicationDriverVersionsEnvVars,
-)
 from .get_environment import (
     GetEnvironment,
     GetEnvironmentEnvironment,
@@ -124,28 +94,12 @@ from .get_pod_statuses import GetPodStatuses, GetPodStatusesPodStatuses
 from .get_restore import GetRestore, GetRestoreRestore
 from .get_task import GetTask, GetTaskTask
 from .input_types import (
-    AffinityBlockInput,
-    AffinityTermInput,
     CrdConditionInput,
-    DedicatedIngressInput,
     DeploymentPodStatusReport,
-    DeploymentReferenceInput,
     DeploymentStatusReportInput,
-    EnvVarInput,
-    IngressServiceConfigInput,
-    LabelSelectorInput,
-    LabelSelectorRequirementInput,
     ManagedResourceCountsInput,
     PodStatusInput,
-    PostRenderInjectionInput,
-    ResourceRequirementsInput,
-    ResourceSpecInput,
-    SchedulingInput,
     ServiceNameOverride,
-    TolerationInput,
-    TopologySpreadConstraintInput,
-    UpdateEnvironmentInput,
-    WeightedAffinityTermInput,
 )
 from .list_backup_schedules import (
     ListBackupSchedules,
@@ -205,15 +159,8 @@ from .update_deployment_version import (
     UpdateDeploymentVersion,
     UpdateDeploymentVersionUpdateDeploymentVersion,
 )
-from .update_environment import (
-    UpdateEnvironment,
-    UpdateEnvironmentUpdateEnvironment,
-    UpdateEnvironmentUpdateEnvironmentCluster,
-)
 
 __all__ = [
-    "AffinityBlockInput",
-    "AffinityTermInput",
     "AssignBackupStorageLocation",
     "AssignBackupStorageLocationAssignBackupStorageLocation",
     "AsyncBaseClient",
@@ -236,7 +183,6 @@ __all__ = [
     "CreateRestoreCreateRestore",
     "CurrentUser",
     "CurrentUserCurrentUser",
-    "DedicatedIngressInput",
     "DeleteBackup",
     "DeleteBackupSchedule",
     "DeleteBackupStorageLocation",
@@ -247,12 +193,7 @@ __all__ = [
     "Deploy",
     "DeployDeploy",
     "DeploymentPodStatusReport",
-    "DeploymentReferenceInput",
     "DeploymentStatusReportInput",
-    "DriverEnvVarLevel",
-    "EnvVarInput",
-    "ExternalDnsEndpointsType",
-    "ExternalUrlScheme",
     "GetBackup",
     "GetBackupBackup",
     "GetBackupSchedule",
@@ -262,10 +203,6 @@ __all__ = [
     "GetCluster",
     "GetClusterCluster",
     "GetDeployment",
-    "GetDeploymentComponentEnvVarsFull",
-    "GetDeploymentComponentEnvVarsFullDeployment",
-    "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVars",
-    "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVarsEnvVars",
     "GetDeploymentDeployment",
     "GetDeploymentDeploymentApplicationInstance",
     "GetDeploymentDeploymentComponents",
@@ -284,19 +221,10 @@ __all__ = [
     "GetDeploymentStatusDeploymentCrdStatusConditions",
     "GetDeploymentStatusDeploymentCrdStatusManagedResourceCounts",
     "GetDeploymentTimeline",
-    "GetDeploymentTimelineContextDiff",
-    "GetDeploymentTimelineContextDiffDeploymentTimeline",
-    "GetDeploymentTimelineContextDiffDeploymentTimelineContextDiff",
-    "GetDeploymentTimelineContextDiffDeploymentTimelineContextDiffChanges",
-    "GetDeploymentTimelineContextDiffDeploymentTimelineTask",
     "GetDeploymentTimelineDeploymentTimeline",
     "GetDeploymentTimelineDeploymentTimelineContextDiff",
     "GetDeploymentTimelineDeploymentTimelineContextDiffChanges",
     "GetDeploymentTimelineDeploymentTimelineTask",
-    "GetDriverEnvVarDocs",
-    "GetDriverEnvVarDocsApplicationDriver",
-    "GetDriverEnvVarDocsApplicationDriverVersions",
-    "GetDriverEnvVarDocsApplicationDriverVersionsEnvVars",
     "GetEnvironment",
     "GetEnvironmentEnvironment",
     "GetEnvironmentEnvironmentCluster",
@@ -313,10 +241,6 @@ __all__ = [
     "GraphQLClientGraphQLMultiError",
     "GraphQLClientHttpError",
     "GraphQLClientInvalidResponseError",
-    "IngressServiceConfigInput",
-    "LabelSelectorInput",
-    "LabelSelectorOperator",
-    "LabelSelectorRequirementInput",
     "ListBackupSchedules",
     "ListBackupSchedulesBackupSchedules",
     "ListBackupStorageLocations",
@@ -349,26 +273,19 @@ __all__ = [
     "ManagedResourceCountsInput",
     "PodPhase",
     "PodStatusInput",
-    "PostRenderInjectionInput",
     "ReportDeploymentStatuses",
     "ReportDeploymentStatusesReportDeploymentStatuses",
     "ReportPodStatuses",
     "ReportPodStatusesReportPodStatuses",
-    "ResourceRequirementsInput",
-    "ResourceSpecInput",
     "RestoreStatus",
+    "Role",
     "RunJob",
     "RunJobRunJob",
-    "SchedulingInput",
     "ServiceNameOverride",
     "StartComponents",
     "StartComponentsStartComponents",
     "StopComponents",
     "StopComponentsStopComponents",
-    "TolerationEffect",
-    "TolerationInput",
-    "TolerationOperator",
-    "TopologySpreadConstraintInput",
     "UnassignBackupStorageLocation",
     "UnassignBackupStorageLocationUnassignBackupStorageLocation",
     "UpdateBackupSchedule",
@@ -379,11 +296,5 @@ __all__ = [
     "UpdateDeploymentUpdateDeployment",
     "UpdateDeploymentVersion",
     "UpdateDeploymentVersionUpdateDeploymentVersion",
-    "UpdateEnvironment",
-    "UpdateEnvironmentInput",
-    "UpdateEnvironmentUpdateEnvironment",
-    "UpdateEnvironmentUpdateEnvironmentCluster",
     "Upload",
-    "WeightedAffinityTermInput",
-    "WhenUnsatisfiable",
 ]

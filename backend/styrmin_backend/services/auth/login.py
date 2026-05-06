@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from styrmin_backend.db.models import Session as SessionModel
@@ -27,7 +28,14 @@ async def authenticate(
     to close the username-enumeration channel.
     """
     canonical = username.casefold()
-    result = await uow.session.exec(select(User).where(User.username == canonical))
+    # Eager-load groups so downstream serialisation (User.effectiveRole,
+    # User.groups) can read the relationship without hitting an async
+    # lazy-load and tripping MissingGreenlet.
+    result = await uow.session.exec(
+        select(User)
+        .where(User.username == canonical)
+        .options(selectinload(User.groups))  # type: ignore[arg-type]
+    )
     user = result.first()
     if user is None:
         raise InvalidCredentialsError

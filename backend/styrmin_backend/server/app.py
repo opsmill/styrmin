@@ -16,6 +16,9 @@ from styrmin_backend.api import init_graphql_router
 from styrmin_backend.api.rest import init_rest_router
 from styrmin_backend.db.utils import init_db, wait_for_database
 from styrmin_backend.server.logging import redact
+from styrmin_backend.services.auth.bootstrap import (
+    bootstrap_default_admin_from_settings,
+)
 from styrmin_backend.services.ingress_controller.driver import (
     initialize_internal_drivers,
 )
@@ -47,6 +50,9 @@ async def app_initialization(_: FastAPI) -> None:
     # Wait for the database to become available, then initialize
     await wait_for_database()
     await init_db()
+
+    # Seed the default admin user (no-op if it already exists). See ADR-019.
+    await bootstrap_default_admin_from_settings()
 
     # Initialize the Prefect manager
     prefect_manager = get_manager()

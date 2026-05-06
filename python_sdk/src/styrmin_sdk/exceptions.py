@@ -46,5 +46,9 @@ class StyrminAuthenticationError(StyrminAPIError):
     """Authentication failed (UNAUTHENTICATED or INVALID_CREDENTIALS)."""
 
 
+class StyrminAuthorizationError(StyrminAPIError):
+    """Authenticated but the caller's effective role is below the required role."""
+
+
 class DeploymentRestoringError(StyrminAPIError):
     """The deployment is restoring; deletion was refused for data integrity."""

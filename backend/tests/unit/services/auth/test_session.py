@@ -8,18 +8,21 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend.db.models import Session as SessionModel
 from styrmin_backend.db.models import User
 from styrmin_backend.services.auth.session import (
     ABSOLUTE_LIFETIME,
     IDLE_LIFETIME,
+    SLIDING_REFRESH_DEBOUNCE,
     create_session,
     delete_all_sessions_for_user,
     delete_session_by_token,
     lookup_session,
     mint_token,
+    touch_session,
 )
 
 
@@ -99,6 +102,9 @@ async def test_lookup_session_returns_none_when_expired(
     await db_session.commit()
     found = await lookup_session(db_session, raw)
     assert found is None
+    # Lazy invalidation: the expired row should be gone after lookup.
+    remaining = await db_session.exec(select(SessionModel))
+    assert remaining.first() is None
 
 
 async def test_lookup_session_returns_none_when_idle_exceeded(
@@ -111,6 +117,8 @@ async def test_lookup_session_returns_none_when_idle_exceeded(
     await db_session.commit()
     found = await lookup_session(db_session, raw)
     assert found is None
+    remaining = await db_session.exec(select(SessionModel))
+    assert remaining.first() is None
 
 
 async def test_create_session_sets_30_day_expiry(db_session: AsyncSession) -> None:
@@ -173,3 +181,49 @@ async def test_delete_all_sessions_for_user_only_targets_that_user(
     assert count == 1
     assert await lookup_session(db_session, raw_alice) is None
     assert await lookup_session(db_session, raw_bob) is not None
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("delta_seconds", "expect_update"),
+    [
+        (0, False),
+        (30, False),
+        (61, True),
+        (120, True),
+    ],
+)
+async def test_touch_session_debounce(
+    db_session: AsyncSession,
+    delta_seconds: int,
+    expect_update: bool,
+) -> None:
+    user = await _seed_user(db_session)
+    row, _ = await create_session(db_session, user.id)
+    original = datetime.now(UTC) - timedelta(seconds=delta_seconds)
+    row.last_used_at = original
+    db_session.add(row)
+    await db_session.commit()
+    await db_session.refresh(row)
+
+    updated = await touch_session(db_session, row)
+    assert updated is expect_update
+
+    refreshed = (
+        await db_session.exec(select(SessionModel).where(SessionModel.id == row.id))
+    ).first()
+    assert refreshed is not None
+    refreshed_last_used = _aware(refreshed.last_used_at)
+
+    if expect_update:
+        assert refreshed_last_used > original
+        assert datetime.now(UTC) - refreshed_last_used < timedelta(seconds=5)
+    else:
+        assert abs(refreshed_last_used - original) < timedelta(seconds=1)
+
+
+async def test_sliding_refresh_debounce_constant() -> None:
+    assert SLIDING_REFRESH_DEBOUNCE == timedelta(seconds=60)

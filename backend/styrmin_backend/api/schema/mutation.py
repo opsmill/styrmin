@@ -10,7 +10,9 @@ from uuid import UUID
 
 import strawberry
 from loguru import logger
+from strawberry.permission import PermissionExtension
 
+from styrmin_backend.api.auth.permissions import RequiresRole
 from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
 from styrmin_backend.api.definitions.backup.restore import Restore as RestoreType
 from styrmin_backend.api.definitions.backup.schedule import (
@@ -39,6 +41,7 @@ from styrmin_backend.api.definitions.environment.inputs import (
 from styrmin_backend.api.definitions.environment.model import Environment
 from styrmin_backend.api.definitions.user.model import LoginResult, User as UserType
 from styrmin_backend.api.dependency import SESSION_COOKIE_NAME
+from styrmin_backend.db.models import Role
 from styrmin_backend.api.definitions.service.model import ServiceNameOverride
 from styrmin_backend.api.definitions.task.model import Task
 from styrmin_backend.api.scalars import JSON
@@ -100,8 +103,15 @@ from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.models import PrefectAction
 
 
+def _requires(role: Role) -> PermissionExtension:
+    """Sugar for the per-mutation permission extension. See ADR-020."""
+    return PermissionExtension([RequiresRole(role)])
+
+
 @strawberry.type
 class Mutation:
+    # login is on the documented allow-list (api/auth/allowlist.py); gating
+    # it would lock everyone out before they could authenticate.
     @strawberry.mutation
     async def login(
         self, info: strawberry.Info, username: str, password: str
@@ -121,7 +131,7 @@ class Mutation:
         )
         return LoginResult(token=raw_token, user=UserType.from_instance(user))
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def create_cluster(
         self, info: strawberry.Info, name: str = "default", config: JSON | None = None
     ) -> Cluster | None:
@@ -129,7 +139,7 @@ class Mutation:
         cluster = await create_cluster(uow=uow, name=name, config=config)
         return Cluster.from_instance(cluster)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def delete_cluster(
         self,
         info: strawberry.Info,
@@ -143,7 +153,7 @@ class Mutation:
         await delete_cluster(cluster_id=cluster.id, uow=uow)
         return "Cluster deleted"
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def create_environment(
         self,
         name: str,
@@ -161,7 +171,7 @@ class Mutation:
         )
         return Environment.from_instance(environment)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def update_environment(
         self,
         environment_id: UUID,
@@ -191,7 +201,7 @@ class Mutation:
         )
         return Environment.from_instance(environment)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def delete_environment(
         self,
         info: strawberry.Info,
@@ -211,7 +221,7 @@ class Mutation:
         await delete_environment(environment_id=environment.id, uow=uow)
         return "Environment deleted"
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def create_backup_storage_location(
         self,
         name: str,
@@ -234,7 +244,7 @@ class Mutation:
         )
         return BackupStorageLocationType.from_instance(bsl)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def update_backup_storage_location(
         self,
         backup_storage_location_id: UUID,
@@ -282,7 +292,7 @@ class Mutation:
 
         return BackupStorageLocationType.from_instance(bsl)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def delete_backup_storage_location(
         self,
         backup_storage_location_id: UUID,
@@ -294,7 +304,7 @@ class Mutation:
         )
         return "Backup storage location deleted"
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def assign_backup_storage_location(
         self,
         environment_id: UUID,
@@ -384,7 +394,7 @@ class Mutation:
         environment = await get_environment(environment_id=environment_id, uow=uow)
         return Environment.from_instance(environment)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def unassign_backup_storage_location(
         self,
         environment_id: UUID,
@@ -436,7 +446,7 @@ class Mutation:
         environment = await get_environment(environment_id=environment_id, uow=uow)
         return Environment.from_instance(environment)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def load_local_application_driver_version(
         self, path: str, info: strawberry.Info
     ) -> ApplicationDriverVersion | None:
@@ -446,7 +456,7 @@ class Mutation:
         )
         return ApplicationDriverVersion.from_instance(application)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def load_remote_application_driver_version(
         self, repository_url: str, branch: str, info: strawberry.Info
     ) -> ApplicationDriverVersion | None:
@@ -456,7 +466,7 @@ class Mutation:
         )
         return ApplicationDriverVersion.from_instance(application)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def deploy(
         self,
         driver: str,
@@ -497,7 +507,7 @@ class Mutation:
         )
         return Task.from_instance(task)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def update_deployment(
         self,
         deployment_id: UUID,
@@ -527,7 +537,7 @@ class Mutation:
         )
         return Task.from_instance(task)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def delete_deployment(
         self,
         deployment_id: UUID,
@@ -552,7 +562,7 @@ class Mutation:
         )
         return Task.from_instance(task)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def create_backup(
         self,
         instance_id: UUID,
@@ -627,7 +637,7 @@ class Mutation:
 
         return BackupType.from_instance(backup)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def delete_backup(
         self,
         backup_id: UUID,
@@ -638,7 +648,7 @@ class Mutation:
         await delete_backup_service(backup_id=backup_id, uow=uow)
         return "Backup deleted"
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def create_restore(
         self,
         backup_id: UUID,
@@ -676,7 +686,7 @@ class Mutation:
 
         return RestoreType.from_instance(restore)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def create_backup_schedule(
         self,
         deployment_id: UUID,
@@ -698,7 +708,7 @@ class Mutation:
         )
         return BackupScheduleType.from_instance(schedule)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def update_backup_schedule(
         self,
         schedule_id: UUID,
@@ -720,7 +730,7 @@ class Mutation:
         )
         return BackupScheduleType.from_instance(schedule)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def delete_backup_schedule(
         self,
         schedule_id: UUID,
@@ -731,6 +741,8 @@ class Mutation:
         await delete_backup_schedule_service(schedule_id=schedule_id, uow=uow)
         return "Backup schedule deleted"
 
+    # callback is on the documented allow-list (api/auth/allowlist.py).
+    # TODO(#188): replace with service-account auth so it can carry RequiresRole(ADMIN).
     @strawberry.mutation
     async def callback(
         self,
@@ -762,7 +774,7 @@ class Mutation:
             message=f"Callback triggered from {task_id} with state {state_name}: {state_message} ({state_type})..."
         )
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def stop_components(
         self,
         deployment_id: UUID,
@@ -778,7 +790,7 @@ class Mutation:
         )
         return Task.from_instance(task)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def start_components(
         self,
         deployment_id: UUID,
@@ -794,7 +806,7 @@ class Mutation:
         )
         return Task.from_instance(task)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def run_job(
         self,
         deployment_id: UUID,
@@ -814,7 +826,7 @@ class Mutation:
         )
         return Task.from_instance(task)
 
-    @strawberry.mutation
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def update_deployment_version(
         self,
         deployment_id: UUID,
@@ -835,6 +847,8 @@ class Mutation:
         )
         return Task.from_instance(task)
 
+    # report_pod_statuses is on the documented allow-list (api/auth/allowlist.py).
+    # TODO(#188): replace with service-account auth so it can carry RequiresRole(ADMIN).
     @strawberry.mutation
     async def report_pod_statuses(
         self,
@@ -877,6 +891,8 @@ class Mutation:
             pods_removed=total_removed,
         )
 
+    # report_deployment_statuses is on the documented allow-list (api/auth/allowlist.py).
+    # TODO(#188): replace with service-account auth so it can carry RequiresRole(ADMIN).
     @strawberry.mutation
     async def report_deployment_statuses(
         self,

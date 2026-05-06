@@ -5,7 +5,11 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from styrmin_sdk import StyrminAuthenticationError, StyrminClient
+from styrmin_sdk import (
+    StyrminAuthenticationError,
+    StyrminAuthorizationError,
+    StyrminClient,
+)
 
 
 async def test_login_plumbs_token_into_transport(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -80,6 +84,23 @@ async def test_current_user_returns_none_when_unauthenticated(client: StyrminCli
     mock_transport.execute.return_value = {"data": {"currentUser": None}}
     result = await client.auth.current_user()
     assert result is None
+
+
+async def test_forbidden_raises_authorization_error(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """A FORBIDDEN response (insufficient role) maps to a typed exception
+    distinct from authentication errors. See ADR-020.
+    """
+    mock_transport.execute.return_value = {
+        "data": {"currentUser": None},
+        "errors": [
+            {
+                "message": "Insufficient permissions",
+                "extensions": {"code": "FORBIDDEN"},
+            }
+        ],
+    }
+    with pytest.raises(StyrminAuthorizationError):
+        await client.auth.current_user()
 
 
 async def test_current_user_returns_user_when_authenticated(client: StyrminClient, mock_transport: AsyncMock) -> None:

@@ -14,6 +14,7 @@ from styrmin_backend.db.models import Session as SessionModel
 
 ABSOLUTE_LIFETIME = timedelta(days=30)
 IDLE_LIFETIME = timedelta(days=7)
+SLIDING_REFRESH_DEBOUNCE = timedelta(seconds=60)
 
 
 def mint_token() -> tuple[str, bytes]:
@@ -56,8 +57,9 @@ async def lookup_session(
 ) -> SessionModel | None:
     """Look up a session by raw token. Returns None if missing or expired.
 
-    Lazy-invalidation: an expired session is *not* returned, but cleanup of
-    the row is deferred to the daily cleanup task (out of scope for #185).
+    Lazy-invalidation: an expired session is deleted in the same transaction
+    and ``None`` is returned. The daily cleanup task is belt-and-suspenders
+    for rows that are never looked up again.
     """
     digest = hash_token(raw_token)
     result = await db_session.exec(
@@ -70,8 +72,28 @@ async def lookup_session(
     expires_at = _ensure_aware(session_row.expires_at)
     last_used_at = _ensure_aware(session_row.last_used_at)
     if now >= expires_at or now >= last_used_at + IDLE_LIFETIME:
+        await db_session.delete(session_row)
+        await db_session.commit()
         return None
     return session_row
+
+
+async def touch_session(db_session: AsyncSession, session_row: SessionModel) -> bool:
+    """Sliding refresh: advance ``last_used_at`` if the debounce window has elapsed.
+
+    Returns ``True`` when the row was updated. Skips the write when the previous
+    update happened within :data:`SLIDING_REFRESH_DEBOUNCE` to avoid hot-row
+    contention on busy users — see ADR-019.
+    """
+    now = datetime.now(UTC)
+    last_used_at = _ensure_aware(session_row.last_used_at)
+    if now - last_used_at < SLIDING_REFRESH_DEBOUNCE:
+        return False
+    session_row.last_used_at = now
+    db_session.add(session_row)
+    await db_session.commit()
+    await db_session.refresh(session_row)
+    return True
 
 
 async def delete_session_by_token(db_session: AsyncSession, raw_token: str) -> bool:

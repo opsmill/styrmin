@@ -4,13 +4,26 @@ This is where the different tables and their columns must be defined.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import ForeignKey, Index, LargeBinary, UniqueConstraint, text
 from sqlmodel import JSON, Column, DateTime, Field, Relationship, SQLModel, func
 from sqlmodel import Enum as SQLModelEnum
+
+
+class Role(IntEnum):
+    """Authorization role. See ADR-020.
+
+    Stored as an ordered integer (10/20/30, gapped for future inserts).
+    Comparisons (``>=``) work natively. The GraphQL representation is the
+    string variant; the integer is an implementation detail.
+    """
+
+    READ_ONLY = 10
+    READ_WRITE = 20
+    ADMIN = 30
 
 
 class StyrminModel(SQLModel):
@@ -28,17 +41,66 @@ class StyrminModel(SQLModel):
     )
 
 
+class UserGroup(SQLModel, table=True):
+    """Many-to-many link between User and Group. See ADR-020."""
+
+    __tablename__ = "user_group"
+
+    user_id: UUID = Field(
+        sa_column=Column(
+            ForeignKey("user.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+    group_id: UUID = Field(
+        sa_column=Column(
+            ForeignKey("group.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+
+
 class User(StyrminModel, table=True):
-    """User account. See ADR-019."""
+    """User account. See ADR-019, ADR-020."""
 
     username: str = Field(unique=True)
     password_hash: str
     display_name: str
     active: bool = Field(default=True, nullable=False)
+    role: Role = Field(
+        default=Role.READ_ONLY,
+        sa_column=Column(SQLModelEnum(Role), nullable=False),
+    )
 
     sessions: list["Session"] = Relationship(
         back_populates="user",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+    groups: list["Group"] = Relationship(
+        back_populates="users",
+        link_model=UserGroup,
+    )
+
+
+class Group(StyrminModel, table=True):
+    """Authorization group. See ADR-020.
+
+    Membership monotonically elevates: a user's effective role is
+    ``max(user.role, *(g.role for g in user.groups))``.
+    """
+
+    name: str = Field(unique=True)
+    role: Role = Field(
+        default=Role.READ_ONLY,
+        sa_column=Column(SQLModelEnum(Role), nullable=False),
+    )
+
+    users: list["User"] = Relationship(
+        back_populates="groups",
+        link_model=UserGroup,
     )
 
 

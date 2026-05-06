@@ -13,6 +13,7 @@ from styrmin_sdk.exceptions import (
     ResourceAlreadyExistsError,
     ResourceNotFoundError,
     StyrminAuthenticationError,
+    StyrminAuthorizationError,
 )
 
 if TYPE_CHECKING:
@@ -61,4 +62,6 @@ class BaseResource:
             raise DeploymentRestoringError(message, code)
         if code in {"UNAUTHENTICATED", "INVALID_CREDENTIALS"}:
             raise StyrminAuthenticationError(message, code)
+        if code == "FORBIDDEN":
+            raise StyrminAuthorizationError(message, code)
         raise OperationFailedError(message, code)

@@ -2,11 +2,13 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import Depends, Request, Response
+from sqlalchemy.orm import selectinload
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import User
 from styrmin_backend.db.utils import get_session
-from styrmin_backend.services.auth.session import lookup_session
+from styrmin_backend.services.auth.session import lookup_session, touch_session
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 
 SESSION_COOKIE_NAME = "styrmin_session"
@@ -43,7 +45,15 @@ async def _resolve_current_user(request: Request, session: AsyncSession) -> User
     session_row = await lookup_session(session, token)
     if session_row is None:
         return None
-    return await session.get(User, session_row.user_id)
+    await touch_session(session, session_row)
+    # Eager-load groups so RequiresRole(effective_role) and the User
+    # serialiser can read the membership without an async lazy-load.
+    result = await session.exec(
+        select(User)
+        .where(User.id == session_row.user_id)
+        .options(selectinload(User.groups))  # type: ignore[arg-type]
+    )
+    return result.first()
 
 
 async def get_context(

@@ -77,6 +77,20 @@ spec:
                 secretKeyRef:
                   name: {{ include "styrmin.secretName" . }}
                   key: agent-source-token
+            # Bootstrap admin (see ADR-019). When STYRMIN_ADMIN_PASSWORD is
+            # unset the bootstrap routine generates a random one and logs it
+            # at WARN level on first boot.
+            {{- if .Values.styrmin.adminUsername }}
+            - name: STYRMIN_ADMIN_USERNAME
+              value: {{ .Values.styrmin.adminUsername | quote }}
+            {{- end }}
+            {{- if .Values.styrmin.adminPassword }}
+            - name: STYRMIN_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "styrmin.secretName" . }}
+                  key: admin-password
+            {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:

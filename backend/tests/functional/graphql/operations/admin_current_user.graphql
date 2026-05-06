@@ -1,0 +1,17 @@
+query AdminCurrentUser {
+    currentUser {
+        id
+        username
+        displayName
+        role
+        effectiveRole
+        active
+        groups {
+            id
+            name
+            role
+        }
+        createdOn
+        updatedOn
+    }
+}

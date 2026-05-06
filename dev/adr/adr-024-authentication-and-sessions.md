@@ -80,9 +80,9 @@ Policy:
 
 Default-admin seeding runs in the FastAPI lifespan hook (`app_initialization()`), **not** in an Alembic migration. Alembic migrations stay pure DDL — running data migrations through Alembic crosses a layer boundary we keep clean elsewhere in the codebase.
 
-The hook reads `STYRMIN_ADMIN_USERNAME` (default `admin`) and `STYRMIN_ADMIN_PASSWORD`. If the password env var is unset, the hook generates a random one and logs it once at WARN level. The hook is multi-replica-safe via `INSERT ... ON CONFLICT (username) DO NOTHING RETURNING id` — only the replica that wins the insert race logs the generated password; losing replicas observe a no-op and log nothing. SQLite ≥ 3.24 is required for `ON CONFLICT` support and is documented as a runtime prerequisite.
+The hook reads `STYRMIN_ADMIN_USERNAME` (default `admin`) and `STYRMIN_ADMIN_PASSWORD`. If the password env var is unset, the hook generates a random one and logs it once at WARN level. The hook is multi-replica-safe via `INSERT ... ON CONFLICT (username) DO NOTHING RETURNING id` — only the replica that wins the insert race logs the generated password; losing replicas observe a no-op and log nothing. **SQLite ≥ 3.35** is required: `ON CONFLICT` (UPSERT) needs 3.24, and `RETURNING` needs 3.35; the implementation depends on both, so 3.35 is the binding constraint and is documented as a runtime prerequisite.
 
-If any user already exists, the hook is a no-op even if the env vars are set. Re-deploying never resets an admin account.
+If a user with the bootstrap username already exists, the hook is a no-op — no password rotation, no log spam — even if the env vars are set. Re-deploying never resets an admin account. Username comparison is case-insensitive (the bootstrap stores the casefolded form), matching the login lookup so an env value of `Admin` cannot create a row that login can never find.
 
 ### Generic login error
 

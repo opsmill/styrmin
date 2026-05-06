@@ -1,3 +1,5 @@
+directive @requiresRole on FIELD_DEFINITION
+
 type Action {
   id: UUID!
   name: String!
@@ -238,6 +240,12 @@ type Environment {
   deployments(includeDeleted: Boolean! = false): [Deployment!]!
 }
 
+type Group {
+  id: UUID!
+  name: String!
+  role: Role!
+}
+
 type HelmChart {
   id: UUID!
   name: String!
@@ -274,31 +282,31 @@ type ManagedResourceCountsType {
 
 type Mutation {
   login(username: String!, password: String!): LoginResult!
-  createCluster(name: String! = "default", config: JSON = null): Cluster
-  deleteCluster(clusterId: UUID = null, clusterName: String = null): String
-  createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment
-  deleteEnvironment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): String
-  createBackupStorageLocation(name: String!, endpoint: String!, bucket: String!, region: String!, accessKeyId: String!, secretAccessKey: String!): BackupStorageLocation
-  updateBackupStorageLocation(backupStorageLocationId: UUID!, name: String = null, endpoint: String = null, bucket: String = null, region: String = null, accessKeyId: String = null, secretAccessKey: String = null): BackupStorageLocation
-  deleteBackupStorageLocation(backupStorageLocationId: UUID!): String
-  assignBackupStorageLocation(environmentId: UUID!, backupStorageLocationId: UUID!): Environment
-  unassignBackupStorageLocation(environmentId: UUID!): Environment
-  loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion
-  loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!): ApplicationDriverVersion
-  deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task
-  updateDeployment(deploymentId: UUID!, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task
-  deleteDeployment(deploymentId: UUID!): Task!
-  createBackup(instanceId: UUID!, name: String = null): Backup
-  deleteBackup(backupId: UUID!): String
-  createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore
-  createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int! = 10, enabled: Boolean! = true): BackupSchedule
-  updateBackupSchedule(scheduleId: UUID!, name: String = null, cronExpression: String = null, retentionCount: Int = null, enabled: Boolean = null): BackupSchedule
-  deleteBackupSchedule(scheduleId: UUID!): String
+  createCluster(name: String! = "default", config: JSON = null): Cluster @requiresRole
+  deleteCluster(clusterId: UUID = null, clusterName: String = null): String @requiresRole
+  createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment @requiresRole
+  deleteEnvironment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): String @requiresRole
+  createBackupStorageLocation(name: String!, endpoint: String!, bucket: String!, region: String!, accessKeyId: String!, secretAccessKey: String!): BackupStorageLocation @requiresRole
+  updateBackupStorageLocation(backupStorageLocationId: UUID!, name: String = null, endpoint: String = null, bucket: String = null, region: String = null, accessKeyId: String = null, secretAccessKey: String = null): BackupStorageLocation @requiresRole
+  deleteBackupStorageLocation(backupStorageLocationId: UUID!): String @requiresRole
+  assignBackupStorageLocation(environmentId: UUID!, backupStorageLocationId: UUID!): Environment @requiresRole
+  unassignBackupStorageLocation(environmentId: UUID!): Environment @requiresRole
+  loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion @requiresRole
+  loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!): ApplicationDriverVersion @requiresRole
+  deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task @requiresRole
+  updateDeployment(deploymentId: UUID!, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task @requiresRole
+  deleteDeployment(deploymentId: UUID!): Task! @requiresRole
+  createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
+  deleteBackup(backupId: UUID!): String @requiresRole
+  createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore @requiresRole
+  createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int! = 10, enabled: Boolean! = true): BackupSchedule @requiresRole
+  updateBackupSchedule(scheduleId: UUID!, name: String = null, cronExpression: String = null, retentionCount: Int = null, enabled: Boolean = null): BackupSchedule @requiresRole
+  deleteBackupSchedule(scheduleId: UUID!): String @requiresRole
   callback(taskId: UUID!, stateName: String!, stateMessage: String, stateType: String!): CallbackResponse!
-  stopComponents(deploymentId: UUID!, components: [String!]!): Task
-  startComponents(deploymentId: UUID!, components: [String!]!): Task
-  runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task
-  updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null): Task
+  stopComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
+  startComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
+  runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task @requiresRole
+  updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null): Task @requiresRole
   reportPodStatuses(reports: [DeploymentPodStatusReport!]!): ReportPodStatusesResponse!
   reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!): ReportDeploymentStatusesResponse!
 }
@@ -419,6 +427,12 @@ enum RestoreStatus {
   FAILED
 }
 
+enum Role {
+  READ_ONLY
+  READ_WRITE
+  ADMIN
+}
+
 type ServiceDefinition {
   name: String!
   kind: String!
@@ -449,4 +463,10 @@ type User {
   id: UUID!
   username: String!
   displayName: String!
+  role: Role! @requiresRole
+  effectiveRole: Role! @requiresRole
+  active: Boolean! @requiresRole
+  groups: [Group!]! @requiresRole
+  createdOn: DateTime @requiresRole
+  updatedOn: DateTime @requiresRole
 }

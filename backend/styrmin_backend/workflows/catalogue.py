@@ -334,3 +334,16 @@ class PrefectCatalogue:
                 set_directory="/source/backend/",
             ),
         )
+
+        # Daily sweep of expired session rows. See ADR-019.
+        self.add_workflow_definition(
+            action=PrefectAction.CLEANUP_EXPIRED_SESSIONS,
+            workflow=LocalSourceWorkflowDefinition(
+                name="cleanup_expired_sessions",
+                type=WorkflowType.INTERNAL,
+                module="styrmin_backend.workflows.templates.session_cleanup",
+                function="cleanup_expired_sessions_flow",
+                set_directory="/source/backend/",
+                cron="17 3 * * *",
+            ),
+        )
