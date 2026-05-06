@@ -60,6 +60,7 @@ from .update_backup_schedule import UpdateBackupSchedule
 from .update_backup_storage_location import UpdateBackupStorageLocation
 from .update_deployment import UpdateDeployment
 from .update_deployment_version import UpdateDeploymentVersion
+from .update_environment import UpdateEnvironment
 
 
 def gql(q: str) -> str:
@@ -1481,6 +1482,38 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return UpdateDeployment.model_validate(data)
+
+    async def update_environment(
+        self,
+        environment_id: UUID,
+        config: Union[Optional[Any], UnsetType] = UNSET,
+        **kwargs: Any,
+    ) -> UpdateEnvironment:
+        query = gql("""
+            mutation UpdateEnvironment($environmentId: UUID!, $config: JSON) {
+              updateEnvironment(environmentId: $environmentId, config: $config) {
+                id
+                name
+                config
+                cluster {
+                  id
+                  name
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {
+            "environmentId": environment_id,
+            "config": config,
+        }
+        response = await self.execute(
+            query=query,
+            operation_name="UpdateEnvironment",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return UpdateEnvironment.model_validate(data)
 
     async def update_backup_schedule(
         self,

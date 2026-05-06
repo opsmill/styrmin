@@ -61,6 +61,24 @@ class EnvironmentResource(BaseResource):
         self._check_graphql_errors(result)
         return self._parse(GetEnvironment, result["data"], "environment", GetEnvironmentEnvironment)
 
+    async def update(
+        self,
+        environment_id: str | UUID,
+        config: JsonValue | None = None,
+    ) -> JsonValue:
+        """Update an environment's config (008-deployment-env-vars / US2).
+
+        ``config`` is forwarded to the GraphQL ``updateEnvironment`` mutation
+        which validates against the server-side ``EnvironmentConfig`` Pydantic
+        model. Env vars travel through this JSON path under the ``env_vars`` key.
+        """
+        variables: dict[str, Any] = {"environmentId": str(environment_id)}
+        if config is not None:
+            variables["config"] = config
+        result = await self._transport.execute(load_query("update_environment"), variables)
+        self._check_graphql_errors(result)
+        return (result.get("data") or {}).get("updateEnvironment")
+
     async def delete(
         self,
         environment_id: str | UUID | None = None,

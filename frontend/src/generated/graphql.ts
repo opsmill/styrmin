@@ -289,6 +289,12 @@ export type Environment = {
   cluster: Cluster;
   config: Scalars['JSON']['output'];
   deployments: Array<Deployment>;
+  /**
+   * Env vars set at the environment scope. Empty when none are set.
+   *
+   * WARNING: This surface is for non-secret values only. The platform stores values in plaintext and exposes them through any query that selects them. Do not store credentials, API keys, or other secret material here — use the dedicated secret env var path (separate ticket) once available.
+   */
+  envVars: Array<EnvVar>;
   id: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
 };
@@ -353,6 +359,7 @@ export type Mutation = {
   updateBackupStorageLocation?: Maybe<BackupStorageLocation>;
   updateDeployment?: Maybe<Task>;
   updateDeploymentVersion?: Maybe<Task>;
+  updateEnvironment?: Maybe<Environment>;
 };
 
 
@@ -543,6 +550,12 @@ export type MutationUpdateDeploymentVersionArgs = {
   deploymentId: Scalars['UUID']['input'];
   parameters?: InputMaybe<Scalars['JSON']['input']>;
   version: Scalars['String']['input'];
+};
+
+
+export type MutationUpdateEnvironmentArgs = {
+  config?: InputMaybe<Scalars['JSON']['input']>;
+  environmentId: Scalars['UUID']['input'];
 };
 
 export type ParameterDefinition = {

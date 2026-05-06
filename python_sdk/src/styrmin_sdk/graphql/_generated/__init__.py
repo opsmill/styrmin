@@ -157,6 +157,11 @@ from .update_deployment_version import (
     UpdateDeploymentVersion,
     UpdateDeploymentVersionUpdateDeploymentVersion,
 )
+from .update_environment import (
+    UpdateEnvironment,
+    UpdateEnvironmentUpdateEnvironment,
+    UpdateEnvironmentUpdateEnvironmentCluster,
+)
 
 __all__ = [
     "AssignBackupStorageLocation",
@@ -288,5 +293,8 @@ __all__ = [
     "UpdateDeploymentUpdateDeployment",
     "UpdateDeploymentVersion",
     "UpdateDeploymentVersionUpdateDeploymentVersion",
+    "UpdateEnvironment",
+    "UpdateEnvironmentUpdateEnvironment",
+    "UpdateEnvironmentUpdateEnvironmentCluster",
     "Upload",
 ]

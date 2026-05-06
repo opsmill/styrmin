@@ -188,3 +188,178 @@ async def test_us1_deployment_level_env_var(
         assert "LOG_LEVEL" in names, (
             f"container {container.name!r} missing LOG_LEVEL env entry"
         )
+
+
+# ---------------------------------------------------------------------------
+# US2 — Environment-scoped baseline env vars (T037 / Quickstart Step 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+async def env_vars_second_deployment(
+    env_vars_environment: dict,
+    env_vars_deployment: dict,  # noqa: ARG001 — force fixture ordering
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    simple_app_image: str,  # noqa: ARG001 — builds the image
+    vcluster: dict,
+) -> dict:
+    """Second deployment in the same environment — used to assert that an
+    environment-scope env var propagates to a peer deployment that has no
+    deployment-level env vars set of its own (FR-001 / Quickstart Step 2).
+    """
+    driver, _ = session_scenario_driver
+    deployment = await driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=env_vars_environment["environment_id"],
+        name="env-vars-b",
+    )
+    deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
+    return {
+        "deployment_id": str(deployment.id),
+        "namespace": f"styrmin-{deployment.id}",
+        "kubeconfig_path": vcluster["kubeconfig_path"],
+    }
+
+
+@pytest.mark.api_only(
+    reason=(
+        "API/SDK-only flow (Quickstart Step 2); no UI page navigation. "
+        "The [ui-chromium] variant would just re-run the same SDK calls."
+    )
+)
+@pytest.mark.ci
+async def test_us2_environment_level_env_var_propagates_to_all_deployments(
+    env_vars_environment: dict,
+    env_vars_deployment: dict,
+    env_vars_second_deployment: dict,
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    _env_vars_driver_bound: None,
+) -> None:
+    """Quickstart Step 2: set ``OTEL_EXPORTER_OTLP_ENDPOINT`` at the
+    environment scope and assert every deployment in that environment
+    receives the entry on its containers (FR-001 / FR-020).
+
+    Then set a deployment-level override on one deployment and assert the
+    divergence (FR-002 deepest-wins, per-key).
+    """
+    client: StyrminClient = env_vars_environment["client"]
+    environment_id = env_vars_environment["environment_id"]
+    deployment_a_id = env_vars_deployment["deployment_id"]
+    deployment_a_namespace = env_vars_deployment["namespace"]
+    deployment_b_id = env_vars_second_deployment["deployment_id"]
+    deployment_b_namespace = env_vars_second_deployment["namespace"]
+
+    # 1) Set an environment-scope env var. Both deployments must pick it up.
+    await client.environments.update(
+        environment_id=environment_id,
+        config={"env_vars": {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.staging"}},
+    )
+    # The two deployments may need to reconcile; their fixtures already
+    # parked them in RUNNING. Wait until the env var lands on each.
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_a_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_b_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+
+    dep_a = await _wait_for_pod_template(
+        vcluster,
+        namespace=deployment_a_namespace,
+        label_selector="app.kubernetes.io/name=simple-app",
+        predicate=lambda d: any(
+            entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
+            and entry.value == "https://otel.staging"
+            for container in d.spec.template.spec.containers or []
+            for entry in container.env or []
+        ),
+        description=(
+            "OTEL_EXPORTER_OTLP_ENDPOINT to land on deployment A from the "
+            "environment scope"
+        ),
+    )
+    dep_b = await _wait_for_pod_template(
+        vcluster,
+        namespace=deployment_b_namespace,
+        label_selector="app.kubernetes.io/name=simple-app",
+        predicate=lambda d: any(
+            entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
+            and entry.value == "https://otel.staging"
+            for container in d.spec.template.spec.containers or []
+            for entry in container.env or []
+        ),
+        description=(
+            "OTEL_EXPORTER_OTLP_ENDPOINT to land on peer deployment B "
+            "without any per-deployment env vars set"
+        ),
+    )
+
+    envs_a = _container_envs(dep_a)
+    envs_b = _container_envs(dep_b)
+    assert {
+        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "value": "https://otel.staging",
+    } in envs_a
+    assert {
+        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "value": "https://otel.staging",
+    } in envs_b
+
+    # 2) Override on deployment A only. Deployment B keeps the env value.
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_a_id,
+        config={"env_vars": {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.local"}},
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_a_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+
+    dep_a_overridden = await _wait_for_pod_template(
+        vcluster,
+        namespace=deployment_a_namespace,
+        label_selector="app.kubernetes.io/name=simple-app",
+        predicate=lambda d: any(
+            entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
+            and entry.value == "https://otel.local"
+            for container in d.spec.template.spec.containers or []
+            for entry in container.env or []
+        ),
+        description=(
+            "deployment-level override to win on deployment A "
+            "(FR-002 per-key deepest-wins)"
+        ),
+    )
+    envs_a_after = _container_envs(dep_a_overridden)
+    assert {
+        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "value": "https://otel.local",
+    } in envs_a_after
+    # The environment-scope value must NOT linger on deployment A's pods.
+    assert {
+        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "value": "https://otel.staging",
+    } not in envs_a_after
+
+    # Re-read deployment B and confirm it still carries the env-scope value.
+    dep_b_after = await _wait_for_pod_template(
+        vcluster,
+        namespace=deployment_b_namespace,
+        label_selector="app.kubernetes.io/name=simple-app",
+        predicate=lambda d: any(
+            entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
+            and entry.value == "https://otel.staging"
+            for container in d.spec.template.spec.containers or []
+            for entry in container.env or []
+        ),
+        description=(
+            "deployment B still serves the environment-scope value after "
+            "deployment A's per-key override"
+        ),
+    )
+    envs_b_after = _container_envs(dep_b_after)
+    assert {
+        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "value": "https://otel.staging",
+    } in envs_b_after

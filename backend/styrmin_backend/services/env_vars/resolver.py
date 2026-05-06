@@ -7,10 +7,12 @@ it up to the ``EnvironmentConfig`` / ``DeploymentConfig`` Pydantic models
 and produces :class:`ResolvedComponentEnvVars` records ready to attach to
 a ``ComponentContext``.
 
-US1 (this iteration) only computes the deployment-level effective dict —
-the per-component path is not exercised yet. The signature already
-accepts ``component_env_vars`` so US3 can fill it in without rewriting
-callers.
+US1 computed the deployment-level effective dict from environment+deployment
+scopes. US2 (T031) confirms this surface — the resolver merges
+``_merge_env_vars(env, dep, None)`` so environment-scope keys propagate to
+every deployment in the environment, with deployment-scope overrides
+applied per-key (FR-002 deepest-wins). The per-component path remains
+opt-in via ``component_env_vars`` for US3.
 """
 
 from __future__ import annotations

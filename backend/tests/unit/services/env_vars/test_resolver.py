@@ -5,13 +5,22 @@ which implements per-key deepest-wins merge across env / deployment /
 component layers (data-model.md §2.2). The end-to-end resolver
 (``EnvVarsResolver.resolve_for_deployment``) lands in US1 (T019), so this
 file pins down the merge primitive in isolation.
+
+US2 (T035) adds high-level :class:`EnvVarsResolver` tests that lock in the
+environment-scope precedence cases at the resolver surface — env-only,
+env-overridden-by-deployment per-key, env-and-deployment-disjoint-keys-merge.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from styrmin_backend.context.models.config import (
+    DeploymentConfig,
+    EnvironmentConfig,
+)
 from styrmin_backend.context.resolvers import _merge_env_vars
+from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
 
 
 class TestMergeEnvVars:
@@ -131,3 +140,66 @@ class TestMergeEnvVars:
         config["FOO"] = "mutated"
         assert env == {"FOO": "1"}
         assert dep == {"FOO": "2"}
+
+
+class TestEnvVarsResolverEnvironmentPrecedence:
+    """T035 / US2: precedence cases at the high-level resolver surface.
+
+    Locks in that ``EnvVarsResolver.resolve_for_deployment`` merges the
+    environment layer ahead of the deployment layer (FR-002 deepest-wins)
+    and reports ``"environment"`` provenance for keys whose value comes
+    from the environment scope.
+    """
+
+    def test_environment_only_propagates(self) -> None:
+        env = EnvironmentConfig(env_vars={"OTEL_ENDPOINT": "https://otel"})
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=env, deployment=None
+        )
+        assert resolved.deployment_effective == {"OTEL_ENDPOINT": "https://otel"}
+        assert resolved.deployment_provenance == {"OTEL_ENDPOINT": "environment"}
+        assert resolved.components == []
+
+    def test_environment_overridden_by_deployment_per_key(self) -> None:
+        env = EnvironmentConfig(env_vars={"FOO": "env", "SHARED": "env"})
+        dep = DeploymentConfig(env_vars={"SHARED": "dep"})
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=env, deployment=dep
+        )
+        # Deployment value wins on the colliding key; the disjoint
+        # environment key still propagates.
+        assert resolved.deployment_effective == {"FOO": "env", "SHARED": "dep"}
+        assert resolved.deployment_provenance == {
+            "FOO": "environment",
+            "SHARED": "deployment",
+        }
+
+    def test_environment_and_deployment_disjoint_keys_merge(self) -> None:
+        env = EnvironmentConfig(env_vars={"OTEL_ENDPOINT": "https://otel"})
+        dep = DeploymentConfig(env_vars={"LOG_LEVEL": "debug"})
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=env, deployment=dep
+        )
+        assert resolved.deployment_effective == {
+            "OTEL_ENDPOINT": "https://otel",
+            "LOG_LEVEL": "debug",
+        }
+        assert resolved.deployment_provenance == {
+            "OTEL_ENDPOINT": "environment",
+            "LOG_LEVEL": "deployment",
+        }
+
+    def test_both_unset_returns_empty(self) -> None:
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=EnvironmentConfig(), deployment=DeploymentConfig()
+        )
+        assert resolved.deployment_effective == {}
+        assert resolved.deployment_provenance == {}
+        assert resolved.components == []
+
+    def test_none_inputs_return_empty(self) -> None:
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=None, deployment=None
+        )
+        assert resolved.deployment_effective == {}
+        assert resolved.deployment_provenance == {}

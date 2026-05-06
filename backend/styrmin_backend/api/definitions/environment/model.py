@@ -6,8 +6,9 @@ from uuid import UUID
 import strawberry
 
 from styrmin_backend.api.definitions.cluster.model import Cluster
-from styrmin_backend.api.definitions.deployment.model import Deployment
+from styrmin_backend.api.definitions.deployment.model import Deployment, EnvVar
 from styrmin_backend.api.scalars import JSON
+from styrmin_backend.context.models.config import EnvironmentConfig
 from styrmin_backend.db.models import Deployment as DeploymentDBModel
 from styrmin_backend.db.models import Environment as EnvironmentModel
 
@@ -96,6 +97,31 @@ class Environment:
         return BackupStorageLocation.from_instance(
             self.instance.backup_storage_location
         )
+
+    @strawberry.field(
+        description=(
+            "Env vars set at the environment scope. Empty when none are set.\n\n"
+            "WARNING: This surface is for non-secret values only. The platform "
+            "stores values in plaintext and exposes them through any query that "
+            "selects them. Do not store credentials, API keys, or other secret "
+            "material here — use the dedicated secret env var path (separate "
+            "ticket) once available."
+        )
+    )
+    def env_vars(self) -> list[EnvVar]:
+        """Resolve the effective environment-scope env vars.
+
+        Reads ``config.env_vars`` from the persisted environment config and
+        validates it through :class:`EnvironmentConfig` so the same Pydantic
+        rules that gate the write path apply on the read projection too.
+        Empty / unset configs surface as an empty list (FR-020).
+        """
+        raw_config = self.instance.config
+        if not raw_config:
+            return []
+        env_cfg = EnvironmentConfig.model_validate(raw_config)
+        env_vars_dict = env_cfg.env_vars or {}
+        return [EnvVar(name=k, value=v) for k, v in env_vars_dict.items()]
 
     @strawberry.field
     def deployments(self, include_deleted: bool = False) -> list[Deployment]:

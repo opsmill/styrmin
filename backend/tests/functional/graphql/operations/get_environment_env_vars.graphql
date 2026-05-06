@@ -1,0 +1,9 @@
+query GetEnvironmentEnvVars($environmentId: UUID!) {
+    environment(environmentId: $environmentId) {
+        id
+        envVars {
+            name
+            value
+        }
+    }
+}

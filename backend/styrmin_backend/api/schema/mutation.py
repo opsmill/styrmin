@@ -62,6 +62,7 @@ from styrmin_backend.services.environments import (
     create_environment,
     delete_environment,
     resolve_environment,
+    update_environment,
 )
 from styrmin_backend.services.backup.scheduler import (
     create_backup_schedule as create_backup_schedule_service,
@@ -131,6 +132,27 @@ class Mutation:
         )
         environment = await create_environment(
             name=name, cluster_id=cluster.id, config=config, uow=uow
+        )
+        return Environment.from_instance(environment)
+
+    @strawberry.mutation
+    async def update_environment(
+        self,
+        environment_id: UUID,
+        info: strawberry.Info,
+        config: JSON | None = None,
+    ) -> Environment | None:
+        """Update an environment's config (008-deployment-env-vars / US2).
+
+        ``config`` is validated against ``EnvironmentConfig``; env vars
+        travel through this existing JSON path under the ``env_vars`` key
+        per ``contracts/graphql.md`` §3.
+        """
+        uow = info.context["uow"]
+        environment = await update_environment(
+            environment_id=environment_id,
+            uow=uow,
+            config=config,
         )
         return Environment.from_instance(environment)
 
