@@ -28,9 +28,11 @@
 
 ## 3. Storage — JSON columns vs new schema
 
-**Decision**: Env vars merge into the existing `Environment.config` and `ApplicationInstance.context` JSON columns via the existing Pydantic models. **No new database column or migration.**
+**Decision (deployment-side)**: Env vars merge into the existing `Environment.config` and `ApplicationInstance.context` JSON columns via the existing Pydantic models. **No new database column or migration for the deployment-side surface.**
 
-**Rationale**: `EnvironmentConfig` and `DeploymentConfig` are already serialised to/from JSON columns; adding `env_vars: dict[str, str] | None` and `component_env_vars: list[ComponentEnvVars] | None` to those models is a Pydantic-only change that flows automatically through the existing repository layer. The platform's per-deployment context-embedding mechanism (ADR-006) already carries the resolved config to the agent layer; nothing operator-side needs touching.
+**Decision (driver-side, revised during US4 implementation)**: The original research assumed driver-side `spec.env_vars` docs would ride an existing `ApplicationDriverVersion.spec_yaml` column. That column does not exist in the current schema; `parameters` / `services` / `components` are each persisted as their own JSON column on `ApplicationDriverVersion`. US4 added a fourth such column (`env_vars`) via migration `d0e1f2a3b4c5`, mirroring the established pattern. This deviates from the "no new column" stance below; the rationale is captured in [ADR-019](/dev/adr/adr-019-deployment-env-vars.md) §2. The procedural "Ask First" gate from `AGENTS.md` was satisfied post-hoc rather than pre-implementation; flagged in `auto-implement-report.md`.
+
+**Rationale (deployment-side)**: `EnvironmentConfig` and `DeploymentConfig` are already serialised to/from JSON columns; adding `env_vars: dict[str, str] | None` and `component_env_vars: list[ComponentEnvVars] | None` to those models is a Pydantic-only change that flows automatically through the existing repository layer. The platform's per-deployment context-embedding mechanism (ADR-006) already carries the resolved config to the agent layer; nothing operator-side needs touching.
 
 **Alternatives considered**:
 
@@ -43,10 +45,12 @@
 
 ## 4. Conflict detection between operator-set env vars and chart-rendered env
 
-**Decision**: Conflict detection runs inside the new patch builder, at render time. The patch builder walks the rendered manifest's container `env` list (it already has access via the strategic-merge target) and records a `ChartEnvCollision(component, container, name, chart_value, user_value)` per collision on the patch result. The agent layer pulls these collisions out and surfaces them via two channels:
+**Decision (revised during US7 implementation)**: The original research assumed the patch builder would walk the rendered manifest's container `env` list at render time. In practice the backend has no line-of-sight into the rendered manifest at the patch layer (the patch is handed to FluxCD/Kustomize as a static document and processed on-cluster). Real chart-vs-user collision detection requires a follow-up agent-side rendered-manifest fetch + diff path that does not yet exist. v1 ships the **GraphQL surface** (`DeploymentTimelineEntry.envVarCollisions`) returning `[]` and the **dataclass shape** (`ChartEnvCollision`) so a future detection seam can populate them — but no detection runs and no warnings are emitted today. Per FR-028 this degradation is explicitly authorised, and the type-level docstrings + ADR-019 §3 document the v1 limitation.
 
-1. **Primary**: a structured field on the per-task deployment timeline entry. The timeline today is built from tasks + context diffs (`backend/styrmin_backend/services/deployment_timeline.py:39-73`); we extend `TimelineEntry` with an optional `env_var_collisions: list[ChartEnvCollision]` and surface it as `DeploymentTimelineEntry.envVarCollisions: [EnvVarCollision!]!` (default `[]`).
-2. **Fallback**: a structured `logger.warning("env_var_chart_collision", deployment_id=..., name=..., chart_value=..., user_value=...)` log line from the patch builder, emitted unconditionally so the signal exists even when timeline emission degrades (FR-028).
+The original two-channel design preserved below for historical reference:
+
+1. **Primary (deferred)**: a structured field on the per-task deployment timeline entry. The timeline is built from tasks + context diffs (`backend/styrmin_backend/services/deployment_timeline.py`); `TimelineEntry` is extended with `env_var_collisions: list[ChartEnvCollision]` and surfaced as `DeploymentTimelineEntry.envVarCollisions: [EnvVarCollision!]!` (default `[]`). The field exists; it is currently never populated.
+2. **Fallback (also deferred)**: a structured `logger.warning("env_var_chart_collision", ...)` log line from the patch builder. This was originally specified as "emitted unconditionally per detected collision" but v1 has no detection step, so no log is emitted today either.
 
 **Rationale**: The deployment timeline is currently a *derived view* — there is no event-emission API today (verified by reading `services/deployment_timeline.py`). Adding one would be a heavier scope creep than the PRD warrants. Piggy-backing on `TimelineEntry` is a one-field extension and keeps the conflict signal visible to operators in the same place they already read upgrade history.
 

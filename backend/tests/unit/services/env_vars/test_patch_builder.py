@@ -350,15 +350,15 @@ class TestUS7ChartEnvCollision:
         )
         assert collision.component is None
 
-    def test_emits_structured_warning_per_operator_set_key(
+    def test_no_collision_warnings_emitted_in_v1(
         self, loguru_caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Per FR-027/FR-028: every operator-set env var key triggers an
-        ``env_var_potentially_chart_colliding`` warning carrying the
-        deployment id, optional component, name, and user value. Support
-        correlates these log lines against chart values when triaging,
-        which is the v1 substitute for the rendered-manifest collision
-        diff.
+        """Per FR-027/FR-028: chart-vs-user collision warnings are spec'd to
+        fire when an actual collision is detected. v1 lacks line-of-sight
+        into the rendered manifest at the patch layer, so no detection runs
+        and no warnings are emitted. Emitting a warning per operator-set
+        key (without an actual collision check) would be log noise rather
+        than an FR-028 signal — explicitly NOT done. See ADR-019 §3.
         """
         loguru_caplog.set_level("WARNING")
         build_env_vars_post_rendering_patches(
@@ -367,76 +367,7 @@ class TestUS7ChartEnvCollision:
             component="worker",
             deployment_id="dep-123",
         )
-        warning_records = [r for r in loguru_caplog.records if r.levelname == "WARNING"]
         collision_records = [
-            r
-            for r in warning_records
-            if "env_var_potentially_chart_colliding" in r.getMessage()
+            r for r in loguru_caplog.records if "chart_collid" in r.getMessage().lower()
         ]
-        assert len(collision_records) == 2, [r.getMessage() for r in warning_records]
-        # Each operator-set name MUST appear in exactly one warning record.
-        emitted_names = {
-            name
-            for name in ("LOG_LEVEL", "FOO")
-            for r in collision_records
-            if f"name={name}" in r.getMessage()
-        }
-        assert emitted_names == {"LOG_LEVEL", "FOO"}
-        # Deployment id and component are threaded through so triage can
-        # correlate against the right rendered manifest.
-        assert all("deployment_id=dep-123" in r.getMessage() for r in collision_records)
-        assert all("component=worker" in r.getMessage() for r in collision_records)
-
-    def test_warning_emitted_with_no_component_for_broadcast_path(
-        self, loguru_caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """FR-004 broadcast (no components): ``component`` is ``None`` in
-        the structured log entry; the operator-set key is still surfaced.
-        """
-        loguru_caplog.set_level("WARNING")
-        build_env_vars_post_rendering_patches(
-            {"LOG_LEVEL": "debug"},
-            deployment_id="dep-broadcast",
-        )
-        collision_records = [
-            r
-            for r in loguru_caplog.records
-            if "env_var_potentially_chart_colliding" in r.getMessage()
-        ]
-        assert len(collision_records) == 1
-        assert "component=None" in collision_records[0].getMessage()
-        assert "name=LOG_LEVEL" in collision_records[0].getMessage()
-
-    def test_no_warning_when_inject_opted_out(
-        self, loguru_caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """When ``inject.env_vars=False`` the patch builder short-circuits
-        BEFORE the warning emission — there is no operator-set entry
-        making it onto the rendered pod, so no triage signal is needed.
-        """
-        loguru_caplog.set_level("WARNING")
-        build_env_vars_post_rendering_patches(
-            {"LOG_LEVEL": "debug"},
-            inject=PostRenderInjection(env_vars=False),
-        )
-        collision_records = [
-            r
-            for r in loguru_caplog.records
-            if "env_var_potentially_chart_colliding" in r.getMessage()
-        ]
-        assert collision_records == []
-
-    def test_no_warning_when_resolved_dict_empty(
-        self, loguru_caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """An empty resolved dict carries no operator-set entries, so no
-        triage signal is emitted.
-        """
-        loguru_caplog.set_level("WARNING")
-        build_env_vars_post_rendering_patches({})
-        collision_records = [
-            r
-            for r in loguru_caplog.records
-            if "env_var_potentially_chart_colliding" in r.getMessage()
-        ]
-        assert collision_records == []
+        assert collision_records == [], [r.getMessage() for r in collision_records]

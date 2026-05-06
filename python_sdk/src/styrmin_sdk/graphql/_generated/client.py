@@ -26,11 +26,14 @@ from .get_backup_schedule import GetBackupSchedule
 from .get_backup_storage_location import GetBackupStorageLocation
 from .get_cluster import GetCluster
 from .get_deployment import GetDeployment
+from .get_deployment_component_env_vars_full import GetDeploymentComponentEnvVarsFull
 from .get_deployment_pod_statuses import GetDeploymentPodStatuses
 from .get_deployment_resolved_scheduling import GetDeploymentResolvedScheduling
 from .get_deployment_services import GetDeploymentServices
 from .get_deployment_status import GetDeploymentStatus
 from .get_deployment_timeline import GetDeploymentTimeline
+from .get_deployment_timeline_context_diff import GetDeploymentTimelineContextDiff
+from .get_driver_env_var_docs import GetDriverEnvVarDocs
 from .get_environment import GetEnvironment
 from .get_environment_services import GetEnvironmentServices
 from .get_pod_statuses import GetPodStatuses
@@ -627,6 +630,34 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetDeployment.model_validate(data)
 
+    async def get_deployment_component_env_vars_full(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentComponentEnvVarsFull:
+        query = gql("""
+            query GetDeploymentComponentEnvVarsFull($deploymentId: UUID!) {
+              deployment(deploymentId: $deploymentId) {
+                id
+                componentEnvVars {
+                  component
+                  isOrphaned
+                  envVars {
+                    name
+                    value
+                  }
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentComponentEnvVarsFull",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentComponentEnvVarsFull.model_validate(data)
+
     async def get_deployment_pod_statuses(
         self, deployment_id: UUID, **kwargs: Any
     ) -> GetDeploymentPodStatuses:
@@ -789,6 +820,68 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeploymentTimeline.model_validate(data)
+
+    async def get_deployment_timeline_context_diff(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentTimelineContextDiff:
+        query = gql("""
+            query GetDeploymentTimelineContextDiff($deploymentId: UUID!) {
+              deploymentTimeline(deploymentId: $deploymentId) {
+                task {
+                  id
+                  type
+                  status
+                }
+                applicationVersion
+                contextDiff {
+                  changes {
+                    path
+                    action
+                  }
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentTimelineContextDiff",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentTimelineContextDiff.model_validate(data)
+
+    async def get_driver_env_var_docs(
+        self, application_driver_id: UUID, **kwargs: Any
+    ) -> GetDriverEnvVarDocs:
+        query = gql("""
+            query GetDriverEnvVarDocs($applicationDriverId: UUID!) {
+              applicationDriver(applicationDriverId: $applicationDriverId) {
+                id
+                name
+                versions {
+                  id
+                  version
+                  envVars {
+                    name
+                    description
+                    level
+                    components
+                  }
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"applicationDriverId": application_driver_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDriverEnvVarDocs",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDriverEnvVarDocs.model_validate(data)
 
     async def get_environment(
         self,

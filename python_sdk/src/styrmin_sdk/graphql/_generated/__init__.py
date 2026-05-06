@@ -52,6 +52,12 @@ from .get_deployment import (
     GetDeploymentDeploymentComponents,
     GetDeploymentDeploymentDeployedServices,
 )
+from .get_deployment_component_env_vars_full import (
+    GetDeploymentComponentEnvVarsFull,
+    GetDeploymentComponentEnvVarsFullDeployment,
+    GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVars,
+    GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVarsEnvVars,
+)
 from .get_deployment_pod_statuses import (
     GetDeploymentPodStatuses,
     GetDeploymentPodStatusesDeployment,
@@ -79,6 +85,19 @@ from .get_deployment_timeline import (
     GetDeploymentTimelineDeploymentTimelineContextDiff,
     GetDeploymentTimelineDeploymentTimelineContextDiffChanges,
     GetDeploymentTimelineDeploymentTimelineTask,
+)
+from .get_deployment_timeline_context_diff import (
+    GetDeploymentTimelineContextDiff,
+    GetDeploymentTimelineContextDiffDeploymentTimeline,
+    GetDeploymentTimelineContextDiffDeploymentTimelineContextDiff,
+    GetDeploymentTimelineContextDiffDeploymentTimelineContextDiffChanges,
+    GetDeploymentTimelineContextDiffDeploymentTimelineTask,
+)
+from .get_driver_env_var_docs import (
+    GetDriverEnvVarDocs,
+    GetDriverEnvVarDocsApplicationDriver,
+    GetDriverEnvVarDocsApplicationDriverVersions,
+    GetDriverEnvVarDocsApplicationDriverVersionsEnvVars,
 )
 from .get_environment import (
     GetEnvironment,
@@ -205,6 +224,10 @@ __all__ = [
     "GetCluster",
     "GetClusterCluster",
     "GetDeployment",
+    "GetDeploymentComponentEnvVarsFull",
+    "GetDeploymentComponentEnvVarsFullDeployment",
+    "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVars",
+    "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVarsEnvVars",
     "GetDeploymentDeployment",
     "GetDeploymentDeploymentApplicationInstance",
     "GetDeploymentDeploymentComponents",
@@ -223,10 +246,19 @@ __all__ = [
     "GetDeploymentStatusDeploymentCrdStatusConditions",
     "GetDeploymentStatusDeploymentCrdStatusManagedResourceCounts",
     "GetDeploymentTimeline",
+    "GetDeploymentTimelineContextDiff",
+    "GetDeploymentTimelineContextDiffDeploymentTimeline",
+    "GetDeploymentTimelineContextDiffDeploymentTimelineContextDiff",
+    "GetDeploymentTimelineContextDiffDeploymentTimelineContextDiffChanges",
+    "GetDeploymentTimelineContextDiffDeploymentTimelineTask",
     "GetDeploymentTimelineDeploymentTimeline",
     "GetDeploymentTimelineDeploymentTimelineContextDiff",
     "GetDeploymentTimelineDeploymentTimelineContextDiffChanges",
     "GetDeploymentTimelineDeploymentTimelineTask",
+    "GetDriverEnvVarDocs",
+    "GetDriverEnvVarDocsApplicationDriver",
+    "GetDriverEnvVarDocsApplicationDriverVersions",
+    "GetDriverEnvVarDocsApplicationDriverVersionsEnvVars",
     "GetEnvironment",
     "GetEnvironmentEnvironment",
     "GetEnvironmentEnvironmentCluster",

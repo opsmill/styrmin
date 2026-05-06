@@ -266,10 +266,10 @@ Render-time:
 | `DeploymentConfig.env_vars` | `ApplicationInstance.context` JSON column (existing) |
 | `DeploymentConfig.component_env_vars` | same JSON column under `components.<name>.env_vars` |
 | `ResolvedComponentEnvVars` | not persisted — recomputed per reconcile from stored config |
-| `DriverEnvVarDoc` | parsed from driver YAML at load time; persisted as part of `ApplicationDriverVersion.spec_yaml` (existing column) |
+| `DriverEnvVarDoc` | parsed from driver YAML at load time; persisted as a dedicated `ApplicationDriverVersion.env_vars` JSON column (added by migration `d0e1f2a3b4c5` during US4 implementation — see [ADR-019](/dev/adr/adr-019-deployment-env-vars.md) §2). The original spec assumed a `spec_yaml` column would carry the data; in practice no such column exists, and the dedicated-column shape mirrors the existing `parameters` / `services` / `components` JSON columns on `ApplicationDriverVersion`. |
 | `EnvVarCollision` | not persisted as a first-class entity in v1 — derived from per-task agent reports; presented through `DeploymentTimelineEntry.envVarCollisions` |
 
-No new database columns; no migration.
+No new database columns for the **deployment-side** env-var storage (FR-022) — the existing `Environment.config` / `ApplicationInstance.context` JSON columns absorb the new fields automatically. The **driver-side** doc surface added in US4 introduced a single new column on `ApplicationDriverVersion` (see the row above) with a corresponding migration `d0e1f2a3b4c5`; that deviation is documented in [ADR-019](/dev/adr/adr-019-deployment-env-vars.md) §2.
 
 ## 7. Errors
 
