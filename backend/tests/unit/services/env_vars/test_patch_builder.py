@@ -4,8 +4,9 @@ Covers:
 * Deployment-level only — one TargetPatch per pod-template-bearing kind.
 * ``inject.env_vars=False`` opt-out — zero patches.
 * No-components fallback — broadcast applies without label selector.
-* Multi-container injection — all containers receive the env entries via
-  the strategic-merge ``name: "*"`` wildcard.
+* Single-container injection on container[0] — JSON-patch ``replace`` shape
+  mirroring :class:`ResourcesPatch`. Multi-container per-pod fan-out is out
+  of scope for v1 (see spec.md §Assumptions / data-model.md §5.1).
 * CronJob path variant — patch nests under ``spec.jobTemplate``.
 """
 
@@ -26,18 +27,17 @@ from styrmin_backend.services.scheduling.patch_builder import (
 
 
 class TestEnvVarsPatchRendering:
-    def test_renders_env_list_under_pod_template_containers(self) -> None:
+    def test_renders_json_patch_replace_on_container_zero_env(self) -> None:
         patch = EnvVarsPatch(env_vars={"LOG_LEVEL": "debug", "FOO": "bar"})
-        doc = yaml.safe_load(patch.render_value())
+        ops = yaml.safe_load(patch.render_value())
 
-        assert doc["apiVersion"] == "apps/v1"
-        assert doc["kind"] == "Deployment"
-        containers = doc["spec"]["template"]["spec"]["containers"]
-        assert len(containers) == 1
-        assert containers[0]["name"] == "*"
-        env_list = containers[0]["env"]
-        assert {"name": "LOG_LEVEL", "value": "debug"} in env_list
-        assert {"name": "FOO", "value": "bar"} in env_list
+        assert isinstance(ops, list)
+        assert len(ops) == 1
+        op = ops[0]
+        assert op["op"] == "replace"
+        assert op["path"] == "/spec/template/spec/containers/0/env"
+        assert {"name": "LOG_LEVEL", "value": "debug"} in op["value"]
+        assert {"name": "FOO", "value": "bar"} in op["value"]
 
     def test_cronjob_variant_uses_jobtemplate_path(self) -> None:
         patch = EnvVarsPatch(
@@ -45,13 +45,11 @@ class TestEnvVarsPatchRendering:
             api_version="batch/v1",
             kind="CronJob",
         )
-        doc = yaml.safe_load(patch.render_value())
+        ops = yaml.safe_load(patch.render_value())
 
-        assert doc["kind"] == "CronJob"
-        containers = doc["spec"]["jobTemplate"]["spec"]["template"]["spec"][
-            "containers"
-        ]
-        assert containers[0]["env"][0]["name"] == "LOG_LEVEL"
+        assert ops[0]["op"] == "replace"
+        assert ops[0]["path"] == "/spec/jobTemplate/spec/template/spec/containers/0/env"
+        assert ops[0]["value"][0]["name"] == "LOG_LEVEL"
 
     def test_render_is_deterministic_across_runs(self) -> None:
         patch_a = EnvVarsPatch(env_vars={"A": "1", "B": "2"})
@@ -60,9 +58,16 @@ class TestEnvVarsPatchRendering:
 
     def test_empty_value_accepted(self) -> None:
         patch = EnvVarsPatch(env_vars={"FOO": ""})
-        doc = yaml.safe_load(patch.render_value())
-        env_list = doc["spec"]["template"]["spec"]["containers"][0]["env"]
-        assert env_list == [{"name": "FOO", "value": ""}]
+        ops = yaml.safe_load(patch.render_value())
+        assert ops[0]["value"] == [{"name": "FOO", "value": ""}]
+
+    def test_explicit_container_index_propagates(self) -> None:
+        """An explicit ``container_index`` parameter targets the chosen
+        container — leaves the door open for callers that need to address a
+        non-zero index even though v1 callers always pass 0."""
+        patch = EnvVarsPatch(env_vars={"X": "y"}, container_index=2)
+        ops = yaml.safe_load(patch.render_value())
+        assert ops[0]["path"] == "/spec/template/spec/containers/2/env"
 
 
 class TestBuildEnvVarsPatches:
@@ -115,18 +120,25 @@ class TestBuildEnvVarsPatches:
         for tp in patches:
             assert tp.target.label_selector == "styrmin/component=worker"
 
-    def test_all_containers_receive_entries_via_wildcard(self) -> None:
+    def test_container_zero_env_path_for_each_kind(self) -> None:
+        """v1 narrows the patch to container[0] (mirrors ``ResourcesPatch``).
+        Multi-container per-pod fan-out is deferred — see spec §Assumptions
+        and data-model.md §5.1.
+        """
         patches = build_env_vars_post_rendering_patches({"LOG_LEVEL": "debug"})
         for tp in patches:
-            doc = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
-            spec_path = (
-                doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
-                if tp.target.kind == "CronJob"
-                else doc["spec"]["template"]["spec"]
-            )
-            containers = spec_path["containers"]
-            assert containers[0]["name"] == "*"
-            assert {"name": "LOG_LEVEL", "value": "debug"} in containers[0]["env"]
+            ops = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
+            assert len(ops) == 1
+            op = ops[0]
+            assert op["op"] == "replace"
+            if tp.target.kind == "CronJob":
+                assert (
+                    op["path"]
+                    == "/spec/jobTemplate/spec/template/spec/containers/0/env"
+                )
+            else:
+                assert op["path"] == "/spec/template/spec/containers/0/env"
+            assert {"name": "LOG_LEVEL", "value": "debug"} in op["value"]
 
 
 class TestComponentLevelInvocations:
@@ -151,15 +163,8 @@ class TestComponentLevelInvocations:
         assert len(patches) == len(POD_TEMPLATE_BEARING_KINDS)
         for tp in patches:
             assert tp.target.label_selector == "styrmin/component=worker"
-            doc = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
-            spec_path = (
-                doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
-                if tp.target.kind == "CronJob"
-                else doc["spec"]["template"]["spec"]
-            )
-            assert {"name": "WORKER_QUEUE", "value": "orders"} in spec_path[
-                "containers"
-            ][0]["env"]
+            ops = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
+            assert {"name": "WORKER_QUEUE", "value": "orders"} in ops[0]["value"]
 
     def test_mixed_deployment_and_component_dicts_are_disjoint(self) -> None:
         """Mixed deployment + component — when the application builder
@@ -182,24 +187,14 @@ class TestComponentLevelInvocations:
         assert worker_selectors == {"styrmin/component=worker"}
         # api patches do NOT carry WORKER_QUEUE.
         for tp in api_patches:
-            doc = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
-            spec_path = (
-                doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
-                if tp.target.kind == "CronJob"
-                else doc["spec"]["template"]["spec"]
-            )
-            names = {entry["name"] for entry in spec_path["containers"][0]["env"]}
+            ops = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
+            names = {entry["name"] for entry in ops[0]["value"]}
             assert "WORKER_QUEUE" not in names
             assert "LOG_LEVEL" in names
         # worker patches carry both names.
         for tp in worker_patches:
-            doc = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
-            spec_path = (
-                doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
-                if tp.target.kind == "CronJob"
-                else doc["spec"]["template"]["spec"]
-            )
-            names = {entry["name"] for entry in spec_path["containers"][0]["env"]}
+            ops = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
+            names = {entry["name"] for entry in ops[0]["value"]}
             assert names >= {"LOG_LEVEL", "WORKER_QUEUE"}
 
     def test_component_inject_false_short_circuits_emission(self) -> None:

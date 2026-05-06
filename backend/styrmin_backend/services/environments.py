@@ -10,6 +10,7 @@ from styrmin_backend.context.validators import validate_environment_config
 from styrmin_backend.db.models import Environment
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.clusters import resolve_cluster
+from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
     ClusterNotFoundError,
@@ -18,6 +19,23 @@ from styrmin_backend.services.exceptions import (
     InvalidContextError,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
+
+
+def _prevalidate_environment_env_vars(config: dict | None) -> None:
+    """Pre-validate environment-scope env vars so typed error codes survive.
+
+    See :func:`styrmin_backend.services.deployment._prevalidate_deployment_env_vars`
+    for the full rationale; in short, Pydantic's ``ValidationError`` collapses
+    typed env-var errors into the generic ``INVALID_CONTEXT`` code, breaking
+    FR-006/FR-007/FR-008/FR-009 and SC-003. Calling
+    :func:`validate_env_vars_dict` here lets the typed errors propagate intact.
+    """
+    if not config:
+        return
+    env_vars = config.get("env_vars")
+    if isinstance(env_vars, dict):
+        validate_env_vars_dict("environment", env_vars)
+
 
 if TYPE_CHECKING:
     pass
@@ -82,6 +100,10 @@ async def create_environment(
         if config is None:
             config = {}
 
+        # Pre-validate env-var bundles so typed error codes survive the
+        # GraphQL boundary (FR-006/FR-007/FR-008/FR-009 / SC-003).
+        _prevalidate_environment_env_vars(config)
+
         try:
             validate_environment_config(config)
         except InvalidEnvironmentContextError as e:
@@ -141,6 +163,9 @@ async def update_environment(
             )
 
         if config is not None:
+            # Pre-validate env-var bundles so typed error codes survive the
+            # GraphQL boundary (FR-006/FR-007/FR-008/FR-009 / SC-003).
+            _prevalidate_environment_env_vars(config)
             try:
                 validate_environment_config(config)
             except InvalidEnvironmentContextError as e:
