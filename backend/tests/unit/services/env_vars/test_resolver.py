@@ -328,17 +328,205 @@ class TestEnvVarsResolverPerComponentPath:
     def test_unknown_component_blocks_are_silently_ignored_in_us3(self) -> None:
         """Stored blocks targeting components the driver does not declare
         are silently dropped in US3 — US5 (Phase 7) replaces this branch
-        with orphan emission."""
+        with orphan emission. With US5 landed, the block is now surfaced as
+        an orphan entry alongside the live one (see ``TestOrphanDetection``);
+        this test stays as a precedence smoke check on the live entry only.
+        """
         resolved = EnvVarsResolver.resolve_for_deployment(
             environment=None,
             deployment=DeploymentConfig(),
             component_env_vars={
                 "worker": {"X": "1"},
-                "removed": {"Y": "2"},  # not declared by the driver
+                "removed": {"Y": "2"},  # orphan after US5
             },
             driver_components=["worker"],
         )
-        assert {e.component_name for e in resolved.components} == {"worker"}
-        worker_entry = resolved.components[0]
+        live = [e for e in resolved.components if not e.resolved.is_orphaned]
+        assert {e.component_name for e in live} == {"worker"}
+        worker_entry = live[0]
         assert worker_entry.resolved.config == {"X": "1"}
         assert worker_entry.resolved.is_orphaned is False
+
+
+class TestOrphanDetection:
+    """T059 / US5 (FR-029..FR-033): orphan detection at the resolver surface.
+
+    Stored ``component_env_vars`` blocks targeting a component that is no
+    longer in the driver's component map are emitted as orphan entries
+    (``is_orphaned=True``) carrying only the stored component-scope values.
+    Provenance for every orphan key is ``"component"``; environment and
+    deployment scopes do NOT layer onto orphans (the operator-visible config
+    must reflect what they stored, not a live merge against a driver that no
+    longer references the component).
+    """
+
+    def test_orphan_for_removed_component(self) -> None:
+        """Driver upgrade removes the ``worker`` component → the stored
+        ``worker`` block becomes an orphan with the stored values intact."""
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=DeploymentConfig(),
+            component_env_vars={
+                "worker": {"WORKER_QUEUE": "orders", "LOG_LEVEL": "debug"},
+            },
+            driver_components=["api"],  # ← worker removed by upgrade
+        )
+        # api appears as a live entry (empty merged dict; still emitted by
+        # the resolver — the API layer drops empty live entries downstream).
+        live = [e for e in resolved.components if not e.resolved.is_orphaned]
+        assert {e.component_name for e in live} == {"api"}
+        # worker appears as an orphan.
+        orphans = [e for e in resolved.components if e.resolved.is_orphaned]
+        assert len(orphans) == 1
+        worker = orphans[0]
+        assert worker.component_name == "worker"
+        assert worker.resolved.is_orphaned is True
+        assert worker.resolved.config == {
+            "WORKER_QUEUE": "orders",
+            "LOG_LEVEL": "debug",
+        }
+        # Provenance for orphan keys is always "component" — orphans carry
+        # the stored block verbatim, no env / dep layering.
+        assert worker.resolved.provenance == {
+            "WORKER_QUEUE": "component",
+            "LOG_LEVEL": "component",
+        }
+
+    def test_orphan_for_renamed_component(self) -> None:
+        """Driver rename ``worker`` → ``processor``. The stored ``worker``
+        block becomes an orphan; ``processor`` appears as a live entry with
+        no component-scope overrides."""
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=DeploymentConfig(env_vars={"LOG_LEVEL": "info"}),
+            component_env_vars={
+                "worker": {"WORKER_QUEUE": "orders"},
+            },
+            driver_components=["processor"],  # rename target
+        )
+        live = {
+            e.component_name: e
+            for e in resolved.components
+            if not e.resolved.is_orphaned
+        }
+        orphans = {
+            e.component_name: e for e in resolved.components if e.resolved.is_orphaned
+        }
+        # processor inherits the deployment-scope LOG_LEVEL only.
+        assert live["processor"].resolved.config == {"LOG_LEVEL": "info"}
+        assert live["processor"].resolved.provenance == {"LOG_LEVEL": "deployment"}
+        # worker is orphaned; the deployment-scope LOG_LEVEL must NOT leak
+        # onto the orphan view (the orphan carries the stored block as-is).
+        assert orphans["worker"].resolved.config == {"WORKER_QUEUE": "orders"}
+        assert "LOG_LEVEL" not in orphans["worker"].resolved.config
+        assert orphans["worker"].resolved.provenance == {"WORKER_QUEUE": "component"}
+
+    def test_orphan_and_live_mixed(self) -> None:
+        """A deployment with one block that is still live and another that
+        is orphaned surfaces both at once. The live entry merges normally;
+        the orphan stays untouched."""
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=DeploymentConfig(env_vars={"LOG_LEVEL": "info"}),
+            component_env_vars={
+                "api": {"API_KEY": "shh"},
+                "worker": {"WORKER_QUEUE": "orders"},  # orphan
+            },
+            driver_components=["api"],
+        )
+        live = {
+            e.component_name: e
+            for e in resolved.components
+            if not e.resolved.is_orphaned
+        }
+        orphans = {
+            e.component_name: e for e in resolved.components if e.resolved.is_orphaned
+        }
+        # api: deployment-layer LOG_LEVEL plus its own API_KEY (component
+        # scope wins on disjoint key).
+        assert live["api"].resolved.config == {"LOG_LEVEL": "info", "API_KEY": "shh"}
+        assert live["api"].resolved.provenance == {
+            "LOG_LEVEL": "deployment",
+            "API_KEY": "component",
+        }
+        # worker: orphan, stored values only.
+        assert orphans["worker"].resolved.config == {"WORKER_QUEUE": "orders"}
+
+    def test_orphan_only_block(self) -> None:
+        """Every stored block targets a component the driver no longer
+        declares. The resolver still emits one live entry per current
+        driver component (with the empty / inherited dict) plus the
+        orphan(s)."""
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=DeploymentConfig(),
+            component_env_vars={
+                "worker": {"WORKER_QUEUE": "orders"},
+                "old": {"X": "1"},
+            },
+            driver_components=["api"],
+        )
+        live = [e for e in resolved.components if not e.resolved.is_orphaned]
+        orphans = [e for e in resolved.components if e.resolved.is_orphaned]
+        assert {e.component_name for e in live} == {"api"}
+        # Orphan emission is sorted for stable output ordering.
+        assert [e.component_name for e in orphans] == ["old", "worker"]
+        assert orphans[0].resolved.config == {"X": "1"}
+        assert orphans[1].resolved.config == {"WORKER_QUEUE": "orders"}
+
+    def test_orphan_flips_back_to_live_when_driver_rolls_back(self) -> None:
+        """FR-033 / Edge Case: a driver rollback that re-introduces the
+        component name flips the previously-orphaned block back to live.
+
+        The resolver is stateless wrt orphans — orphan-ness is recomputed
+        at every call against the current driver's component map. Pin this
+        behaviour so future refactors don't accidentally introduce a
+        sticky-orphan bug.
+        """
+        stored_blocks: dict[str, dict[str, str] | None] = {
+            "worker": {"WORKER_QUEUE": "orders"}
+        }
+        # 1) Driver v2 removes worker — block becomes orphaned.
+        resolved_v2 = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=DeploymentConfig(),
+            component_env_vars=stored_blocks,
+            driver_components=["api"],
+        )
+        worker_v2 = next(
+            e for e in resolved_v2.components if e.component_name == "worker"
+        )
+        assert worker_v2.resolved.is_orphaned is True
+
+        # 2) Operator rolls back to v1 (which still declares worker) —
+        # the very same stored blocks are re-resolved as live.
+        resolved_v1 = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=DeploymentConfig(),
+            component_env_vars=stored_blocks,
+            driver_components=["api", "worker"],
+        )
+        worker_v1 = next(
+            e for e in resolved_v1.components if e.component_name == "worker"
+        )
+        assert worker_v1.resolved.is_orphaned is False
+        assert worker_v1.resolved.config == {"WORKER_QUEUE": "orders"}
+        # No orphans remain.
+        assert all(not e.resolved.is_orphaned for e in resolved_v1.components)
+
+    def test_empty_orphan_block_is_dropped(self) -> None:
+        """A stored block that is empty / None for an unknown component
+        contributes nothing — there is nothing to display, so no orphan
+        entry is emitted (matches the "components without block" branch
+        for live components)."""
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=DeploymentConfig(),
+            component_env_vars={
+                "worker": {},
+                "old": None,
+            },
+            driver_components=["api"],
+        )
+        orphans = [e for e in resolved.components if e.resolved.is_orphaned]
+        assert orphans == []

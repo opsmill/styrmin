@@ -362,9 +362,14 @@ def _populate_component_env_vars(
         return
 
     # FR-008a caps — applied per-component on the post-merge dict, plus the
-    # 1 MiB per-deployment cap summed across components.
+    # 1 MiB per-deployment cap summed across components. Orphan entries
+    # (US5) carry stale operator-set values that the patch builder skips,
+    # so they don't consume runtime budget — exclude them from cap
+    # accounting.
     total_bytes = 0
     for entry in resolved.components:
+        if entry.resolved.is_orphaned:
+            continue
         per_component_bytes = _serialised_dict_bytes(entry.resolved.config)
         if per_component_bytes > _RESOLVED_PER_COMPONENT_BYTE_CAP:
             raise EnvVarSizeLimitExceededError(

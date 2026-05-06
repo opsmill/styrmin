@@ -501,6 +501,115 @@ async def test_deployment_component_env_vars_pre_seeded_persists_block(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# US5 — Deployment.componentEnvVars orphan surfacing (T060)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deployment_component_env_vars_surfaces_orphan_after_driver_upgrade(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Stage a deployment whose stored config carries a per-component env
+    var block on ``worker``, but whose current driver no longer declares
+    ``worker`` (simulating an upgrade that renamed the component to
+    ``processor``). ``Deployment.componentEnvVars`` must surface the
+    leftover block with ``isOrphaned=true`` while the live ``processor``
+    component carries no orphaned entries (FR-029..FR-033).
+
+    The resolver determines orphan-ness from the deployment's current
+    ``Component`` rows (the in-memory driver-component map), so the test
+    seeds those rows for ``api`` + ``processor`` only and pre-seeds the
+    deployment config with the leftover ``worker`` block. This drives the
+    real service + repository layers without needing a Prefect-backed
+    upgrade flow — the propagation contract only requires the read-side
+    projection round-trip.
+    """
+    deployment = await _seed_deployment_with_components(
+        session, component_names=["api", "processor"]
+    )
+    deployment.config = {
+        "components": {
+            "worker": {"env_vars": {"WORKER_QUEUE": "orders", "LOG_LEVEL": "debug"}},
+        },
+    }
+    session.add(deployment)
+    await session.commit()
+
+    db_row = await session.get(Deployment, deployment.id)
+    assert db_row is not None
+    assert db_row.config["components"]["worker"]["env_vars"] == {
+        "WORKER_QUEUE": "orders",
+        "LOG_LEVEL": "debug",
+    }
+
+    data = await gql(
+        client,
+        "get_deployment_component_env_vars",
+        {"deploymentId": str(deployment.id)},
+    )
+    rows = {row["component"]: row for row in data["deployment"]["componentEnvVars"]}
+
+    # The orphan block is visible.
+    assert "worker" in rows, rows
+    worker = rows["worker"]
+    assert worker["isOrphaned"] is True
+    worker_pairs = {ev["name"]: ev["value"] for ev in worker["envVars"]}
+    assert worker_pairs == {"WORKER_QUEUE": "orders", "LOG_LEVEL": "debug"}
+
+    # Live components carry no orphaned entries — the leftover env vars do
+    # NOT bleed into rendered patches for ``api`` / ``processor`` (the
+    # resolver scopes the orphan block to the orphan entry only).
+    assert "api" not in rows, (
+        "api had no env vars at any layer, so the surface should drop the "
+        "empty live entry"
+    )
+    assert "processor" not in rows, (
+        "processor had no env vars at any layer, so the surface should drop "
+        "the empty live entry; the orphan worker block must NOT leak into it"
+    )
+
+
+@pytest.mark.asyncio
+async def test_deployment_component_env_vars_orphan_does_not_layer_deployment_scope(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """An orphan entry must reflect the stored block verbatim — environment
+    and deployment scopes do NOT layer onto orphans (data-model.md §2.3).
+    Pin this behaviour at the GraphQL boundary so a future "merge orphans
+    too" refactor can't silently break the operator-visible config.
+    """
+    deployment = await _seed_deployment_with_components(
+        session, component_names=["api"]
+    )
+    deployment.config = {
+        "env_vars": {"DEPLOYMENT_KEY": "dep_value"},
+        "components": {
+            "worker": {"env_vars": {"WORKER_QUEUE": "orders"}},
+        },
+    }
+    session.add(deployment)
+    await session.commit()
+
+    data = await gql(
+        client,
+        "get_deployment_component_env_vars",
+        {"deploymentId": str(deployment.id)},
+    )
+    rows = {row["component"]: row for row in data["deployment"]["componentEnvVars"]}
+
+    # Orphan: only the stored component-scope value, no DEPLOYMENT_KEY.
+    worker = rows["worker"]
+    assert worker["isOrphaned"] is True
+    worker_names = {ev["name"] for ev in worker["envVars"]}
+    assert worker_names == {"WORKER_QUEUE"}, worker
+    # Live api inherits the deployment-level dict.
+    api = rows["api"]
+    assert api["isOrphaned"] is False
+    api_names = {ev["name"] for ev in api["envVars"]}
+    assert "DEPLOYMENT_KEY" in api_names
+
+
 @pytest.mark.asyncio
 async def test_application_driver_version_env_vars_projects_persisted_docs(
     client: AsyncClient, session: AsyncSession

@@ -528,3 +528,170 @@ async def test_us4_driver_env_var_docs_surfaced_via_graphql(
     assert db_pool["level"] == "COMPONENT"
     assert db_pool["components"] == ["database"]
     assert "pool size" in db_pool["description"].lower()
+
+
+# ---------------------------------------------------------------------------
+# US5 — Visible orphan tracking across driver upgrades (T061 / Step 6)
+# ---------------------------------------------------------------------------
+
+
+_DEPLOYMENT_COMPONENT_ENV_VARS_QUERY = """
+query GetDeploymentComponentEnvVars($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        componentEnvVars {
+            component
+            isOrphaned
+            envVars { name value }
+        }
+    }
+}
+"""
+
+
+_DEPLOYMENT_TIMELINE_CONTEXT_DIFF_QUERY = """
+query GetDeploymentTimelineContextDiff($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        timeline {
+            task { id type status }
+            applicationVersion
+            contextDiff {
+                changes { path action }
+            }
+        }
+    }
+}
+"""
+
+
+@pytest.mark.skip(
+    reason=(
+        "Requires a second simple-app driver version that renames or removes "
+        "a component (e.g. ``database`` → ``db``) so the per-component env "
+        "var block becomes orphaned across the upgrade. The current fixture "
+        "(``simple_app_image_v2``) only ships an application-code bump and "
+        "keeps the component map identical, so the orphan transition cannot "
+        "be exercised end-to-end. Tracked alongside the multi-version driver "
+        "fixture work — once a renamed-component driver version exists, "
+        "remove this skip and run the scenario as written below."
+    )
+)
+@pytest.mark.api_only(
+    reason=(
+        "API/SDK-only flow (Quickstart Step 6); the test queries the "
+        "GraphQL surface for ``componentEnvVars.isOrphaned`` and "
+        "``timeline.contextDiff`` — no UI page navigation. The "
+        "[ui-chromium] variant would just re-run the same SDK calls."
+    )
+)
+@pytest.mark.ci
+async def test_us5_orphan_visible_across_driver_upgrade(
+    env_vars_environment: dict,
+    env_vars_deployment: dict,
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    _env_vars_driver_bound: None,
+    simple_app_image_v2: str,  # noqa: ARG001 — builds the renamed-component v2 image
+) -> None:
+    """Quickstart Step 6: upgrade a deployment to a driver version whose
+    component map renames the ``database`` component (e.g. to ``db``).
+
+    Asserts (FR-029..FR-033):
+
+    1. ``Deployment.componentEnvVars`` lists the leftover ``database`` block
+       with ``isOrphaned: true`` after the upgrade settles.
+    2. The renamed component's pods do NOT carry the orphaned env vars
+       (the patch builder skips orphan blocks).
+    3. ``Deployment.timeline.contextDiff`` records the orphan transition
+       once on the upgrade Task entry.
+    """
+    deployment_id = env_vars_deployment["deployment_id"]
+    namespace = env_vars_deployment["namespace"]
+    client: StyrminClient = env_vars_environment["client"]
+
+    # 1) Set a per-component env var on ``database`` (live in v0.1.0).
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_id,
+        config={
+            "components": {
+                "database": {
+                    "env_vars": {"DB_POOL_SIZE": "5", "DB_LOG_LEVEL": "debug"},
+                },
+            },
+        },
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+
+    # 2) Upgrade to a driver version that renames ``database`` → ``db``.
+    #    The version string here matches the future renamed-component
+    #    fixture; update both when the fixture lands.
+    await scenario_driver.upgrade_deployment(
+        deployment_id=deployment_id, version="0.3.0"
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+
+    # 3) Query ``componentEnvVars`` — the ``database`` block must surface
+    #    as orphaned with the stored values intact.
+    raw = await client._transport.execute(
+        _DEPLOYMENT_COMPONENT_ENV_VARS_QUERY,
+        {"deploymentId": deployment_id},
+    )
+    assert "errors" not in raw, raw
+    rows = {
+        row["component"]: row for row in raw["data"]["deployment"]["componentEnvVars"]
+    }
+    assert "database" in rows, rows
+    database = rows["database"]
+    assert database["isOrphaned"] is True
+    db_pairs = {ev["name"]: ev["value"] for ev in database["envVars"]}
+    assert db_pairs == {"DB_POOL_SIZE": "5", "DB_LOG_LEVEL": "debug"}
+
+    # 4) The renamed component's pods must NOT carry the orphaned values.
+    db_dep = await _wait_for_pod_template(
+        vcluster,
+        namespace=namespace,
+        # The new driver version uses ``app.kubernetes.io/name=db`` for
+        # the renamed component (mirrors driver naming convention).
+        label_selector="app.kubernetes.io/name=db",
+        predicate=lambda d: True,  # any pod template snapshot
+        description="renamed db component pods to roll out after upgrade",
+    )
+    db_envs = _container_envs(db_dep)
+    db_names = {entry["name"] for entry in db_envs}
+    assert "DB_POOL_SIZE" not in db_names, (
+        "orphaned env vars must NOT leak onto renamed component's pods"
+    )
+    assert "DB_LOG_LEVEL" not in db_names
+
+    # 5) Timeline must record the orphan transition exactly once on the
+    #    upgrade Task. ``contextDiff`` is the existing machinery — no new
+    #    event type for orphans.
+    raw_timeline = await client._transport.execute(
+        _DEPLOYMENT_TIMELINE_CONTEXT_DIFF_QUERY,
+        {"deploymentId": deployment_id},
+    )
+    assert "errors" not in raw_timeline, raw_timeline
+    entries = raw_timeline["data"]["deployment"]["timeline"]
+    upgrade_entries = [
+        e
+        for e in entries
+        if e.get("applicationVersion") == "0.3.0" and e.get("contextDiff") is not None
+    ]
+    # Exactly one upgrade Task carries a context_diff that records the
+    # orphan transition (subsequent reconciles share the upgraded context
+    # and therefore have no diff).
+    assert len(upgrade_entries) == 1, upgrade_entries
+    diff_paths = {
+        change["path"] for change in upgrade_entries[0]["contextDiff"]["changes"]
+    }
+    # The orphan transition manifests as a path change touching the
+    # ``components.database.env_vars`` slot (the diff machinery surfaces
+    # the operator-set block as removed/orphaned across the upgrade).
+    assert any("database" in p and "env_vars" in p for p in diff_paths), (
+        f"context_diff did not record the orphan transition: {diff_paths}"
+    )
