@@ -25,6 +25,7 @@ from styrmin_backend.operator.config import CRD_GROUP, CRD_PLURAL, CRD_VERSION
 from styrmin_backend.services.env_vars.exceptions import (
     UnknownComponentEnvVarError,
 )
+from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
     DeploymentNameConflictError,
@@ -86,6 +87,35 @@ def _validate_component_env_var_targets(
                 component_name=name,
                 known_components=sorted(known),
             )
+
+
+def _prevalidate_deployment_env_vars(deployment_config: dict | None) -> None:
+    """Run typed env-var validation ahead of Pydantic model construction.
+
+    Pydantic's ``DeploymentConfig.env_vars`` field validators raise the same
+    typed :class:`ServiceError` subclasses (``InvalidEnvVarNameError``,
+    ``EnvVarSizeLimitExceededError``, ``DuplicateEnvVarNameError``), but
+    :class:`pydantic.ValidationError` wraps them on the way out and
+    :func:`context.validators.validate_deployment_config` rewraps that into a
+    generic ``InvalidDeploymentContextError`` — collapsing the precise
+    ``extensions.code`` to ``INVALID_CONTEXT``. Calling
+    :func:`validate_env_vars_dict` directly here lets the typed errors
+    propagate to Strawberry untouched, restoring the operator-visible codes
+    promised by FR-006/FR-007/FR-008/FR-009 and SC-003.
+    """
+    if not deployment_config:
+        return
+    deployment_env = deployment_config.get("env_vars")
+    if isinstance(deployment_env, dict):
+        validate_env_vars_dict("deployment", deployment_env)
+    components_block = deployment_config.get("components")
+    if isinstance(components_block, dict):
+        for _name, block in components_block.items():
+            if not isinstance(block, dict):
+                continue
+            comp_env = block.get("env_vars")
+            if isinstance(comp_env, dict):
+                validate_env_vars_dict("component", comp_env)
 
 
 async def get_deployment(
@@ -220,6 +250,13 @@ async def update_deployment(
             assert adv is not None, "Application driver version not found"
             known_names = [cc.name for cc in (adv.component_configs or [])]
             _validate_component_env_var_targets(deployment_config, known_names)
+
+            # Pre-validate env-var bundles so the typed error codes
+            # (INVALID_ENV_VAR_NAME / ENV_VAR_SIZE_LIMIT_EXCEEDED /
+            # DUPLICATE_ENV_VAR_NAME) survive the GraphQL boundary instead of
+            # being collapsed into INVALID_CONTEXT (FR-006/FR-007/FR-008/
+            # FR-009 / SC-003).
+            _prevalidate_deployment_env_vars(deployment_config)
 
             try:
                 validate_deployment_config(context=deployment_config)
@@ -747,6 +784,13 @@ async def deploy_application(
             cc.name for cc in (application_driver_version.component_configs or [])
         ]
         _validate_component_env_var_targets(deployment_config, known_names)
+
+        # Pre-validate env-var bundles so the typed error codes
+        # (INVALID_ENV_VAR_NAME / ENV_VAR_SIZE_LIMIT_EXCEEDED /
+        # DUPLICATE_ENV_VAR_NAME) survive the GraphQL boundary instead of
+        # being collapsed into INVALID_CONTEXT (FR-006/FR-007/FR-008/FR-009 /
+        # SC-003).
+        _prevalidate_deployment_env_vars(deployment_config)
 
         try:
             validate_deployment_config(context=deployment_config)

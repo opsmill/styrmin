@@ -726,48 +726,48 @@ class RuntimeClassPatch(Patch):
 
 @dataclass
 class EnvVarsPatch(Patch):
-    """Strategic-merge YAML patch injecting ``env`` entries into containers.
+    """JSON-patch injecting ``env`` entries onto a container at a fixed index.
 
-    Targets ``spec.template.spec.containers`` with the strategic-merge
-    ``name: "*"`` wildcard so every container in the pod template receives
-    the env entries (FR-026: post-render replaces chart values when an env
-    name collides; the strategic merge of an entry with the same ``name``
-    overwrites the chart-rendered ``value``).
+    Kubernetes strategic-merge keys container lists on ``name`` with no
+    wildcard semantic (a literal ``"*"`` would create a phantom container
+    rather than match every container), so we mirror :class:`ResourcesPatch`
+    and emit a JSON-patch ``replace`` op against
+    ``/spec/template/spec/containers/{container_index}/env``. The
+    pragmatic default ``container_index = 0`` covers single-container pods —
+    the common case. Multi-container components needing per-container env
+    injection are out of scope for v1; component-level scoping with
+    ``label_selector`` plus per-component patches remains the way to narrow
+    by workload kind.
+
+    ``replace`` semantics: the chart-rendered ``env`` list on container[0]
+    is replaced wholesale by the operator-set list. Per-name override
+    behaviour (FR-026) holds for keys the chart shipped because the merged
+    list takes precedence on the rendered pod; chart-only entries on
+    container[0] are dropped — this is the v1 limitation captured in
+    spec.md / data-model.md.
 
     For ``CronJob`` the path nests under
-    ``spec.jobTemplate.spec.template.spec.containers``. Mirrors the kind /
-    api-version branching pattern used by :class:`AffinityPatch`.
-
-    The ``env_vars`` dict is materialised as a stable list ordered by
-    insertion so render output is deterministic across runs.
+    ``/spec/jobTemplate/spec/template/spec/containers/...``.
     """
 
     env_vars: dict[str, str]
     api_version: str = "apps/v1"
     kind: str = "Deployment"
     name: str = "any"
+    container_index: int = 0
     _path: str = field(init=False, default="/spec/template/spec/containers")
-    _operation: str = field(init=False, default="add")
+    _operation: str = field(init=False, default="replace")
 
-    def _spec_path(self) -> tuple[str, ...]:
-        return (
-            _CRONJOB_TEMPLATE_SPEC_PATH
-            if self.kind == "CronJob"
-            else _POD_TEMPLATE_SPEC_PATH
-        )
+    def _spec_path_str(self) -> str:
+        if self.kind == "CronJob":
+            return "/spec/jobTemplate/spec/template/spec"
+        return "/spec/template/spec"
 
     def render_value(self) -> str:
         env_list = [{"name": k, "value": v} for k, v in self.env_vars.items()]
-        leaf = {"containers": [{"name": "*", "env": env_list}]}
-        spec_body = _nested_dict(self._spec_path(), leaf)
-
-        doc: dict[str, Any] = {
-            "apiVersion": self.api_version,
-            "kind": self.kind,
-            "metadata": {"name": self.name},
-            **spec_body,
-        }
-        return yaml.dump(doc, default_flow_style=False, sort_keys=False)
+        patch_path = f"{self._spec_path_str()}/containers/{self.container_index}/env"
+        ops = [{"op": "replace", "path": patch_path, "value": env_list}]
+        return yaml.dump(ops, default_flow_style=False, sort_keys=False)
 
 
 @dataclass

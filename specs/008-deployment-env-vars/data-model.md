@@ -228,6 +228,8 @@ Operator
   → next reconcile renders pods with env entries
 ```
 
+> **v1 patch shape:** the env-injection patch is a JSON-patch ``replace`` against ``/spec/template/spec/containers/0/env`` (CronJob: ``/spec/jobTemplate/spec/template/spec/containers/0/env``), matching :class:`ResourcesPatch`. Strategic-merge has no wildcard semantic for container ``name``, so v1 narrows to container[0] — the common single-container case. Multi-container per-pod fan-out (emitting one patch per declared container in the rendered manifest) is tracked as a follow-up iteration; today's component-level label-selector scoping remains the way to narrow by workload kind.
+
 ### 5.2 Driver upgrade with component renamed
 
 ```text

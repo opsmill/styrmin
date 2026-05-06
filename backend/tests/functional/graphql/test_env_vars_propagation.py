@@ -27,6 +27,7 @@ from styrmin_backend.db.models import (
     Environment,
 )
 
+from ._queries import load_query
 from .conftest import gql
 from .seeds import (
     seed_application_driver_version,
@@ -337,11 +338,7 @@ async def test_update_deployment_rejects_unknown_component_env_var(
     response = await client.post(
         "/graphql",
         json={
-            "query": (
-                "mutation($deploymentId: UUID!, $config: JSON) {"
-                " updateDeployment(deploymentId: $deploymentId, config: $config)"
-                " { id } }"
-            ),
+            "query": load_query("update_deployment_config"),
             "variables": {
                 "deploymentId": str(deployment.id),
                 "config": {
@@ -364,6 +361,94 @@ async def test_update_deployment_rejects_unknown_component_env_var(
     # flattens ``error_metadata`` directly into ``extensions``.
     assert sorted(extensions.get("known_components") or []) == ["api", "worker"]
     assert extensions.get("component_name") == "does_not_exist"
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_rejects_invalid_env_var_name(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,  # noqa: ARG001 — prevents Prefect dispatch in mutation path
+) -> None:
+    """``updateDeployment(config: { env_vars: { "1BAD": "x" } })`` is rejected
+    at the service boundary with ``extensions.code = "INVALID_ENV_VAR_NAME"``
+    (FR-006 / SC-003). Pre-validation runs ahead of Pydantic's
+    ``ValidationError`` rewrap so the typed code reaches the GraphQL caller
+    instead of collapsing to ``INVALID_CONTEXT``.
+    """
+    deployment = await seed_deployment(session)
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment_config"),
+            "variables": {
+                "deploymentId": str(deployment.id),
+                "config": {"env_vars": {"1BAD": "x"}},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "INVALID_ENV_VAR_NAME"
+    assert extensions.get("name") == "1BAD"
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_rejects_oversized_env_var_value(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,  # noqa: ARG001 — prevents Prefect dispatch in mutation path
+) -> None:
+    """A value exceeding the per-value 64 KiB cap is rejected with
+    ``extensions.code = "ENV_VAR_SIZE_LIMIT_EXCEEDED"`` (FR-007 / SC-003).
+    """
+    deployment = await seed_deployment(session)
+    oversized = "x" * (64 * 1024 + 1)
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment_config"),
+            "variables": {
+                "deploymentId": str(deployment.id),
+                "config": {"env_vars": {"BIG": oversized}},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "ENV_VAR_SIZE_LIMIT_EXCEEDED"
+    assert extensions.get("name") == "BIG"
+
+
+@pytest.mark.asyncio
+async def test_update_environment_rejects_invalid_env_var_name(
+    client: AsyncClient,
+    session: AsyncSession,
+) -> None:
+    """``updateEnvironment(config: { env_vars: { "1BAD": "x" } })`` is rejected
+    with ``extensions.code = "INVALID_ENV_VAR_NAME"`` (FR-006 / FR-020 /
+    SC-003) — exercises the environment-scope pre-validation path.
+    """
+    environment = await seed_environment(session)
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_environment"),
+            "variables": {
+                "environmentId": str(environment.id),
+                "config": {"env_vars": {"1BAD": "x"}},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "INVALID_ENV_VAR_NAME"
+    assert extensions.get("name") == "1BAD"
 
 
 @pytest.mark.asyncio
