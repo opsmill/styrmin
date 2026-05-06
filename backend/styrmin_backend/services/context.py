@@ -7,9 +7,14 @@ from styrmin_backend.agent.service.kubernetes.utils import (
     get_kubernetes_reference,
 )
 from styrmin_backend.context.models.components import (
+    ResolvedComponentEnvVars,
     ResolvedComponentScheduling,
 )
-from styrmin_backend.context.models.config import SchedulingConfig
+from styrmin_backend.context.models.config import (
+    DeploymentConfig,
+    EnvironmentConfig,
+    SchedulingConfig,
+)
 from styrmin_backend.context.models.contexts import (
     GlobalContext,
     UtilityContext,
@@ -30,6 +35,14 @@ from styrmin_backend.context.resolvers import (
     resolve_global_context,
 )
 from styrmin_backend.domain.models import Deployment
+from styrmin_backend.services.env_vars.exceptions import (
+    EnvVarSizeLimitExceededError,
+)
+from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
+from styrmin_backend.services.env_vars.validator import (
+    PER_SCOPE_BYTE_CAP,
+    _serialised_dict_bytes,
+)
 from styrmin_backend.services.exceptions import (
     DeploymentNotFoundError,
     InvalidSchedulingConfigError,
@@ -38,6 +51,14 @@ from styrmin_backend.services.scheduling.validator import (
     expand_deployment_references,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
+
+# FR-008a: post-merge size caps. The per-component cap reuses the same
+# 256 KiB ceiling as input scopes (PER_SCOPE_BYTE_CAP) since the resolved
+# dict is just one merged scope; the per-deployment cap caps the sum
+# across components at 1 MiB so the deployment CRD stays comfortably
+# under the Kubernetes 1.5 MiB resource size limit.
+_RESOLVED_PER_COMPONENT_BYTE_CAP: int = PER_SCOPE_BYTE_CAP  # 256 KiB
+_RESOLVED_PER_DEPLOYMENT_BYTE_CAP: int = 1024 * 1024  # 1 MiB
 
 
 async def generate_context_from_deployment_id(
@@ -203,6 +224,15 @@ async def generate_context_from_deployment(
             deployment_components=deployment.components or [],
         )
 
+        # Resolve env vars per component (008-deployment-env-vars / US1).
+        # The per-component path is empty in US1 — only the deployment-level
+        # effective dict is computed and broadcast.
+        _populate_component_env_vars(
+            context=context,
+            environment_config=environment.config,
+            deployment_config=deployment.config,
+        )
+
         return context
 
 
@@ -263,6 +293,86 @@ async def _populate_component_scheduling(
         component_ctx.scheduling = ResolvedComponentScheduling(
             config=resolved, provenance=provenance
         )
+
+
+def _populate_component_env_vars(
+    *,
+    context: GlobalContext,
+    environment_config: dict | None,
+    deployment_config: dict | None,
+) -> None:
+    """Populate ``ComponentContext.env_vars`` with the deployment-level dict.
+
+    For US1 the per-component path is empty: every component receives the
+    deployment-level effective dict (env → dep merge) so the broadcast
+    semantics in FR-004 — "no components → broad apply" — and the
+    component-by-component apply are the same value at this stage. US3 will
+    extend this helper to take per-component overrides into account.
+
+    Enforces the FR-008a post-merge size caps: 256 KiB per component, 1 MiB
+    summed across components per deployment. Failures raise
+    :class:`EnvVarSizeLimitExceededError(scope="resolved", ...)`.
+    """
+    env_cfg = _validate_env_section(environment_config, scope="environment")
+    dep_cfg = _validate_env_section(deployment_config, scope="deployment")
+
+    resolved = EnvVarsResolver.resolve_for_deployment(
+        environment=env_cfg,
+        deployment=dep_cfg,
+        component_env_vars=None,  # US3 wires per-component overrides
+    )
+
+    deployment_dict = resolved.deployment_effective
+    deployment_provenance = resolved.deployment_provenance
+    if not deployment_dict:
+        return
+
+    # FR-008a per-component cap.
+    per_component_bytes = _serialised_dict_bytes(deployment_dict)
+    if per_component_bytes > _RESOLVED_PER_COMPONENT_BYTE_CAP:
+        raise EnvVarSizeLimitExceededError(
+            scope="resolved",
+            bytes=per_component_bytes,
+            cap=_RESOLVED_PER_COMPONENT_BYTE_CAP,
+        )
+
+    if context.components is None:
+        return
+
+    component_count = len(context.components.root)
+    if component_count == 0:
+        return
+
+    # FR-008a per-deployment cap (sum across components).
+    total_bytes = per_component_bytes * component_count
+    if total_bytes > _RESOLVED_PER_DEPLOYMENT_BYTE_CAP:
+        raise EnvVarSizeLimitExceededError(
+            scope="resolved",
+            bytes=total_bytes,
+            cap=_RESOLVED_PER_DEPLOYMENT_BYTE_CAP,
+        )
+
+    for _name, component_ctx in context.components.root.items():
+        component_ctx.env_vars = ResolvedComponentEnvVars(
+            config=dict(deployment_dict),
+            provenance=dict(deployment_provenance),
+            is_orphaned=False,
+        )
+
+
+def _validate_env_section(
+    raw_config: dict | None, *, scope: str
+) -> EnvironmentConfig | DeploymentConfig | None:
+    """Build the typed config model from a raw dict so the env_vars
+    Pydantic field validators run before resolution. Defensive: the
+    deployment service already validates on the write path, but resolution
+    can run from sources that bypass the mutation (e.g. context-from-CRD).
+    """
+    if not raw_config:
+        return None
+    if scope == "environment":
+        return EnvironmentConfig.model_validate(raw_config)
+    return DeploymentConfig.model_validate(raw_config)
 
 
 def _extract_scheduling(

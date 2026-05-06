@@ -725,6 +725,52 @@ class RuntimeClassPatch(Patch):
 
 
 @dataclass
+class EnvVarsPatch(Patch):
+    """Strategic-merge YAML patch injecting ``env`` entries into containers.
+
+    Targets ``spec.template.spec.containers`` with the strategic-merge
+    ``name: "*"`` wildcard so every container in the pod template receives
+    the env entries (FR-026: post-render replaces chart values when an env
+    name collides; the strategic merge of an entry with the same ``name``
+    overwrites the chart-rendered ``value``).
+
+    For ``CronJob`` the path nests under
+    ``spec.jobTemplate.spec.template.spec.containers``. Mirrors the kind /
+    api-version branching pattern used by :class:`AffinityPatch`.
+
+    The ``env_vars`` dict is materialised as a stable list ordered by
+    insertion so render output is deterministic across runs.
+    """
+
+    env_vars: dict[str, str]
+    api_version: str = "apps/v1"
+    kind: str = "Deployment"
+    name: str = "any"
+    _path: str = field(init=False, default="/spec/template/spec/containers")
+    _operation: str = field(init=False, default="add")
+
+    def _spec_path(self) -> tuple[str, ...]:
+        return (
+            _CRONJOB_TEMPLATE_SPEC_PATH
+            if self.kind == "CronJob"
+            else _POD_TEMPLATE_SPEC_PATH
+        )
+
+    def render_value(self) -> str:
+        env_list = [{"name": k, "value": v} for k, v in self.env_vars.items()]
+        leaf = {"containers": [{"name": "*", "env": env_list}]}
+        spec_body = _nested_dict(self._spec_path(), leaf)
+
+        doc: dict[str, Any] = {
+            "apiVersion": self.api_version,
+            "kind": self.kind,
+            "metadata": {"name": self.name},
+            **spec_body,
+        }
+        return yaml.dump(doc, default_flow_style=False, sort_keys=False)
+
+
+@dataclass
 class GenericPatch(Patch):
     """
     Represents a generic patch with a specific value.
