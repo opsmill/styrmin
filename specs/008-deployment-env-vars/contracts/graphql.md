@@ -5,11 +5,15 @@ This contract enumerates every GraphQL surface change introduced by the feature.
 ## 1. New types
 
 ```graphql
-"""A single environment variable to inject into rendered containers."""
+"""A single environment variable to inject into rendered containers.
+
+WARNING: This surface is for non-secret values only. The platform stores values in plaintext
+and exposes them through any query that selects them. Do not store credentials, API keys, or
+other secret material here — use the dedicated secret env var path (separate ticket) once available."""
 type EnvVar {
   """POSIX-portable env var name, matching ^[A-Za-z_][A-Za-z0-9_]*$."""
   name: String!
-  """The value to set. May be the empty string."""
+  """The value to set. May be the empty string. NOT for secret material; see the EnvVar type description."""
   value: String!
 }
 
