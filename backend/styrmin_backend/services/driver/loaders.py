@@ -28,6 +28,7 @@ from styrmin_backend.services.driver.validators import (
     Validator,
     build_user_actions_validator,
     get_validator,
+    validate_driver_env_var_docs,
 )
 
 
@@ -66,6 +67,13 @@ class DriverLoader:
             values_template = get_resource_file_loader(
                 directory_map.values_template
             ).load()
+
+            # Post-deserialization: cross-field validation that needs the
+            # whole spec. Run env-var-doc validation early so registration
+            # aborts with a precise error before action validation runs
+            # (FR-014).
+            if isinstance(driver_spec, DriverSpec):
+                validate_driver_env_var_docs(driver_spec.spec)
 
             # Post-deserialization: validate actions against actions.py if present
             if isinstance(driver_spec, DriverSpec) and driver_spec.spec.actions:
