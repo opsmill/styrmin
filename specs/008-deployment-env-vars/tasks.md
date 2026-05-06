@@ -23,10 +23,10 @@ This is a **web service** project (backend = Python; frontend = React, untouched
 
 **Purpose**: Create the new package skeletons and shared exception types that every later phase depends on. No business logic yet.
 
-- [ ] T001 Create new package skeleton at `backend/styrmin_backend/services/env_vars/` with empty `__init__.py`, `validator.py`, `resolver.py`, `patch_builder.py`, `exceptions.py` files (one stub class/function each so the imports work).
-- [ ] T002 [P] Create new module `backend/styrmin_backend/services/driver/models/resources/env_vars.py` with empty `DriverEnvVarLevel` enum and `DriverEnvVarDoc` class stubs (no validators yet).
-- [ ] T003 [P] Add empty test directories `backend/tests/unit/services/env_vars/` and `backend/tests/unit/services/driver/` (create `__init__.py` files only).
-- [ ] T004 [P] Create empty E2E test file `backend/tests/e2e/test_deployment_env_vars.py` with a single placeholder `@pytest.mark.api_only` decorator and a passing stub test, so the file is wired into pytest collection.
+- [X] T001 Create new package skeleton at `backend/styrmin_backend/services/env_vars/` with empty `__init__.py`, `validator.py`, `resolver.py`, `patch_builder.py`, `exceptions.py` files (one stub class/function each so the imports work).
+- [X] T002 [P] Create new module `backend/styrmin_backend/services/driver/models/resources/env_vars.py` with empty `DriverEnvVarLevel` enum and `DriverEnvVarDoc` class stubs (no validators yet).
+- [X] T003 [P] Add empty test directories `backend/tests/unit/services/env_vars/` and `backend/tests/unit/services/driver/` (create `__init__.py` files only).
+- [X] T004 [P] Create empty E2E test file `backend/tests/e2e/test_deployment_env_vars.py` with a single placeholder `@pytest.mark.api_only` decorator and a passing stub test, so the file is wired into pytest collection.
 
 **Checkpoint**: `uv run pytest -q backend/tests/` collects the new paths without errors.
 
