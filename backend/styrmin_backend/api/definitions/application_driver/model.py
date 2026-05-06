@@ -19,7 +19,43 @@ from styrmin_backend.db.models import (
     ApplicationDriverVersion as ApplicationDriverVersionModel,
 )
 from styrmin_backend.domain.models import ComponentConfig as DomainComponentConfig
+from styrmin_backend.services.driver.models.resources.env_vars import (
+    DriverEnvVarLevel as DriverEnvVarLevelPydantic,
+)
 from styrmin_backend.services.exceptions import ApplicationDriverNotFoundError
+
+# 008 / US4: Strawberry mirror of the Pydantic enum. Uses ``strawberry.enum``
+# with the existing ``str``-based Pydantic enum directly so the GraphQL
+# enum values stay aligned with the Pydantic source of truth (mirrors the
+# ``PodPhaseType`` pattern in ``api/definitions/pod_status/model.py``).
+DriverEnvVarLevel = strawberry.enum(DriverEnvVarLevelPydantic, name="DriverEnvVarLevel")
+
+
+@strawberry.type(
+    description=(
+        "Doc-only declaration of an env var the driver's app respects. "
+        "Surfaces in the driver detail view; does not validate, default, "
+        "or constrain operator-set values (FR-015)."
+    )
+)
+class DriverEnvVarDoc:
+    name: str
+    description: str
+    level: DriverEnvVarLevel  # type: ignore[valid-type]
+    components: list[str]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> DriverEnvVarDoc:
+        # ``data`` is the JSON-column payload stored at registration
+        # (see ``services/applications.py``: ``model_dump(mode="json")``);
+        # ``level`` arrives as the enum's string value.
+        return cls(
+            name=data["name"],
+            description=data["description"],
+            level=DriverEnvVarLevelPydantic(data["level"]),
+            components=list(data.get("components") or []),
+        )
+
 
 # FIXME: Support domain models serialization instead
 
@@ -102,6 +138,20 @@ class ApplicationDriverVersion:
         if not raw:
             return []
         return [ParameterDefinition.from_dict(p) for p in raw]
+
+    @strawberry.field(
+        description=(
+            "Doc-only env var declarations from the driver's spec.env_vars "
+            "block. Empty when the driver omits the block."
+        )
+    )
+    def env_vars(self) -> list[DriverEnvVarDoc]:
+        # The DB column is nullable; coerce NULL to ``[]`` so callers can
+        # rely on the GraphQL ``[DriverEnvVarDoc!]!`` non-null contract.
+        raw = self.instance.env_vars
+        if not raw:
+            return []
+        return [DriverEnvVarDoc.from_dict(d) for d in raw]
 
     @strawberry.field
     def component_configs(self) -> list[ComponentConfig]:

@@ -26,6 +26,11 @@ type ApplicationDriverVersion {
   applicationDriver: ApplicationDriver!
   services: [ServiceDefinition!]!
   parameters: [ParameterDefinition!]!
+
+  """
+  Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block.
+  """
+  envVars: [DriverEnvVarDoc!]!
   componentConfigs: [ComponentConfig!]!
   helmChart: HelmChart!
   actions: [Action!]!
@@ -254,6 +259,21 @@ type DeploymentTimelineEntry {
   task: Task!
   applicationVersion: String
   contextDiff: ContextDiff
+}
+
+"""
+Doc-only declaration of an env var the driver's app respects. Surfaces in the driver detail view; does not validate, default, or constrain operator-set values (FR-015).
+"""
+type DriverEnvVarDoc {
+  name: String!
+  description: String!
+  level: DriverEnvVarLevel!
+  components: [String!]!
+}
+
+enum DriverEnvVarLevel {
+  DEPLOYMENT
+  COMPONENT
 }
 
 """
