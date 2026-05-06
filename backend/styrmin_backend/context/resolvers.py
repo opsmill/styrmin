@@ -90,6 +90,22 @@ def _resolve_instance_config(
     else:
         resolved_context.pop("scheduling", None)
 
+    # Same per-key-deepest-wins rule applies to env_vars (FR-002). The flat
+    # dict spread above replaces ``env_vars`` wholesale whenever both env
+    # and dep set it, dropping environment-scope keys that aren't also set
+    # at deployment scope. The render-time broadcast (when no components
+    # are declared, application.py:407) reads from this resolved dict and
+    # would otherwise miss those keys — US2 Acceptance Scenario 1.
+    if environment.env_vars is not None or deployment.env_vars is not None:
+        merged_env_vars, _ = _merge_env_vars(
+            env=environment.env_vars,
+            dep=deployment.env_vars,
+            comp=None,
+        )
+        resolved_context["env_vars"] = merged_env_vars
+    else:
+        resolved_context.pop("env_vars", None)
+
     return ResolvedConfig(**resolved_context)
 
 

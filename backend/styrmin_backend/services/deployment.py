@@ -304,9 +304,6 @@ async def update_deployment(
             environment_id=deployment.environment_id, uow=uow
         )
 
-        # Update the deployment config
-        deployment.config = deployment_config
-
         # Merge and validate parameters if provided
         if deployment_parameters is not None:
             application_driver_version = await uow.application_driver_versions.get(

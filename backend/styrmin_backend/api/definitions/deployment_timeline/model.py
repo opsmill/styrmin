@@ -51,11 +51,14 @@ class ContextDiff:
         "entry of the same name. The operator-set value wins; this record "
         "exposes the chart value for audit. v1 NOTE: the backend has no "
         "line-of-sight into the post-rendered manifest at the patch layer "
-        "(Kustomize processes the post-render patch on-cluster), so the "
+        "(Kustomize processes the post-render patch on-cluster), so this "
         "field is exposed for forward-compatibility but always returns an "
-        "empty list in v1; the authoritative collision signal in v1 is the "
-        "`env_var_potentially_chart_colliding` structured log entry emitted "
-        "by the patch builder per operator-set env var key (FR-027/FR-028)."
+        "empty list in v1. Per FR-028 the conflict-detection path is allowed "
+        "to degrade fully — no detection runs and no warnings are emitted "
+        "today. A future iteration will add a post-apply rendered-manifest "
+        "fetch + diff path; until then operators must inspect chart values "
+        "directly (e.g. via `kubectl get` on the rendered workload). "
+        "See ADR-019 §3."
     )
 )
 class EnvVarCollision:
