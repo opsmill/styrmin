@@ -351,28 +351,38 @@
     "auto": {
       "version": "1.0.0",
       "source": "local",
-      "manifest_hash": "sha256:188c671952825fda5e05bab47347bbe483b0f35cf60bcb5daf21a6fafc663883",
+      "manifest_hash": "sha256:b7eb487625814aebfbb7317945b19503124ab99f6ebaca2e96eebf6309d5c4bd",
       "enabled": true,
       "priority": 10,
       "registered_commands": {
         "agy": [
-          "speckit.auto.run"
+          "speckit.auto.run",
+          "speckit.auto.prep",
+          "speckit.auto.implement"
         ],
         "amp": [
-          "speckit.auto.run"
+          "speckit.auto.run",
+          "speckit.auto.prep",
+          "speckit.auto.implement"
         ],
         "claude": [
-          "speckit.auto.run"
+          "speckit.auto.run",
+          "speckit.auto.prep",
+          "speckit.auto.implement"
         ],
         "codex": [
-          "speckit.auto.run"
+          "speckit.auto.run",
+          "speckit.auto.prep",
+          "speckit.auto.implement"
         ],
         "copilot": [
-          "speckit.auto.run"
+          "speckit.auto.run",
+          "speckit.auto.prep",
+          "speckit.auto.implement"
         ]
       },
       "registered_skills": [],
-      "installed_at": "2026-05-02T14:49:35.534746+00:00"
+      "installed_at": "2026-05-06T04:31:17.052695+00:00"
     }
   }
 }

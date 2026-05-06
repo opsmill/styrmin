@@ -26,6 +26,12 @@ provides:
     - name: "speckit.auto.run"
       file: "commands/run.md"
       description: "Run the full speckit pipeline end-to-end with autonomous decision-making"
+    - name: "speckit.auto.prep"
+      file: "commands/prep.md"
+      description: "Run the preparation phases of the speckit pipeline (specify → plan → critique → tasks); stops before implementation"
+    - name: "speckit.auto.implement"
+      file: "commands/implement.md"
+      description: "Implement an existing tasks.md chunk-by-chunk in clean-context subagents, then review, then produce a report"
 
 tags:
   - "automation"
