@@ -221,6 +221,8 @@ export type Deployment = {
   crdStatus?: Maybe<DeploymentStatusType>;
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
   deployedServices: Array<DeployedService>;
+  /** Effective deployment-level env vars (after merging environment & deployment scopes, but BEFORE component-level overrides). Empty when none are set. */
+  envVars: Array<EnvVar>;
   environment: Environment;
   environmentId: Scalars['UUID']['output'];
   id: Scalars['UUID']['output'];
@@ -265,6 +267,19 @@ export type DeploymentTimelineEntry = {
   applicationVersion?: Maybe<Scalars['String']['output']>;
   contextDiff?: Maybe<ContextDiff>;
   task: Task;
+};
+
+/**
+ * A single environment variable to inject into rendered containers.
+ *
+ * WARNING: This surface is for non-secret values only. The platform stores values in plaintext and exposes them through any query that selects them. Do not store credentials, API keys, or other secret material here — use the dedicated secret env var path (separate ticket) once available.
+ */
+export type EnvVar = {
+  __typename?: 'EnvVar';
+  /** POSIX-portable env var name, matching ^[A-Za-z_][A-Za-z0-9_]*$. */
+  name: Scalars['String']['output'];
+  /** The value to set. May be the empty string. NOT for secret material; see the EnvVar type description. */
+  value: Scalars['String']['output'];
 };
 
 export type Environment = {

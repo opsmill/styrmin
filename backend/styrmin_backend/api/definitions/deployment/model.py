@@ -26,6 +26,10 @@ from styrmin_backend.context.fqdn import (
     compute_human_readable_fqdn,
     compute_primary_fqdn,
 )
+from styrmin_backend.context.models.config import (
+    DeploymentConfig,
+    EnvironmentConfig,
+)
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import (
     Deployment as DeploymentEntity,
@@ -55,6 +59,28 @@ class Component:
             name=instance.name,
             enabled=instance.enabled,
         )
+
+
+@strawberry.type(
+    description=(
+        "A single environment variable to inject into rendered containers.\n\n"
+        "WARNING: This surface is for non-secret values only. The platform "
+        "stores values in plaintext and exposes them through any query that "
+        "selects them. Do not store credentials, API keys, or other secret "
+        "material here — use the dedicated secret env var path (separate "
+        "ticket) once available."
+    )
+)
+class EnvVar:
+    name: str = strawberry.field(
+        description="POSIX-portable env var name, matching ^[A-Za-z_][A-Za-z0-9_]*$."
+    )
+    value: str = strawberry.field(
+        description=(
+            "The value to set. May be the empty string. NOT for secret "
+            "material; see the EnvVar type description."
+        )
+    )
 
 
 @strawberry.type
@@ -305,6 +331,54 @@ class Deployment:
                 )
             )
         return results
+
+    @strawberry.field(
+        description=(
+            "Effective deployment-level env vars (after merging environment "
+            "& deployment scopes, but BEFORE component-level overrides). "
+            "Empty when none are set."
+        )
+    )
+    async def env_vars(self, info: strawberry.Info) -> list[EnvVar]:
+        """Resolve the effective deployment-level env vars.
+
+        Mirrors the merge done by the resolver: environment-scope values are
+        layered first, deployment-scope values overwrite per-key (FR-002
+        deepest-wins). For US1 environment-scope env vars are not yet
+        wired through write-side validation but the read-side merge
+        already honours them so US2 only adds the write path.
+        """
+        from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
+
+        uow = info.context["uow"]
+        async with uow:
+            deployment = await uow.deployments.find(self.id)
+            if deployment is None:
+                logger.warning(
+                    "env_vars: deployment {} not found (likely deleted "
+                    "between parent query and sub-field resolution)",
+                    self.id,
+                )
+                return []
+            environment = await uow.environments.get(deployment.environment_id)
+            env_config_raw = environment.config if environment is not None else None
+            dep_config_raw = deployment.config
+
+        env_cfg = (
+            EnvironmentConfig.model_validate(env_config_raw) if env_config_raw else None
+        )
+        dep_cfg = (
+            DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None
+        )
+
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=env_cfg,
+            deployment=dep_cfg,
+            component_env_vars=None,
+        )
+        return [
+            EnvVar(name=k, value=v) for k, v in resolved.deployment_effective.items()
+        ]
 
     @strawberry.field
     async def crd_status(self, info: strawberry.Info) -> DeploymentStatusType | None:
