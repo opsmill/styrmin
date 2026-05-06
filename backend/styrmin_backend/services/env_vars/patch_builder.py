@@ -71,16 +71,16 @@ def build_env_vars_post_rendering_patches(
     resources (e.g. ``"styrmin/component=worker"``); omit it to apply to
     every matching kind in the release (FR-004 broadcast path).
 
-    *component* and *deployment_id* are optional contextual fields used
-    only to enrich the structured warning log emitted per operator-set
-    env var key (US7 / FR-027 / FR-028). The platform's v1 architecture
-    does NOT see the post-rendered manifest at this layer — the patch is
-    a JSON-patch document Kustomize processes on-cluster — so true
-    chart-vs-user collision detection cannot be wired here. Per FR-028,
-    the conflict-detection path is allowed to degrade to a structured log
-    entry; the GraphQL surface (``DeploymentTimelineEntry.envVarCollisions``)
-    is present but populated as ``[]`` until a future iteration adds the
-    post-apply rendered-manifest fetch + diff path.
+    *component* and *deployment_id* are reserved for the future chart-vs-user
+    collision detection path (US7 / FR-027 / FR-028) — they are NOT consumed
+    today. The platform's v1 architecture does NOT see the post-rendered
+    manifest at this layer (the patch is a JSON-patch document Kustomize
+    processes on-cluster), so true collision detection cannot be wired here.
+    Per FR-028 the conflict-detection path is allowed to degrade fully — no
+    detection runs and no warnings are emitted in v1. The GraphQL surface
+    (``DeploymentTimelineEntry.envVarCollisions``) is present but populated
+    as ``[]`` until a future iteration adds the post-apply rendered-manifest
+    fetch + diff path. See ADR-019 §3.
     """
     if not effective_inject_flag(inject, "env_vars"):
         return []

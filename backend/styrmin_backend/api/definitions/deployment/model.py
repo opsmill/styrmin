@@ -85,12 +85,11 @@ class EnvVar:
 
 @strawberry.type(
     description=(
-        "A bundle of environment variables targeting one component, plus an "
-        "``isOrphaned`` flag that becomes true when the deployment's current "
-        "driver no longer declares the targeted component (008-deployment-env-vars "
-        "/ US3 + US5). Orphaned blocks remain visible in the API but are NOT "
-        "injected into rendered pods. For US3 (Phase 5) every entry has "
-        "``isOrphaned=False``; the orphan transition lands in Phase 7 (US5)."
+        "A bundle of environment variables targeting one component of a "
+        "deployment, plus an ``isOrphaned`` flag indicating whether the "
+        "deployment's current driver still declares the targeted component. "
+        "Orphaned blocks remain visible in the API but are NOT injected "
+        "into rendered pods."
     )
 )
 class ComponentEnvVars:
@@ -101,9 +100,9 @@ class ComponentEnvVars:
     is_orphaned: bool = strawberry.field(
         description=(
             "True when the deployment's current driver no longer declares "
-            "this component. Orphaned blocks are visible in the API but are "
-            "NOT injected into rendered pods. Lands with US5 (Phase 7); "
-            "always False in US3."
+            "this component (the upgrade renamed or removed it). Orphaned "
+            "blocks are visible in the API but are NOT injected into "
+            "rendered pods, so the operator can audit and clean them up."
         )
     )
 

@@ -37,12 +37,14 @@ The driver-side docs are persisted in a dedicated `applicationdriverversion.env_
 
 When a chart's rendered manifest already contains an `env:` entry with the same name as an operator-set env var, **the operator-set value wins**. This is enforced by the post-render JSON-patch which replaces the container's `env` list at index 0 (see ADR-006 + Assumptions in spec.md for the `container[0]`-only v1 limit).
 
-Detection of these collisions is best-effort:
+Detection of these collisions is best-effort, with two channels in the design:
 
 - **Primary channel**: a structured field on the deployment timeline entry (`DeploymentTimelineEntry.envVarCollisions`) populated when the agent layer can compare rendered chart output against the operator-set list.
-- **Fallback channel**: a structured `logger.warning("env_var_potentially_chart_colliding", ...)` log line emitted unconditionally from the patch builder.
+- **Fallback channel**: a structured `logger.warning("env_var_chart_collision", ...)` log line from the patch builder when timeline emission isn't feasible.
 
-FR-028 explicitly authorises the degradation: when timeline emission can't be wired (which is the v1 state — there is no rendered-manifest fetch + diff seam yet), the feature does not block on it. The operator's value still wins; the warning surface is purely diagnostic. We did not consider blocking on collision (would break the headline use case) or "chart wins" (would silently drop the operator's intent).
+**v1 status: both channels are inert.** The backend has no line-of-sight into the post-rendered manifest at the patch layer (the patch is a JSON-patch document that Kustomize processes on-cluster), so no detection runs. `DeploymentTimelineEntry.envVarCollisions` always returns `[]` and no warning log is emitted. The `EnvVarCollision` Strawberry type and the `ChartEnvCollision` dataclass shape ship for forward-compatibility — a future iteration will add a post-apply rendered-manifest fetch + diff path that populates them.
+
+FR-028 explicitly authorises this degradation: when collision detection can't be wired, the feature does not block on it. The operator's value still wins; the warning surface is purely diagnostic. We did not consider blocking on collision (would break the headline use case) or "chart wins" (would silently drop the operator's intent). An earlier draft of this ADR claimed the patch builder emitted the fallback log "unconditionally" per operator-set key — that was implemented and reverted because emitting a warning per key without an actual collision check is mislabelled noise, not a triage signal.
 
 ### 4. Upgrade orphan policy: warn-and-keep, never block
 

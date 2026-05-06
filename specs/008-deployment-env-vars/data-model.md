@@ -245,18 +245,23 @@ Operator
   → subsequent reconciles: orphan persists, no new timeline entries (no new task per reconcile)
 ```
 
-### 5.3 Chart-collision warning
+### 5.3 Chart-collision warning (v1: deferred per FR-028)
+
+The original design called for the patch builder to walk rendered container env entries at render time, record `ChartEnvCollision` per name overlap, and emit a structured warning log. **This is not implemented in v1**: the backend has no line-of-sight into the post-rendered manifest at the patch layer (the JSON-patch is processed by Kustomize on-cluster). Per FR-028 the conflict-detection path is allowed to degrade fully — no detection runs and no warnings are emitted. The operator-set value still wins (post-render replaces chart entries on `container[0]`).
+
+The forward-compatible flow that lands when a real detection seam is added:
 
 ```text
-Render-time:
-  patch builder walks rendered manifest container env entries
-  → for every name overlap with operator-set env vars:
-    → record ChartEnvCollision on the patch result
-    → emit logger.warning("env_var_chart_collision", ...) unconditionally
-  → operator-set value wins (post-render replaces chart value)
-  → agent layer attaches collisions to the Task for this reconcile
+Future (post-apply rendered-manifest fetch + diff path):
+  agent fetches rendered manifest after FluxCD apply
+  → for every name overlap between chart env and operator-set env vars:
+    → record ChartEnvCollision per collision
+    → emit logger.warning("env_var_chart_collision", ...) per collision
+  → agent attaches collisions to the Task for this reconcile
   → DeploymentTimelineEntry.envVarCollisions surfaces them in API/UI
 ```
+
+In v1, `DeploymentTimelineEntry.envVarCollisions` always returns `[]`; the `EnvVarCollision` Strawberry type and `ChartEnvCollision` dataclass shape ship for forward-compatibility. See [ADR-019](/dev/adr/adr-019-deployment-env-vars.md) §3.
 
 ## 6. Storage
 
@@ -280,6 +285,6 @@ No new database columns for the **deployment-side** env-var storage (FR-022) —
 | `EnvVarSizeLimitExceededError` | per-value, per-dict-entry-count, or per-dict-bytes cap | `ENV_VAR_SIZE_LIMIT_EXCEEDED` |
 | `UnknownComponentEnvVarError` | mutation references a component the driver does not declare | `UNKNOWN_COMPONENT_ENV_VAR` |
 | `DriverEnvVarDocComponentMismatchError` | driver doc references unknown component | `DRIVER_ENV_VAR_DOC_COMPONENT_MISMATCH` (raised at driver load) |
-| `DriverEnvVarDocLevelComponentMismatchError` | `level=component` with empty `components`, or `level=deployment` with non-empty `components` | `DRIVER_ENV_VAR_DOC_LEVEL_MISMATCH` |
+| `DriverEnvVarDocLevelMismatchError` | `level=component` with empty `components`, or `level=deployment` with non-empty `components` | `DRIVER_ENV_VAR_DOC_LEVEL_MISMATCH` |
 
 All errors subclass `ServiceError` (Constitution §IV); the `StructuredErrorExtension` middleware projects them onto `extensions.code`.
