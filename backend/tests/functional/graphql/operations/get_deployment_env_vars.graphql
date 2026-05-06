@@ -1,0 +1,9 @@
+query GetDeploymentEnvVars($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        envVars {
+            name
+            value
+        }
+    }
+}
