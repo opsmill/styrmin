@@ -153,7 +153,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - run: uv sync
       - name: Run unit tests
-        run: uv run pytest -v backend/tests/unit
+        run: uv run pytest -v --ignore=backend/tests/e2e backend/tests
 
   e2e-tests-api:
     name: E2E Tests (API entrypoint)
