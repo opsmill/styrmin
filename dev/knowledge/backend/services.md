@@ -60,6 +60,12 @@ styrmin_backend/services/
 │
 ├── scheduling/                    # Pod scheduling helpers
 │
+├── env_vars/                      # Free-form deployment env vars (post-render injection)
+│   ├── validator.py               # name regex + size caps + risky-name warning
+│   ├── resolver.py                # env→dep→comp deepest-wins merge
+│   ├── patch_builder.py           # JSON-patch builder for container[0].env
+│   └── exceptions.py              # InvalidEnvVarNameError, EnvVarSizeLimitExceededError, etc.
+│
 └── utilities/                     # Infrastructure utilities (ingress, etc.)
     └── utilities.py               # Utility management
 ```
@@ -410,7 +416,11 @@ ServiceError (base)
 ├── InvalidSchedulingConfigError
 ├── UnknownComponentInConfigError
 ├── UnresolvableAffinityReferenceError
-└── SchedulingPatchRenderingError
+├── SchedulingPatchRenderingError
+├── InvalidEnvVarNameError                  # services/env_vars/exceptions.py
+├── DuplicateEnvVarNameError
+├── EnvVarSizeLimitExceededError
+└── UnknownComponentEnvVarError
 ```
 
 ## Key Files
