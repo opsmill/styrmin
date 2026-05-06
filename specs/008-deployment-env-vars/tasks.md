@@ -162,10 +162,10 @@ This is a **web service** project (backend = Python; frontend = React, untouched
 
 **Independent Test**: Quickstart Step 7.
 
-- [ ] T062 [US6] Verify `effective_inject_flag(inject, "env_vars")` (T015) is invoked inside `build_env_vars_post_rendering_patches` (T022) and inside `ApplicationBuilder.build_env_vars_post_rendering_patches()` (T023) for the per-component branch. If missing, add the call so component-level opt-out short-circuits patch emission.
-- [ ] T063 [US6] [P] Extend `test_patch_builder.py` (T027 file) with: `inject.env_vars=False` opts-out at component level, peer components still receive env vars, deployment-level inject=False suppresses everything.
-- [ ] T064 [US6] [P] Extend `test_application_builder_env_vars.py` (T028 file) with the multi-component opt-out scenario.
-- [ ] T065 [US6] Extend the E2E test with Quickstart Step 7 (component-level opt-out asserts).
+- [X] T062 [US6] Verify `effective_inject_flag(inject, "env_vars")` (T015) is invoked inside `build_env_vars_post_rendering_patches` (T022) and inside `ApplicationBuilder.build_env_vars_post_rendering_patches()` (T023) for the per-component branch. If missing, add the call so component-level opt-out short-circuits patch emission.
+- [X] T063 [US6] [P] Extend `test_patch_builder.py` (T027 file) with: `inject.env_vars=False` opts-out at component level, peer components still receive env vars, deployment-level inject=False suppresses everything.
+- [X] T064 [US6] [P] Extend `test_application_builder_env_vars.py` (T028 file) with the multi-component opt-out scenario.
+- [X] T065 [US6] Extend the E2E test with Quickstart Step 7 (component-level opt-out asserts).
 
 **Checkpoint**: US6 is shippable. Pristine-env components are protected.
 
