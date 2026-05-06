@@ -363,3 +363,95 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
         "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
         "value": "https://otel.staging",
     } in envs_b_after
+
+
+# ---------------------------------------------------------------------------
+# US3 — Per-component scoping with deepest-wins precedence (T046 / Step 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api_only(
+    reason=(
+        "API/SDK-only flow (Quickstart Step 3); no UI page navigation. "
+        "The [ui-chromium] variant would just re-run the same SDK call. "
+        "The Step 4 negative case (UnknownComponentEnvVarError) is covered "
+        "by the propagation test in test_env_vars_propagation.py since it "
+        "exercises only the GraphQL mutation rejection path and does not "
+        "require a real cluster."
+    )
+)
+@pytest.mark.ci
+async def test_us3_per_component_env_var_overrides_deployment_level(
+    env_vars_environment: dict,
+    env_vars_deployment: dict,
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    _env_vars_driver_bound: None,
+) -> None:
+    """Quickstart Step 3: deployment-level + per-component env vars on a
+    multi-component driver. The ``server`` component inherits the
+    deployment-level ``LOG_LEVEL=info``; the ``database`` component
+    overrides ``LOG_LEVEL=debug`` and adds ``DB_POOL_SIZE=5`` only to its
+    own pods. Asserts FR-002 (deepest-wins) and that peer components are
+    unaffected by another component's block.
+    """
+    deployment_id = env_vars_deployment["deployment_id"]
+    namespace = env_vars_deployment["namespace"]
+
+    # Reset the environment-scope OTEL endpoint so it doesn't pollute the
+    # baseline assertions (US2's earlier test left it set).
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_id,
+        config={
+            "env_vars": {"LOG_LEVEL": "info"},
+            "components": {
+                "database": {
+                    "env_vars": {"LOG_LEVEL": "debug", "DB_POOL_SIZE": "5"},
+                }
+            },
+        },
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+
+    # ``server`` pods carry LOG_LEVEL=info inherited from the deployment
+    # scope and must NOT carry DB_POOL_SIZE.
+    server_dep = await _wait_for_pod_template(
+        vcluster,
+        namespace=namespace,
+        label_selector="app.kubernetes.io/name=simple-app",
+        predicate=lambda d: any(
+            entry.name == "LOG_LEVEL" and entry.value == "info"
+            for container in d.spec.template.spec.containers or []
+            for entry in container.env or []
+        ),
+        description="LOG_LEVEL=info to land on server pods (deployment scope)",
+    )
+    server_envs = _container_envs(server_dep)
+    server_names = {entry["name"] for entry in server_envs}
+    assert {"name": "LOG_LEVEL", "value": "info"} in server_envs
+    assert "DB_POOL_SIZE" not in server_names, (
+        "server pods must not receive component-scoped env vars meant for database"
+    )
+
+    # ``database`` pods override LOG_LEVEL and gain DB_POOL_SIZE.
+    database_dep = await _wait_for_pod_template(
+        vcluster,
+        namespace=namespace,
+        label_selector="app.kubernetes.io/name=postgresql",
+        predicate=lambda d: any(
+            entry.name == "LOG_LEVEL" and entry.value == "debug"
+            for container in d.spec.template.spec.containers or []
+            for entry in container.env or []
+        ),
+        description=(
+            "LOG_LEVEL=debug to land on database pods via component scope "
+            "(FR-002 deepest-wins)"
+        ),
+    )
+    database_envs = _container_envs(database_dep)
+    assert {"name": "LOG_LEVEL", "value": "debug"} in database_envs
+    assert {"name": "DB_POOL_SIZE", "value": "5"} in database_envs
+    # The deployment-scope LOG_LEVEL=info must NOT linger on database pods.
+    assert {"name": "LOG_LEVEL", "value": "info"} not in database_envs

@@ -157,6 +157,17 @@ export type ComponentConfig = {
   name: Scalars['String']['output'];
 };
 
+/** A bundle of environment variables targeting one component, plus an ``isOrphaned`` flag that becomes true when the deployment's current driver no longer declares the targeted component (008-deployment-env-vars / US3 + US5). Orphaned blocks remain visible in the API but are NOT injected into rendered pods. For US3 (Phase 5) every entry has ``isOrphaned=False``; the orphan transition lands in Phase 7 (US5). */
+export type ComponentEnvVars = {
+  __typename?: 'ComponentEnvVars';
+  /** Name of the targeted component. */
+  component: Scalars['String']['output'];
+  /** The effective env vars set on this component (env+dep+component merged). */
+  envVars: Array<EnvVar>;
+  /** True when the deployment's current driver no longer declares this component. Orphaned blocks are visible in the API but are NOT injected into rendered pods. Lands with US5 (Phase 7); always False in US3. */
+  isOrphaned: Scalars['Boolean']['output'];
+};
+
 export type ComponentRestoreStatus = {
   __typename?: 'ComponentRestoreStatus';
   componentName: Scalars['String']['output'];
@@ -216,6 +227,8 @@ export type Deployment = {
   applicationDriverVersionId: Scalars['UUID']['output'];
   applicationInstance?: Maybe<ApplicationInstance>;
   applicationVersion: Scalars['String']['output'];
+  /** Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Orphaned blocks (component renamed or removed by a driver upgrade) are visible here but skipped by the post-render injector — orphan handling lands in Phase 7 (US5); for US3 every entry has ``isOrphaned=False``. */
+  componentEnvVars: Array<ComponentEnvVars>;
   components: Array<Component>;
   config: Scalars['JSON']['output'];
   crdStatus?: Maybe<DeploymentStatusType>;

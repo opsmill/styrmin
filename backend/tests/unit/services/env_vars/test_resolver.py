@@ -203,3 +203,142 @@ class TestEnvVarsResolverEnvironmentPrecedence:
         )
         assert resolved.deployment_effective == {}
         assert resolved.deployment_provenance == {}
+
+
+class TestEnvVarsResolverPerComponentPath:
+    """T044 / US3: per-component precedence cases at the resolver surface.
+
+    Locks in that
+    :func:`EnvVarsResolver.resolve_for_deployment` produces one
+    :class:`ResolvedComponentEnvVars` per **driver-declared** component when
+    ``driver_components`` is supplied, with the component scope overriding
+    deployment + environment scopes per FR-002 deepest-wins precedence.
+    Stored blocks targeting components the driver does not declare are
+    silently ignored (US5 Phase 7 will surface them as orphans).
+    """
+
+    def test_component_overrides_deployment_per_key(self) -> None:
+        env = EnvironmentConfig(env_vars={"LOG_LEVEL": "info"})
+        dep = DeploymentConfig(env_vars={"LOG_LEVEL": "info"})
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=env,
+            deployment=dep,
+            component_env_vars={
+                "worker": {"LOG_LEVEL": "debug", "WORKER_QUEUE": "orders"}
+            },
+            driver_components=["api", "worker"],
+        )
+        # Two driver components → two entries.
+        assert {e.component_name for e in resolved.components} == {"api", "worker"}
+        api_entry = next(e for e in resolved.components if e.component_name == "api")
+        worker_entry = next(
+            e for e in resolved.components if e.component_name == "worker"
+        )
+        # api inherits the deployment-level dict; component layer is empty.
+        assert api_entry.resolved.config == {"LOG_LEVEL": "info"}
+        assert api_entry.resolved.provenance == {"LOG_LEVEL": "deployment"}
+        assert api_entry.resolved.is_orphaned is False
+        # worker overrides LOG_LEVEL and adds WORKER_QUEUE; provenance flags
+        # both keys as ``"component"``.
+        assert worker_entry.resolved.config == {
+            "LOG_LEVEL": "debug",
+            "WORKER_QUEUE": "orders",
+        }
+        assert worker_entry.resolved.provenance == {
+            "LOG_LEVEL": "component",
+            "WORKER_QUEUE": "component",
+        }
+
+    def test_component_only_no_deployment_no_environment(self) -> None:
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=None,
+            component_env_vars={"worker": {"WORKER_QUEUE": "orders"}},
+            driver_components=["worker"],
+        )
+        assert len(resolved.components) == 1
+        entry = resolved.components[0]
+        assert entry.component_name == "worker"
+        assert entry.resolved.config == {"WORKER_QUEUE": "orders"}
+        assert entry.resolved.provenance == {"WORKER_QUEUE": "component"}
+
+    def test_component_provenance_layers_per_key(self) -> None:
+        """Mixed precedence: env / dep / comp each contribute disjoint keys
+        plus one key the component overrides — provenance must reflect the
+        per-key origin (data-model.md §2.2 deepest-wins)."""
+        env = EnvironmentConfig(env_vars={"FROM_ENV": "1", "SHARED": "env"})
+        dep = DeploymentConfig(env_vars={"FROM_DEP": "2", "SHARED": "dep"})
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=env,
+            deployment=dep,
+            component_env_vars={
+                "worker": {"FROM_COMP": "3", "SHARED": "comp"},
+            },
+            driver_components=["worker"],
+        )
+        entry = resolved.components[0]
+        assert entry.resolved.config == {
+            "FROM_ENV": "1",
+            "FROM_DEP": "2",
+            "FROM_COMP": "3",
+            "SHARED": "comp",
+        }
+        assert entry.resolved.provenance == {
+            "FROM_ENV": "environment",
+            "FROM_DEP": "deployment",
+            "FROM_COMP": "component",
+            "SHARED": "component",
+        }
+
+    def test_no_components_declared_fallback(self) -> None:
+        """FR-004 broadcast path: when ``driver_components`` is None or
+        empty, no per-component entries are produced; callers consume
+        ``deployment_effective`` directly."""
+        env = EnvironmentConfig(env_vars={"X": "1"})
+        dep = DeploymentConfig(env_vars={"Y": "2"})
+        resolved_none = EnvVarsResolver.resolve_for_deployment(
+            environment=env, deployment=dep, driver_components=None
+        )
+        assert resolved_none.components == []
+        assert resolved_none.deployment_effective == {"X": "1", "Y": "2"}
+
+        resolved_empty = EnvVarsResolver.resolve_for_deployment(
+            environment=env, deployment=dep, driver_components=[]
+        )
+        assert resolved_empty.components == []
+        assert resolved_empty.deployment_effective == {"X": "1", "Y": "2"}
+
+    def test_components_without_block_inherit_deployment_dict(self) -> None:
+        """A component declared by the driver but absent from
+        ``component_env_vars`` still produces an entry — its merged config
+        is the env+dep dict (the component layer is empty)."""
+        dep = DeploymentConfig(env_vars={"LOG_LEVEL": "info"})
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=dep,
+            component_env_vars={},
+            driver_components=["api", "worker"],
+        )
+        assert {e.component_name for e in resolved.components} == {"api", "worker"}
+        for entry in resolved.components:
+            assert entry.resolved.config == {"LOG_LEVEL": "info"}
+            assert entry.resolved.provenance == {"LOG_LEVEL": "deployment"}
+            assert entry.resolved.is_orphaned is False
+
+    def test_unknown_component_blocks_are_silently_ignored_in_us3(self) -> None:
+        """Stored blocks targeting components the driver does not declare
+        are silently dropped in US3 — US5 (Phase 7) replaces this branch
+        with orphan emission."""
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=None,
+            deployment=DeploymentConfig(),
+            component_env_vars={
+                "worker": {"X": "1"},
+                "removed": {"Y": "2"},  # not declared by the driver
+            },
+            driver_components=["worker"],
+        )
+        assert {e.component_name for e in resolved.components} == {"worker"}
+        worker_entry = resolved.components[0]
+        assert worker_entry.resolved.config == {"X": "1"}
+        assert worker_entry.resolved.is_orphaned is False

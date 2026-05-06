@@ -7,7 +7,6 @@ from styrmin_backend.agent.service.kubernetes.utils import (
     get_kubernetes_reference,
 )
 from styrmin_backend.context.models.components import (
-    ResolvedComponentEnvVars,
     ResolvedComponentScheduling,
 )
 from styrmin_backend.context.models.config import (
@@ -224,9 +223,13 @@ async def generate_context_from_deployment(
             deployment_components=deployment.components or [],
         )
 
-        # Resolve env vars per component (008-deployment-env-vars / US1).
-        # The per-component path is empty in US1 — only the deployment-level
-        # effective dict is computed and broadcast.
+        # Resolve env vars per component (008-deployment-env-vars / US3).
+        # Reads per-component blocks from
+        # ``DeploymentConfig.components[<name>].env_vars`` and assigns the
+        # merged ``env → dep → comp`` dict to each
+        # ``ComponentContext.env_vars``. Components without an explicit block
+        # still receive the deployment-level merged dict (FR-002 deepest-wins
+        # falls through to the deployment scope).
         _populate_component_env_vars(
             context=context,
             environment_config=environment.config,
@@ -301,13 +304,20 @@ def _populate_component_env_vars(
     environment_config: dict | None,
     deployment_config: dict | None,
 ) -> None:
-    """Populate ``ComponentContext.env_vars`` with the deployment-level dict.
+    """Populate ``ComponentContext.env_vars`` with per-component merged dicts.
 
-    For US1 the per-component path is empty: every component receives the
-    deployment-level effective dict (env → dep merge) so the broadcast
-    semantics in FR-004 — "no components → broad apply" — and the
-    component-by-component apply are the same value at this stage. US3 will
-    extend this helper to take per-component overrides into account.
+    Reads per-component env var blocks from
+    ``DeploymentConfig.components[<name>].env_vars`` and assigns each
+    :class:`ComponentContext` a :class:`ResolvedComponentEnvVars` whose
+    ``config`` is the FR-002 deepest-wins merge of
+    ``env → dep → component_block``. Components without a stored block still
+    receive the deployment-level merged dict (the merge falls through to the
+    ``dep`` layer and stops).
+
+    Stored blocks targeting components the deployment's current driver does
+    NOT declare are silently ignored in US3 — Phase 7 (US5) will surface
+    them as ``is_orphaned=True`` entries. Mutation-side validation is the
+    place for hard rejection (T040).
 
     Enforces the FR-008a post-merge size caps: 256 KiB per component, 1 MiB
     summed across components per deployment. Failures raise
@@ -316,35 +326,54 @@ def _populate_component_env_vars(
     env_cfg = _validate_env_section(environment_config, scope="environment")
     dep_cfg = _validate_env_section(deployment_config, scope="deployment")
 
+    # Extract per-component env var blocks from the typed DeploymentConfig.
+    component_env_vars: dict[str, dict[str, str] | None] = {}
+    if dep_cfg is not None and isinstance(dep_cfg, DeploymentConfig):
+        for name, block in (dep_cfg.components or {}).items():
+            component_env_vars[name] = block.env_vars
+
+    driver_components: list[str] | None = None
+    if context.components is not None:
+        driver_components = list(context.components.root.keys())
+
     resolved = EnvVarsResolver.resolve_for_deployment(
         environment=env_cfg,
         deployment=dep_cfg,
-        component_env_vars=None,  # US3 wires per-component overrides
+        component_env_vars=component_env_vars,
+        driver_components=driver_components,
     )
 
     deployment_dict = resolved.deployment_effective
-    deployment_provenance = resolved.deployment_provenance
-    if not deployment_dict:
+
+    # FR-004 broadcast path — no components declared. The deployment-level
+    # effective dict is consumed directly by the patch builder via
+    # ``context.instance.config.env_vars``; nothing to attach to a component
+    # context here. Still enforce the FR-008a per-component cap because the
+    # broadcast applies to every workload.
+    if context.components is None or len(context.components.root) == 0:
+        if deployment_dict:
+            per_component_bytes = _serialised_dict_bytes(deployment_dict)
+            if per_component_bytes > _RESOLVED_PER_COMPONENT_BYTE_CAP:
+                raise EnvVarSizeLimitExceededError(
+                    scope="resolved",
+                    bytes=per_component_bytes,
+                    cap=_RESOLVED_PER_COMPONENT_BYTE_CAP,
+                )
         return
 
-    # FR-008a per-component cap.
-    per_component_bytes = _serialised_dict_bytes(deployment_dict)
-    if per_component_bytes > _RESOLVED_PER_COMPONENT_BYTE_CAP:
-        raise EnvVarSizeLimitExceededError(
-            scope="resolved",
-            bytes=per_component_bytes,
-            cap=_RESOLVED_PER_COMPONENT_BYTE_CAP,
-        )
-
-    if context.components is None:
-        return
-
-    component_count = len(context.components.root)
-    if component_count == 0:
-        return
-
-    # FR-008a per-deployment cap (sum across components).
-    total_bytes = per_component_bytes * component_count
+    # FR-008a caps — applied per-component on the post-merge dict, plus the
+    # 1 MiB per-deployment cap summed across components.
+    total_bytes = 0
+    for entry in resolved.components:
+        per_component_bytes = _serialised_dict_bytes(entry.resolved.config)
+        if per_component_bytes > _RESOLVED_PER_COMPONENT_BYTE_CAP:
+            raise EnvVarSizeLimitExceededError(
+                scope="resolved",
+                component=entry.component_name,
+                bytes=per_component_bytes,
+                cap=_RESOLVED_PER_COMPONENT_BYTE_CAP,
+            )
+        total_bytes += per_component_bytes
     if total_bytes > _RESOLVED_PER_DEPLOYMENT_BYTE_CAP:
         raise EnvVarSizeLimitExceededError(
             scope="resolved",
@@ -352,12 +381,16 @@ def _populate_component_env_vars(
             cap=_RESOLVED_PER_DEPLOYMENT_BYTE_CAP,
         )
 
-    for _name, component_ctx in context.components.root.items():
-        component_ctx.env_vars = ResolvedComponentEnvVars(
-            config=dict(deployment_dict),
-            provenance=dict(deployment_provenance),
-            is_orphaned=False,
-        )
+    # Attach per-component resolved env vars. Components with empty merged
+    # dicts get ``None`` so the patch builder skips them cleanly.
+    for entry in resolved.components:
+        component_ctx = context.components.root.get(entry.component_name)
+        if component_ctx is None:
+            continue
+        if not entry.resolved.config:
+            component_ctx.env_vars = None
+            continue
+        component_ctx.env_vars = entry.resolved
 
 
 def _validate_env_section(
