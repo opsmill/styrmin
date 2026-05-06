@@ -118,6 +118,42 @@ async def get_environments(uow: UnitOfWork) -> Sequence[Environment]:
         return await uow.environments.get_all()
 
 
+async def update_environment(
+    environment_id: UUID, uow: UnitOfWork, config: dict | None = None
+) -> Environment:
+    """Update an environment's config, validating against ``EnvironmentConfig``.
+
+    Mirrors :func:`create_environment` for the validation step so env var
+    rules (and any other Pydantic validators on ``EnvironmentConfig``) gate
+    the write path (008-deployment-env-vars / US2 / FR-020). Recomputes
+    capabilities from the updated config and persists the row.
+
+    Raises:
+        EnvironmentNotFoundError: When ``environment_id`` does not exist.
+        InvalidContextError: When the new config fails ``EnvironmentConfig``
+            validation (e.g. invalid env var names, oversized dicts).
+    """
+    async with uow:
+        environment = await uow.environments.get(environment_id)
+        if environment is None:
+            raise EnvironmentNotFoundError(
+                f"Environment with id {environment_id} not found."
+            )
+
+        if config is not None:
+            try:
+                validate_environment_config(config)
+            except InvalidEnvironmentContextError as e:
+                raise InvalidContextError from e
+            environment.config = config
+            environment.capabilities = compute_environment_capabilities(environment)
+
+        await uow.commit()
+        refreshed = await uow.environments.get(environment_id)
+        assert refreshed is not None, "Environment should still exist after update"
+        return refreshed
+
+
 async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
     """Delete an environment by its id."""
     async with uow:

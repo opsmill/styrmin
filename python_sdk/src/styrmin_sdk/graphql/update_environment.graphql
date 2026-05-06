@@ -1,0 +1,11 @@
+mutation UpdateEnvironment($environmentId: UUID!, $config: JSON) {
+    updateEnvironment(environmentId: $environmentId, config: $config) {
+        id
+        name
+        config
+        cluster {
+            id
+            name
+        }
+    }
+}

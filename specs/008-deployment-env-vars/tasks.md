@@ -84,13 +84,13 @@ This is a **web service** project (backend = Python; frontend = React, untouched
 
 **Independent Test**: Quickstart Step 2.
 
-- [ ] T031 [US2] Extend `EnvVarsResolver.resolve_for_deployment` in `backend/styrmin_backend/services/env_vars/resolver.py` to merge the environment layer ahead of the deployment layer using `_merge_env_vars(env, dep, None)`. Provenance must report `"environment"` for keys whose value comes from the environment scope.
-- [ ] T032 [US2] [P] Add `Environment.envVars: [EnvVar!]!` resolver in `backend/styrmin_backend/api/definitions/environment/model.py` (mirror US1's deployment surface).
-- [ ] T033 [US2] [P] Verify the existing `updateEnvironmentConfig` (or current equivalent — check `backend/styrmin_backend/api/schema/mutation.py`) accepts `config: { env_vars: { ... } }` via the existing JSON path; if it does not validate against `EnvironmentConfig`, wire it through.
-- [ ] T034 [US2] [P] Regenerate `schema.graphql` and SDK types after the resolver field is added.
-- [ ] T035 [US2] [P] Extend `test_resolver.py` (T018 file) with the precedence cases: env-only, env-overridden-by-deployment per-key, env-and-deployment-disjoint-keys-merge.
-- [ ] T036 [US2] Add propagation test for `Environment.envVars` to `backend/tests/unit/api/schema/test_env_vars_propagation.py`: `updateEnvironmentConfig(config: { env_vars: { X: "y" } })` → query returns `[{name: "X", value: "y"}]`.
-- [ ] T037 [US2] Extend the E2E test with the US2 scenario (Quickstart Step 2): set env var at environment scope, deploy a second deployment, assert both pods carry the env var; then set a deployment-level override on one and assert the divergence.
+- [X] T031 [US2] Extend `EnvVarsResolver.resolve_for_deployment` in `backend/styrmin_backend/services/env_vars/resolver.py` to merge the environment layer ahead of the deployment layer using `_merge_env_vars(env, dep, None)`. Provenance must report `"environment"` for keys whose value comes from the environment scope.
+- [X] T032 [US2] [P] Add `Environment.envVars: [EnvVar!]!` resolver in `backend/styrmin_backend/api/definitions/environment/model.py` (mirror US1's deployment surface).
+- [X] T033 [US2] [P] Verify the existing `updateEnvironmentConfig` (or current equivalent — check `backend/styrmin_backend/api/schema/mutation.py`) accepts `config: { env_vars: { ... } }` via the existing JSON path; if it does not validate against `EnvironmentConfig`, wire it through.
+- [X] T034 [US2] [P] Regenerate `schema.graphql` and SDK types after the resolver field is added.
+- [X] T035 [US2] [P] Extend `test_resolver.py` (T018 file) with the precedence cases: env-only, env-overridden-by-deployment per-key, env-and-deployment-disjoint-keys-merge.
+- [X] T036 [US2] Add propagation test for `Environment.envVars` to `backend/tests/unit/api/schema/test_env_vars_propagation.py`: `updateEnvironmentConfig(config: { env_vars: { X: "y" } })` → query returns `[{name: "X", value: "y"}]`.
+- [X] T037 [US2] Extend the E2E test with the US2 scenario (Quickstart Step 2): set env var at environment scope, deploy a second deployment, assert both pods carry the env var; then set a deployment-level override on one and assert the divergence.
 
 **Checkpoint**: US2 is independently shippable on top of US1.
 
