@@ -325,6 +325,11 @@ class PostRenderInjection(BaseModel):
     resources: bool | None = None
     tolerations: bool | None = None
     runtime_class: bool | None = None
+    # FR-024: env var injection follows the same three-valued opt-out
+    # semantics as the scheduling flags above. ``None`` inherits, ``False``
+    # opts the component out (sidecars / debug containers), ``True`` is the
+    # default behaviour.
+    env_vars: bool | None = None
 
 
 class SchedulingConfig(BaseModel):
@@ -429,12 +434,31 @@ class EnvironmentConfig(BaseConfigSection):
     Attributes:
         ip_whitelist (list[str] | None): The IP whitelist.
         dedicated_ingress (DedicatedIngressConfig | None): The dedicated ingress controller config.
+        env_vars (dict[str, str] | None): Free-form environment variables to
+            inject into every component's containers (008-deployment-env-vars,
+            FR-001/FR-006..FR-008). Per-key validated through
+            :func:`styrmin_backend.services.env_vars.validator.validate_env_vars_dict`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     ip_whitelist: list[str] | None = None
     dedicated_ingress: DedicatedIngressConfig | None = None
+    env_vars: dict[str, str] | None = None
+
+    @field_validator("env_vars")
+    @classmethod
+    def _validate_env_vars(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        if v is None:
+            return v
+        # Imported lazily to avoid a circular import at module load time
+        # (the validator module depends on services.exceptions, which itself
+        # imports nothing from context.models).
+        from styrmin_backend.services.env_vars.validator import (
+            validate_env_vars_dict,
+        )
+
+        return validate_env_vars_dict("environment", v)
 
 
 class DeploymentConfig(ClusterConfig, EnvironmentConfig):
@@ -445,9 +469,25 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
 
     Attributes:
         ip_whitelist (list[str] | None): The IP whitelist.
+        env_vars (dict[str, str] | None): Deployment-scope free-form env vars
+            (008-deployment-env-vars). Overrides matching keys from the
+            environment scope per FR-002 deepest-wins precedence.
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("env_vars")
+    @classmethod
+    def _validate_deployment_env_vars(
+        cls, v: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        if v is None:
+            return v
+        from styrmin_backend.services.env_vars.validator import (
+            validate_env_vars_dict,
+        )
+
+        return validate_env_vars_dict("deployment", v)
 
 
 class ResolvedConfig(DeploymentConfig):
