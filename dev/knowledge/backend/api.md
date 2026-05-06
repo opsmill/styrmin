@@ -212,9 +212,13 @@ type Deployment {
   deployedServices: [DeployedService!]!
   podStatuses: [PodStatus!]!
   resolvedScheduling: [ResolvedComponentScheduling!]!
+  envVars: [EnvVar!]!                          # see specs/008-deployment-env-vars
+  componentEnvVars: [ComponentEnvVars!]!       # per-component effective dicts (incl. orphan flag)
   crdStatus: DeploymentStatusType
 }
 ```
+
+`Environment` gains a parallel `envVars: [EnvVar!]!`. Operator-set env vars travel through the existing `config: JSON` argument on `deploy()`, `updateDeployment()`, and `updateEnvironment()` — Pydantic-validated against `EnvironmentConfig` / `DeploymentConfig`. Driver-side documentation (`ApplicationDriverVersion.envVars`), orphan tracking on per-component blocks (`ComponentEnvVars.isOrphaned = true`), and chart-vs-user collision warnings (`DeploymentTimelineEntry.envVarCollisions`) are scoped for follow-up user stories (US4/US5/US7) and will be added as those ship.
 
 There is no `tasks` field on `Deployment` — query `tasks` at the root and filter by `deploymentId` if you need a deployment's task history.
 
