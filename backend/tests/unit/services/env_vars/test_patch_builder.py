@@ -208,3 +208,69 @@ class TestComponentLevelInvocations:
             label_selector="styrmin/component=worker",
         )
         assert patches == []
+
+
+class TestUS6ComponentLevelOptOut:
+    """T063 / US6: per-component opt-out invariants.
+
+    The patch builder is the single primitive every per-component invocation
+    funnels through. These tests pin down that the ``inject.env_vars=False``
+    opt-out at the component level (a) suppresses patch emission for that
+    component without affecting peer-component invocations, and (b) the same
+    flag set at the deployment scope (no-components fallback) suppresses
+    everything emitted by the broadcast path. Together they fully cover the
+    three branches the application builder relies on.
+    """
+
+    def test_component_opt_out_emits_zero_patches_at_component_scope(self) -> None:
+        """A component-scoped opt-out yields no patches even when the
+        resolved dict is non-empty and a selector is supplied."""
+        inject = PostRenderInjection(env_vars=False)
+        patches = build_env_vars_post_rendering_patches(
+            {"DB_POOL_SIZE": "5"},
+            inject=inject,
+            label_selector="styrmin/component=database",
+        )
+        assert patches == []
+
+    def test_peer_component_still_receives_env_vars_when_one_opts_out(
+        self,
+    ) -> None:
+        """Multi-component scenario: one component opts out, the peer does
+        not. The peer's invocation still emits the full patch set scoped by
+        its own selector — no cross-contamination from the opt-out branch.
+        """
+        opted_out = build_env_vars_post_rendering_patches(
+            {"DB_POOL_SIZE": "5"},
+            inject=PostRenderInjection(env_vars=False),
+            label_selector="styrmin/component=database",
+        )
+        peer = build_env_vars_post_rendering_patches(
+            {"LOG_LEVEL": "debug"},
+            inject=PostRenderInjection(),  # default — env_vars unset → opt-in
+            label_selector="styrmin/component=server",
+        )
+        assert opted_out == []
+        assert len(peer) == len(POD_TEMPLATE_BEARING_KINDS)
+        for tp in peer:
+            assert tp.target.label_selector == "styrmin/component=server"
+            ops = yaml.safe_load(tp.patch.render_value())  # type: ignore[attr-defined]
+            names = {entry["name"] for entry in ops[0]["value"]}
+            assert names == {"LOG_LEVEL"}
+            # The opted-out component's key must never bleed across.
+            assert "DB_POOL_SIZE" not in names
+
+    def test_deployment_level_opt_out_suppresses_broadcast_path(self) -> None:
+        """No-components fallback (FR-004 broadcast): when the resolved
+        deployment-scope ``inject.env_vars=False``, the broadcast invocation
+        emits zero patches across every pod-template-bearing kind. Mirrors
+        the contract the application builder's no-components branch relies
+        on — the deployment-wide opt-out gates the broadcast cleanly.
+        """
+        inject = PostRenderInjection(env_vars=False)
+        patches = build_env_vars_post_rendering_patches(
+            {"LOG_LEVEL": "debug"},
+            inject=inject,
+            label_selector=None,
+        )
+        assert patches == []

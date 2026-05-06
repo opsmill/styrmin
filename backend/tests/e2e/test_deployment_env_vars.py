@@ -695,3 +695,91 @@ async def test_us5_orphan_visible_across_driver_upgrade(
     assert any("database" in p and "env_vars" in p for p in diff_paths), (
         f"context_diff did not record the orphan transition: {diff_paths}"
     )
+
+
+# ---------------------------------------------------------------------------
+# US6 — Component-level injection opt-out (T065 / Quickstart Step 7)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api_only(
+    reason=(
+        "API/SDK-only flow (Quickstart Step 7); the assertion is on the "
+        "rendered pod template — peer components receive operator-set env "
+        "vars, the opted-out component does not. No UI page navigation; the "
+        "[ui-chromium] variant would just re-run the same SDK call."
+    )
+)
+@pytest.mark.ci
+async def test_us6_component_inject_opt_out(
+    env_vars_environment: dict,  # noqa: ARG001 — keeps fixture chain wired
+    env_vars_deployment: dict,
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    _env_vars_driver_bound: None,  # noqa: ARG001
+) -> None:
+    """Quickstart Step 7: a multi-component deployment opts out one
+    component via ``components.<name>.scheduling.inject.env_vars=False``.
+
+    Asserts (FR-024, US6):
+
+    1. The opted-out component's pods retain only chart-rendered env entries
+       — the operator-set deployment-level env var does NOT reach them.
+    2. Peer components in the same deployment continue to receive the
+       operator-set deployment-level env var (FR-004 broadcast).
+
+    The simple-app driver declares ``server`` and ``database`` components.
+    The test sets ``LOG_LEVEL=debug`` at deployment scope, opts the
+    ``database`` component out of env var injection, and inspects both
+    component's rendered pod templates.
+    """
+    deployment_id = env_vars_deployment["deployment_id"]
+    namespace = env_vars_deployment["namespace"]
+
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_id,
+        config={
+            "env_vars": {"LOG_LEVEL": "debug"},
+            "components": {
+                "database": {
+                    "scheduling": {"inject": {"env_vars": False}},
+                },
+            },
+        },
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+
+    # 1) Server (peer) — receives the deployment-level LOG_LEVEL.
+    server_dep = await _wait_for_pod_template(
+        vcluster,
+        namespace=namespace,
+        label_selector="app.kubernetes.io/name=simple-app",
+        predicate=lambda d: any(
+            entry.name == "LOG_LEVEL" and entry.value == "debug"
+            for container in d.spec.template.spec.containers or []
+            for entry in container.env or []
+        ),
+        description="LOG_LEVEL=debug to land on server pods (peer component)",
+    )
+    server_envs = _container_envs(server_dep)
+    assert {"name": "LOG_LEVEL", "value": "debug"} in server_envs
+
+    # 2) Database (opted-out) — must NOT carry the operator-set entry.
+    #    Wait for a stable pod-template snapshot first; the predicate is a
+    #    no-op acceptor since we are asserting on absence rather than
+    #    presence (otherwise the wait would never converge).
+    database_dep = await _wait_for_pod_template(
+        vcluster,
+        namespace=namespace,
+        label_selector="app.kubernetes.io/name=postgresql",
+        predicate=lambda d: True,
+        description="database pod template snapshot",
+    )
+    database_envs = _container_envs(database_dep)
+    database_names = {entry["name"] for entry in database_envs}
+    assert "LOG_LEVEL" not in database_names, (
+        "opted-out component must not receive operator-set env vars; "
+        f"observed env on database pods: {database_envs}"
+    )
