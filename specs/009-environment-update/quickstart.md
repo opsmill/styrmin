@@ -67,11 +67,17 @@ For each deployment, query the deployment timeline:
 
 Expected: each deployment's timeline has a fresh entry whose `contextDiff` records the env-config change (the `env_vars` path appears in `changes`).
 
-## Step 5 — No-op update (FR-010)
+## Step 5 — Per-deployment no-op (FR-010)
 
-Submit the same `updateEnvironment(input: ...)` mutation with byte-for-byte identical content.
+Submit the same `updateEnvironment(input: ...)` mutation with byte-for-byte identical content. Both d1, d2, and d3 are already at the new config (Step 3 confirmed their pods carry the env value).
 
-Expected: mutation returns success; **no new Task is created** on any of d1/d2/d3 (verify by re-querying each deployment's timeline — the entry count should not have increased). The environment row's `updated_at` may have changed; the row content is identical.
+Expected: mutation returns success; **no new Task is created** on any of d1/d2/d3 (per-deployment no-op detection skips all three). The structured log entry shows `dispatched=0`, `skipped_noop=3`, `dispatch_failed=0`. Verify by re-querying each deployment's timeline — the entry count must not have increased.
+
+Then induce a partial-fanout state to validate recovery:
+
+1. Manually delete or roll back one of d1/d2/d3's active instance to a config that predates the env update (e.g., via `kubectl delete applicationinstance <id>` and a manual reconcile, or by simulating with the test fixture).
+2. Submit the **same** `updateEnvironment(input=...)` mutation again.
+3. Expected: a new Task is created **only** for the deployment that was rolled back; the other two report `skipped_noop` in the structured log. This is the partial-fanout-recovery contract — see spec FR-010 / acceptance scenarios for US1.
 
 ## Step 6 — Mutation rejection paths (US2 negative cases)
 

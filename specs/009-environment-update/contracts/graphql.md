@@ -118,7 +118,9 @@ The implementer's job is to add one row per nested input field at implementation
 | `DUPLICATE_ENV_VAR_NAME` rejection | `updateEnvironment(input: { envVars: [{name: "X", value: "1"}, {name: "X", value: "2"}] })` → `extensions.code = "DUPLICATE_ENV_VAR_NAME"`. |
 | `ENVIRONMENT_NOT_FOUND` rejection | `updateEnvironment(environmentId: "<random uuid>", input: {})` → `extensions.code = "ENVIRONMENT_NOT_FOUND"`. |
 | Fanout dispatch (mutation-result coupling) | Pre-seed environment with two deployments (one valid, one tombstoned). `updateEnvironment(input: { envVars: [{name: "X", value: "y"}] })` → mutation succeeds; check that exactly one redeploy Task was created (the non-tombstoned deployment); the tombstoned deployment has no new Task. |
-| No-op skip | Pre-seed environment with `envVars: [{X: "y"}]`. `updateEnvironment` with the same input → mutation succeeds; no new Task is created on any deployment. |
+| Per-deployment no-op skip | Pre-seed environment with two deployments **already at config v1** (their active instances were generated against config v1). `updateEnvironment(input=v1)` → mutation succeeds; **zero new Tasks** created on either deployment (per-deployment no-op detection skips both). |
+| Partial-fanout recovery | Pre-seed environment with three deployments where two are at config v2 and one is at config v1 (simulating a prior partial-fanout failure). `updateEnvironment(input=v2)` → mutation succeeds; **exactly one new Task** created for the v1 laggard; zero new Tasks on the two already-at-v2 deployments. |
+| Commit ordering (FR-009a) | Mock the redeploy dispatch path to raise on the first deployment in the fanout. `updateEnvironment(input=...)` → mutation surfaces the env-config row as updated (the row is committed before any dispatch), the failing deployment's dispatch is logged as a fanout dispatch failure, peer deployments still receive Tasks. The persisted env-config MUST reflect the new input regardless of dispatch outcomes. |
 
 ## 5. Removed surface (clean replace)
 

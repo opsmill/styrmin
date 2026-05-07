@@ -12,6 +12,8 @@
 - *Single `JSON` input wrapped in a thin typed wrapper*: rejected. The whole point of US2 is to remove the JSON-blob write surface; a thin wrapper would just relocate it.
 - *Partial-update with `UNSET` sentinels*: rejected for v1 by the user's explicit decision (full-replacement is the v1 contract). A future incremental-update mutation may revisit.
 
+**SDK ergonomics note (P1 from critique)**: full-replacement makes "I want to add one env var" awkward over the SDK — callers must read the existing config, add the env var, and submit the full intended state. The frontend form (US4) mediates this, but SDK users don't get that mediation. Documented expectation: SDK consumers using `client.environments.update(input=...)` should construct the **full** intended state, not patch the previous result. A future v1.5 ergonomics improvement may expose a thin SDK helper that reads + patches + writes; out of scope for v1.
+
 **Reference**: `backend/styrmin_backend/context/models/config.py` (the Pydantic models being mirrored); `backend/styrmin_backend/services/env_vars/exceptions.py` (the typed errors that survive the mutation boundary thanks to `_prevalidate_environment_env_vars`).
 
 ## 2. Redeploy fanout — reuse `update_deployment_version`'s instance-generation pipeline
@@ -28,21 +30,25 @@
 
 **Reference**: `backend/styrmin_backend/services/deployment.py:383-583` (`update_deployment_version`); `backend/styrmin_backend/services/deployment_timeline.py` (the existing `context_diff` machinery the timeline reads from).
 
-## 3. No-op detection
+## 3. No-op detection — per-deployment, not per-mutation
 
-**Decision**: Compute a stable canonical form of both the input and the persisted config, compare for equality, and skip the fanout when equal. The canonical form is `EnvironmentConfig.model_dump(exclude_none=True, mode='json')` with sorted keys at every level — this is what Pydantic's `.model_dump_json(... sort_keys=True)` produces. Both sides go through the same Pydantic model first, so `None` vs missing-key drift is normalised away.
+**Decision (revised after critique X1)**: Decide whether to dispatch a redeploy **per deployment**, not per mutation call. For each deployment in the environment, compare the canonical form of the deployment's currently-active `ApplicationInstance` source config against the canonical form of the just-persisted env-config; dispatch a redeploy if and only if they differ. The canonical form is `EnvironmentConfig.model_dump(exclude_none=True, mode='json')` — both sides go through `EnvironmentConfig.model_validate(...)` first to normalise `None`-vs-missing drift.
 
-**Rationale**: The naive comparison `input.dict() == environment.config` would false-positive on key-ordering differences and false-negative on `None` vs missing fields. Going through `EnvironmentConfig` first normalises both sides into the same shape. Pydantic's `exclude_none=True` is the right canonical form because the persisted config also excludes none-valued fields by convention (the existing JSON-blob path persists `model_dump(exclude_none=True)`).
+**Rationale**: The original design (mutation-level no-op detection: skip the entire fanout when the input equals the persisted row) creates a partial-fanout-recovery footgun. If the fanout dispatches Tasks for deployments 1..24 successfully and hits a transient Prefect dispatch error on deployment 25, the operator retrying with the same input would see the fanout skipped under mutation-level no-op detection — leaving deployments 25..N stranded at the old config. Per-deployment no-op detection naturally handles this: laggards re-trigger on the next call, already-converged deployments are skipped. The check is also self-healing: if the platform crashes mid-fanout, the next mutation call (regardless of whether the input has changed) reaches the per-deployment branch and dispatches redeploys for any deployment whose active instance is at the old config.
 
-**Edge case — updated-at semantics**: A no-op update still persists the config row (potentially incrementing an `updated_at` timestamp if the model has one). This matters because operators sometimes "touch" an environment to force a re-emission of audit logs; the fanout-skip is purely about deployment Tasks, not about whether the row update happens. **The platform persists the row even on a no-op**.
+**Edge case — updated-at semantics**: The env-config row is still persisted on a true environment-wide no-op (input identical to persisted, every deployment already converged). Operators may rely on `updated_at` ticking; the platform doesn't break that contract.
+
+**Edge case — what config does an `ApplicationInstance` carry?** The instance was generated against an `InstanceContext` that flowed environment + deployment + driver config through `_resolve_instance_config`. The "source config" we compare is the environment-level slice of that — accessible via the persisted `ApplicationInstance.context` JSON column under the relevant key. Implementation lookup at task time.
 
 **Alternatives considered**:
 
+- *Mutation-level no-op detection (the original design)*: rejected per the partial-fanout argument above.
 - *Hash-based comparison (SHA-256 of JSON)*: rejected. Hashing has no real benefit over equality on already-validated Pydantic objects, and obscures debugging when the comparison disagrees.
-- *Skip the row update too on a no-op*: rejected. Operators may rely on `updated_at` ticking to trigger audit-log rotation; we don't break that contract just to save one row write.
+- *Skip the row update too on a no-op*: rejected. Operators may rely on `updated_at` ticking to trigger audit-log rotation.
 - *Per-field diff (only fanout if specific fields changed)*: rejected for v1. Determining which fields actually need a redeploy requires knowing each field's reconcile semantics; an env var change always needs redeploy, but an `external_url_port` change might not. v1 ships the conservative "any change → fanout" rule; per-field optimisation is a follow-up.
+- *Global retry list (track failed dispatches in a separate table, retry them on next mutation regardless of no-op)*: rejected. Per-deployment no-op detection is structurally simpler — no new state to maintain; the source of truth is the deployment's active-instance config itself.
 
-**Reference**: `backend/styrmin_backend/services/environments.py` (the existing `update_environment` for the post-008 baseline).
+**Reference**: `backend/styrmin_backend/services/environments.py` (the existing `update_environment` for the post-008 baseline); `backend/styrmin_backend/db/models.py` (the `ApplicationInstance.context` column).
 
 ## 4. Per-deployment failure isolation
 
@@ -99,7 +105,7 @@
 | Test bundle | Layer | Coverage |
 |---|---|---|
 | `test_environment_update_inputs.py` | Unit | Strawberry input → Pydantic `EnvironmentConfig` conversion: every input field maps to its Pydantic counterpart; nested optionals (`scheduling`, `dedicated_ingress`) round-trip cleanly; missing fields produce the unset state on the Pydantic side; invalid env-var rows raise `InvalidEnvVarNameError` at the right point. |
-| `test_environments.py` (extend existing) | Unit | Fanout dispatch over a fixture environment with N deployments; no-op detection skips fanout; tombstoned and internal deployments excluded from fanout; per-deployment failure caught and logged; mutation result not affected by per-deployment failures. |
+| `test_environments.py` (extend existing) | Unit | Fanout dispatch over a fixture environment with N deployments; **per-deployment** no-op detection skips redeploy for already-converged deployments while still dispatching for laggards; tombstoned and internal deployments excluded from fanout; per-deployment failure caught and logged; mutation result not affected by per-deployment failures; **partial-fanout-recovery scenario** (E3): pre-seed three deployments where one is at config v1 and two are at config v2, persist v2, dispatch fanout → only the v1 laggard receives a redeploy Task. |
 | `test_environment_update_propagation.py` | Propagation (Constitution §V) | Every new GraphQL field/argument on `UpdateEnvironmentInput` and its nested inputs has one assertion: round-trip mutation → DB read → query projection. The matrix is defined in `contracts/graphql.md` §4. **One assertion per row.** Three error-code rejection paths: `INVALID_ENV_VAR_NAME`, `ENV_VAR_SIZE_LIMIT_EXCEEDED`, `DUPLICATE_ENV_VAR_NAME`. |
 | `test_environment_update.py` | E2E (`api_only` for the headline; `[ui-chromium]` for US4 form) | **Two scenarios:** (1) US1 headline — environment with three deployments, set env var via mutation, assert pods on all three carry the new env entry within one reconcile cycle, assert each deployment's timeline records the change. (2) US1 failure-isolation — environment with two deployments where deployment B has a deliberate render-fail (e.g., bad scheduling override that's compatible with env A but not B's chart); assert env-config row persists, deployment A converges, deployment B's timeline records the failed Task, peer deployments unaffected. |
 | `EnvVarsForm.test.tsx` | Frontend unit (Vitest) | Add/edit/remove rows; client-side validation rules (regex, size caps, duplicates); confirm dialog opens with deployment count; submit-disabled state when invalid. |

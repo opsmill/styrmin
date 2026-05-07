@@ -123,7 +123,7 @@ extend type Mutation {
 
 The argument shape is **clean replace** — `config: JSON` is removed in the same commit. Returns the updated `Environment` (matches the post-008 return type).
 
-### 2.2 Service-layer flow
+### 2.2 Service-layer flow (per-deployment no-op detection per FR-010 / critique X1)
 
 ```text
 Operator
@@ -134,23 +134,27 @@ Operator
     → validate_environment_config (full Pydantic validation)
   → service.update_environment_with_fanout(environment_id, validated_config, uow)
     → environment = uow.environments.get(environment_id)  # raises EnvironmentNotFoundError if missing
-    → if canonical(input) == canonical(persisted):
-        → persist row (updated_at ticks); return environment; SKIP fanout
-    → else:
-        → environment.config = validated_config
-        → environment.capabilities = compute_environment_capabilities(environment)
-        → uow.commit()
-        → fanout_tasks = []
-        → for deployment in environment.deployments:
-            → if deployment.tombstoned or deployment.internal: continue
-            → try:
-                → task = redeploy_for_environment_update(deployment, uow)
-                → fanout_tasks.append(task)
-              → except Exception as e:
-                → record per-deployment failure (logger.exception); continue
-        → log structured "env_config_fanout_dispatched" with environment_id + count
-        → return environment
+    → environment.config = validated_config
+    → environment.capabilities = compute_environment_capabilities(environment)
+    → uow.commit()  # FR-009a: row committed BEFORE any Task dispatch
+    → counts = { dispatched: 0, skipped_noop: 0, dispatch_failed: 0 }
+    → for deployment in environment.deployments:
+        → if deployment.tombstoned or deployment.internal: continue
+        → if _deployment_already_at_config(deployment, validated_config):
+            → counts.skipped_noop += 1; continue   # per-deployment no-op
+        → try:
+            → task = redeploy_for_environment_update(deployment, uow)
+            → counts.dispatched += 1
+          → except Exception as e:
+            → counts.dispatch_failed += 1
+            → logger.exception("env_config_fanout_dispatch_error", ...)
+            → continue
+    → emit metric env_config_fanout_deployments_total{environment, outcome=...}
+    → log structured "env_config_fanout_dispatched" with environment_id + counts
+    → return environment
 ```
+
+**Note**: there is no mutation-level no-op skip. The env-config row is **always** persisted on a successful mutation; whether each deployment receives a redeploy is decided per-deployment in the loop. When every deployment is already at the new config (a true environment-wide no-op), the loop dispatches zero Tasks and `counts.skipped_noop` equals the deployment count.
 
 ### 2.3 Per-deployment redeploy helper
 
@@ -189,28 +193,39 @@ async def redeploy_for_environment_update(
 
 The helper lives in `services/deployment.py` next to `update_deployment_version`; `update_environment` imports and calls it.
 
-## 3. No-op detection
+## 3. No-op detection (per-deployment per FR-010 / critique X1)
 
 ```python
-def _is_environment_config_noop(
+def _deployment_already_at_config(
+    deployment: Deployment,
     new_config: EnvironmentConfig,
-    persisted_config: dict[str, Any] | None,
 ) -> bool:
-    """Return True when the new config is byte-equivalent to the persisted one.
+    """Return True when the deployment's currently-active ApplicationInstance
+    was generated against an environment config canonically equal to ``new_config``.
 
-    Both sides are normalised through Pydantic + JSON canonicalisation so
-    `None`-vs-missing drift is collapsed.
+    Used inside the fanout loop to decide whether a deployment needs a redeploy
+    Task — fully-converged deployments are skipped (no spurious work), while
+    laggards (e.g., from a prior partially-failed fanout) are re-dispatched.
+
+    The canonical form normalises ``None``-vs-missing drift via the shared
+    ``EnvironmentConfig.model_validate`` round-trip.
     """
-    if persisted_config is None:
-        return False  # never persisted yet
-    persisted = EnvironmentConfig.model_validate(persisted_config)
+    active = deployment.active_instance
+    if active is None or active.context is None:
+        return False  # no active instance → must dispatch redeploy
+    # The active instance's source environment-config slice is stored under a
+    # known key in `active.context` (concrete key TBD at implementation time).
+    instance_env_config_dict = _extract_environment_slice_from_context(active.context)
+    instance_env_config = EnvironmentConfig.model_validate(instance_env_config_dict)
     return (
         new_config.model_dump(exclude_none=True, mode="json")
-        == persisted.model_dump(exclude_none=True, mode="json")
+        == instance_env_config.model_dump(exclude_none=True, mode="json")
     )
 ```
 
-When `_is_environment_config_noop(...)` returns `True`, the row is persisted (`updated_at` ticks if applicable) but the fanout is skipped.
+The decision lives **inside the fanout loop**, applied per deployment. There is no separate mutation-level no-op short-circuit — the env-config row is always committed, and whether each deployment receives a Task is computed individually. This naturally handles partial-fanout recovery: if a prior fanout dispatched Tasks for some deployments but not others, the next mutation call (with the same input) re-evaluates each deployment's active instance against the persisted config, finds the laggards, and re-dispatches Tasks only for those.
+
+The per-deployment check is cheap (one in-memory comparison after a Pydantic round-trip; no DB hit beyond loading the active instance which is already eager-loaded for the loop).
 
 ## 4. Storage
 
@@ -236,14 +251,36 @@ T4: mutation returns success with updated Environment
 T5..Tn: each per-deployment Task runs through Prefect; successes update the deployment's timeline; failures record on the per-deployment Task
 ```
 
-### 5.2 No-op update
+### 5.2 Environment-wide no-op update (every deployment already converged)
 
 ```text
-T0: operator submits updateEnvironment(input) where input == persisted
-T1: input validates; canonical equality holds
+T0: operator submits updateEnvironment(input) where input == persisted state
+    AND every deployment in the environment already has an active instance
+    at that config.
+T1: input validates
 T2: environment.config row updated (updated_at ticks); uow.commit()
-T3: fanout loop SKIPPED
-T4: mutation returns success
+T3: fanout loop runs; for every deployment _deployment_already_at_config returns True;
+    every iteration increments skipped_noop; zero Tasks dispatched.
+T4: mutation returns success.
+```
+
+### 5.2a Partial-fanout recovery (a laggard from a prior failed fanout)
+
+```text
+Scenario: a prior updateEnvironment(input=v2) dispatched Tasks for deployments A and C
+but failed to dispatch for deployment B (transient Prefect error). The env-config row
+was committed at v2; A and C are now at v2; B is still at v1.
+
+T0: operator (or automation) re-submits updateEnvironment(input=v2).
+T1: input validates.
+T2: environment.config row updated (idempotent — already at v2); uow.commit().
+T3: fanout loop iterates A, B, C:
+    - A: _deployment_already_at_config returns True (A's active instance was generated
+      against v2 in the prior call); skipped_noop += 1.
+    - B: _deployment_already_at_config returns False (B's active instance is still v1);
+      redeploy_for_environment_update dispatched; dispatched += 1.
+    - C: _deployment_already_at_config returns True; skipped_noop += 1.
+T4: mutation returns success; B will reconcile to v2 via the new Task.
 ```
 
 ### 5.3 Per-deployment failure during fanout
