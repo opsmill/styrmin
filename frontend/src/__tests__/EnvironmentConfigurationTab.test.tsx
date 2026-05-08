@@ -150,4 +150,67 @@ describe("EnvironmentConfigurationTab", () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId("env-vars-form-empty")).toBeInTheDocument();
   });
+
+  // Regression: review H2. ``buildFullReplacementInput`` ships nested
+  // fields as ``null`` because the v1 form cannot map
+  // ``DedicatedIngressInput`` / ``SchedulingInput``. To prevent a
+  // silent clear under full-replacement semantics, the section detects
+  // nested overrides on the persisted config and blocks submission.
+  it("blocks Save when dedicated_ingress is set on the persisted config", async () => {
+    const config: Record<string, unknown> = {
+      env_vars: { LOG_LEVEL: "info" },
+      dedicated_ingress: {
+        class_name: "nginx-staging",
+      },
+    };
+    await render(
+      <EnvironmentConfigurationTab
+        environmentId={ENV_ID}
+        config={config}
+        deployments={noDeployments}
+      />,
+    );
+    expect(
+      screen.getByTestId("env-vars-form-blocked-warning"),
+    ).toHaveTextContent(/dedicated_ingress/i);
+    expect(screen.getByTestId("env-vars-form-save-button")).toBeDisabled();
+  });
+
+  it("blocks Save when scheduling is set on the persisted config", async () => {
+    const config: Record<string, unknown> = {
+      env_vars: { LOG_LEVEL: "info" },
+      scheduling: {
+        runtime_class: "kata",
+      },
+    };
+    await render(
+      <EnvironmentConfigurationTab
+        environmentId={ENV_ID}
+        config={config}
+        deployments={noDeployments}
+      />,
+    );
+    expect(
+      screen.getByTestId("env-vars-form-blocked-warning"),
+    ).toHaveTextContent(/scheduling/i);
+    expect(screen.getByTestId("env-vars-form-save-button")).toBeDisabled();
+  });
+
+  it("does not block Save when neither nested override is set", async () => {
+    const config: Record<string, unknown> = {
+      env_vars: { LOG_LEVEL: "info" },
+      ip_whitelist: ["10.0.0.0/8"],
+    };
+    await render(
+      <EnvironmentConfigurationTab
+        environmentId={ENV_ID}
+        config={config}
+        deployments={noDeployments}
+      />,
+    );
+    expect(
+      screen.queryByTestId("env-vars-form-blocked-warning"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("env-vars-form-save-button")).toBeEnabled();
+  });
 });

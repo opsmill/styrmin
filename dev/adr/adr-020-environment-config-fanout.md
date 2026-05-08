@@ -51,14 +51,15 @@ The frontend env-vars form (US4) only maps the `envVars` slice from `Environment
 
 The nested object fields (`dedicatedIngress`, `scheduling`) are **not yet** carried through the form. They are ignored at form-state construction time and therefore submitted as `null`, which under full-replacement semantics **clears them on the persisted row**.
 
-**Operational impact**: if an operator edits env vars via the v1 frontend form on an environment that has `dedicatedIngress` or `scheduling` overrides set, those overrides are silently cleared. The fanout will then redeploy every deployment with the cleared overrides, which is observable but not a recoverable error — the operator's only path back is to re-set the overrides via the SDK or GraphiQL.
+**Operational impact (mitigated)**: under full-replacement semantics, omitting the nested fields from `UpdateEnvironmentInput` clears them on the persisted row. To prevent the v1 form from doing this silently, **the form blocks submission** when the persisted config carries `dedicated_ingress` or `scheduling` overrides:
 
-**Recommended workaround until a future iteration carries nested fields through the form**:
+- The Environment Variables section detects either field on the persisted config (non-empty object) and renders a destructive Alert above the env-var rows explaining that saving from this form would clear the overrides and pointing operators to the SDK / GraphiQL.
+- The Save button is disabled while the warning is present. The handler-level guard short-circuits even if a caller bypasses the disabled attribute. The env-var rows remain readable + editable so operators can review the current values and copy them into their SDK call.
+- When neither nested field is set, the form behaves normally — no warning, Save enabled — which is the common case at this stage of the platform.
 
-- Operators on environments with `dedicatedIngress` or `scheduling` overrides MUST use the SDK (`client.environments.update(environment_id, input=UpdateEnvironmentInput(...))`) or GraphiQL to edit env vars. They re-supply the existing nested overrides verbatim in the `UpdateEnvironmentInput`.
-- The v1 form is safe for environments where `dedicatedIngress` and `scheduling` are unset (the common case at this stage of the platform).
+The block lives in `frontend/src/pages/environments/EnvironmentConfigurationTab.tsx` (`detectNestedOverridesBlock`) and `frontend/src/components/environment/EnvVarsForm.tsx` (`blockedReason` prop). Vitest regression coverage in `frontend/src/__tests__/EnvVarsForm.test.tsx` and `EnvironmentConfigurationTab.test.tsx` pins both the warning render and the disabled-Save behaviour.
 
-A follow-up iteration will extend the form's read-then-write loop to cover the nested fields, at which point this footnote disappears.
+**Path forward**: a follow-up iteration will extend the form's read-then-write loop to cover the nested fields, at which point both the warning Alert and this footnote disappear. Until then, operators on environments with nested overrides use the SDK (`client.environments.update(environment_id, input=UpdateEnvironmentInput(...))`) or GraphiQL — re-supplying the existing nested overrides verbatim in the `UpdateEnvironmentInput`.
 
 ### 3. Clean replace — no deprecation window — for the schema migration
 

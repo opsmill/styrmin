@@ -157,4 +157,51 @@ describe("EnvVarsForm", () => {
     ) as HTMLInputElement;
     expect(nameInput.value).toBe("LOG_LEVEL");
   });
+
+  // Regression: review H2. The v1 form cannot map nested
+  // ``dedicated_ingress`` / ``scheduling`` overrides into
+  // ``UpdateEnvironmentInput``, so submitting under full-replacement
+  // semantics would silently clear them. The form receives a
+  // ``blockedReason`` from its parent and MUST render a warning Alert
+  // + disable Save when present. See ADR-020 §"Decision 2".
+  it("renders the blocked-warning Alert and disables Save when blockedReason is set", async () => {
+    const onSubmit = vi.fn();
+    await render(
+      <EnvVarsForm
+        initialEnvVars={[{ name: "LOG_LEVEL", value: "info" }]}
+        deployments={ONE_DEPLOYMENT}
+        onSubmit={onSubmit}
+        blockedReason="This environment carries dedicated_ingress overrides..."
+      />,
+    );
+    expect(
+      screen.getByTestId("env-vars-form-blocked-warning"),
+    ).toHaveTextContent(/dedicated_ingress/i);
+    expect(screen.getByTestId("env-vars-form-save-button")).toBeDisabled();
+
+    // Even attempting a click MUST NOT open the confirm dialog or call
+    // onSubmit — the disabled attribute prevents the click event, but
+    // we also pin the handler-level guard.
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("env-vars-form-save-button"));
+    expect(
+      screen.queryByTestId("redeploy-confirm-dialog"),
+    ).not.toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("does not render the blocked-warning Alert when blockedReason is null", async () => {
+    await render(
+      <EnvVarsForm
+        initialEnvVars={[{ name: "LOG_LEVEL", value: "info" }]}
+        deployments={ONE_DEPLOYMENT}
+        onSubmit={vi.fn()}
+        blockedReason={null}
+      />,
+    );
+    expect(
+      screen.queryByTestId("env-vars-form-blocked-warning"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("env-vars-form-save-button")).toBeEnabled();
+  });
 });

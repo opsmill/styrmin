@@ -184,15 +184,13 @@ function buildFullReplacementInput(
 
   // Nested input types (DedicatedIngressInput, SchedulingInput) carry a
   // deep snake_case ↔ camelCase shape that this v1 form does not edit.
-  // The GraphQL inputs are typed; passing a raw snake_case dict would
-  // fail validation. Until the form learns to edit those sections we
-  // omit them here — the backend persists them as unset, which is
-  // acceptable for v1 since the form is gated by US3 (where we have
-  // already documented full-replacement semantics) and the Phase 7
-  // ADR explicitly calls out incremental-edit as a follow-up.
-  // Operators editing only env vars on environments that ALSO carry
-  // dedicated ingress / scheduling overrides should use the SDK until
-  // those sections become editable from the form.
+  // The form blocks submission upstream when either is set on the
+  // persisted config (see ``hasNestedOverrides`` below + the
+  // ``blockedReason`` plumbing in ``EnvVarsForm``). This builder is
+  // therefore only reachable when both are unset, which makes the
+  // ``null`` literals here a tautology rather than a silent clear.
+  // ADR-020 §"Decision 2 — Full-replacement input" documents the
+  // form-blocks-submission mitigation for the nested-clearing footgun.
   return {
     envVars: envVars.map((v) => ({ name: v.name, value: v.value })),
     ipWhitelist: ipWhitelist.length > 0 ? ipWhitelist : null,
@@ -203,6 +201,36 @@ function buildFullReplacementInput(
     dedicatedIngress: null,
     scheduling: null,
   };
+}
+
+/**
+ * Detect whether the persisted environment config carries
+ * ``dedicated_ingress`` or ``scheduling`` overrides. Either presence
+ * (non-empty object) trips the v1 form's submission block — saving
+ * would silently clear them under FR-003 / FR-020 full-replacement
+ * semantics. Returns a human-readable explanation for the warning
+ * Alert, or ``null`` when the form is safe to submit.
+ */
+function detectNestedOverridesBlock(
+  config: Record<string, unknown> | null | undefined,
+): string | null {
+  const dedicatedIngress = asObject(config?.dedicated_ingress);
+  const scheduling = asObject(config?.scheduling);
+  const present: string[] = [];
+  if (dedicatedIngress && Object.keys(dedicatedIngress).length > 0) {
+    present.push("dedicated_ingress");
+  }
+  if (scheduling && Object.keys(scheduling).length > 0) {
+    present.push("scheduling");
+  }
+  if (present.length === 0) return null;
+  const list = present.join(" and ");
+  return (
+    `This environment carries ${list} overrides that the v1 form cannot ` +
+    `edit yet. Saving from this form would clear them. To update env ` +
+    `vars without losing those overrides, use the SDK or GraphiQL ` +
+    `until a future iteration adds nested-field support.`
+  );
 }
 
 function EnvVarsSection({
@@ -219,6 +247,7 @@ function EnvVarsSection({
   const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const mutation = useUpdateEnvironmentMutation();
+  const blockedReason = detectNestedOverridesBlock(config);
 
   const handleSubmit = async (envVars: EnvVarPayload[]) => {
     setSubmitError(null);
@@ -241,6 +270,7 @@ function EnvVarsSection({
       onSubmit={handleSubmit}
       submitError={submitError}
       isSubmitting={mutation.isPending}
+      blockedReason={blockedReason}
     />
   );
 }

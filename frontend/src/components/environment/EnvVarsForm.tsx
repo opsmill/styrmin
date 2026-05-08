@@ -54,6 +54,18 @@ export interface EnvVarsFormProps {
   submitError?: string | null;
   /** Hint that a submission is in flight (disables the Save/Redeploy buttons). */
   isSubmitting?: boolean;
+  /**
+   * When true, the form renders a warning Alert and disables the Save
+   * button. Set by the parent (``EnvVarsSection``) when the persisted
+   * environment config carries ``dedicated_ingress`` or ``scheduling``
+   * overrides — fields the v1 form cannot edit. Submitting from the
+   * form under full-replacement semantics (FR-003 / FR-020) would
+   * silently clear those overrides, so the form blocks submission
+   * outright until a future iteration adds nested-field mapping. See
+   * ADR-020 §"Decision 2 — Full-replacement input" for the durable
+   * write-up. Operators who hit this gate use the SDK or GraphiQL.
+   */
+  blockedReason?: string | null;
 }
 
 const NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -153,6 +165,7 @@ export function EnvVarsForm({
   onSubmit,
   submitError,
   isSubmitting = false,
+  blockedReason = null,
 }: EnvVarsFormProps) {
   const [rows, setRows] = useState<EnvVarRowState[]>(() =>
     seedRows(initialEnvVars),
@@ -191,7 +204,7 @@ export function EnvVarsForm({
   };
 
   const handleSaveClick = () => {
-    if (hasErrors || isSubmitting) return;
+    if (hasErrors || isSubmitting || blockedReason) return;
     setConfirmOpen(true);
   };
 
@@ -210,6 +223,16 @@ export function EnvVarsForm({
 
   return (
     <div className="flex flex-col gap-3" data-testid="env-vars-form">
+      {blockedReason && (
+        <Alert
+          variant="destructive"
+          data-testid="env-vars-form-blocked-warning"
+        >
+          <AlertTitle>Save disabled — nested overrides present</AlertTitle>
+          <AlertDescription>{blockedReason}</AlertDescription>
+        </Alert>
+      )}
+
       {submitError && (
         <Alert variant="destructive" data-testid="env-vars-form-error">
           <AlertTitle>Update failed</AlertTitle>
@@ -332,7 +355,7 @@ export function EnvVarsForm({
           <Button
             type="button"
             onClick={handleSaveClick}
-            disabled={hasErrors || isSubmitting}
+            disabled={hasErrors || isSubmitting || Boolean(blockedReason)}
             data-testid="env-vars-form-save-button"
           >
             {isSubmitting ? "Saving..." : "Save"}
