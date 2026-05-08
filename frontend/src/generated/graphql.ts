@@ -1245,6 +1245,14 @@ export type UpdateDeploymentVersionMutationVariables = Exact<{
 
 export type UpdateDeploymentVersionMutation = { __typename?: 'Mutation', updateDeploymentVersion?: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, deploymentId?: string | null } | null };
 
+export type UpdateEnvironmentMutationVariables = Exact<{
+  environmentId: Scalars['UUID']['input'];
+  input: UpdateEnvironmentInput;
+}>;
+
+
+export type UpdateEnvironmentMutation = { __typename?: 'Mutation', updateEnvironment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string } } | null };
+
 
 
 export const AssignBackupStorageLocationDocument = `
@@ -2323,6 +2331,33 @@ export const useUpdateDeploymentVersionMutation = <
       {
     mutationKey: ['UpdateDeploymentVersion'],
     mutationFn: (variables?: UpdateDeploymentVersionMutationVariables) => graphqlFetcher<UpdateDeploymentVersionMutation, UpdateDeploymentVersionMutationVariables>(UpdateDeploymentVersionDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateEnvironmentDocument = `
+    mutation UpdateEnvironment($environmentId: UUID!, $input: UpdateEnvironmentInput!) {
+  updateEnvironment(environmentId: $environmentId, input: $input) {
+    id
+    name
+    config
+    cluster {
+      id
+      name
+    }
+  }
+}
+    `;
+
+export const useUpdateEnvironmentMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateEnvironmentMutation, TError, UpdateEnvironmentMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateEnvironmentMutation, TError, UpdateEnvironmentMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateEnvironment'],
+    mutationFn: (variables?: UpdateEnvironmentMutationVariables) => graphqlFetcher<UpdateEnvironmentMutation, UpdateEnvironmentMutationVariables>(UpdateEnvironmentDocument, variables)(),
     ...options
   }
     )};

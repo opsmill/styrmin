@@ -43,16 +43,23 @@ describe("EnvironmentConfigurationTab", () => {
     expect(screen.getByTestId("section-scheduling")).toBeInTheDocument();
     expect(screen.getByTestId("section-fqdn")).toBeInTheDocument();
 
-    // Env vars rendered.
-    const envList = screen.getByTestId("env-vars-list");
-    expect(
-      within(envList).getByText("OTEL_EXPORTER_OTLP_ENDPOINT"),
-    ).toBeInTheDocument();
-    expect(
-      within(envList).getByText("https://otel.staging"),
-    ).toBeInTheDocument();
-    expect(within(envList).getByText("LOG_LEVEL")).toBeInTheDocument();
-    expect(within(envList).getByText("debug")).toBeInTheDocument();
+    // Env vars rendered through the editable form (Phase 6 / US4).
+    const formRows = screen.getByTestId("env-vars-form-rows");
+    const nameInputs = within(formRows).getAllByTestId("env-var-name-input");
+    const valueInputs = within(formRows).getAllByTestId("env-var-value-input");
+    const namesAndValues = nameInputs.map((input, idx) => ({
+      name: (input as HTMLInputElement).value,
+      value: (valueInputs[idx] as HTMLInputElement).value,
+    }));
+    expect(namesAndValues).toEqual(
+      expect.arrayContaining([
+        {
+          name: "OTEL_EXPORTER_OTLP_ENDPOINT",
+          value: "https://otel.staging",
+        },
+        { name: "LOG_LEVEL", value: "debug" },
+      ]),
+    );
 
     // IP allowlist.
     const ipList = screen.getByTestId("ip-allowlist-list");
@@ -83,9 +90,7 @@ describe("EnvironmentConfigurationTab", () => {
       />,
     );
 
-    expect(
-      screen.getByText("No environment variables set."),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("env-vars-form-empty")).toBeInTheDocument();
     expect(screen.getByText("No IP allowlist configured.")).toBeInTheDocument();
     expect(
       screen.getByText("Using default ingress controller."),
@@ -96,7 +101,7 @@ describe("EnvironmentConfigurationTab", () => {
     expect(screen.getByText("Using cluster defaults.")).toBeInTheDocument();
 
     // No populated lists.
-    expect(screen.queryByTestId("env-vars-list")).toBeNull();
+    expect(screen.queryByTestId("env-vars-form-rows")).toBeNull();
     expect(screen.queryByTestId("ip-allowlist-list")).toBeNull();
   });
 
@@ -113,9 +118,13 @@ describe("EnvironmentConfigurationTab", () => {
       />,
     );
 
-    // The populated section renders its value.
-    expect(screen.getByText("ONLY_ONE")).toBeInTheDocument();
-    expect(screen.getByText("yes")).toBeInTheDocument();
+    // The populated section renders its row in the editable form.
+    const formRows = screen.getByTestId("env-vars-form-rows");
+    const nameInputs = within(formRows).getAllByTestId("env-var-name-input");
+    const valueInputs = within(formRows).getAllByTestId("env-var-value-input");
+    expect(nameInputs).toHaveLength(1);
+    expect((nameInputs[0] as HTMLInputElement).value).toBe("ONLY_ONE");
+    expect((valueInputs[0] as HTMLInputElement).value).toBe("yes");
 
     // Every other section falls back to its empty-state message.
     expect(screen.getByText("No IP allowlist configured.")).toBeInTheDocument();
@@ -139,8 +148,6 @@ describe("EnvironmentConfigurationTab", () => {
     expect(
       screen.getByTestId("environment-configuration-tab"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("No environment variables set."),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("env-vars-form-empty")).toBeInTheDocument();
   });
 });
