@@ -131,13 +131,13 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
 
 **Purpose**: Final-suite validation, codegen consistency, FR cross-check.
 
-- [ ] T032 [P] Run `uv run invoke format lint` — must pass.
-- [ ] T033 [P] Run `uv run invoke validate-graphql` — must pass.
-- [ ] T034 [P] Run the full GraphQL propagation test suite (`uv run pytest -q backend/tests/functional/graphql/`). Every retained row in 008+009's matrix continues to pass; the rows for `DeploymentTimelineEntry.envVarCollisions` + `PostRenderInjectionInput.envVars` are gone (T019).
-- [ ] T035 Run the full E2E suite (`uv run pytest backend/tests/e2e/test_deployment_env_vars.py -v -s --pdb`) against a real Kind/vCluster and observe a green run, per Constitution §V. **This is the load-bearing run** — the chart-default-preservation assertion (T026 / FR-014a) confirms the pivot achieves SC-002. If the dev stack isn't up locally, document the partial outcome and defer to PR opener.
-- [ ] T036 [P] Confirm `schema.graphql` and the regenerated SDK + frontend types are checked in and consistent (no drift after a fresh `uv run invoke generate`). Per the deletion sweep, the diff against pre-010 should show ONLY removed surface; no unrelated drift.
-- [ ] T037 [P] Run `cd frontend && pnpm test --run`. The frontend codegen-only changes should not affect Vitest behaviour; every existing test continues to pass.
-- [ ] T038 Final cross-check: every FR in `spec.md` (FR-001..FR-026) maps to at least one task in this list. Items in spec §"Out of Scope" / FR-024..FR-026 are deliberately not wired (codified non-features). Generate the FR cross-check table inline in your final response.
+- [X] T032 [P] Run `uv run invoke format lint` — must pass.
+- [X] T033 [P] Run `uv run invoke validate-graphql` — must pass.
+- [X] T034 [P] Run the full GraphQL propagation test suite (`uv run pytest -q backend/tests/functional/graphql/`). Every retained row in 008+009's matrix continues to pass; the rows for `DeploymentTimelineEntry.envVarCollisions` + `PostRenderInjectionInput.envVars` are gone (T019).
+- [X] T035 Run the full E2E suite (`uv run pytest backend/tests/e2e/test_deployment_env_vars.py -v -s --pdb`) against a real Kind/vCluster and observe a green run, per Constitution §V. **This is the load-bearing run** — the chart-default-preservation assertion (T026 / FR-014a) confirms the pivot achieves SC-002. If the dev stack isn't up locally, document the partial outcome and defer to PR opener.
+- [X] T036 [P] Confirm `schema.graphql` and the regenerated SDK + frontend types are checked in and consistent (no drift after a fresh `uv run invoke generate`). Per the deletion sweep, the diff against pre-010 should show ONLY removed surface; no unrelated drift.
+- [X] T037 [P] Run `cd frontend && pnpm test --run`. The frontend codegen-only changes should not affect Vitest behaviour; every existing test continues to pass.
+- [X] T038 Final cross-check: every FR in `spec.md` (FR-001..FR-026) maps to at least one task in this list. Items in spec §"Out of Scope" / FR-024..FR-026 are deliberately not wired (codified non-features). Generate the FR cross-check table inline in your final response.
 
 ---
 
