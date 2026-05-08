@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Sequence
 from uuid import UUID
 
+from loguru import logger
+
 from styrmin_backend.context.exceptions import InvalidEnvironmentContextError
 from styrmin_backend.context.models.config import EnvironmentConfig
 from styrmin_backend.context.validators import validate_environment_config
@@ -12,6 +14,7 @@ from styrmin_backend.db.models import Environment
 from styrmin_backend.domain.models import Deployment
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.clusters import resolve_cluster
+from styrmin_backend.services.deployment import redeploy_for_environment_update
 from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
@@ -229,15 +232,54 @@ async def get_environments(uow: UnitOfWork) -> Sequence[Environment]:
         return await uow.environments.get_all()
 
 
+def _emit_fanout_metric(environment_id: UUID, outcome: str) -> None:
+    """Emit a per-deployment fanout outcome metric (FR-023a).
+
+    The target metric is
+    ``env_config_fanout_deployments_total{environment, outcome}`` where
+    ``outcome`` is one of ``dispatched``, ``skipped_noop``, or
+    ``dispatch_failed``. The project does not yet wire a metrics backend
+    (Prometheus / OTel exporter), so this helper is the call-site stub:
+    it logs the would-be metric at ``info`` level with a clear marker so
+    the data is recoverable from logs today and the wiring becomes a
+    one-line edit once the backend lands. The call site existing is what
+    FR-023a requires.
+
+    TODO (metrics-backend): replace the ``logger.info`` with the real
+    counter increment (e.g. ``METRIC.labels(...).inc()``) once a metrics
+    client is registered with the backend.
+    """
+    logger.info(
+        "metric=env_config_fanout_deployments_total environment_id={} outcome={}",
+        environment_id,
+        outcome,
+    )
+
+
 async def update_environment(
     environment_id: UUID, uow: UnitOfWork, config: dict | None = None
 ) -> Environment:
-    """Update an environment's config, validating against ``EnvironmentConfig``.
+    """Update an environment's config and fan out redeploys to its deployments.
 
-    Mirrors :func:`create_environment` for the validation step so env var
-    rules (and any other Pydantic validators on ``EnvironmentConfig``) gate
-    the write path (008-deployment-env-vars / US2 / FR-020). Recomputes
-    capabilities from the updated config and persists the row.
+    Persists the validated ``EnvironmentConfig`` on the environment row,
+    commits the row **before** entering the fanout loop (FR-009a so a
+    crash mid-fanout never leaves the persisted config behind), then
+    iterates over every non-tombstoned, non-internal deployment in the
+    environment dispatching :func:`redeploy_for_environment_update`. Each
+    iteration runs ``_deployment_already_at_config`` first; deployments
+    whose active instance is already at ``new_config`` are skipped (no
+    spurious Task / timeline entry, FR-010 / data-model.md §3). Per-
+    deployment dispatch failures are caught, logged, counted, and do not
+    propagate — the env-config row stays persisted and peer deployments
+    are unaffected (FR-008 / Edge Cases "Per-deployment failure").
+
+    Tombstoned (``deleted_at IS NOT NULL``) and internal deployments are
+    excluded from the fanout per FR-012 / FR-013. They are NOT counted
+    toward ``skipped_noop`` (which is reserved for "deployment evaluated
+    and found already at config"); ``evaluated`` counts the total
+    iteration including the excluded rows so operators can see the
+    distinction between "no rows to consider" and "rows considered, all
+    skipped".
 
     Raises:
         EnvironmentNotFoundError: When ``environment_id`` does not exist.
@@ -251,18 +293,82 @@ async def update_environment(
                 f"Environment with id {environment_id} not found."
             )
 
-        if config is not None:
-            # Pre-validate env-var bundles so typed error codes survive the
-            # GraphQL boundary (FR-006/FR-007/FR-008/FR-009 / SC-003).
-            _prevalidate_environment_env_vars(config)
-            try:
-                validate_environment_config(config)
-            except InvalidEnvironmentContextError as e:
-                raise InvalidContextError from e
-            environment.config = config
-            environment.capabilities = compute_environment_capabilities(environment)
+        if config is None:
+            # Idempotent no-op: nothing to validate, nothing to fan out.
+            # Commit is a no-op but kept for API symmetry.
+            await uow.commit()
+            refreshed = await uow.environments.get(environment_id)
+            assert refreshed is not None, "Environment should still exist after update"
+            return refreshed
 
+        # Pre-validate env-var bundles so typed error codes survive the
+        # GraphQL boundary (FR-006/FR-007/FR-008/FR-009 / SC-003).
+        _prevalidate_environment_env_vars(config)
+        try:
+            validate_environment_config(config)
+        except InvalidEnvironmentContextError as e:
+            raise InvalidContextError from e
+
+        # Persist the env-config row. Per FR-009a this commit MUST run
+        # before any Task dispatch so a crash mid-fanout never reverts
+        # the config.
+        environment.config = config
+        environment.capabilities = compute_environment_capabilities(environment)
         await uow.commit()
+
+        validated_config = EnvironmentConfig.model_validate(config)
+
+        # Enumerate non-tombstoned deployments in the environment. We
+        # rely on the repository to return domain entities; the fanout
+        # filters internal rows in-loop (FR-013) so the counters
+        # accurately reflect "evaluated".
+        deployments = await uow.deployments.find_all_by_environment(environment_id)
+
+        counts = {
+            "evaluated": 0,
+            "dispatched": 0,
+            "skipped_noop": 0,
+            "dispatch_failed": 0,
+        }
+        for deployment in deployments:
+            counts["evaluated"] += 1
+            # Tombstoned + internal deployments are excluded per FR-012 /
+            # FR-013. They are NOT counted toward ``skipped_noop`` —
+            # ``skipped_noop`` is reserved for "deployment evaluated and
+            # already at the new config".
+            if deployment.deleted_at is not None or deployment.internal:
+                continue
+            if _deployment_already_at_config(deployment, validated_config):
+                counts["skipped_noop"] += 1
+                _emit_fanout_metric(environment_id, "skipped_noop")
+                continue
+            try:
+                await redeploy_for_environment_update(deployment, uow)
+            except Exception:  # noqa: BLE001 — broad catch is intentional for per-deployment isolation (FR-008)
+                counts["dispatch_failed"] += 1
+                logger.exception(
+                    "env_config_fanout_dispatch_error environment_id={} deployment_id={}",
+                    environment_id,
+                    deployment.id,
+                )
+                _emit_fanout_metric(environment_id, "dispatch_failed")
+                continue
+            counts["dispatched"] += 1
+            _emit_fanout_metric(environment_id, "dispatched")
+
+        # One audit log entry per fanout invocation regardless of
+        # dispatched count — FR-023. True environment-wide no-ops still
+        # produce an entry with ``dispatched=0``.
+        logger.info(
+            "env_config_fanout_dispatched environment_id={} evaluated={} "
+            "dispatched={} skipped_noop={} dispatch_failed={}",
+            environment_id,
+            counts["evaluated"],
+            counts["dispatched"],
+            counts["skipped_noop"],
+            counts["dispatch_failed"],
+        )
+
         refreshed = await uow.environments.get(environment_id)
         assert refreshed is not None, "Environment should still exist after update"
         return refreshed

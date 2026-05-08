@@ -67,6 +67,17 @@ class DeploymentRepository(BaseRepository[DeploymentModel], ABC):
             "The find_internal_by_environment method must be implemented in the subclass."
         )
 
+    @abstractmethod
+    async def find_all_by_environment(
+        self,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> list[DeploymentEntity]:
+        raise NotImplementedError(
+            "The find_all_by_environment method must be implemented in the subclass."
+        )
+
 
 class SQLModelDeploymentRepository(
     BaseSQLModelRepository[DeploymentModel], DeploymentRepository
@@ -246,6 +257,32 @@ class SQLModelDeploymentRepository(
             return None
 
         return self._to_entity(entity)
+
+    async def find_all_by_environment(
+        self,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> list[DeploymentEntity]:
+        """Return every deployment in ``environment_id``.
+
+        Used by the env-config fanout (009-environment-update / FR-006) to
+        enumerate redeploy targets. Tombstoned (``deleted_at IS NOT NULL``)
+        rows are excluded by default — set ``include_deleted=True`` only on
+        the forensic / cleanup paths that need the full history. Internal
+        rows are NOT filtered here; the caller decides whether to skip them
+        (the fanout loop excludes them per FR-013, but other callers may
+        want every row).
+        """
+        statement = (
+            select(self.model_class)
+            .where(self.model_class.environment_id == environment_id)
+            .options(*self._eager_load_options())
+        )
+        if not include_deleted:
+            statement = statement.where(self.model_class.deleted_at.is_(None))  # type: ignore[union-attr]
+        result = await self.session.exec(statement)
+        return [self._to_entity(entity) for entity in result.all()]
 
     async def find_internal_by_environment(
         self, environment_id: UUID

@@ -404,6 +404,19 @@ class FakeDeploymentRepository(DeploymentRepository):
                 return d
         return None
 
+    async def find_all_by_environment(
+        self,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> list[DeploymentEntity]:
+        return [
+            d
+            for d in self._deployments
+            if d.environment_id == environment_id
+            and (include_deleted or d.deleted_at is None)
+        ]
+
 
 class FakeDeployedServiceRepository(
     FakeRepository[DeployedService], DeployedServiceRepository
