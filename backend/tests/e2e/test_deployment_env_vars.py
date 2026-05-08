@@ -253,9 +253,21 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
     deployment_b_namespace = env_vars_second_deployment["namespace"]
 
     # 1) Set an environment-scope env var. Both deployments must pick it up.
+    from styrmin_sdk.graphql._generated.input_types import (
+        EnvVarInput,
+        UpdateEnvironmentInput,
+    )
+
     await client.environments.update(
         environment_id=environment_id,
-        config={"env_vars": {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.staging"}},
+        input=UpdateEnvironmentInput(
+            env_vars=[
+                EnvVarInput(
+                    name="OTEL_EXPORTER_OTLP_ENDPOINT",
+                    value="https://otel.staging",
+                )
+            ],
+        ),
     )
     # The two deployments may need to reconcile; their fixtures already
     # parked them in RUNNING. Wait until the env var lands on each.

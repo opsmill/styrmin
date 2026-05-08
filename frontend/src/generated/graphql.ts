@@ -30,6 +30,24 @@ export type Action = {
   name: Scalars['String']['output'];
 };
 
+/** Affinity block (required + preferred) for one affinity kind. */
+export type AffinityBlockInput = {
+  preferred?: InputMaybe<Array<WeightedAffinityTermInput>>;
+  replace?: InputMaybe<Scalars['Boolean']['input']>;
+  required?: InputMaybe<Array<AffinityTermInput>>;
+};
+
+/** Single affinity term mirroring ``AffinityTerm``. */
+export type AffinityTermInput = {
+  deploymentRef?: InputMaybe<DeploymentReferenceInput>;
+  labelSelector?: InputMaybe<LabelSelectorInput>;
+  matchLabelKeys?: InputMaybe<Array<Scalars['String']['input']>>;
+  mismatchLabelKeys?: InputMaybe<Array<Scalars['String']['input']>>;
+  namespaceSelector?: InputMaybe<LabelSelectorInput>;
+  namespaces?: InputMaybe<Array<Scalars['String']['input']>>;
+  topologyKey: Scalars['String']['input'];
+};
+
 export type ApplicationDriver = {
   __typename?: 'ApplicationDriver';
   id: Scalars['UUID']['output'];
@@ -207,6 +225,13 @@ export type CrdConditionType = {
   type: Scalars['String']['output'];
 };
 
+/** Dedicated per-environment ingress controller configuration. */
+export type DedicatedIngressInput = {
+  implementation?: InputMaybe<Scalars['String']['input']>;
+  service?: InputMaybe<IngressServiceConfigInput>;
+  type?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type DeployedService = {
   __typename?: 'DeployedService';
   component: Scalars['String']['output'];
@@ -252,6 +277,13 @@ export type Deployment = {
 export type DeploymentPodStatusReport = {
   deploymentId: Scalars['UUID']['input'];
   pods: Array<PodStatusInput>;
+};
+
+/** Reference to another deployment in the same environment. */
+export type DeploymentReferenceInput = {
+  components?: InputMaybe<Array<Scalars['String']['input']>>;
+  deploymentId?: InputMaybe<Scalars['String']['input']>;
+  deploymentName?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type DeploymentStatusReportInput = {
@@ -322,6 +354,12 @@ export type EnvVarCollision = {
   userValue: Scalars['String']['output'];
 };
 
+/** A single environment variable name/value pair. */
+export type EnvVarInput = {
+  name: Scalars['String']['input'];
+  value: Scalars['String']['input'];
+};
+
 export type Environment = {
   __typename?: 'Environment';
   backupStorageLocation?: Maybe<BackupStorageLocation>;
@@ -344,6 +382,14 @@ export type EnvironmentDeploymentsArgs = {
   includeDeleted?: Scalars['Boolean']['input'];
 };
 
+export type ExternalDnsEndpointsType =
+  | 'CLUSTER_IP'
+  | 'NODE_EXTERNAL_IP';
+
+export type ExternalUrlScheme =
+  | 'HTTP'
+  | 'HTTPS';
+
 export type HelmChart = {
   __typename?: 'HelmChart';
   id: Scalars['UUID']['output'];
@@ -351,6 +397,36 @@ export type HelmChart = {
   repository: Scalars['String']['output'];
   valueTemplate: Scalars['String']['output'];
   version: Scalars['String']['output'];
+};
+
+/** Configuration for the dedicated ingress Kubernetes Service. */
+export type IngressServiceConfigInput = {
+  annotations?: InputMaybe<Scalars['JSON']['input']>;
+  externalTrafficPolicy?: InputMaybe<Scalars['String']['input']>;
+  ipFamilies?: InputMaybe<Array<Scalars['String']['input']>>;
+  ipFamilyPolicy?: InputMaybe<Scalars['String']['input']>;
+  loadBalancerIp?: InputMaybe<Scalars['String']['input']>;
+  nodePort?: InputMaybe<Scalars['Int']['input']>;
+  type?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** Kubernetes-style label selector. */
+export type LabelSelectorInput = {
+  matchExpressions?: InputMaybe<Array<LabelSelectorRequirementInput>>;
+  matchLabels?: InputMaybe<Scalars['JSON']['input']>;
+};
+
+export type LabelSelectorOperator =
+  | 'DOES_NOT_EXIST'
+  | 'EXISTS'
+  | 'IN'
+  | 'NOT_IN';
+
+/** One ``matchExpressions`` entry on a label selector. */
+export type LabelSelectorRequirementInput = {
+  key: Scalars['String']['input'];
+  operator: LabelSelectorOperator;
+  values?: InputMaybe<Array<Scalars['String']['input']>>;
 };
 
 export type ManagedResourceCountsInput = {
@@ -594,8 +670,8 @@ export type MutationUpdateDeploymentVersionArgs = {
 
 
 export type MutationUpdateEnvironmentArgs = {
-  config?: InputMaybe<Scalars['JSON']['input']>;
   environmentId: Scalars['UUID']['input'];
+  input: UpdateEnvironmentInput;
 };
 
 export type ParameterDefinition = {
@@ -642,6 +718,17 @@ export type PodStatusInput = {
   ready: Scalars['Boolean']['input'];
   restartCount: Scalars['Int']['input'];
   startedAt?: InputMaybe<Scalars['DateTime']['input']>;
+};
+
+/** Per-feature opt-out flags for the post-render injection. */
+export type PostRenderInjectionInput = {
+  envVars?: InputMaybe<Scalars['Boolean']['input']>;
+  nodeAffinity?: InputMaybe<Scalars['Boolean']['input']>;
+  podAffinity?: InputMaybe<Scalars['Boolean']['input']>;
+  resources?: InputMaybe<Scalars['Boolean']['input']>;
+  runtimeClass?: InputMaybe<Scalars['Boolean']['input']>;
+  tolerations?: InputMaybe<Scalars['Boolean']['input']>;
+  topologySpread?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 export type Query = {
@@ -782,6 +869,20 @@ export type ResolvedComponentScheduling = {
   provenance: Scalars['JSON']['output'];
 };
 
+/** Container resource requirements (``requests`` and ``limits``). */
+export type ResourceRequirementsInput = {
+  limits?: InputMaybe<ResourceSpecInput>;
+  requests?: InputMaybe<ResourceSpecInput>;
+};
+
+/** Pod-container resource ``requests`` or ``limits`` payload. */
+export type ResourceSpecInput = {
+  cpu?: InputMaybe<Scalars['String']['input']>;
+  ephemeralStorage?: InputMaybe<Scalars['String']['input']>;
+  extended?: InputMaybe<Scalars['JSON']['input']>;
+  memory?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type Restore = {
   __typename?: 'Restore';
   backup: Backup;
@@ -804,6 +905,18 @@ export type RestoreStatus =
   | 'FAILED'
   | 'IN_PROGRESS'
   | 'PENDING';
+
+/** Hierarchical pod scheduling & resource configuration section. */
+export type SchedulingInput = {
+  inject?: InputMaybe<PostRenderInjectionInput>;
+  nodeAffinity?: InputMaybe<AffinityBlockInput>;
+  podAffinity?: InputMaybe<AffinityBlockInput>;
+  podAntiAffinity?: InputMaybe<AffinityBlockInput>;
+  resources?: InputMaybe<ResourceRequirementsInput>;
+  runtimeClass?: InputMaybe<Scalars['String']['input']>;
+  tolerations?: InputMaybe<Array<TolerationInput>>;
+  topologySpreadConstraints?: InputMaybe<Array<TopologySpreadConstraintInput>>;
+};
 
 export type ServiceDefinition = {
   __typename?: 'ServiceDefinition';
@@ -830,6 +943,58 @@ export type Task = {
   type: Scalars['String']['output'];
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };
+
+export type TolerationEffect =
+  | 'NO_EXECUTE'
+  | 'NO_SCHEDULE'
+  | 'PREFER_NO_SCHEDULE';
+
+/** Single pod toleration entry. */
+export type TolerationInput = {
+  effect?: InputMaybe<TolerationEffect>;
+  key?: InputMaybe<Scalars['String']['input']>;
+  operator?: InputMaybe<TolerationOperator>;
+  tolerationSeconds?: InputMaybe<Scalars['Int']['input']>;
+  value?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type TolerationOperator =
+  | 'EQUAL'
+  | 'EXISTS';
+
+/** One topology-spread constraint on the pod template. */
+export type TopologySpreadConstraintInput = {
+  labelSelector?: InputMaybe<LabelSelectorInput>;
+  matchLabelKeys?: InputMaybe<Array<Scalars['String']['input']>>;
+  maxSkew: Scalars['Int']['input'];
+  minDomains?: InputMaybe<Scalars['Int']['input']>;
+  nodeAffinityPolicy?: InputMaybe<Scalars['String']['input']>;
+  nodeTaintsPolicy?: InputMaybe<Scalars['String']['input']>;
+  topologyKey: Scalars['String']['input'];
+  whenUnsatisfiable: WhenUnsatisfiable;
+};
+
+/** Full-replacement input for environment configuration updates. Submit the complete desired configuration; any field omitted (``null``) is persisted as its unset state on the underlying EnvironmentConfig. */
+export type UpdateEnvironmentInput = {
+  dedicatedIngress?: InputMaybe<DedicatedIngressInput>;
+  envVars?: InputMaybe<Array<EnvVarInput>>;
+  externalDnsEndpointsType?: InputMaybe<ExternalDnsEndpointsType>;
+  externalUrlPort?: InputMaybe<Scalars['Int']['input']>;
+  externalUrlScheme?: InputMaybe<ExternalUrlScheme>;
+  fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
+  ipWhitelist?: InputMaybe<Array<Scalars['String']['input']>>;
+  scheduling?: InputMaybe<SchedulingInput>;
+};
+
+/** Weighted affinity term for a ``preferred`` rule. */
+export type WeightedAffinityTermInput = {
+  term: AffinityTermInput;
+  weight: Scalars['Int']['input'];
+};
+
+export type WhenUnsatisfiable =
+  | 'DO_NOT_SCHEDULE'
+  | 'SCHEDULE_ANYWAY';
 
 export type AssignBackupStorageLocationMutationVariables = Exact<{
   environmentId: Scalars['UUID']['input'];

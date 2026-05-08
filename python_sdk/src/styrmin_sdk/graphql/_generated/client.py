@@ -43,6 +43,7 @@ from .input_types import (
     DeploymentPodStatusReport,
     DeploymentStatusReportInput,
     ServiceNameOverride,
+    UpdateEnvironmentInput,
 )
 from .list_backup_schedules import ListBackupSchedules
 from .list_backup_storage_locations import ListBackupStorageLocations
@@ -1577,14 +1578,11 @@ class Client(AsyncBaseClient):
         return UpdateDeployment.model_validate(data)
 
     async def update_environment(
-        self,
-        environment_id: UUID,
-        config: Union[Optional[Any], UnsetType] = UNSET,
-        **kwargs: Any,
+        self, environment_id: UUID, input: UpdateEnvironmentInput, **kwargs: Any
     ) -> UpdateEnvironment:
         query = gql("""
-            mutation UpdateEnvironment($environmentId: UUID!, $config: JSON) {
-              updateEnvironment(environmentId: $environmentId, config: $config) {
+            mutation UpdateEnvironment($environmentId: UUID!, $input: UpdateEnvironmentInput!) {
+              updateEnvironment(environmentId: $environmentId, input: $input) {
                 id
                 name
                 config
@@ -1595,10 +1593,7 @@ class Client(AsyncBaseClient):
               }
             }
             """)
-        variables: dict[str, object] = {
-            "environmentId": environment_id,
-            "config": config,
-        }
+        variables: dict[str, object] = {"environmentId": environment_id, "input": input}
         response = await self.execute(
             query=query,
             operation_name="UpdateEnvironment",

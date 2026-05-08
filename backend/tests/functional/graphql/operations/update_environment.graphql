@@ -1,5 +1,5 @@
-mutation UpdateEnvironment($environmentId: UUID!, $config: JSON) {
-    updateEnvironment(environmentId: $environmentId, config: $config) {
+mutation UpdateEnvironment($environmentId: UUID!, $input: UpdateEnvironmentInput!) {
+    updateEnvironment(environmentId: $environmentId, input: $input) {
         id
         config
     }

@@ -118,7 +118,7 @@ async def test_deployment_env_vars_merges_environment_layer(
 async def test_environment_env_vars_round_trip_through_mutation(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """``updateEnvironment(config: { env_vars: ... })`` → ``Environment.envVars``.
+    """``updateEnvironment(input: { envVars: ... })`` → ``Environment.envVars``.
 
     Drives the write path through the real ``update_environment`` service,
     proves the value reached the DB by reading the row back through
@@ -132,8 +132,13 @@ async def test_environment_env_vars_round_trip_through_mutation(
         "update_environment",
         {
             "environmentId": str(environment.id),
-            "config": {
-                "env_vars": {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.staging"}
+            "input": {
+                "envVars": [
+                    {
+                        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+                        "value": "https://otel.staging",
+                    }
+                ]
             },
         },
     )
@@ -430,7 +435,7 @@ async def test_update_environment_rejects_invalid_env_var_name(
     client: AsyncClient,
     session: AsyncSession,
 ) -> None:
-    """``updateEnvironment(config: { env_vars: { "1BAD": "x" } })`` is rejected
+    """``updateEnvironment(input: { envVars: [{name: "1BAD", value: "x"}] })`` is rejected
     with ``extensions.code = "INVALID_ENV_VAR_NAME"`` (FR-006 / FR-020 /
     SC-003) — exercises the environment-scope pre-validation path.
     """
@@ -441,7 +446,7 @@ async def test_update_environment_rejects_invalid_env_var_name(
             "query": load_query("update_environment"),
             "variables": {
                 "environmentId": str(environment.id),
-                "config": {"env_vars": {"1BAD": "x"}},
+                "input": {"envVars": [{"name": "1BAD", "value": "x"}]},
             },
         },
     )

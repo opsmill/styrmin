@@ -32,6 +32,10 @@ from styrmin_backend.api.definitions.deployment_status.model import (
     ReportDeploymentStatusesResponse,
 )
 from styrmin_backend.api.definitions.cluster.model import Cluster
+from styrmin_backend.api.definitions.environment.inputs import (
+    UpdateEnvironmentInput,
+    update_environment_input_to_dict,
+)
 from styrmin_backend.api.definitions.environment.model import Environment
 from styrmin_backend.api.definitions.service.model import ServiceNameOverride
 from styrmin_backend.api.definitions.task.model import Task
@@ -140,19 +144,28 @@ class Mutation:
         self,
         environment_id: UUID,
         info: strawberry.Info,
-        config: JSON | None = None,
+        input: UpdateEnvironmentInput,
     ) -> Environment | None:
-        """Update an environment's config (008-deployment-env-vars / US2).
+        """Update an environment's config with a typed ``UpdateEnvironmentInput``.
 
-        ``config`` is validated against ``EnvironmentConfig``; env vars
-        travel through this existing JSON path under the ``env_vars`` key
-        per ``contracts/graphql.md`` §3.
+        Triggers a redeploy fanout: every non-tombstoned, non-internal
+        deployment in the environment receives a fresh ``ApplicationInstance``
+        version and a redeploy ``Task``. See
+        ``specs/009-environment-update/contracts/graphql.md`` §2.
+
+        The typed input is converted to a plain dict (``None``-valued
+        fields omitted to express full-replacement semantics) and forwarded
+        to the service-layer ``update_environment``, which runs the
+        env-var pre-validation ahead of full Pydantic validation so typed
+        error codes (``INVALID_ENV_VAR_NAME`` etc.) reach the GraphQL
+        boundary intact.
         """
         uow = info.context["uow"]
+        config_dict = update_environment_input_to_dict(input)
         environment = await update_environment(
             environment_id=environment_id,
             uow=uow,
-            config=config,
+            config=config_dict,
         )
         return Environment.from_instance(environment)
 

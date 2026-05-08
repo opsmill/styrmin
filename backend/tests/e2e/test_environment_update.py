@@ -32,6 +32,11 @@ from typing import Any, AsyncGenerator, Callable
 import pytest
 from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
+from styrmin_sdk.graphql._generated.input_types import (
+    EnvVarInput,
+    SchedulingInput,
+    UpdateEnvironmentInput,
+)
 
 from tests.e2e.drivers import ScenarioDriver
 
@@ -199,7 +204,14 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
 
     await client.environments.update(
         environment_id=environment_id,
-        config={"env_vars": {"OTEL_EXPORTER_OTLP_ENDPOINT": target_value}},
+        input=UpdateEnvironmentInput(
+            env_vars=[
+                EnvVarInput(
+                    name="OTEL_EXPORTER_OTLP_ENDPOINT",
+                    value=target_value,
+                )
+            ],
+        ),
     )
 
     # Each deployment must reconcile to RUNNING with the new env entry on
@@ -324,20 +336,28 @@ async def test_us1_environment_update_failure_isolation(
     # render — the exact value depends on the multi-driver fixture; the
     # placeholder below is the shape the test will use once the fixture
     # exists.
-    bad_override = {"scheduling": {"runtime_class": "nonexistent"}}
-    payload = {
-        "env_vars": {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.staging"},
-        **bad_override,
-    }
+    bad_override = SchedulingInput(runtime_class="nonexistent")
+    typed_input = UpdateEnvironmentInput(
+        env_vars=[
+            EnvVarInput(
+                name="OTEL_EXPORTER_OTLP_ENDPOINT",
+                value="https://otel.staging",
+            )
+        ],
+        scheduling=bad_override,
+    )
 
     await client.environments.update(
         environment_id=environment_id,
-        config=payload,
+        input=typed_input,
     )
 
     # The env-config row persists despite the per-deployment failure.
     fresh_env = await client.environments.get(environment_id=environment_id)
-    assert fresh_env.config == payload
+    assert fresh_env.config == {
+        "env_vars": {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.staging"},
+        "scheduling": {"runtime_class": "nonexistent"},
+    }
 
     # A converges with the new env var.
     await scenario_driver.wait_for_deployment_running(
@@ -374,3 +394,43 @@ async def test_us1_environment_update_failure_isolation(
         "deployment B should have logged a failed Task in its timeline; "
         "found no FAILED entries"
     )
+
+
+# ---------------------------------------------------------------------------
+# T047 — typed-input rejection scenario (Quickstart Step 6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api_only(
+    reason=(
+        "API/SDK-only flow (Quickstart Step 6); the rejection happens at "
+        "the GraphQL boundary before any cluster interaction. The "
+        "[ui-chromium] variant would just re-run the same SDK call."
+    )
+)
+@pytest.mark.ci
+async def test_us2_environment_update_invalid_env_var_name_rejected(
+    env_update_environment: dict,
+) -> None:
+    """Quickstart Step 6: an ``updateEnvironment`` with an invalid env var
+    name (regex violation) is rejected with
+    ``extensions.code = "INVALID_ENV_VAR_NAME"`` (FR-006 / SC-003).
+
+    The regenerated SDK surfaces the error as
+    :class:`styrmin_sdk.exceptions.OperationFailedError` whose
+    ``typename`` carries the GraphQL extensions code; we assert directly
+    on that to keep the contract pinned.
+    """
+    from styrmin_sdk.exceptions import OperationFailedError
+
+    client: StyrminClient = env_update_environment["client"]
+    environment_id = env_update_environment["environment_id"]
+
+    with pytest.raises(OperationFailedError) as exc_info:
+        await client.environments.update(
+            environment_id=environment_id,
+            input=UpdateEnvironmentInput(
+                env_vars=[EnvVarInput(name="1invalid", value="y")],
+            ),
+        )
+    assert exc_info.value.typename == "INVALID_ENV_VAR_NAME"

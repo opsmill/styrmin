@@ -192,7 +192,9 @@ async def test_update_environment_dispatches_only_active_deployments(
         "update_environment",
         {
             "environmentId": str(environment_id),
-            "config": {"env_vars": {"OTEL_ENDPOINT": "https://otel.staging"}},
+            "input": {
+                "envVars": [{"name": "OTEL_ENDPOINT", "value": "https://otel.staging"}]
+            },
         },
     )
     assert payload["updateEnvironment"]["config"] == {
@@ -255,7 +257,12 @@ async def test_update_environment_skips_when_all_deployments_at_config(
     await gql(
         client,
         "update_environment",
-        {"environmentId": str(environment_id), "config": target},
+        {
+            "environmentId": str(environment_id),
+            "input": {
+                "envVars": [{"name": "OTEL_ENDPOINT", "value": "https://otel.staging"}]
+            },
+        },
     )
 
     # No Tasks — both deployments were skipped.
@@ -311,7 +318,10 @@ async def test_update_environment_partial_recovery_dispatches_only_laggard(
     await gql(
         client,
         "update_environment",
-        {"environmentId": str(environment_id), "config": config_v2},
+        {
+            "environmentId": str(environment_id),
+            "input": {"envVars": [{"name": "FOO", "value": "v2"}]},
+        },
     )
 
     # Exactly one Task — for the laggard (B).
@@ -330,3 +340,513 @@ async def test_update_environment_partial_recovery_dispatches_only_laggard(
             f"deployment {converged_name} unexpectedly received a Task; "
             "partial-fanout recovery must skip already-converged peers"
         )
+
+
+# ---------------------------------------------------------------------------
+# T041 — typed-input top-level field round-trips (one assertion per
+# `contracts/graphql.md` §4 row)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_env_vars_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``input.envVars`` round-trips to ``Environment.config.env_vars``."""
+    environment = await seed_environment(session)
+    payload = await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"envVars": [{"name": "X", "value": "y"}]},
+        },
+    )
+    assert payload["updateEnvironment"]["config"] == {"env_vars": {"X": "y"}}
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"env_vars": {"X": "y"}}
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_ip_whitelist_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``input.ipWhitelist`` round-trips to ``Environment.config.ip_whitelist``."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"ipWhitelist": ["10.0.0.0/8"]},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"ip_whitelist": ["10.0.0.0/8"]}
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_fqdn_suffix_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"fqdnSuffix": "test.example.com"},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"fqdn_suffix": "test.example.com"}
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_external_url_scheme_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``ExternalUrlScheme`` enum lowers to the ``Literal`` string."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"externalUrlScheme": "HTTPS"},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"external_url_scheme": "https"}
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_external_url_port_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"externalUrlPort": 8443},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"external_url_port": 8443}
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_external_dns_endpoints_type_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``ExternalDnsEndpointsType.NODE_EXTERNAL_IP`` lowers to ``"NodeExternalIP"``."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"externalDnsEndpointsType": "NODE_EXTERNAL_IP"},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"external_dns_endpoints_type": "NodeExternalIP"}
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_dedicated_ingress_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Nested ``DedicatedIngressInput`` fields project onto ``Environment.config``."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {
+                "dedicatedIngress": {
+                    "implementation": "traefik",
+                    "type": "ingress",
+                }
+            },
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {
+        "dedicated_ingress": {"implementation": "traefik", "type": "ingress"}
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_scheduling_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Nested ``SchedulingInput.runtimeClass`` projects onto ``Environment.config``."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"scheduling": {"runtimeClass": "kata"}},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"scheduling": {"runtime_class": "kata"}}
+
+
+# ---------------------------------------------------------------------------
+# T042 — nested-input field projections (per `contracts/graphql.md` §4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_dedicated_ingress_service_nested(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``DedicatedIngressInput.service.loadBalancerIp`` round-trips."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {
+                "dedicatedIngress": {
+                    "service": {
+                        "type": "LoadBalancer",
+                        "loadBalancerIp": "10.0.0.1",
+                    }
+                }
+            },
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {
+        "dedicated_ingress": {
+            "service": {"type": "LoadBalancer", "load_balancer_ip": "10.0.0.1"}
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_scheduling_resources_nested(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``SchedulingInput.resources.requests`` round-trips."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {
+                "scheduling": {
+                    "resources": {
+                        "requests": {"cpu": "100m", "memory": "256Mi"},
+                        "limits": {"cpu": "500m", "memory": "512Mi"},
+                    }
+                }
+            },
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {
+        "scheduling": {
+            "resources": {
+                "requests": {"cpu": "100m", "memory": "256Mi"},
+                "limits": {"cpu": "500m", "memory": "512Mi"},
+            }
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_scheduling_tolerations_nested(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``SchedulingInput.tolerations`` with enums round-trips."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {
+                "scheduling": {
+                    "tolerations": [
+                        {
+                            "key": "node-role.kubernetes.io/control-plane",
+                            "operator": "EXISTS",
+                            "effect": "NO_SCHEDULE",
+                        }
+                    ]
+                }
+            },
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {
+        "scheduling": {
+            "tolerations": [
+                {
+                    "key": "node-role.kubernetes.io/control-plane",
+                    "operator": "Exists",
+                    "effect": "NoSchedule",
+                }
+            ]
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_scheduling_topology_spread_nested(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``SchedulingInput.topologySpreadConstraints`` with ``WhenUnsatisfiable``."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {
+                "scheduling": {
+                    "topologySpreadConstraints": [
+                        {
+                            "maxSkew": 1,
+                            "topologyKey": "topology.kubernetes.io/zone",
+                            "whenUnsatisfiable": "DO_NOT_SCHEDULE",
+                        }
+                    ]
+                }
+            },
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {
+        "scheduling": {
+            "topology_spread_constraints": [
+                {
+                    "max_skew": 1,
+                    "topology_key": "topology.kubernetes.io/zone",
+                    "when_unsatisfiable": "DoNotSchedule",
+                }
+            ]
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_scheduling_inject_nested(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``SchedulingInput.inject`` boolean opt-out flags round-trip."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"scheduling": {"inject": {"envVars": False, "resources": True}}},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {
+        "scheduling": {"inject": {"env_vars": False, "resources": True}}
+    }
+
+
+# ---------------------------------------------------------------------------
+# T043 — typed-error rejection paths (per `contracts/graphql.md` §4 behavioural rows)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_environment_typed_input_rejects_invalid_env_var_name(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``input.envVars[].name = "1bad"`` → ``extensions.code = "INVALID_ENV_VAR_NAME"``.
+
+    The persisted env-config row must remain unchanged (the mutation
+    failed before ``uow.commit()``).
+    """
+    environment = await seed_environment(session)
+    environment_id = environment.id
+    pre_config = environment.config
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_environment"),
+            "variables": {
+                "environmentId": str(environment_id),
+                "input": {"envVars": [{"name": "1bad", "value": "y"}]},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "INVALID_ENV_VAR_NAME"
+    session.expire_all()
+    db_row = await session.get(Environment, environment_id)
+    assert db_row is not None
+    assert db_row.config == pre_config
+
+
+@pytest.mark.asyncio
+async def test_update_environment_typed_input_rejects_oversized_value(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``input.envVars[].value`` exceeding the per-value cap →
+    ``extensions.code = "ENV_VAR_SIZE_LIMIT_EXCEEDED"``.
+    """
+    environment = await seed_environment(session)
+    environment_id = environment.id
+    pre_config = environment.config
+    oversized = "x" * (64 * 1024 + 1)
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_environment"),
+            "variables": {
+                "environmentId": str(environment_id),
+                "input": {"envVars": [{"name": "BIG", "value": oversized}]},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "ENV_VAR_SIZE_LIMIT_EXCEEDED"
+    session.expire_all()
+    db_row = await session.get(Environment, environment_id)
+    assert db_row is not None
+    assert db_row.config == pre_config
+
+
+@pytest.mark.asyncio
+async def test_update_environment_typed_input_rejects_duplicate_env_var_name(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``input.envVars`` carrying two rows with the same name →
+    ``extensions.code = "DUPLICATE_ENV_VAR_NAME"``.
+    """
+    environment = await seed_environment(session)
+    environment_id = environment.id
+    pre_config = environment.config
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_environment"),
+            "variables": {
+                "environmentId": str(environment_id),
+                "input": {
+                    "envVars": [
+                        {"name": "X", "value": "1"},
+                        {"name": "X", "value": "2"},
+                    ]
+                },
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "DUPLICATE_ENV_VAR_NAME"
+    session.expire_all()
+    db_row = await session.get(Environment, environment_id)
+    assert db_row is not None
+    assert db_row.config == pre_config
+
+
+# ---------------------------------------------------------------------------
+# T044 — full-replacement semantics
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_environment_full_replacement_clears_omitted_fields(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Pre-seed environment with ``ipWhitelist=["10.0.0.0/8"]``. Submit
+    ``updateEnvironment(input: { envVars: [...] })`` (omitting
+    ``ipWhitelist``). The persisted ``Environment.config`` must NOT carry
+    the prior ``ip_whitelist`` value (full-replacement semantics).
+    """
+    environment = await seed_environment(session)
+    environment.config = {"ip_whitelist": ["10.0.0.0/8"]}
+    session.add(environment)
+    await session.commit()
+    environment_id = environment.id
+
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment_id),
+            "input": {"envVars": [{"name": "X", "value": "y"}]},
+        },
+    )
+    session.expire_all()
+    db_row = await session.get(Environment, environment_id)
+    assert db_row is not None
+    # Full-replacement: only env_vars is set; ip_whitelist is gone
+    # (omitted from the persisted config dict).
+    assert db_row.config == {"env_vars": {"X": "y"}}
+    assert db_row.config is not None
+    assert "ip_whitelist" not in db_row.config
+
+
+# ---------------------------------------------------------------------------
+# T045 — ENVIRONMENT_NOT_FOUND rejection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_environment_unknown_id_returns_not_found(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """A random ``environmentId`` → ``extensions.code = "NOT_FOUND"`` (the
+    code surfaced by ``EnvironmentNotFoundError``, per
+    ``services/exceptions.py``). No DB writes occur, no Tasks dispatched.
+    """
+    random_id = str(uuid4())
+    pre_task_count = len((await session.exec(select(Task))).all())
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_environment"),
+            "variables": {
+                "environmentId": random_id,
+                "input": {"envVars": [{"name": "X", "value": "y"}]},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "NOT_FOUND"
+    # No env-config row was written and no Tasks were dispatched.
+    post_task_count = len((await session.exec(select(Task))).all())
+    assert post_task_count == pre_task_count
