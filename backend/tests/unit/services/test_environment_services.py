@@ -938,3 +938,84 @@ async def test_fanout_commits_env_config_before_dispatch(
     refreshed = await uow.environments.get(environment.id)
     assert refreshed is not None
     assert refreshed.config == new_config
+
+
+async def test_fanout_commits_task_writes_after_dispatch_loop(
+    uow,
+    fake_cluster: Cluster,
+    mocker,
+):
+    """Regression: ``update_environment`` MUST commit after the fanout
+    loop so per-deployment Task and ``active_application_instance_id``
+    writes survive the unit-of-work boundary.
+
+    ``redeploy_for_environment_update`` calls ``uow.deployments.save``
+    and ``uow.tasks.save`` but does NOT commit (the helper runs inside
+    the caller's UoW context). The previous implementation also did not
+    commit after the fanout loop — ``UnitOfWork.__aexit__`` only rolls
+    back on exception, so the persisted env-config row (committed before
+    dispatch per FR-009a) was intact but every Task row and every
+    refreshed active-instance pointer was silently dropped on clean
+    exit. This test pins the cadence: at least one commit before the
+    loop (env-config row) and at least one commit after the loop (Task
+    rows + active-instance pointers) — i.e. ``commit_count`` is
+    monotonically increasing across both seams. (FR-006/FR-009a.)
+
+    ``FakeUnitOfWork`` does not flush a real DB session, so the bug it
+    is masking can only be observed via a commit-cadence spy. That is
+    exactly what ``commit_count`` / ``commit_history`` exist for.
+    """
+    deployments = [
+        _make_fanout_deployment(
+            environment_id=uuid4(), name=f"fanout-{i}", active_env_config=None
+        )
+        for i in range(2)
+    ]
+    environment = await _seed_environment_and_deployments(
+        uow, cluster=fake_cluster, deployments=deployments
+    )
+    # Reset the commit counter so we measure only the update_environment
+    # call (the seed path itself committed).
+    uow.commit_count = 0
+    uow.commit_history = []
+
+    commit_count_at_dispatch: list[int] = []
+
+    async def record_commit_count(deployment, uow):  # noqa: ARG001
+        # Snapshot the running commit count at the moment a redeploy is
+        # dispatched. The pre-fanout commit must already have run, so
+        # this should be >= 1 on every iteration.
+        commit_count_at_dispatch.append(uow.commit_count)
+
+    mocker.patch(
+        "styrmin_backend.services.environments.redeploy_for_environment_update",
+        side_effect=record_commit_count,
+    )
+    mocker.patch("styrmin_backend.services.environments.logger.info")
+
+    new_config = {"env_vars": {"COMMIT_AFTER_LOOP": "yes"}}
+
+    await update_environment(
+        environment_id=environment.id,
+        uow=uow,
+        config=new_config,
+    )
+
+    # Pre-fanout commit ran before any dispatch (FR-009a).
+    assert commit_count_at_dispatch, "no dispatch invocations recorded"
+    assert all(snapshot >= 1 for snapshot in commit_count_at_dispatch), (
+        f"FR-009a violated: env-config commit did not run before dispatch "
+        f"(snapshots={commit_count_at_dispatch})"
+    )
+    # Post-fanout commit ran after dispatch — at least one additional
+    # commit on top of the pre-fanout one. Strict inequality pins the
+    # bug regression: without the post-loop commit, ``commit_count``
+    # would equal the snapshot at the last dispatch.
+    assert uow.commit_count > commit_count_at_dispatch[-1], (
+        f"post-fanout commit missing: commit_count={uow.commit_count} "
+        f"final dispatch snapshot={commit_count_at_dispatch[-1]}"
+    )
+    # Stronger statement: at least 2 commits total (pre + post).
+    assert uow.commit_count >= 2, (
+        f"expected >= 2 commits (pre + post fanout), got {uow.commit_count}"
+    )

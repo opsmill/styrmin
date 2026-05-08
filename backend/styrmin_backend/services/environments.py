@@ -356,6 +356,25 @@ async def update_environment(
             counts["dispatched"] += 1
             _emit_fanout_metric(environment_id, "dispatched")
 
+        # Persist the per-deployment writes accumulated across the
+        # fanout loop. ``redeploy_for_environment_update`` calls
+        # ``uow.deployments.save(...)`` (refreshes
+        # ``active_application_instance_id``) and ``uow.tasks.save(...)``
+        # (the dispatched Task row) but does NOT commit — the helper is
+        # invoked from inside this enclosing UoW context, so the caller
+        # owns the commit cadence. ``UnitOfWork.__aexit__`` only rolls
+        # back on exception; on a clean exit it is a no-op. Without this
+        # explicit commit the persisted env-config row (committed above
+        # per FR-009a) is intact but every Task row and every
+        # ``active_application_instance_id`` flip from the loop is
+        # silently dropped — operators see "fanout dispatched=N" in the
+        # audit log but no Task rows in storage. Sibling write paths
+        # (``update_deployment``, ``update_deployment_version``,
+        # ``delete_deployment``) all explicitly commit at the end of
+        # their ``async with uow:`` block; this commit puts
+        # ``update_environment`` back in line with them. (FR-006/FR-009.)
+        await uow.commit()
+
         # One audit log entry per fanout invocation regardless of
         # dispatched count — FR-023. True environment-wide no-ops still
         # produce an entry with ``dispatched=0``.
