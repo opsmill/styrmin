@@ -23,14 +23,14 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
 
 **Purpose**: Create new file skeletons every later phase consumes. No business logic yet.
 
-- [ ] T001 Create new module `backend/styrmin_backend/api/definitions/environment/inputs.py` with placeholder `UpdateEnvironmentInput` Strawberry input class (no fields yet) so imports resolve.
-- [ ] T002 [P] Create test stub at `backend/tests/unit/services/test_environment_update_inputs.py` with one passing placeholder test, so the file is wired into pytest collection.
-- [ ] T003 [P] Create test stub at `backend/tests/functional/graphql/test_environment_update_propagation.py` with one passing placeholder test (and the same `from .conftest import gql` / `from ._queries import load_query` imports the 008 propagation file uses, to lock the convention).
-- [ ] T004 [P] Create E2E test file `backend/tests/e2e/test_environment_update.py` with one passing `@pytest.mark.api_only` placeholder test, so the file is wired into pytest collection.
-- [ ] T005 [P] Create frontend component skeleton at `frontend/src/pages/environments/EnvironmentConfigurationTab.tsx` with a minimal placeholder export so the import resolves.
-- [ ] T006 [P] Create frontend component skeleton at `frontend/src/components/environment/EnvVarsForm.tsx` with a minimal placeholder export.
-- [ ] T007 [P] Create frontend component skeleton at `frontend/src/components/environment/RedeployConfirmDialog.tsx` with a minimal placeholder export.
-- [ ] T008 [P] Create frontend Vitest test stub at `frontend/src/__tests__/EnvVarsForm.test.tsx` with one passing placeholder.
+- [X] T001 Create new module `backend/styrmin_backend/api/definitions/environment/inputs.py` with placeholder `UpdateEnvironmentInput` Strawberry input class (no fields yet) so imports resolve.
+- [X] T002 [P] Create test stub at `backend/tests/unit/services/test_environment_update_inputs.py` with one passing placeholder test, so the file is wired into pytest collection.
+- [X] T003 [P] Create test stub at `backend/tests/functional/graphql/test_environment_update_propagation.py` with one passing placeholder test (and the same `from .conftest import gql` / `from ._queries import load_query` imports the 008 propagation file uses, to lock the convention).
+- [X] T004 [P] Create E2E test file `backend/tests/e2e/test_environment_update.py` with one passing `@pytest.mark.api_only` placeholder test, so the file is wired into pytest collection.
+- [X] T005 [P] Create frontend component skeleton at `frontend/src/pages/environments/EnvironmentConfigurationTab.tsx` with a minimal placeholder export so the import resolves.
+- [X] T006 [P] Create frontend component skeleton at `frontend/src/components/environment/EnvVarsForm.tsx` with a minimal placeholder export.
+- [X] T007 [P] Create frontend component skeleton at `frontend/src/components/environment/RedeployConfirmDialog.tsx` with a minimal placeholder export.
+- [X] T008 [P] Create frontend Vitest test stub at `frontend/src/__tests__/EnvVarsForm.test.tsx` with one passing placeholder.
 
 **Checkpoint**: `uv run pytest --collect-only -q backend/tests/` collects the new paths without errors. `cd frontend && pnpm test --run` collects the new Vitest stub.
 
