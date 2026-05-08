@@ -104,7 +104,7 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
 
 **Independent Test**: Quickstart Step 7.
 
-- [ ] T029 [US4] Fill in `dev/guides/driver-env-var-consumption.md` per research §4. Three sections:
+- [X] T029 [US4] Fill in `dev/guides/driver-env-var-consumption.md` per research §4. Three sections:
   1. **What env vars reach your template** — `instance.config.env_vars` and `components[<name>].env_vars.config` shapes; when populated; how the platform-side merge works.
   2. **How to render them** — three worked examples per FR-022:
      - Single-component driver (simple-app pattern).
@@ -113,7 +113,7 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
      **All examples MUST use safe value escaping** (Jinja `tojson` filter or equivalent quoting) per FR-022 + critique E2.
   3. **What the platform doesn't do** — explicit non-policy: no enforcement, no validation that env vars are consumed, no automatic chart-default merging. Drivers own consumption shape.
   Cross-link to `dev/knowledge/backend/deployment-env-vars.md` (operator-facing) and `specs/010-driver-env-var-consumption/spec.md` (canonical contract).
-- [ ] T030 [US4] [P] Fill in `dev/adr/adr-021-driver-env-var-consumption.md` per research §5. Six topics:
+- [X] T030 [US4] [P] Fill in `dev/adr/adr-021-driver-env-var-consumption.md` per research §5. Six topics:
   1. Why post-render injection failed (k8s strategic-merge has no container wildcard; per-container patches require chart-internal container names the platform doesn't have without an invasive new contract — see research §2's third rejected alternative).
   2. Why driver-side consumption is the right boundary (drivers know their charts).
   3. Why merged dicts (not layered) — simpler API; layered is future work.
@@ -121,7 +121,7 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
   5. Migration responsibility — driver authors update templates as needed.
   6. Relationship to ADR-019 + ADR-020 — 010 supersedes ADR-019's post-render-injection portions; ADR-020 (env-config fanout) is unaffected.
   Status: Accepted. Date: 2026-05-08.
-- [ ] T031 [US4] [P] Update `dev/knowledge/backend/deployment-env-vars.md` per FR-023: replace the "post-render injection" paragraph with a "driver-side consumption" paragraph pointing at the new guide. Note that the consumption contract belongs to the driver author; the platform's role is to expose the resolved dict via the rendering context.
+- [X] T031 [US4] [P] Update `dev/knowledge/backend/deployment-env-vars.md` per FR-023: replace the "post-render injection" paragraph with a "driver-side consumption" paragraph pointing at the new guide. Note that the consumption contract belongs to the driver author; the platform's role is to expose the resolved dict via the rendering context.
 
 **Checkpoint**: US4 is shippable. Driver authors have docs; the design is recorded for the future.
 
