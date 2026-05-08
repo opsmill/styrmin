@@ -191,6 +191,31 @@ class ApplicationHelmReleaseBuilder:
 
         Returns:
             dict: The rendered value template.
+
+        Rendering contract surfaced to driver templates:
+            The Jinja rendering dict is produced by
+            ``GlobalContext.model_dump(exclude_none=True)``. Driver
+            ``values_template`` files consume the resolved env vars through
+            two stable, named paths on this dict:
+
+            - ``instance.config.env_vars`` (``dict[str, str]`` | absent) —
+              the deployment-effective merged env vars (environment-scope
+              values overlaid with deployment-scope values per the
+              deepest-wins precedence in 008-deployment-env-vars).
+            - ``components[<name>].env_vars.config`` (``dict[str, str]`` |
+              absent) — the per-component effective merged env vars
+              (env → deployment → component layers combined).
+
+            Both paths use ``model_dump(exclude_none=True)`` semantics: the
+            ``env_vars`` (and per-component ``env_vars.config``) keys are
+            absent from the dict whenever no env vars are set at the
+            relevant scope. Driver templates handle absence with defensive
+            accessors — typically
+            ``{% for k, v in (instance.config.env_vars or {}).items() %}``
+            and an analogous guard around
+            ``components.<name>.env_vars.config``. See
+            ``dev/guides/driver-env-var-consumption.md`` for the
+            driver-author guide on consuming these fields.
         """
         # Turn the context model into a dict
         context_dict: dict = context.model_dump(exclude_none=True)
