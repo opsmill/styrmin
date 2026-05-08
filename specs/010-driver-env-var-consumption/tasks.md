@@ -23,9 +23,9 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
 
 **Purpose**: Create new file scaffolding. Deletion-heavy feature, so most setup is preparing test files for the new context-exposure verification + the docs.
 
-- [ ] T001 [P] Create new test file `backend/tests/unit/agent/test_render_value_template_env_vars.py` with one passing placeholder test, so the file is wired into pytest collection.
-- [ ] T002 [P] Create new doc file `dev/guides/driver-env-var-consumption.md` with a stub heading + one-line summary, so the file exists for content fill-in.
-- [ ] T003 [P] Create new ADR file `dev/adr/adr-021-driver-env-var-consumption.md` with Status / Context / Decision / Consequences scaffolding (reference adr-019 + adr-020 for shape).
+- [X] T001 [P] Create new test file `backend/tests/unit/agent/test_render_value_template_env_vars.py` with one passing placeholder test, so the file is wired into pytest collection.
+- [X] T002 [P] Create new doc file `dev/guides/driver-env-var-consumption.md` with a stub heading + one-line summary, so the file exists for content fill-in.
+- [X] T003 [P] Create new ADR file `dev/adr/adr-021-driver-env-var-consumption.md` with Status / Context / Decision / Consequences scaffolding (reference adr-019 + adr-020 for shape).
 
 **Checkpoint**: `uv run pytest --collect-only -q backend/tests/unit/agent/test_render_value_template_env_vars.py` collects cleanly. The two doc files exist as stubs.
 
