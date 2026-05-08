@@ -112,6 +112,7 @@ A new doc at `dev/guides/driver-env-var-consumption.md` (or appended to an exist
 - **FR-012**: `driver/examples/simple-app/values.j2.yml` MUST be updated to consume `instance.config.env_vars` and emit them as standard Helm chart env entries on the simple-app container.
 - **FR-013**: The simple-app driver's Helm chart (or its values shape, if the chart accepts a free-form env list) MUST support an `env: [{ name, value }]` array on the container spec. If the chart does not currently support this, the chart itself is updated alongside the values template — the simple-app driver and its chart are both project-controlled examples.
 - **FR-014**: The 008/009 E2E test asserting "operator sets `LOG_LEVEL=debug`, pod has it" MUST continue to pass against the updated simple-app driver. The test bodies do not change; only the platform's render path differs (driver-side consumption replaces platform-side injection).
+- **FR-014a**: The retained E2E (or a new sibling E2E assertion in the same file) MUST explicitly verify that at least one chart-default env entry is preserved alongside the operator-set entries. This is the load-bearing assertion vs 008's broken behaviour and the operationally-significant outcome of SC-002. Without this explicit assertion, a regression that re-introduced env-list clobbering would pass the existing E2E. The simple-app chart's existing default env entries (or a sidecar / postgresql container's chart-rendered env) are the natural assertion target.
 
 #### What stays from 008+009 (preserved invariants)
 
@@ -125,7 +126,7 @@ A new doc at `dev/guides/driver-env-var-consumption.md` (or appended to an exist
 #### Documentation (US4)
 
 - **FR-021**: A new guide at `dev/guides/driver-env-var-consumption.md` MUST exist after this feature ships. It MUST document: how env vars reach the template (FR-001/FR-002 surfaces), the merged-dict shape, how to render them as Helm `env:` entries, how to scope them per component, and how to combine with chart-default env entries.
-- **FR-022**: The guide MUST include at least two worked examples: a single-component driver consuming `instance.config.env_vars`, and a multi-component driver consuming `components[<name>].env_vars.config`.
+- **FR-022**: The guide MUST include at least two worked examples: a single-component driver consuming `instance.config.env_vars`, and a multi-component driver consuming `components[<name>].env_vars.config`. The examples MUST demonstrate **safe value escaping** — for instance, by using Jinja's `tojson` filter or equivalent quoting — so driver authors emitting env-var values into YAML do not silently produce broken values.yaml when a value contains characters that would break unquoted YAML (newlines, quotes, leading dashes, etc.). The platform does NOT escape values for drivers; this is a driver-author responsibility, and the guide MUST surface it explicitly.
 - **FR-023**: `dev/knowledge/backend/deployment-env-vars.md` (created in 008's polish phase) MUST be updated to reflect the architecture change — the "post-render injection" paragraph is replaced with a "driver-side consumption" paragraph pointing at the new guide.
 
 #### Out of Scope (codified)

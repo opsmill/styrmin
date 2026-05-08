@@ -67,6 +67,7 @@ returns zero hits. Archived spec docs (`specs/008-...`, `specs/009-...`) may sti
 
 - Phased deletion (mark deprecated in one release, delete in the next). Rejected — the surface was always broken; nothing legitimate uses it. There is no "deprecation period" worth honouring.
 - Leave the surface in place but add a runtime warning. Rejected — the deletion FRs are explicit (FR-005..FR-011); leaving the code in degrades the architecture and continues to confuse driver authors.
+- **Fix the injection layer in place via per-container strategic-merge by chart-known container names.** Rejected. Strategic-merge requires knowing the target container's `name` (the merge key) — that information lives in the chart's templates, not at the platform layer. The platform can't synthesise a strategic-merge patch that names every chart's containers without the driver author providing the names. Implementing this properly would require the platform to either (a) re-render the chart server-side and inspect the rendered manifest before patching (heavy; couples the platform to chart internals), or (b) require driver authors to declare every container name in `driver.styrmin.yml` (significant new contract; more intrusive than driver-side template consumption). Driver-side consumption avoids the entire question.
 
 ## 3. simple-app driver update
 
@@ -98,6 +99,20 @@ env:
 **Helm chart concerns**: the simple-app chart's container template needs to consume the rendered `env:` array on the container spec. Most charts already accept this shape (`.Values.env`). If the simple-app chart doesn't, extend it minimally — this is a project-controlled chart, not external.
 
 **Edge case — empty env vars**: `instance.config.env_vars or {}` returns `{}` when the field is absent or `None`; the loop emits zero entries; the chart's `env:` field is the empty list `[]`. The chart template handles "no env vars set" without rendering the section.
+
+**Safety — value escaping**: the simple-app demo (and the driver-author guide, FR-022) MUST emit values via Jinja's `tojson` filter or equivalent quoting, so an operator-supplied value containing newlines, quotes, leading dashes, or other YAML-significant characters does NOT silently produce broken values.yaml. The illustrative shape becomes:
+
+```yaml
+env:
+{%- for name, value in (instance.config.env_vars or {}).items() %}
+  - name: {{ name | tojson }}
+    value: {{ value | tojson }}
+{%- else %}
+  []
+{%- endfor %}
+```
+
+`tojson` produces JSON-encoded strings that are valid YAML scalars and round-trip safely under Helm's templating. The platform does NOT escape values for drivers — driver authors choose the escaping shape that fits their chart. Skipping escaping is a recipe for silent breakage when an operator submits a value like `"hello\nworld"`; FR-022 mandates the guide demonstrates the safe form.
 
 **Alternatives considered**:
 

@@ -19,7 +19,7 @@ client.deployment.update(
 
 Wait for the reconcile to settle.
 
-## Step 2 — Verify the chart's default env entries are intact
+## Step 2 — Verify the chart's default env entries are intact (FR-014a)
 
 ```bash
 kubectl -n styrmin-<deployment-id> get pod -l app.kubernetes.io/name=simple-app \
@@ -28,7 +28,7 @@ kubectl -n styrmin-<deployment-id> get pod -l app.kubernetes.io/name=simple-app 
 
 Expected: every env entry the simple-app Helm chart sets by default is present, AND `LOG_LEVEL=debug` is also present. The platform did NOT replace, modify, or strip any chart-rendered env entry — the new render path adds operator-set env vars through the chart's own templating, on the same footing as chart-default env entries.
 
-This is the load-bearing assertion vs 008's broken behaviour. Under 008, the chart's defaults would be wiped and only `LOG_LEVEL=debug` would survive.
+**This is the load-bearing assertion vs 008's broken behaviour.** Under 008, the chart's defaults would be wiped and only `LOG_LEVEL=debug` would survive. The retained E2E test for this scenario MUST explicitly assert at least one chart-default env entry is preserved (FR-014a) — the existing 008 E2E body's "operator-set entry reaches the pod" assertion is necessary but not sufficient; SC-002 requires the chart-default invariant to be exercised as well.
 
 ## Step 3 — Verify the broken injection layer is gone
 
