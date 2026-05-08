@@ -10,6 +10,23 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# DO NOT REMOVE — pinned by
+# backend/tests/e2e/test_deployment_env_vars.py::test_us1_deployment_level_env_var
+# to assert chart-default env preservation per
+# 010-driver-env-var-consumption / FR-014a. The chart's deployment template
+# emits this as a hard-coded `STYRMIN_CHART_DEFAULT` env entry on the
+# simple-app container; the test verifies the entry survives alongside any
+# operator-supplied env vars (the load-bearing assertion vs 008's broken
+# behaviour where chart-default entries were clobbered).
+chartDefaultMarker: "marker"
+
+# Operator-supplied env vars contributed by the driver's values.j2.yml
+# (010-driver-env-var-consumption). The chart concatenates this list onto
+# the chart-default env block; the platform never touches the chart-default
+# entries directly. Empty by default — the driver template populates this
+# field when operators set deployment-level env vars.
+extraEnv: []
+
 podAnnotations: {}
 podLabels: {}
 
