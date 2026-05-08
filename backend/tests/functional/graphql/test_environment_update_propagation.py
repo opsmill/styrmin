@@ -663,13 +663,15 @@ async def test_update_environment_input_scheduling_inject_nested(
         "update_environment",
         {
             "environmentId": str(environment.id),
-            "input": {"scheduling": {"inject": {"envVars": False, "resources": True}}},
+            "input": {
+                "scheduling": {"inject": {"tolerations": False, "resources": True}}
+            },
         },
     )
     db_row = await session.get(Environment, environment.id)
     assert db_row is not None
     assert db_row.config == {
-        "scheduling": {"inject": {"env_vars": False, "resources": True}}
+        "scheduling": {"inject": {"tolerations": False, "resources": True}}
     }
 
 

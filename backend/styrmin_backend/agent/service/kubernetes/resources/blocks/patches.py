@@ -725,52 +725,6 @@ class RuntimeClassPatch(Patch):
 
 
 @dataclass
-class EnvVarsPatch(Patch):
-    """JSON-patch injecting ``env`` entries onto a container at a fixed index.
-
-    Kubernetes strategic-merge keys container lists on ``name`` with no
-    wildcard semantic (a literal ``"*"`` would create a phantom container
-    rather than match every container), so we mirror :class:`ResourcesPatch`
-    and emit a JSON-patch ``replace`` op against
-    ``/spec/template/spec/containers/{container_index}/env``. The
-    pragmatic default ``container_index = 0`` covers single-container pods —
-    the common case. Multi-container components needing per-container env
-    injection are out of scope for v1; component-level scoping with
-    ``label_selector`` plus per-component patches remains the way to narrow
-    by workload kind.
-
-    ``replace`` semantics: the chart-rendered ``env`` list on container[0]
-    is replaced wholesale by the operator-set list. Per-name override
-    behaviour (FR-026) holds for keys the chart shipped because the merged
-    list takes precedence on the rendered pod; chart-only entries on
-    container[0] are dropped — this is the v1 limitation captured in
-    spec.md / data-model.md.
-
-    For ``CronJob`` the path nests under
-    ``/spec/jobTemplate/spec/template/spec/containers/...``.
-    """
-
-    env_vars: dict[str, str]
-    api_version: str = "apps/v1"
-    kind: str = "Deployment"
-    name: str = "any"
-    container_index: int = 0
-    _path: str = field(init=False, default="/spec/template/spec/containers")
-    _operation: str = field(init=False, default="replace")
-
-    def _spec_path_str(self) -> str:
-        if self.kind == "CronJob":
-            return "/spec/jobTemplate/spec/template/spec"
-        return "/spec/template/spec"
-
-    def render_value(self) -> str:
-        env_list = [{"name": k, "value": v} for k, v in self.env_vars.items()]
-        patch_path = f"{self._spec_path_str()}/containers/{self.container_index}/env"
-        ops = [{"op": "replace", "path": patch_path, "value": env_list}]
-        return yaml.dump(ops, default_flow_style=False, sort_keys=False)
-
-
-@dataclass
 class GenericPatch(Patch):
     """
     Represents a generic patch with a specific value.

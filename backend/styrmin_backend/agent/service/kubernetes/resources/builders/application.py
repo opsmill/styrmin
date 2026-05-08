@@ -22,9 +22,6 @@ from styrmin_backend.services.driver.models.resources.backup import (
 from styrmin_backend.services.exceptions import (
     SchedulingPatchRenderingError,
 )
-from styrmin_backend.services.env_vars.patch_builder import (
-    build_env_vars_post_rendering_patches,
-)
 from styrmin_backend.services.scheduling.patch_builder import (
     build_affinity_patches,
     build_node_affinity_patches,
@@ -385,65 +382,6 @@ class ApplicationHelmReleaseBuilder:
         )
         return patches
 
-    def build_env_vars_post_rendering_patches(self) -> list[TargetPatch]:
-        """Build Kustomize patches that inject resolved env vars (008/US1).
-
-        Mirrors :meth:`build_scheduling_post_rendering_patches`. When the
-        deployment declares components, each component's effective env var
-        dict (from ``context.components[*].env_vars.config``) drives one
-        narrowed patch group. When the driver declares no components,
-        the deployment-level resolved dict (from
-        ``context.instance.config.env_vars``) applies broadly to every
-        pod-template-bearing kind in the release (FR-004).
-
-        Orphaned per-component blocks (``is_orphaned=True``, lands with
-        US5) are skipped here so renamed/removed components never receive
-        injected env entries.
-        """
-        patches: list[TargetPatch] = []
-
-        if self.context.components is not None:
-            for component_definition in self.context.components.root.values():
-                resolved = component_definition.env_vars
-                if resolved is None or resolved.is_orphaned:
-                    continue
-                if not resolved.config:
-                    continue
-                inject = (
-                    component_definition.scheduling.config.inject
-                    if component_definition.scheduling is not None
-                    else None
-                )
-                selector = (
-                    component_definition.config.identifier.label.label_selectable()
-                )
-                patches.extend(
-                    _validate_renders(
-                        build_env_vars_post_rendering_patches(
-                            resolved=resolved.config,
-                            inject=inject,
-                            label_selector=selector,
-                        )
-                    )
-                )
-            return patches
-
-        # No components declared — apply deployment-level env vars broadly.
-        deployment_env_vars = self.context.instance.config.env_vars
-        if not deployment_env_vars:
-            return patches
-        instance_scheduling = self.context.instance.config.scheduling
-        inject = instance_scheduling.inject if instance_scheduling is not None else None
-        patches.extend(
-            _validate_renders(
-                build_env_vars_post_rendering_patches(
-                    resolved=deployment_env_vars,
-                    inject=inject,
-                )
-            )
-        )
-        return patches
-
     def build_backup_annotation_patches(self) -> list[TargetPatch]:
         """Extract backup configs from components and build Velero annotation patches."""
         if self.context.components is None:
@@ -539,11 +477,6 @@ class ApplicationHelmReleaseBuilder:
         # tolerations, topology spread, runtime class) — dispatcher stub
         # that later user-story phases extend.
         target_patches.extend(self.build_scheduling_post_rendering_patches())
-
-        # Add env vars post-renderer patches (008-deployment-env-vars / US1).
-        # Mirrors scheduling so chart-rendered env entries are overridden by
-        # operator-set env vars on the same name (FR-026 last-writer-wins).
-        target_patches.extend(self.build_env_vars_post_rendering_patches())
 
         if target_patches:
             rh.add_spec(PostRenderers(target_patches=target_patches))

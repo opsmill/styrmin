@@ -291,11 +291,6 @@ type DeploymentTimelineEntry {
   task: Task!
   applicationVersion: String
   contextDiff: ContextDiff
-
-  """
-  Chart-vs-user env var collisions detected during the reconcile this entry represents. Empty in v1 — see :type:`EnvVarCollision` for the FR-028 degradation rationale; structured log entries are the authoritative source until the rendered-manifest detection seam lands.
-  """
-  envVarCollisions: [EnvVarCollision!]!
 }
 
 """
@@ -326,17 +321,6 @@ type EnvVar {
   The value to set. May be the empty string. NOT for secret material; see the EnvVar type description.
   """
   value: String!
-}
-
-"""
-Collision between an operator-set env var and a chart-rendered env entry of the same name. The operator-set value wins; this record exposes the chart value for audit. v1 NOTE: the backend has no line-of-sight into the post-rendered manifest at the patch layer (Kustomize processes the post-render patch on-cluster), so this field is exposed for forward-compatibility but always returns an empty list in v1. Per FR-028 the conflict-detection path is allowed to degrade fully — no detection runs and no warnings are emitted today. A future iteration will add a post-apply rendered-manifest fetch + diff path; until then operators must inspect chart values directly (e.g. via `kubectl get` on the rendered workload). See ADR-019 §3.
-"""
-type EnvVarCollision {
-  component: String
-  container: String!
-  name: String!
-  chartValue: String!
-  userValue: String!
 }
 
 """A single environment variable name/value pair."""
@@ -516,7 +500,6 @@ input PostRenderInjectionInput {
   resources: Boolean = null
   tolerations: Boolean = null
   runtimeClass: Boolean = null
-  envVars: Boolean = null
 }
 
 type Query {

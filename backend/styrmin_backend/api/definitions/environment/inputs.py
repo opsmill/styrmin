@@ -182,7 +182,6 @@ class PostRenderInjectionInput:
     resources: bool | None = None
     tolerations: bool | None = None
     runtime_class: bool | None = None
-    env_vars: bool | None = None
 
 
 @strawberry.input(

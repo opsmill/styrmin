@@ -7,7 +7,6 @@ from typing import Any
 from uuid import UUID
 
 from styrmin_backend.domain.models import Task
-from styrmin_backend.services.env_vars.patch_builder import ChartEnvCollision
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 
@@ -30,26 +29,11 @@ class ContextDiff:
 
 @dataclass
 class TimelineEntry:
-    """A task enriched with version and diff data for the deployment timeline.
-
-    ``env_var_collisions`` carries chart-vs-user env var collisions detected
-    during the reconcile this entry represents (US7 / FR-027). In v1 the
-    field is always ``[]`` because the backend has no line-of-sight into
-    the post-rendered manifest at the layer where collisions could be
-    diffed (the env-var patch is shipped to FluxCD as a JSON-patch
-    document and Kustomize processes it on-cluster). FR-028 explicitly
-    authorises this degradation: the structured-log fallback is the
-    authoritative collision signal in v1, emitted by the patch builder
-    per operator-set env var key. The field is wired through to keep the
-    GraphQL surface stable and unlock a future iteration that fetches
-    rendered manifests post-apply, diffs them, and reports collisions
-    back through the agent layer.
-    """
+    """A task enriched with version and diff data for the deployment timeline."""
 
     task: Task
     application_version: str | None = None
     context_diff: ContextDiff | None = None
-    env_var_collisions: list[ChartEnvCollision] = field(default_factory=list)
 
 
 async def build_deployment_timeline(

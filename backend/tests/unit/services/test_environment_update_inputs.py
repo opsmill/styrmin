@@ -266,11 +266,13 @@ def test_scheduling_post_render_injection_round_trip() -> None:
     """``PostRenderInjectionInput`` carries booleans that survive the conversion."""
     input_obj = UpdateEnvironmentInput(
         scheduling=SchedulingInput(
-            inject=PostRenderInjectionInput(env_vars=False, resources=True),
+            inject=PostRenderInjectionInput(tolerations=False, resources=True),
         ),
     )
     result = update_environment_input_to_dict(input_obj)
-    assert result == {"scheduling": {"inject": {"env_vars": False, "resources": True}}}
+    assert result == {
+        "scheduling": {"inject": {"tolerations": False, "resources": True}}
+    }
     EnvironmentConfig.model_validate(result)
 
 

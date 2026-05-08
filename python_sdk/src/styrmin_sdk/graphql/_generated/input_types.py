@@ -157,7 +157,6 @@ class PostRenderInjectionInput(BaseModel):
     resources: Optional[bool] = None
     tolerations: Optional[bool] = None
     runtime_class: Optional[bool] = Field(alias="runtimeClass", default=None)
-    env_vars: Optional[bool] = Field(alias="envVars", default=None)
 
 
 class ResourceRequirementsInput(BaseModel):

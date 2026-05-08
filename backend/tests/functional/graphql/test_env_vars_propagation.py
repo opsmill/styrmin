@@ -34,7 +34,6 @@ from .seeds import (
     seed_application_driver_version,
     seed_deployment,
     seed_environment,
-    seed_task,
 )
 
 
@@ -696,48 +695,3 @@ async def test_application_driver_version_env_vars_empty_when_unset(
     matching = [v for v in versions if v["id"] == str(adv.id)]
     assert len(matching) == 1
     assert matching[0]["envVars"] == []
-
-
-# ---------------------------------------------------------------------------
-# US7 — DeploymentTimelineEntry.envVarCollisions propagation (T072)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_deployment_timeline_env_var_collisions_field_reachable(
-    client: AsyncClient, session: AsyncSession
-) -> None:
-    """``DeploymentTimelineEntry.envVarCollisions`` is reachable through the
-    full GraphQL → service → repository round-trip and projects an empty
-    list in v1 (the FR-028 degradation path).
-
-    v1 NOTE — degraded propagation case: the platform has no line-of-sight
-    into the post-rendered manifest at the patch layer, so no real
-    :class:`ChartEnvCollision` data can be threaded onto the per-task
-    timeline entry today. Per FR-028 the conflict-detection path is
-    explicitly authorised to degrade to a structured log fallback (see
-    :func:`build_env_vars_post_rendering_patches`). This propagation test
-    asserts the GraphQL contract surface is wired end-to-end — the field
-    exists, the resolver runs, the projection round-trips through the
-    real ``build_deployment_timeline`` service over a real DB row — so
-    the wiring is ready for a future iteration that populates the field
-    once a rendered-manifest fetch + diff seam exists. The "real
-    collision data" half of the propagation matrix row (contracts/
-    graphql.md §4) is intentionally unverified until the detection seam
-    lands and is tracked as Phase 9 deferred work.
-    """
-    deployment = await seed_deployment(session)
-    task = await seed_task(session, deployment=deployment)
-
-    data = await gql(
-        client,
-        "get_deployment_timeline_env_var_collisions",
-        {"deploymentId": str(deployment.id)},
-    )
-    entries = data["deploymentTimeline"]
-    assert any(entry["task"]["id"] == str(task.id) for entry in entries)
-    for entry in entries:
-        # Every entry exposes the field as the empty list contract — the
-        # GraphQL surface is in place for the post-MVP detection seam to
-        # populate without reshuffling types.
-        assert entry["envVarCollisions"] == []

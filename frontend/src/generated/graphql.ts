@@ -313,8 +313,6 @@ export type DeploymentTimelineEntry = {
   __typename?: 'DeploymentTimelineEntry';
   applicationVersion?: Maybe<Scalars['String']['output']>;
   contextDiff?: Maybe<ContextDiff>;
-  /** Chart-vs-user env var collisions detected during the reconcile this entry represents. Empty in v1 — see :type:`EnvVarCollision` for the FR-028 degradation rationale; structured log entries are the authoritative source until the rendered-manifest detection seam lands. */
-  envVarCollisions: Array<EnvVarCollision>;
   task: Task;
 };
 
@@ -342,16 +340,6 @@ export type EnvVar = {
   name: Scalars['String']['output'];
   /** The value to set. May be the empty string. NOT for secret material; see the EnvVar type description. */
   value: Scalars['String']['output'];
-};
-
-/** Collision between an operator-set env var and a chart-rendered env entry of the same name. The operator-set value wins; this record exposes the chart value for audit. v1 NOTE: the backend has no line-of-sight into the post-rendered manifest at the patch layer (Kustomize processes the post-render patch on-cluster), so this field is exposed for forward-compatibility but always returns an empty list in v1. Per FR-028 the conflict-detection path is allowed to degrade fully — no detection runs and no warnings are emitted today. A future iteration will add a post-apply rendered-manifest fetch + diff path; until then operators must inspect chart values directly (e.g. via `kubectl get` on the rendered workload). See ADR-019 §3. */
-export type EnvVarCollision = {
-  __typename?: 'EnvVarCollision';
-  chartValue: Scalars['String']['output'];
-  component?: Maybe<Scalars['String']['output']>;
-  container: Scalars['String']['output'];
-  name: Scalars['String']['output'];
-  userValue: Scalars['String']['output'];
 };
 
 /** A single environment variable name/value pair. */
@@ -722,7 +710,6 @@ export type PodStatusInput = {
 
 /** Per-feature opt-out flags for the post-render injection. */
 export type PostRenderInjectionInput = {
-  envVars?: InputMaybe<Scalars['Boolean']['input']>;
   nodeAffinity?: InputMaybe<Scalars['Boolean']['input']>;
   podAffinity?: InputMaybe<Scalars['Boolean']['input']>;
   resources?: InputMaybe<Scalars['Boolean']['input']>;

@@ -159,7 +159,6 @@ _INJECT_FIELDS: tuple[str, ...] = (
     "resources",
     "tolerations",
     "runtime_class",
-    "env_vars",
 )
 
 
@@ -234,8 +233,7 @@ def effective_inject_flag(inject: PostRenderInjection | None, field_name: str) -
 
     ``None`` — whether because no level set ``inject`` at all or because
     the field is inherited — resolves to ``True``. Recognises every flag
-    declared on :class:`PostRenderInjection`, including ``env_vars``
-    (008-deployment-env-vars FR-024).
+    declared on :class:`PostRenderInjection`.
     """
     if inject is None:
         return True

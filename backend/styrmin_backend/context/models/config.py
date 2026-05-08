@@ -325,11 +325,6 @@ class PostRenderInjection(BaseModel):
     resources: bool | None = None
     tolerations: bool | None = None
     runtime_class: bool | None = None
-    # FR-024: env var injection follows the same three-valued opt-out
-    # semantics as the scheduling flags above. ``None`` inherits, ``False``
-    # opts the component out (sidecars / debug containers), ``True`` is the
-    # default behaviour.
-    env_vars: bool | None = None
 
 
 class SchedulingConfig(BaseModel):
