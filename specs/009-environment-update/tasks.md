@@ -154,16 +154,16 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
 
 **Purpose**: Documentation, full-suite validation, code-quality gates.
 
-- [ ] T062 [P] Update `dev/knowledge/backend/api.md` to reflect the new `Mutation.updateEnvironment(input: UpdateEnvironmentInput!)` signature. Remove any references to the old `config: JSON` argument.
-- [ ] T063 [P] Update `dev/knowledge/backend/services.md` to mention the env-config fanout in the services-layer overview (one-liner pointing to `update_environment` + `redeploy_for_environment_update`). Add the new `redeploy_for_environment_update` helper to relevant indexes.
-- [ ] T064 [P] Append a section to `dev/adr/adr-019-deployment-env-vars.md` (or create a new ADR `dev/adr/adr-020-environment-config-fanout.md` — implementer's choice depending on whether the design feels novel enough to warrant its own ADR) documenting: per-deployment no-op detection (vs mutation-level skip), full-replacement vs incremental-update v1 choice, structured-input migration strategy (clean replace).
-- [ ] T065 [P] Run the full GraphQL propagation test suite (`uv run pytest backend/tests/functional/graphql/test_environment_update_propagation.py -v`) and confirm every row in `contracts/graphql.md §4` has a passing assertion.
-- [ ] T066 [P] Run `uv run invoke format lint` and resolve any violations.
-- [ ] T067 [P] Run `uv run invoke validate-graphql` to confirm every new `.graphql` file passes schema validation.
-- [ ] T068 [P] Confirm `schema.graphql` and the generated SDK + frontend types are checked in and consistent (no drift after a fresh `uv run invoke generate`).
-- [ ] T069 [P] Run `cd frontend && pnpm test --run` and confirm all Vitest tests pass.
-- [ ] T070 Run the full E2E suite (`uv run pytest backend/tests/e2e/test_environment_update.py -v -s --pdb`) against a real Kind/vCluster and observe a green run, per Constitution §V (E2E is part of the definition of done). If skipped scenarios exist (per T026 / T061 deferral), document them in the final report.
-- [ ] T071 Final cross-check: every FR in `spec.md` Requirements section is wired to at least one task in this list. Items intentionally deferred should match `spec.md` Out of Scope only. Any FR without a task is a gap.
+- [X] T062 [P] Update `dev/knowledge/backend/api.md` to reflect the new `Mutation.updateEnvironment(input: UpdateEnvironmentInput!)` signature. Remove any references to the old `config: JSON` argument.
+- [X] T063 [P] Update `dev/knowledge/backend/services.md` to mention the env-config fanout in the services-layer overview (one-liner pointing to `update_environment` + `redeploy_for_environment_update`). Add the new `redeploy_for_environment_update` helper to relevant indexes.
+- [X] T064 [P] Append a section to `dev/adr/adr-019-deployment-env-vars.md` (or create a new ADR `dev/adr/adr-020-environment-config-fanout.md` — implementer's choice depending on whether the design feels novel enough to warrant its own ADR) documenting: per-deployment no-op detection (vs mutation-level skip), full-replacement vs incremental-update v1 choice, structured-input migration strategy (clean replace).
+- [X] T065 [P] Run the full GraphQL propagation test suite (`uv run pytest backend/tests/functional/graphql/test_environment_update_propagation.py -v`) and confirm every row in `contracts/graphql.md §4` has a passing assertion.
+- [X] T066 [P] Run `uv run invoke format lint` and resolve any violations.
+- [X] T067 [P] Run `uv run invoke validate-graphql` to confirm every new `.graphql` file passes schema validation.
+- [X] T068 [P] Confirm `schema.graphql` and the generated SDK + frontend types are checked in and consistent (no drift after a fresh `uv run invoke generate`).
+- [X] T069 [P] Run `cd frontend && pnpm test --run` and confirm all Vitest tests pass.
+- [X] T070 Run the full E2E suite (`uv run pytest backend/tests/e2e/test_environment_update.py -v -s --pdb`) against a real Kind/vCluster and observe a green run, per Constitution §V (E2E is part of the definition of done). If skipped scenarios exist (per T026 / T061 deferral), document them in the final report.
+- [X] T071 Final cross-check: every FR in `spec.md` Requirements section is wired to at least one task in this list. Items intentionally deferred should match `spec.md` Out of Scope only. Any FR without a task is a gap.
 
 ---
 

@@ -112,6 +112,8 @@ class UnitOfWork(ABC):
 
 `__aexit__` calls `rollback()` automatically when the `async with` block exits with an exception; otherwise services must call `await uow.commit()` explicitly.
 
+`DeploymentRepository` exposes a `find_all_by_environment(environment_id)` accessor (added in 009-environment-update) that returns every deployment in an environment, including tombstoned and internal rows. Callers wanting the active-only subset filter the result in-loop. The fanout in `update_environment` uses this accessor and applies the tombstoned/internal exclusion at iteration time so the per-deployment counters can distinguish "evaluated but excluded" from "evaluated and dispatched/skipped".
+
 ### Usage Pattern
 
 ```python
@@ -148,7 +150,20 @@ Manages environments within clusters.
 | `create_environment(name, cluster_id, uow, config=None)` | Create environment in cluster (name unique per cluster). Computes and persists capabilities. |
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
+| `update_environment(environment_id, uow, config)` | Validate + persist env-config row, then fan out a redeploy Task to every non-tombstoned, non-internal deployment in the environment whose active instance is not already at the new config. See "Environment-config fanout" below + [ADR-020](../adr/adr-020-environment-config-fanout.md). |
 | `delete_environment(environment_id, uow)` | Delete an environment |
+
+#### Environment-config fanout
+
+<!-- Extracted from specs/009-environment-update on 2026-05-08 -->
+
+`update_environment` is the load-bearing write path for environment configuration. The mutation is thin: validate the input through the Pydantic pipeline, commit the env-config row **before** any Task dispatch (FR-009a), then iterate every non-tombstoned, non-internal deployment in the environment, calling `redeploy_for_environment_update(deployment, uow)` for each one whose active instance is not already at the new config.
+
+Per-deployment no-op detection is in `_deployment_already_at_config(deployment, new_config) -> bool` — it compares the canonical Pydantic round-trip of the deployment's active-instance environment-config slice against the canonical round-trip of the new config. This shape handles two cases with one code path: a true environment-wide no-op (every deployment skips, zero Tasks dispatched, zero spurious timeline entries) and partial-fanout recovery (a re-submission of the same input dispatches Tasks only for laggards that didn't reach the new config on a prior attempt). See [ADR-020](../adr/adr-020-environment-config-fanout.md) §1 for the design rationale.
+
+The fanout helper `redeploy_for_environment_update(deployment, uow) -> Task` lives in `services/deployment.py`. It mirrors the post-version-decision portion of `update_deployment_version` — does NOT change the deployment's `application_version`, `parameters`, or `service_name_overrides`; only regenerates the active instance against the deployment's currently-bound driver and dispatches the resulting Task.
+
+Per-deployment dispatch failures are caught, logged, and counted (`dispatch_failed`); they do NOT propagate or roll back the env-config row, and peer deployments still receive Tasks (FR-008). One structured log line per fanout dispatch (`env_config_fanout_dispatched ...`) records the counts (FR-023). The metric `env_config_fanout_deployments_total{environment, outcome}` (FR-023a) is emitted via `_emit_fanout_metric`; the metric backend is not yet wired in v1, so the helper currently logs the would-be metric at `info` level — see the TODO at `services/environments.py::_emit_fanout_metric`.
 
 ### Capabilities Service (`capabilities.py`)
 
@@ -171,6 +186,7 @@ Orchestrates application deployments.
 | `get_deployment(deployment_id, uow)` | Get deployment by ID |
 | `update_deployment(deployment_id, config, uow)` | Update deployment configuration |
 | `update_deployment_version(deployment_id, version, uow)` | Change application version |
+| `redeploy_for_environment_update(deployment, uow)` | Per-deployment redeploy helper used by the env-config fanout (009). Regenerates the active instance against the deployment's currently-bound driver and dispatches a Task; does NOT change `application_version`, `parameters`, or `service_name_overrides`. |
 | `refresh_deployment(deployment_id, uow)` | Re-reconcile deployment state |
 | `delete_deployment(deployment_id, uow)` | Request platform-driven teardown — see lifecycle below |
 

@@ -86,6 +86,7 @@ Defined on `type Mutation`:
 | `createCluster` | `name="default", config?` | `Cluster` |
 | `deleteCluster` | `clusterId?, clusterName?` | `String` |
 | `createEnvironment` | `name, clusterId?, clusterName?, config?` | `Environment` |
+| `updateEnvironment` | `environmentId, input: UpdateEnvironmentInput!` | `Environment` (typed full-replacement input; triggers per-deployment redeploy fanout — see [ADR-020](../adr/adr-020-environment-config-fanout.md)) |
 | `deleteEnvironment` | `environmentId?, environmentName?, clusterId?, clusterName?` | `String` |
 | `createBackupStorageLocation` | `name, endpoint, bucket, region, accessKeyId, secretAccessKey` | `BackupStorageLocation` |
 | `updateBackupStorageLocation` | `backupStorageLocationId, name?, endpoint?, bucket?, region?, accessKeyId?, secretAccessKey?` | `BackupStorageLocation` |
@@ -218,7 +219,26 @@ type Deployment {
 }
 ```
 
-`Environment` gains a parallel `envVars: [EnvVar!]!`. Operator-set env vars travel through the existing `config: JSON` argument on `deploy()`, `updateDeployment()`, and `updateEnvironment()` — Pydantic-validated against `EnvironmentConfig` / `DeploymentConfig`. Driver-side documentation (`ApplicationDriverVersion.envVars`), orphan tracking on per-component blocks (`ComponentEnvVars.isOrphaned = true`), and chart-vs-user collision warnings (`DeploymentTimelineEntry.envVarCollisions`) are scoped for follow-up user stories (US4/US5/US7) and will be added as those ship.
+`Environment` gains a parallel `envVars: [EnvVar!]!`. Operator-set env vars travel through the existing `config: JSON` argument on `deploy()` and `updateDeployment()` (Pydantic-validated against `DeploymentConfig`). Environment-scope edits go through the typed `updateEnvironment(environmentId, input: UpdateEnvironmentInput!)` mutation — see "Environment-config update + fanout" below for the full contract. Driver-side documentation (`ApplicationDriverVersion.envVars`), orphan tracking on per-component blocks (`ComponentEnvVars.isOrphaned = true`), and chart-vs-user collision warnings (`DeploymentTimelineEntry.envVarCollisions`) are scoped for follow-up user stories (US4/US5/US7) and will be added as those ship.
+
+#### Environment-config update + fanout
+
+<!-- Extracted from specs/009-environment-update on 2026-05-08 -->
+
+`updateEnvironment(environmentId: UUID!, input: UpdateEnvironmentInput!)` is the single typed write surface for environment configuration. The prior JSON-blob shape (`config: JSON`) is **gone** — the schema does not accept it post-009 and CI fails if it is reintroduced (FR-024).
+
+`UpdateEnvironmentInput` is **full-replacement**: the input represents the complete desired environment configuration; any field omitted is persisted as its unset state. Operators editing one field MUST read the existing config first and re-supply the unchanged fields. The input mirrors `EnvironmentConfig` field-for-field (`envVars: [EnvVarInput!]`, `ipWhitelist: [String!]`, `dedicatedIngress: DedicatedIngressInput`, `scheduling: SchedulingInput`, `fqdnSuffix: String`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`).
+
+Validation flows through the same Pydantic pipeline as `deploy()` / `updateDeployment()`, surfacing the typed error codes from 008 at the GraphQL boundary: `INVALID_ENV_VAR_NAME`, `ENV_VAR_SIZE_LIMIT_EXCEEDED`, `DUPLICATE_ENV_VAR_NAME`, plus `ENVIRONMENT_NOT_FOUND` for unknown ids.
+
+After persistence, the platform fans out a redeploy Task to **every non-tombstoned, non-internal deployment in the environment** whose active instance is not already at the new config (per-deployment no-op detection — see [ADR-020](../adr/adr-020-environment-config-fanout.md) §1). The mutation returns once the env-config row is committed and Tasks are dispatched (it does NOT block on Task completion). Per-deployment Task failures are recorded on the affected deployment's timeline; they do NOT roll back the env-config row or affect peer deployments (FR-008/FR-009a).
+
+Frontend form caveat (v1, US4): the env-vars edit form on the environment detail Configuration tab maps only the `envVars` and flat-scalar slices of `EnvironmentConfig` back into the full-replacement input. The nested `dedicatedIngress` and `scheduling` fields are NOT yet carried through the form — they are submitted as `null`, which under full-replacement clears them on the persisted row. Operators on environments with those overrides set MUST use the SDK or GraphiQL to edit env vars until a future iteration extends the form. See [ADR-020](../adr/adr-020-environment-config-fanout.md) §2 for details.
+
+Observability:
+
+- One structured log line per fanout dispatch (`env_config_fanout_dispatched ...`) records `evaluated`, `dispatched`, `skipped_noop`, `dispatch_failed` counts (FR-023).
+- Per-deployment outcomes are emitted via `_emit_fanout_metric` against the metric `env_config_fanout_deployments_total{environment, outcome}` (FR-023a). The metric backend is **not yet wired**: the helper at `services/environments.py::_emit_fanout_metric` currently logs the would-be metric at `info` level with a clear marker. Replacing the log call with a real counter increment is a one-line edit once a metrics client is registered. Until then, dashboards consume the structured log lines.
 
 There is no `tasks` field on `Deployment` — query `tasks` at the root and filter by `deploymentId` if you need a deployment's task history.
 
