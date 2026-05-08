@@ -24,10 +24,12 @@ import {
 import { Label } from "@/components/ui/label";
 import { Plus } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
+import EnvironmentConfigurationTab from "./EnvironmentConfigurationTab";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "parameters", label: "Parameters" },
+  { id: "configuration", label: "Configuration" },
   { id: "backups", label: "Backups", badge: "SOON" },
 ];
 
@@ -348,6 +350,15 @@ export default function EnvironmentDetailPage() {
             </SelectContent>
           </Select>
         </div>
+      </TabPanel>
+
+      {/* Configuration Tab */}
+      <TabPanel active={activeTab === "configuration"}>
+        <EnvironmentConfigurationTab
+          environmentId={environmentId}
+          config={environment.config}
+          deployments={environment.deployments}
+        />
       </TabPanel>
 
       {/* Backups Tab (Coming Soon) */}

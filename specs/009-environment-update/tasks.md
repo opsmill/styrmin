@@ -118,11 +118,11 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
 
 **Dependencies**: Phase 2 (the GraphQL projection of `Environment.config` is already in place post-008; this phase consumes it).
 
-- [ ] T048 [US3] Implement `EnvironmentConfigurationTab.tsx` in `frontend/src/pages/environments/EnvironmentConfigurationTab.tsx`: takes `environmentId`, `config`, `deployments` as props. Renders sections in a vertical layout: Environment Variables, IP Allowlist, Dedicated Ingress, Scheduling, FQDN/External-URL Settings.
-- [ ] T049 [US3] Each section reads its slice of `config` and renders content OR an empty state ("no overrides set" with appropriate phrasing per section) per FR-015. Use the project's existing `EmptyState` component for consistency.
-- [ ] T050 [US3] Add `Configuration` to the `TABS` array in `frontend/src/pages/environments/EnvironmentDetailPage.tsx` and wire the new tab content to render `<EnvironmentConfigurationTab>` when active.
-- [ ] T051 [US3] [P] Update `frontend/src/graphql/get_environment.graphql` if needed to ensure the `Environment.config` field is fully projected (with all nested sub-fields the configuration tab needs). Regen frontend types via `cd frontend && pnpm codegen` if the projection changed.
-- [ ] T052 [US3] [P] Add a Vitest test at `frontend/src/__tests__/EnvironmentConfigurationTab.test.tsx` covering: an environment with multiple sections populated renders all sections; an environment with empty sections renders empty-state messages; the page does not crash on a partially-populated config.
+- [X] T048 [US3] Implement `EnvironmentConfigurationTab.tsx` in `frontend/src/pages/environments/EnvironmentConfigurationTab.tsx`: takes `environmentId`, `config`, `deployments` as props. Renders sections in a vertical layout: Environment Variables, IP Allowlist, Dedicated Ingress, Scheduling, FQDN/External-URL Settings.
+- [X] T049 [US3] Each section reads its slice of `config` and renders content OR an empty state ("no overrides set" with appropriate phrasing per section) per FR-015. Use the project's existing `EmptyState` component for consistency.
+- [X] T050 [US3] Add `Configuration` to the `TABS` array in `frontend/src/pages/environments/EnvironmentDetailPage.tsx` and wire the new tab content to render `<EnvironmentConfigurationTab>` when active.
+- [X] T051 [US3] [P] Update `frontend/src/graphql/get_environment.graphql` if needed to ensure the `Environment.config` field is fully projected (with all nested sub-fields the configuration tab needs). Regen frontend types via `cd frontend && pnpm codegen` if the projection changed.
+- [X] T052 [US3] [P] Add a Vitest test at `frontend/src/__tests__/EnvironmentConfigurationTab.test.tsx` covering: an environment with multiple sections populated renders all sections; an environment with empty sections renders empty-state messages; the page does not crash on a partially-populated config.
 
 **Checkpoint**: US3 is independently shippable. Operators can read the full environment config via the new tab without dropping into the SDK.
 
