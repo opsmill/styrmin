@@ -38,4 +38,12 @@ MUTATION_ALLOW_LIST: frozenset[str] = frozenset(
 #:
 #: ``currentUser`` returns null when unauthenticated so that callers booting
 #: the app distinguish "logged out" from "errored" without an error branch.
-QUERY_ALLOW_LIST: frozenset[str] = frozenset({"currentUser", "ok"})
+#:
+#: ``environments`` is the read-side counterpart to the agent allow-list
+#: above: the in-cluster status reporter polls
+#: ``ListDeploymentsForStatus`` (a traversal under ``Query.environments``)
+#: to discover which deployments to report on. It has no caller user
+#: identity in v1; the same #188 follow-up that introduces service-account
+#: session tokens for the report mutations covers this read path.
+#: TODO(#188): replace agent allow-list entries with service-account auth.
+QUERY_ALLOW_LIST: frozenset[str] = frozenset({"currentUser", "ok", "environments"})
