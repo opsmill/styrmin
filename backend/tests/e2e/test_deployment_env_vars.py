@@ -182,13 +182,21 @@ async def test_us1_deployment_level_env_var(
     envs = _container_envs(dep)
     assert {"name": "LOG_LEVEL", "value": "debug"} in envs
 
-    # Every container in the pod template should have received the entry
-    # (FR-026 strategic-merge wildcard injection).
-    for container in dep.spec.template.spec.containers or []:
-        names = {entry.name for entry in container.env or []}
-        assert "LOG_LEVEL" in names, (
-            f"container {container.name!r} missing LOG_LEVEL env entry"
-        )
+    # FR-014a (010-driver-env-var-consumption): chart-default env entries
+    # MUST be preserved alongside operator-set ones. The
+    # ``STYRMIN_CHART_DEFAULT`` marker is sourced from the simple-app
+    # chart's ``values.yaml`` and rendered by the chart's own
+    # ``deployment.yaml`` template (see
+    # ``driver/examples/simple-app/src/helm/``). DO NOT remove the marker
+    # from the chart without updating this assertion; the marker is the
+    # load-bearing assertion vs 008's broken behaviour where chart-default
+    # entries were clobbered by the post-render injection layer.
+    chart_default_names = {entry["name"] for entry in envs}
+    assert "STYRMIN_CHART_DEFAULT" in chart_default_names, (
+        "chart-default env entry was clobbered by env-vars consumption — "
+        "the platform must NOT modify chart-rendered env entries (FR-014a / "
+        f"SC-002). Observed env entries on the simple-app container: {envs}"
+    )
 
 
 # ---------------------------------------------------------------------------
