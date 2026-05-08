@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 from uuid import UUID
 
 from styrmin_backend.context.exceptions import InvalidEnvironmentContextError
+from styrmin_backend.context.models.config import EnvironmentConfig
 from styrmin_backend.context.validators import validate_environment_config
 from styrmin_backend.db.models import Environment
+from styrmin_backend.domain.models import Deployment
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.clusters import resolve_cluster
 from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
@@ -39,6 +41,93 @@ def _prevalidate_environment_env_vars(config: dict | None) -> None:
 
 if TYPE_CHECKING:
     pass
+
+
+def _extract_environment_slice_from_context(
+    context: Any,
+) -> dict[str, Any] | None:
+    """Extract the environment-scope config dict from a persisted instance context.
+
+    The instance ``context`` carries a serialised :class:`GlobalContext`
+    (built by :func:`_resolve_instance_context` in
+    ``backend/styrmin_backend/context/resolvers.py``). The environment-scope
+    slice — the :class:`EnvironmentConfig` that was active when the instance
+    was generated — is reachable as ``context.environment.config``.
+
+    The helper accepts both the in-memory shape (a :class:`GlobalContext`
+    Pydantic model on the domain :class:`Instance` entity) and the
+    JSON-serialised shape (a plain ``dict`` as returned by SQLModel for the
+    raw JSON column). Returns the env-config slice as a plain dict suitable
+    for round-tripping through :meth:`EnvironmentConfig.model_validate`.
+    Returns ``None`` when the context is missing or doesn't carry an
+    environment slice (older instances written before the slice was
+    persisted, hypothetical malformed rows). Callers treat ``None`` as
+    "always redeploy" — see :func:`_deployment_already_at_config`.
+    """
+    if context is None:
+        return None
+    # Domain shape: GlobalContext Pydantic model.
+    environment = getattr(context, "environment", None)
+    if environment is not None:
+        config = getattr(environment, "config", None)
+        if config is None:
+            return None
+        # EnvironmentConfig is a Pydantic model; dump preserves None-vs-missing
+        # the same way model_validate accepts on the way back.
+        if hasattr(config, "model_dump"):
+            return config.model_dump(mode="json")
+        if isinstance(config, dict):
+            return config
+        return None
+    # Raw JSON shape (dict from the JSON column).
+    if isinstance(context, dict):
+        env_block = context.get("environment")
+        if not isinstance(env_block, dict):
+            return None
+        config = env_block.get("config")
+        if isinstance(config, dict):
+            return config
+        return None
+    return None
+
+
+def _deployment_already_at_config(
+    deployment: Deployment,
+    new_config: EnvironmentConfig,
+) -> bool:
+    """Return True iff the deployment's active instance is already at ``new_config``.
+
+    Per FR-010 / data-model.md §3, the env-config fanout decides whether
+    each deployment needs a redeploy by comparing the active instance's
+    embedded environment-config slice against the just-persisted config.
+    Equality means the deployment is fully converged and the redeploy is
+    skipped (no spurious Task / timeline entry); inequality means the
+    deployment is a laggard and a redeploy is dispatched.
+
+    Both sides are normalised through the canonical Pydantic round-trip
+    (``EnvironmentConfig.model_validate(...).model_dump(exclude_none=True,
+    mode="json")``) to flatten ``None``-vs-missing drift — a slice that
+    omits ``ip_whitelist`` compares equal to a slice that explicitly sets
+    ``ip_whitelist=None``.
+
+    Returns ``False`` when:
+
+    * the deployment has no active instance (must dispatch the first
+      reconcile);
+    * the active instance carries no extractable environment-config slice
+      (older row, malformed shape — err on the side of redeploying);
+    * the canonical comparison disagrees.
+    """
+    active = deployment.active_instance
+    if active is None:
+        return False
+    instance_env_config_dict = _extract_environment_slice_from_context(active.context)
+    if instance_env_config_dict is None:
+        return False
+    instance_env_config = EnvironmentConfig.model_validate(instance_env_config_dict)
+    new_canon = new_config.model_dump(exclude_none=True, mode="json")
+    instance_canon = instance_env_config.model_dump(exclude_none=True, mode="json")
+    return new_canon == instance_canon
 
 
 async def resolve_environment(

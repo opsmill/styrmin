@@ -595,6 +595,57 @@ async def update_deployment_version(
         return result
 
 
+async def redeploy_for_environment_update(
+    deployment: Deployment,
+    uow: UnitOfWork,
+) -> Task:
+    """Redeploy a deployment in response to an environment-config change.
+
+    Generates a new :class:`ApplicationInstance` from the deployment (which
+    now resolves against the just-updated environment config flowing through
+    :func:`_resolve_instance_context`), sets it as the active instance,
+    transitions the deployment into ``DEPLOYING``, dispatches the
+    reconciliation Task via :func:`apply_state`, and persists the deployment.
+    Returns the dispatched Task so the caller (the env-config fanout in
+    :func:`services.environments.update_environment`) can collect it.
+
+    The helper does NOT change the deployment's ``application_version``,
+    ``parameters``, or service overrides — it only regenerates the active
+    instance against the deployment's current bound driver. This is the
+    "redeploy at the current version" primitive that the env-config fanout
+    needs (data-model.md §2.3 / FR-006/FR-010).
+
+    Mirrors the post-version-decision portion of
+    :func:`update_deployment_version` (the steps that run after the version
+    is decided and the new driver/components are bound). Kept as a separate
+    function rather than refactoring ``update_deployment_version`` to call
+    it: ``update_deployment_version`` carries extra version-specific
+    bookkeeping (service-overrides preservation, services-discovery
+    reconcile on driver change) that is not relevant to a same-version
+    redeploy. The duplication is intentional and bounded — see the comment
+    inside ``update_deployment_version`` for the cross-reference.
+    """
+    current_instance = deployment.active_instance
+
+    new_instance = await generate_instance_from_deployment(
+        deployment=deployment,
+        uow=uow,
+    )
+    deployment.set_active_instance(instance=new_instance)
+    deployment.set_status(DeploymentState.DEPLOYING)
+
+    task = await apply_state(
+        deployment=deployment,
+        current_instance=current_instance,
+        uow=uow,
+    )
+
+    await uow.deployments.save(deployment=deployment)
+    await uow.tasks.save(task=task)
+
+    return task
+
+
 async def _resolve_dedicated_ingress(
     environment_id: UUID,
     uow: UnitOfWork,
