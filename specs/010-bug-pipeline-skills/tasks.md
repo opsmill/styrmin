@@ -144,15 +144,15 @@ description: "Task list for 010-bug-pipeline-skills implementation"
 
 ### Implementation for Phase 7b
 
-- [ ] T020 Install the `gh aw` GitHub CLI extension on the implementer's machine: `gh extension install github/gh-aw`. Verify with `gh aw --help`. (This is contributor-side tooling per FR-028; CI runners do not need it because `.lock.yml` is committed.)
+- [X] T020 Install the `gh aw` GitHub CLI extension on the implementer's machine: `gh extension install github/gh-aw`. Verify with `gh aw --help`. (This is contributor-side tooling per FR-028; CI runners do not need it because `.lock.yml` is committed.)
 
-- [ ] T021 [P] [US5] Write `.github/workflows/bug-agent-analyst.md` per research §R8 (post-Iteration form) and `contracts/slash-command-protocol.md`. Frontmatter declares: `description`, `on.slash_command.{name: bug-analyze, events: [issue_comment]}`, `engine: claude`, `permissions:` (contents/PRs/issues write, id-token write, actions read — matching `claude.yml`), `concurrency: {group: bug-pipeline-${{ github.event.issue.number }}, cancel-in-progress: false}`, auth wiring for `${{ secrets.ANTHROPIC_API_KEY }}`, checkout `fetch-depth: 0`. Body = exactly one line: `/bug-analyze ${{ github.event.issue.number }}`. **No agent prompt content. No prose body.**
+- [X] T021 [P] [US5] Write `.github/workflows/bug-agent-analyst.md` per research §R8 (post-Iteration form) and `contracts/slash-command-protocol.md`. Frontmatter declares: `description`, `on.slash_command.{name: bug-analyze, events: [issue_comment]}`, `engine: claude`, `permissions:` (contents/PRs/issues write, id-token write, actions read — matching `claude.yml`), `concurrency: {group: bug-pipeline-${{ github.event.issue.number }}, cancel-in-progress: false}`, auth wiring for `${{ secrets.ANTHROPIC_API_KEY }}`, checkout `fetch-depth: 0`. Body = exactly one line: `/bug-analyze ${{ github.event.issue.number }}`. **No agent prompt content. No prose body.**
 
-- [ ] T022 [P] [US5] Write `.github/workflows/bug-agent-fix.md` mirroring T021's structure exactly, except: `slash_command.name: bug-fix`; body = `/bug-fix ${{ github.event.issue.number }}`.
+- [X] T022 [P] [US5] Write `.github/workflows/bug-agent-fix.md` mirroring T021's structure exactly, except: `slash_command.name: bug-fix`; body = `/bug-fix ${{ github.event.issue.number }}`.
 
-- [ ] T023 [P] [US5] Write `.github/workflows/bug-agent-test.md` mirroring T021, except: `slash_command.name: bug-test`; body = `/bug-test ${{ github.event.issue.number }}`. Note: `issue_comment` events fire for both issue and PR comments; `github.event.issue.number` is correct in both cases.
+- [X] T023 [P] [US5] Write `.github/workflows/bug-agent-test.md` mirroring T021, except: `slash_command.name: bug-test`; body = `/bug-test ${{ github.event.issue.number }}`. Note: `issue_comment` events fire for both issue and PR comments; `github.event.issue.number` is correct in both cases.
 
-- [ ] T024 [P] [US5] Write `.github/workflows/bug-agent-review.md` mirroring T021, except: `slash_command.name: bug-review`; body = `/bug-review ${{ github.event.issue.number }}`.
+- [X] T024 [P] [US5] Write `.github/workflows/bug-agent-review.md` mirroring T021, except: `slash_command.name: bug-review`; body = `/bug-review ${{ github.event.issue.number }}`.
 
 - [ ] T025 [US5] Run `gh aw compile .github/workflows/bug-agent-analyst.md .github/workflows/bug-agent-fix.md .github/workflows/bug-agent-test.md .github/workflows/bug-agent-review.md` (or the equivalent batch invocation per `gh aw --help`). Verify each `.md` source produces a `.lock.yml` next to it. Stage all four `.lock.yml` files for commit; **do not hand-edit them** (FR-028).
 
