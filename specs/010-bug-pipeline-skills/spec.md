@@ -100,7 +100,7 @@ A maintainer wants to drive the entire pipeline from the GitHub UI by typing sla
 - **Stage skipped**: A maintainer triggers `/bug-fix` on an issue that has no analyst comment yet. The fix stage must handle the missing analyst summary gracefully — posting a failure comment that points the maintainer to run analyze first, rather than producing a broken PR.
 - **Multiple analyst comments**: An issue may accumulate several analyze runs over time. The fix stage must use the **most recent** analyst comment that contains a valid machine-readable summary block.
 - **Branch already exists**: A previous fix attempt may have left a `bug/NNN-*` branch. The fix stage must either reuse, replace, or namespace its branch in a deterministic way that is documented in the failure comment if it cannot proceed.
-- **Lint or test failure during fix**: If the fix passes the agent's correctness check but fails project linting or tests, the fix stage must surface that failure (via failure comment + no PR opened, or via a clearly-flagged draft PR with the failure recorded — the chosen behaviour must be deterministic).
+- **Lint or test failure during fix**: If the fix passes the agent's correctness check but fails project linting or tests, the fix stage MUST treat this as a failure path per FR-010 / FR-012 (failure comment, no branch pushed, no PR opened). This is the deterministic behaviour for v1; the previously-mentioned alternative ("clearly-flagged draft PR with the failure recorded") is rejected to keep CI and local runs identical.
 - **No bug label gating**: The pipeline must work on **any** issue regardless of labels — no label is required to trigger the stages, so the pipeline is usable for triage as well as for confirmed bugs.
 - **Reviewer flips PR back to draft**: If a human reviewer manually reverts the PR to draft after the review stage marked it ready-for-review, subsequent re-runs of `/bug-review` must respect the human action and re-evaluate from the current state.
 
@@ -125,7 +125,7 @@ A maintainer wants to drive the entire pipeline from the GitHub UI by typing sla
 
 - **FR-008**: The fix stage MUST consume the most recent valid analyst comment on the issue (i.e., the most recent comment containing a parseable machine-readable summary).
 - **FR-009**: The fix stage MUST create a branch named `bug/<NNN>-<short-description>` from the default branch, where `<NNN>` is the issue number.
-- **FR-010**: The fix stage MUST run the project's standard formatting and linting commands on its changes before opening a PR; if those commands fail, the stage MUST surface the failure deterministically (per the Edge Cases policy) rather than silently opening a broken PR.
+- **FR-010**: The fix stage MUST run the project's standard formatting and linting commands on its changes before opening a PR. If those commands fail, the stage MUST treat the failure as a failure path per FR-012 — no PR is opened, no branch is pushed, and a failure comment is posted on the issue with the lint output included verbatim. The fix stage MUST NOT open a PR with known formatting or linting violations.
 - **FR-011**: On success, the fix stage MUST open a **draft** PR whose description (a) contains `Closes #<NNN>` and (b) embeds the analyst's machine-readable summary inside a collapsible section so reviewers have full context without leaving the PR view.
 - **FR-012**: On failure, the fix stage MUST post a comment on the issue explaining what was attempted, MUST NOT push a branch, and MUST NOT open a PR.
 

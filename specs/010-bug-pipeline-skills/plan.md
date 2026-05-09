@@ -98,6 +98,7 @@ dev/guides/
 - Skills follow the **existing one-directory-per-skill convention** in `.agents/skills/` (cf. `create-issue/`, `pr/`, `dev-validate/`, `rebase/`).
 - Each skill directory contains exactly one `SKILL.md` for v1. We do **not** introduce sub-files (assets, scripts) to keep the surface minimal; if shared instruction blocks become repetitive across skills, that refactor is deferred to a follow-up iteration.
 - Workflow filenames mirror the source PRD (`bug-agent-<stage>.yml`) so they are visually grouped in the `.github/workflows/` listing.
+- Each workflow file includes a `concurrency:` block keyed on the issue number to serialise same-stage invocations on the same issue (see `research.md` §R8). This is workflow orchestration, not agent logic, and remains FR-024-compliant.
 - Tests for this feature are **manual smoke tests + `yamllint`**, not pytest. Rationale documented under Complexity Tracking.
 
 ## Complexity Tracking

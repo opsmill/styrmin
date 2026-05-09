@@ -121,15 +121,17 @@ This document captures the design decisions made during planning, the alternativ
 
 - **Decision**: Each workflow file contains, in order:
   1. `name:`
-  2. `on:` (issue_comment trigger + the prefix-match `if:`)
-  3. `jobs.<stage>:` with `runs-on`, `permissions`, and exactly two `steps`:
+  2. `on:` (issue_comment trigger + the prefix-match `if:` per `contracts/slash-command-protocol.md`)
+  3. `concurrency:` keyed on the issue number — `group: bug-pipeline-${{ github.event.issue.number }}`, `cancel-in-progress: false`. This is workflow orchestration, not agent logic, so it does not violate FR-024. It prevents two simultaneous `/bug-fix` (or any same-stage) invocations on the same issue from racing.
+  4. `jobs.<stage>:` with `runs-on`, `permissions`, and exactly two `steps`:
      - `actions/checkout@v6` (with `fetch-depth: 0` so the agent can branch from history)
      - `anthropics/claude-code-action@v1` with `prompt: '/bug-<stage> ${{ github.event.issue.number }}'`
 - **What's explicitly forbidden in YAML**: agent prompt text beyond the slash command, branch-naming logic, comment templates, summary parsing.
-- **Rationale**: keeps FR-024 mechanically verifiable — a reviewer can read each YAML file in under 30 seconds and confirm there's no agent logic.
-- **Alternatives considered**: 
-  - Including a small `if:` to filter by user permissions: rejected for v1 — GitHub already gates the trigger by repo permissions; adding our own gate is premature.
+- **Rationale**: keeps FR-024 mechanically verifiable — a reviewer can read each YAML file in under 30 seconds and confirm there's no agent logic. The `concurrency:` block is admitted because it expresses *when the workflow runs*, not *what the agent does*.
+- **Alternatives considered**:
+  - Including a small `if:` to filter by user permissions: rejected for v1 — GitHub already gates the trigger by repo permissions; adding our own gate would diverge from the existing `claude.yml` precedent.
   - Pre-parsing the comment body in YAML to extract arguments before invoking Claude: rejected — that's logic, FR-024 forbids it; let the skill handle it.
+  - Using `cancel-in-progress: true` instead of `false`: rejected — cancelling an in-flight fix mid-write could leave a half-pushed branch.
 
 ## R9. Test strategy (Constitution §V deviation)
 

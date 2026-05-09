@@ -24,19 +24,30 @@ Empty or malformed arguments fail loudly with a usage message; the skill MUST NO
 
 ## Trigger matching rules (workflow YAML)
 
-Each workflow's `if:` clause uses a leading-prefix match against `github.event.comment.body`, anchored at the start of a line:
+Each workflow's `if:` clause matches against the **first line** of `github.event.comment.body`. Both with-argument and no-argument forms must trigger so the skill itself can post a usage comment for malformed invocations:
 
 ```yaml
 if: |
-  github.event_name == 'issue_comment' &&
-  startsWith(github.event.comment.body, '/bug-analyze ')
+  github.event_name == 'issue_comment' && (
+    startsWith(github.event.comment.body, '/bug-analyze ') ||
+    github.event.comment.body == '/bug-analyze' ||
+    startsWith(github.event.comment.body, '/bug-analyze\n')
+  )
 ```
 
-(or `/bug-fix `, `/bug-test `, `/bug-review ` respectively).
+(repeat the equivalent block for `/bug-fix`, `/bug-test`, `/bug-review`).
 
-This rule deliberately excludes:
-- Comments that quote the command (e.g., `> /bug-analyze 206`) — the leading `>` makes the prefix not match.
-- Comments that mention the command mid-paragraph — only line-start invocations fire.
+This rule deliberately:
+- **Excludes** comments that quote the command (e.g., `> /bug-analyze 206`) — the leading `>` prevents the prefix match.
+- **Excludes** comments that mention the command mid-paragraph — only line-start invocations fire.
+- **Includes** invocations with no argument so the skill can respond with a usage message rather than the user seeing no feedback at all.
+
+### Skill responsibilities for invalid arguments
+
+When triggered with no argument, an empty argument, or an argument that does not parse as a positive integer or canonical GitHub URL, the skill MUST:
+
+1. Post a comment on the same issue/PR explaining the expected argument format and giving an example.
+2. Stop without performing any other side effects (no branch, no PR, no further comments).
 
 ## Permission requirements
 
