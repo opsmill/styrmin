@@ -98,6 +98,8 @@ async def update_environment_via_form(
 - *Separate `EnvironmentDetailPage` class instantiated by the test*: rejected — breaks the dual-entrypoint protocol, see above.
 - *Page-object methods on `ui_driver` BUT NOT on `api_driver`* (so the test runs only under `[ui-chromium]`): rejected — that's the same shape as the broken `api_only` markers we're trying to clean up. Symmetric methods on both drivers IS the pattern.
 
+**Parity contract (critique E1 + E2)**: the api_driver reads existing config, **round-trips through `EnvironmentConfig.model_validate(config)` so Pydantic coerces `Literal["http", "https"]` etc. automatically**, then submits. The ui_driver drives the form which applies US2's manual transform. Both reach the same persisted state. **The dual-entrypoint parametrisation IS the parity check** — running T061 under both `[api-chromium]` and `[ui-chromium]` IS how we verify "the driver-side bug US2 fixes in the frontend doesn't have a parallel bug in the api_driver". No separate parity test is needed; this design intent is now explicit. See data-model §4.3 for the api_driver implementation shape.
+
 **Reference**: `backend/tests/e2e/drivers/protocol.py` (the protocol the methods must satisfy), `backend/tests/e2e/drivers/ui_driver.py` (existing page-object-style methods to mirror), `backend/tests/e2e/drivers/api_driver.py` (existing API-side parallel).
 
 ## 3. The `api_only` marker audit landscape

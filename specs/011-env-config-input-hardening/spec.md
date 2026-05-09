@@ -77,6 +77,7 @@ An end-to-end Playwright scenario drives the full env-vars edit form flow: navig
 2. **Given** the page object's `.add_env_var(name, value)` method, **When** called from the test, **Then** the form gains a new row populated with the supplied name/value pair, observable via Playwright assertions on the rendered DOM.
 3. **Given** T061 is unskipped after the page object lands, **When** the test runs against a real cluster, **Then** it asserts: form submission triggers the confirm dialog naming the deployment count, confirming dispatches the redeploy, the page refreshes with the new env vars visible.
 4. **Given** an existing E2E that calls `scenario_driver.update_deployment` is currently marked `api_only`, **When** the marker cleanup completes, **Then** the marker is removed (or replaced with a documented justification if the test genuinely is api-only by some other criterion). The pytest suite picks it up under both variants.
+5. **Given** T061 is parametrised over both `[api-chromium]` and `[ui-chromium]` after the marker cleanup, **When** the test runs, **Then** the same observable outcomes are asserted under both variants — and that parametrisation IS the api/ui-parity check. The api_driver's `update_environment_via_form` reaches the same persisted state as the ui_driver's form flow (the api_driver does this via Pydantic `EnvironmentConfig.model_validate` coercion of raw JSON config; the ui_driver does it via the US2 manual transform). No separate parity test is needed.
 
 ---
 

@@ -216,9 +216,13 @@ Drives the Playwright flow:
 6. `page.click("dialog button:has-text('Redeploy')")`
 7. Wait for the page to return to the read state with the new env vars visible.
 
-### 4.3 `api_driver.py` implementation
+### 4.3 `api_driver.py` implementation (parity contract per critique E1)
 
-Reads the existing config, constructs an `UpdateEnvironmentInput` with the new env vars + every other field carried through (full-replacement semantics), submits via the SDK's `client.environments.update`. The implementation parallels what `EnvironmentConfigurationTab.tsx` does in TypeScript.
+Reads the existing config, **round-trips it through `EnvironmentConfig.model_validate(config)`**, modifies the env_vars field, then constructs an `UpdateEnvironmentInput` from the validated Pydantic model and submits via `client.environments.update`. **No manual value-transform is required** — Pydantic's `Literal["http", "https"]` and `Literal["NodeExternalIP", "ClusterIP"]` types coerce the raw JSON strings into proper enum values automatically during `model_validate`. The frontend can't do this (TypeScript has no Pydantic equivalent), which is exactly why US2's manual transform exists in `buildFullReplacementInput`.
+
+This means the api_driver and ui_driver reach the same persisted state through different mechanisms — the api_driver via Pydantic coercion, the ui_driver via the form's manual transform. **Any test parametrised over both drivers (notably T061) is the dual-entrypoint parity check** (per critique E2 — the parametrisation IS the parity verification; no separate parity test is needed).
+
+Implementer note: the api_driver's read of existing config goes through `client.environments.get(...)` which post-009 returns a typed Pydantic model. The explicit `model_validate` round-trip in this driver is therefore mostly redundant but documents the contract that the driver tolerates raw-JSON config inputs and produces validated `UpdateEnvironmentInput` outputs.
 
 ## 5. Storage
 
