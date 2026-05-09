@@ -147,6 +147,7 @@ This document captures the design decisions made during planning, the alternativ
   - **No GHAW** (keep hand-authored `.yml`): rejected by user request.
   - **GHAW for one stage as a pilot, hand-authored for the others**: rejected — inconsistent surface; not worth the irregularity for a 4-file change.
 - **Tooling**: `gh extension install github/gh-aw` (one-time per contributor machine). Required only for editing workflow sources; CI consumes the committed `.lock.yml`.
+- **Post-implementation note**: GHAW strict mode rejected `contents: write` and forced the read-only-permissions + `safe-outputs:` model. The four SKILL.md files were rewritten tool-agnostically (commit `97ec390c`) so the same intent flows through `gh`/`git` CLI locally and the Safe-Outputs MCP in CI. The bug-review flip-to-draft edge case was dropped (no `mark_pull_request_as_draft` capability in GHAW v0.71.5).
 
 ## R12. Drift policy v1 — added 2026-05-09
 

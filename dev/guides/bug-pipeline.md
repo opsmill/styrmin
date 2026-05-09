@@ -49,7 +49,7 @@ From a Claude Code session in the repo, invoke the same commands directly:
 Local prerequisites:
 
 - `gh` CLI authenticated against the target repository.
-- Write access to issues and pull requests (the same permission set the workflows request).
+- Write access to issues and pull requests via your personal `gh auth login` token. CI uses a separate, read-only repository token plus GHAW Safe-Outputs to route writes.
 - A clean git working tree on `develop` for `/bug-fix` (the skill creates a new branch and refuses to proceed on an existing one).
 
 Local and CI runs produce **identical** observable side effects (same comment shape, same branch naming, same PR body). The only difference is the argument source — locally you type the issue number, in CI it comes from `github.event.issue.number`.
@@ -88,6 +88,15 @@ Edit cycle:
 1. Edit the `.md` source (e.g., `.github/workflows/bug-agent-fix.md`).
 2. Recompile: `gh aw compile .github/workflows/bug-agent-fix.md`.
 3. Commit both the `.md` and the regenerated `.lock.yml` together.
+
+Permissions in the `.md` source must be **read-only** under GHAW strict mode; write capabilities are declared per stage in the `safe-outputs:` block. Strict mode rejects `contents: write`, `issues: write`, etc. Do not attempt to change them.
+
+Per-stage `safe-outputs:` catalogue:
+
+- **analyst** (`bug-agent-analyst.md`) → `add-comment`
+- **fix** (`bug-agent-fix.md`) → `create-pull-request` (draft) + `add-comment`
+- **test** (`bug-agent-test.md`) → `push-to-pull-request-branch` + `add-comment`
+- **review** (`bug-agent-review.md`) → `add-comment` + `mark-pull-request-as-ready-for-review`
 
 `yamllint` ignores `.github/workflows/*.lock.yml` (configured in `.yamllint.yml`) so the generated artefacts don't trip the linter. Drift between `.md` sources and their `.lock.yml` artefacts is currently caught only by reviewer attention; a CI check that re-runs `gh aw compile --no-emit` and fails on diff is a planned follow-up (FR-029).
 

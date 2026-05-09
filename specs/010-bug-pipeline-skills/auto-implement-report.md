@@ -112,3 +112,14 @@ The iteration was defined and applied (`/speckit-iterate-define` + `/speckit-ite
 The four SKILL.md files are unchanged; the dev guide gets a follow-up edit task (T029); the smoke-test deferrals (T004/T006/T008/T010/T016) carry through and now run against the GHAW `.lock.yml` outputs.
 
 To re-run implementation for Phase 7b, invoke `/speckit-implement` (or `/speckit-auto-implement`) — the spec, plan, research, and tasks are now consistent with the HYBRID-GHAW target.
+
+### Post-iteration remediation
+
+After Phase 7b landed, a post-iteration review surfaced six findings against the GHAW migration. They were addressed in two commits without adding new tasks to `tasks.md` (the work is remediation under the existing Iteration 1 envelope):
+
+- **Three high-severity SC-006 parity findings (F1, F2, F3)** — the four SKILL.md files contained CLI-specific instructions (`gh`/`git`) that did not map cleanly onto the GHAW Safe-Outputs MCP path used in CI. Resolved by **Option A** in commit `97ec390c`: the four SKILL.md files were rewritten tool-agnostically so the same intent flows through `gh`/`git` CLI locally and the Safe-Outputs MCP in CI.
+- **Three medium-severity findings (F4, F5, F6)** — addressed in this commit:
+  - F4: dropped the unused `update-pull-request` safe-output from `bug-agent-review.md`; recompiled.
+  - F5: fixed misleading "write access" language in `dev/guides/bug-pipeline.md`; documented the per-stage `safe-outputs:` catalogue and the strict-mode read-only constraint.
+  - F6: added FR-030 to `spec.md`, clarified SC-006's parity definition, appended a §R11 post-implementation note in `research.md`.
+- **Bug-review flip-to-draft edge case dropped** — locally and in CI for symmetry. GHAW v0.71.5 has no `mark_pull_request_as_draft` capability; future GHAW upstream may add it, in which case the edge case can be reinstated.

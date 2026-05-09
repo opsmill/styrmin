@@ -159,6 +159,7 @@ A maintainer wants to drive the entire pipeline from the GitHub UI by typing sla
 
 - **FR-028**: The system MUST commit both the GHAW `.md` source AND the `gh aw compile`-generated `.lock.yml` to git for each of the four workflows. The `.lock.yml` is treated as a build artifact: hand-edits MUST NOT occur; any change to behaviour goes through editing the `.md` source and re-running `gh aw compile`.
 - **FR-029**: Drift-prevention between `.md` source and `.lock.yml` is **manual for v1** — contributors run `gh aw compile` before committing, and the developer guide (FR-027) documents this. Automated drift detection (a CI job or pre-commit hook running `gh aw compile --check` or equivalent) is a documented follow-up. Operational risk is bounded in HYBRID mode because the `.md` body is just the slash-command invocation and post-creation churn is minimal.
+- **FR-030**: GHAW strict mode forces workflow `permissions:` to read-only across the four bug-agent stages. Write capabilities MUST be declared explicitly via `safe-outputs:` blocks per stage. The catalogue is: analyze → `add-comment`; fix → `create-pull-request` (draft) + `add-comment`; test → `push-to-pull-request-branch` + `add-comment`; review → `add-comment` + `mark-pull-request-as-ready-for-review`. Skills MUST be tool-agnostic about write side effects (intent-level language; the agent uses `gh`/`git` CLI locally and the GHAW Safe-Outputs MCP tools in CI). Branching on context inside the skill is forbidden.
 
 #### Documentation
 
@@ -181,7 +182,7 @@ A maintainer wants to drive the entire pipeline from the GitHub UI by typing sla
 - **SC-003**: 100% of fix-stage runs that complete successfully open a draft PR that links to its source issue via `Closes #<NNN>` and embeds the analyst summary in a collapsible section.
 - **SC-004**: 100% of test-stage runs that complete successfully push their tests to the same branch as the fix and produce a passing run of the project's standard test command.
 - **SC-005**: 100% of review-stage runs leave the PR in a state consistent with the review verdict — ready-for-review on pass, draft on fail — with **no** false-positive ready-for-review flips.
-- **SC-006**: A developer can run any stage locally from their CLI and observe the same side effects (comment posted, branch pushed, PR state updated) as the equivalent CI run, with no logic divergence between the two paths.
+- **SC-006**: A developer can run any stage locally from their CLI and observe the same side effects (comment posted, branch pushed, PR state updated) as the equivalent CI run, with no logic divergence between the two paths. Parity is at the **observable side-effect level** (a comment is posted; a draft PR is opened; a branch is pushed-and-extended; a PR is marked ready-for-review). The underlying tools differ between local and CI (CLI vs MCP); the skill is tool-agnostic so that this difference is invisible to maintainers.
 - **SC-007**: All agent prompt and orchestration logic lives in skill files; no workflow source (`.md`) or compiled output (`.lock.yml`) contains agent prompts, branch-naming rules, or comment-formatting templates. Verified by inspection of each workflow `.md` (the body is one line: the slash-command invocation).
 - **SC-008**: A failure path on any stage produces a clear failure comment that names what was attempted and where the stage gave up, and does **not** suggest a next-stage command — verified by triggering each stage against an input designed to fail.
 
@@ -210,3 +211,5 @@ A maintainer wants to drive the entire pipeline from the GitHub UI by typing sla
 **Tasks added**: T020–T029 (10 tasks under new Phase 7b).
 
 **Tasks superseded** (kept as `[X]` historically, but their output is replaced): T011, T012, T013, T014, T015.
+
+**Post-iteration remediation**: Commit `97ec390c` applied Option A — rewrite the four SKILL.md files tool-agnostically so the same intent flows through `gh`/`git` CLI locally and the GHAW Safe-Outputs MCP tools in CI (resolves SC-006 parity findings F1, F2, F3). A follow-up commit dropped the unused `update-pull-request` safe-output from `bug-agent-review.md`, fixed misleading permission language in `dev/guides/bug-pipeline.md`, and added FR-030 (F4, F5, F6).

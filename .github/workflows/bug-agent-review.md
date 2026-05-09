@@ -18,8 +18,6 @@ checkout:
 safe-outputs:
   add-comment:
     max: 5
-  update-pull-request:
-    max: 1
   mark-pull-request-as-ready-for-review:
     max: 1
 ---
