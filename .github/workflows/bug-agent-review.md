@@ -6,17 +6,22 @@ on:
     events: [issue_comment]
 engine: claude
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  id-token: write
+  contents: read
+  issues: read
+  pull-requests: read
   actions: read
 concurrency:
   group: bug-pipeline-${{ github.event.issue.number }}
   cancel-in-progress: false
 checkout:
   fetch-depth: 0
-anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+safe-outputs:
+  add-comment:
+    max: 5
+  update-pull-request:
+    max: 1
+  mark-pull-request-as-ready-for-review:
+    max: 1
 ---
 
 /bug-review ${{ github.event.issue.number }}

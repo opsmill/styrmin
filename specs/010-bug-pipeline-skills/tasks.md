@@ -154,15 +154,15 @@ description: "Task list for 010-bug-pipeline-skills implementation"
 
 - [X] T024 [P] [US5] Write `.github/workflows/bug-agent-review.md` mirroring T021, except: `slash_command.name: bug-review`; body = `/bug-review ${{ github.event.issue.number }}`.
 
-- [ ] T025 [US5] Run `gh aw compile .github/workflows/bug-agent-analyst.md .github/workflows/bug-agent-fix.md .github/workflows/bug-agent-test.md .github/workflows/bug-agent-review.md` (or the equivalent batch invocation per `gh aw --help`). Verify each `.md` source produces a `.lock.yml` next to it. Stage all four `.lock.yml` files for commit; **do not hand-edit them** (FR-028).
+- [X] T025 [US5] Run `gh aw compile .github/workflows/bug-agent-analyst.md .github/workflows/bug-agent-fix.md .github/workflows/bug-agent-test.md .github/workflows/bug-agent-review.md` (or the equivalent batch invocation per `gh aw --help`). Verify each `.md` source produces a `.lock.yml` next to it. Stage all four `.lock.yml` files for commit; **do not hand-edit them** (FR-028).
 
-- [ ] T026 [US5] Delete the four hand-authored YAML files: `.github/workflows/bug-agent-analyst.yml`, `bug-agent-fix.yml`, `bug-agent-test.yml`, `bug-agent-review.yml`. They are replaced by the `.md` + `.lock.yml` pairs from T021–T025.
+- [X] T026 [US5] Delete the four hand-authored YAML files: `.github/workflows/bug-agent-analyst.yml`, `bug-agent-fix.yml`, `bug-agent-test.yml`, `bug-agent-review.yml`. They are replaced by the `.md` + `.lock.yml` pairs from T021–T025.
 
-- [ ] T027 [US5] Update `.yamllint.yml` to add `.github/workflows/*.lock.yml` to the `ignore:` list (mirrors `opsmill/infrahub#9043`). Verify the existing yamllint config doesn't already cover this pattern; if it does, this task is a no-op and should be marked accordingly.
+- [X] T027 [US5] Update `.yamllint.yml` to add `.github/workflows/*.lock.yml` to the `ignore:` list (mirrors `opsmill/infrahub#9043`). Verify the existing yamllint config doesn't already cover this pattern; if it does, this task is a no-op and should be marked accordingly.
 
-- [ ] T028 [US5] Re-run `uv run yamllint` over the entire workflow tree (`.github/workflows/*.yml` and `.github/workflows/*.md`); confirm clean. The four `.lock.yml` files MUST be excluded by T027's update; the four `.md` files MUST pass yamllint frontmatter validation.
+- [X] T028 [US5] Re-run `uv run yamllint` over the entire workflow tree (`.github/workflows/*.yml` and `.github/workflows/*.md`); confirm clean. The four `.lock.yml` files MUST be excluded by T027's update; the four `.md` files MUST pass yamllint frontmatter validation.
 
-- [ ] T029 [P] Update `dev/guides/bug-pipeline.md`: replace `.yml` references with the `.md` (source) + `.lock.yml` (generated) pair; add a "Editing the workflows" section explaining `gh extension install github/gh-aw`, `gh aw compile`, commit both files. Note that drift-prevention is currently manual (per FR-029 / research §R12).
+- [X] T029 [P] Update `dev/guides/bug-pipeline.md`: replace `.yml` references with the `.md` (source) + `.lock.yml` (generated) pair; add a "Editing the workflows" section explaining `gh extension install github/gh-aw`, `gh aw compile`, commit both files. Note that drift-prevention is currently manual (per FR-029 / research §R12).
 
 **Checkpoint**: Phase 7b complete. Four `.md` sources + four `.lock.yml` artifacts under `.github/workflows/`; four old `.yml` files deleted; yamllint clean; dev guide updated.
 
