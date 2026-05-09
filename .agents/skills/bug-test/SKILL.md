@@ -26,6 +26,15 @@ Stages chain via a hybrid model — every stage is human-triggered, and on succe
 - The PR's head branch matches the pattern `bug/<NNN>-<short_description>` per the fix-stage contract.
 - A working tree of the repository so the agent can check out the fix branch and run the test command.
 
+## Execution contexts
+
+This skill runs in one of two contexts with **identical** observable side effects:
+
+- **Local CLI**: invoked from Claude Code; the agent uses `gh`/`git` directly with the maintainer's credentials for both reads and writes.
+- **GHAW CI**: invoked from a GitHub issue or PR comment; the workflow's GitHub token is read-only, and write operations route through the GHAW Safe-Outputs MCP tools listed below. The agent uses whichever write tool is available at runtime — there is no context-detection logic in this skill.
+
+For this stage, the available writes are `push_to_pull_request_branch` (one or more new commits onto the existing fix branch — same-branch only per FR-014) and `add_comment` (issue/PR comments). For operational details and CI-workflow context, see `dev/guides/bug-pipeline.md`.
+
 ## Arguments
 
 <arguments> $ARGUMENTS </arguments>
@@ -74,7 +83,7 @@ The test stage's contract with `bug-fix` is the open draft PR whose body contain
    - The PR is not in `draft` state, or is closed/merged.
    - The PR body has no `Closes #<NNN>` line that resolves to a real issue number.
 
-   In the failure case: post a comment on the issue (or the PR if `kind=pr`) naming what was looked for ("an open draft PR with `Closes #<NNN>` in its body") and instructing the maintainer to run `/bug-fix <NNN>` first or to reopen the draft. **Stop.** Do not check anything out, do not write tests, do not commit.
+   In the failure case: post a comment on the issue (or the PR if `kind=pr`) naming what was looked for ("an open draft PR with `Closes #<NNN>` in its body") and instructing the maintainer to run `/bug-fix <NNN>` first or to reopen the draft. Use the available comment-write tool (`gh issue comment` / `gh pr comment` locally / `add_comment` MCP in CI). **Stop.** Do not check anything out, do not write tests, do not commit.
 
 ### 3. Verify the fix branch matches `bug/<NNN>-*`
 
@@ -82,7 +91,7 @@ The branch name is the load-bearing handle that ties the fix, its tests, and dow
 
 1. Read the PR's `headRefName` from step 2.
 2. Confirm it matches the regex `^bug/[0-9]+-` (numeric issue prefix, kebab-case continuation).
-3. **Failure path** if it does not match: post a comment on the PR naming the actual head ref and the expected pattern (`bug/<NNN>-<short-description>`), and **stop**. Do not check it out, do not write tests, do not push. Branch-mismatch means the PR was likely opened outside the pipeline, and the test stage cannot safely extend it.
+3. **Failure path** if it does not match: post a comment on the PR naming the actual head ref and the expected pattern (`bug/<NNN>-<short-description>`), and **stop**. Use the available comment-write tool (`gh pr comment` locally / `add_comment` MCP in CI). Do not check it out, do not write tests, do not push. Branch-mismatch means the PR was likely opened outside the pipeline, and the test stage cannot safely extend it.
 
 ### 4. Re-fetch the analyst summary from the linked issue
 
@@ -99,16 +108,16 @@ The analyst's `reproduction` field guides what behaviour the new tests must cove
 4. **Validate** the parsed object against the schema in `specs/010-bug-pipeline-skills/contracts/analyst-summary-schema.md`:
    - `schema_version` MUST equal `1`. Any other value (or a missing field) is a parse failure.
    - Required fields: `issue.number`, `issue.url`, `hypothesis`, `affected_files`, `reproduction`, `short_description`.
-5. **Failure path** if no valid summary is found, the schema mismatches, or `reproduction` is empty: post a comment on the PR explaining what was looked for, and **stop**. Do not write tests against guessed behaviour.
+5. **Failure path** if no valid summary is found, the schema mismatches, or `reproduction` is empty: post a comment on the PR explaining what was looked for, and **stop**. Use the available comment-write tool (`gh pr comment` locally / `add_comment` MCP in CI). Do not write tests against guessed behaviour.
 
 The `reproduction` list is the primary input for step 6 — every step in that list should map (where meaningful) to an assertion in the new or extended tests.
 
-### 5. Check out the fix branch
+### 5. Prepare the working tree on the fix branch
 
-Work directly on the fix branch — **never create a new branch.** Per FR-014 the test stage MUST add or modify tests on the same branch as the fix, not on a new branch. Do not create `bug/<NNN>-tests`, do not create `bug/<NNN>-<short>-tests`, do not branch off the fix branch. The test commits land on top of the fix commits on the same ref.
+Work directly on the fix branch — **never create a new branch.** Per FR-014 the test stage MUST add or modify tests on the same branch as the fix, not on a new branch. Do not create `bug/<NNN>-tests`, do not create `bug/<NNN>-<short>-tests`, do not branch off the fix branch. The test commits land on top of the fix commits on the same ref. The same-branch constraint applies in **both** execution contexts; the `push_to_pull_request_branch` Safe-Outputs tool used in CI explicitly targets the existing PR's head ref and does not allow a different branch.
 
 1. If the working tree is dirty, stash or commit the noise away first; the test stage requires a clean checkout.
-2. Fetch and check out the fix branch:
+2. Fetch and check out the fix branch. Locally:
 
    ```bash
    git fetch origin bug/<NNN>-<short_description>
@@ -116,7 +125,9 @@ Work directly on the fix branch — **never create a new branch.** Per FR-014 th
    git pull --ff-only origin bug/<NNN>-<short_description>
    ```
 
-3. If `git pull --ff-only` fails (the local branch has diverged), reset to `origin/bug/<NNN>-<short_description>` only after confirming there is no local work to lose; otherwise, treat the divergence as a failure path per step 8 and stop.
+   In CI, the workflow checks out the PR's head ref before the agent starts, so the working tree is already on `bug/<NNN>-<short_description>`. Do not switch branches.
+
+3. If the local branch has diverged from `origin/bug/<NNN>-<short_description>` (locally: `git pull --ff-only` fails), reset to the remote ref only after confirming there is no local work to lose; otherwise, treat the divergence as a failure path per step 9 and stop.
 
 ### 6. Write or extend tests covering the reproduction scenario
 
@@ -130,40 +141,44 @@ The job here is to choose the right test file and write tests that exercise the 
    - Carry a comment naming the issue (e.g., `# Regression for #<NNN>` or `// Regression for #<NNN>`) so future readers can trace it back to the analyst summary.
    - Map (where meaningful) to a step in the analyst's `reproduction` list — set up the input from the reproduction, exercise the path, assert the expected post-fix behaviour.
    - Keep the scope tight: cover the reproduced bug, not adjacent functionality.
-4. Stage and commit the test changes with a conventional-commit message (e.g., `test: add regression for #<NNN> …`). Do **not** push yet — the test command must succeed first (step 7).
+4. Stage the test changes. Locally, also commit them now with a conventional-commit message (e.g., `test: add regression for #<NNN> …`); do **not** push yet — the test command must succeed first (step 7). In CI, leave the changes staged in the working tree — the `push_to_pull_request_branch` Safe-Outputs tool (step 8) composes the commit and pushes it atomically when invoked, and you provide the conventional-commit-style message as its commit-message argument at that point.
 
 ### 7. Run the project's standard test command
 
 1. Run the project's standard test command **as documented in `AGENTS.md`** for the tier you wrote tests in. Do not hard-code a command here — the source of truth lives in `AGENTS.md`.
 2. **If the test command exits non-zero, this is the failure path.**
-   - Post a comment on the PR containing the failing test output **verbatim** in a fenced code block (use a triple backtick fence; preserve line breaks). Prepend a one-paragraph prose explanation that tests were written but did not pass.
-   - **Do NOT push the test commit.** The local commit is left in place so the maintainer can check out the branch, inspect what was attempted, and either fix the test or re-run `/bug-test`.
+   - Post a comment on the PR containing the failing test output **verbatim** in a fenced code block (use a triple backtick fence; preserve line breaks). Prepend a one-paragraph prose explanation that tests were written but did not pass. Use the available comment-write tool (`gh pr comment` locally / `add_comment` MCP in CI).
+   - **Do NOT push the test commit.** Locally, the commit is left in place so the maintainer can check out the branch, inspect what was attempted, and either fix the test or re-run `/bug-test`. In CI, do not invoke `push_to_pull_request_branch`; the staged diff is discarded with the ephemeral runner.
    - **Do NOT include a `> Next:` suggestion line.** Failure paths never suggest a next stage.
    - **Stop.**
 3. If the test command exits zero, continue to step 8.
 
 ### 8. Push the test commits and post the success comment
 
-1. Push the test commits to the **same** branch on `origin`:
+1. **Push the test commits to the same branch** on `origin` — same branch as the fix, never a new ref. Locally:
 
    ```bash
    git push origin bug/<NNN>-<short_description>
    ```
 
-   Do not use `--force`; the push should fast-forward over the existing fix commits. If it cannot, the branch was rewritten between step 5 and now — treat that as a failure path (step 9).
+   Do not use `--force`; the push should fast-forward over the existing fix commits. If it cannot, the branch was rewritten between step 5 and now — treat that as a failure path (step 10).
+
+   In CI, emit the `push_to_pull_request_branch` Safe-Outputs MCP tool. The tool targets the PR's existing head ref by construction, so it cannot accidentally write to a different branch; provide the conventional-commit-style commit message you would have used locally (`test: add regression for #<NNN> …`).
+
+   Both paths produce the same observable outcome: one or more new commits on `bug/<NNN>-<short_description>` on `origin`, on top of the existing fix commits.
 
 2. Post a single comment on the **PR** (not on the issue) that:
    - Names what was tested in 1–3 lines (which behaviour is now covered, what kind of tests were added).
    - Lists the test file(s) added or extended (repo-relative paths).
    - Ends with a final line: `> Next: \`/bug-review <PR-number>\``.
 
-   Do not edit prior comments. The pipeline only ever appends.
+   Use the available comment-write tool (`gh pr comment` locally / `add_comment` MCP in CI). Do not edit prior comments. The pipeline only ever appends.
 
 ### 9. Handle missing or invalid arguments
 
 Per `specs/010-bug-pipeline-skills/contracts/slash-command-protocol.md`, when triggered with no argument, an empty argument, or an argument that does not parse as a positive integer or canonical GitHub URL, the skill MUST:
 
-1. Post a comment on the same issue/PR explaining the expected argument format and giving an example.
+1. Post a comment on the same issue/PR explaining the expected argument format and giving an example. Use the available comment-write tool (`gh issue comment` / `gh pr comment` locally / `add_comment` MCP in CI).
 2. Stop without performing any other side effects (no checkout, no commits, no further comments).
 
 Suggested usage-comment body:
@@ -182,14 +197,14 @@ GitHub issue or PR URL. Examples:
 
 ### 10. Failure path (any other unrecoverable failure)
 
-If anything outside steps 2, 3, 4, 7, and 9 goes irrecoverably wrong (e.g., `git push` fails after the test commit, the PR head ref is updated mid-run, the test file location cannot be determined), post a comment on the PR (or the issue if no PR is yet known) that:
+If anything outside steps 2, 3, 4, 7, and 9 goes irrecoverably wrong (e.g., the push step fails after the test commit, the PR head ref is updated mid-run, the test file location cannot be determined), post a comment on the PR (or the issue if no PR is yet known) that:
 
 - Names what the stage was attempting at the point of failure.
 - States plainly where the stage stopped.
-- Describes any partial state — e.g., "a test commit was made locally but the branch was not pushed" — so the maintainer can clean up.
+- Describes any partial state — e.g., "a test commit was made locally but the branch was not pushed" — so the maintainer can clean up. (In CI the `push_to_pull_request_branch` Safe-Outputs call is atomic, so the partial-state cases are local-CLI-only; in CI the failure is "the test commit was not pushed".)
 - Does **not** include a `> Next:` suggestion line.
 
-If the partial state includes local commits that were not pushed, leave them in place; the maintainer can check out the branch and decide whether to keep, amend, or drop them.
+Use the available comment-write tool (`gh pr comment` / `gh issue comment` locally / `add_comment` MCP in CI). If the partial state (local CLI only) includes local commits that were not pushed, leave them in place; the maintainer can check out the branch and decide whether to keep, amend, or drop them.
 
 ## Examples
 

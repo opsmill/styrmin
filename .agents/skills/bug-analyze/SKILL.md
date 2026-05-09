@@ -24,6 +24,15 @@ Stages chain via a hybrid model — every stage is human-triggered, and on succe
 - Write access to issues on the target repository (needed to post the analyst comment).
 - A working tree of the repository so the agent can search the codebase while forming a hypothesis.
 
+## Execution contexts
+
+This skill runs in one of two contexts with **identical** observable side effects:
+
+- **Local CLI**: invoked from Claude Code; the agent has the maintainer's `gh`/`git` credentials and uses those CLIs directly for both reads and writes.
+- **GHAW CI**: invoked from a GitHub issue comment; the workflow's GitHub token is read-only, and write operations route through the GHAW Safe-Outputs MCP tools listed below. The agent uses whichever write tool is available at runtime — there is no context-detection logic in this skill.
+
+For this stage, the only available write is `add_comment` (issue comments). For operational details and CI-workflow context, see `dev/guides/bug-pipeline.md`.
+
 ## Arguments
 
 <arguments> $ARGUMENTS </arguments>
@@ -128,7 +137,7 @@ After the closing `<!-- bug-pipeline:summary:end -->` marker, end the comment wi
 > Next: `/bug-fix <NNN>`
 ```
 
-Post the comment with `gh issue comment <NNN> --body-file <path>` (or the equivalent MCP/API call). Do **not** edit or delete prior comments — every stage appends.
+**Post the comment.** This is the skill's only write side effect. The local-CLI path posts it via `gh issue comment <NNN> --body-file <path>`; the GHAW-CI path emits it via the `add_comment` Safe-Outputs MCP tool. Both paths produce the same observable outcome: a single new comment on issue `<NNN>` with this body. Use whichever write tool is available at runtime. Do **not** edit or delete prior comments — every stage appends.
 
 ### 6. Compose the failure comment (no defensible hypothesis)
 
@@ -142,13 +151,13 @@ The failure comment MUST:
 - **Omit** the YAML summary block entirely. Do not post an empty or placeholder block.
 - **Omit** the `> Next:` suggestion line. Failure paths never suggest a next stage.
 
-The maintainer can address the gap (e.g., ask the reporter for a reproduction) and re-run `/bug-analyze` later; subsequent successful runs supersede earlier failures because consumers always pick the most recent valid analyst comment.
+Post the failure comment using the same write capability as the success path (`gh issue comment` locally / `add_comment` MCP in CI). The maintainer can address the gap (e.g., ask the reporter for a reproduction) and re-run `/bug-analyze` later; subsequent successful runs supersede earlier failures because consumers always pick the most recent valid analyst comment.
 
 ### 7. Handle missing or invalid arguments
 
 Per `specs/010-bug-pipeline-skills/contracts/slash-command-protocol.md`, when triggered with no argument, an empty argument, or an argument that does not parse as a positive integer or canonical GitHub URL, the skill MUST:
 
-1. Post a comment on the same issue/PR explaining the expected argument format and giving an example.
+1. Post a comment on the same issue/PR explaining the expected argument format and giving an example. Use the same write capability as the success/failure comments above (`gh issue comment` locally / `add_comment` MCP in CI).
 2. Stop without performing any other side effects (no further investigation, no second comment).
 
 Suggested usage-comment body:

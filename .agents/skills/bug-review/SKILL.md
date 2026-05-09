@@ -23,10 +23,19 @@ Because review is the terminal stage, this skill **never** suggests a next comma
 ## Prerequisites
 
 - `gh` CLI authenticated against the target repository (or equivalent GitHub MCP/API tooling).
-- Write access to pull requests on the target repository (needed to post the review comment and toggle ready-for-review).
+- Write access to pull requests on the target repository (needed to post the review comment and mark ready-for-review).
 - The target PR exists. **Typically** it is a draft PR opened by `bug-fix` and extended with regression tests by `bug-test`, but the skill MUST also handle:
   - PRs already in **ready-for-review** state (re-review on demand — see step 6).
   - PRs that a human reviewer manually flipped **back to draft** after a previous `bug-review` run marked them ready (see edge case in step 6).
+
+## Execution contexts
+
+This skill runs in one of two contexts with **identical** observable side effects:
+
+- **Local CLI**: invoked from Claude Code; the agent uses `gh`/`git` directly with the maintainer's credentials for both reads and writes.
+- **GHAW CI**: invoked from a GitHub PR comment; the workflow's GitHub token is read-only, and write operations route through the GHAW Safe-Outputs MCP tools listed below. The agent uses whichever write tool is available at runtime — there is no context-detection logic in this skill.
+
+For this stage, the available writes are `add_comment` (PR comments) and `mark_pull_request_as_ready_for_review` (state transition: draft → ready). For operational details and CI-workflow context, see `dev/guides/bug-pipeline.md`.
 
 ## Arguments
 
@@ -97,7 +106,7 @@ These are the four substantive checks per FR-017. Each produces one paragraph in
 
 ### 5. Compose the review comment
 
-Post a **single** comment on the PR via `gh pr comment <PR-NNN> --body-file <path>` (or the equivalent `add_pull_request_comment` MCP call). The comment has a fixed structure:
+Post a **single** comment on the PR with the structure below. Use the available comment-write tool: `gh pr comment <PR-NNN> --body-file <path>` locally, or the `add_comment` Safe-Outputs MCP tool in CI. Both produce the same observable outcome — one new comment on the PR with this body. The comment has a fixed structure:
 
 ```markdown
 ### Bug-pipeline review
@@ -135,15 +144,15 @@ This is the load-bearing part of the skill. The mapping from verdict to PR state
 
 | Verdict | Action on the PR |
 |---------|------------------|
-| **Satisfied** (✅) | Run `gh pr ready <PR-NNN>` to flip the draft PR to ready-for-review. |
-| **Not satisfied** (⚠️) | Do **not** call `gh pr ready`. Leave the PR in draft. |
+| **Satisfied** (✅) | Mark the PR as ready-for-review. |
+| **Not satisfied** (⚠️) | Do **not** mark the PR as ready-for-review. Leave the PR in its current state. |
 
-`gh pr ready` is called **only** on the satisfied path. On the not-satisfied path the skill posts the review comment and stops; the PR's draft state is preserved.
+The state-transition write is performed only on the satisfied path. Use the available tool: `gh pr ready <PR-NNN>` locally, or the `mark_pull_request_as_ready_for_review` Safe-Outputs MCP tool in CI. Both produce the same observable outcome — the PR transitions from `draft` to ready-for-review. On the not-satisfied path the skill posts the review comment and stops; the PR's draft state is preserved.
 
 **Edge case — PR is already in ready-for-review when invoked.** A maintainer may re-run `/bug-review` on a PR that a previous run already flipped to ready-for-review (or on a PR that was never in draft to begin with). Still post the review comment — the maintainer asked for it. Then:
 
-- If the new verdict is **satisfied**, no state change is needed (the PR is already in the satisfied state). Do not call `gh pr ready` redundantly. Note in the verdict line that the PR was already ready-for-review.
-- If the new verdict is **not satisfied**, flip the PR back to draft with `gh pr ready --undo <PR-NNN>` and explain in the comment that the previous ready-for-review state has been reverted because new concerns were raised. The PR returns to draft until the requested changes are addressed and the next `/bug-review` run is satisfied.
+- If the new verdict is **satisfied**, no state change is needed (the PR is already in the satisfied state). Do not invoke the ready-for-review tool redundantly. Note in the verdict line that the PR was already ready-for-review.
+- If the new verdict is **not satisfied**, post the review comment with the requested-changes list as normal, but **do not attempt to flip the PR back to draft** in either execution context. v1 does not perform an automatic ready → draft transition: GHAW does not currently expose a `mark_pull_request_as_draft` Safe-Outputs capability, so a CI run cannot perform the flip; for symmetry / preserved cross-context parity (SC-006), the local-CLI run does not perform it either. Add a closing line to the review comment instructing the human reviewer to flip the PR back to draft manually if they agree with the requested changes. (Future GHAW upstream may add a `mark_pull_request_as_draft` capability; if it does, the flip-to-draft edge case can be reinstated in a follow-up iteration.)
 
 **Edge case — PR was flipped back to draft by a human (per spec).** When `bug-review` is invoked again on a PR whose state is `draft` but where a previous review comment from this skill marked it satisfied, treat it as a fresh review against the **current state** — re-fetch the diff (the diff may have changed since the previous run), re-run the four checks, and produce a verdict from scratch. **Do not** assume the previous verdict still holds. Mention in the review comment that this is a re-review (e.g., a leading line like `_Re-review: this PR was previously flipped to ready-for-review and has since been reverted to draft. Re-evaluating against the current diff._`).
 
@@ -151,7 +160,7 @@ This is the load-bearing part of the skill. The mapping from verdict to PR state
 
 Per `specs/010-bug-pipeline-skills/contracts/slash-command-protocol.md`, when triggered with no argument, an empty argument, or an argument that does not parse as a positive integer or canonical GitHub PR URL, the skill MUST:
 
-1. Post a comment on the same PR (or issue, if the trigger surface was an issue comment) explaining the expected argument format and giving an example.
+1. Post a comment on the same PR (or issue, if the trigger surface was an issue comment) explaining the expected argument format and giving an example. Use the available comment-write tool (`gh pr comment` / `gh issue comment` locally / `add_comment` MCP in CI).
 2. Stop without performing any other side effects (no review comment, no state change, no further comments).
 
 Suggested usage-comment body:
@@ -167,12 +176,14 @@ Argument is required and must be either a bare PR number or a full GitHub PR URL
 
 ### 8. Failure path (any other unrecoverable failure)
 
-If anything outside steps 2, 3 (handled non-fatally), 6, and 7 goes irrecoverably wrong (e.g., `gh pr view` cannot fetch the PR, `gh pr ready` fails after the satisfied verdict was posted, the diff cannot be retrieved), post a comment on the PR (or the issue, when no PR is in scope) that:
+If anything outside steps 2, 3 (handled non-fatally), 6, and 7 goes irrecoverably wrong (e.g., the PR cannot be fetched, the ready-for-review state transition fails after the satisfied verdict was posted, the diff cannot be retrieved), post a comment on the PR (or the issue, when no PR is in scope) that:
 
 - Names what the stage was attempting at the point of failure.
 - States plainly where the stage stopped.
-- Describes any partial state — e.g., "the review comment was posted but `gh pr ready` failed; the PR is still in draft despite the satisfied verdict" — so the maintainer can finish the transition manually.
+- Describes any partial state — e.g., "the review comment was posted but the ready-for-review state transition failed; the PR is still in draft despite the satisfied verdict" — so the maintainer can finish the transition manually.
 - Does **not** include a `> Next:` suggestion line. Review is the terminal stage; failure paths never suggest a next stage either.
+
+Use the available comment-write tool (`gh pr comment` / `gh issue comment` locally / `add_comment` MCP in CI).
 
 ## Examples
 
@@ -217,19 +228,19 @@ If anything outside steps 2, 3 (handled non-fatally), 6, and 7 goes irrecoverabl
 
 ## Notes
 
-- This skill **only** posts a review comment and may toggle the draft / ready-for-review state. It never writes code, never amends commits, never edits prior comments, and never invokes downstream stages (there are none — review is terminal).
-- **Verdict-to-state mapping is one-to-one and explicit**: satisfied → `gh pr ready <PR>`; not satisfied → no `gh pr ready` call. The only exception is the already-ready re-review case, where a not-satisfied verdict triggers `gh pr ready --undo <PR>` to flip the PR back to draft.
-- This skill is **distinct** from the general-purpose `@claude review` workflow in `.github/workflows/claude.yml`. That workflow performs generic review on any PR; `bug-review` is pipeline-aware (cross-checks the analyst summary, owns the draft ↔ ready-for-review transition, and only suggests changes scoped to the bug being fixed). Both coexist.
+- This skill **only** posts a review comment and may transition the PR from draft to ready-for-review. It never writes code, never amends commits, never edits prior comments, and never invokes downstream stages (there are none — review is terminal).
+- **Verdict-to-state mapping is one-to-one and explicit**: satisfied → mark the PR as ready-for-review (locally `gh pr ready <PR>`; in CI the `mark_pull_request_as_ready_for_review` Safe-Outputs MCP tool); not satisfied → no state-transition call. v1 does not perform an automatic ready → draft flip; if a re-review on an already-ready PR returns a not-satisfied verdict, the review comment instructs the human reviewer to flip the PR back to draft manually. (The constraint stems from GHAW not exposing a `mark_pull_request_as_draft` Safe-Outputs capability; cross-context parity per SC-006 keeps the local-CLI behaviour aligned with what CI can do.)
+- This skill is **distinct** from the general-purpose `@claude review` workflow in `.github/workflows/claude.yml`. That workflow performs generic review on any PR; `bug-review` is pipeline-aware (cross-checks the analyst summary, owns the draft → ready-for-review transition, and only suggests changes scoped to the bug being fixed). Both coexist.
 - Coding-convention questions (lint command, where tests live, layered architecture rules, GraphQL regeneration, E2E discipline) defer to `AGENTS.md` and per-component `AGENTS.md` files. Do not duplicate that content here.
 - The pipeline works on **any** issue/PR regardless of labels (FR-022). Do not gate on labels.
 - Review is the **terminal** stage. The output comment never ends with a `> Next:` suggestion on either path.
 
 ## Expected Outcome
 
-On the **satisfied** verdict: a single review comment posted on the PR with a "What I checked" section and a `✅`-prefixed verdict line, and the PR transitioned from draft to ready-for-review via `gh pr ready`. No `> Next:` suggestion. No other side effects.
+On the **satisfied** verdict: a single review comment posted on the PR with a "What I checked" section and a `✅`-prefixed verdict line, and (when the PR was previously in `draft`) the PR transitioned from draft to ready-for-review. No `> Next:` suggestion. No other side effects.
 
-On the **not-satisfied** verdict: a single review comment posted on the PR with a "What I checked" section, a `⚠️`-prefixed verdict line, and a numbered list of requested changes. The PR remains in draft (or, in the already-ready re-review case, is flipped back to draft via `gh pr ready --undo`). No `> Next:` suggestion. No other side effects.
+On the **not-satisfied** verdict: a single review comment posted on the PR with a "What I checked" section, a `⚠️`-prefixed verdict line, and a numbered list of requested changes. The PR's draft / ready-for-review state is **not changed by this skill** — if it was in draft it stays in draft; if it was already in ready-for-review, the comment instructs the human reviewer to flip it back to draft manually if they agree with the requested changes. No `> Next:` suggestion. No other side effects.
 
-On any failure path (missing/invalid argument, unrecoverable error fetching PR or issue context, `gh pr ready` failure after a satisfied verdict): a comment posted on the PR (or the issue, when no PR is in scope) describing what was attempted and where the stage stopped, **no `> Next:` suggestion**, and no further state changes beyond what completed before the failure.
+On any failure path (missing/invalid argument, unrecoverable error fetching PR or issue context, ready-for-review state-transition failure after a satisfied verdict): a comment posted on the PR (or the issue, when no PR is in scope) describing what was attempted and where the stage stopped, **no `> Next:` suggestion**, and no further state changes beyond what completed before the failure.
 
 In neither case does the skill edit or delete prior comments, and in no case does it auto-fire a next stage — there is none.
