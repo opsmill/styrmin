@@ -100,12 +100,34 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
 
 **Purpose**: Final-suite validation, codegen consistency, FR cross-check.
 
-- [ ] T025 [P] Run the full backend test suite: `uv run pytest -q backend/tests/unit/ backend/tests/functional/`. Confirm green (with the 2 pre-existing flakes from prior phases noted as unrelated).
-- [ ] T026 [P] Run the frontend Vitest suite: `cd frontend && pnpm test --run`. Confirm green.
-- [ ] T027 [P] Run `uv run invoke validate-graphql` to confirm no schema drift.
-- [ ] T028 [P] Confirm `schema.graphql` and the regenerated SDK + frontend types are checked in and consistent (`uv run invoke generate` produces no diff).
-- [ ] T029 Run the full E2E suite (`uv run pytest backend/tests/e2e/test_deployment_env_vars.py backend/tests/e2e/test_environment_update.py -v -s --pdb`) against a real Kind/vCluster. **This is the load-bearing run** — T061's unskipped UI E2E + the marker-cleaned dual-entrypoint runs are what confirms US4 actually delivers. If the dev stack isn't up, document the partial outcome and defer to PR opener (precedent from 008/009/010).
-- [ ] T030 Final cross-check: every FR in `spec.md` (FR-001..FR-015) maps to at least one task in this list. Generate the FR cross-check table inline in your final response.
+- [X] T025 [P] Run the full backend test suite: `uv run pytest -q backend/tests/unit/ backend/tests/functional/`. Confirm green (with the 2 pre-existing flakes from prior phases noted as unrelated). **Result**: 1247 passed, 1 skipped, 2 failed — the failures are `test_create_cluster_and_try_to_create_it_again` and `test_create_and_delete_cluster_with_error_support` in `backend/tests/functional/test_api.py`, both unrelated cluster-CRUD flakes from prior phases (no env-config / env-vars / validator surface area).
+- [X] T026 [P] Run the frontend Vitest suite: `cd frontend && pnpm test --run`. Confirm green. **Result**: 11 test files, 77 tests, all green.
+- [X] T027 [P] Run `uv run invoke validate-graphql` to confirm no schema drift. **Result**: 131/131 .graphql files passed validation.
+- [X] T028 [P] Confirm `schema.graphql` and the regenerated SDK + frontend types are checked in and consistent (`uv run invoke generate` produces no diff). **Result**: clean — `git status` reports no modified files after `uv run invoke generate`.
+- [ ] T029 Run the full E2E suite (`uv run pytest backend/tests/e2e/test_deployment_env_vars.py backend/tests/e2e/test_environment_update.py -v -s --pdb`) against a real Kind/vCluster. **This is the load-bearing run** — T061's unskipped UI E2E + the marker-cleaned dual-entrypoint runs are what confirms US4 actually delivers. If the dev stack isn't up, document the partial outcome and defer to PR opener (precedent from 008/009/010). **⚠️ DEFERRED to PR opener**: requires a live Kind/vCluster which is not available in this implementation chunk. Following precedent from 008/009/010, the PR opener owns the live-cluster E2E gate. Box left unchecked to honestly reflect the deferral; rationale documented inline above.
+- [X] T030 Final cross-check: every FR in `spec.md` (FR-001..FR-015) maps to at least one task in this list. Generate the FR cross-check table inline in your final response. **Result**: see "## FR cross-check" section below.
+
+## FR cross-check
+
+Every FR-001..FR-015 in `spec.md` maps to at least one implementing task:
+
+| FR ID | Description (short) | Task IDs |
+|-------|---------------------|----------|
+| FR-001 | `UpdateEnvironmentInput` gains `ingressClass` + `dbSize`; converter handles both | T002, T003, T004 |
+| FR-002 | Schema-walking propagation test asserts every `EnvironmentConfig` field has a matching input field | T005 |
+| FR-003 | SDK + frontend types regenerate; SDK accepts `ingress_class` / `db_size` kwargs | T003, T028 |
+| FR-004 | `buildFullReplacementInput` transforms enum values (`http`→`HTTP`, `NodeExternalIP`→`NODE_EXTERNAL_IP`, etc.) | T007, T008, T010 |
+| FR-005 | Transform is the only `as`-cast site for these enum values; TS-only casts removed | T008, T010 |
+| FR-006 | Transform raises clear runtime error on unrecognised enum value; no silent corruption | T007, T010 |
+| FR-007 | Transform is write-side only; read-side display unchanged | T007, T008 |
+| FR-008 | New `InvalidEnvVarValueError` typed error, `error_code = "INVALID_ENV_VAR_VALUE"`, name + value_type metadata | T012 |
+| FR-009 | `validate_env_vars_dict` type-checks values at entry-point; covers int/float/bool/None/bytes/list/dict/etc. | T014, T015 |
+| FR-010 | `INVALID_ENV_VAR_VALUE` registered in `ErrorCode` enum so `StructuredErrorExtension` projects it | T013 |
+| FR-011 | JSON config write path (`deploy()` / `updateDeployment(config: JSON)`) surfaces typed code | T016, T017 |
+| FR-012 | New `EnvironmentDetailPage` Playwright page object with `.open_configuration_tab()` etc. | T018, T019, T020 |
+| FR-013 | T061 (UI form E2E) unskipped; runs under both variants | T021 |
+| FR-014 | `api_only` marker audit across env-vars / env-config E2Es; misapplied markers removed | T022, T023 |
+| FR-015 | Retained `api_only` markers carry inline justification comment | T022 |
 
 ---
 
