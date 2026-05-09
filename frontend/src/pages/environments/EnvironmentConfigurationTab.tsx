@@ -25,10 +25,9 @@ import {
   type EnvVarPayload,
 } from "@/components/environment/EnvVarsForm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  type UpdateEnvironmentInput,
-  useUpdateEnvironmentMutation,
-} from "@/generated/graphql";
+import { useUpdateEnvironmentMutation } from "@/generated/graphql";
+
+import { buildFullReplacementInput } from "./EnvironmentConfigurationTab.helpers";
 
 interface EnvironmentConfigurationTabProps {
   environmentId: string;
@@ -160,48 +159,13 @@ function EmptySectionMessage({ message }: { message: string }) {
 // ``UpdateEnvironmentInput`` uses camelCase. Map the persisted dict
 // field-for-field so unchanged fields ride through the mutation; any
 // field omitted is persisted as its unset state.
+//
+// The mapping tables, the ``transformEnumValue`` helper, and
+// ``buildFullReplacementInput`` itself live in
+// ``EnvironmentConfigurationTab.helpers.ts`` so unit tests can import
+// them without instantiating the component (and so the component file
+// stays Fast-Refresh-friendly per ``react-refresh/only-export-components``).
 // ---------------------------------------------------------------------------
-
-function buildFullReplacementInput(
-  config: Record<string, unknown> | null | undefined,
-  envVars: EnvVarPayload[],
-): UpdateEnvironmentInput {
-  const ipWhitelist = asStringArray(config?.ip_whitelist);
-  const fqdnSuffix =
-    typeof config?.fqdn_suffix === "string" ? config.fqdn_suffix : null;
-  const externalUrlScheme =
-    typeof config?.external_url_scheme === "string"
-      ? (config.external_url_scheme as UpdateEnvironmentInput["externalUrlScheme"])
-      : null;
-  const externalUrlPort =
-    typeof config?.external_url_port === "number"
-      ? config.external_url_port
-      : null;
-  const externalDnsEndpointsType =
-    typeof config?.external_dns_endpoints_type === "string"
-      ? (config.external_dns_endpoints_type as UpdateEnvironmentInput["externalDnsEndpointsType"])
-      : null;
-
-  // Nested input types (DedicatedIngressInput, SchedulingInput) carry a
-  // deep snake_case ↔ camelCase shape that this v1 form does not edit.
-  // The form blocks submission upstream when either is set on the
-  // persisted config (see ``hasNestedOverrides`` below + the
-  // ``blockedReason`` plumbing in ``EnvVarsForm``). This builder is
-  // therefore only reachable when both are unset, which makes the
-  // ``null`` literals here a tautology rather than a silent clear.
-  // ADR-020 §"Decision 2 — Full-replacement input" documents the
-  // form-blocks-submission mitigation for the nested-clearing footgun.
-  return {
-    envVars: envVars.map((v) => ({ name: v.name, value: v.value })),
-    ipWhitelist: ipWhitelist.length > 0 ? ipWhitelist : null,
-    fqdnSuffix,
-    externalUrlScheme,
-    externalUrlPort,
-    externalDnsEndpointsType,
-    dedicatedIngress: null,
-    scheduling: null,
-  };
-}
 
 /**
  * Detect whether the persisted environment config carries
@@ -210,6 +174,14 @@ function buildFullReplacementInput(
  * would silently clear them under FR-003 / FR-020 full-replacement
  * semantics. Returns a human-readable explanation for the warning
  * Alert, or ``null`` when the form is safe to submit.
+ *
+ * Note (011/US2): pre-011, ``ingress_class`` and ``db_size`` would
+ * also have been silently cleared by ``buildFullReplacementInput``
+ * (the input type omitted them entirely). 011/US1 added them to the
+ * input and 011/US2 carries them through ``buildFullReplacementInput``
+ * unchanged, so they no longer need to trip this block. The block's
+ * field set is therefore intentionally limited to the two nested
+ * input types that still get cleared to ``null``.
  */
 function detectNestedOverridesBlock(
   config: Record<string, unknown> | null | undefined,

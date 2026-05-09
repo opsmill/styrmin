@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@/test/utils";
 import EnvironmentConfigurationTab from "@/pages/environments/EnvironmentConfigurationTab";
+import {
+  EXTERNAL_DNS_ENDPOINTS_TYPE_MAP,
+  EXTERNAL_URL_SCHEME_MAP,
+  buildFullReplacementInput,
+  transformEnumValue,
+} from "@/pages/environments/EnvironmentConfigurationTab.helpers";
 
 const ENV_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -212,5 +218,185 @@ describe("EnvironmentConfigurationTab", () => {
       screen.queryByTestId("env-vars-form-blocked-warning"),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("env-vars-form-save-button")).toBeEnabled();
+  });
+
+  // 011/US2: post-011, ingress_class and db_size are carried through
+  // buildFullReplacementInput unchanged. They no longer trip the H2
+  // block (they never did pre-011 either — they were silently cleared,
+  // which is the bug 011 fixes), so a config with these fields set
+  // and no nested overrides is safe to submit.
+  it("does not block Save when ingress_class / db_size are set (011/US2)", async () => {
+    const config: Record<string, unknown> = {
+      env_vars: { LOG_LEVEL: "info" },
+      ingress_class: "nginx",
+      db_size: "10Gi",
+    };
+    await render(
+      <EnvironmentConfigurationTab
+        environmentId={ENV_ID}
+        config={config}
+        deployments={noDeployments}
+      />,
+    );
+    expect(
+      screen.queryByTestId("env-vars-form-blocked-warning"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("env-vars-form-save-button")).toBeEnabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 011/US2 — transformEnumValue + buildFullReplacementInput unit tests
+// ---------------------------------------------------------------------------
+
+describe("transformEnumValue (011/US2)", () => {
+  it("maps 'http' to 'HTTP'", () => {
+    expect(transformEnumValue("scheme", "http", EXTERNAL_URL_SCHEME_MAP)).toBe(
+      "HTTP",
+    );
+  });
+
+  it("maps 'https' to 'HTTPS'", () => {
+    expect(transformEnumValue("scheme", "https", EXTERNAL_URL_SCHEME_MAP)).toBe(
+      "HTTPS",
+    );
+  });
+
+  it("maps 'NodeExternalIP' to 'NODE_EXTERNAL_IP'", () => {
+    expect(
+      transformEnumValue(
+        "endpointsType",
+        "NodeExternalIP",
+        EXTERNAL_DNS_ENDPOINTS_TYPE_MAP,
+      ),
+    ).toBe("NODE_EXTERNAL_IP");
+  });
+
+  it("maps 'ClusterIP' to 'CLUSTER_IP'", () => {
+    expect(
+      transformEnumValue(
+        "endpointsType",
+        "ClusterIP",
+        EXTERNAL_DNS_ENDPOINTS_TYPE_MAP,
+      ),
+    ).toBe("CLUSTER_IP");
+  });
+
+  it("returns null for null input", () => {
+    expect(
+      transformEnumValue("scheme", null, EXTERNAL_URL_SCHEME_MAP),
+    ).toBeNull();
+    expect(
+      transformEnumValue(
+        "endpointsType",
+        null,
+        EXTERNAL_DNS_ENDPOINTS_TYPE_MAP,
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for undefined input", () => {
+    expect(
+      transformEnumValue("scheme", undefined, EXTERNAL_URL_SCHEME_MAP),
+    ).toBeNull();
+    expect(
+      transformEnumValue(
+        "endpointsType",
+        undefined,
+        EXTERNAL_DNS_ENDPOINTS_TYPE_MAP,
+      ),
+    ).toBeNull();
+  });
+
+  it("throws on unrecognised scheme value with field name + value in message", () => {
+    expect(() =>
+      transformEnumValue("externalUrlScheme", "wss", EXTERNAL_URL_SCHEME_MAP),
+    ).toThrow(/externalUrlScheme.*wss/);
+  });
+
+  it("throws on unrecognised endpoints type value with field name + value in message", () => {
+    expect(() =>
+      transformEnumValue(
+        "externalDnsEndpointsType",
+        "InternalIP",
+        EXTERNAL_DNS_ENDPOINTS_TYPE_MAP,
+      ),
+    ).toThrow(/externalDnsEndpointsType.*InternalIP/);
+  });
+
+  it("throws on non-string non-null value with type info in message", () => {
+    expect(() =>
+      transformEnumValue("scheme", 42, EXTERNAL_URL_SCHEME_MAP),
+    ).toThrow(/expected string, got number/);
+  });
+});
+
+describe("buildFullReplacementInput (011/US2)", () => {
+  it("transforms enum strings and carries through ingress_class + db_size", () => {
+    const config: Record<string, unknown> = {
+      env_vars: { LOG_LEVEL: "info" },
+      ip_whitelist: ["10.0.0.0/8"],
+      fqdn_suffix: "staging.example.com",
+      external_url_scheme: "https",
+      external_url_port: 443,
+      external_dns_endpoints_type: "NodeExternalIP",
+      ingress_class: "nginx",
+      db_size: "10Gi",
+    };
+    const input = buildFullReplacementInput(config, [
+      { name: "LOG_LEVEL", value: "debug" },
+    ]);
+    expect(input).toEqual({
+      envVars: [{ name: "LOG_LEVEL", value: "debug" }],
+      ipWhitelist: ["10.0.0.0/8"],
+      fqdnSuffix: "staging.example.com",
+      externalUrlScheme: "HTTPS",
+      externalUrlPort: 443,
+      externalDnsEndpointsType: "NODE_EXTERNAL_IP",
+      ingressClass: "nginx",
+      dbSize: "10Gi",
+      dedicatedIngress: null,
+      scheduling: null,
+    });
+  });
+
+  it("maps 'http' + 'ClusterIP' to their literals", () => {
+    const config: Record<string, unknown> = {
+      external_url_scheme: "http",
+      external_dns_endpoints_type: "ClusterIP",
+    };
+    const input = buildFullReplacementInput(config, []);
+    expect(input.externalUrlScheme).toBe("HTTP");
+    expect(input.externalDnsEndpointsType).toBe("CLUSTER_IP");
+  });
+
+  it("emits null for unset enum + scalar fields", () => {
+    const input = buildFullReplacementInput({}, []);
+    expect(input).toEqual({
+      envVars: [],
+      ipWhitelist: null,
+      fqdnSuffix: null,
+      externalUrlScheme: null,
+      externalUrlPort: null,
+      externalDnsEndpointsType: null,
+      ingressClass: null,
+      dbSize: null,
+      dedicatedIngress: null,
+      scheduling: null,
+    });
+  });
+
+  it("emits null when config is null/undefined", () => {
+    expect(buildFullReplacementInput(null, []).externalUrlScheme).toBeNull();
+    expect(buildFullReplacementInput(undefined, []).ingressClass).toBeNull();
+  });
+
+  it("throws when persisted config carries an unrecognised enum value", () => {
+    const config: Record<string, unknown> = {
+      external_url_scheme: "wss",
+    };
+    expect(() => buildFullReplacementInput(config, [])).toThrow(
+      /externalUrlScheme.*wss/,
+    );
   });
 });
