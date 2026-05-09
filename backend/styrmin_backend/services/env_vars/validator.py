@@ -30,6 +30,7 @@ from styrmin_backend.services.env_vars.exceptions import (
     DuplicateEnvVarNameError,
     EnvVarSizeLimitExceededError,
     InvalidEnvVarNameError,
+    InvalidEnvVarValueError,
 )
 
 # FR-006: POSIX-style env var name regex.
@@ -82,10 +83,24 @@ def validate_env_var_name(name: str, scope: str | None = None) -> None:
 def validate_env_var_value(name: str, value: str, scope: str | None = None) -> None:
     """Validate a single env var *value* against the per-value byte cap.
 
+    Type-checks *value* at the entry point (FR-008..FR-011 / 011-US3): a
+    non-string ``value`` raises :class:`InvalidEnvVarValueError` BEFORE any
+    UTF-8 encoding so the JSON config write path surfaces a typed code at the
+    GraphQL boundary instead of an ``AttributeError`` 500. Note that ``bool``
+    is a subclass of ``int`` (not ``str``) and ``bytes`` defines ``.encode()``
+    but is not ``str`` — both are correctly rejected by ``isinstance(value,
+    str)``.
+
     Empty string is accepted (FR-007). Values whose UTF-8 encoding exceeds
     :data:`PER_VALUE_BYTE_CAP` raise :class:`EnvVarSizeLimitExceededError`
     with ``name`` and ``bytes`` populated.
     """
+    if not isinstance(value, str):
+        raise InvalidEnvVarValueError(
+            name=name,
+            value_type=type(value).__name__,
+            scope=scope,
+        )
     size = _utf8_bytes(value)
     if size > PER_VALUE_BYTE_CAP:
         raise EnvVarSizeLimitExceededError(

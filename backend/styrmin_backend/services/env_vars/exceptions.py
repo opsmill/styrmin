@@ -76,6 +76,46 @@ class DuplicateEnvVarNameError(ServiceError):
         return {"name": self.name, "scope": self.scope}
 
 
+class InvalidEnvVarValueError(ServiceError):
+    """The env var value is not a string.
+
+    Raised by :func:`validate_env_var_value` and :func:`validate_env_vars_dict`
+    at the entry point — before any UTF-8 byte counting or size cap check —
+    so that JSON config write paths surface a typed
+    ``extensions.code = "INVALID_ENV_VAR_VALUE"`` instead of an
+    ``AttributeError`` 500. The value-side counterpart to
+    :class:`InvalidEnvVarNameError`.
+    """
+
+    error_code = "INVALID_ENV_VAR_VALUE"
+    default_message = "Environment variable value must be a string"
+
+    def __init__(
+        self,
+        message: str = "",
+        name: str = "",
+        value_type: str = "",
+        scope: str | None = None,
+    ) -> None:
+        self.name = name
+        self.value_type = value_type
+        self.scope = scope
+        super().__init__(
+            message
+            or (
+                f"Environment variable {name!r} (scope={scope!r}): expected "
+                f"str, got {value_type}"
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        meta: dict[str, Any] = {"name": self.name, "value_type": self.value_type}
+        if self.scope is not None:
+            meta["scope"] = self.scope
+        return meta
+
+
 class EnvVarSizeLimitExceededError(ServiceError):
     """An env var payload exceeded one of the size caps.
 

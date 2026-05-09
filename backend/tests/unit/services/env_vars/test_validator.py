@@ -19,6 +19,7 @@ from styrmin_backend.services.env_vars.exceptions import (
     DuplicateEnvVarNameError,
     EnvVarSizeLimitExceededError,
     InvalidEnvVarNameError,
+    InvalidEnvVarValueError,
 )
 from styrmin_backend.services.env_vars.validator import (
     PER_SCOPE_BYTE_CAP,
@@ -136,6 +137,72 @@ class TestValidateEnvVarValue:
         over = char * (PER_VALUE_BYTE_CAP // 3 + 1)
         with pytest.raises(EnvVarSizeLimitExceededError):
             validate_env_var_value("FOO", over)
+
+    @pytest.mark.parametrize(
+        "value, expected_type",
+        [
+            (1, "int"),
+            (1.5, "float"),
+            (True, "bool"),
+            (False, "bool"),
+            (None, "NoneType"),
+            (b"bytes", "bytes"),
+            ([1, 2], "list"),
+            ({"a": 1}, "dict"),
+            ((1, 2), "tuple"),
+        ],
+    )
+    def test_rejects_non_string_value_with_typed_error(
+        self, value: Any, expected_type: str
+    ) -> None:
+        """FR-008..FR-011 (011-US3): type-check at the validator entry point.
+
+        ``bool`` is a subclass of ``int`` and ``bytes`` defines ``.encode()``;
+        both must still be rejected because ``isinstance(value, str)`` is the
+        type gate, not duck typing.
+        """
+        with pytest.raises(InvalidEnvVarValueError) as exc:
+            validate_env_var_value("FOO", value, scope="environment")  # type: ignore[arg-type]
+        assert exc.value.name == "FOO"
+        assert exc.value.value_type == expected_type
+        assert exc.value.scope == "environment"
+        meta = exc.value.error_metadata
+        assert meta["name"] == "FOO"
+        assert meta["value_type"] == expected_type
+        assert meta["scope"] == "environment"
+        assert exc.value.error_code == "INVALID_ENV_VAR_VALUE"
+
+    def test_rejects_non_string_without_scope(self) -> None:
+        """``scope`` is optional — metadata omits it when not supplied."""
+        with pytest.raises(InvalidEnvVarValueError) as exc:
+            validate_env_var_value("FOO", 1)  # type: ignore[arg-type]
+        assert "scope" not in exc.value.error_metadata
+        assert exc.value.error_metadata["value_type"] == "int"
+
+
+class TestValidateEnvVarsDictNonStringValues:
+    @pytest.mark.parametrize(
+        "value, expected_type",
+        [
+            (1, "int"),
+            (True, "bool"),
+            (None, "NoneType"),
+            ([1, 2], "list"),
+            ({"a": 1}, "dict"),
+        ],
+    )
+    def test_dict_path_rejects_non_string_value(
+        self, value: Any, expected_type: str
+    ) -> None:
+        """The dict-level entry point routes through
+        :func:`validate_env_var_value`; non-string values raise the same
+        typed error there with the offending name attached.
+        """
+        with pytest.raises(InvalidEnvVarValueError) as exc:
+            validate_env_vars_dict("deployment", {"FOO": value})  # type: ignore[dict-item]
+        assert exc.value.name == "FOO"
+        assert exc.value.value_type == expected_type
+        assert exc.value.scope == "deployment"
 
 
 class TestValidateEnvVarsDict:
