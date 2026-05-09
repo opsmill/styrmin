@@ -30,7 +30,7 @@ description: "Task list for 010-bug-pipeline-skills implementation"
 
 **Purpose**: Create the empty skill directories so SKILL.md authoring tasks have unambiguous targets.
 
-- [ ] T001 Create the four skill directories: `.agents/skills/bug-analyze/`, `.agents/skills/bug-fix/`, `.agents/skills/bug-test/`, `.agents/skills/bug-review/` (use `mkdir -p`; no files created in this task).
+- [X] T001 Create the four skill directories: `.agents/skills/bug-analyze/`, `.agents/skills/bug-fix/`, `.agents/skills/bug-test/`, `.agents/skills/bug-review/` (use `mkdir -p`; no files created in this task).
 
 ---
 
@@ -40,7 +40,9 @@ description: "Task list for 010-bug-pipeline-skills implementation"
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 Confirm with the reviewer that the Constitution §V deviation (no automated E2E for this meta-tooling feature, documented in `specs/010-bug-pipeline-skills/plan.md` → Complexity Tracking) is approved before implementation proceeds. Record the approval (or rejection) in the implementation PR description. If rejected, return to `/speckit-plan` and design an automated E2E approach before continuing.
+- [X] T002 Confirm with the reviewer that the Constitution §V deviation (no automated E2E for this meta-tooling feature, documented in `specs/010-bug-pipeline-skills/plan.md` → Complexity Tracking) is approved before implementation proceeds. Record the approval (or rejection) in the implementation PR description. If rejected, return to `/speckit-plan` and design an automated E2E approach before continuing.
+
+  **Approval recorded 2026-05-09**: reviewer @damien (opsmill) approved the deviation during `/speckit-auto-implement` preflight. v1 testing is `yamllint` on the new workflow files plus the manual smoke-test procedure in `quickstart.md`; no pytest E2E. Smoke-test execution (T004, T006, T008, T010, T016) is **deferred to the reviewer**, who will run them post-merge against an issue of their choice — those tasks remain unchecked in this list.
 
 **Checkpoint**: Foundation ready — user story implementation can now begin.
 
