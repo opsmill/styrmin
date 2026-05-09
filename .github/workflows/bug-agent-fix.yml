@@ -1,0 +1,37 @@
+---
+name: Bug Agent — Fix
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: bug-pipeline-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: |
+      github.event_name == 'issue_comment' && (
+        startsWith(github.event.comment.body, '/bug-fix ') ||
+        github.event.comment.body == '/bug-fix' ||
+        startsWith(github.event.comment.body, '/bug-fix\n')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run /bug-fix
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: '/bug-fix ${{ github.event.issue.number }}'
