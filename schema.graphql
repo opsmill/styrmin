@@ -668,6 +668,8 @@ input UpdateEnvironmentInput {
   externalUrlScheme: ExternalUrlScheme = null
   externalUrlPort: Int = null
   externalDnsEndpointsType: ExternalDnsEndpointsType = null
+  ingressClass: String = null
+  dbSize: String = null
 }
 
 """Weighted affinity term for a ``preferred`` rule."""

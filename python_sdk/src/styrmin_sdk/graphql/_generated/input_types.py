@@ -245,6 +245,8 @@ class UpdateEnvironmentInput(BaseModel):
     external_dns_endpoints_type: Optional[ExternalDnsEndpointsType] = Field(
         alias="externalDnsEndpointsType", default=None
     )
+    ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
+    db_size: Optional[str] = Field(alias="dbSize", default=None)
 
 
 class WeightedAffinityTermInput(BaseModel):

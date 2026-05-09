@@ -462,6 +462,79 @@ async def test_update_environment_input_external_dns_endpoints_type_round_trip(
 
 
 @pytest.mark.asyncio
+async def test_update_environment_input_ingress_class_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``input.ingressClass`` round-trips to ``Environment.config.ingress_class`` (011 / FR-001)."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"ingressClass": "nginx"},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"ingress_class": "nginx"}
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_db_size_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``input.dbSize`` round-trips to ``Environment.config.db_size`` (011 / FR-001)."""
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"dbSize": "10Gi"},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"db_size": "10Gi"}
+
+
+# ---------------------------------------------------------------------------
+# 011 / T005 — schema-walking input completeness check (FR-002)
+# ---------------------------------------------------------------------------
+
+
+def test_update_environment_input_covers_every_environment_config_field() -> None:
+    """Schema-walking completeness check (011 / FR-002).
+
+    Walks ``EnvironmentConfig.model_fields`` (Pydantic) and asserts that for
+    every public field, an equivalently-named Strawberry field exists on
+    ``UpdateEnvironmentInput``. Future schema drift — e.g., adding a field
+    to ``BaseConfigSection`` without updating the input — fails this test
+    with a precise message naming the missing field.
+
+    Compares on ``python_name`` (snake_case) so the assertion is robust
+    against Strawberry's automatic GraphQL camelCase conversion.
+    """
+    from styrmin_backend.api.definitions.environment.inputs import (
+        UpdateEnvironmentInput,
+    )
+
+    input_field_names = {
+        f.python_name for f in UpdateEnvironmentInput.__strawberry_definition__.fields
+    }
+    pydantic_field_names = set(EnvironmentConfig.model_fields.keys())
+
+    missing = pydantic_field_names - input_field_names
+    assert not missing, (
+        f"UpdateEnvironmentInput is missing {missing} — every "
+        f"EnvironmentConfig field MUST have a corresponding input field "
+        f"(FR-002). Add the field to "
+        f"backend/styrmin_backend/api/definitions/environment/inputs.py."
+    )
+
+
+@pytest.mark.asyncio
 async def test_update_environment_input_dedicated_ingress_round_trip(
     client: AsyncClient, session: AsyncSession
 ) -> None:

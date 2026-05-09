@@ -963,12 +963,14 @@ export type TopologySpreadConstraintInput = {
 
 /** Full-replacement input for environment configuration updates. Submit the complete desired configuration; any field omitted (``null``) is persisted as its unset state on the underlying EnvironmentConfig. */
 export type UpdateEnvironmentInput = {
+  dbSize?: InputMaybe<Scalars['String']['input']>;
   dedicatedIngress?: InputMaybe<DedicatedIngressInput>;
   envVars?: InputMaybe<Array<EnvVarInput>>;
   externalDnsEndpointsType?: InputMaybe<ExternalDnsEndpointsType>;
   externalUrlPort?: InputMaybe<Scalars['Int']['input']>;
   externalUrlScheme?: InputMaybe<ExternalUrlScheme>;
   fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
+  ingressClass?: InputMaybe<Scalars['String']['input']>;
   ipWhitelist?: InputMaybe<Array<Scalars['String']['input']>>;
   scheduling?: InputMaybe<SchedulingInput>;
 };

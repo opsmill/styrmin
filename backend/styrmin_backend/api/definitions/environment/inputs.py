@@ -242,6 +242,8 @@ class UpdateEnvironmentInput:
     external_url_scheme: ExternalUrlScheme | None = None
     external_url_port: int | None = None
     external_dns_endpoints_type: ExternalDnsEndpointsType | None = None
+    ingress_class: str | None = None
+    db_size: str | None = None
 
 
 # ---------------------------------------------------------------------------
