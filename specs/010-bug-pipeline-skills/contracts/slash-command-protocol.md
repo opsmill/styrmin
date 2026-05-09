@@ -4,12 +4,12 @@ This contract defines the surface that maintainers interact with — the slash c
 
 ## Commands
 
-| Command | Argument | Posted on | Triggers (CI) |
+| Command | Argument | Posted on | Triggers (CI source / lock file) |
 |---------|----------|-----------|----------------|
-| `/bug-analyze <issue>` | issue number or URL | issue comment | `bug-agent-analyst.yml` |
-| `/bug-fix <issue>` | issue number or URL | issue comment | `bug-agent-fix.yml` |
-| `/bug-test <issue\|pr>` | issue/PR number or URL | issue comment **or** PR comment | `bug-agent-test.yml` |
-| `/bug-review <pr>` | PR number or URL | PR comment | `bug-agent-review.yml` |
+| `/bug-analyze <issue>` | issue number or URL | issue comment | `bug-agent-analyst.md` → `bug-agent-analyst.lock.yml` |
+| `/bug-fix <issue>` | issue number or URL | issue comment | `bug-agent-fix.md` → `bug-agent-fix.lock.yml` |
+| `/bug-test <issue\|pr>` | issue/PR number or URL | issue comment **or** PR comment | `bug-agent-test.md` → `bug-agent-test.lock.yml` |
+| `/bug-review <pr>` | PR number or URL | PR comment | `bug-agent-review.md` → `bug-agent-review.lock.yml` |
 
 All four commands are also runnable from the local Claude Code CLI by typing the command directly (the skills are surfaced in the project's skill registry).
 
@@ -22,25 +22,43 @@ Both forms are accepted by every stage and produce the same canonicalised pair `
 
 Empty or malformed arguments fail loudly with a usage message; the skill MUST NOT proceed with a guessed value.
 
-## Trigger matching rules (workflow YAML)
+## Trigger matching rules (GHAW source)
 
-Each workflow's `if:` clause matches against the **first line** of `github.event.comment.body`. Both with-argument and no-argument forms must trigger so the skill itself can post a usage comment for malformed invocations:
+As of Iteration 2026-05-09 (HYBRID GHAW adoption), the trigger is declared in the GHAW `.md` source frontmatter using the `slash_command:` primitive. The GHAW compiler emits the line-anchored matching logic into the generated `.lock.yml`; behaviour from the maintainer's perspective is unchanged.
+
+Frontmatter shape (per `.md` source):
 
 ```yaml
-if: |
-  github.event_name == 'issue_comment' && (
-    startsWith(github.event.comment.body, '/bug-analyze ') ||
-    github.event.comment.body == '/bug-analyze' ||
-    startsWith(github.event.comment.body, '/bug-analyze\n')
-  )
+---
+description: <one-line description of the stage>
+on:
+  slash_command:
+    name: bug-<stage>
+    events: [issue_comment]
+engine: claude
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+concurrency:
+  group: bug-pipeline-${{ github.event.issue.number }}
+  cancel-in-progress: false
+---
+
+/bug-<stage> ${{ github.event.issue.number }}
 ```
 
-(repeat the equivalent block for `/bug-fix`, `/bug-test`, `/bug-review`).
+The body of the `.md` is exactly the slash-command invocation — one line — and contains no agent prompt, no branch logic, and no comment formatting (per FR-024). All agent logic is in the corresponding `.agents/skills/bug-<stage>/SKILL.md`.
 
-This rule deliberately:
-- **Excludes** comments that quote the command (e.g., `> /bug-analyze 206`) — the leading `>` prevents the prefix match.
-- **Excludes** comments that mention the command mid-paragraph — only line-start invocations fire.
-- **Includes** invocations with no argument so the skill can respond with a usage message rather than the user seeing no feedback at all.
+This trigger model deliberately:
+
+- **Matches only line-start invocations** of the slash command — embedded mentions in long discussion comments don't fire it.
+- **Includes invocations with no argument** so the skill can respond with a usage message rather than the user seeing no feedback at all.
+- **Excludes quoted variants** (e.g., `> /bug-analyze 206` in a blockquote) — the leading `>` prevents the prefix match.
+
+The exact regex GHAW emits into the `.lock.yml` is opaque to this contract; the contract specifies behaviour, not implementation.
 
 ### Skill responsibilities for invalid arguments
 
@@ -75,4 +93,4 @@ The bug-pipeline never edits or deletes prior comments — every stage append a 
 
 ## Local CLI vs CI parity
 
-The skills must produce **identical observable side effects** whether invoked locally (`/bug-analyze 206` in Claude Code CLI) or from a workflow run (`/bug-analyze ${{ github.event.issue.number }}` in `bug-agent-analyst.yml`). Implementation difference is limited to the argument source — the skill body is identical.
+The skills must produce **identical observable side effects** whether invoked locally (`/bug-analyze 206` in Claude Code CLI) or from a workflow run (`/bug-analyze ${{ github.event.issue.number }}` in `bug-agent-analyst.md` / its compiled `.lock.yml`). Implementation difference is limited to the argument source — the skill body is identical, and HYBRID GHAW adoption keeps the workflow `.md` body to a single slash-command line so no logic forks between local and CI paths.

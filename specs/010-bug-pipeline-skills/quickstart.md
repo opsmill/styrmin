@@ -19,7 +19,7 @@ claude
 > /bug-analyze 206
 ```
 
-**Trigger from GitHub**: paste a comment on the issue with body `/bug-analyze 206`.
+**Trigger from GitHub**: paste a comment on the issue with body `/bug-analyze 206`. The comment fires the GHAW workflow `bug-agent-analyst.lock.yml` (compiled from `bug-agent-analyst.md`); see `dev/guides/bug-pipeline.md` for editing workflow sources.
 
 **Expected observable outcomes**:
 1. A new comment is posted on the issue.

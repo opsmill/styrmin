@@ -109,29 +109,53 @@ This document captures the design decisions made during planning, the alternativ
 
 ## R7. Workflow trigger and gating
 
-- **Decision**: All four workflows trigger on `issue_comment.created` events whose `body` matches the corresponding `/bug-*` command. The workflow `if:` clause matches the prefix only at the start of a line, so embedded mentions in long discussion comments don't fire it.
-- **Rationale**: Mirrors the trigger style used by `claude.yml` (which gates on `@claude` substring), but tightens to a leading-prefix match so accidental mentions don't run the pipeline.
+- **Decision**: All four workflows trigger on `issue_comment.created` events whose `body` matches the corresponding `/bug-*` command. As of Iteration 2026-05-09 (GHAW adoption), the trigger is declared in the GHAW `.md` frontmatter via `slash_command:` rather than a hand-written `if:` clause. The GHAW compiler emits the line-anchored matching logic into the `.lock.yml`; matching semantics (line-start prefix, both with-arg and no-arg forms) are preserved.
+- **Rationale**: Mirrors the trigger style used by `claude.yml` (which gates on `@claude` substring), but tightens to a leading-prefix match so accidental mentions don't run the pipeline. Using GHAW's `slash_command:` primitive replaces the bespoke `if:` clause with a maintained tooling abstraction; behaviour is identical from the maintainer's perspective.
 - **Permissions** (matching `claude.yml`):
   - `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`.
 - **Alternatives considered**:
   - Triggering on label events: rejected — FR-022 disallows label-gating.
   - Triggering on a custom `repository_dispatch` event: rejected — would require a separate trigger mechanism and break the "type a comment in the GitHub UI" UX.
+  - Keeping a hand-written `if:` clause instead of GHAW's `slash_command:`: rejected by Iteration 2026-05-09 — the iteration adopts GHAW tooling so the workflow source is authored in the upstream-supported abstraction.
 
-## R8. Workflow YAML scope (FR-024 enforcement)
+## R8. Workflow source scope (FR-024 enforcement)
 
-- **Decision**: Each workflow file contains, in order:
-  1. `name:`
-  2. `on:` (issue_comment trigger + the prefix-match `if:` per `contracts/slash-command-protocol.md`)
-  3. `concurrency:` keyed on the issue number — `group: bug-pipeline-${{ github.event.issue.number }}`, `cancel-in-progress: false`. This is workflow orchestration, not agent logic, so it does not violate FR-024. It prevents two simultaneous `/bug-fix` (or any same-stage) invocations on the same issue from racing.
-  4. `jobs.<stage>:` with `runs-on`, `permissions`, and exactly two `steps`:
-     - `actions/checkout@v6` (with `fetch-depth: 0` so the agent can branch from history)
-     - `anthropics/claude-code-action@v1` with `prompt: '/bug-<stage> ${{ github.event.issue.number }}'`
-- **What's explicitly forbidden in YAML**: agent prompt text beyond the slash command, branch-naming logic, comment templates, summary parsing.
-- **Rationale**: keeps FR-024 mechanically verifiable — a reviewer can read each YAML file in under 30 seconds and confirm there's no agent logic. The `concurrency:` block is admitted because it expresses *when the workflow runs*, not *what the agent does*.
+- **Decision (post-Iteration 2026-05-09)**: Each workflow is now a GHAW `.md` source plus a `gh aw compile`-generated `.lock.yml` artifact. The `.md` is the authoritative source; the `.lock.yml` is an opaque build output committed to git for CI to consume.
+- **`.md` source structure** (in order):
+  1. **Frontmatter** declaring: `description`, `on: slash_command:` (with `name`, `events`), `engine: claude`, `permissions:` (matching `claude.yml`), `concurrency:` (`group: bug-pipeline-${{ github.event.issue.number }}`, `cancel-in-progress: false`), auth wiring (`anthropic_api_key` via `secrets.ANTHROPIC_API_KEY`), checkout config (`fetch-depth: 0`).
+  2. **Body** = exactly one line: the slash-command invocation, e.g. `/bug-analyze ${{ github.event.issue.number }}`. **No prose, no agent prompt, no instructions.** All agent logic lives in `.agents/skills/bug-<stage>/SKILL.md`.
+- **What's explicitly forbidden** in either the `.md` source or the `.lock.yml` output: agent prompt text beyond the slash command, branch-naming logic, comment templates, summary parsing.
+- **Rationale**: keeps FR-024 mechanically verifiable — a reviewer reads each `.md` in under 30 seconds and confirms the body is one slash-command line. The `concurrency:` block is admitted because it expresses *when the workflow runs*, not *what the agent does*. GHAW's `slash_command:` trigger replaces the hand-written `if:` clause without changing behaviour.
+- **Lock file**: `gh aw compile` produces `<stage>.lock.yml` next to the `.md`. The lock file embeds shell/JS that exceeds normal `yamllint` rules; per Iteration 2026-05-09 it is excluded from `yamllint` via `.yamllint.yml` (mirrors `opsmill/infrahub#9043`).
 - **Alternatives considered**:
+  - Hand-authored `.yml` files (the pre-Iteration form): rejected by user request to adopt `gh aw compile`.
+  - Full Infrahub-style (agent prompt inline in the `.md` body): rejected — would walk back FR-001 (local-CLI parity) and FR-002 (skill self-containment); was explicitly the pattern the source PRD set out to avoid.
   - Including a small `if:` to filter by user permissions: rejected for v1 — GitHub already gates the trigger by repo permissions; adding our own gate would diverge from the existing `claude.yml` precedent.
-  - Pre-parsing the comment body in YAML to extract arguments before invoking Claude: rejected — that's logic, FR-024 forbids it; let the skill handle it.
+  - Pre-parsing the comment body to extract arguments before invoking the skill: rejected — that's logic, FR-024 forbids it; let the skill handle it.
   - Using `cancel-in-progress: true` instead of `false`: rejected — cancelling an in-flight fix mid-write could leave a half-pushed branch.
+
+## R11. GHAW adoption (HYBRID mode) — added 2026-05-09
+
+- **Decision**: Adopt the `gh aw` GitHub CLI extension as the project's workflow-authoring tool for the four bug-agent stages. Workflow definitions are authored as `.md` source files; `gh aw compile` produces `.lock.yml` artifacts that GitHub Actions runs.
+- **HYBRID specifically**: only the workflow surface uses GHAW. Agent logic stays in `.agents/skills/bug-*/SKILL.md`. The `.md` body is the slash-command invocation only — GHAW gives us its `slash_command:` trigger and validated compilation, without taking over the prompt-authoring surface that the original PRD reserved for skills.
+- **Rationale**:
+  - Preserves FR-001 (local-CLI parity) and FR-002 (skill self-containment) — the original design point that motivated the source PRD.
+  - Adopts the upstream-maintained GHAW compilation layer, satisfying the user's request and aligning with the Infrahub precedent at the workflow-source level.
+  - The `.md` + `.lock.yml` pair is a familiar "source + build artifact" model; the operational gap (drift) is minimised in HYBRID mode because the `.md` body is one stable line.
+- **Alternatives considered**:
+  - **Full Infrahub-style** (agent prompt in `.md`): rejected as above.
+  - **No GHAW** (keep hand-authored `.yml`): rejected by user request.
+  - **GHAW for one stage as a pilot, hand-authored for the others**: rejected — inconsistent surface; not worth the irregularity for a 4-file change.
+- **Tooling**: `gh extension install github/gh-aw` (one-time per contributor machine). Required only for editing workflow sources; CI consumes the committed `.lock.yml`.
+
+## R12. Drift policy v1 — added 2026-05-09
+
+- **Decision**: Drift between `.md` source and `.lock.yml` artifact is **manually managed** in v1. Contributors run `gh aw compile` before committing changes to a workflow `.md`; the developer guide (FR-027) documents this requirement.
+- **Rationale**:
+  - In HYBRID mode the `.md` body is a one-line slash-command invocation. Post-creation churn is minimal — there is little surface for drift to creep in.
+  - A CI drift-check (`gh aw compile --check` or equivalent) requires `gh aw` on the runner. The project does not currently install `gh` extensions in CI; adding that pipeline plumbing is out of scope for v1.
+  - A pre-commit hook running `gh aw compile --check` is a possible v2 — pre-commit already runs `prek` for project hooks; adding one more is cheap once the team agrees to require `gh aw` on every contributor's machine.
+- **Follow-up trigger**: if drift bites in practice (a contributor edits a `.md` and forgets to recompile, breaking the workflow), open a follow-up to add either the pre-commit hook or a CI check.
 
 ## R9. Test strategy (Constitution §V deviation)
 

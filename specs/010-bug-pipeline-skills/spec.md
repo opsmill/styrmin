@@ -151,13 +151,18 @@ A maintainer wants to drive the entire pipeline from the GitHub UI by typing sla
 #### GitHub Actions workflows (thin wrappers)
 
 - **FR-023**: The system MUST provide four workflow files — one per stage — that are triggered by the corresponding `/bug-analyze`, `/bug-fix`, `/bug-test`, `/bug-review` comment commands on issues or PRs.
-- **FR-024**: Each workflow file MUST contain only repository checkout, permission setup, and a single invocation of the corresponding skill — **no agent prompts, no branch logic, no comment-formatting logic** may live in the workflow YAML.
+- **FR-024**: Workflow definitions are authored as **GHAW (`gh aw`) `.md` source files** under `.github/workflows/`, and `gh aw compile` produces a `.lock.yml` artifact next to each source. Both the `.md` source AND the `.lock.yml` output MUST be limited to: triggers, permissions, concurrency, checkout, auth wiring, and a single invocation of the corresponding skill via slash command. Specifically, the `.md` body MUST be only the slash-command invocation (e.g., `/bug-analyze ${{ github.event.issue.number }}`); it MUST NOT contain agent prompt text, branch logic, comment-formatting logic, or summary parsing. The `.lock.yml` is a build artifact and inherits this restriction transitively (its content is determined by the `.md`).
 - **FR-025**: Each workflow MUST request the same permission scope used by the existing Claude integration: write access to repository contents, pull requests, and issues.
-- **FR-026**: Workflow files MUST pass the project's existing GitHub Actions linting (the same linter already run in CI on workflow files).
+- **FR-026**: Lint expectations are split per file type: (a) the `.md` source files MUST pass the project's YAML-frontmatter validation via `yamllint` and the project's markdown lint where applicable; (b) the `.lock.yml` generated outputs MUST be **excluded** from `yamllint` because GHAW-compiled output embeds shell/JS that exceeds normal lint rules (mirrors the exclusion added in `opsmill/infrahub#9043`). The exclusion lives in `.yamllint.yml`.
+
+#### GHAW build artifacts
+
+- **FR-028**: The system MUST commit both the GHAW `.md` source AND the `gh aw compile`-generated `.lock.yml` to git for each of the four workflows. The `.lock.yml` is treated as a build artifact: hand-edits MUST NOT occur; any change to behaviour goes through editing the `.md` source and re-running `gh aw compile`.
+- **FR-029**: Drift-prevention between `.md` source and `.lock.yml` is **manual for v1** — contributors run `gh aw compile` before committing, and the developer guide (FR-027) documents this. Automated drift detection (a CI job or pre-commit hook running `gh aw compile --check` or equivalent) is a documented follow-up. Operational risk is bounded in HYBRID mode because the `.md` body is just the slash-command invocation and post-creation churn is minimal.
 
 #### Documentation
 
-- **FR-027**: The system MUST include a short developer guide explaining how to trigger each stage from GitHub (via the comment command) and from the local CLI.
+- **FR-027**: The system MUST include a short developer guide explaining how to trigger each stage from GitHub (via the comment command) and from the local CLI, AND how to edit a workflow source (edit `.md`, run `gh aw compile`, commit both).
 
 ### Key Entities
 
@@ -177,7 +182,7 @@ A maintainer wants to drive the entire pipeline from the GitHub UI by typing sla
 - **SC-004**: 100% of test-stage runs that complete successfully push their tests to the same branch as the fix and produce a passing run of the project's standard test command.
 - **SC-005**: 100% of review-stage runs leave the PR in a state consistent with the review verdict — ready-for-review on pass, draft on fail — with **no** false-positive ready-for-review flips.
 - **SC-006**: A developer can run any stage locally from their CLI and observe the same side effects (comment posted, branch pushed, PR state updated) as the equivalent CI run, with no logic divergence between the two paths.
-- **SC-007**: All agent prompt and orchestration logic lives in skill files; no workflow YAML file contains agent prompts, branch-naming rules, or comment-formatting templates. Verified by inspection of each workflow file.
+- **SC-007**: All agent prompt and orchestration logic lives in skill files; no workflow source (`.md`) or compiled output (`.lock.yml`) contains agent prompts, branch-naming rules, or comment-formatting templates. Verified by inspection of each workflow `.md` (the body is one line: the slash-command invocation).
 - **SC-008**: A failure path on any stage produces a clear failure comment that names what was attempted and where the stage gave up, and does **not** suggest a next-stage command — verified by triggering each stage against an input designed to fail.
 
 ## Assumptions
@@ -189,4 +194,19 @@ A maintainer wants to drive the entire pipeline from the GitHub UI by typing sla
 - Workflow triggers are GitHub `issue_comment` events matched on the `/bug-*` command. Other trigger styles (label-add, schedule) are out of scope.
 - Stages are invoked sequentially by humans. Concurrency control (e.g., preventing two `/bug-fix` invocations on the same issue from racing) is out of scope; if it becomes an operational issue, it is addressed in a follow-up.
 - The pipeline coexists with the existing general-purpose `@claude` review workflow. The bug-review stage is pipeline-aware; the existing workflow remains the general-purpose path.
-- Out-of-scope items per the source PRD: the `gh aw compile` / `.lock.yml` GHAW compilation step, streaming CI logs into the analyst's investigation, auto-chaining stages without human confirmation, label-gating eligibility.
+- The `gh aw compile` step IS in scope for v1 (added by Iteration 2026-05-09 — see Iterations section). Drift-prevention automation is deferred to a follow-up (FR-029).
+- Out-of-scope items per the source PRD: streaming CI logs into the analyst's investigation, auto-chaining stages without human confirmation, label-gating eligibility.
+
+## Iterations
+
+### Iteration 2026-05-09: GHAW adoption (HYBRID mode)
+
+**Change**: Adopt `gh aw` GitHub Agentic Workflows tooling for the four bug-agent workflows; replace hand-authored `.yml` files with `.md` source + `.lock.yml` generated artifact pairs. Skills retain all agent logic (HYBRID mode preserves FR-001 / SC-006).
+
+**Scope**: Phase 7 (US5) only — workflow definitions and supporting lint configuration.
+
+**Artifacts updated**: `spec.md` (FR-024 amended; FR-026 amended; FR-028, FR-029 added; SC-007 retargeted; Assumptions updated), `plan.md` (new tool dependency, project structure), `research.md` (new §R11, §R12; §R7 + §R8 updated), `contracts/slash-command-protocol.md` (trigger declaration retargeted), `quickstart.md` (one-line note), `tasks.md` (T011–T015 superseded; T020–T029 added).
+
+**Tasks added**: T020–T029 (10 tasks under new Phase 7b).
+
+**Tasks superseded** (kept as `[X]` historically, but their output is replaced): T011, T012, T013, T014, T015.

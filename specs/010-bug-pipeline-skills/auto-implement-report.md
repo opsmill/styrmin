@@ -94,3 +94,21 @@ The orchestrator made the following judgment calls during this run; the user may
 - No PR was opened.
 - Nothing was pushed to the remote.
 - No new feature was started.
+
+---
+
+## Iteration 1 (GHAW migration) — 2026-05-09
+
+After this initial run completed, the user asked whether `gh aw compile` had been used. The hand-authored `.yml` files in T011–T015 were written without the GHAW toolchain (per the source PRD's out-of-scope list). The user then chose to **bring GHAW in scope** in **HYBRID mode**: keep the four skills as the source of truth for agent logic (preserves FR-001 / SC-006), but replace the workflow `.yml` files with GHAW `.md` source + `.lock.yml` artifact pairs.
+
+The iteration was defined and applied (`/speckit-iterate-define` + `/speckit-iterate-apply`):
+
+- **Tasks superseded** (kept as `[X]` historical, output replaced by Phase 7b): T011, T012, T013, T014, T015.
+- **Tasks added** (Phase 7b — pending implementation): T020 (install `gh aw`), T021–T024 (write four `.md` sources), T025 (`gh aw compile`), T026 (delete the four old `.yml`), T027 (`.yamllint.yml` exclusion), T028 (re-run yamllint), T029 (update `dev/guides/bug-pipeline.md`).
+- **Spec amendments**: FR-024 retargeted at `.md` source / `.lock.yml`; FR-026 split per file type; new FR-028 (build-artifact contract) and FR-029 (drift policy v1 — manual).
+- **New tool dependency**: `gh aw` GitHub CLI extension; user authorised explicitly.
+- **Drift policy**: deferred to follow-up — see research §R12 for rationale.
+
+The four SKILL.md files are unchanged; the dev guide gets a follow-up edit task (T029); the smoke-test deferrals (T004/T006/T008/T010/T016) carry through and now run against the GHAW `.lock.yml` outputs.
+
+To re-run implementation for Phase 7b, invoke `/speckit-implement` (or `/speckit-auto-implement`) — the spec, plan, research, and tasks are now consistent with the HYBRID-GHAW target.

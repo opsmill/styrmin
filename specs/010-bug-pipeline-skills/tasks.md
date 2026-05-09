@@ -112,27 +112,59 @@ description: "Task list for 010-bug-pipeline-skills implementation"
 
 ---
 
-## Phase 7: User Story 5 — GHAW thin wrappers (Priority: P3)
+## Phase 7: User Story 5 — GHAW thin wrappers (Priority: P3) — SUPERSEDED by Phase 7b
 
-**Goal**: Each `/bug-*` slash command, posted as a comment on a GitHub issue or PR, triggers the corresponding workflow which invokes the matching skill — with **no agent logic in the YAML** beyond checkout, permissions, concurrency control, and a single `claude-code-action@v1` invocation.
+> **Iteration 2026-05-09**: Tasks T011–T015 produced four hand-authored `.yml` files. They are kept here as historical record (`[X] (superseded)`); their output is **deleted** by Phase 7b in favour of GHAW `.md` source + `.lock.yml` artifact pairs. Only T016 (smoke test, deferred to reviewer) remains active.
 
-**Independent Test**: Per `quickstart.md` §1–§4 "Trigger from GitHub" — post each slash command as a comment and verify the same observable side effects as the local-CLI runs from US1–US4. Inspect each workflow file and confirm zero agent-prompt/branch/comment-formatting logic.
+**Goal**: Each `/bug-*` slash command, posted as a comment on a GitHub issue or PR, triggers the corresponding workflow which invokes the matching skill — with **no agent logic in the workflow source** beyond checkout, permissions, concurrency control, and a single skill invocation.
 
-### Implementation for User Story 5
+**Independent Test**: Per `quickstart.md` §1–§4 "Trigger from GitHub" — post each slash command as a comment and verify the same observable side effects as the local-CLI runs from US1–US4. Inspect each workflow source and confirm zero agent-prompt/branch/comment-formatting logic.
 
-- [X] T011 [P] [US5] Write `.github/workflows/bug-agent-analyst.yml` per research §R8 and slash-command-protocol contract: `name`, `on: issue_comment.created` with `if:` matching `/bug-analyze ` (with arg) and `/bug-analyze` (no arg, both line-anchored forms per the contract), `concurrency: { group: bug-pipeline-${{ github.event.issue.number }}, cancel-in-progress: false }`, `jobs.analyze` with `runs-on: ubuntu-latest`, `permissions: { contents: write, pull-requests: write, issues: write, id-token: write, actions: read }`, two steps: `actions/checkout@v6` (`fetch-depth: 0`) and `anthropics/claude-code-action@v1` with `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` and `prompt: '/bug-analyze ${{ github.event.issue.number }}'`. NO agent prompt text, branch logic, or comment-formatting logic anywhere in the YAML.
+### Implementation for User Story 5 (superseded by Phase 7b)
 
-- [X] T012 [P] [US5] Write `.github/workflows/bug-agent-fix.yml` mirroring T011's structure exactly, except: `if:` matches `/bug-fix`; `prompt: '/bug-fix ${{ github.event.issue.number }}'`.
+- [X] T011 [P] [US5] (superseded by T021) Write `.github/workflows/bug-agent-analyst.yml` per research §R8 (pre-Iteration form) and slash-command-protocol contract.
 
-- [X] T013 [P] [US5] Write `.github/workflows/bug-agent-test.yml` mirroring T011's structure, except: `if:` matches `/bug-test`; the prompt invokes `/bug-test` against the issue or PR number depending on where the comment was posted (use `github.event.issue.number` since `issue_comment` events fire for both issue and PR comments and expose `issue.number`); `prompt: '/bug-test ${{ github.event.issue.number }}'`.
+- [X] T012 [P] [US5] (superseded by T022) Write `.github/workflows/bug-agent-fix.yml` mirroring T011.
 
-- [X] T014 [P] [US5] Write `.github/workflows/bug-agent-review.yml` mirroring T011's structure, except: `if:` matches `/bug-review`; `prompt: '/bug-review ${{ github.event.issue.number }}'`.
+- [X] T013 [P] [US5] (superseded by T023) Write `.github/workflows/bug-agent-test.yml` mirroring T011.
 
-- [X] T015 [US5] Run `uv run yamllint .github/workflows/bug-agent-analyst.yml .github/workflows/bug-agent-fix.yml .github/workflows/bug-agent-test.yml .github/workflows/bug-agent-review.yml` and fix any violations until it passes clean. Confirm the same yamllint configuration that runs in `prek` pre-commit accepts the four files.
+- [X] T014 [P] [US5] (superseded by T024) Write `.github/workflows/bug-agent-review.yml` mirroring T011.
 
-- [ ] T016 [US5] Smoke-test all four workflows by posting `/bug-analyze`, `/bug-fix`, `/bug-test`, `/bug-review` slash commands as comments on a sandbox issue/PR per `quickstart.md`. Verify (i) each workflow fires only for its corresponding command, (ii) the workflow logs show the skill being invoked with no extra prompt content, (iii) the produced GitHub side effects match the local-CLI smoke tests from T004/T006/T008/T010 (i.e., local-vs-CI parity per SC-006), (iv) inspecting each `.yml` file confirms zero agent logic. Record the workflow run URLs in the implementation PR description.
+- [X] T015 [US5] (superseded by T028) Run `uv run yamllint` on the four hand-authored workflow files; clean.
 
-**Checkpoint**: Pipeline fully usable from both local CLI and GitHub UI; SC-006 (local-vs-CI parity) verified.
+- [ ] T016 [US5] Smoke-test all four workflows by posting `/bug-analyze`, `/bug-fix`, `/bug-test`, `/bug-review` slash commands as comments on a sandbox issue/PR per `quickstart.md`. Verify (i) each workflow fires only for its corresponding command, (ii) the workflow logs show the skill being invoked with no extra prompt content, (iii) the produced GitHub side effects match the local-CLI smoke tests from T004/T006/T008/T010 (i.e., local-vs-CI parity per SC-006), (iv) inspecting each `.md` file confirms zero agent logic in the body (one-line slash invocation only). Record the workflow run URLs in the implementation PR description. **As of Iteration 2026-05-09 this smoke test runs against the GHAW `.lock.yml` outputs from Phase 7b.**
+
+---
+
+## Phase 7b: GHAW migration (HYBRID mode) — added by Iteration 2026-05-09
+
+**Goal**: Replace the four hand-authored `.yml` workflow files with GHAW `.md` source + `.lock.yml` generated artifact pairs. Skills retain all agent logic (HYBRID mode preserves FR-001 / SC-006). The `.md` body is exactly one line: the slash-command invocation.
+
+**Independent Test**: After Phase 7b, the four `.lock.yml` files trigger the same observable behaviour as the hand-authored `.yml` files did. `yamllint` passes with the new `.lock.yml` exclusion. The four `.md` files contain a one-line body and no other agent content.
+
+### Implementation for Phase 7b
+
+- [ ] T020 Install the `gh aw` GitHub CLI extension on the implementer's machine: `gh extension install github/gh-aw`. Verify with `gh aw --help`. (This is contributor-side tooling per FR-028; CI runners do not need it because `.lock.yml` is committed.)
+
+- [ ] T021 [P] [US5] Write `.github/workflows/bug-agent-analyst.md` per research §R8 (post-Iteration form) and `contracts/slash-command-protocol.md`. Frontmatter declares: `description`, `on.slash_command.{name: bug-analyze, events: [issue_comment]}`, `engine: claude`, `permissions:` (contents/PRs/issues write, id-token write, actions read — matching `claude.yml`), `concurrency: {group: bug-pipeline-${{ github.event.issue.number }}, cancel-in-progress: false}`, auth wiring for `${{ secrets.ANTHROPIC_API_KEY }}`, checkout `fetch-depth: 0`. Body = exactly one line: `/bug-analyze ${{ github.event.issue.number }}`. **No agent prompt content. No prose body.**
+
+- [ ] T022 [P] [US5] Write `.github/workflows/bug-agent-fix.md` mirroring T021's structure exactly, except: `slash_command.name: bug-fix`; body = `/bug-fix ${{ github.event.issue.number }}`.
+
+- [ ] T023 [P] [US5] Write `.github/workflows/bug-agent-test.md` mirroring T021, except: `slash_command.name: bug-test`; body = `/bug-test ${{ github.event.issue.number }}`. Note: `issue_comment` events fire for both issue and PR comments; `github.event.issue.number` is correct in both cases.
+
+- [ ] T024 [P] [US5] Write `.github/workflows/bug-agent-review.md` mirroring T021, except: `slash_command.name: bug-review`; body = `/bug-review ${{ github.event.issue.number }}`.
+
+- [ ] T025 [US5] Run `gh aw compile .github/workflows/bug-agent-analyst.md .github/workflows/bug-agent-fix.md .github/workflows/bug-agent-test.md .github/workflows/bug-agent-review.md` (or the equivalent batch invocation per `gh aw --help`). Verify each `.md` source produces a `.lock.yml` next to it. Stage all four `.lock.yml` files for commit; **do not hand-edit them** (FR-028).
+
+- [ ] T026 [US5] Delete the four hand-authored YAML files: `.github/workflows/bug-agent-analyst.yml`, `bug-agent-fix.yml`, `bug-agent-test.yml`, `bug-agent-review.yml`. They are replaced by the `.md` + `.lock.yml` pairs from T021–T025.
+
+- [ ] T027 [US5] Update `.yamllint.yml` to add `.github/workflows/*.lock.yml` to the `ignore:` list (mirrors `opsmill/infrahub#9043`). Verify the existing yamllint config doesn't already cover this pattern; if it does, this task is a no-op and should be marked accordingly.
+
+- [ ] T028 [US5] Re-run `uv run yamllint` over the entire workflow tree (`.github/workflows/*.yml` and `.github/workflows/*.md`); confirm clean. The four `.lock.yml` files MUST be excluded by T027's update; the four `.md` files MUST pass yamllint frontmatter validation.
+
+- [ ] T029 [P] Update `dev/guides/bug-pipeline.md`: replace `.yml` references with the `.md` (source) + `.lock.yml` (generated) pair; add a "Editing the workflows" section explaining `gh extension install github/gh-aw`, `gh aw compile`, commit both files. Note that drift-prevention is currently manual (per FR-029 / research §R12).
+
+**Checkpoint**: Phase 7b complete. Four `.md` sources + four `.lock.yml` artifacts under `.github/workflows/`; four old `.yml` files deleted; yamllint clean; dev guide updated.
 
 ---
 
