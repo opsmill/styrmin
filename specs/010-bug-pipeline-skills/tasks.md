@@ -138,11 +138,11 @@ description: "Task list for 010-bug-pipeline-skills implementation"
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T017 [P] Write `dev/guides/bug-pipeline.md` covering: how to invoke each stage from GitHub (slash command on issue/PR) and from the local CLI; the four slash commands and their argument formats; what each stage does and what side effects to expect; the failure-comment vocabulary and how to recover; references to `specs/010-bug-pipeline-skills/contracts/` for the schema and trigger contracts. Follow `dev/guidelines/markdown.md` conventions; mirror the structure of existing guides like `dev/guides/local-demo.md` and `dev/guides/pre-commit-hooks.md`.
+- [X] T017 [P] Write `dev/guides/bug-pipeline.md` covering: how to invoke each stage from GitHub (slash command on issue/PR) and from the local CLI; the four slash commands and their argument formats; what each stage does and what side effects to expect; the failure-comment vocabulary and how to recover; references to `specs/010-bug-pipeline-skills/contracts/` for the schema and trigger contracts. Follow `dev/guidelines/markdown.md` conventions; mirror the structure of existing guides like `dev/guides/local-demo.md` and `dev/guides/pre-commit-hooks.md`.
 
-- [ ] T018 Run `uv run invoke format lint` and `uv run yamllint` (or equivalently, `prek run --all-files` if available) and confirm no regressions in linting/formatting are introduced by the implementation. `.agents/` is excluded from pre-commit by design, so SKILL.md content must be hand-reviewed for markdown conventions per `dev/guidelines/markdown.md`.
+- [X] T018 Run `uv run invoke format lint` and `uv run yamllint` (or equivalently, `prek run --all-files` if available) and confirm no regressions in linting/formatting are introduced by the implementation. `.agents/` is excluded from pre-commit by design, so SKILL.md content must be hand-reviewed for markdown conventions per `dev/guidelines/markdown.md`.
 
-- [ ] T019 Update the implementation PR description to record: (a) the smoke-test URLs from T004, T006, T008, T010, T016; (b) the reviewer's confirmation of the Constitution §V deviation captured in T002; (c) any failure-path runs that were exercised. This satisfies SC-001 / SC-005 / SC-007 / SC-008 evidence.
+- [X] T019 Update the implementation PR description to record: (a) the smoke-test URLs from T004, T006, T008, T010, T016; (b) the reviewer's confirmation of the Constitution §V deviation captured in T002; (c) any failure-path runs that were exercised. This satisfies SC-001 / SC-005 / SC-007 / SC-008 evidence.
 
 ---
 
