@@ -1,10 +1,21 @@
-"""End-to-end coverage for environment-config update + fanout (009).
+"""End-to-end coverage for environment-config update + fanout (009 + 011).
 
-Drives the user-facing path for ``updateEnvironment`` (SDK / GraphQL):
-the env-config row is persisted, every active deployment receives a
-redeploy Task, and the new env-config slice lands on the rendered pod
-spec on the vcluster. The flow is API/SDK-only (no UI page navigation),
-hence the ``api_only`` markers per AGENTS.md "Dual-entrypoint scope".
+Drives the user-facing path for ``updateEnvironment``: the env-config row
+is persisted, every active deployment receives a redeploy Task, and the
+new env-config slice lands on the rendered pod spec on the vcluster.
+
+Marker landscape (audited under 011/US4):
+
+* US1 fanout + US4 form scenarios use the dual-entrypoint
+  ``scenario_driver.update_environment_via_form`` and run under both
+  ``[api-chromium]`` and ``[ui-chromium]`` — the parametrisation IS the
+  parity check between the SDK round-trip path and the form's
+  ``buildFullReplacementInput`` path.
+* The remaining ``api_only`` markers below tag scenarios that have no
+  dual-entrypoint analogue: failure-isolation needs a typed
+  ``SchedulingInput`` the v1 form cannot drive, and the rejection test
+  asserts on a typed SDK exception that the UI form would only surface
+  as an inline error string.
 
 Scenarios:
 
@@ -165,14 +176,6 @@ def _env_update_driver_bound(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.api_only(
-    reason=(
-        "API/SDK-only flow (Quickstart Steps 1-3); no UI page navigation. "
-        "The [ui-chromium] variant would just re-run the same SDK calls. "
-        "The env-config fanout is exercised through the typed environment "
-        "GraphQL surface and asserted on rendered pod env entries."
-    )
-)
 @pytest.mark.ci
 async def test_us1_environment_update_fans_out_to_all_deployments(
     env_update_environment: dict,
@@ -202,16 +205,14 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
         timeline = await client.deployments.timeline(deployment_id=dep["deployment_id"])
         pre_timeline_lengths[dep["deployment_id"]] = len(timeline)
 
-    await client.environments.update(
+    # Use the dual-entrypoint scenario_driver method so the test runs
+    # under both ``[api-chromium]`` (typed SDK round-trip) and
+    # ``[ui-chromium]`` (Configuration tab + EnvVarsForm) variants
+    # automatically — the parametrisation IS the parity check per
+    # 011-env-config-input-hardening / US4.
+    await scenario_driver.update_environment_via_form(
         environment_id=environment_id,
-        input=UpdateEnvironmentInput(
-            env_vars=[
-                EnvVarInput(
-                    name="OTEL_EXPORTER_OTLP_ENDPOINT",
-                    value=target_value,
-                )
-            ],
-        ),
+        env_vars={"OTEL_EXPORTER_OTLP_ENDPOINT": target_value},
     )
 
     # Each deployment must reconcile to RUNNING with the new env entry on
@@ -301,8 +302,17 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
 )
 @pytest.mark.api_only(
     reason=(
-        "API/SDK-only flow (Quickstart Step 7); no UI page navigation. "
-        "The [ui-chromium] variant would just re-run the same SDK calls."
+        # 011/US4 audit (FR-015): kept api_only because this scenario submits a
+        # ``SchedulingInput`` override that the v1 ``EnvVarsForm`` cannot drive
+        # (the form blocks submission outright when persisted ``scheduling``
+        # is non-empty — see ``detectNestedOverridesBlock`` in
+        # EnvironmentConfigurationTab). A ``[ui-chromium]`` variant would
+        # have to bypass the form block to reproduce this scenario, which
+        # would defeat the purpose of the dual-entrypoint test.
+        "Submits a SchedulingInput override that the v1 EnvVarsForm "
+        "cannot edit (the form's nested-overrides block trips on "
+        "non-empty scheduling). No UI surface drives this flow today; "
+        "the [ui-chromium] variant would have to bypass the form block."
     )
 )
 @pytest.mark.ci
@@ -403,9 +413,16 @@ async def test_us1_environment_update_failure_isolation(
 
 @pytest.mark.api_only(
     reason=(
-        "API/SDK-only flow (Quickstart Step 6); the rejection happens at "
-        "the GraphQL boundary before any cluster interaction. The "
-        "[ui-chromium] variant would just re-run the same SDK call."
+        # 011/US4 audit (FR-015): kept api_only because the assertion
+        # binds to ``OperationFailedError.typename`` — a typed SDK
+        # exception. The UI form's client-side validator catches
+        # ``"1invalid"`` before any GraphQL call, so the
+        # ``[ui-chromium]`` variant cannot exercise the server-side
+        # ``INVALID_ENV_VAR_NAME`` extension code that is the test's
+        # contract.
+        "Asserts on the OperationFailedError.typename surfaced by the "
+        "GraphQL extensions code; the UI form's client-side regex "
+        "rejects '1invalid' before any mutation reaches the server."
     )
 )
 @pytest.mark.ci
@@ -441,22 +458,6 @@ async def test_us2_environment_update_invalid_env_var_name_rejected(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason=(
-        "US4 form E2E (Quickstart Step 9) needs an EnvironmentDetailPage page "
-        "object exposing the Configuration tab + EnvVarsForm interactions and "
-        "a multi-deployment Playwright fixture. The body below is fully "
-        "written so unskipping is a one-line change once the page object "
-        "lands; tracked under tasks T061 in "
-        "specs/009-environment-update/tasks.md."
-    )
-)
-@pytest.mark.ui_only(
-    reason=(
-        "Exercises the React env-vars form + redeploy confirm dialog; the "
-        "[api-chromium] variant cannot drive the Playwright UI flow."
-    )
-)
 @pytest.mark.ci
 async def test_us4_env_vars_form_redeploys_environment(
     env_update_environment: dict,
@@ -465,70 +466,31 @@ async def test_us4_env_vars_form_redeploys_environment(
     scenario_driver: ScenarioDriver,
     _env_update_driver_bound: None,
 ) -> None:
-    """Quickstart Step 9: an operator edits env vars from the Configuration
-    tab on the environment detail page, confirms the redeploy, and the
-    page refreshes with the new state. Each affected deployment's pod
-    template eventually carries the new env entry on container[0].
+    """Quickstart Step 9: an operator edits env vars from the environment
+    detail page, confirms the redeploy, and each affected deployment's
+    pod template eventually carries the new env entry on container[0].
 
-    The flow:
-
-    1. Navigate to ``/environments/<staging-id>``.
-    2. Open the Configuration tab.
-    3. Click "Add Variable" → fill ``LOG_LEVEL=debug``.
-    4. Click Save → the redeploy confirmation dialog names all three
-       deployments.
-    5. Click Redeploy → the form reloads; the env vars list now shows
-       ``LOG_LEVEL=debug``.
-    6. Each deployment converges to RUNNING with the new env entry on
-       its rendered pod template.
+    Drives the dual-entrypoint
+    ``scenario_driver.update_environment_via_form`` (011 / US4): under
+    ``[ui-chromium]`` the driver navigates the Configuration tab, fills
+    the env-vars form, and confirms the redeploy dialog; under
+    ``[api-chromium]`` the driver round-trips the existing config
+    through ``EnvironmentConfig.model_validate`` and submits a typed
+    ``UpdateEnvironmentInput``. Both sides must reach the same persisted
+    state and trigger the same per-deployment fanout — the
+    parametrisation IS the parity check (critique E1+E2).
     """
-    from tests.e2e.pages.environments import EnvironmentDetailPage
-
-    # `page` is the pytest-playwright session page (see conftest.
-    # session_ui_page). The fixture binding is added when this test is
-    # unskipped; today the local helper does not exist.
-    page = None  # type: ignore[assignment] — placeholder for the unskip step
-    detail = EnvironmentDetailPage(page)  # type: ignore[arg-type]
-
     environment_id = env_update_environment["environment_id"]
-    await detail.goto(environment_id=environment_id)
 
-    # Switch to the Configuration tab. The trigger uses the same Tabs
-    # primitive as the BSL flow; selector to be confirmed against the
-    # final markup when this test is wired up.
-    await page.get_by_role("tab", name="Configuration").click()
-
-    # Add a new env var row and fill it in.
-    await page.get_by_test_id("env-vars-form-add-button").click()
-    name_inputs = page.get_by_test_id("env-var-name-input")
-    value_inputs = page.get_by_test_id("env-var-value-input")
-    await name_inputs.last.fill("LOG_LEVEL")
-    await value_inputs.last.fill("debug")
-
-    # Save → confirm dialog appears with all three deployments named.
-    await page.get_by_test_id("env-vars-form-save-button").click()
-    body = page.get_by_test_id("redeploy-confirm-dialog-body")
-    body_text = await body.text_content()
-    assert body_text is not None
-    assert "3 deployments will be redeployed" in body_text
-    for dep in env_update_three_deployments:
-        # Deployment name is `env-update-{a,b,c}`; the page object should
-        # surface it directly in the dialog body.
-        # We don't assert exact substring matches because the dialog
-        # truncates past 5 names — three names always render in full.
-        assert dep["deployment_id"]  # placeholder for name lookup
-
-    await page.get_by_test_id("redeploy-confirm-redeploy").click()
-
-    # The dialog closes and the form rerenders with the new row persisted.
-    await page.get_by_test_id("redeploy-confirm-dialog").wait_for(state="hidden")
-    persisted_names = await page.get_by_test_id("env-var-name-input").all()
-    persisted_values = [await el.input_value() for el in persisted_names]
-    assert "LOG_LEVEL" in persisted_values
+    await scenario_driver.update_environment_via_form(
+        environment_id=environment_id,
+        env_vars={"LOG_LEVEL": "debug"},
+    )
 
     # Each deployment converges to RUNNING with the new env entry on
-    # container[0]. This reuses the same _wait_for_pod_template helper
-    # the API/SDK fanout test uses so the assertion shape stays uniform.
+    # container[0]. This reuses the same ``_wait_for_pod_template``
+    # helper the API/SDK fanout test uses so the assertion shape stays
+    # uniform across both variants.
     for dep in env_update_three_deployments:
         await scenario_driver.wait_for_deployment_running(
             deployment_id=dep["deployment_id"], timeout=RECONCILE_TIMEOUT_SECONDS

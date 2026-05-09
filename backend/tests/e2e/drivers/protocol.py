@@ -118,6 +118,34 @@ class ScenarioDriver(Protocol):
         self, *, deployment_id: str
     ) -> list[TimelineEntry]: ...
 
+    # --- Environments -----------------------------------------------------
+
+    async def update_environment_via_form(
+        self,
+        *,
+        environment_id: str,
+        env_vars: dict[str, str],
+    ) -> None:
+        """Update env vars on an environment.
+
+        UI driver: drives the env-vars form on the Configuration tab —
+        navigates to ``/environments/{environment_id}``, opens the
+        Configuration tab, adds env-var rows, clicks Save, confirms the
+        redeploy dialog, and waits for the page to refresh.
+
+        API driver: reads the existing ``Environment.config``, round-trips
+        it through ``EnvironmentConfig.model_validate(config)`` so Pydantic
+        coerces ``Literal["http", "https"]`` etc. automatically, modifies
+        the ``env_vars`` slice, and submits a typed
+        ``UpdateEnvironmentInput`` via ``client.environments.update(...)``
+        — full-replacement semantics per FR-003 / FR-020.
+
+        Both implementations result in the same persisted state and the
+        same per-deployment redeploy fanout per 009. The parametrisation
+        across ``[api-chromium]``/``[ui-chromium]`` IS the dual-entrypoint
+        parity check (per critique E1+E2 of 011-env-config-input-hardening).
+        """
+
     # --- Backup / Restore -------------------------------------------------
 
     async def create_backup(self, *, instance_id: str) -> BackupRef: ...

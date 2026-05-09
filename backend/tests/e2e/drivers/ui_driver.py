@@ -254,6 +254,28 @@ class UiScenarioDriver:
             await self._deployment_detail.fill_scheduling_config(scheduling)
             await self._deployment_detail.save_scheduling_config()
 
+    async def update_environment_via_form(
+        self,
+        *,
+        environment_id: str,
+        env_vars: dict[str, str],
+    ) -> None:
+        """Drive the env-vars form on the Configuration tab.
+
+        Per 011-env-config-input-hardening / US4 (data-model §4.2): goto
+        ``/environments/{environment_id}``, open the Configuration tab,
+        append a row for each ``(name, value)`` via "Add Variable", click
+        Save, confirm the redeploy dialog, and wait for the page to
+        return to the read state. The page object owns the selector
+        details so this driver method stays a thin coordinator.
+        """
+        async with _ui_errors(
+            f"updating env vars on environment {environment_id} via form"
+        ):
+            await self._environment_detail.update_env_vars_via_form(
+                environment_id=environment_id, env_vars=env_vars
+            )
+
     async def get_deployment_timeline(
         self, *, deployment_id: str
     ) -> list[TimelineEntry]:

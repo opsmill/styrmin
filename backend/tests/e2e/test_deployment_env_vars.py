@@ -8,8 +8,21 @@ the container ``env`` block.
 
 US1 scenario corresponds to Quickstart Step 1: deploy ``simple-app``, set
 ``LOG_LEVEL=debug`` on the deployment, observe the env entry on every
-container's ``env:`` list. The flow is API/SDK-only (no UI page navigation),
-hence the ``api_only`` marker per AGENTS.md "Dual-entrypoint scope".
+container's ``env:`` list.
+
+Marker landscape (audited under 011/US4): every scenario in this file
+keeps its ``api_only`` marker. Although ``scenario_driver.update_deployment``
+is a dual-entrypoint method, the UI driver's implementation only accepts
+the ``scheduling`` sub-tree (see ``UiScenarioDriver.update_deployment``);
+the deployment-detail page exposes no env-vars editor today, so a
+``[ui-chromium]`` variant of these scenarios would raise
+``ScenarioActionError`` immediately. The driver-docs scenario is a pure
+GraphQL read with no UI surface either. Each retained marker carries an
+inline FR-015 rationale; the markers will retire as the deployment-level
+env-vars UI lands in a future iteration. The 011/US4 audit's marker-count
+reduction therefore comes entirely from the environment-update tests
+where ``scenario_driver.update_environment_via_form`` is now wired
+up.
 """
 
 from __future__ import annotations
@@ -141,8 +154,15 @@ def _env_vars_driver_bound(
 
 @pytest.mark.api_only(
     reason=(
-        "API/SDK-only flow (Quickstart Step 1); no UI page navigation. "
-        "The [ui-chromium] variant would just re-run the same SDK call."
+        # 011/US4 audit (FR-015): the UI driver's update_deployment only
+        # supports the ``scheduling`` sub-tree (see UiScenarioDriver
+        # rejection at drivers/ui_driver.py); there is no UI surface for
+        # ``deployment.config.env_vars``. Until the deployment-detail
+        # page grows an env-vars editor, the ``[ui-chromium]`` variant
+        # cannot drive this flow.
+        "Drives scenario_driver.update_deployment with env_vars; the UI "
+        "driver only accepts the 'scheduling' sub-tree today (no "
+        "deployment-detail env-vars form exists yet)."
     )
 )
 @pytest.mark.ci
@@ -233,8 +253,13 @@ async def env_vars_second_deployment(
 
 @pytest.mark.api_only(
     reason=(
-        "API/SDK-only flow (Quickstart Step 2); no UI page navigation. "
-        "The [ui-chromium] variant would just re-run the same SDK calls."
+        # 011/US4 audit (FR-015): the second half of this scenario calls
+        # ``scenario_driver.update_deployment`` with an env_vars override
+        # which the UI driver rejects (scheduling-only); no deployment-
+        # detail env-vars editor exists yet.
+        "Drives scenario_driver.update_deployment with env_vars in the "
+        "deployment-level override step; the UI driver only accepts "
+        "the 'scheduling' sub-tree today."
     )
 )
 @pytest.mark.ci
@@ -393,12 +418,15 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
 
 @pytest.mark.api_only(
     reason=(
-        "API/SDK-only flow (Quickstart Step 3); no UI page navigation. "
-        "The [ui-chromium] variant would just re-run the same SDK call. "
-        "The Step 4 negative case (UnknownComponentEnvVarError) is covered "
-        "by the propagation test in test_env_vars_propagation.py since it "
-        "exercises only the GraphQL mutation rejection path and does not "
-        "require a real cluster."
+        # 011/US4 audit (FR-015): drives
+        # scenario_driver.update_deployment with both env_vars and
+        # per-component env_vars; the UI driver only accepts the
+        # 'scheduling' sub-tree, and per-component env_var editing has
+        # no UI surface today.
+        "Drives scenario_driver.update_deployment with env_vars and "
+        "per-component env_vars; the UI driver only accepts the "
+        "'scheduling' sub-tree today, and there is no per-component "
+        "env-vars editor in the frontend."
     )
 )
 @pytest.mark.ci
@@ -485,10 +513,14 @@ async def test_us3_per_component_env_var_overrides_deployment_level(
 
 @pytest.mark.api_only(
     reason=(
-        "API/SDK-only flow (Quickstart Step 5); the assertion is on the "
-        "GraphQL response shape for ``ApplicationDriverVersion.envVars`` — "
-        "no UI page navigation. The [ui-chromium] variant would just "
-        "re-run the same SDK call."
+        # 011/US4 audit (FR-015): pure GraphQL read of
+        # ApplicationDriverVersion.envVars; no scenario_driver mutation,
+        # no UI surface to drive (the driver-detail page does not yet
+        # render the env-vars docs). The [ui-chromium] variant would
+        # only re-run the same SDK call without exercising any UI.
+        "Pure GraphQL read of ApplicationDriverVersion.envVars (no "
+        "scenario_driver mutation); the driver-detail page does not "
+        "render env-var docs today, so there is no UI surface to drive."
     )
 )
 @pytest.mark.ci
@@ -550,10 +582,16 @@ async def test_us4_driver_env_var_docs_surfaced_via_graphql(
 )
 @pytest.mark.api_only(
     reason=(
-        "API/SDK-only flow (Quickstart Step 6); the test queries the "
-        "GraphQL surface for ``componentEnvVars.isOrphaned`` and "
-        "``timeline.contextDiff`` — no UI page navigation. The "
-        "[ui-chromium] variant would just re-run the same SDK calls."
+        # 011/US4 audit (FR-015): currently @pytest.mark.skip'd. When
+        # unskipped, the test will drive scenario_driver.update_deployment
+        # with per-component env_vars (no UI surface) plus
+        # scenario_driver.upgrade_deployment, and assert on
+        # componentEnvVars.isOrphaned / timeline.contextDiff GraphQL
+        # fields — neither has a UI surface today.
+        "Drives scenario_driver.update_deployment with per-component "
+        "env_vars plus an upgrade, then asserts on the "
+        "componentEnvVars.isOrphaned and timeline.contextDiff GraphQL "
+        "shapes — neither has a UI surface today."
     )
 )
 @pytest.mark.ci
