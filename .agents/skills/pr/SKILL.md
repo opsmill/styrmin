@@ -174,31 +174,40 @@ Omit this section if no docs were changed.]
    Or, when using the GitHub MCP server, the equivalent `create_pull_request` call.
 4. Return the PR URL to the user.
 
-### 7. Monitor CI & Fix Issues
+### 7. Hand Off to `pr-monitor` as a Background Survey Agent
 
-Don't just open the PR and walk away. Watch CI, especially linters — they frequently catch issues. Fix them proactively.
+Don't just open the PR and walk away — but don't re-implement the CI babysitting loop here either, and don't sit blocked in the foreground waiting 30+ minutes for E2E to finish. The `pr-monitor` skill owns the CI workflow (poll, classify, reproduce narrowly, fix, retry up to 5 times, revert on exhaustion), and CI watching is the textbook "long-running, independent of what the user does next" survey task. Spawn it as a background agent so the parent conversation can return control to the user immediately.
 
-1. After PR creation, wait for the CI to start and monitor the actions runs (check every 30-60 seconds):
+1. Confirm the PR was created and you have the PR number / URL / branch name.
+2. **Spawn `pr-monitor` as a background survey agent.** Use the runtime's agent-launching mechanism (Claude Code: the `Agent` tool with `run_in_background: true`; other runtimes: equivalent background-task primitive). The agent must run with a clean context — give it everything it needs in the prompt rather than relying on parent-conversation state.
 
-   ```bash
-   gh run list --branch <branch-name> --limit 5
+   Recommended invocation (Claude Code, general-purpose subagent):
+
+   ```text
+   Agent(
+     description: "Monitor PR #<N> CI",
+     subagent_type: "general-purpose",
+     run_in_background: true,
+     prompt: "Run the workflow defined in .agents/skills/pr-monitor/SKILL.md
+              against PR #<N> on branch <branch>. The PR was just opened by
+              the /pr skill at commit <sha>; treat that commit as the
+              baseline_commit for the revert-on-exhaustion logic. Follow
+              every phase of SKILL.md verbatim, including the narrow-
+              reproduction-first discipline and the 5-iteration cap.
+              Produce the SKILL.md final report when you finish."
+   )
    ```
 
-   The CI can take a few minutes to start. If nothing has started after 5 minutes, there might be an issue with the CI itself; investigate whether the PR introduced changes to the CI configuration.
+   Adjust the prompt to match your runtime's agent contract, but always (a) name the SKILL.md file as the source of truth, (b) pass the PR number, branch, and baseline commit, and (c) require the SKILL.md final report on completion.
 
-2. Wait for at least all **linter jobs** to complete (check every 30-60 seconds).
-3. If any jobs fail:
-   - Read failure logs:
+3. **Tell the user what just happened**, then return control:
+   - PR URL.
+   - That `pr-monitor` is now running in the background as a survey agent.
+   - That CI feedback / fix attempts / a final report will arrive asynchronously when the agent completes.
 
-     ```bash
-     gh run view <run-id> --log-failed
-     ```
+   Do not poll or re-summarize CI here. The agent's final report is the closing status; surface it to the user when it lands.
 
-   - Reproduce the issue locally by running the same linter/check command.
-   - Analyze the failure and propose a fix to the user.
-   - After approval, commit the fix and push.
-   - Continue monitoring until linters pass.
-4. Report final CI status to the user.
+If the runtime cannot spawn background agents, fall back to invoking `/pr-monitor <pr-number>` synchronously, or — as a last resort — poll `gh run list --branch <branch-name>` every 30–60 seconds and follow the same narrow-reproduction-first discipline `pr-monitor` enforces. Do not push speculative fixes when local reproduction is possible.
 
 ## Notes
 
@@ -226,4 +235,4 @@ A pull request that:
 - Has a business-value-focused description referencing specs when available.
 - Includes up-to-date developer documentation.
 - Has been reviewed and approved by the user before creation.
-- Has passing CI linters (with fixes pushed if needed).
+- Has been handed off to a backgrounded `pr-monitor` survey agent, which owns post-creation CI watching and fix-on-failure asynchronously.
