@@ -67,6 +67,31 @@ def split_string(value: str, separator: str | None = None) -> list[str]:
     return value.split(separator)
 
 
+def component_env_vars(components: object, name: str) -> list[dict[str, str]]:
+    """Return per-component env vars as a list of ``{name, value}`` entries.
+
+    The single canonical accessor for driver value templates: yields the
+    Kubernetes-native env list shape (which supports `value`, `valueFrom`,
+    secret refs, etc.) and returns an empty list whenever the component is
+    absent from the rendering context, has no ``env_vars`` block, or the
+    merged config dict is empty. Templates can drop every defensive guard:
+
+        extraEnv: {{ components | component_env_vars("server") | tojson }}
+    """
+    if not isinstance(components, dict):
+        return []
+    component = components.get(name)
+    if not isinstance(component, dict):
+        return []
+    env_vars = component.get("env_vars")
+    if not isinstance(env_vars, dict):
+        return []
+    config = env_vars.get("config")
+    if not isinstance(config, dict):
+        return []
+    return [{"name": str(k), "value": str(v)} for k, v in config.items()]
+
+
 def _validate_renders(patches: list[TargetPatch]) -> list[TargetPatch]:
     """Eagerly render each patch so serialisation failures raise before
     Kustomize gets them (spec US6 Scenario 3 / T054). Returns *patches*
@@ -123,6 +148,7 @@ def get_jinja_environment(**kwargs: object) -> jinja2.Environment:
     env = jinja2.Environment(**kwargs)  # type: ignore[arg-type]
     env.filters["to_fqdn_label"] = to_fqdn_label
     env.filters["split"] = split_string
+    env.filters["component_env_vars"] = component_env_vars
     return env
 
 

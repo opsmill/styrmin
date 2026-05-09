@@ -26,6 +26,7 @@ from uuid import uuid4
 
 from styrmin_backend.agent.service.kubernetes.resources.builders.application import (
     ApplicationHelmReleaseBuilder,
+    component_env_vars,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.models.components import (
@@ -264,6 +265,49 @@ class TestRenderValueTemplateEnvVarsExposure:
 
         assert result["deployment_env_vars"] in (None, [])
         assert result["worker_env_vars"] in (None, [])
+
+    def test_component_env_vars_filter_returns_list_form(self) -> None:
+        """The ``component_env_vars`` Jinja filter is the single canonical
+        accessor used by every example driver. Verifies it returns the
+        Kubernetes-native ``[{name, value}, ...]`` list form, the empty list
+        when the component is absent / has no env_vars / has an empty config,
+        and is reachable through the rendered template.
+        """
+        components = ComponentsContext(
+            root={
+                "server": _component("server", "server-app", {"LOG_LEVEL": "debug"}),
+                "worker_no_env": _component("worker_no_env", "worker-app", None),
+                "worker_empty": _component("worker_empty", "worker-app", {}),
+            }
+        )
+        context = _make_global_context(
+            instance_env_vars=None,
+            components=components,
+        )
+        dumped = context.model_dump(exclude_none=True)
+
+        assert component_env_vars(dumped["components"], "server") == [
+            {"name": "LOG_LEVEL", "value": "debug"},
+        ]
+        assert component_env_vars(dumped["components"], "worker_no_env") == []
+        assert component_env_vars(dumped["components"], "worker_empty") == []
+        assert component_env_vars(dumped["components"], "missing") == []
+        # Garbage inputs collapse to an empty list — no template should ever
+        # raise because of a malformed context.
+        assert component_env_vars(None, "server") == []
+        assert component_env_vars("not-a-dict", "server") == []
+
+        rendered = ApplicationHelmReleaseBuilder.render_value_template(
+            values_template=(
+                'extraEnv: {{ components | component_env_vars("server") | tojson }}\n'
+                'workerEnv: {{ components | component_env_vars("worker_no_env") | tojson }}\n'
+                'missingEnv: {{ components | component_env_vars("missing") | tojson }}\n'
+            ),
+            context=context,
+        )
+        assert rendered["extraEnv"] == [{"name": "LOG_LEVEL", "value": "debug"}]
+        assert rendered["workerEnv"] == []
+        assert rendered["missingEnv"] == []
 
     def test_dump_shape_carries_env_vars_through(self) -> None:
         """Regression-pin on FR-003 / the ``model_dump(exclude_none=True)``

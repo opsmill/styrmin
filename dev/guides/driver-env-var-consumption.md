@@ -22,18 +22,37 @@ env vars:
 | `components[<name>].env_vars.config` | `dict[str, str]` | The **per-component** merged env vars (environment → deployment → component, deepest-wins). |
 
 Both keys may be **absent** from the rendered context dict when no env vars
-are set anywhere — `exclude_none=True` drops them. Always use defensive
-accessors:
+are set anywhere — `exclude_none=True` drops them. The canonical accessor
+is the **`component_env_vars` Jinja filter**, which encapsulates every
+defensive guard and returns the Kubernetes-native `[{name, value}, ...]`
+list shape ready to drop straight into a chart-side `extraEnv` /
+`extraEnvVars` value:
 
 ```jinja
-{# deployment-effective dict #}
-{{ instance.config.env_vars or {} }}
-
-{# per-component dict — guard both the component and the env_vars sub-block #}
-{%- set comp_env = (components.worker.env_vars.config
-                    if (components.worker is defined and components.worker.env_vars)
-                    else {}) %}
+extraEnv: {{ components | component_env_vars("server") | tojson }}
 ```
+
+The filter returns an empty list whenever the component is missing from
+the context, has no `env_vars` block, or its merged config dict is empty —
+so templates never need `is defined` / `or {}` guards. For mixed renders
+(chart-default entries plus operator-supplied entries), iterate the filter
+output and emit each entry alongside the hardcoded ones:
+
+```jinja
+extraEnvVars:
+  - name: HARDCODED
+    value: "yes"
+{%- for entry in components | component_env_vars("server") %}
+  - name: {{ entry.name | tojson }}
+    value: {{ entry.value | tojson }}
+{%- endfor %}
+```
+
+The deployment-effective `instance.config.env_vars` dict remains available
+for templates that intentionally want a coarser scope; use the same
+defensive `or {}` accessor (`(instance.config.env_vars or {}).items()`).
+Per-component is preferred for new templates: it carries the full
+env→dep→comp merge, so deployment-level env vars still flow through.
 
 The platform resolves the merge order; you do not implement it. Operators
 control which scope wins through the standard `updateEnvironment` /
@@ -60,13 +79,7 @@ image:
   repository: my-app
   tag: "{{ app.version }}"
 
-extraEnv:
-{%- for name, value in (instance.config.env_vars or {}).items() %}
-  - name: {{ name | tojson }}
-    value: {{ value | tojson }}
-{%- else %}
-  []
-{%- endfor %}
+extraEnv: {{ components | component_env_vars("server") | tojson }}
 ```
 
 Corresponding chart-side hook in `templates/deployment.yaml`:
@@ -86,35 +99,17 @@ list — pick your ordering accordingly.
 
 ### Multi-component driver (per-component scoping)
 
-When your driver declares multiple components, render each component's
-slice from `components[<name>].env_vars.config`. Each component receives its
-own env→dep→comp-merged dict; peer components are not affected.
+When your driver declares multiple components, call the filter once per
+component. Each component receives its own env→dep→comp-merged dict; peer
+components are not affected.
 
 ```jinja
 # values.j2.yml — multi-component driver with `api` and `worker`
 api:
-  extraEnv:
-{%- set api_env = (components.api.env_vars.config
-                   if (components.api is defined and components.api.env_vars)
-                   else {}) %}
-{%- for name, value in api_env.items() %}
-    - name: {{ name | tojson }}
-      value: {{ value | tojson }}
-{%- else %}
-    []
-{%- endfor %}
+  extraEnv: {{ components | component_env_vars("api") | tojson }}
 
 worker:
-  extraEnv:
-{%- set worker_env = (components.worker.env_vars.config
-                      if (components.worker is defined and components.worker.env_vars)
-                      else {}) %}
-{%- for name, value in worker_env.items() %}
-    - name: {{ name | tojson }}
-      value: {{ value | tojson }}
-{%- else %}
-    []
-{%- endfor %}
+  extraEnv: {{ components | component_env_vars("worker") | tojson }}
 ```
 
 An operator setting `componentEnvVars: [{ component: "worker", envVars: { WORKER_QUEUE: "orders" } }]`

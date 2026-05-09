@@ -13,6 +13,10 @@ service:
   type: ClusterIP
   port: 8000
 
+# Extra env vars appended to the server container — populated by the driver's
+# values.j2.yml from `components.server.env_vars.config`.
+extraEnv: []
+
 resources:
   requests:
     cpu: 50m
