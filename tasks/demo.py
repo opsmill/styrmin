@@ -192,6 +192,7 @@ def _print_summary(context: Context) -> None:
     body = (
         f"[bold]Styrmin UI:[/bold]     {url}\n"
         f"[bold]GraphQL:[/bold]        {url}/graphql\n"
+        f"[bold]Admin login:[/bold]    admin / admin-password\n"
         f"[bold]MinIO console:[/bold]  kubectl port-forward svc/minio 9001:9001 -n {KUBERNETES_ROOT_NAMESPACE}\n"
         f"[bold]MinIO creds:[/bold]    minioadmin / minioadmin\n\n"
         f"[bold]Deployments:[/bold]\n{deploy_output}"

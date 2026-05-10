@@ -22,6 +22,10 @@ ingress:
 styrmin:
   url:
     apiK8s: http://styrmin-server.styrmin.svc.cluster.local:8000
+  # Local-demo convention (see ADR-024). Password policy requires ≥12 chars.
+  # Production installs MUST override.
+  adminUsername: admin
+  adminPassword: admin-password
 
 velero:
   backupsEnabled: false

@@ -30,10 +30,23 @@ def load_query(name: str) -> str:
     return (GRAPHQL_DIR / f"{name}.graphql").read_text()
 
 
-def graphql(url: str, query: str, variables: dict) -> dict:  # type: ignore[type-arg]
-    """Send a GraphQL request and return the parsed response body."""
+def graphql(
+    url: str,
+    query: str,
+    variables: dict,  # type: ignore[type-arg]
+    token: str | None = None,
+) -> dict:  # type: ignore[type-arg]
+    """Send a GraphQL request and return the parsed response body.
+
+    When ``token`` is provided it is sent as ``Authorization: Bearer
+    <token>``; the server's auth middleware accepts this transport for
+    SDK / script callers (see ADR-024).
+    """
     payload = json.dumps({"query": query, "variables": variables}).encode()
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})  # noqa: S310
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=payload, headers=headers)  # noqa: S310
     try:
         with urllib.request.urlopen(req) as response:  # noqa: S310
             return json.loads(response.read())  # type: ignore[no-any-return]
