@@ -140,12 +140,23 @@ async def env_update_three_deployments(
     """
     driver, _ = session_scenario_driver
     deployments: list[dict] = []
+    # All three deployments share `env_update_environment` and use the
+    # `simple-app` driver, which declares a service named `simple-app`. The
+    # platform enforces service-name uniqueness within an environment, so each
+    # deployment must rename its service (see `test_pod_scheduling.py` for the
+    # same pattern).
     for suffix in ("a", "b", "c"):
         deployment = await driver.create_deployment(
             driver="simple-app",
             version="0.1.0",
             environment_id=env_update_environment["environment_id"],
             name=f"env-update-{suffix}",
+            service_name_overrides=[
+                {
+                    "driverServiceName": "simple-app",
+                    "overrideName": f"simple-app-{suffix}",
+                }
+            ],
         )
         deployment = await driver.wait_for_deployment_running(
             deployment_id=deployment.id

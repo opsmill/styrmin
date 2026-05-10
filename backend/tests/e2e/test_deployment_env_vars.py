@@ -257,11 +257,20 @@ async def env_vars_second_deployment(
     deployment-level env vars set of its own (FR-001 / Quickstart Step 2).
     """
     driver, _ = session_scenario_driver
+    # Both deployments in this module share `env_vars_environment` and use the
+    # `simple-app` driver, which declares a service named `simple-app`. The
+    # platform enforces service-name uniqueness within an environment, so the
+    # second deployment must rename its service (see also
+    # `test_pod_scheduling.py::scheduling_second_deployment` for the same
+    # pattern, and `conftest.py::scenario_environment` for the rationale).
     deployment = await driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
         environment_id=env_vars_environment["environment_id"],
         name="env-vars-b",
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": "simple-app-b"}
+        ],
     )
     deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
     return {
