@@ -2,7 +2,7 @@
 
 **Feature Branch**: `010-driver-env-var-consumption`
 **Created**: 2026-05-08
-**Status**: Draft
+**Status**: Extracted
 **Input**: Course-correction on 008-deployment-env-vars. The post-render injection layer added in 008 (`EnvVarsPatch`) does a JSON `replace` on `/spec/template/spec/containers/0/env`, which silently wipes every env entry the Helm chart set. The "operator value wins on collision" promise was technically true but operationally meaningless — every chart-rendered env var got clobbered, not just the colliding ones. This is unworkable in production.
 
 The pivot: stop injecting at the post-render layer entirely. The platform's job is to **resolve and expose** env vars to the driver's `values.j2.yml` Jinja context. The driver author **consumes** them however the chart expects. Inheritance/merging across env→dep→comp scopes still happens platform-side (the resolution pipeline is correct; only injection was broken). Drivers receive a ready-to-use merged dict.

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `011-env-config-input-hardening`
 **Created**: 2026-05-09
-**Status**: Draft
+**Status**: Extracted
 **Input**: Hardening pass on 008+009+010 surfacing four real bugs found by an external review:
 
 1. `UpdateEnvironmentInput` (added in 009) is incomplete — `EnvironmentConfig` (via `BaseConfigSection`) carries `ingress_class` and `db_size`, but the input definition omitted them. Under full-replacement semantics, any environment with these fields set silently loses them on env-var save through the UI.

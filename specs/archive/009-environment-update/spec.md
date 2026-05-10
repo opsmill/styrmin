@@ -2,7 +2,7 @@
 
 **Feature Branch**: `009-environment-update`
 **Created**: 2026-05-07
-**Status**: Draft
+**Status**: Extracted
 **Input**: User description: Replace the JSON-blob `updateEnvironment(environmentId, config: JSON)` mutation introduced in 008-deployment-env-vars with a structured GraphQL surface, fan out a redeploy to every deployment in the environment when the config changes, expose the full environment configuration to the frontend, and add a UI form for editing environment-scope env vars.
 
 This feature is the sequel to 008-deployment-env-vars. It assumes the post-008 baseline: `Environment.config` carries a structured Pydantic model that includes env vars, ip_whitelist, dedicated_ingress, scheduling, fqdn_suffix, external_url_scheme, external_url_port, and external_dns_endpoints_type.

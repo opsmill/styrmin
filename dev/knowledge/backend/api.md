@@ -160,6 +160,16 @@ async def create_cluster(
 
 On the client side, errors arrive as standard GraphQL errors with `extensions.code` for programmatic handling. See [`../guides/graphql-propagation-tests.md`](../guides/graphql-propagation-tests.md) for the per-field test pattern.
 
+<!-- Extracted from specs/011-env-config-input-hardening on 2026-05-10 -->
+
+#### Notable typed error codes
+
+| Code | Source | Surface |
+|------|--------|---------|
+| `INVALID_ENV_VAR_VALUE` | `validate_env_var_value` rejecting a non-string value at the validator entry point (spec 011 / US3) | Raised on JSON-config write paths to `Environment.config.env_vars`, `Deployment.config.env_vars`, and `Deployment.config.components.<name>.env_vars`; `error_metadata` carries `name`, `value_type`, and (when known) `scope`. |
+
+The validator type-checks every env-var value against `isinstance(value, str)` *before* any encoding or size computation. Non-string inputs surface as a typed `INVALID_ENV_VAR_VALUE` rather than crashing the resolver with a generic `AttributeError` from a downstream `.encode("utf-8")` call. See [`adr-022`](../../adr/adr-022-schema-walking-input-propagation-tests.md) for the matching schema-walking input-completeness test pattern that prevents the upstream "missing field" class of bugs.
+
 ## GraphQL Types
 
 Below is a sample of the most-frequently-touched types; consult `schema.graphql` for the full set.

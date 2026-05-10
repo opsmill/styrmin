@@ -38,6 +38,73 @@ Conventions for authoring forms with TanStack Form. See [knowledge/frontend/form
 - `onSubmit` lives on `useForm({ ... onSubmit })` and receives `{ value }`. Call the GraphQL mutation hook from there, then invalidate via the patterns in [data-fetching guidelines](./data-fetching.md).
 - Forms must prevent double-submission while a request is in flight. Disable the submit button on `useStore(form.store, (s) => s.isSubmitting)`; do not wire ad-hoc `useState` flags.
 
+<!-- Extracted from specs/011-env-config-input-hardening on 2026-05-10 -->
+
+### Value-transform boundary for full-replacement inputs
+
+When a form submits a typed GraphQL input built from **persisted** JSON
+state — i.e. a full-replacement mutation that round-trips fields the
+operator may not have edited — every field whose persisted shape differs
+from its GraphQL input shape MUST be transformed at the submit boundary,
+not casted with `as`. The canonical case: persisted Pydantic enums
+round-trip as raw strings (`"https"`, `"NodeExternalIP"`); the GraphQL
+input requires the enum literal (`HTTPS`, `NODE_EXTERNAL_IP`).
+
+Use a typed helper with an explicit declarative mapping table per enum:
+
+```typescript
+const EXTERNAL_URL_SCHEME_MAP: Record<string, ExternalUrlScheme> = {
+    "http": ExternalUrlScheme.HTTP,
+    "https": ExternalUrlScheme.HTTPS,
+};
+
+function transformEnumValue<E extends string>(
+    field: string,
+    value: unknown,
+    mapping: Record<string, E>,
+): E | null {
+    if (value == null) return null;
+    if (typeof value !== "string") {
+        throw new Error(`Field ${field}: expected string, got ${typeof value}`);
+    }
+    const transformed = mapping[value];
+    if (transformed === undefined) {
+        throw new Error(
+            `Field ${field}: unrecognised value "${value}". ` +
+            `Expected one of: ${Object.keys(mapping).join(", ")}`,
+        );
+    }
+    return transformed;
+}
+```
+
+Used inside `buildFullReplacementInput` (or the equivalent submit-shape
+builder for the form):
+
+```typescript
+externalUrlScheme: transformEnumValue(
+    "externalUrlScheme",
+    config.external_url_scheme,
+    EXTERNAL_URL_SCHEME_MAP,
+),
+```
+
+**Throw on unrecognised values** — never silently submit `null` or pass a
+TypeScript-only `as` cast. The form's existing error-display path catches
+the throw and surfaces an actionable message to the operator. Silent
+corruption of a persisted field on every save is the bug class this
+discipline prevents (spec 011/US2).
+
+The mappings are **maintained by hand** next to the form, matched to the
+Pydantic source of truth. Drift is surfaced at code-review time when a
+new enum value lands; codegen-generated mapping tables were rejected in
+[ADR-023](../../adr/adr-023-frontend-value-transform-boundary.md) — the
+manual table is clearer for the small cardinalities involved.
+
+The pattern generalises beyond enums: any persisted-vs-GraphQL shape
+divergence (date strings, partial objects, JSON-encoded payloads) belongs
+at the same boundary with the same throw-on-unknown discipline.
+
 ### Dialog Forms
 
 - For forms inside dialogs, call `form.reset()` from the dialog's `onOpenChange` when transitioning to closed. This restores defaults and clears errors and matches the long-standing UX expectation that closing a dialog discards in-flight edits.

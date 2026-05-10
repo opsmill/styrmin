@@ -2,7 +2,7 @@
 
 **Feature Branch**: `008-deployment-env-vars`
 **Created**: 2026-05-06
-**Status**: Draft
+**Status**: Extracted
 **Input**: User description: PRD from issue #4 comment 4372753082 — free-form `dict[str, str]` of environment variables settable at environment, deployment, and per-component scope, auto-injected into rendered workloads via the existing post-render injection mechanism, with optional doc-only declarations on the driver side.
 
 ## User Scenarios & Testing *(mandatory)*

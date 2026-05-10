@@ -45,9 +45,27 @@ key). This mirrors the `SchedulingConfig` precedent — see
 
 ## Setting values via the API
 
-Writes ride the existing `config: JSON` argument on `deploy()` /
-`updateDeployment()` / `updateEnvironment()`. There is no new mutation and no
-new typed mutation argument.
+<!-- Extracted from specs/009-environment-update on 2026-05-10 -->
+
+**Environment scope** uses the typed `UpdateEnvironmentInput` mutation
+introduced in spec 009 (see [ADR-020](../../adr/adr-020-environment-config-fanout.md)).
+The mutation full-replaces the env-config row and fans out a redeploy task
+per non-tombstoned, non-internal deployment in the environment:
+
+```graphql
+mutation {
+  updateEnvironment(
+    environmentId: "..."
+    input: { envVars: [{ name: "LOG_LEVEL", value: "debug" }] }
+  ) { id }
+}
+```
+
+**Deployment and per-component scopes** still ride the `config: JSON`
+argument on `deploy()` / `updateDeployment()`. Migrating these to typed
+inputs is tracked separately; the typed-validator hardening from spec 011
+protects the still-active JSON write path against non-string values
+(see the `INVALID_ENV_VAR_VALUE` error in [`api.md`](api.md)).
 
 ```graphql
 # Deployment scope
