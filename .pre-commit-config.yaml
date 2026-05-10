@@ -30,8 +30,13 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Exclude `gh aw compile` output: trailing whitespace and missing EOF
+      # newlines are reintroduced on every recompile (FR-026, same rationale
+      # as the yamllint exclusion in `.yamllint.yml`).
       - id: trailing-whitespace
+        exclude: ^\.github/workflows/.*\.lock\.yml$
       - id: end-of-file-fixer
+        exclude: ^\.github/workflows/.*\.lock\.yml$
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=500]
