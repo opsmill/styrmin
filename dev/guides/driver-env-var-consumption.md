@@ -183,6 +183,19 @@ These are **not** bugs — they are deliberate non-features:
   but don't reach pods. This is a feature: each driver decides whether to
   expose the surface.
 
+## Extending the renderer
+
+The Jinja environment used to render every driver `values.j2.yml` is built
+in `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py:get_jinja_environment`.
+Custom filters (`to_fqdn_label`, `split`, `component_env_vars`) are
+registered there. To add a new filter for driver authors, add the function
+nearby and register it in `get_jinja_environment` — the
+`SilentUndefined` policy applied at the same site means filters can
+safely traverse undefined chains without raising. Add a unit test
+alongside `backend/tests/unit/agent/test_render_value_template_env_vars.py`
+that drives the filter through `ApplicationHelmReleaseBuilder.render_value_template`
+to lock in the contract.
+
 ## Related
 
 - Operator-facing reference: [`dev/knowledge/backend/deployment-env-vars.md`](../knowledge/backend/deployment-env-vars.md).
