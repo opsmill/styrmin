@@ -3,8 +3,8 @@
 Drives the full user-facing path: ``updateDeployment(config: { env_vars: ... })``
 (SDK / GraphQL) → server reconciler → FluxCD HelmRelease post-renderers →
 rendered pod spec on the vcluster. Asserts by reading the resulting
-``apps/v1.Deployment`` back from the vcluster API server and inspecting
-the container ``env`` block.
+workload (``apps/v1.Deployment`` / ``StatefulSet`` / ``DaemonSet``) back
+from the vcluster API server and inspecting the container ``env`` block.
 
 US1 scenario corresponds to Quickstart Step 1: deploy ``simple-app``, set
 ``LOG_LEVEL=debug`` on the deployment, observe the env entry on every
@@ -52,22 +52,42 @@ async def _wait_for_pod_template(
     description: str,
     timeout: float = RECONCILE_TIMEOUT_SECONDS,
 ) -> Any:
+    """Poll workloads in ``namespace`` matching ``label_selector`` until one
+    satisfies ``predicate``.
+
+    Scans Deployments, StatefulSets, and DaemonSets — bitnami subcharts
+    (e.g. postgresql) render the database as a StatefulSet, so a
+    Deployment-only scan would never resolve component-scope env-var
+    assertions for those workloads.
+    """
     apps = kubeclient.AppsV1Api(vcluster["api"])
     deadline = time.time() + timeout
-    last_seen: str = "(no matching Deployments)"
+    last_seen: str = "(no matching workloads)"
     while time.time() < deadline:
-        resp = await apps.list_namespaced_deployment(
-            namespace=namespace, label_selector=label_selector
-        )
-        deployments = list(resp.items)
-        for dep in deployments:
+        deployments = (
+            await apps.list_namespaced_deployment(
+                namespace=namespace, label_selector=label_selector
+            )
+        ).items
+        statefulsets = (
+            await apps.list_namespaced_stateful_set(
+                namespace=namespace, label_selector=label_selector
+            )
+        ).items
+        daemonsets = (
+            await apps.list_namespaced_daemon_set(
+                namespace=namespace, label_selector=label_selector
+            )
+        ).items
+        workloads = list(deployments) + list(statefulsets) + list(daemonsets)
+        for workload in workloads:
             try:
-                if predicate(dep):
-                    return dep
+                if predicate(workload):
+                    return workload
             except Exception:
                 continue
-        if deployments:
-            last_seen = f"{len(deployments)} deployment(s) did not satisfy predicate"
+        if workloads:
+            last_seen = f"{len(workloads)} workload(s) did not satisfy predicate"
         await asyncio.sleep(RECONCILE_POLL_INTERVAL)
     raise TimeoutError(
         f"Timed out waiting for {description} in namespace {namespace} "

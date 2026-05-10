@@ -216,9 +216,18 @@ async def _wait_for_service_ready(
 
     deadline = time.time() + endpoint_timeout
     while time.time() < deadline:
-        endpoints = await core_api.read_namespaced_endpoints(
-            name=name, namespace=namespace
-        )
+        try:
+            endpoints = await core_api.read_namespaced_endpoints(
+                name=name, namespace=namespace
+            )
+        except K8sApiException as exc:
+            # Endpoints objects are auto-created by the kube-controller after
+            # the Service is admitted; on a fresh vcluster there is a brief
+            # window where this returns 404. Treat as "not ready yet".
+            if exc.status != 404:
+                raise
+            await asyncio.sleep(2)
+            continue
         if endpoints.subsets and any(subset.addresses for subset in endpoints.subsets):
             break
         await asyncio.sleep(2)
