@@ -215,3 +215,8 @@ playwright-report/
 
 # Speckit per-checkout pointer to the active feature directory
 .specify/feature.json
+
+# Documentation site (Docusaurus)
+docs/node_modules/
+docs/build/
+docs/.docusaurus/

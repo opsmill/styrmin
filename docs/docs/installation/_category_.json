@@ -1,0 +1,9 @@
+{
+  "label": "Installation",
+  "position": 2,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "description": "Installation guides for supported Kubernetes platforms."
+  }
+}

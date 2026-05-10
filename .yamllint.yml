@@ -16,6 +16,8 @@ ignore: |
   /.specify/extensions.yml
   /driver/examples/simple-app/src/helm/
   /driver/examples/db-test/src/helm/templates/
+  /docs/node_modules/
+  /docs/pnpm-lock.yaml
 
 
 rules:
