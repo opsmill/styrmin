@@ -137,9 +137,6 @@ async def execute_velero_backup_flow(
                 "status": {
                     "phase": status.get("phase", ""),
                     "failureReason": status.get("failureReason", ""),
-                    "backupItemOperationsCompleted": status.get(
-                        "backupItemOperationsCompleted"
-                    ),
                 }
             },
             overwrite=True,
@@ -428,12 +425,14 @@ async def execute_backup_workflow(
 
         uow = await get_unit_of_work()
         if velero_phase == "Completed":
-            size_bytes = status.get("backupItemOperationsCompleted")
+            # size_bytes is intentionally omitted: Velero's BackupSpec.status
+            # surfaces backupItemOperationsCompleted (an operation count), not
+            # a byte total. Until a real byte count is available the field
+            # stays None to avoid reporting a count under a byte-sized name.
             await update_backup_status(
                 backup_id=backup_uuid,
                 status=BackupStatus.COMPLETED,
                 uow=uow,
-                size_bytes=size_bytes,
             )
             logger.info(f"Backup {backup_uuid} completed successfully")
         else:
