@@ -213,7 +213,9 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
     # can assert "exactly one new entry" instead of just "non-empty".
     pre_timeline_lengths: dict[str, int] = {}
     for dep in env_update_three_deployments:
-        timeline = await client.deployments.timeline(deployment_id=dep["deployment_id"])
+        timeline = await client.deployments.get_timeline(
+            deployment_id=dep["deployment_id"]
+        )
         pre_timeline_lengths[dep["deployment_id"]] = len(timeline)
 
     # Use the dual-entrypoint scenario_driver method so the test runs
@@ -262,7 +264,7 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
     # follow-up entries (status-only) — what we DO lock is that a fresh
     # entry exists with the new env var in its diff.
     for dep in env_update_three_deployments:
-        timeline_after = await client.deployments.timeline(
+        timeline_after = await client.deployments.get_timeline(
             deployment_id=dep["deployment_id"]
         )
         assert len(timeline_after) > pre_timeline_lengths[dep["deployment_id"]], (
@@ -272,7 +274,11 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
         # At least one new entry must record the env-config change in
         # its context diff — the additions must reference the env var
         # name we set.
-        new_entries = timeline_after[pre_timeline_lengths[dep["deployment_id"]] :]
+        # Timeline is ordered newest-first (see
+        # ``TaskRepository.find_by_deployment``), so the entries added by
+        # the fanout sit at the front of the list — not at the end.
+        new_count = len(timeline_after) - pre_timeline_lengths[dep["deployment_id"]]
+        new_entries = timeline_after[:new_count]
         env_var_in_diff = False
         for entry in new_entries:
             ctx_diff = getattr(entry, "context_diff", None)
@@ -282,9 +288,23 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
             for change in changes:
                 path = getattr(change, "path", "") or ""
                 new_value = getattr(change, "new_value", None)
-                if "OTEL_EXPORTER_OTLP_ENDPOINT" in path or (
-                    isinstance(new_value, str) and target_value in new_value
+                # The diff path contains the env var name when ``env_vars``
+                # already existed pre-update (the recursive dict diff
+                # extends the path with the new key). When ``env_vars`` was
+                # absent pre-update it is recorded as a single
+                # ``added`` change at ``instance.config.env_vars`` whose
+                # ``new_value`` is the whole env-vars dict — match either
+                # shape, plus the legacy "value-substring" form.
+                if "OTEL_EXPORTER_OTLP_ENDPOINT" in path:
+                    env_var_in_diff = True
+                    break
+                if isinstance(new_value, dict) and (
+                    "OTEL_EXPORTER_OTLP_ENDPOINT" in new_value
+                    or target_value in new_value.values()
                 ):
+                    env_var_in_diff = True
+                    break
+                if isinstance(new_value, str) and target_value in new_value:
                     env_var_in_diff = True
                     break
             if env_var_in_diff:
@@ -403,7 +423,7 @@ async def test_us1_environment_update_failure_isolation(
     } in envs_a
 
     # B's timeline records a failed Task.
-    timeline_b = await client.deployments.timeline(
+    timeline_b = await client.deployments.get_timeline(
         deployment_id=deployment_b["deployment_id"]
     )
     failed_tasks = [
