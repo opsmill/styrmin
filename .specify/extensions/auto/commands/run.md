@@ -14,75 +14,51 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 You are running the **full speckit pipeline** end-to-end. The user's input (above) is the feature description that will seed the specification phase.
 
-Execute every phase below **in order**, making all decisions autonomously. Do not stop to ask the user for input between phases — if a phase requires choices (e.g., clarification questions in specify, research decisions in plan), use your best judgment and proceed. The user expects a hands-off, one-shot execution.
+This command is a thin orchestrator over two sibling commands:
 
-After **each phase**, invoke the `speckit-checkpoint-commit` skill to commit the artifacts produced by that phase before moving on.
+- `speckit.auto.prep` — Specify → Plan → Critique → Tasks (+ spec/ask alignment check)
+- `speckit.auto.implement` — Implement → Review → Final report
+
+Run them back-to-back, then run extraction, making all decisions autonomously. Do not stop to ask the user for input between phases — if a sub-phase requires choices (clarification questions in specify, research decisions in plan, drift remediation in alignment), use your best judgment and proceed. The user expects a hands-off, one-shot execution.
 
 > Each phase below is executed by invoking the named skill (e.g. via the agent's Skill tool). Skills are agent-agnostic, so this workflow runs identically across any harness that supports skill discovery — not only those exposing speckit slash commands.
 
-### Phase 1 — Specify
+### Phase A — Preparation (delegated to `speckit.auto.prep`)
 
-Invoke the `speckit-specify` skill with the user's feature description (`$ARGUMENTS`).
+Invoke the `speckit-auto-prep` skill with the user's feature description (`$ARGUMENTS`) verbatim.
 
-- Complete the full specify workflow: generate a short name, create the spec directory, write `spec.md`, run quality checks.
-- If clarification questions arise, answer them yourself based on context and best judgment — do **not** pause for user input.
-- Commit the spec artifacts.
+- This covers Specify → Plan → Critique → Tasks **and** the trailing spec/ask alignment check.
+- The sub-skill commits its own artifacts after each phase via `speckit-checkpoint-commit`.
+- If the alignment check inside auto-prep loops (re-running plan/critique/tasks to fix spec drift), let it run to completion. Do not interfere.
+- Capture the spec directory path it produced — you will pass it to Phase B.
 
-### Phase 2 — Plan
+If `speckit-auto-prep` reports it stopped early (e.g., alignment never converged within its retry budget), surface the failure to the user and stop. Do not proceed to implementation on a misaligned spec.
 
-Invoke the `speckit-plan` skill.
+### Phase B — Implementation tail (delegated to `speckit.auto.implement`)
 
-- Complete the full plan workflow: research unknowns, generate `plan.md`, `research.md`, `data-model.md`, API contracts, `quickstart.md`.
-- Make all design decisions autonomously.
-- Commit the plan artifacts.
+Invoke the `speckit-auto-implement` skill with the spec directory path from Phase A as its argument.
 
-### Phase 3 — Critique
+- This covers Phase 0 (Preflight) → Phase 5 (Implement loop in clean-context subagents) → Phase 6 (Review) → Phase 7 (Final report).
+- The sub-skill writes `<spec-dir>/auto-implement-report.md` and commits it.
+- If it reports blocked tasks or unfixed high-severity review findings, capture that for the final summary — but do not retry from this orchestrator. The user will decide whether to re-run.
 
-Invoke the `speckit-critique-run` skill.
-
-- Run the dual-lens (Product + Engineering) critique against `spec.md` and `plan.md` before any tasks are generated.
-- For any 🎯 **Must-Address** findings, apply the suggested fixes to `spec.md` / `plan.md` autonomously and commit them — do not pause for user approval.
-- For 💡 Recommendations, apply them when the fix is clear and low-risk; otherwise note and move on.
-- 🤔 Questions: resolve with your best judgment based on context (same rule as the Specify phase).
-- If the verdict is 🛑 **RETHINK**, loop back to `speckit-plan` (or `speckit-specify` if the spec itself is the problem), re-run the critique, then continue.
-- Commit the critique report and any spec/plan updates before moving on.
-
-### Phase 4 — Tasks
-
-Invoke the `speckit-tasks` skill.
-
-- Generate the full `tasks.md` with dependency-ordered, actionable tasks.
-- Skip the optional `speckit-analyze` skill unless something looks inconsistent — use your judgment.
-- Commit the tasks artifact.
-
-### Phase 5 — Implement
-
-Invoke the `speckit-implement` skill.
-
-- Execute all tasks from `tasks.md` phase by phase.
-- Commit at natural implementation checkpoints (after each task or logical group of tasks).
-- Run formatters and linters as required by the project.
-- If tests fail, fix them before moving on.
-
-### Phase 6 — Review
-
-Invoke the `speckit-review-run` skill.
-
-- Run the comprehensive review across all enabled agents.
-- For any findings rated **high severity or above**, fix them immediately and commit the fixes.
-- For lower-severity findings, note them but do not block progress.
-
-### Phase 7 — Extract
+### Phase C — Extract
 
 Invoke the `speckit-extract-run` skill.
 
 - Extract ADRs, knowledge, and guidelines from the completed spec into `dev/`.
-- Commit the extracted documentation.
+- Commit the extracted documentation via `speckit-checkpoint-commit`.
+
+`speckit.auto.implement` deliberately stops before extraction, so this phase only runs from `speckit.auto.run`.
 
 ## Completion
 
-After all phases are complete, provide a brief summary:
+After all three phases are complete, provide a brief summary:
+
 - Feature name and spec directory
-- Number of tasks completed
-- Any review findings that were fixed
-- Any notable decisions you made autonomously
+- Whether the alignment check inside auto-prep required retries (and how many)
+- Number of tasks completed (from the auto-implement report)
+- Any review findings that were fixed inline vs. deferred
+- Any notable decisions you or the sub-skills made autonomously
+
+Do **not** open a PR, push, or start a new feature. The user takes it from there.

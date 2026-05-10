@@ -10,13 +10,22 @@ It also splits the pipeline at its natural seam — preparation vs. implementati
 
 ## Commands
 
-The extension provides three commands:
+The extension provides three commands. `auto.run` is a thin orchestrator over the other two — there is exactly one source of truth for each phase.
 
-- **`/speckit.auto.run`** — Full pipeline, end-to-end. Specify → Plan → Critique → Tasks → Implement → Review → Extract. Use when you trust the agent to take a feature description all the way to merged code without you in the loop.
-- **`/speckit.auto.prep`** — Preparation phases only. Specify → Plan → Critique → Tasks. Stops with a reviewable `tasks.md`. Use when you want a feature fully designed by the agent but want to eyeball the task breakdown before any code is written.
-- **`/speckit.auto.implement`** — Implementation tail only. Picks up an existing `tasks.md` and runs Implement → Review → Final report, executing each chunk inside a clean-context subagent so the orchestrator's context stays small. Use after `/speckit.auto.prep` (or after manual prep) when you're ready to let the agent execute.
+- **`/speckit.auto.prep`** — Preparation phases. Specify → Plan → Critique → Tasks → **Spec/Ask Alignment Check**. Stops with a reviewable `tasks.md` and an `alignment-check.md` confirming the spec still matches the user's original ask (especially when the ask is a detailed PRD or a link to one).
+- **`/speckit.auto.implement`** — Implementation tail. Picks up an existing `tasks.md` and runs Implement → Review → Final report, executing each chunk inside a clean-context subagent so the orchestrator's context stays small. Use after `/speckit.auto.prep` (or after manual prep) when you're ready to let the agent execute.
+- **`/speckit.auto.run`** — Full pipeline. Invokes `auto.prep`, then `auto.implement`, then a final extraction pass — no duplicated phase logic. Use when you trust the agent to take a feature description all the way to merged code without you in the loop.
 
 After each phase, the agent invokes `/speckit.checkpoint.commit` to commit the artifacts produced. Clarifications and design decisions are made autonomously — the workflow does not pause for user input between phases.
+
+### Spec/Ask Alignment Check
+
+`auto.prep`'s last phase compares the generated `spec.md` against the user's original ask, with two important behaviours:
+
+- **URL-aware** — if `$ARGUMENTS` contains a link to a PRD (Notion, Confluence, Google Doc, GitHub issue, Linear ticket, etc.), the check fetches the link and uses its body as the source-of-truth PRD. PRDs are commonly delivered as links, not pasted inline.
+- **Auto-remediation with a retry budget** — if the spec has significantly drifted (missing requirements, added scope, changed semantics, dropped acceptance criteria, contradicted constraints), the check updates `spec.md` and re-runs Plan → Critique → Tasks, then re-validates. Up to 2 remediation passes; if drift persists, it stops and surfaces an `🛑 UNRESOLVED — manual review required` verdict rather than silently proceeding.
+
+The check is skipped automatically when the ask is a one-liner or empty (no PRD to compare against).
 
 ## Quick Start
 
@@ -51,6 +60,7 @@ When finished, each command reports a summary:
 - Feature name and spec directory
 - Number of tasks generated and/or completed
 - Any critique or review findings that were fixed inline
+- Alignment check status — verdict, source PRD reference, and how many remediation passes were used (only from `auto.prep` and `auto.run`)
 - Any notable decisions made autonomously
 
 ## When to Use This
@@ -64,9 +74,9 @@ A common middle-ground workflow: run `/speckit.auto.prep`, review and tweak `tas
 ```
 extension.yml          # Extension metadata and command registration
 commands/
-  run.md               # Full pipeline (specify → ... → extract)
-  prep.md              # Preparation only (specify → ... → tasks)
+  prep.md              # Preparation (specify → ... → tasks → alignment check)
   implement.md         # Implementation tail (implement → review → report)
+  run.md               # Orchestrator: invokes prep + implement + extract
 ```
 
 ## License
