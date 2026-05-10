@@ -60,10 +60,17 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [adr-011-replace-urql-with-tanstack-query.md](adr/adr-011-replace-urql-with-tanstack-query.md) - Replace urql with TanStack Query for GraphQL data fetching
 - [adr-012-migrate-forms-to-tanstack-form.md](adr/adr-012-migrate-forms-to-tanstack-form.md) - Migrate frontend forms from React Hook Form to TanStack Form
 - [adr-013-migrate-ui-primitives-to-base-ui.md](adr/adr-013-migrate-ui-primitives-to-base-ui.md) - Migrate frontend UI primitives from Radix UI to Base UI
+- [adr-014-pod-status-records-observed-state-not-declared-state.md](adr/adr-014-pod-status-records-observed-state-not-declared-state.md) - Pod-status records observed runtime state, not declared component intent
+- [adr-014-pre-commit-hooks-via-prek.md](adr/adr-014-pre-commit-hooks-via-prek.md) - Pre-commit hooks via prek
 - [adr-015-deployment-soft-delete-tombstoning.md](adr/adr-015-deployment-soft-delete-tombstoning.md) - Soft-delete tombstoning with the agent status reporter as the sole writer of `Deployment.deleted_at`
 - [adr-016-forensic-cr-retention-janitor.md](adr/adr-016-forensic-cr-retention-janitor.md) - Forensic-retention CR janitor: TTL-gated reaping of `phase: Deleted` CRs, never reaps `Deleting`-stuck ones
 - [adr-017-tombstone-visibility-conflation.md](adr/adr-017-tombstone-visibility-conflation.md) - Tombstoned-record visibility: `NOT_FOUND` conflation on writes + opt-in `includeDeleted` filter on reads
 - [adr-018-scoped-tombstone-aware-name-uniqueness.md](adr/adr-018-scoped-tombstone-aware-name-uniqueness.md) - Per-environment, tombstone-aware deployment name uniqueness via partial unique index
+- [adr-019-deployment-env-vars.md](adr/adr-019-deployment-env-vars.md) - Deployment env vars — free-form, three-scope, post-render injected (post-render injection layer later superseded by ADR-021)
+- [adr-020-environment-config-fanout.md](adr/adr-020-environment-config-fanout.md) - Environment-config update — typed `UpdateEnvironmentInput`, per-deployment fanout, clean replace
+- [adr-021-driver-env-var-consumption.md](adr/adr-021-driver-env-var-consumption.md) - Driver-side env var consumption via the values template, replacing platform post-render injection
+- [adr-022-schema-walking-input-propagation-tests.md](adr/adr-022-schema-walking-input-propagation-tests.md) - Schema-walking propagation tests for Strawberry input completeness against Pydantic config models
+- [adr-023-frontend-value-transform-boundary.md](adr/adr-023-frontend-value-transform-boundary.md) - Frontend value-transform layer at the GraphQL submit boundary for full-replacement inputs
 
 ## Current Knowledge
 

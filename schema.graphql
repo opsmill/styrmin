@@ -6,6 +6,24 @@ type Action {
   image: String
 }
 
+"""Affinity block (required + preferred) for one affinity kind."""
+input AffinityBlockInput {
+  required: [AffinityTermInput!] = null
+  preferred: [WeightedAffinityTermInput!] = null
+  replace: Boolean = null
+}
+
+"""Single affinity term mirroring ``AffinityTerm``."""
+input AffinityTermInput {
+  topologyKey: String!
+  namespaces: [String!] = null
+  namespaceSelector: LabelSelectorInput = null
+  labelSelector: LabelSelectorInput = null
+  deploymentRef: DeploymentReferenceInput = null
+  matchLabelKeys: [String!] = null
+  mismatchLabelKeys: [String!] = null
+}
+
 type ApplicationDriver {
   id: UUID!
   name: String!
@@ -26,6 +44,11 @@ type ApplicationDriverVersion {
   applicationDriver: ApplicationDriver!
   services: [ServiceDefinition!]!
   parameters: [ParameterDefinition!]!
+
+  """
+  Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block.
+  """
+  envVars: [DriverEnvVarDoc!]!
   componentConfigs: [ComponentConfig!]!
   helmChart: HelmChart!
   actions: [Action!]!
@@ -123,6 +146,24 @@ type ComponentConfig {
   config: JSON
 }
 
+"""
+A bundle of environment variables targeting one component of a deployment, plus an ``isOrphaned`` flag indicating whether the deployment's current driver still declares the targeted component. Orphaned blocks remain visible in the API but are NOT injected into rendered pods.
+"""
+type ComponentEnvVars {
+  """Name of the targeted component."""
+  component: String!
+
+  """
+  The effective env vars set on this component (env+dep+component merged).
+  """
+  envVars: [EnvVar!]!
+
+  """
+  True when the deployment's current driver no longer declares this component (the upgrade renamed or removed it). Orphaned blocks are visible in the API but are NOT injected into rendered pods, so the operator can audit and clean them up.
+  """
+  isOrphaned: Boolean!
+}
+
 type ComponentRestoreStatus {
   componentName: String!
   status: String!
@@ -159,6 +200,13 @@ type CrdConditionType {
 """Date with time (isoformat)"""
 scalar DateTime
 
+"""Dedicated per-environment ingress controller configuration."""
+input DedicatedIngressInput {
+  implementation: String = null
+  type: String = null
+  service: IngressServiceConfigInput = null
+}
+
 type DeployedService {
   id: UUID!
   driverServiceName: String!
@@ -192,12 +240,29 @@ type Deployment {
   deployedServices: [DeployedService!]!
   podStatuses: [PodStatus!]!
   resolvedScheduling: [ResolvedComponentScheduling!]!
+
+  """
+  Effective deployment-level env vars (after merging environment & deployment scopes, but BEFORE component-level overrides). Empty when none are set.
+  """
+  envVars: [EnvVar!]!
+
+  """
+  Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Orphaned blocks (component renamed or removed by a driver upgrade — FR-029..FR-033) are visible here but skipped by the post-render injector so no env entries reach rendered pods.
+  """
+  componentEnvVars: [ComponentEnvVars!]!
   crdStatus: DeploymentStatusType
 }
 
 input DeploymentPodStatusReport {
   deploymentId: UUID!
   pods: [PodStatusInput!]!
+}
+
+"""Reference to another deployment in the same environment."""
+input DeploymentReferenceInput {
+  deploymentId: String = null
+  deploymentName: String = null
+  components: [String!] = null
 }
 
 input DeploymentStatusReportInput {
@@ -228,6 +293,42 @@ type DeploymentTimelineEntry {
   contextDiff: ContextDiff
 }
 
+"""
+Doc-only declaration of an env var the driver's app respects. Surfaces in the driver detail view; does not validate, default, or constrain operator-set values (FR-015).
+"""
+type DriverEnvVarDoc {
+  name: String!
+  description: String!
+  level: DriverEnvVarLevel!
+  components: [String!]!
+}
+
+enum DriverEnvVarLevel {
+  DEPLOYMENT
+  COMPONENT
+}
+
+"""
+A single environment variable to inject into rendered containers.
+
+WARNING: This surface is for non-secret values only. The platform stores values in plaintext and exposes them through any query that selects them. Do not store credentials, API keys, or other secret material here — use the dedicated secret env var path (separate ticket) once available.
+"""
+type EnvVar {
+  """POSIX-portable env var name, matching ^[A-Za-z_][A-Za-z0-9_]*$."""
+  name: String!
+
+  """
+  The value to set. May be the empty string. NOT for secret material; see the EnvVar type description.
+  """
+  value: String!
+}
+
+"""A single environment variable name/value pair."""
+input EnvVarInput {
+  name: String!
+  value: String!
+}
+
 type Environment {
   id: UUID!
   name: String!
@@ -235,7 +336,24 @@ type Environment {
   capabilities: JSON!
   cluster: Cluster!
   backupStorageLocation: BackupStorageLocation
+
+  """
+  Env vars set at the environment scope. Empty when none are set.
+  
+  WARNING: This surface is for non-secret values only. The platform stores values in plaintext and exposes them through any query that selects them. Do not store credentials, API keys, or other secret material here — use the dedicated secret env var path (separate ticket) once available.
+  """
+  envVars: [EnvVar!]!
   deployments(includeDeleted: Boolean! = false): [Deployment!]!
+}
+
+enum ExternalDnsEndpointsType {
+  NODE_EXTERNAL_IP
+  CLUSTER_IP
+}
+
+enum ExternalUrlScheme {
+  HTTP
+  HTTPS
 }
 
 type HelmChart {
@@ -246,10 +364,41 @@ type HelmChart {
   repository: String!
 }
 
+"""Configuration for the dedicated ingress Kubernetes Service."""
+input IngressServiceConfigInput {
+  type: String = null
+  annotations: JSON = null
+  loadBalancerIp: String = null
+  externalTrafficPolicy: String = null
+  ipFamilies: [String!] = null
+  ipFamilyPolicy: String = null
+  nodePort: Int = null
+}
+
 """
 The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).
 """
 scalar JSON @specifiedBy(url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf")
+
+"""Kubernetes-style label selector."""
+input LabelSelectorInput {
+  matchLabels: JSON = null
+  matchExpressions: [LabelSelectorRequirementInput!] = null
+}
+
+enum LabelSelectorOperator {
+  IN
+  NOT_IN
+  EXISTS
+  DOES_NOT_EXIST
+}
+
+"""One ``matchExpressions`` entry on a label selector."""
+input LabelSelectorRequirementInput {
+  key: String!
+  operator: LabelSelectorOperator!
+  values: [String!] = null
+}
 
 input ManagedResourceCountsInput {
   networkPolicies: Int! = 0
@@ -271,6 +420,7 @@ type Mutation {
   createCluster(name: String! = "default", config: JSON = null): Cluster
   deleteCluster(clusterId: UUID = null, clusterName: String = null): String
   createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment
+  updateEnvironment(environmentId: UUID!, input: UpdateEnvironmentInput!): Environment
   deleteEnvironment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): String
   createBackupStorageLocation(name: String!, endpoint: String!, bucket: String!, region: String!, accessKeyId: String!, secretAccessKey: String!): BackupStorageLocation
   updateBackupStorageLocation(backupStorageLocationId: UUID!, name: String = null, endpoint: String = null, bucket: String = null, region: String = null, accessKeyId: String = null, secretAccessKey: String = null): BackupStorageLocation
@@ -342,6 +492,16 @@ input PodStatusInput {
   startedAt: DateTime = null
 }
 
+"""Per-feature opt-out flags for the post-render injection."""
+input PostRenderInjectionInput {
+  podAffinity: Boolean = null
+  nodeAffinity: Boolean = null
+  topologySpread: Boolean = null
+  resources: Boolean = null
+  tolerations: Boolean = null
+  runtimeClass: Boolean = null
+}
+
 type Query {
   clusters: [Cluster!]!
   cluster(clusterId: UUID = null, clusterName: String = null): Cluster
@@ -389,6 +549,20 @@ type ResolvedComponentScheduling {
   provenance: JSON!
 }
 
+"""Container resource requirements (``requests`` and ``limits``)."""
+input ResourceRequirementsInput {
+  requests: ResourceSpecInput = null
+  limits: ResourceSpecInput = null
+}
+
+"""Pod-container resource ``requests`` or ``limits`` payload."""
+input ResourceSpecInput {
+  cpu: String = null
+  memory: String = null
+  ephemeralStorage: String = null
+  extended: JSON = null
+}
+
 type Restore {
   id: UUID!
   name: String!
@@ -410,6 +584,18 @@ enum RestoreStatus {
   IN_PROGRESS
   COMPLETED
   FAILED
+}
+
+"""Hierarchical pod scheduling & resource configuration section."""
+input SchedulingInput {
+  podAffinity: AffinityBlockInput = null
+  podAntiAffinity: AffinityBlockInput = null
+  nodeAffinity: AffinityBlockInput = null
+  topologySpreadConstraints: [TopologySpreadConstraintInput!] = null
+  resources: ResourceRequirementsInput = null
+  tolerations: [TolerationInput!] = null
+  runtimeClass: String = null
+  inject: PostRenderInjectionInput = null
 }
 
 type ServiceDefinition {
@@ -436,4 +622,63 @@ type Task {
   deployment: Deployment
 }
 
+enum TolerationEffect {
+  NO_SCHEDULE
+  PREFER_NO_SCHEDULE
+  NO_EXECUTE
+}
+
+"""Single pod toleration entry."""
+input TolerationInput {
+  key: String = null
+  operator: TolerationOperator = null
+  value: String = null
+  effect: TolerationEffect = null
+  tolerationSeconds: Int = null
+}
+
+enum TolerationOperator {
+  EXISTS
+  EQUAL
+}
+
+"""One topology-spread constraint on the pod template."""
+input TopologySpreadConstraintInput {
+  maxSkew: Int!
+  topologyKey: String!
+  whenUnsatisfiable: WhenUnsatisfiable!
+  labelSelector: LabelSelectorInput = null
+  minDomains: Int = null
+  nodeAffinityPolicy: String = null
+  nodeTaintsPolicy: String = null
+  matchLabelKeys: [String!] = null
+}
+
 scalar UUID
+
+"""
+Full-replacement input for environment configuration updates. Submit the complete desired configuration; any field omitted (``null``) is persisted as its unset state on the underlying EnvironmentConfig.
+"""
+input UpdateEnvironmentInput {
+  envVars: [EnvVarInput!] = null
+  ipWhitelist: [String!] = null
+  dedicatedIngress: DedicatedIngressInput = null
+  scheduling: SchedulingInput = null
+  fqdnSuffix: String = null
+  externalUrlScheme: ExternalUrlScheme = null
+  externalUrlPort: Int = null
+  externalDnsEndpointsType: ExternalDnsEndpointsType = null
+  ingressClass: String = null
+  dbSize: String = null
+}
+
+"""Weighted affinity term for a ``preferred`` rule."""
+input WeightedAffinityTermInput {
+  weight: Int!
+  term: AffinityTermInput!
+}
+
+enum WhenUnsatisfiable {
+  DO_NOT_SCHEDULE
+  SCHEDULE_ANYWAY
+}

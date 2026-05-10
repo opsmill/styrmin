@@ -8,7 +8,43 @@ from uuid import UUID
 from pydantic import Field
 
 from .base_model import BaseModel
-from .enums import PodPhase
+from .enums import (
+    ExternalDnsEndpointsType,
+    ExternalUrlScheme,
+    LabelSelectorOperator,
+    PodPhase,
+    TolerationEffect,
+    TolerationOperator,
+    WhenUnsatisfiable,
+)
+
+
+class AffinityBlockInput(BaseModel):
+    """Affinity block (required + preferred) for one affinity kind."""
+
+    required: Optional[list["AffinityTermInput"]] = None
+    preferred: Optional[list["WeightedAffinityTermInput"]] = None
+    replace: Optional[bool] = None
+
+
+class AffinityTermInput(BaseModel):
+    """Single affinity term mirroring ``AffinityTerm``."""
+
+    topology_key: str = Field(alias="topologyKey")
+    namespaces: Optional[list[str]] = None
+    namespace_selector: Optional["LabelSelectorInput"] = Field(
+        alias="namespaceSelector", default=None
+    )
+    label_selector: Optional["LabelSelectorInput"] = Field(
+        alias="labelSelector", default=None
+    )
+    deployment_ref: Optional["DeploymentReferenceInput"] = Field(
+        alias="deploymentRef", default=None
+    )
+    match_label_keys: Optional[list[str]] = Field(alias="matchLabelKeys", default=None)
+    mismatch_label_keys: Optional[list[str]] = Field(
+        alias="mismatchLabelKeys", default=None
+    )
 
 
 class CrdConditionInput(BaseModel):
@@ -21,9 +57,25 @@ class CrdConditionInput(BaseModel):
     )
 
 
+class DedicatedIngressInput(BaseModel):
+    """Dedicated per-environment ingress controller configuration."""
+
+    implementation: Optional[str] = None
+    type_: Optional[str] = Field(alias="type", default=None)
+    service: Optional["IngressServiceConfigInput"] = None
+
+
 class DeploymentPodStatusReport(BaseModel):
     deployment_id: UUID = Field(alias="deploymentId")
     pods: list["PodStatusInput"]
+
+
+class DeploymentReferenceInput(BaseModel):
+    """Reference to another deployment in the same environment."""
+
+    deployment_id: Optional[str] = Field(alias="deploymentId", default=None)
+    deployment_name: Optional[str] = Field(alias="deploymentName", default=None)
+    components: Optional[list[str]] = None
 
 
 class DeploymentStatusReportInput(BaseModel):
@@ -36,6 +88,44 @@ class DeploymentStatusReportInput(BaseModel):
     managed_resource_counts: Optional["ManagedResourceCountsInput"] = Field(
         alias="managedResourceCounts", default=None
     )
+
+
+class EnvVarInput(BaseModel):
+    """A single environment variable name/value pair."""
+
+    name: str
+    value: str
+
+
+class IngressServiceConfigInput(BaseModel):
+    """Configuration for the dedicated ingress Kubernetes Service."""
+
+    type_: Optional[str] = Field(alias="type", default=None)
+    annotations: Optional[Any] = None
+    load_balancer_ip: Optional[str] = Field(alias="loadBalancerIp", default=None)
+    external_traffic_policy: Optional[str] = Field(
+        alias="externalTrafficPolicy", default=None
+    )
+    ip_families: Optional[list[str]] = Field(alias="ipFamilies", default=None)
+    ip_family_policy: Optional[str] = Field(alias="ipFamilyPolicy", default=None)
+    node_port: Optional[int] = Field(alias="nodePort", default=None)
+
+
+class LabelSelectorInput(BaseModel):
+    """Kubernetes-style label selector."""
+
+    match_labels: Optional[Any] = Field(alias="matchLabels", default=None)
+    match_expressions: Optional[list["LabelSelectorRequirementInput"]] = Field(
+        alias="matchExpressions", default=None
+    )
+
+
+class LabelSelectorRequirementInput(BaseModel):
+    """One ``matchExpressions`` entry on a label selector."""
+
+    key: str
+    operator: LabelSelectorOperator
+    values: Optional[list[str]] = None
 
 
 class ManagedResourceCountsInput(BaseModel):
@@ -58,10 +148,122 @@ class PodStatusInput(BaseModel):
     started_at: Optional[datetime] = Field(alias="startedAt", default=None)
 
 
+class PostRenderInjectionInput(BaseModel):
+    """Per-feature opt-out flags for the post-render injection."""
+
+    pod_affinity: Optional[bool] = Field(alias="podAffinity", default=None)
+    node_affinity: Optional[bool] = Field(alias="nodeAffinity", default=None)
+    topology_spread: Optional[bool] = Field(alias="topologySpread", default=None)
+    resources: Optional[bool] = None
+    tolerations: Optional[bool] = None
+    runtime_class: Optional[bool] = Field(alias="runtimeClass", default=None)
+
+
+class ResourceRequirementsInput(BaseModel):
+    """Container resource requirements (``requests`` and ``limits``)."""
+
+    requests: Optional["ResourceSpecInput"] = None
+    limits: Optional["ResourceSpecInput"] = None
+
+
+class ResourceSpecInput(BaseModel):
+    """Pod-container resource ``requests`` or ``limits`` payload."""
+
+    cpu: Optional[str] = None
+    memory: Optional[str] = None
+    ephemeral_storage: Optional[str] = Field(alias="ephemeralStorage", default=None)
+    extended: Optional[Any] = None
+
+
+class SchedulingInput(BaseModel):
+    """Hierarchical pod scheduling & resource configuration section."""
+
+    pod_affinity: Optional["AffinityBlockInput"] = Field(
+        alias="podAffinity", default=None
+    )
+    pod_anti_affinity: Optional["AffinityBlockInput"] = Field(
+        alias="podAntiAffinity", default=None
+    )
+    node_affinity: Optional["AffinityBlockInput"] = Field(
+        alias="nodeAffinity", default=None
+    )
+    topology_spread_constraints: Optional[list["TopologySpreadConstraintInput"]] = (
+        Field(alias="topologySpreadConstraints", default=None)
+    )
+    resources: Optional["ResourceRequirementsInput"] = None
+    tolerations: Optional[list["TolerationInput"]] = None
+    runtime_class: Optional[str] = Field(alias="runtimeClass", default=None)
+    inject: Optional["PostRenderInjectionInput"] = None
+
+
 class ServiceNameOverride(BaseModel):
     driver_service_name: str = Field(alias="driverServiceName")
     override_name: str = Field(alias="overrideName")
 
 
+class TolerationInput(BaseModel):
+    """Single pod toleration entry."""
+
+    key: Optional[str] = None
+    operator: Optional[TolerationOperator] = None
+    value: Optional[str] = None
+    effect: Optional[TolerationEffect] = None
+    toleration_seconds: Optional[int] = Field(alias="tolerationSeconds", default=None)
+
+
+class TopologySpreadConstraintInput(BaseModel):
+    """One topology-spread constraint on the pod template."""
+
+    max_skew: int = Field(alias="maxSkew")
+    topology_key: str = Field(alias="topologyKey")
+    when_unsatisfiable: WhenUnsatisfiable = Field(alias="whenUnsatisfiable")
+    label_selector: Optional["LabelSelectorInput"] = Field(
+        alias="labelSelector", default=None
+    )
+    min_domains: Optional[int] = Field(alias="minDomains", default=None)
+    node_affinity_policy: Optional[str] = Field(
+        alias="nodeAffinityPolicy", default=None
+    )
+    node_taints_policy: Optional[str] = Field(alias="nodeTaintsPolicy", default=None)
+    match_label_keys: Optional[list[str]] = Field(alias="matchLabelKeys", default=None)
+
+
+class UpdateEnvironmentInput(BaseModel):
+    """Full-replacement input for environment configuration updates. Submit the complete desired configuration; any field omitted (``null``) is persisted as its unset state on the underlying EnvironmentConfig."""
+
+    env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
+    ip_whitelist: Optional[list[str]] = Field(alias="ipWhitelist", default=None)
+    dedicated_ingress: Optional["DedicatedIngressInput"] = Field(
+        alias="dedicatedIngress", default=None
+    )
+    scheduling: Optional["SchedulingInput"] = None
+    fqdn_suffix: Optional[str] = Field(alias="fqdnSuffix", default=None)
+    external_url_scheme: Optional[ExternalUrlScheme] = Field(
+        alias="externalUrlScheme", default=None
+    )
+    external_url_port: Optional[int] = Field(alias="externalUrlPort", default=None)
+    external_dns_endpoints_type: Optional[ExternalDnsEndpointsType] = Field(
+        alias="externalDnsEndpointsType", default=None
+    )
+    ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
+    db_size: Optional[str] = Field(alias="dbSize", default=None)
+
+
+class WeightedAffinityTermInput(BaseModel):
+    """Weighted affinity term for a ``preferred`` rule."""
+
+    weight: int
+    term: "AffinityTermInput"
+
+
+AffinityBlockInput.model_rebuild()
+AffinityTermInput.model_rebuild()
+DedicatedIngressInput.model_rebuild()
 DeploymentPodStatusReport.model_rebuild()
 DeploymentStatusReportInput.model_rebuild()
+LabelSelectorInput.model_rebuild()
+ResourceRequirementsInput.model_rebuild()
+SchedulingInput.model_rebuild()
+TopologySpreadConstraintInput.model_rebuild()
+UpdateEnvironmentInput.model_rebuild()
+WeightedAffinityTermInput.model_rebuild()

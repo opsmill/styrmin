@@ -12,9 +12,17 @@ infrahubServer:
       - name: "{{ services.infrahub.human_readable_fqdn }}"
         path: /
   infrahubServer:
+    # Hardcoded chart wiring + operator-supplied env vars for the `server`
+    # component.
     env:
-      PREFECT_API_URL: "http://styrmin-task-manager:4200/api"
-      INFRAHUB_WORKFLOW_ADDRESS: styrmin-task-manager
+      - name: PREFECT_API_URL
+        value: "http://styrmin-task-manager:4200/api"
+      - name: INFRAHUB_WORKFLOW_ADDRESS
+        value: styrmin-task-manager
+{%- for entry in components | component_env_vars("server") %}
+      - name: {{ entry.name | tojson }}
+        value: {{ entry.value | tojson }}
+{%- endfor %}
   persistence:
     accessMode: ReadWriteOnce
     enabled: true
@@ -22,9 +30,17 @@ infrahubServer:
   replicas: "{{ parameters.replicas_server }}"
 infrahubTaskWorker:
   infrahubTaskWorker:
+    # Hardcoded chart wiring + operator-supplied env vars for the
+    # `task-worker` component.
     env:
-      PREFECT_API_URL: "http://styrmin-task-manager:4200/api"
-      INFRAHUB_WORKFLOW_ADDRESS: styrmin-task-manager
+      - name: PREFECT_API_URL
+        value: "http://styrmin-task-manager:4200/api"
+      - name: INFRAHUB_WORKFLOW_ADDRESS
+        value: styrmin-task-manager
+{%- for entry in components | component_env_vars("task-worker") %}
+      - name: {{ entry.name | tojson }}
+        value: {{ entry.value | tojson }}
+{%- endfor %}
   replicas: "{{ parameters.replicas_task_worker }}"
 nats:
   enabled: false
@@ -35,6 +51,8 @@ neo4j:
   additionalVolumes:
     - emptyDir: {}
       name: backup
+  # Operator-supplied env vars for the `database` component.
+  env: {{ components | component_env_vars("database") | tojson }}
   config:
     server.backup.enabled: "true"
   disableLookups: true
@@ -86,14 +104,22 @@ prefect-server:
         timeoutSeconds: 1
         failureThreshold: 120
       resourcesPreset: none
+    # Hardcoded analytics flag plus operator-supplied env vars for the
+    # `task-manager-db` component.
     env:
-    - name: PREFECT_SERVER_ANALYTICS_ENABLED
-      value: "{{ parameters.enable_analytics }}"
+      - name: PREFECT_SERVER_ANALYTICS_ENABLED
+        value: "{{ parameters.enable_analytics }}"
+{%- for entry in components | component_env_vars("task-manager-db") %}
+      - name: {{ entry.name | tojson }}
+        value: {{ entry.value | tojson }}
+{%- endfor %}
 rabbitmq:
   enabled: true
   fullnameOverride: styrmin-message-queue
   auth:
     erlangCookie: styrmin-infrahub-supersecret
+  # Operator-supplied env vars for the `message-queue` component.
+  extraEnvVars: {{ components | component_env_vars("message-queue") | tojson }}
   startupProbe:
     enabled: true
     initialDelaySeconds: 1
@@ -110,6 +136,8 @@ redis:
   enabled: true
   fullnameOverride: styrmin-cache
   master:
+    # Operator-supplied env vars for the `cache` component.
+    extraEnvVars: {{ components | component_env_vars("cache") | tojson }}
     startupProbe:
       enabled: true
       initialDelaySeconds: 1

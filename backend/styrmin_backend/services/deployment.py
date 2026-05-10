@@ -22,6 +22,10 @@ from styrmin_backend.domain.utils import (
 )
 from styrmin_backend.context.models.config import DedicatedIngressConfig
 from styrmin_backend.operator.config import CRD_GROUP, CRD_PLURAL, CRD_VERSION
+from styrmin_backend.services.env_vars.exceptions import (
+    UnknownComponentEnvVarError,
+)
+from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
     DeploymentNameConflictError,
@@ -48,6 +52,81 @@ from styrmin_backend.services.services_discovery import (
     reconcile_services_on_upgrade,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
+
+
+def _validate_component_env_var_targets(
+    deployment_config: dict | None,
+    known_component_names: list[str],
+) -> None:
+    """Reject ``config.components.<name>.env_vars`` targeting unknown components.
+
+    Raised at the service-layer entry point ahead of Pydantic-driven
+    ``DeploymentConfig`` validation so the typed
+    :class:`UnknownComponentEnvVarError` surfaces directly to the GraphQL
+    caller (mapped to ``extensions.code = "UNKNOWN_COMPONENT_ENV_VAR"``)
+    instead of being collapsed into ``ValidationError`` and re-wrapped as the
+    generic ``INVALID_CONTEXT`` error code (008-deployment-env-vars / FR-010).
+    The known-components list is sourced from the deployment's current
+    driver and surfaced in the error metadata so operators can fix the typo
+    without a round-trip.
+
+    Read-vs-write asymmetry (US5 / FR-029..FR-033): this validator runs on
+    the **write** path only (``deploy``, ``update_deployment``,
+    ``update_deployment_config``). The read path
+    (``EnvVarsResolver.resolve_for_deployment`` consumed by
+    ``Deployment.componentEnvVars``) does NOT raise on unknown components —
+    it tolerates orphan state and exposes ``ComponentEnvVars.isOrphaned=true``
+    for blocks whose target component the current driver no longer declares.
+    This split lets a driver upgrade that renames or removes a component
+    succeed (the existing block becomes visibly orphaned and stops being
+    injected) while still blocking new typos at the boundary.
+    """
+    if not deployment_config:
+        return
+    components_block = deployment_config.get("components")
+    if not isinstance(components_block, dict) or not components_block:
+        return
+    known = set(known_component_names)
+    for name, block in components_block.items():
+        if name in known:
+            continue
+        # Only fail when the offending block actually carries env vars (the
+        # block could be empty in transient client payloads); other future
+        # per-component slots will get their own typed errors.
+        if isinstance(block, dict) and block.get("env_vars"):
+            raise UnknownComponentEnvVarError(
+                component_name=name,
+                known_components=sorted(known),
+            )
+
+
+def _prevalidate_deployment_env_vars(deployment_config: dict | None) -> None:
+    """Run typed env-var validation ahead of Pydantic model construction.
+
+    Pydantic's ``DeploymentConfig.env_vars`` field validators raise the same
+    typed :class:`ServiceError` subclasses (``InvalidEnvVarNameError``,
+    ``EnvVarSizeLimitExceededError``, ``DuplicateEnvVarNameError``), but
+    :class:`pydantic.ValidationError` wraps them on the way out and
+    :func:`context.validators.validate_deployment_config` rewraps that into a
+    generic ``InvalidDeploymentContextError`` — collapsing the precise
+    ``extensions.code`` to ``INVALID_CONTEXT``. Calling
+    :func:`validate_env_vars_dict` directly here lets the typed errors
+    propagate to Strawberry untouched, restoring the operator-visible codes
+    promised by FR-006/FR-007/FR-008/FR-009 and SC-003.
+    """
+    if not deployment_config:
+        return
+    deployment_env = deployment_config.get("env_vars")
+    if isinstance(deployment_env, dict):
+        validate_env_vars_dict("deployment", deployment_env)
+    components_block = deployment_config.get("components")
+    if isinstance(components_block, dict):
+        for _name, block in components_block.items():
+            if not isinstance(block, dict):
+                continue
+            comp_env = block.get("env_vars")
+            if isinstance(comp_env, dict):
+                validate_env_vars_dict("component", comp_env)
 
 
 async def get_deployment(
@@ -157,12 +236,6 @@ async def update_deployment(
             "At least one of config, parameters, name, or serviceNameOverrides must be provided"
         )
 
-    if deployment_config is not None:
-        try:
-            validate_deployment_config(context=deployment_config)
-        except InvalidDeploymentContextError as e:
-            raise InvalidContextError() from e
-
     async with uow:
         # Get the deployment
         deployment = await uow.deployments.find(id=deployment_id)
@@ -176,6 +249,30 @@ async def update_deployment(
             deployment.id,
             deployment.application_version,
         )
+
+        if deployment_config is not None:
+            # Reject component-level env var blocks targeting components the
+            # deployment's current driver does not declare (FR-010). Run this
+            # ahead of Pydantic validation so the typed error reaches the
+            # GraphQL caller intact.
+            adv = await uow.application_driver_versions.get(
+                id=deployment.application_driver_version_id
+            )
+            assert adv is not None, "Application driver version not found"
+            known_names = [cc.name for cc in (adv.component_configs or [])]
+            _validate_component_env_var_targets(deployment_config, known_names)
+
+            # Pre-validate env-var bundles so the typed error codes
+            # (INVALID_ENV_VAR_NAME / ENV_VAR_SIZE_LIMIT_EXCEEDED /
+            # DUPLICATE_ENV_VAR_NAME) survive the GraphQL boundary instead of
+            # being collapsed into INVALID_CONTEXT (FR-006/FR-007/FR-008/
+            # FR-009 / SC-003).
+            _prevalidate_deployment_env_vars(deployment_config)
+
+            try:
+                validate_deployment_config(context=deployment_config)
+            except InvalidDeploymentContextError as e:
+                raise InvalidContextError() from e
 
         # Update deployment name if provided
         if deployment_name is not None:
@@ -206,9 +303,6 @@ async def update_deployment(
         await _ensure_ingress_controller(
             environment_id=deployment.environment_id, uow=uow
         )
-
-        # Update the deployment config
-        deployment.config = deployment_config
 
         # Merge and validate parameters if provided
         if deployment_parameters is not None:
@@ -501,6 +595,57 @@ async def update_deployment_version(
         return result
 
 
+async def redeploy_for_environment_update(
+    deployment: Deployment,
+    uow: UnitOfWork,
+) -> Task:
+    """Redeploy a deployment in response to an environment-config change.
+
+    Generates a new :class:`ApplicationInstance` from the deployment (which
+    now resolves against the just-updated environment config flowing through
+    :func:`_resolve_instance_context`), sets it as the active instance,
+    transitions the deployment into ``DEPLOYING``, dispatches the
+    reconciliation Task via :func:`apply_state`, and persists the deployment.
+    Returns the dispatched Task so the caller (the env-config fanout in
+    :func:`services.environments.update_environment`) can collect it.
+
+    The helper does NOT change the deployment's ``application_version``,
+    ``parameters``, or service overrides — it only regenerates the active
+    instance against the deployment's current bound driver. This is the
+    "redeploy at the current version" primitive that the env-config fanout
+    needs (data-model.md §2.3 / FR-006/FR-010).
+
+    Mirrors the post-version-decision portion of
+    :func:`update_deployment_version` (the steps that run after the version
+    is decided and the new driver/components are bound). Kept as a separate
+    function rather than refactoring ``update_deployment_version`` to call
+    it: ``update_deployment_version`` carries extra version-specific
+    bookkeeping (service-overrides preservation, services-discovery
+    reconcile on driver change) that is not relevant to a same-version
+    redeploy. The duplication is intentional and bounded — see the comment
+    inside ``update_deployment_version`` for the cross-reference.
+    """
+    current_instance = deployment.active_instance
+
+    new_instance = await generate_instance_from_deployment(
+        deployment=deployment,
+        uow=uow,
+    )
+    deployment.set_active_instance(instance=new_instance)
+    deployment.set_status(DeploymentState.DEPLOYING)
+
+    task = await apply_state(
+        deployment=deployment,
+        current_instance=current_instance,
+        uow=uow,
+    )
+
+    await uow.deployments.save(deployment=deployment)
+    await uow.tasks.save(task=task)
+
+    return task
+
+
 async def _resolve_dedicated_ingress(
     environment_id: UUID,
     uow: UnitOfWork,
@@ -648,10 +793,9 @@ async def deploy_application(
     if deployment_config is None:
         deployment_config = {}
 
-    try:
-        validate_deployment_config(context=deployment_config)
-    except InvalidDeploymentContextError as e:
-        raise InvalidContextError(str(e)) from e
+    # Pydantic validation runs after driver lookup so we can surface the
+    # typed ``UnknownComponentEnvVarError`` (FR-010) ahead of the generic
+    # context-validation error.
 
     # Treat empty string as no version provided
     if version is not None and version.strip() == "":
@@ -689,6 +833,28 @@ async def deploy_application(
             raise InvalidVersionError(
                 f"Version {version} is not supported by the application driver {driver_name}"
             )
+
+        # Reject component-level env var blocks targeting components the
+        # selected driver does not declare (FR-010). Surface
+        # ``UnknownComponentEnvVarError`` with ``UNKNOWN_COMPONENT_ENV_VAR``
+        # ahead of Pydantic-driven config validation so the typed error
+        # reaches the GraphQL caller.
+        known_names = [
+            cc.name for cc in (application_driver_version.component_configs or [])
+        ]
+        _validate_component_env_var_targets(deployment_config, known_names)
+
+        # Pre-validate env-var bundles so the typed error codes
+        # (INVALID_ENV_VAR_NAME / ENV_VAR_SIZE_LIMIT_EXCEEDED /
+        # DUPLICATE_ENV_VAR_NAME) survive the GraphQL boundary instead of
+        # being collapsed into INVALID_CONTEXT (FR-006/FR-007/FR-008/FR-009 /
+        # SC-003).
+        _prevalidate_deployment_env_vars(deployment_config)
+
+        try:
+            validate_deployment_config(context=deployment_config)
+        except InvalidDeploymentContextError as e:
+            raise InvalidContextError(str(e)) from e
 
         # Get the environment
         environment = await uow.environments.get(environment_id)

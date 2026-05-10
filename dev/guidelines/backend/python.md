@@ -114,6 +114,81 @@ Raise with exception chaining:
 raise InvalidContextError() from e
 ```
 
+<!-- Extracted from specs/011-env-config-input-hardening on 2026-05-10 -->
+
+### Validator entry-point type guards
+
+Public validators MUST type-check their inputs at the **entry point**,
+before any encoding, size computation, or other downstream work. Non-string
+(or otherwise wrong-typed) inputs surface as a typed `ServiceError` with
+`error_code` + `error_metadata` — never as a generic `AttributeError` /
+`TypeError` raised by a downstream `.encode("utf-8")` or similar:
+
+```python
+def validate_env_var_value(name: str, value: str, scope: str | None = None) -> None:
+    if not isinstance(value, str):
+        raise InvalidEnvVarValueError(
+            name=name,
+            value_type=type(value).__name__,
+            scope=scope,
+        )
+    # ... existing 64 KiB cap check, encoding, etc. ...
+```
+
+The same guard belongs in any dict-level helper that callers can hit
+without passing through the per-value validator (defence in depth — see
+spec 011/US3 for the regression that motivated the rule).
+
+`bool` is a subclass of `int`, not `str` — `isinstance(value, str)`
+correctly rejects `True`/`False`. Coercing wrong-typed values via `str(value)`
+is **forbidden**: an operator who passes `1` may have meant `"1"` or may
+have intended an integer; a typed error tells them which.
+
+### Schema-walking propagation tests
+
+Every Strawberry input that mirrors a Pydantic config model MUST have a
+runtime test that introspects both sides and asserts every Pydantic field
+has a corresponding Strawberry input field. The test fails fast with the
+missing field name when schema drift introduces a Pydantic field without
+its input mirror. See [ADR-022](../../adr/adr-022-schema-walking-input-propagation-tests.md)
+for the full pattern and the `EnvironmentConfig` ↔ `UpdateEnvironmentInput`
+exemplar at `backend/tests/functional/graphql/test_environment_update_propagation.py`.
+
+The schema walk is fail-on-drift; the existing per-field round-trip tests
+are fail-on-regression. Both stay; neither subsumes the other.
+
+### Per-target failure isolation in fanout writes
+
+When a write operation fans out across multiple targets (e.g.
+`update_environment` redeploys every deployment in the environment),
+wrap each per-target invocation in a `try/except Exception`, record the
+failure on the per-target `Task`, log it structured, and continue to the
+next target. The mutation succeeds once every iteration has either
+dispatched a Task or recorded a failure; per-target failures do **not**
+surface in the mutation envelope:
+
+```python
+for deployment in deployments:
+    try:
+        task = await redeploy_for_environment_update(deployment, uow)
+    except Exception as exc:  # noqa: BLE001 — surface as a per-target Task
+        logger.warning(
+            "fanout_redeploy_failed",
+            deployment_id=str(deployment.id),
+            error=str(exc),
+        )
+        await record_failed_task(deployment, exc, uow)
+        continue
+    tasks.append(task)
+```
+
+This pattern is what makes a fanout write resilient to per-deployment
+chart-render failures, missing drivers, or transient cluster errors —
+one bad deployment does not block the rest. The failure surface is
+queryable via `Deployment.timeline` after the fact; see [ADR-020 §commit
+ordering](../../adr/adr-020-environment-config-fanout.md) for the
+durability contract.
+
 ## Database Models (SQLModel)
 
 - Inherit from `StyrminModel` (provides `id`, `created_on`, `updated_on`)

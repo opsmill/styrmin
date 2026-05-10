@@ -90,6 +90,22 @@ def _resolve_instance_config(
     else:
         resolved_context.pop("scheduling", None)
 
+    # Same per-key-deepest-wins rule applies to env_vars (FR-002). The flat
+    # dict spread above replaces ``env_vars`` wholesale whenever both env
+    # and dep set it, dropping environment-scope keys that aren't also set
+    # at deployment scope. The render-time broadcast (when no components
+    # are declared, application.py:407) reads from this resolved dict and
+    # would otherwise miss those keys — US2 Acceptance Scenario 1.
+    if environment.env_vars is not None or deployment.env_vars is not None:
+        merged_env_vars, _ = _merge_env_vars(
+            env=environment.env_vars,
+            dep=deployment.env_vars,
+            comp=None,
+        )
+        resolved_context["env_vars"] = merged_env_vars
+    else:
+        resolved_context.pop("env_vars", None)
+
     return ResolvedConfig(**resolved_context)
 
 
@@ -146,6 +162,39 @@ _INJECT_FIELDS: tuple[str, ...] = (
 )
 
 
+def _merge_env_vars(
+    env: dict[str, str] | None,
+    dep: dict[str, str] | None,
+    comp: dict[str, str] | None,
+) -> tuple[dict[str, str], dict[str, ProvenanceLevel]]:
+    """Merge layered env var dicts with per-key deepest-wins.
+
+    Layers (shallowest → deepest): ``env``, ``dep``, ``comp``. For every key
+    present in any layer the deepest contributing level wins; provenance
+    records that level under the key. Empty / ``None`` layers are skipped.
+    Returns a fresh ``(config, provenance)`` pair so callers can mutate it
+    without aliasing the inputs.
+
+    Mirrors data-model.md §2.2. Used by the env vars resolver in
+    ``services/env_vars/resolver.py`` (US1+) and exported here so unit tests
+    can exercise the merge in isolation.
+    """
+    config: dict[str, str] = {}
+    provenance: dict[str, ProvenanceLevel] = {}
+    layers: list[tuple[dict[str, str] | None, ProvenanceLevel]] = [
+        (env, "environment"),
+        (dep, "deployment"),
+        (comp, "component"),
+    ]
+    for src, level in layers:
+        if not src:
+            continue
+        for k, v in src.items():
+            config[k] = v  # later layers overwrite; deepest wins per key
+            provenance[k] = level
+    return config, provenance
+
+
 def _merge_inject_flags(
     levels: list[tuple[ProvenanceLevel, SchedulingConfig | None]],
     provenance: dict[str, ProvenanceLevel],
@@ -183,7 +232,8 @@ def effective_inject_flag(inject: PostRenderInjection | None, field_name: str) -
     """Return the effective (defaulted) value of an inject flag.
 
     ``None`` — whether because no level set ``inject`` at all or because
-    the field is inherited — resolves to ``True``.
+    the field is inherited — resolves to ``True``. Recognises every flag
+    declared on :class:`PostRenderInjection`.
     """
     if inject is None:
         return True

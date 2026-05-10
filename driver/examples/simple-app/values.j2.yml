@@ -4,6 +4,12 @@ image:
   repository: simple-app
   tag: "{{ app.version }}"
 
+# Operator-supplied env vars for the `server` component (env→dep→comp
+# deepest-wins per spec 010). Per-component dict already includes the
+# deployment-level env vars merged in, so the 008/009 E2E that asserts
+# `LOG_LEVEL=debug` flows through to the server pod still passes.
+extraEnv: {{ components | component_env_vars("server") | tojson }}
+
 ingress:
   enabled: true
   className: "{{ instance.config.ingress_class }}"
@@ -43,3 +49,5 @@ postgresql:
     extraVolumeMounts:
       - name: backup
         mountPath: /backup
+    # Operator-supplied env vars for the `database` component.
+    extraEnvVars: {{ components | component_env_vars("database") | tojson }}

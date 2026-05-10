@@ -20,11 +20,21 @@ mariadb:
     accessModes: ReadWriteOnce
     size: "{{ parameters.mariadb_storage_size }}Gi"
     className: "{{ instance.config.standard_storage.storage_class }}"
+  # Hardcoded mariadb creds plus operator-supplied env vars for the
+  # `mariadb` component.
   env:
-    MARIADB_DATABASE: portal
-    MARIADB_USER: slurpit
-    MARIADB_PASSWORD: slurpit-styrmin-password
-    MARIADB_ROOT_PASSWORD: slurpit-styrmin-root-password
+    - name: MARIADB_DATABASE
+      value: portal
+    - name: MARIADB_USER
+      value: slurpit
+    - name: MARIADB_PASSWORD
+      value: slurpit-styrmin-password
+    - name: MARIADB_ROOT_PASSWORD
+      value: slurpit-styrmin-root-password
+{%- for entry in components | component_env_vars("mariadb") %}
+    - name: {{ entry.name | tojson }}
+      value: {{ entry.value | tojson }}
+{%- endfor %}
   extraVolumes:
     - name: backup
       emptyDir: {}
@@ -45,9 +55,17 @@ mongodb:
     accessModes: ReadWriteOnce
     size: "{{ parameters.mongodb_storage_size }}Gi"
     className: "{{ instance.config.standard_storage.storage_class }}"
+  # Hardcoded mongo creds plus operator-supplied env vars for the
+  # `mongodb` component.
   env:
-    MONGO_INITDB_ROOT_USERNAME: slurpit
-    MONGO_INITDB_ROOT_PASSWORD: slurpit-styrmin-mongo-password
+    - name: MONGO_INITDB_ROOT_USERNAME
+      value: slurpit
+    - name: MONGO_INITDB_ROOT_PASSWORD
+      value: slurpit-styrmin-mongo-password
+{%- for entry in components | component_env_vars("mongodb") %}
+    - name: {{ entry.name | tojson }}
+      value: {{ entry.value | tojson }}
+{%- endfor %}
   extraVolumes:
     - name: backup
       emptyDir: {}
@@ -68,17 +86,33 @@ portal:
     accessModes: ReadWriteOnce
     size: "{{ parameters.portal_storage_size }}Gi"
     className: "{{ instance.config.standard_storage.storage_class }}"
+  # Hardcoded portal wiring plus operator-supplied env vars for the
+  # `portal` component.
   env:
-    PORTAL_DB_HOSTNAME: styrmin-slurpit-mariadb-service
-    PORTAL_DB_PORT: "3306"
-    PORTAL_DB_NAME: portal
-    PORTAL_DB_USERNAME: slurpit
-    PORTAL_DB_PASSWORD: slurpit-styrmin-password
-    PORTAL_WAREHOUSE_URL: "http://styrmin-slurpit-warehouse-service"
-    PORTAL_WAREHOUSE_TOKEN: styrmin-slurpit-pw-token
-    PORTAL_WAREHOUSE_CALLBACK_TOKEN: styrmin-slurpit-pwcb-token
-    PORTAL_SAFEKEY: styrmin-slurpit-safekey
-    PORTAL_BASE_URL: "http://{{ services.slurpit.primary_fqdn }}"
+    - name: PORTAL_DB_HOSTNAME
+      value: styrmin-slurpit-mariadb-service
+    - name: PORTAL_DB_PORT
+      value: "3306"
+    - name: PORTAL_DB_NAME
+      value: portal
+    - name: PORTAL_DB_USERNAME
+      value: slurpit
+    - name: PORTAL_DB_PASSWORD
+      value: slurpit-styrmin-password
+    - name: PORTAL_WAREHOUSE_URL
+      value: "http://styrmin-slurpit-warehouse-service"
+    - name: PORTAL_WAREHOUSE_TOKEN
+      value: styrmin-slurpit-pw-token
+    - name: PORTAL_WAREHOUSE_CALLBACK_TOKEN
+      value: styrmin-slurpit-pwcb-token
+    - name: PORTAL_SAFEKEY
+      value: styrmin-slurpit-safekey
+    - name: PORTAL_BASE_URL
+      value: "http://{{ services.slurpit.primary_fqdn }}"
+{%- for entry in components | component_env_vars("portal") %}
+    - name: {{ entry.name | tojson }}
+      value: {{ entry.value | tojson }}
+{%- endfor %}
 
 ingress:
   enabled: true
@@ -101,30 +135,60 @@ warehouse:
     accessModes: ReadWriteOnce
     size: "{{ parameters.warehouse_storage_size }}Gi"
     className: "{{ instance.config.standard_storage.storage_class }}"
+  # Hardcoded warehouse wiring plus operator-supplied env vars for the
+  # `warehouse` component.
   env:
-    WAREHOUSE_MONGODB_URI: "mongodb://slurpit:slurpit-styrmin-mongo-password@styrmin-slurpit-mongodb-service:27017/slurpit?authSource=admin"
-    WAREHOUSE_PORTAL_URL: "http://styrmin-slurpit-portal-service"
-    WAREHOUSE_PORTAL_TOKEN: styrmin-slurpit-pwcb-token
-    WAREHOUSE_API_TOKEN: styrmin-slurpit-pw-token
+    - name: WAREHOUSE_MONGODB_URI
+      value: "mongodb://slurpit:slurpit-styrmin-mongo-password@styrmin-slurpit-mongodb-service:27017/slurpit?authSource=admin"
+    - name: WAREHOUSE_PORTAL_URL
+      value: "http://styrmin-slurpit-portal-service"
+    - name: WAREHOUSE_PORTAL_TOKEN
+      value: styrmin-slurpit-pwcb-token
+    - name: WAREHOUSE_API_TOKEN
+      value: styrmin-slurpit-pw-token
+{%- for entry in components | component_env_vars("warehouse") %}
+    - name: {{ entry.name | tojson }}
+      value: {{ entry.value | tojson }}
+{%- endfor %}
 
 # --- Scanner ---
 scanner:
   enabled: true
   image:
     name: slurpit/scanner
+  # Hardcoded scanner wiring plus operator-supplied env vars for the
+  # `scanner` component.
   env:
-    SCANNER_WAREHOUSE_HOSTNAME: styrmin-slurpit-warehouse-service
-    SCANNER_WAREHOUSE_PORT: "50051"
-    SCANNER_WAREHOUSE_TOKEN: styrmin-slurpit-pw-token
-    SCANNER_POOLSIZE: "{{ parameters.scanner_pool_size }}"
+    - name: SCANNER_WAREHOUSE_HOSTNAME
+      value: styrmin-slurpit-warehouse-service
+    - name: SCANNER_WAREHOUSE_PORT
+      value: "50051"
+    - name: SCANNER_WAREHOUSE_TOKEN
+      value: styrmin-slurpit-pw-token
+    - name: SCANNER_POOLSIZE
+      value: "{{ parameters.scanner_pool_size }}"
+{%- for entry in components | component_env_vars("scanner") %}
+    - name: {{ entry.name | tojson }}
+      value: {{ entry.value | tojson }}
+{%- endfor %}
 
 # --- Scraper ---
 scraper:
   enabled: true
   image:
     name: slurpit/scraper
+  # Hardcoded scraper wiring plus operator-supplied env vars for the
+  # `scraper` component.
   env:
-    SCRAPER_WAREHOUSE_HOSTNAME: styrmin-slurpit-warehouse-service
-    SCRAPER_WAREHOUSE_PORT: "50051"
-    SCRAPER_WAREHOUSE_TOKEN: styrmin-slurpit-pw-token
-    SCRAPER_POOLSIZE: "{{ parameters.scraper_pool_size }}"
+    - name: SCRAPER_WAREHOUSE_HOSTNAME
+      value: styrmin-slurpit-warehouse-service
+    - name: SCRAPER_WAREHOUSE_PORT
+      value: "50051"
+    - name: SCRAPER_WAREHOUSE_TOKEN
+      value: styrmin-slurpit-pw-token
+    - name: SCRAPER_POOLSIZE
+      value: "{{ parameters.scraper_pool_size }}"
+{%- for entry in components | component_env_vars("scraper") %}
+    - name: {{ entry.name | tojson }}
+      value: {{ entry.value | tojson }}
+{%- endfor %}

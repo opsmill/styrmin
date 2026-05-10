@@ -160,6 +160,10 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     components: dict | None = Field(default=None, sa_column=Column(JSON))
     parameters: list | None = Field(default=None, sa_column=Column(JSON))
     services: list | None = Field(default=None, sa_column=Column(JSON))
+    # 008 / US4: doc-only env var declarations parsed from ``spec.env_vars``.
+    # Each entry shape matches :class:`DriverEnvVarDoc` (name, description,
+    # level, components). Empty/None when the driver omits the block.
+    env_vars: list | None = Field(default=None, sa_column=Column(JSON))
     component_configs: list[ComponentConfig] = Relationship(
         back_populates="application_driver_version"
     )

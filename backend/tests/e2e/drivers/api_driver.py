@@ -205,6 +205,109 @@ class ApiScenarioDriver:
         except StyrminError as exc:
             raise _normalise(exc) from exc
 
+    async def update_environment_via_form(
+        self,
+        *,
+        environment_id: str,
+        env_vars: dict[str, str],
+    ) -> None:
+        """API-side parallel of the UI form's env-var save flow.
+
+        Implementation per ``data-model.md`` §4.3 (011-env-config-input-
+        hardening): read the existing config, round-trip it through
+        ``EnvironmentConfig.model_validate(config)`` so Pydantic coerces
+        ``Literal["http", "https"]`` (etc.) automatically during parsing,
+        then construct a typed ``UpdateEnvironmentInput`` carrying every
+        persisted scalar unchanged with only ``env_vars`` replaced.
+
+        The ``EnvironmentConfig`` Pydantic ``Literal`` fields hold the
+        backend-side string values (``"http"`` / ``"NodeExternalIP"``)
+        whereas ``UpdateEnvironmentInput``'s GraphQL enum types use the
+        codegen names (``ExternalUrlScheme.HTTPS`` /
+        ``ExternalDnsEndpointsType.NODE_EXTERNAL_IP``). The mapping below
+        is the api-side analogue of the frontend's ``transformEnumValue``
+        helper in ``EnvironmentConfigurationTab.helpers.ts``; both sides
+        produce the same canonical input shape so the dual-entrypoint
+        parametrisation is the parity check for the persisted state
+        (critique E1+E2).
+        """
+        # Imported locally so importing the api_driver doesn't pull the
+        # full backend graph at module-load time (the test suite imports
+        # this driver from many fixtures).
+        from styrmin_backend.context.models.config import EnvironmentConfig
+        from styrmin_sdk.graphql._generated.enums import (
+            ExternalDnsEndpointsType,
+            ExternalUrlScheme,
+        )
+        from styrmin_sdk.graphql._generated.input_types import (
+            EnvVarInput,
+            UpdateEnvironmentInput,
+        )
+
+        external_url_scheme_map: dict[str, ExternalUrlScheme] = {
+            "http": ExternalUrlScheme.HTTP,
+            "https": ExternalUrlScheme.HTTPS,
+        }
+        external_dns_endpoints_type_map: dict[str, ExternalDnsEndpointsType] = {
+            "NodeExternalIP": ExternalDnsEndpointsType.NODE_EXTERNAL_IP,
+            "ClusterIP": ExternalDnsEndpointsType.CLUSTER_IP,
+        }
+
+        try:
+            existing = await self._client.environments.get(
+                environment_id=environment_id
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+
+        raw_config = existing.config or {}
+        if not isinstance(raw_config, dict):
+            raise ScenarioActionError(
+                "update_environment_via_form: existing Environment.config "
+                f"is not a dict (got {type(raw_config).__name__})"
+            )
+        # Pydantic round-trip: validates the raw JSON dict and coerces
+        # Literal-typed fields (external_url_scheme etc.) to their proper
+        # values. Surfaces config corruption loudly rather than as a 5xx
+        # at the GraphQL boundary.
+        validated = EnvironmentConfig.model_validate(raw_config)
+
+        merged_env_vars = {**(validated.env_vars or {}), **env_vars}
+        input_obj = UpdateEnvironmentInput(
+            envVars=[
+                EnvVarInput(name=name, value=value)
+                for name, value in merged_env_vars.items()
+            ],
+            ipWhitelist=validated.ip_whitelist,
+            # ``dedicated_ingress`` and ``scheduling`` would need a
+            # nested-input round-trip; the v1 form does not edit them
+            # either (see ``detectNestedOverridesBlock`` in
+            # EnvironmentConfigurationTab) so we leave them at None to
+            # match the UI driver's behaviour. Tests that need to set
+            # them must use the typed SDK directly.
+            fqdnSuffix=validated.fqdn_suffix,
+            externalUrlScheme=(
+                external_url_scheme_map[validated.external_url_scheme]
+                if validated.external_url_scheme is not None
+                else None
+            ),
+            externalUrlPort=validated.external_url_port,
+            externalDnsEndpointsType=(
+                external_dns_endpoints_type_map[validated.external_dns_endpoints_type]
+                if validated.external_dns_endpoints_type is not None
+                else None
+            ),
+            ingressClass=validated.ingress_class,
+            dbSize=validated.db_size,
+        )
+
+        try:
+            await self._client.environments.update(
+                environment_id=environment_id, input=input_obj
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+
     async def get_deployment_timeline(
         self, *, deployment_id: str
     ) -> list[TimelineEntry]:

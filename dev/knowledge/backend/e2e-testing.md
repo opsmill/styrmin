@@ -54,6 +54,64 @@ Defined in the root `pyproject.toml` under `[tool.pytest.ini_options]`:
 
 The dual-entrypoint design is the reason every E2E scenario runs **twice by default** in CI — once as `[api-chromium]` (driver = SDK) and once as `[ui-chromium]` (driver = Playwright). Use `api_only` / `ui_only` to opt out of one variant when the same code path would be exercised redundantly. See `backend/tests/AGENTS.md` for the full rationale.
 
+<!-- Extracted from specs/011-env-config-input-hardening on 2026-05-10 -->
+
+#### `api_only` audit discipline
+
+A test that calls **any** dual-entrypoint method on `scenario_driver`
+(`create_deployment` / `update_deployment` / `update_environment_via_form` /
+`upgrade_deployment` / `create_backup` / `start_components` / `stop_components`
+/ `run_job` / `delete_*`) MUST run under both variants — these methods
+exercise both the UI form and the API code path, and the parametrisation
+**is** the parity check. Marking such a test `api_only` short-circuits half
+the coverage and was the source of the marker drift cleaned up in spec 011.
+
+`api_only` is reserved for tests that genuinely have no UI surface — pure
+GraphQL reads (e.g. `client.X.Y()` SDK calls), `kubectl`/`kr8s`
+introspection, or assertions on backend-only state. Each retained marker
+carries an inline `reason=` explaining why the UI variant would add no
+coverage.
+
+When adding a new dual-entrypoint method, add it to **both** drivers
+(`api_driver.py` and `ui_driver.py`) with the same signature — that's the
+shape of the protocol and the lever the parametrisation uses. Adding the
+method to only `ui_driver.py` (or wrapping the test in `api_only` because
+the API side is missing) re-introduces the same drift class.
+
+#### Peer-deployment service-name overrides
+
+The platform enforces **service-name uniqueness within an environment**.
+A driver that declares `services: [{ name: "simple-app", … }]` registers
+one `DeployedService` per deployment with that resolved name. A second
+deployment using the same driver in the same environment errors with
+`ServiceNameConflictError: Service name 'simple-app' already exists in
+environment` at fixture-setup time, before the test body even runs.
+
+When a fixture creates **multiple deployments using the same driver in a
+shared environment** (the scenario behind `test_pod_scheduling`,
+`test_deployment_env_vars`, `test_environment_update`), every peer past
+the first MUST pass `service_name_overrides` to rename its services:
+
+```python
+deployment = await driver.create_deployment(
+    driver="simple-app",
+    version="0.1.0",
+    environment_id=shared_env["environment_id"],
+    name="env-update-b",
+    service_name_overrides=[
+        {"driverServiceName": "simple-app", "overrideName": "simple-app-b"},
+    ],
+)
+```
+
+The conftest's session-scoped `scenario_environment` docstring documents
+the same rule for tests that share the session-wide env (e.g.
+`test_service_discovery`, `test_upgrade_simple_app`,
+`test_backup_and_restore_lifecycle`). The same applies for
+**module-scoped** envs created inside individual test files.
+
+A first deployment never needs the override — only peers do.
+
 `pytest-rerunfailures` is intentionally not in the dependency set — it is incompatible with `--pdb` (the project's standard E2E debugging workflow); see `dev/CLAUDE.md` (Debugging E2E Tests).
 
 ## Test Environment

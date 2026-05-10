@@ -404,6 +404,19 @@ class FakeDeploymentRepository(DeploymentRepository):
                 return d
         return None
 
+    async def find_all_by_environment(
+        self,
+        environment_id: UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> list[DeploymentEntity]:
+        return [
+            d
+            for d in self._deployments
+            if d.environment_id == environment_id
+            and (include_deleted or d.deleted_at is None)
+        ]
+
 
 class FakeDeployedServiceRepository(
     FakeRepository[DeployedService], DeployedServiceRepository
@@ -508,6 +521,18 @@ class FakeUnitOfWork(UnitOfWork):
         self.session = _FakeSession()  # type: ignore[assignment]
 
         self.committed = False
+        # Total ``commit()`` invocations across the lifetime of this fake.
+        # Used by regression tests that need to assert commit cadence
+        # (e.g. "the env-config row was committed BEFORE the fanout loop
+        # AND the Task rows were committed AFTER the loop"). The boolean
+        # ``committed`` flag alone cannot distinguish "one commit total"
+        # from "multiple commits"; counting closes that gap.
+        self.commit_count = 0
+        # Ordered log of commit invocations — append-only — so tests can
+        # assert ordering relative to other observable side effects
+        # (e.g. ``deployments.save`` calls). Each entry is a monotonically
+        # increasing integer; the value is irrelevant beyond the order.
+        self.commit_history: list[int] = []
 
     async def __aenter__(self):
         self.committed = False
@@ -518,6 +543,8 @@ class FakeUnitOfWork(UnitOfWork):
 
     async def commit(self):
         self.committed = True
+        self.commit_count += 1
+        self.commit_history.append(self.commit_count)
 
     async def rollback(self):
         pass

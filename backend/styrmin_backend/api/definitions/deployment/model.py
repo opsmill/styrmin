@@ -26,6 +26,10 @@ from styrmin_backend.context.fqdn import (
     compute_human_readable_fqdn,
     compute_primary_fqdn,
 )
+from styrmin_backend.context.models.config import (
+    DeploymentConfig,
+    EnvironmentConfig,
+)
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import (
     Deployment as DeploymentEntity,
@@ -55,6 +59,52 @@ class Component:
             name=instance.name,
             enabled=instance.enabled,
         )
+
+
+@strawberry.type(
+    description=(
+        "A single environment variable to inject into rendered containers.\n\n"
+        "WARNING: This surface is for non-secret values only. The platform "
+        "stores values in plaintext and exposes them through any query that "
+        "selects them. Do not store credentials, API keys, or other secret "
+        "material here — use the dedicated secret env var path (separate "
+        "ticket) once available."
+    )
+)
+class EnvVar:
+    name: str = strawberry.field(
+        description="POSIX-portable env var name, matching ^[A-Za-z_][A-Za-z0-9_]*$."
+    )
+    value: str = strawberry.field(
+        description=(
+            "The value to set. May be the empty string. NOT for secret "
+            "material; see the EnvVar type description."
+        )
+    )
+
+
+@strawberry.type(
+    description=(
+        "A bundle of environment variables targeting one component of a "
+        "deployment, plus an ``isOrphaned`` flag indicating whether the "
+        "deployment's current driver still declares the targeted component. "
+        "Orphaned blocks remain visible in the API but are NOT injected "
+        "into rendered pods."
+    )
+)
+class ComponentEnvVars:
+    component: str = strawberry.field(description="Name of the targeted component.")
+    env_vars: list[EnvVar] = strawberry.field(
+        description="The effective env vars set on this component (env+dep+component merged)."
+    )
+    is_orphaned: bool = strawberry.field(
+        description=(
+            "True when the deployment's current driver no longer declares "
+            "this component (the upgrade renamed or removed it). Orphaned "
+            "blocks are visible in the API but are NOT injected into "
+            "rendered pods, so the operator can audit and clean them up."
+        )
+    )
 
 
 @strawberry.type
@@ -302,6 +352,134 @@ class Deployment:
                     component_name=component.name,
                     config=resolved.model_dump(exclude_none=True, mode="json"),
                     provenance=dict(provenance),
+                )
+            )
+        return results
+
+    @strawberry.field(
+        description=(
+            "Effective deployment-level env vars (after merging environment "
+            "& deployment scopes, but BEFORE component-level overrides). "
+            "Empty when none are set."
+        )
+    )
+    async def env_vars(self, info: strawberry.Info) -> list[EnvVar]:
+        """Resolve the effective deployment-level env vars.
+
+        Mirrors the merge done by the resolver: environment-scope values are
+        layered first, deployment-scope values overwrite per-key (FR-002
+        deepest-wins). For US1 environment-scope env vars are not yet
+        wired through write-side validation but the read-side merge
+        already honours them so US2 only adds the write path.
+        """
+        from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
+
+        uow = info.context["uow"]
+        async with uow:
+            deployment = await uow.deployments.find(self.id)
+            if deployment is None:
+                logger.warning(
+                    "env_vars: deployment {} not found (likely deleted "
+                    "between parent query and sub-field resolution)",
+                    self.id,
+                )
+                return []
+            environment = await uow.environments.get(deployment.environment_id)
+            env_config_raw = environment.config if environment is not None else None
+            dep_config_raw = deployment.config
+
+        env_cfg = (
+            EnvironmentConfig.model_validate(env_config_raw) if env_config_raw else None
+        )
+        dep_cfg = (
+            DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None
+        )
+
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=env_cfg,
+            deployment=dep_cfg,
+            component_env_vars=None,
+        )
+        return [
+            EnvVar(name=k, value=v) for k, v in resolved.deployment_effective.items()
+        ]
+
+    @strawberry.field(
+        description=(
+            "Per-component effective env vars, including orphaned blocks "
+            "(``isOrphaned=true``). Component-level entries override "
+            "deployment- and environment-level entries on a per-key basis "
+            "(FR-002 deepest-wins). Orphaned blocks (component renamed or "
+            "removed by a driver upgrade — FR-029..FR-033) are visible here "
+            "but skipped by the post-render injector so no env entries reach "
+            "rendered pods."
+        )
+    )
+    async def component_env_vars(self, info: strawberry.Info) -> list[ComponentEnvVars]:
+        """Resolve effective env vars per declared component.
+
+        Pulls per-component blocks from
+        ``DeploymentConfig.components[<name>].env_vars`` and merges them with
+        the environment + deployment scopes via :class:`EnvVarsResolver`.
+        Components without an explicit block still appear in the result with
+        the deployment-level merged dict (the merge falls through to the
+        ``deployment`` layer). Live components for which the merged dict is
+        empty are omitted to keep the surface tidy. Orphaned blocks
+        (US5 / FR-029..FR-033) are always surfaced regardless of dict size —
+        their whole purpose is operator visibility after a driver upgrade.
+        """
+        from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
+
+        uow = info.context["uow"]
+        async with uow:
+            deployment = await uow.deployments.find(self.id)
+            if deployment is None:
+                logger.warning(
+                    "component_env_vars: deployment {} not found (likely "
+                    "deleted between parent query and sub-field resolution)",
+                    self.id,
+                )
+                return []
+            environment = await uow.environments.get(deployment.environment_id)
+            env_config_raw = environment.config if environment is not None else None
+            dep_config_raw = deployment.config
+            driver_components = [c.name for c in (deployment.components or [])]
+
+        env_cfg = (
+            EnvironmentConfig.model_validate(env_config_raw) if env_config_raw else None
+        )
+        dep_cfg = (
+            DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None
+        )
+
+        component_env_vars: dict[str, dict[str, str] | None] = {}
+        if dep_cfg is not None:
+            for name, block in (dep_cfg.components or {}).items():
+                component_env_vars[name] = block.env_vars
+
+        resolved = EnvVarsResolver.resolve_for_deployment(
+            environment=env_cfg,
+            deployment=dep_cfg,
+            component_env_vars=component_env_vars,
+            driver_components=driver_components,
+        )
+
+        results: list[ComponentEnvVars] = []
+        for entry in resolved.components:
+            # Live entries with an empty merged dict are dropped so the
+            # surface stays tidy (a component declared by the driver but
+            # carrying no env vars at any layer adds no signal). Orphans are
+            # always surfaced — their visibility is the whole point of US5.
+            if not entry.resolved.is_orphaned and not entry.resolved.config:
+                continue
+            results.append(
+                ComponentEnvVars(
+                    component=entry.component_name,
+                    env_vars=[
+                        EnvVar(name=k, value=v)
+                        for k, v in entry.resolved.config.items()
+                    ],
+                    is_orphaned=entry.resolved.is_orphaned,
                 )
             )
         return results

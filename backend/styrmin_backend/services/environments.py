@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 from uuid import UUID
 
+from loguru import logger
+
 from styrmin_backend.context.exceptions import InvalidEnvironmentContextError
+from styrmin_backend.context.models.config import EnvironmentConfig
 from styrmin_backend.context.validators import validate_environment_config
 from styrmin_backend.db.models import Environment
+from styrmin_backend.domain.models import Deployment
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.clusters import resolve_cluster
+from styrmin_backend.services.deployment import redeploy_for_environment_update
+from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
     ClusterNotFoundError,
@@ -19,8 +25,112 @@ from styrmin_backend.services.exceptions import (
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
+
+def _prevalidate_environment_env_vars(config: dict | None) -> None:
+    """Pre-validate environment-scope env vars so typed error codes survive.
+
+    See :func:`styrmin_backend.services.deployment._prevalidate_deployment_env_vars`
+    for the full rationale; in short, Pydantic's ``ValidationError`` collapses
+    typed env-var errors into the generic ``INVALID_CONTEXT`` code, breaking
+    FR-006/FR-007/FR-008/FR-009 and SC-003. Calling
+    :func:`validate_env_vars_dict` here lets the typed errors propagate intact.
+    """
+    if not config:
+        return
+    env_vars = config.get("env_vars")
+    if isinstance(env_vars, dict):
+        validate_env_vars_dict("environment", env_vars)
+
+
 if TYPE_CHECKING:
     pass
+
+
+def _extract_environment_slice_from_context(
+    context: Any,
+) -> dict[str, Any] | None:
+    """Extract the environment-scope config dict from a persisted instance context.
+
+    The instance ``context`` carries a serialised :class:`GlobalContext`
+    (built by :func:`_resolve_instance_context` in
+    ``backend/styrmin_backend/context/resolvers.py``). The environment-scope
+    slice — the :class:`EnvironmentConfig` that was active when the instance
+    was generated — is reachable as ``context.environment.config``.
+
+    The helper accepts both the in-memory shape (a :class:`GlobalContext`
+    Pydantic model on the domain :class:`Instance` entity) and the
+    JSON-serialised shape (a plain ``dict`` as returned by SQLModel for the
+    raw JSON column). Returns the env-config slice as a plain dict suitable
+    for round-tripping through :meth:`EnvironmentConfig.model_validate`.
+    Returns ``None`` when the context is missing or doesn't carry an
+    environment slice (older instances written before the slice was
+    persisted, hypothetical malformed rows). Callers treat ``None`` as
+    "always redeploy" — see :func:`_deployment_already_at_config`.
+    """
+    if context is None:
+        return None
+    # Domain shape: GlobalContext Pydantic model.
+    environment = getattr(context, "environment", None)
+    if environment is not None:
+        config = getattr(environment, "config", None)
+        if config is None:
+            return None
+        # EnvironmentConfig is a Pydantic model; dump preserves None-vs-missing
+        # the same way model_validate accepts on the way back.
+        if hasattr(config, "model_dump"):
+            return config.model_dump(mode="json")
+        if isinstance(config, dict):
+            return config
+        return None
+    # Raw JSON shape (dict from the JSON column).
+    if isinstance(context, dict):
+        env_block = context.get("environment")
+        if not isinstance(env_block, dict):
+            return None
+        config = env_block.get("config")
+        if isinstance(config, dict):
+            return config
+        return None
+    return None
+
+
+def _deployment_already_at_config(
+    deployment: Deployment,
+    new_config: EnvironmentConfig,
+) -> bool:
+    """Return True iff the deployment's active instance is already at ``new_config``.
+
+    Per FR-010 / data-model.md §3, the env-config fanout decides whether
+    each deployment needs a redeploy by comparing the active instance's
+    embedded environment-config slice against the just-persisted config.
+    Equality means the deployment is fully converged and the redeploy is
+    skipped (no spurious Task / timeline entry); inequality means the
+    deployment is a laggard and a redeploy is dispatched.
+
+    Both sides are normalised through the canonical Pydantic round-trip
+    (``EnvironmentConfig.model_validate(...).model_dump(exclude_none=True,
+    mode="json")``) to flatten ``None``-vs-missing drift — a slice that
+    omits ``ip_whitelist`` compares equal to a slice that explicitly sets
+    ``ip_whitelist=None``.
+
+    Returns ``False`` when:
+
+    * the deployment has no active instance (must dispatch the first
+      reconcile);
+    * the active instance carries no extractable environment-config slice
+      (older row, malformed shape — err on the side of redeploying);
+    * the canonical comparison disagrees.
+    """
+    active = deployment.active_instance
+    if active is None:
+        return False
+    instance_env_config_dict = _extract_environment_slice_from_context(active.context)
+    if instance_env_config_dict is None:
+        return False
+    instance_env_config = EnvironmentConfig.model_validate(instance_env_config_dict)
+    new_canon = new_config.model_dump(exclude_none=True, mode="json")
+    instance_canon = instance_env_config.model_dump(exclude_none=True, mode="json")
+    return new_canon == instance_canon
 
 
 async def resolve_environment(
@@ -82,6 +192,10 @@ async def create_environment(
         if config is None:
             config = {}
 
+        # Pre-validate env-var bundles so typed error codes survive the
+        # GraphQL boundary (FR-006/FR-007/FR-008/FR-009 / SC-003).
+        _prevalidate_environment_env_vars(config)
+
         try:
             validate_environment_config(config)
         except InvalidEnvironmentContextError as e:
@@ -116,6 +230,167 @@ async def get_environments(uow: UnitOfWork) -> Sequence[Environment]:
     """Get all the environments."""
     async with uow:
         return await uow.environments.get_all()
+
+
+def _emit_fanout_metric(environment_id: UUID, outcome: str) -> None:
+    """Emit a per-deployment fanout outcome metric (FR-023a).
+
+    The target metric is
+    ``env_config_fanout_deployments_total{environment, outcome}`` where
+    ``outcome`` is one of ``dispatched``, ``skipped_noop``, or
+    ``dispatch_failed``. The project does not yet wire a metrics backend
+    (Prometheus / OTel exporter), so this helper is the call-site stub:
+    it logs the would-be metric at ``info`` level with a clear marker so
+    the data is recoverable from logs today and the wiring becomes a
+    one-line edit once the backend lands. The call site existing is what
+    FR-023a requires.
+
+    TODO (metrics-backend): replace the ``logger.info`` with the real
+    counter increment (e.g. ``METRIC.labels(...).inc()``) once a metrics
+    client is registered with the backend.
+    """
+    logger.info(
+        "metric=env_config_fanout_deployments_total environment_id={} outcome={}",
+        environment_id,
+        outcome,
+    )
+
+
+async def update_environment(
+    environment_id: UUID, uow: UnitOfWork, config: dict | None = None
+) -> Environment:
+    """Update an environment's config and fan out redeploys to its deployments.
+
+    Persists the validated ``EnvironmentConfig`` on the environment row,
+    commits the row **before** entering the fanout loop (FR-009a so a
+    crash mid-fanout never leaves the persisted config behind), then
+    iterates over every non-tombstoned, non-internal deployment in the
+    environment dispatching :func:`redeploy_for_environment_update`. Each
+    iteration runs ``_deployment_already_at_config`` first; deployments
+    whose active instance is already at ``new_config`` are skipped (no
+    spurious Task / timeline entry, FR-010 / data-model.md §3). Per-
+    deployment dispatch failures are caught, logged, counted, and do not
+    propagate — the env-config row stays persisted and peer deployments
+    are unaffected (FR-008 / Edge Cases "Per-deployment failure").
+
+    Tombstoned (``deleted_at IS NOT NULL``) and internal deployments are
+    excluded from the fanout per FR-012 / FR-013. They are NOT counted
+    toward ``skipped_noop`` (which is reserved for "deployment evaluated
+    and found already at config"); ``evaluated`` counts the total
+    iteration including the excluded rows so operators can see the
+    distinction between "no rows to consider" and "rows considered, all
+    skipped".
+
+    Raises:
+        EnvironmentNotFoundError: When ``environment_id`` does not exist.
+        InvalidContextError: When the new config fails ``EnvironmentConfig``
+            validation (e.g. invalid env var names, oversized dicts).
+    """
+    async with uow:
+        environment = await uow.environments.get(environment_id)
+        if environment is None:
+            raise EnvironmentNotFoundError(
+                f"Environment with id {environment_id} not found."
+            )
+
+        if config is None:
+            # Idempotent no-op: nothing to validate, nothing to fan out.
+            # Commit is a no-op but kept for API symmetry.
+            await uow.commit()
+            refreshed = await uow.environments.get(environment_id)
+            assert refreshed is not None, "Environment should still exist after update"
+            return refreshed
+
+        # Pre-validate env-var bundles so typed error codes survive the
+        # GraphQL boundary (FR-006/FR-007/FR-008/FR-009 / SC-003).
+        _prevalidate_environment_env_vars(config)
+        try:
+            validate_environment_config(config)
+        except InvalidEnvironmentContextError as e:
+            raise InvalidContextError from e
+
+        # Persist the env-config row. Per FR-009a this commit MUST run
+        # before any Task dispatch so a crash mid-fanout never reverts
+        # the config.
+        environment.config = config
+        environment.capabilities = compute_environment_capabilities(environment)
+        await uow.commit()
+
+        validated_config = EnvironmentConfig.model_validate(config)
+
+        # Enumerate non-tombstoned deployments in the environment. We
+        # rely on the repository to return domain entities; the fanout
+        # filters internal rows in-loop (FR-013) so the counters
+        # accurately reflect "evaluated".
+        deployments = await uow.deployments.find_all_by_environment(environment_id)
+
+        counts = {
+            "evaluated": 0,
+            "dispatched": 0,
+            "skipped_noop": 0,
+            "dispatch_failed": 0,
+        }
+        for deployment in deployments:
+            counts["evaluated"] += 1
+            # Tombstoned + internal deployments are excluded per FR-012 /
+            # FR-013. They are NOT counted toward ``skipped_noop`` —
+            # ``skipped_noop`` is reserved for "deployment evaluated and
+            # already at the new config".
+            if deployment.deleted_at is not None or deployment.internal:
+                continue
+            if _deployment_already_at_config(deployment, validated_config):
+                counts["skipped_noop"] += 1
+                _emit_fanout_metric(environment_id, "skipped_noop")
+                continue
+            try:
+                await redeploy_for_environment_update(deployment, uow)
+            except Exception:  # noqa: BLE001 — broad catch is intentional for per-deployment isolation (FR-008)
+                counts["dispatch_failed"] += 1
+                logger.exception(
+                    "env_config_fanout_dispatch_error environment_id={} deployment_id={}",
+                    environment_id,
+                    deployment.id,
+                )
+                _emit_fanout_metric(environment_id, "dispatch_failed")
+                continue
+            counts["dispatched"] += 1
+            _emit_fanout_metric(environment_id, "dispatched")
+
+        # Persist the per-deployment writes accumulated across the
+        # fanout loop. ``redeploy_for_environment_update`` calls
+        # ``uow.deployments.save(...)`` (refreshes
+        # ``active_application_instance_id``) and ``uow.tasks.save(...)``
+        # (the dispatched Task row) but does NOT commit — the helper is
+        # invoked from inside this enclosing UoW context, so the caller
+        # owns the commit cadence. ``UnitOfWork.__aexit__`` only rolls
+        # back on exception; on a clean exit it is a no-op. Without this
+        # explicit commit the persisted env-config row (committed above
+        # per FR-009a) is intact but every Task row and every
+        # ``active_application_instance_id`` flip from the loop is
+        # silently dropped — operators see "fanout dispatched=N" in the
+        # audit log but no Task rows in storage. Sibling write paths
+        # (``update_deployment``, ``update_deployment_version``,
+        # ``delete_deployment``) all explicitly commit at the end of
+        # their ``async with uow:`` block; this commit puts
+        # ``update_environment`` back in line with them. (FR-006/FR-009.)
+        await uow.commit()
+
+        # One audit log entry per fanout invocation regardless of
+        # dispatched count — FR-023. True environment-wide no-ops still
+        # produce an entry with ``dispatched=0``.
+        logger.info(
+            "env_config_fanout_dispatched environment_id={} evaluated={} "
+            "dispatched={} skipped_noop={} dispatch_failed={}",
+            environment_id,
+            counts["evaluated"],
+            counts["dispatched"],
+            counts["skipped_noop"],
+            counts["dispatch_failed"],
+        )
+
+        refreshed = await uow.environments.get(environment_id)
+        assert refreshed is not None, "Environment should still exist after update"
+        return refreshed
 
 
 async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:

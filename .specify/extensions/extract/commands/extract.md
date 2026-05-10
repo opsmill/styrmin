@@ -287,12 +287,13 @@ For each spec:
 
 ### 3. Update dev/README.md
 
-After **all** specs have been processed, update `dev/README.md` once with all new files:
-- If any **new** files were created in `dev/knowledge/`, `dev/guidelines/`, or `dev/adr/`:
-  - Read `dev/README.md`
-  - Add new entries to the appropriate section (Current Guidelines, Current Knowledge, or a new Current ADRs section)
-  - Follow the existing link format: `- [filename.md](path/to/filename.md) - Brief description`
+After **all** specs have been processed, update `dev/README.md` once with all new files. **This step is mandatory whenever a new file is created in `dev/adr/`, `dev/knowledge/`, or `dev/guidelines/`** — historical drift in the index (ADRs landing without a matching index entry) has happened and is hard to detect after the fact.
+
+- For every newly-created file, read the file's title (the first H1 line) to derive the index description.
+- Read `dev/README.md` and add an entry in the matching section (`Current ADRs`, `Current Knowledge`, `Current Guidelines`).
+- Follow the existing link format: `- [filename.md](path/to/filename.md) - Brief description`.
 - If `dev/adr/` now has content and there is no "Current ADRs" section in the README, create one following the pattern of the existing sections.
+- **Verification step before completing**: list every new file under `dev/adr/`, `dev/knowledge/`, `dev/guidelines/` and confirm it appears in `dev/README.md`. Surface any missed registrations to the user before reporting completion.
 
 ### 4. Report
 

@@ -30,6 +30,24 @@ export type Action = {
   name: Scalars['String']['output'];
 };
 
+/** Affinity block (required + preferred) for one affinity kind. */
+export type AffinityBlockInput = {
+  preferred?: InputMaybe<Array<WeightedAffinityTermInput>>;
+  replace?: InputMaybe<Scalars['Boolean']['input']>;
+  required?: InputMaybe<Array<AffinityTermInput>>;
+};
+
+/** Single affinity term mirroring ``AffinityTerm``. */
+export type AffinityTermInput = {
+  deploymentRef?: InputMaybe<DeploymentReferenceInput>;
+  labelSelector?: InputMaybe<LabelSelectorInput>;
+  matchLabelKeys?: InputMaybe<Array<Scalars['String']['input']>>;
+  mismatchLabelKeys?: InputMaybe<Array<Scalars['String']['input']>>;
+  namespaceSelector?: InputMaybe<LabelSelectorInput>;
+  namespaces?: InputMaybe<Array<Scalars['String']['input']>>;
+  topologyKey: Scalars['String']['input'];
+};
+
 export type ApplicationDriver = {
   __typename?: 'ApplicationDriver';
   id: Scalars['UUID']['output'];
@@ -45,6 +63,8 @@ export type ApplicationDriverVersion = {
   componentConfigs: Array<ComponentConfig>;
   components?: Maybe<Scalars['JSON']['output']>;
   defaultVersion?: Maybe<Scalars['String']['output']>;
+  /** Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block. */
+  envVars: Array<DriverEnvVarDoc>;
   helmChart: HelmChart;
   id: Scalars['UUID']['output'];
   parameters: Array<ParameterDefinition>;
@@ -157,6 +177,17 @@ export type ComponentConfig = {
   name: Scalars['String']['output'];
 };
 
+/** A bundle of environment variables targeting one component of a deployment, plus an ``isOrphaned`` flag indicating whether the deployment's current driver still declares the targeted component. Orphaned blocks remain visible in the API but are NOT injected into rendered pods. */
+export type ComponentEnvVars = {
+  __typename?: 'ComponentEnvVars';
+  /** Name of the targeted component. */
+  component: Scalars['String']['output'];
+  /** The effective env vars set on this component (env+dep+component merged). */
+  envVars: Array<EnvVar>;
+  /** True when the deployment's current driver no longer declares this component (the upgrade renamed or removed it). Orphaned blocks are visible in the API but are NOT injected into rendered pods, so the operator can audit and clean them up. */
+  isOrphaned: Scalars['Boolean']['output'];
+};
+
 export type ComponentRestoreStatus = {
   __typename?: 'ComponentRestoreStatus';
   componentName: Scalars['String']['output'];
@@ -194,6 +225,13 @@ export type CrdConditionType = {
   type: Scalars['String']['output'];
 };
 
+/** Dedicated per-environment ingress controller configuration. */
+export type DedicatedIngressInput = {
+  implementation?: InputMaybe<Scalars['String']['input']>;
+  service?: InputMaybe<IngressServiceConfigInput>;
+  type?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type DeployedService = {
   __typename?: 'DeployedService';
   component: Scalars['String']['output'];
@@ -216,11 +254,15 @@ export type Deployment = {
   applicationDriverVersionId: Scalars['UUID']['output'];
   applicationInstance?: Maybe<ApplicationInstance>;
   applicationVersion: Scalars['String']['output'];
+  /** Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Orphaned blocks (component renamed or removed by a driver upgrade — FR-029..FR-033) are visible here but skipped by the post-render injector so no env entries reach rendered pods. */
+  componentEnvVars: Array<ComponentEnvVars>;
   components: Array<Component>;
   config: Scalars['JSON']['output'];
   crdStatus?: Maybe<DeploymentStatusType>;
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
   deployedServices: Array<DeployedService>;
+  /** Effective deployment-level env vars (after merging environment & deployment scopes, but BEFORE component-level overrides). Empty when none are set. */
+  envVars: Array<EnvVar>;
   environment: Environment;
   environmentId: Scalars['UUID']['output'];
   id: Scalars['UUID']['output'];
@@ -235,6 +277,13 @@ export type Deployment = {
 export type DeploymentPodStatusReport = {
   deploymentId: Scalars['UUID']['input'];
   pods: Array<PodStatusInput>;
+};
+
+/** Reference to another deployment in the same environment. */
+export type DeploymentReferenceInput = {
+  components?: InputMaybe<Array<Scalars['String']['input']>>;
+  deploymentId?: InputMaybe<Scalars['String']['input']>;
+  deploymentName?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type DeploymentStatusReportInput = {
@@ -267,6 +316,38 @@ export type DeploymentTimelineEntry = {
   task: Task;
 };
 
+/** Doc-only declaration of an env var the driver's app respects. Surfaces in the driver detail view; does not validate, default, or constrain operator-set values (FR-015). */
+export type DriverEnvVarDoc = {
+  __typename?: 'DriverEnvVarDoc';
+  components: Array<Scalars['String']['output']>;
+  description: Scalars['String']['output'];
+  level: DriverEnvVarLevel;
+  name: Scalars['String']['output'];
+};
+
+export type DriverEnvVarLevel =
+  | 'COMPONENT'
+  | 'DEPLOYMENT';
+
+/**
+ * A single environment variable to inject into rendered containers.
+ *
+ * WARNING: This surface is for non-secret values only. The platform stores values in plaintext and exposes them through any query that selects them. Do not store credentials, API keys, or other secret material here — use the dedicated secret env var path (separate ticket) once available.
+ */
+export type EnvVar = {
+  __typename?: 'EnvVar';
+  /** POSIX-portable env var name, matching ^[A-Za-z_][A-Za-z0-9_]*$. */
+  name: Scalars['String']['output'];
+  /** The value to set. May be the empty string. NOT for secret material; see the EnvVar type description. */
+  value: Scalars['String']['output'];
+};
+
+/** A single environment variable name/value pair. */
+export type EnvVarInput = {
+  name: Scalars['String']['input'];
+  value: Scalars['String']['input'];
+};
+
 export type Environment = {
   __typename?: 'Environment';
   backupStorageLocation?: Maybe<BackupStorageLocation>;
@@ -274,6 +355,12 @@ export type Environment = {
   cluster: Cluster;
   config: Scalars['JSON']['output'];
   deployments: Array<Deployment>;
+  /**
+   * Env vars set at the environment scope. Empty when none are set.
+   *
+   * WARNING: This surface is for non-secret values only. The platform stores values in plaintext and exposes them through any query that selects them. Do not store credentials, API keys, or other secret material here — use the dedicated secret env var path (separate ticket) once available.
+   */
+  envVars: Array<EnvVar>;
   id: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
 };
@@ -283,6 +370,14 @@ export type EnvironmentDeploymentsArgs = {
   includeDeleted?: Scalars['Boolean']['input'];
 };
 
+export type ExternalDnsEndpointsType =
+  | 'CLUSTER_IP'
+  | 'NODE_EXTERNAL_IP';
+
+export type ExternalUrlScheme =
+  | 'HTTP'
+  | 'HTTPS';
+
 export type HelmChart = {
   __typename?: 'HelmChart';
   id: Scalars['UUID']['output'];
@@ -290,6 +385,36 @@ export type HelmChart = {
   repository: Scalars['String']['output'];
   valueTemplate: Scalars['String']['output'];
   version: Scalars['String']['output'];
+};
+
+/** Configuration for the dedicated ingress Kubernetes Service. */
+export type IngressServiceConfigInput = {
+  annotations?: InputMaybe<Scalars['JSON']['input']>;
+  externalTrafficPolicy?: InputMaybe<Scalars['String']['input']>;
+  ipFamilies?: InputMaybe<Array<Scalars['String']['input']>>;
+  ipFamilyPolicy?: InputMaybe<Scalars['String']['input']>;
+  loadBalancerIp?: InputMaybe<Scalars['String']['input']>;
+  nodePort?: InputMaybe<Scalars['Int']['input']>;
+  type?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** Kubernetes-style label selector. */
+export type LabelSelectorInput = {
+  matchExpressions?: InputMaybe<Array<LabelSelectorRequirementInput>>;
+  matchLabels?: InputMaybe<Scalars['JSON']['input']>;
+};
+
+export type LabelSelectorOperator =
+  | 'DOES_NOT_EXIST'
+  | 'EXISTS'
+  | 'IN'
+  | 'NOT_IN';
+
+/** One ``matchExpressions`` entry on a label selector. */
+export type LabelSelectorRequirementInput = {
+  key: Scalars['String']['input'];
+  operator: LabelSelectorOperator;
+  values?: InputMaybe<Array<Scalars['String']['input']>>;
 };
 
 export type ManagedResourceCountsInput = {
@@ -338,6 +463,7 @@ export type Mutation = {
   updateBackupStorageLocation?: Maybe<BackupStorageLocation>;
   updateDeployment?: Maybe<Task>;
   updateDeploymentVersion?: Maybe<Task>;
+  updateEnvironment?: Maybe<Environment>;
 };
 
 
@@ -530,6 +656,12 @@ export type MutationUpdateDeploymentVersionArgs = {
   version: Scalars['String']['input'];
 };
 
+
+export type MutationUpdateEnvironmentArgs = {
+  environmentId: Scalars['UUID']['input'];
+  input: UpdateEnvironmentInput;
+};
+
 export type ParameterDefinition = {
   __typename?: 'ParameterDefinition';
   default?: Maybe<Scalars['JSON']['output']>;
@@ -574,6 +706,16 @@ export type PodStatusInput = {
   ready: Scalars['Boolean']['input'];
   restartCount: Scalars['Int']['input'];
   startedAt?: InputMaybe<Scalars['DateTime']['input']>;
+};
+
+/** Per-feature opt-out flags for the post-render injection. */
+export type PostRenderInjectionInput = {
+  nodeAffinity?: InputMaybe<Scalars['Boolean']['input']>;
+  podAffinity?: InputMaybe<Scalars['Boolean']['input']>;
+  resources?: InputMaybe<Scalars['Boolean']['input']>;
+  runtimeClass?: InputMaybe<Scalars['Boolean']['input']>;
+  tolerations?: InputMaybe<Scalars['Boolean']['input']>;
+  topologySpread?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 export type Query = {
@@ -714,6 +856,20 @@ export type ResolvedComponentScheduling = {
   provenance: Scalars['JSON']['output'];
 };
 
+/** Container resource requirements (``requests`` and ``limits``). */
+export type ResourceRequirementsInput = {
+  limits?: InputMaybe<ResourceSpecInput>;
+  requests?: InputMaybe<ResourceSpecInput>;
+};
+
+/** Pod-container resource ``requests`` or ``limits`` payload. */
+export type ResourceSpecInput = {
+  cpu?: InputMaybe<Scalars['String']['input']>;
+  ephemeralStorage?: InputMaybe<Scalars['String']['input']>;
+  extended?: InputMaybe<Scalars['JSON']['input']>;
+  memory?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type Restore = {
   __typename?: 'Restore';
   backup: Backup;
@@ -736,6 +892,18 @@ export type RestoreStatus =
   | 'FAILED'
   | 'IN_PROGRESS'
   | 'PENDING';
+
+/** Hierarchical pod scheduling & resource configuration section. */
+export type SchedulingInput = {
+  inject?: InputMaybe<PostRenderInjectionInput>;
+  nodeAffinity?: InputMaybe<AffinityBlockInput>;
+  podAffinity?: InputMaybe<AffinityBlockInput>;
+  podAntiAffinity?: InputMaybe<AffinityBlockInput>;
+  resources?: InputMaybe<ResourceRequirementsInput>;
+  runtimeClass?: InputMaybe<Scalars['String']['input']>;
+  tolerations?: InputMaybe<Array<TolerationInput>>;
+  topologySpreadConstraints?: InputMaybe<Array<TopologySpreadConstraintInput>>;
+};
 
 export type ServiceDefinition = {
   __typename?: 'ServiceDefinition';
@@ -762,6 +930,60 @@ export type Task = {
   type: Scalars['String']['output'];
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };
+
+export type TolerationEffect =
+  | 'NO_EXECUTE'
+  | 'NO_SCHEDULE'
+  | 'PREFER_NO_SCHEDULE';
+
+/** Single pod toleration entry. */
+export type TolerationInput = {
+  effect?: InputMaybe<TolerationEffect>;
+  key?: InputMaybe<Scalars['String']['input']>;
+  operator?: InputMaybe<TolerationOperator>;
+  tolerationSeconds?: InputMaybe<Scalars['Int']['input']>;
+  value?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type TolerationOperator =
+  | 'EQUAL'
+  | 'EXISTS';
+
+/** One topology-spread constraint on the pod template. */
+export type TopologySpreadConstraintInput = {
+  labelSelector?: InputMaybe<LabelSelectorInput>;
+  matchLabelKeys?: InputMaybe<Array<Scalars['String']['input']>>;
+  maxSkew: Scalars['Int']['input'];
+  minDomains?: InputMaybe<Scalars['Int']['input']>;
+  nodeAffinityPolicy?: InputMaybe<Scalars['String']['input']>;
+  nodeTaintsPolicy?: InputMaybe<Scalars['String']['input']>;
+  topologyKey: Scalars['String']['input'];
+  whenUnsatisfiable: WhenUnsatisfiable;
+};
+
+/** Full-replacement input for environment configuration updates. Submit the complete desired configuration; any field omitted (``null``) is persisted as its unset state on the underlying EnvironmentConfig. */
+export type UpdateEnvironmentInput = {
+  dbSize?: InputMaybe<Scalars['String']['input']>;
+  dedicatedIngress?: InputMaybe<DedicatedIngressInput>;
+  envVars?: InputMaybe<Array<EnvVarInput>>;
+  externalDnsEndpointsType?: InputMaybe<ExternalDnsEndpointsType>;
+  externalUrlPort?: InputMaybe<Scalars['Int']['input']>;
+  externalUrlScheme?: InputMaybe<ExternalUrlScheme>;
+  fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
+  ingressClass?: InputMaybe<Scalars['String']['input']>;
+  ipWhitelist?: InputMaybe<Array<Scalars['String']['input']>>;
+  scheduling?: InputMaybe<SchedulingInput>;
+};
+
+/** Weighted affinity term for a ``preferred`` rule. */
+export type WeightedAffinityTermInput = {
+  term: AffinityTermInput;
+  weight: Scalars['Int']['input'];
+};
+
+export type WhenUnsatisfiable =
+  | 'DO_NOT_SCHEDULE'
+  | 'SCHEDULE_ANYWAY';
 
 export type AssignBackupStorageLocationMutationVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -1011,6 +1233,14 @@ export type UpdateDeploymentVersionMutationVariables = Exact<{
 
 
 export type UpdateDeploymentVersionMutation = { __typename?: 'Mutation', updateDeploymentVersion?: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, deploymentId?: string | null } | null };
+
+export type UpdateEnvironmentMutationVariables = Exact<{
+  environmentId: Scalars['UUID']['input'];
+  input: UpdateEnvironmentInput;
+}>;
+
+
+export type UpdateEnvironmentMutation = { __typename?: 'Mutation', updateEnvironment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string } } | null };
 
 
 
@@ -2090,6 +2320,33 @@ export const useUpdateDeploymentVersionMutation = <
       {
     mutationKey: ['UpdateDeploymentVersion'],
     mutationFn: (variables?: UpdateDeploymentVersionMutationVariables) => graphqlFetcher<UpdateDeploymentVersionMutation, UpdateDeploymentVersionMutationVariables>(UpdateDeploymentVersionDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateEnvironmentDocument = `
+    mutation UpdateEnvironment($environmentId: UUID!, $input: UpdateEnvironmentInput!) {
+  updateEnvironment(environmentId: $environmentId, input: $input) {
+    id
+    name
+    config
+    cluster {
+      id
+      name
+    }
+  }
+}
+    `;
+
+export const useUpdateEnvironmentMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateEnvironmentMutation, TError, UpdateEnvironmentMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateEnvironmentMutation, TError, UpdateEnvironmentMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateEnvironment'],
+    mutationFn: (variables?: UpdateEnvironmentMutationVariables) => graphqlFetcher<UpdateEnvironmentMutation, UpdateEnvironmentMutationVariables>(UpdateEnvironmentDocument, variables)(),
     ...options
   }
     )};

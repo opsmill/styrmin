@@ -60,6 +60,9 @@ spec:
               value: {{ .Values.mariadb.auth.database | quote }}
             - name: MONGODB_URL
               value: "mongodb://{{ .Values.mongodb.auth.rootUser }}:{{ .Values.mongodb.auth.rootPassword }}@{{ include "db-test.mongodb.fullname" . }}:27017/testdb?authSource=admin"
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:

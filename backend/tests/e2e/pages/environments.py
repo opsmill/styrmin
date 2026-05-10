@@ -169,6 +169,64 @@ class EnvironmentDetailPage:
         """Click the 'Show deleted' toggle in the list header."""
         await self._page.locator("[data-testid=show-deleted-toggle]").first.click()
 
+    async def update_env_vars_via_form(
+        self,
+        *,
+        environment_id: str,
+        env_vars: dict[str, str],
+    ) -> None:
+        """Drive the EnvVarsForm on the Configuration tab to add env vars.
+
+        Implements the UI side of the
+        ``ScenarioDriver.update_environment_via_form`` contract for
+        011-env-config-input-hardening / US4. Each ``(name, value)`` is
+        appended via "Add Variable"; existing rows are left in place so
+        the form's full-replacement payload preserves what was already
+        persisted (matching the api_driver's read-modify-write shape).
+        """
+        from playwright.async_api import expect
+
+        await self.goto(environment_id=environment_id)
+
+        # The Configuration tab uses the project's plain-button-based
+        # ``Tabs`` primitive (see frontend/src/components/ui/tabs.tsx),
+        # which does NOT set ``role="tab"``. We match it as a button
+        # with the exact label.
+        await self._page.get_by_role("button", name="Configuration", exact=True).click()
+
+        form = self._page.locator("[data-testid=env-vars-form]").first
+        await form.wait_for(state="visible")
+
+        # Snapshot the row count before adding so we can target the new
+        # rows by index without disturbing existing values.
+        existing_rows = self._page.locator("[data-testid=env-vars-form-row]")
+        existing_count = await existing_rows.count()
+
+        for offset, (name, value) in enumerate(env_vars.items()):
+            await self._page.locator("[data-testid=env-vars-form-add-button]").click()
+            new_row_index = existing_count + offset
+            new_row = self._page.locator("[data-testid=env-vars-form-row]").nth(
+                new_row_index
+            )
+            await new_row.locator("[data-testid=env-var-name-input]").fill(name)
+            await new_row.locator("[data-testid=env-var-value-input]").fill(value)
+
+        save = self._page.locator("[data-testid=env-vars-form-save-button]")
+        await save.click()
+
+        dialog = self._page.locator("[data-testid=redeploy-confirm-dialog]")
+        await dialog.wait_for(state="visible")
+        await self._page.locator("[data-testid=redeploy-confirm-redeploy]").click()
+        # Dialog must close before we let the test continue — otherwise
+        # the next assertion can race the still-pending mutation.
+        await dialog.wait_for(state="hidden")
+
+        # Wait for the form to settle: the Save button drops out of its
+        # "Saving..." pending state. ``expect`` retries the locator's
+        # text until it matches (or times out), giving the urql cache
+        # invalidation room to land without a hardcoded sleep.
+        await expect(save).to_have_text("Save")
+
     async def assign_bsl(self, *, environment_id: str, bsl_id: str) -> None:
         """Open the Parameters tab and pick the BSL from the selector."""
         await self.goto(environment_id=environment_id)

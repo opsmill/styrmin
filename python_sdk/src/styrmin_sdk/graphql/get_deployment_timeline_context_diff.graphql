@@ -1,0 +1,16 @@
+query GetDeploymentTimelineContextDiff($deploymentId: UUID!) {
+    deploymentTimeline(deploymentId: $deploymentId) {
+        task {
+            id
+            type
+            status
+        }
+        applicationVersion
+        contextDiff {
+            changes {
+                path
+                action
+            }
+        }
+    }
+}

@@ -11,6 +11,28 @@ class BackupStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class DriverEnvVarLevel(str, Enum):
+    DEPLOYMENT = "DEPLOYMENT"
+    COMPONENT = "COMPONENT"
+
+
+class ExternalDnsEndpointsType(str, Enum):
+    NODE_EXTERNAL_IP = "NODE_EXTERNAL_IP"
+    CLUSTER_IP = "CLUSTER_IP"
+
+
+class ExternalUrlScheme(str, Enum):
+    HTTP = "HTTP"
+    HTTPS = "HTTPS"
+
+
+class LabelSelectorOperator(str, Enum):
+    IN = "IN"
+    NOT_IN = "NOT_IN"
+    EXISTS = "EXISTS"
+    DOES_NOT_EXIST = "DOES_NOT_EXIST"
+
+
 class PodPhase(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
@@ -24,3 +46,19 @@ class RestoreStatus(str, Enum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+
+
+class TolerationEffect(str, Enum):
+    NO_SCHEDULE = "NO_SCHEDULE"
+    PREFER_NO_SCHEDULE = "PREFER_NO_SCHEDULE"
+    NO_EXECUTE = "NO_EXECUTE"
+
+
+class TolerationOperator(str, Enum):
+    EXISTS = "EXISTS"
+    EQUAL = "EQUAL"
+
+
+class WhenUnsatisfiable(str, Enum):
+    DO_NOT_SCHEDULE = "DO_NOT_SCHEDULE"
+    SCHEDULE_ANYWAY = "SCHEDULE_ANYWAY"

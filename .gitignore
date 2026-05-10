@@ -220,3 +220,6 @@ playwright-report/
 docs/node_modules/
 docs/build/
 docs/.docusaurus/
+
+# Claude Code transient runtime state
+.claude/scheduled_tasks.lock

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from styrmin_sdk._queries import load_query
@@ -13,6 +13,9 @@ from styrmin_sdk.graphql._generated.create_environment import (
 from styrmin_sdk.graphql._generated.get_environment import GetEnvironment, GetEnvironmentEnvironment
 from styrmin_sdk.graphql._generated.list_environments import ListEnvironments, ListEnvironmentsEnvironments
 from styrmin_sdk.resources._base import BaseResource, JsonValue
+
+if TYPE_CHECKING:
+    from styrmin_sdk.graphql._generated.input_types import UpdateEnvironmentInput
 
 
 class EnvironmentResource(BaseResource):
@@ -60,6 +63,27 @@ class EnvironmentResource(BaseResource):
         result = await self._transport.execute(load_query("get_environment"), variables)
         self._check_graphql_errors(result)
         return self._parse(GetEnvironment, result["data"], "environment", GetEnvironmentEnvironment)
+
+    async def update(
+        self,
+        environment_id: str | UUID,
+        input: UpdateEnvironmentInput,
+    ) -> JsonValue:
+        """Update an environment's config with a typed ``UpdateEnvironmentInput``.
+
+        ``input`` is the regenerated Pydantic model that mirrors the
+        GraphQL ``UpdateEnvironmentInput`` input type. Pass-through to
+        ``Mutation.updateEnvironment`` (009-environment-update / US2);
+        full-replacement semantics — any field omitted (``None``) is
+        persisted as the unset state on the underlying ``EnvironmentConfig``.
+        """
+        variables: dict[str, Any] = {
+            "environmentId": str(environment_id),
+            "input": input.model_dump(by_alias=True, exclude_none=True),
+        }
+        result = await self._transport.execute(load_query("update_environment"), variables)
+        self._check_graphql_errors(result)
+        return (result.get("data") or {}).get("updateEnvironment")
 
     async def delete(
         self,

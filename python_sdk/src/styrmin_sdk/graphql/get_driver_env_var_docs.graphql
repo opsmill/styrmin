@@ -1,0 +1,16 @@
+query GetDriverEnvVarDocs($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        id
+        name
+        versions {
+            id
+            version
+            envVars {
+                name
+                description
+                level
+                components
+            }
+        }
+    }
+}
