@@ -11,8 +11,8 @@ const config: Config = {
     v4: true,
   },
 
-  url: 'https://opsmill.github.io',
-  baseUrl: '/styrmin/',
+  url: 'https://styrmin.pages.dev',
+  baseUrl: '/',
 
   onBrokenLinks: 'throw',
 
