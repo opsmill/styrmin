@@ -4,6 +4,9 @@ on:
   slash_command:
     name: bug-fix
     events: [issue_comment]
+  skip-bots:
+    - cloudflare-pages[bot]
+    - cloudflare-workers-and-pages[bot]
 engine: claude
 permissions:
   contents: read
