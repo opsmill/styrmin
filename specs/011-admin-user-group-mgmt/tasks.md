@@ -129,12 +129,12 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### Frontend for US2
 
-- [ ] T044 [P] [US2] Add `.graphql` operations under `frontend/src/graphql/` (snake_case): the same six operations as the SDK, but consumed by `graphqlFetcher` + TanStack Query. (Frontend uses the operation strings directly via `graphqlFetcher`.)
-- [ ] T045 [P] [US2] Create `frontend/src/pages/users/UsersListPage.tsx` per contracts/frontend.md: query `users(active, role, search)`, filter row, table with client-side pagination (25 rows/page), "Create user" button opens a dialog form. Mirror `pages/backup-storage-locations/` structure.
-- [ ] T046 [P] [US2] Create `frontend/src/pages/users/UserDetailPage.tsx`: inline-edit display name, role, active, group memberships (multi-select of `groups()`). Reset-password and Delete-user buttons with confirmation. Surface server `LAST_ADMIN` / `USER_HAS_REFERENCES` errors as toasts AND inline on the affected field (per FR-010 edge case in spec).
-- [ ] T047 [P] [US2] Create `frontend/src/routes/usersList.tsx` and `frontend/src/routes/userDetail.tsx` with admin `beforeLoad` guards per research.md D4. Register in `routeTree.ts`.
-- [ ] T048 [P] [US2] Test `frontend/src/__tests__/UsersListPage.test.tsx`: renders rows from query; role filter updates query variables; client-side pagination shows 25 rows per page.
-- [ ] T049 [US2] Update navigation in `AppShell.tsx`: add "Users" link wrapped in `<IfRole minimum="ADMIN">` (depends on T017).
+- [X] T044 [P] [US2] Add `.graphql` operations under `frontend/src/graphql/` (snake_case): the same six operations as the SDK, but consumed by `graphqlFetcher` + TanStack Query. (Frontend uses the operation strings directly via `graphqlFetcher`.) _(list_groups.graphql deferred — no Query.groups resolver in schema yet; US3 adds it. UserDetailPage derives the group-membership multi-select from the existing list_users response as a stopgap.)_
+- [X] T045 [P] [US2] Create `frontend/src/pages/users/UsersListPage.tsx` per contracts/frontend.md: query `users(active, role, search)`, filter row, table with client-side pagination (25 rows/page), "Create user" button opens a dialog form. Mirror `pages/backup-storage-locations/` structure.
+- [X] T046 [P] [US2] Create `frontend/src/pages/users/UserDetailPage.tsx`: inline-edit display name, role, active, group memberships (multi-select of `groups()`). Reset-password and Delete-user buttons with confirmation. Surface server `LAST_ADMIN` / `USER_HAS_REFERENCES` errors as toasts AND inline on the affected field (per FR-010 edge case in spec).
+- [X] T047 [P] [US2] Create `frontend/src/routes/usersList.tsx` and `frontend/src/routes/userDetail.tsx` with admin `beforeLoad` guards per research.md D4. Register in `routeTree.ts`.
+- [X] T048 [P] [US2] Test `frontend/src/__tests__/UsersListPage.test.tsx`: renders rows from query; role filter updates query variables; client-side pagination shows 25 rows per page.
+- [X] T049 [US2] Update navigation in `AppShell.tsx`: add "Users" link wrapped in `<IfRole minimum="ADMIN">` (depends on T017).
 
 **Checkpoint**: An admin can complete the full user lifecycle via `/users` and `/users/$id`. The lifecycle-test scenario for users is now sufficient.
 

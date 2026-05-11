@@ -7,11 +7,13 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeft,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/use-theme";
 import { useAuth } from "@/auth/AuthProvider";
 import { HeaderUserMenu } from "@/components/HeaderUserMenu";
+import { IfRole } from "@/auth/IfRole";
 
 const STORAGE_KEY = "sidebar-collapsed";
 
@@ -24,6 +26,10 @@ const navItems = [
     href: "/backup-storage-locations",
     exact: false,
   },
+];
+
+const adminNavItems = [
+  { label: "Users", icon: Users, href: "/users", exact: false },
 ];
 
 const bottomNavItems = [
@@ -126,6 +132,7 @@ export function AppShell() {
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3">
           {navItems.map(renderNavLink)}
+          <IfRole minimum="ADMIN">{adminNavItems.map(renderNavLink)}</IfRole>
         </nav>
 
         {/* Bottom */}

@@ -11,6 +11,8 @@ import { addDriverRoute } from "./routes/addDriver";
 import { driverDetailRoute } from "./routes/driverDetail";
 import { settingsRoute } from "./routes/settings";
 import { clusterDetailRoute } from "./routes/clusterDetail";
+import { usersListRoute } from "./routes/usersList";
+import { userDetailRoute } from "./routes/userDetail";
 
 export const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -25,4 +27,6 @@ export const routeTree = rootRoute.addChildren([
   driverDetailRoute,
   settingsRoute,
   clusterDetailRoute,
+  usersListRoute,
+  userDetailRoute,
 ]);
