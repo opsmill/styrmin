@@ -23,6 +23,7 @@ import { AlertCircle, Trash2, KeyRound } from "lucide-react";
 import { useState } from "react";
 import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
+import { IfRole } from "@/auth/IfRole";
 
 const updateCredentialsSchema = z.object({
   accessKeyId: z.string().min(1, "Access key ID is required"),
@@ -98,7 +99,8 @@ export default function BackupStorageLocationDetailPage() {
       ]}
       actions={
         <div className="flex items-center gap-2">
-          <Dialog open={credentialsOpen} onOpenChange={setCredentialsOpen}>
+          <IfRole minimum="READ_WRITE">
+            <Dialog open={credentialsOpen} onOpenChange={setCredentialsOpen}>
             <DialogTrigger asChild>
               <Button size="sm" variant="outline">
                 <KeyRound className="h-4 w-4 mr-1" />
@@ -176,10 +178,13 @@ export default function BackupStorageLocationDetailPage() {
               </form>
             </DialogContent>
           </Dialog>
-          <Button size="sm" variant="destructive" onClick={handleDelete}>
-            <Trash2 className="h-4 w-4 mr-1" />
-            Delete
-          </Button>
+          </IfRole>
+          <IfRole minimum="READ_WRITE">
+            <Button size="sm" variant="destructive" onClick={handleDelete}>
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete
+            </Button>
+          </IfRole>
         </div>
       }
     >

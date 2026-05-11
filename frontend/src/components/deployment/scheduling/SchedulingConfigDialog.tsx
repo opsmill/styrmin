@@ -19,6 +19,7 @@ import { TolerationsEditor } from "./TolerationsEditor";
 import { TopologySpreadEditor } from "./TopologySpreadEditor";
 import { sanitizeSchedulingConfig } from "./sanitize";
 import type { SchedulingConfig } from "./types";
+import { IfRole } from "@/auth/IfRole";
 
 interface Props {
   open: boolean;
@@ -210,9 +211,11 @@ export function SchedulingConfigDialog({
           >
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={updateMutation.isPending}>
-            {updateMutation.isPending ? "Saving..." : "Save"}
-          </Button>
+          <IfRole minimum="READ_WRITE">
+            <Button onClick={handleSubmit} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </IfRole>
         </DialogFooter>
       </DialogContent>
     </Dialog>

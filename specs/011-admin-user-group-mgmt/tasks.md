@@ -200,13 +200,13 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### Frontend — wrap existing mutation buttons
 
-- [ ] T067 [P] [US5] In `frontend/src/pages/backup-storage-locations/`, wrap every write-mutation button (`Create`, `Edit`, `Delete`) with `<IfRole minimum="READ_WRITE">`.
-- [ ] T068 [P] [US5] In `frontend/src/pages/deployments/`, wrap every write-mutation button (Create deployment, Delete deployment, Upgrade, etc.) with `<IfRole minimum="READ_WRITE">`.
-- [ ] T069 [P] [US5] In `frontend/src/pages/drivers/`, wrap every write-mutation button (Add driver, Delete) with `<IfRole minimum="READ_WRITE">`.
-- [ ] T070 [P] [US5] In `frontend/src/pages/environments/`, wrap every write-mutation button (env-var update, create env, delete env, update config, etc.) with `<IfRole minimum="READ_WRITE">`.
-- [ ] T071 [P] [US5] In `frontend/src/pages/settings/`, wrap any write actions with `<IfRole minimum="READ_WRITE">`.
-- [ ] T072 [P] [US5] In `frontend/src/components/deployment/` and `frontend/src/components/environment/`, audit every component that renders a write button (Add/Edit/Delete/Save) and wrap appropriately. Use grep on `<Button` + `onClick` to enumerate.
-- [ ] T073 [US5] Add a Vitest snapshot or RTL test in `frontend/src/__tests__/role_gating.test.tsx` that mounts the AppShell + a sample page with a `read_only` mock user and asserts no `<Button>` for write mutations appears (queryByText for "Create", "Delete", etc. returns null). Same for `read_write`: admin-only buttons absent. Same for ADMIN: all buttons present.
+- [X] T067 [P] [US5] In `frontend/src/pages/backup-storage-locations/`, wrap every write-mutation button (`Create`, `Edit`, `Delete`) with `<IfRole minimum="READ_WRITE">`.
+- [X] T068 [P] [US5] In `frontend/src/pages/deployments/`, wrap every write-mutation button (Create deployment, Delete deployment, Upgrade, etc.) with `<IfRole minimum="READ_WRITE">`.
+- [X] T069 [P] [US5] In `frontend/src/pages/drivers/`, wrap every write-mutation button (Add driver, Delete) with `<IfRole minimum="READ_WRITE">`.
+- [X] T070 [P] [US5] In `frontend/src/pages/environments/`, wrap every write-mutation button (env-var update, create env, delete env, update config, etc.) with `<IfRole minimum="READ_WRITE">`.
+- [X] T071 [P] [US5] In `frontend/src/pages/settings/`, wrap any write actions with `<IfRole minimum="READ_WRITE">`.
+- [X] T072 [P] [US5] In `frontend/src/components/deployment/` and `frontend/src/components/environment/`, audit every component that renders a write button (Add/Edit/Delete/Save) and wrap appropriately. Use grep on `<Button` + `onClick` to enumerate.
+- [X] T073 [US5] Add a Vitest snapshot or RTL test in `frontend/src/__tests__/role_gating.test.tsx` that mounts the AppShell + a sample page with a `read_only` mock user and asserts no `<Button>` for write mutations appears (queryByText for "Create", "Delete", etc. returns null). Same for `read_write`: admin-only buttons absent. Same for ADMIN: all buttons present.
 
 **Checkpoint**: Every page now honours effective role.
 

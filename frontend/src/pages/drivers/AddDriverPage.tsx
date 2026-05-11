@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 import { useState } from "react";
+import { IfRole } from "@/auth/IfRole";
 
 const localSchema = z.object({
   path: z.string().min(1, "Path is required"),
@@ -153,9 +154,11 @@ export default function AddDriverPage() {
               )}
             </localForm.Field>
             <div className="flex gap-2">
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Loading..." : "Load Driver"}
-              </Button>
+              <IfRole minimum="READ_WRITE">
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? "Loading..." : "Load Driver"}
+                </Button>
+              </IfRole>
               <Button
                 type="button"
                 variant="outline"
@@ -213,9 +216,11 @@ export default function AddDriverPage() {
               )}
             </remoteForm.Field>
             <div className="flex gap-2">
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Loading..." : "Load Driver"}
-              </Button>
+              <IfRole minimum="READ_WRITE">
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? "Loading..." : "Load Driver"}
+                </Button>
+              </IfRole>
               <Button
                 type="button"
                 variant="outline"

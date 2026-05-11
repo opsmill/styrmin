@@ -45,6 +45,7 @@ import {
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
 import { SchedulingConfigDialog } from "@/components/deployment/scheduling/SchedulingConfigDialog";
+import { IfRole } from "@/auth/IfRole";
 
 const DEPLOYMENT_TABS = [
   { id: "overview", label: "Overview" },
@@ -289,47 +290,55 @@ export default function DeploymentDetailPage() {
             lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
             onRefreshNow={() => refetch()}
           />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={isTerminal}
-            onClick={() => setSchedulingOpen(true)}
-            title={isTerminal ? "This deployment is retired" : undefined}
-          >
-            Scheduling
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!instanceId || isRestoring || isTerminal}
-            onClick={() => setUpgradeOpen(true)}
-            title={isTerminal ? "This deployment is retired" : undefined}
-          >
-            Upgrade
-          </Button>
-          <Button
-            size="sm"
-            disabled={isTerminal}
-            title={isTerminal ? "This deployment is retired" : undefined}
-          >
-            Redeploy
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={isRestoring || isTerminal}
-            onClick={() => setDeleteDeploymentOpen(true)}
-            title={
-              isTerminal
-                ? "This deployment is retired"
-                : isRestoring
-                  ? "Deletion is refused while a restore is in progress"
-                  : undefined
-            }
-            data-testid="delete-deployment-button"
-          >
-            Delete
-          </Button>
+          <IfRole minimum="READ_WRITE">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isTerminal}
+              onClick={() => setSchedulingOpen(true)}
+              title={isTerminal ? "This deployment is retired" : undefined}
+            >
+              Scheduling
+            </Button>
+          </IfRole>
+          <IfRole minimum="READ_WRITE">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!instanceId || isRestoring || isTerminal}
+              onClick={() => setUpgradeOpen(true)}
+              title={isTerminal ? "This deployment is retired" : undefined}
+            >
+              Upgrade
+            </Button>
+          </IfRole>
+          <IfRole minimum="READ_WRITE">
+            <Button
+              size="sm"
+              disabled={isTerminal}
+              title={isTerminal ? "This deployment is retired" : undefined}
+            >
+              Redeploy
+            </Button>
+          </IfRole>
+          <IfRole minimum="READ_WRITE">
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={isRestoring || isTerminal}
+              onClick={() => setDeleteDeploymentOpen(true)}
+              title={
+                isTerminal
+                  ? "This deployment is retired"
+                  : isRestoring
+                    ? "Deletion is refused while a restore is in progress"
+                    : undefined
+              }
+              data-testid="delete-deployment-button"
+            >
+              Delete
+            </Button>
+          </IfRole>
         </div>
       </div>
 
@@ -558,20 +567,24 @@ export default function DeploymentDetailPage() {
             <span className="text-[13px] font-semibold text-foreground">
               Backup History
             </span>
-            <Button
-              size="sm"
-              disabled={
-                !instanceId ||
-                createBackupMutation.isPending ||
-                isRestoring ||
-                isTerminal
-              }
-              onClick={handleBackup}
-              title={isTerminal ? "This deployment is retired" : undefined}
-            >
-              <Archive className="h-4 w-4" />
-              {createBackupMutation.isPending ? "Creating..." : "Create Backup"}
-            </Button>
+            <IfRole minimum="READ_WRITE">
+              <Button
+                size="sm"
+                disabled={
+                  !instanceId ||
+                  createBackupMutation.isPending ||
+                  isRestoring ||
+                  isTerminal
+                }
+                onClick={handleBackup}
+                title={isTerminal ? "This deployment is retired" : undefined}
+              >
+                <Archive className="h-4 w-4" />
+                {createBackupMutation.isPending
+                  ? "Creating..."
+                  : "Create Backup"}
+              </Button>
+            </IfRole>
           </div>
 
           {backupsFetching && !backupsData ? (
@@ -671,12 +684,14 @@ export default function DeploymentDetailPage() {
             >
               Cancel
             </Button>
-            <Button
-              onClick={handleRestore}
-              disabled={!selectedBackupId || createRestoreMutation.isPending}
-            >
-              {createRestoreMutation.isPending ? "Restoring..." : "Restore"}
-            </Button>
+            <IfRole minimum="READ_WRITE">
+              <Button
+                onClick={handleRestore}
+                disabled={!selectedBackupId || createRestoreMutation.isPending}
+              >
+                {createRestoreMutation.isPending ? "Restoring..." : "Restore"}
+              </Button>
+            </IfRole>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -717,9 +732,11 @@ export default function DeploymentDetailPage() {
             >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleDelete}>
-              Delete
-            </Button>
+            <IfRole minimum="READ_WRITE">
+              <Button variant="destructive" onClick={handleDelete}>
+                Delete
+              </Button>
+            </IfRole>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -758,12 +775,14 @@ export default function DeploymentDetailPage() {
             >
               Cancel
             </Button>
-            <Button
-              onClick={handleUpgrade}
-              disabled={!newVersion.trim() || updateVersionMutation.isPending}
-            >
-              {updateVersionMutation.isPending ? "Upgrading..." : "Upgrade"}
-            </Button>
+            <IfRole minimum="READ_WRITE">
+              <Button
+                onClick={handleUpgrade}
+                disabled={!newVersion.trim() || updateVersionMutation.isPending}
+              >
+                {updateVersionMutation.isPending ? "Upgrading..." : "Upgrade"}
+              </Button>
+            </IfRole>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -827,17 +846,19 @@ export default function DeploymentDetailPage() {
             >
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteDeployment}
-              disabled={
-                deleteDeploymentConfirm !== deployment.name ||
-                deleteDeploymentMutation.isPending
-              }
-              data-testid="delete-deployment-confirm-button"
-            >
-              {deleteDeploymentMutation.isPending ? "Deleting…" : "Delete"}
-            </Button>
+            <IfRole minimum="READ_WRITE">
+              <Button
+                variant="destructive"
+                onClick={handleDeleteDeployment}
+                disabled={
+                  deleteDeploymentConfirm !== deployment.name ||
+                  deleteDeploymentMutation.isPending
+                }
+                data-testid="delete-deployment-confirm-button"
+              >
+                {deleteDeploymentMutation.isPending ? "Deleting…" : "Delete"}
+              </Button>
+            </IfRole>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -987,23 +1008,25 @@ function BackupRow({
           {backup.sizeBytes != null ? formatBytes(backup.sizeBytes) : "—"}
         </span>
         <div className="flex flex-1 items-center gap-2">
-          <button
-            disabled={isRestoreDisabled}
-            onClick={() => onRestore(backup.id)}
-            className="text-xs font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
-            title={terminalTooltip}
-          >
-            Restore
-          </button>
-          <span className="text-muted-foreground/30">|</span>
-          <button
-            disabled={deploymentTerminal}
-            onClick={() => onDelete(backup.id)}
-            className="text-xs font-medium text-destructive hover:underline disabled:text-muted-foreground disabled:no-underline"
-            title={terminalTooltip}
-          >
-            Delete
-          </button>
+          <IfRole minimum="READ_WRITE">
+            <button
+              disabled={isRestoreDisabled}
+              onClick={() => onRestore(backup.id)}
+              className="text-xs font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+              title={terminalTooltip}
+            >
+              Restore
+            </button>
+            <span className="text-muted-foreground/30">|</span>
+            <button
+              disabled={deploymentTerminal}
+              onClick={() => onDelete(backup.id)}
+              className="text-xs font-medium text-destructive hover:underline disabled:text-muted-foreground disabled:no-underline"
+              title={terminalTooltip}
+            >
+              Delete
+            </button>
+          </IfRole>
         </div>
       </div>
 

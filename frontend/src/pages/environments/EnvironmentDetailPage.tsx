@@ -24,6 +24,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Plus } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
+import { IfRole } from "@/auth/IfRole";
+import { useEffectiveRole } from "@/auth/useEffectiveRole";
 import EnvironmentConfigurationTab from "./EnvironmentConfigurationTab";
 
 const TABS = [
@@ -52,6 +54,9 @@ export default function EnvironmentDetailPage() {
   const assignBslMutation = useAssignBackupStorageLocationMutation();
   const unassignBslMutation = useUnassignBackupStorageLocationMutation();
   const queryClient = useQueryClient();
+  const effectiveRole = useEffectiveRole();
+  const canWrite =
+    effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";
 
   const environment = data?.environment;
 
@@ -139,17 +144,19 @@ export default function EnvironmentDetailPage() {
             lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
             onRefreshNow={() => refetch()}
           />
-          <Button
-            onClick={() =>
-              navigate({
-                to: "/environments/$environmentId/deploy",
-                params: { environmentId },
-              })
-            }
-          >
-            <Plus className="h-4 w-4" />
-            Deploy
-          </Button>
+          <IfRole minimum="READ_WRITE">
+            <Button
+              onClick={() =>
+                navigate({
+                  to: "/environments/$environmentId/deploy",
+                  params: { environmentId },
+                })
+              }
+            >
+              <Plus className="h-4 w-4" />
+              Deploy
+            </Button>
+          </IfRole>
         </div>
       </div>
 
@@ -246,12 +253,15 @@ export default function EnvironmentDetailPage() {
             <EmptyState
               title="No deployments"
               description="No applications have been deployed to this environment yet."
-              actionLabel="Deploy an application"
-              onAction={() =>
-                navigate({
-                  to: "/environments/$environmentId/deploy",
-                  params: { environmentId },
-                })
+              actionLabel={canWrite ? "Deploy an application" : undefined}
+              onAction={
+                canWrite
+                  ? () =>
+                      navigate({
+                        to: "/environments/$environmentId/deploy",
+                        params: { environmentId },
+                      })
+                  : undefined
               }
             />
           ) : (
@@ -333,22 +343,28 @@ export default function EnvironmentDetailPage() {
           <Label className="text-[13px] text-muted-foreground whitespace-nowrap">
             Backup Storage Location:
           </Label>
-          <Select
-            value={environment.backupStorageLocation?.id ?? "__none__"}
-            onValueChange={handleBslChange}
-          >
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Cluster default" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">Cluster default</SelectItem>
-              {bslData?.backupStorageLocations.map((bsl) => (
-                <SelectItem key={bsl.id} value={bsl.id}>
-                  {bsl.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {canWrite ? (
+            <Select
+              value={environment.backupStorageLocation?.id ?? "__none__"}
+              onValueChange={handleBslChange}
+            >
+              <SelectTrigger className="w-64">
+                <SelectValue placeholder="Cluster default" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Cluster default</SelectItem>
+                {bslData?.backupStorageLocations.map((bsl) => (
+                  <SelectItem key={bsl.id} value={bsl.id}>
+                    {bsl.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <span className="text-[13px] text-foreground">
+              {environment.backupStorageLocation?.name ?? "Cluster default"}
+            </span>
+          )}
         </div>
       </TabPanel>
 

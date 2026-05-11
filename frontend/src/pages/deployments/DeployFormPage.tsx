@@ -26,6 +26,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertCircle } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
+import { IfRole } from "@/auth/IfRole";
 
 const deployFormSchema = z.object({
   name: z.string().min(1, "Deployment name is required"),
@@ -430,9 +431,11 @@ export default function DeployFormPage() {
         </div>
 
         <div className="flex gap-2">
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "Deploying..." : "Deploy"}
-          </Button>
+          <IfRole minimum="READ_WRITE">
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Deploying..." : "Deploy"}
+            </Button>
+          </IfRole>
           <Button
             type="button"
             variant="outline"

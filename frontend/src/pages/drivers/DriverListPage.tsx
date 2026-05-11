@@ -16,10 +16,15 @@ import {
 } from "@/components/ui/card";
 import { Package, Plus } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
+import { IfRole } from "@/auth/IfRole";
+import { useEffectiveRole } from "@/auth/useEffectiveRole";
 
 export default function DriverListPage() {
   const navigate = useNavigate();
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const effectiveRole = useEffectiveRole();
+  const canWrite =
+    effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";
   const { data, isLoading, error, refetch, dataUpdatedAt } =
     useListDriversQuery(undefined, {
       refetchInterval: autoRefreshEnabled ? 10_000 : false,
@@ -37,10 +42,12 @@ export default function DriverListPage() {
             lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
             onRefreshNow={() => refetch()}
           />
-          <Button onClick={() => navigate({ to: "/drivers/add" })}>
-            <Plus className="h-4 w-4" />
-            Add Driver
-          </Button>
+          <IfRole minimum="READ_WRITE">
+            <Button onClick={() => navigate({ to: "/drivers/add" })}>
+              <Plus className="h-4 w-4" />
+              Add Driver
+            </Button>
+          </IfRole>
         </>
       }
     >
@@ -54,8 +61,8 @@ export default function DriverListPage() {
         <EmptyState
           title="No drivers"
           description="No application drivers have been installed yet."
-          actionLabel="Add a driver"
-          onAction={() => navigate({ to: "/drivers/add" })}
+          actionLabel={canWrite ? "Add a driver" : undefined}
+          onAction={canWrite ? () => navigate({ to: "/drivers/add" }) : undefined}
         />
       )}
 
