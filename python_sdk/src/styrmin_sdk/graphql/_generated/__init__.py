@@ -130,6 +130,7 @@ from .input_types import (
     AffinityBlockInput,
     AffinityTermInput,
     CrdConditionInput,
+    CreateUserInput,
     DedicatedIngressInput,
     DeploymentPodStatusReport,
     DeploymentReferenceInput,
@@ -148,6 +149,7 @@ from .input_types import (
     TolerationInput,
     TopologySpreadConstraintInput,
     UpdateEnvironmentInput,
+    UpdateUserInput,
     WeightedAffinityTermInput,
 )
 from .list_backup_schedules import (
@@ -239,6 +241,7 @@ __all__ = [
     "CreateEnvironmentCreateEnvironmentCluster",
     "CreateRestore",
     "CreateRestoreCreateRestore",
+    "CreateUserInput",
     "CurrentUser",
     "CurrentUserCurrentUser",
     "DedicatedIngressInput",
@@ -391,6 +394,7 @@ __all__ = [
     "UpdateEnvironmentInput",
     "UpdateEnvironmentUpdateEnvironment",
     "UpdateEnvironmentUpdateEnvironmentCluster",
+    "UpdateUserInput",
     "Upload",
     "WeightedAffinityTermInput",
     "WhenUnsatisfiable",

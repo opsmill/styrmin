@@ -225,6 +225,14 @@ export type CrdConditionType = {
   type: Scalars['String']['output'];
 };
 
+export type CreateUserInput = {
+  displayName: Scalars['String']['input'];
+  groupIds?: InputMaybe<Array<Scalars['ID']['input']>>;
+  password: Scalars['String']['input'];
+  role: Role;
+  username: Scalars['String']['input'];
+};
+
 /** Dedicated per-environment ingress controller configuration. */
 export type DedicatedIngressInput = {
   implementation?: InputMaybe<Scalars['String']['input']>;
@@ -459,12 +467,14 @@ export type Mutation = {
   createCluster?: Maybe<Cluster>;
   createEnvironment?: Maybe<Environment>;
   createRestore?: Maybe<Restore>;
+  createUser: User;
   deleteBackup?: Maybe<Scalars['String']['output']>;
   deleteBackupSchedule?: Maybe<Scalars['String']['output']>;
   deleteBackupStorageLocation?: Maybe<Scalars['String']['output']>;
   deleteCluster?: Maybe<Scalars['String']['output']>;
   deleteDeployment: Task;
   deleteEnvironment?: Maybe<Scalars['String']['output']>;
+  deleteUser: Scalars['Boolean']['output'];
   deploy?: Maybe<Task>;
   loadLocalApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
   loadRemoteApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
@@ -472,6 +482,7 @@ export type Mutation = {
   logout: Scalars['Boolean']['output'];
   reportDeploymentStatuses: ReportDeploymentStatusesResponse;
   reportPodStatuses: ReportPodStatusesResponse;
+  resetUserPassword: Scalars['Boolean']['output'];
   runJob?: Maybe<Task>;
   startComponents?: Maybe<Task>;
   stopComponents?: Maybe<Task>;
@@ -481,6 +492,7 @@ export type Mutation = {
   updateDeployment?: Maybe<Task>;
   updateDeploymentVersion?: Maybe<Task>;
   updateEnvironment?: Maybe<Environment>;
+  updateUser: User;
 };
 
 
@@ -550,6 +562,11 @@ export type MutationCreateRestoreArgs = {
 };
 
 
+export type MutationCreateUserArgs = {
+  input: CreateUserInput;
+};
+
+
 export type MutationDeleteBackupArgs = {
   backupId: Scalars['UUID']['input'];
 };
@@ -581,6 +598,11 @@ export type MutationDeleteEnvironmentArgs = {
   clusterName?: InputMaybe<Scalars['String']['input']>;
   environmentId?: InputMaybe<Scalars['UUID']['input']>;
   environmentName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationDeleteUserArgs = {
+  id: Scalars['UUID']['input'];
 };
 
 
@@ -622,6 +644,12 @@ export type MutationReportDeploymentStatusesArgs = {
 
 export type MutationReportPodStatusesArgs = {
   reports: Array<DeploymentPodStatusReport>;
+};
+
+
+export type MutationResetUserPasswordArgs = {
+  newPassword: Scalars['String']['input'];
+  userId: Scalars['UUID']['input'];
 };
 
 
@@ -689,6 +717,12 @@ export type MutationUpdateDeploymentVersionArgs = {
 export type MutationUpdateEnvironmentArgs = {
   environmentId: Scalars['UUID']['input'];
   input: UpdateEnvironmentInput;
+};
+
+
+export type MutationUpdateUserArgs = {
+  id: Scalars['UUID']['input'];
+  input: UpdateUserInput;
 };
 
 export type ParameterDefinition = {
@@ -773,6 +807,7 @@ export type Query = {
   restores: Array<Restore>;
   task?: Maybe<Task>;
   tasks: Array<Task>;
+  users: Array<User>;
 };
 
 
@@ -861,6 +896,13 @@ export type QueryRestoresArgs = {
 
 export type QueryTaskArgs = {
   taskId: Scalars['UUID']['input'];
+};
+
+
+export type QueryUsersArgs = {
+  active?: InputMaybe<Scalars['Boolean']['input']>;
+  role?: InputMaybe<Role>;
+  search?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type ReportDeploymentStatusesResponse = {
@@ -1008,6 +1050,13 @@ export type UpdateEnvironmentInput = {
   ingressClass?: InputMaybe<Scalars['String']['input']>;
   ipWhitelist?: InputMaybe<Array<Scalars['String']['input']>>;
   scheduling?: InputMaybe<SchedulingInput>;
+};
+
+export type UpdateUserInput = {
+  active?: InputMaybe<Scalars['Boolean']['input']>;
+  displayName?: InputMaybe<Scalars['String']['input']>;
+  groupIds?: InputMaybe<Array<Scalars['ID']['input']>>;
+  role?: InputMaybe<Role>;
 };
 
 export type User = {
