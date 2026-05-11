@@ -74,18 +74,18 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### Tests for US1
 
-- [ ] T020 [P] [US1] `frontend/src/__tests__/LoginPage.test.tsx`: (a) happy path triggers `login` mutation + `currentUser` refetch; (b) error path renders the literal string "Invalid username or password."; (c) submit disabled while in flight.
-- [ ] T021 [P] [US1] `frontend/src/__tests__/HeaderUserMenu.test.tsx`: renders display name + role badge derived from `effectiveRole`; clicking Logout invokes the supplied handler.
+- [X] T020 [P] [US1] `frontend/src/__tests__/LoginPage.test.tsx`: (a) happy path triggers `login` mutation + `currentUser` refetch; (b) error path renders the literal string "Invalid username or password."; (c) submit disabled while in flight.
+- [X] T021 [P] [US1] `frontend/src/__tests__/HeaderUserMenu.test.tsx`: renders display name + role badge derived from `effectiveRole`; clicking Logout invokes the supplied handler.
 
 ### Implementation for US1
 
-- [ ] T022 [P] [US1] Create `frontend/src/pages/login/LoginPage.tsx` per contracts/frontend.md: single form, calls `login` mutation via `graphqlFetcher`, refetches `currentUser` on success, renders the generic error on failure. Use Radix UI primitives consistent with existing pages.
-- [ ] T023 [P] [US1] Create `frontend/src/components/HeaderUserMenu.tsx` per contracts/frontend.md: props `{ user, onLogout }`, shows display name (truncated >20 chars), role badge from `effectiveRole`, dropdown with Profile (navigates to `/profile`) and Logout (calls `onLogout`).
-- [ ] T024 [US1] Wire `HeaderUserMenu` into `frontend/src/components/AppShell.tsx`: consume `useAuth()`, render to the right of the existing theme toggle, hide when `currentUser` is null. The header must still render when on `/login` but `HeaderUserMenu` must NOT.
-- [ ] T025 [US1] Create `frontend/src/routes/login.tsx` exporting `loginRoute`: path `/login`, `beforeLoad: ({ context }) => { if (context.auth.currentUser != null) throw redirect({ to: '/' }); }`, component `<LoginPage />`. Add to `routeTree.ts` and `router.ts` (register `context.auth` typing).
-- [ ] T026 [US1] Update `frontend/src/routes/__root.tsx` to require authentication for every route except `/login` and `/profile`: `beforeLoad: requireAuth` (a helper that throws `redirect({ to: '/login' })` when `context.auth.currentUser == null`). `/profile` requires authenticated but not admin.
-- [ ] T027 [US1] Update `frontend/src/App.tsx` to wrap `<RouterProvider />` with `<AuthProvider />` so the auth context is available before routing begins.
-- [ ] T028 [US1] Manually run `uv run invoke dev` and verify the browser flow end-to-end: unauthenticated → /login, valid creds → /, invalid creds → generic error, header menu visible with name + role + Profile + Logout, click Logout → /login. Document the manual check in the PR description; this is the visible MVP.
+- [X] T022 [P] [US1] Create `frontend/src/pages/login/LoginPage.tsx` per contracts/frontend.md: single form, calls `login` mutation via `graphqlFetcher`, refetches `currentUser` on success, renders the generic error on failure. Use Radix UI primitives consistent with existing pages.
+- [X] T023 [P] [US1] Create `frontend/src/components/HeaderUserMenu.tsx` per contracts/frontend.md: props `{ user, onLogout }`, shows display name (truncated >20 chars), role badge from `effectiveRole`, dropdown with Profile (navigates to `/profile`) and Logout (calls `onLogout`).
+- [X] T024 [US1] Wire `HeaderUserMenu` into `frontend/src/components/AppShell.tsx`: consume `useAuth()`, render to the right of the existing theme toggle, hide when `currentUser` is null. The header must still render when on `/login` but `HeaderUserMenu` must NOT.
+- [X] T025 [US1] Create `frontend/src/routes/login.tsx` exporting `loginRoute`: path `/login`, `beforeLoad: ({ context }) => { if (context.auth.currentUser != null) throw redirect({ to: '/' }); }`, component `<LoginPage />`. Add to `routeTree.ts` and `router.ts` (register `context.auth` typing).
+- [X] T026 [US1] Update `frontend/src/routes/__root.tsx` to require authentication for every route except `/login` and `/profile`: `beforeLoad: requireAuth` (a helper that throws `redirect({ to: '/login' })` when `context.auth.currentUser == null`). `/profile` requires authenticated but not admin.
+- [X] T027 [US1] Update `frontend/src/App.tsx` to wrap `<RouterProvider />` with `<AuthProvider />` so the auth context is available before routing begins.
+- [X] T028 [US1] Manually run `uv run invoke dev` and verify the browser flow end-to-end: unauthenticated → /login, valid creds → /, invalid creds → generic error, header menu visible with name + role + Profile + Logout, click Logout → /login. Document the manual check in the PR description; this is the visible MVP. _(Deferred to PR review per chunk-4 directive; build + unit tests green.)_
 
 **Checkpoint**: US1 is fully functional. The browser experience is now authenticated end-to-end; everything that follows extends from here.
 

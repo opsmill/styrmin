@@ -8,11 +8,17 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  LogoutDocument,
   useCurrentUserQuery,
   type CurrentUserQuery,
+  type LogoutMutation,
+  type LogoutMutationVariables,
   type Role,
 } from "@/generated/graphql";
-import { setUnauthenticatedHandler } from "@/lib/graphql-fetcher";
+import {
+  graphqlFetcher,
+  setUnauthenticatedHandler,
+} from "@/lib/graphql-fetcher";
 import { router } from "@/router";
 import { LoadingState } from "@/components/LoadingState";
 
@@ -50,14 +56,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [queryClient]);
 
   const logout = useCallback(async () => {
-    // Logout mutation wiring is added in a later task (US1). For now,
-    // clear cached queries and navigate to the login page.
+    // Best-effort: tell the server to invalidate the session cookie. We always
+    // proceed to clear the local cache and redirect even if the request fails
+    // (network down, already unauthenticated, etc.) so the user is not stuck.
+    try {
+      await graphqlFetcher<LogoutMutation, LogoutMutationVariables>(
+        LogoutDocument,
+      )();
+    } catch {
+      // Swallow — the local cleanup below is what matters for the UX.
+    }
     queryClient.clear();
-    // The /login route is registered by a later task; use a loose cast so
-    // this file compiles independently of that route's registration.
-    await router.navigate({ to: "/login" } as Parameters<
-      typeof router.navigate
-    >[0]);
+    await router.navigate({ to: "/login" });
   }, [queryClient]);
 
   // Register the UNAUTHENTICATED handler so any subsequent query that gets
@@ -65,9 +75,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     setUnauthenticatedHandler(() => {
       queryClient.clear();
-      void router.navigate({ to: "/login" } as Parameters<
-        typeof router.navigate
-      >[0]);
+      void router.navigate({ to: "/login" });
     });
     return () => {
       setUnauthenticatedHandler(null);

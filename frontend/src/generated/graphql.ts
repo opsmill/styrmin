@@ -1247,6 +1247,19 @@ export type LoadRemoteDriverMutationVariables = Exact<{
 
 export type LoadRemoteDriverMutation = { __typename?: 'Mutation', loadRemoteApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, applicationDriverId: string } | null };
 
+export type LoginMutationVariables = Exact<{
+  username: Scalars['String']['input'];
+  password: Scalars['String']['input'];
+}>;
+
+
+export type LoginMutation = { __typename?: 'Mutation', login: { __typename?: 'LoginResult', token: string, user: { __typename?: 'User', id: string, username: string, displayName: string, role: Role, effectiveRole: Role, active: boolean } } };
+
+export type LogoutMutationVariables = Exact<{ [key: string]: never; }>;
+
+
+export type LogoutMutation = { __typename?: 'Mutation', logout: boolean };
+
 export type UnassignBackupStorageLocationMutationVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
 }>;
@@ -2282,6 +2295,54 @@ export const useLoadRemoteDriverMutation = <
       {
     mutationKey: ['LoadRemoteDriver'],
     mutationFn: (variables?: LoadRemoteDriverMutationVariables) => graphqlFetcher<LoadRemoteDriverMutation, LoadRemoteDriverMutationVariables>(LoadRemoteDriverDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const LoginDocument = `
+    mutation Login($username: String!, $password: String!) {
+  login(username: $username, password: $password) {
+    token
+    user {
+      id
+      username
+      displayName
+      role
+      effectiveRole
+      active
+    }
+  }
+}
+    `;
+
+export const useLoginMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<LoginMutation, TError, LoginMutationVariables, TContext>) => {
+    
+    return useMutation<LoginMutation, TError, LoginMutationVariables, TContext>(
+      {
+    mutationKey: ['Login'],
+    mutationFn: (variables?: LoginMutationVariables) => graphqlFetcher<LoginMutation, LoginMutationVariables>(LoginDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const LogoutDocument = `
+    mutation Logout {
+  logout
+}
+    `;
+
+export const useLogoutMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<LogoutMutation, TError, LogoutMutationVariables, TContext>) => {
+    
+    return useMutation<LogoutMutation, TError, LogoutMutationVariables, TContext>(
+      {
+    mutationKey: ['Logout'],
+    mutationFn: (variables?: LogoutMutationVariables) => graphqlFetcher<LogoutMutation, LogoutMutationVariables>(LogoutDocument, variables)(),
     ...options
   }
     )};
