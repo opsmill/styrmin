@@ -33,7 +33,7 @@ Post a comment on the issue (or PR for the test/review stages) whose **first lin
 
 The trigger matcher is strict: the comment must **start** with the command. Quoting it in a blockquote (`> /bug-analyze 206`) or burying it mid-paragraph will not fire the workflow. This is intentional — it keeps discussion of the commands from accidentally re-triggering them.
 
-You also need write access to issues and pull requests on the repository — GitHub's repository-level role gating is what restricts who can run the pipeline.
+You also need write access to issues and pull requests on the repository — GitHub's repository-level role gating is what restricts who can run the pipeline. In addition, comments posted by Cloudflare-related bots (`cloudflare-pages[bot]`, `cloudflare-workers-and-pages[bot]`) are explicitly excluded via the `skip-bots` frontmatter on each stage, so deployment-preview comments never spawn a run regardless of their content or author association.
 
 ## How to trigger locally from Claude Code
 
