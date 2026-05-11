@@ -529,6 +529,32 @@ class Deployment:
         )
         return UserType.from_instance(user)
 
+    @strawberry.field(
+        description=(
+            "Username of the user who created this deployment, or ``null`` "
+            "if the creator row has been removed (forward-compatible with "
+            "``ondelete=SET NULL`` even though the FK is currently non-null). "
+            "Unlike ``createdBy``, this field is NOT admin-gated — drivers "
+            "and the UI can surface attribution without elevated access per "
+            "FR-028."
+        )
+    )
+    async def created_by_username(self, info: strawberry.Info) -> str | None:
+        from sqlmodel import select
+
+        from styrmin_backend.db.models import User as UserDBModel
+
+        if self.created_by_user_id is None:
+            return None
+        uow = info.context["uow"]
+        result = await uow.session.exec(
+            select(UserDBModel.username).where(
+                UserDBModel.id == self.created_by_user_id
+            )
+        )
+        username = result.first()
+        return username if username is not None else None
+
     @classmethod
     def from_instance(cls, instance: DeploymentEntity) -> Deployment:
         return cls(

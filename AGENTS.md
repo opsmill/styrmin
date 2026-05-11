@@ -202,6 +202,7 @@ Use `git commit --no-verify` only for genuine emergencies — e.g., a hook that 
 |----------|----------|
 | How does the system work? | `dev/knowledge/` |
 | How do I do X? | `dev/guides/` |
+| How do I manage users, groups, and roles? | `dev/guides/users-and-groups.md` |
 | Why was this decided? | `dev/adr/` |
 | What are we building? | `specs/` |
 | How should I write code? | `dev/guidelines/` |

@@ -32,6 +32,60 @@ from .seeds import seed_deployment, seed_user
 
 
 @pytest.mark.asyncio
+async def test_deployment_created_by_username_propagation(
+    session: AsyncSession,
+) -> None:
+    """``Deployment.createdByUsername`` projects the creator's username.
+
+    Driver-visible (not admin-gated per FR-028): a non-admin authenticated
+    caller can read the field. Asserts the value matches the username of
+    the user that owns the deployment row's ``created_by_user_id`` FK.
+    """
+    # Seed a READ_WRITE user who will both own the deployment and act as
+    # the caller. Confirms the field is not admin-gated.
+    caller = User(
+        username="alice-creator",
+        password_hash=hash_password("not-used-but-12chars"),
+        display_name="Alice Creator",
+        active=True,
+        role=Role.READ_WRITE,
+    )
+    session.add(caller)
+    await session.commit()
+    await session.refresh(caller)
+    _row, raw_token = await create_session(session, caller.id)
+
+    deployment = await seed_deployment(session, creator=caller)
+
+    async def get_session_override():
+        yield session
+
+    app.dependency_overrides[get_session] = get_session_override
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {raw_token}"},
+        ) as caller_client:
+            response = await caller_client.post(
+                "/graphql",
+                json={
+                    "query": load_query("get_deployment_created_by_username"),
+                    "variables": {"deploymentId": str(deployment.id)},
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+    row = payload["data"]["deployment"]
+    assert row["id"] == str(deployment.id)
+    assert row["createdByUsername"] == "alice-creator"
+
+
+@pytest.mark.asyncio
 async def test_created_by_projects_persisted_user(
     client: AsyncClient, session: AsyncSession
 ) -> None:

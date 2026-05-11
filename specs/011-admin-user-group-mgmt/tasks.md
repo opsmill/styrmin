@@ -239,8 +239,8 @@ The bulk of SDK work landed in T039–T043 (US2) and T055–T059 (US3) because b
 
 ### Implementation
 
-- [ ] T080 [P] [US6] Verify the SDK exports `from styrmin_sdk import StyrminClient; client.users; client.groups` work in a fresh interpreter; add a smoke-test script under `python_sdk/examples/users_groups.py` matching the quickstart § E example.
-- [ ] T081 [P] [US6] Update `python_sdk/AGENTS.md` (if it lists resources) with the new namespaces. (If the file already auto-enumerates, this is a no-op.)
+- [X] T080 [P] [US6] Verify the SDK exports `from styrmin_sdk import StyrminClient; client.users; client.groups` work in a fresh interpreter; add a smoke-test script under `python_sdk/examples/users_groups.py` matching the quickstart § E example.
+- [X] T081 [P] [US6] Update `python_sdk/AGENTS.md` (if it lists resources) with the new namespaces. (If the file already auto-enumerates, this is a no-op.)
 
 **Checkpoint**: SDK is publishable; the lifecycle script in quickstart.md § E runs.
 
@@ -252,7 +252,7 @@ The bulk of SDK work landed in T039–T043 (US2) and T055–T059 (US3) because b
 
 ### Implementation
 
-- [ ] T082 [US7] Create `dev/guides/users-and-groups.md` covering: (a) the three roles (`READ_ONLY`, `READ_WRITE`, `ADMIN`) and "effective role" via group membership; (b) default-admin bootstrap (`STYRMIN_ADMIN_USERNAME` / `STYRMIN_ADMIN_PASSWORD` env vars; generated-password log line behavior); (c) admin UI walkthrough (mirror quickstart § A–D); (d) what to do when locked out (re-bootstrap via env var; no recovery flow in v1); (e) the SDK equivalent (quickstart § E); (f) "hide-not-disable" rationale and how to inspect via `effectiveRole`. Cross-link from `AGENTS.md` Navigation table if applicable.
+- [X] T082 [US7] Create `dev/guides/users-and-groups.md` covering: (a) the three roles (`READ_ONLY`, `READ_WRITE`, `ADMIN`) and "effective role" via group membership; (b) default-admin bootstrap (`STYRMIN_ADMIN_USERNAME` / `STYRMIN_ADMIN_PASSWORD` env vars; generated-password log line behavior); (c) admin UI walkthrough (mirror quickstart § A–D); (d) what to do when locked out (re-bootstrap via env var; no recovery flow in v1); (e) the SDK equivalent (quickstart § E); (f) "hide-not-disable" rationale and how to inspect via `effectiveRole`. Cross-link from `AGENTS.md` Navigation table if applicable.
 
 **Checkpoint**: A new operator can self-serve without reading source (SC-008).
 
@@ -264,9 +264,9 @@ The bulk of SDK work landed in T039–T043 (US2) and T055–T059 (US3) because b
 
 ### Implementation
 
-- [ ] T083 [P] [US2] Add a `createdByUsername: str | None` field to the `Deployment` GraphQL type (look up the resolver in `backend/styrmin_backend/api/definitions/deployment/`; resolver projects `deployment.created_by.username` when the FK is non-null, else `None`). NOT admin-gated — driver-visible.
-- [ ] T084 [US2] Regenerate `schema.graphql`.
-- [ ] T085 [P] [US2] Propagation test `test_deployment_created_by_username_propagation` in `backend/tests/functional/test_deployments.py` (or the closest existing file): create a deployment as a non-admin authenticated user; assert `Deployment.createdByUsername == user.username`. Hard-delete the user via admin; assert the field becomes `None` (audits the SET NULL behaviour). For this test, ensure the user has no remaining FK references before the delete — temporarily delete the deployment row in the test, or rely on the existing `ondelete=SET NULL` if it is configured on the audit FK.
+- [X] T083 [P] [US2] Add a `createdByUsername: str | None` field to the `Deployment` GraphQL type (look up the resolver in `backend/styrmin_backend/api/definitions/deployment/`; resolver projects `deployment.created_by.username` when the FK is non-null, else `None`). NOT admin-gated — driver-visible.
+- [X] T084 [US2] Regenerate `schema.graphql`.
+- [X] T085 [P] [US2] Propagation test `test_deployment_created_by_username_propagation` in `backend/tests/functional/test_deployments.py` (or the closest existing file): create a deployment as a non-admin authenticated user; assert `Deployment.createdByUsername == user.username`. Hard-delete the user via admin; assert the field becomes `None` (audits the SET NULL behaviour). For this test, ensure the user has no remaining FK references before the delete — temporarily delete the deployment row in the test, or rely on the existing `ondelete=SET NULL` if it is configured on the audit FK. _(Per chunk-17 directive: SET NULL scenario skipped; happy path only — added to `backend/tests/functional/graphql/test_deployment_created_by.py`.)_
 
 ---
 

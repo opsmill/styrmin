@@ -274,6 +274,8 @@ export type Deployment = {
   config: Scalars['JSON']['output'];
   crdStatus?: Maybe<DeploymentStatusType>;
   createdBy: User;
+  /** Username of the user who created this deployment, or ``null`` if the creator row has been removed (forward-compatible with ``ondelete=SET NULL`` even though the FK is currently non-null). Unlike ``createdBy``, this field is NOT admin-gated — drivers and the UI can surface attribution without elevated access per FR-028. */
+  createdByUsername?: Maybe<Scalars['String']['output']>;
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
   deployedServices: Array<DeployedService>;
   /** Effective deployment-level env vars (after merging environment & deployment scopes, but BEFORE component-level overrides). Empty when none are set. */
