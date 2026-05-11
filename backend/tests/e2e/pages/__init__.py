@@ -12,7 +12,9 @@ from tests.e2e.pages.deploy_form import DeployFormPage
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 from tests.e2e.pages.drivers_list import DriversListPage
 from tests.e2e.pages.environments import EnvironmentDetailPage, EnvironmentsListPage
+from tests.e2e.pages.login import LoginPage
 from tests.e2e.pages.settings import BackupStorageLocationsListPage, SettingsPage
+from tests.e2e.pages.users_admin import UsersAdminPage
 
 __all__ = [
     "BackupStorageLocationsListPage",
@@ -21,5 +23,7 @@ __all__ = [
     "DriversListPage",
     "EnvironmentDetailPage",
     "EnvironmentsListPage",
+    "LoginPage",
     "SettingsPage",
+    "UsersAdminPage",
 ]

@@ -26,6 +26,14 @@ from tests.e2e.drivers.api_driver import ApiScenarioDriver
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import DeploymentRef
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
+from tests.e2e.fixtures.auth import (
+    InjectSessionCookie,
+    inject_session_cookie,
+    should_inject_session_cookie,
+)
+
+# Re-export so the fixture is discoverable on the e2e conftest scope.
+__all__ = ["inject_session_cookie"]
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -36,6 +44,23 @@ _LOG = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.resolve().parents[2]
 FIXTURES_DIR = Path(__file__).parent.resolve() / "fixtures"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register E2E-only pytest markers.
+
+    The ``e2e`` / ``ci`` / ``api_only`` / ``ui_only`` markers live in the
+    project-level ``pyproject.toml``. ``no_cookie_injection`` is scoped
+    to the E2E suite (it tweaks the session-scoped Playwright cookie
+    injection introduced in 011-admin-user-group-mgmt) so it is
+    registered here rather than polluting the global pytest config.
+    """
+    config.addinivalue_line(
+        "markers",
+        "no_cookie_injection: opt out of the session-scoped Playwright session "
+        "cookie injection (used by tests that drive the actual login form, "
+        "e.g. test_auth_lifecycle.py).",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -641,9 +666,11 @@ async def authenticated_styrmin_client(
 
 @pytest.fixture(scope="session")
 async def session_ui_page(
+    request: pytest.FixtureRequest,
     driver_mode: str,
     styrmin_deployment: str,
-    admin_token: str,
+    admin_token: str,  # noqa: ARG001 — kept for backwards compat; injection now flows through ``inject_session_cookie``
+    inject_session_cookie: InjectSessionCookie,
     browser_name: str,  # noqa: ARG001 — declared so pytest-playwright parametrizes node IDs with `-chromium`
 ) -> AsyncGenerator["Page | None", None]:
     """Playwright page at session scope for styrmin_resources UI-mode setup.
@@ -660,6 +687,10 @@ async def session_ui_page(
     ``browser_name`` is kept as a declared parameter so pytest-playwright
     adds ``-chromium`` to node IDs — that's what the CI filters
     ``-k "api-chromium"`` / ``-k "ui-chromium"`` match.
+
+    SC-007 contract: every ``BrowserContext`` opened by the suite goes
+    through ``inject_session_cookie`` unless the test opts out with
+    ``@pytest.mark.no_cookie_injection``. Default-deny is on (ADR-020).
     """
     if driver_mode != "ui":
         yield None
@@ -675,26 +706,15 @@ async def session_ui_page(
     async with async_playwright() as p:
         browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(base_url=styrmin_deployment)
-        # Default-deny is on (ADR-020). Seed the session cookie up front
-        # so every page navigation already carries the admin session —
-        # the UI driver never has to drive the login flow itself.
-        from urllib.parse import urlparse
-
-        parsed = urlparse(styrmin_deployment)
-        await context.add_cookies(
-            [
-                {
-                    "name": "styrmin_session",
-                    "value": admin_token,
-                    "domain": parsed.hostname or "localhost",
-                    "path": "/",
-                    "httpOnly": True,
-                    # localhost is plain http during the E2E run.
-                    "secure": parsed.scheme == "https",
-                    "sameSite": "Lax",
-                }
-            ]
-        )
+        # Session cookie injection: skip when the requesting test (if any
+        # at session-fixture-resolution time) opted out. The session
+        # fixture is built lazily on first request, so the marker check
+        # here covers the common case where the first test in the session
+        # is the auth-lifecycle test. Per-test contexts (none exist
+        # today; every UI scenario shares this session page) would re-
+        # apply the same predicate.
+        if should_inject_session_cookie(request):
+            await inject_session_cookie(context)
         page = await context.new_page()
         try:
             yield page
