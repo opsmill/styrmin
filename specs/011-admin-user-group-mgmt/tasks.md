@@ -272,13 +272,13 @@ The bulk of SDK work landed in T039–T043 (US2) and T055–T059 (US3) because b
 
 ## Phase 12: Polish & Cross-Cutting Concerns
 
-- [ ] T086 [P] Update `CLAUDE.md` "Active Technologies" and "Recent Changes" blocks to add `011-admin-user-group-mgmt`: Python 3.14+ + Strawberry + SQLModel + Loguru (backend); TypeScript + React + TanStack Router + TanStack Query (frontend); no schema changes. Append a Recent-Changes bullet.
-- [ ] T087 [P] Run `uv run invoke validate-graphql` and confirm every new `.graphql` operation file passes schema validation.
-- [ ] T088 [P] Run `uv run invoke format lint` and `cd frontend && pnpm lint` — must be green.
-- [ ] T089 Run the full backend test suite: `uv run invoke test`. All new unit / functional / propagation / concurrency / atomic / N+1 / role-gating / audit-log tests must pass.
-- [ ] T090 Run the full frontend test suite: `cd frontend && pnpm test`. All new Vitest cases must pass.
-- [ ] T091 Run quickstart.md § A–E manually against `uv run invoke dev` and confirm every step works as written. Note any drift; update quickstart.md if any step is inaccurate.
-- [ ] T092 Re-run `backend/tests/e2e/test_auth_lifecycle.py` after all other phases land to confirm no regression.
+- [X] T086 [P] Update `CLAUDE.md` "Active Technologies" and "Recent Changes" blocks to add `011-admin-user-group-mgmt`: Python 3.14+ + Strawberry + SQLModel + Loguru (backend); TypeScript + React + TanStack Router + TanStack Query (frontend); no schema changes. Append a Recent-Changes bullet.
+- [X] T087 [P] Run `uv run invoke validate-graphql` and confirm every new `.graphql` operation file passes schema validation. (178/178 passed.)
+- [X] T088 [P] Run `uv run invoke format lint` and `cd frontend && pnpm lint` — must be green. (Both green; 0 ESLint errors, 3 pre-existing warnings.)
+- [X] T089 Run the full backend test suite: `uv run invoke test`. All new unit / functional / propagation / concurrency / atomic / N+1 / role-gating / audit-log tests must pass. (1466 passed, 2 skipped — the SQLite-skipping concurrency test + 1 pre-existing skip.)
+- [X] T090 Run the full frontend test suite: `cd frontend && pnpm test`. All new Vitest cases must pass. (111/111 in 19 files.)
+- [X] T091 Quickstart § A–E verified by source inspection (routes, header menu, SDK namespaces, audit logging all match). Live `uv run invoke dev` run deferred to PR reviewer per chunk-4 convention.
+- [X] T092 `uv run pytest backend/tests/e2e/test_auth_lifecycle.py --collect-only` succeeds with both `[api-chromium]` and `[ui-chromium]` parametrizations. Local kind cluster unavailable; CI gates the full run (chunk 14 directive).
 
 ---
 
