@@ -103,7 +103,7 @@ There is no recovery flow in v1. If every admin loses access:
    backend environment to credentials you control.
 3. Manually mark the bootstrap admin row as needing re-creation by
    deleting it from the database (or directly setting its
-   `password_hash` to a new bcrypt hash and `active=true`).
+   `password_hash` to a new argon2id hash and `active=true`).
 4. Restart the backend. The bootstrap will create (or repair) the
    admin row using the env vars.
 
