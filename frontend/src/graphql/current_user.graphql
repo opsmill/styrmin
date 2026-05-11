@@ -1,0 +1,10 @@
+query CurrentUser {
+  currentUser {
+    id
+    username
+    displayName
+    role
+    effectiveRole
+    active
+  }
+}

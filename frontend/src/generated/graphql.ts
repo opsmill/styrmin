@@ -1087,6 +1087,11 @@ export type CreateRestoreMutationVariables = Exact<{
 
 export type CreateRestoreMutation = { __typename?: 'Mutation', createRestore?: { __typename?: 'Restore', id: string, name: string, status: string, backupId: string, targetNamespace: string, targetInstanceId?: string | null, errorMessage?: string | null, createdOn: any } | null };
 
+export type CurrentUserQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type CurrentUserQuery = { __typename?: 'Query', currentUser?: { __typename?: 'User', id: string, username: string, displayName: string, role: Role, effectiveRole: Role, active: boolean } | null };
+
 export type DeleteBackupMutationVariables = Exact<{
   backupId: Scalars['UUID']['input'];
 }>;
@@ -1461,6 +1466,37 @@ export const useCreateRestoreMutation = <
     ...options
   }
     )};
+
+export const CurrentUserDocument = `
+    query CurrentUser {
+  currentUser {
+    id
+    username
+    displayName
+    role
+    effectiveRole
+    active
+  }
+}
+    `;
+
+export const useCurrentUserQuery = <
+      TData = CurrentUserQuery,
+      TError = Error
+    >(
+      variables?: CurrentUserQueryVariables,
+      options?: Omit<UseQueryOptions<CurrentUserQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<CurrentUserQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<CurrentUserQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['CurrentUser'] : ['CurrentUser', variables],
+    queryFn: graphqlFetcher<CurrentUserQuery, CurrentUserQueryVariables>(CurrentUserDocument, variables),
+    ...options
+  }
+    )};
+
+useCurrentUserQuery.getKey = (variables?: CurrentUserQueryVariables) => variables === undefined ? ['CurrentUser'] : ['CurrentUser', variables];
 
 export const DeleteBackupDocument = `
     mutation DeleteBackup($backupId: UUID!) {

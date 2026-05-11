@@ -54,13 +54,13 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### Frontend foundational
 
-- [ ] T013 [P] Extend `frontend/src/lib/graphql-fetcher.ts`: add `credentials: 'include'` to the `fetch` options; introduce `GraphQLOperationError`, `UnauthenticatedError`, `ForbiddenError`; introduce `setUnauthenticatedHandler(cb)` module-scope state; map `errors[0].extensions.code` per research.md D3. Preserve `GraphQLTransportError` behavior. Per contracts/frontend.md.
-- [ ] T014 [P] Extend `frontend/src/lib/graphql-fetcher.test.ts`: add the four new cases per contracts/frontend.md (credentials include sent; UNAUTHENTICATED calls handler + throws; FORBIDDEN throws without calling handler; unknown code preserves `code`).
-- [ ] T015 Create `frontend/src/auth/AuthProvider.tsx` exporting `AuthProvider` component and the `useAuth` hook. Boots by issuing `currentUser` query; renders a centered spinner until the first response; registers `setUnauthenticatedHandler(...)` that calls `queryClient.clear()` + `router.navigate({ to: '/login' })`; pushes auth into `router.update({ context: { auth } })` on every change. Depends on T013.
-- [ ] T016 [P] Create `frontend/src/auth/useEffectiveRole.ts` exporting `useEffectiveRole()` that reads `useAuth().currentUser?.effectiveRole ?? null`.
-- [ ] T017 [P] Create `frontend/src/auth/IfRole.tsx` exporting `<IfRole minimum={Role} fallback={ReactNode?}>`. Uses `useEffectiveRole()`; compares `READ_ONLY < READ_WRITE < ADMIN`; renders children when effective ≥ minimum, else fallback (default: null).
-- [ ] T018 [P] Test `frontend/src/auth/IfRole.test.tsx`: hide/show by minimum; admin-via-group user with direct READ_ONLY but effectiveRole=ADMIN renders ADMIN-minimum content.
-- [ ] T019 [P] Test `frontend/src/auth/AuthProvider.test.tsx`: (a) spinner before first response; (b) null currentUser → children not rendered (login route handles UI); (c) authenticated user → children rendered; (d) UNAUTHENTICATED later → handler invoked + queryClient.clear() called + router.navigate('/login') called.
+- [X] T013 [P] Extend `frontend/src/lib/graphql-fetcher.ts`: add `credentials: 'include'` to the `fetch` options; introduce `GraphQLOperationError`, `UnauthenticatedError`, `ForbiddenError`; introduce `setUnauthenticatedHandler(cb)` module-scope state; map `errors[0].extensions.code` per research.md D3. Preserve `GraphQLTransportError` behavior. Per contracts/frontend.md.
+- [X] T014 [P] Extend `frontend/src/lib/graphql-fetcher.test.ts`: add the four new cases per contracts/frontend.md (credentials include sent; UNAUTHENTICATED calls handler + throws; FORBIDDEN throws without calling handler; unknown code preserves `code`).
+- [X] T015 Create `frontend/src/auth/AuthProvider.tsx` exporting `AuthProvider` component and the `useAuth` hook. Boots by issuing `currentUser` query; renders a centered spinner until the first response; registers `setUnauthenticatedHandler(...)` that calls `queryClient.clear()` + `router.navigate({ to: '/login' })`; pushes auth into `router.update({ context: { auth } })` on every change. Depends on T013.
+- [X] T016 [P] Create `frontend/src/auth/useEffectiveRole.ts` exporting `useEffectiveRole()` that reads `useAuth().currentUser?.effectiveRole ?? null`.
+- [X] T017 [P] Create `frontend/src/auth/IfRole.tsx` exporting `<IfRole minimum={Role} fallback={ReactNode?}>`. Uses `useEffectiveRole()`; compares `READ_ONLY < READ_WRITE < ADMIN`; renders children when effective ≥ minimum, else fallback (default: null).
+- [X] T018 [P] Test `frontend/src/auth/IfRole.test.tsx`: hide/show by minimum; admin-via-group user with direct READ_ONLY but effectiveRole=ADMIN renders ADMIN-minimum content.
+- [X] T019 [P] Test `frontend/src/auth/AuthProvider.test.tsx`: (a) spinner before first response; (b) null currentUser → children not rendered (login route handles UI); (c) authenticated user → children rendered; (d) UNAUTHENTICATED later → handler invoked + queryClient.clear() called + router.navigate('/login') called.
 
 **Checkpoint**: All cross-cutting plumbing is in place. User stories can now proceed in parallel.
 
