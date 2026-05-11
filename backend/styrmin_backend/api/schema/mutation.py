@@ -39,7 +39,12 @@ from styrmin_backend.api.definitions.environment.inputs import (
     update_environment_input_to_dict,
 )
 from styrmin_backend.api.definitions.environment.model import Environment
-from styrmin_backend.api.definitions.user.model import LoginResult, User as UserType
+from styrmin_backend.api.definitions.user.model import (
+    CreateUserInput,
+    LoginResult,
+    UpdateUserInput,
+    User as UserType,
+)
 from styrmin_backend.api.dependency import SESSION_COOKIE_NAME
 from styrmin_backend.db.models import Role
 from styrmin_backend.api.definitions.service.model import ServiceNameOverride
@@ -52,6 +57,14 @@ from styrmin_backend.services.applications import (
 from styrmin_backend.services.auth.login import authenticate
 from styrmin_backend.services.auth.password_change import (
     change_password as change_password_service,
+)
+from styrmin_backend.services.auth.users import (
+    CreateUserData,
+    UpdateUserData,
+    create_user as create_user_service,
+    delete_user as delete_user_service,
+    reset_user_password as reset_user_password_service,
+    update_user as update_user_service,
 )
 from styrmin_backend.services.backup_storage_locations import (
     assign_backup_storage_location as assign_bsl_service,
@@ -184,6 +197,91 @@ class Mutation:
             calling_session_id=current_session.id,
         )
         return True
+
+    # ------------------------------------------------------------------
+    # Admin user mutations (specs/011-admin-user-group-mgmt).
+    # All four are admin-only. Service-layer raises ServiceError
+    # subclasses with the appropriate error_code; StructuredErrorExtension
+    # surfaces them through extensions.code without further mapping here.
+    # ------------------------------------------------------------------
+
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    async def create_user(
+        self, info: strawberry.Info, input: CreateUserInput
+    ) -> UserType:
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        data = CreateUserData(
+            username=input.username,
+            password=input.password,
+            display_name=input.display_name,
+            role=Role[input.role.value],
+            group_ids=(
+                [UUID(str(gid)) for gid in input.group_ids]
+                if input.group_ids is not None
+                else None
+            ),
+        )
+        user = await create_user_service(uow, input=data, actor_user_id=current_user.id)
+        return UserType.from_instance(user)
+
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    async def update_user(
+        self, info: strawberry.Info, id: UUID, input: UpdateUserInput
+    ) -> UserType:
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        data = UpdateUserData(
+            display_name=input.display_name,
+            role=Role[input.role.value] if input.role is not None else None,
+            active=input.active,
+            group_ids=(
+                [UUID(str(gid)) for gid in input.group_ids]
+                if input.group_ids is not None
+                else None
+            ),
+        )
+        user = await update_user_service(
+            uow,
+            user_id=id,
+            input=data,
+            actor_user_id=current_user.id,
+        )
+        return UserType.from_instance(user)
+
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    async def reset_user_password(
+        self,
+        info: strawberry.Info,
+        user_id: UUID,
+        new_password: str,
+    ) -> bool:
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        return await reset_user_password_service(
+            uow,
+            user_id=user_id,
+            new_password=new_password,
+            actor_user_id=current_user.id,
+        )
+
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    async def delete_user(self, info: strawberry.Info, id: UUID) -> bool:
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        return await delete_user_service(uow, user_id=id, actor_user_id=current_user.id)
 
     @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def create_cluster(

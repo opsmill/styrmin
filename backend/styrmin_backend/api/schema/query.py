@@ -8,7 +8,9 @@ from __future__ import annotations
 from uuid import UUID
 
 import strawberry
+from strawberry.permission import PermissionExtension
 
+from styrmin_backend.api.auth.permissions import RequiresRole
 from styrmin_backend.api.definitions.backup.backup import (
     Backup as BackupType,
     BackupStatusType,
@@ -33,11 +35,16 @@ from styrmin_backend.api.definitions.service.model import (
     DeployedService as DeployedServiceType,
 )
 from styrmin_backend.api.definitions.task.model import Task
-from styrmin_backend.api.definitions.user.model import User as UserType
+from styrmin_backend.api.definitions.user.model import (
+    Role as RoleType,
+    User as UserType,
+)
+from styrmin_backend.db.models import Role as RoleModel
 from styrmin_backend.services.application_drivers import (
     get_application_driver,
     get_application_drivers,
 )
+from styrmin_backend.services.auth.users import list_users as list_users_service
 from styrmin_backend.services.backup.scheduler import (
     get_backup_schedule,
     get_backup_schedules,
@@ -69,6 +76,11 @@ from styrmin_backend.services.pod_status import get_pod_statuses
 from styrmin_backend.services.tasks import get_task, get_tasks
 
 
+def _requires_admin() -> PermissionExtension:
+    """Sugar for admin-only query fields. See ADR-020."""
+    return PermissionExtension([RequiresRole(RoleModel.ADMIN)])
+
+
 @strawberry.type
 class Query:
     @strawberry.field
@@ -77,6 +89,27 @@ class Query:
         if user is None:
             return None
         return UserType.from_instance(user)
+
+    @strawberry.field(extensions=[_requires_admin()])
+    async def users(
+        self,
+        info: strawberry.Info,
+        active: bool | None = None,
+        role: RoleType | None = None,
+        search: str | None = None,
+    ) -> list[UserType]:
+        """Admin-only filtered listing of users.
+
+        See specs/011-admin-user-group-mgmt/contracts/graphql.md. Filters
+        apply independently in any combination. Search is a substring
+        match (case-insensitive) over username and display_name.
+        """
+        uow = info.context["uow"]
+        role_model = RoleModel[role.value] if role is not None else None
+        users = await list_users_service(
+            uow, active=active, role=role_model, search=search
+        )
+        return [UserType.from_instance(u) for u in users]
 
     @strawberry.field
     async def clusters(self, info: strawberry.Info) -> list[Cluster]:

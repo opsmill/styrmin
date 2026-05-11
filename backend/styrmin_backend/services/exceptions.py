@@ -481,6 +481,17 @@ class UnresolvableAffinityReferenceError(ServiceError):
         return meta
 
 
+class ValidationError(ServiceError):
+    """Generic input validation failure (length, charset, enum).
+
+    Used by admin user / group mutations when a free-form input fails a
+    shape constraint that does not have a more specific code.
+    """
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "Input validation failed"
+
+
 class UserNotFoundError(ServiceError):
     """The user was not found."""
 

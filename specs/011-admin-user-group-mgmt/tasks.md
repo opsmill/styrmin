@@ -99,16 +99,16 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### Backend — admin user mutations (depends on Phase 2 T004–T012)
 
-- [ ] T029 [P] [US2] Create `backend/styrmin_backend/services/auth/users.py` exposing `async def create_user(uow, *, input)`, `async def update_user(uow, *, user_id, input, actor_user_id)`, `async def reset_user_password(uow, *, user_id, new_password)`, `async def delete_user(uow, *, user_id)`, `async def list_users(uow, *, active, role, search)`, `async def get_user(uow, *, user_id)`. Each function:
+- [X] T029 [P] [US2] Create `backend/styrmin_backend/services/auth/users.py` exposing `async def create_user(uow, *, input)`, `async def update_user(uow, *, user_id, input, actor_user_id)`, `async def reset_user_password(uow, *, user_id, new_password)`, `async def delete_user(uow, *, user_id)`, `async def list_users(uow, *, active, role, search)`, `async def get_user(uow, *, user_id)`. Each function:
   - Loads `AdminSnapshot` via `SELECT ... FOR UPDATE` on admin-conferring rows (per research.md D1 concurrency strategy) when the mutation can affect admin state.
   - Calls `would_leave_zero_admins(...)` / `can_hard_delete_user(...)` from `admin_guards`.
   - For `update_user` with `active=False` or `reset_user_password`: writes password/active first, then calls `delete_all_sessions_for_user`, then commits once (per research.md D15).
   - Emits the audit log line per FR-030 on success: `logger.info("admin_mutation actor={} action={} target={} changed_fields={}", ...)`.
   - Uses `selectinload(User.groups)` for `list_users` per research.md D16.
   - Calls `replace_user_groups` from `auth/membership` when `input.group_ids` is present.
-- [ ] T030 [P] [US2] Add to `backend/styrmin_backend/api/schema/mutation.py`: `create_user`, `update_user`, `reset_user_password`, `delete_user` mutations each declaring `extensions=[_requires(Role.ADMIN)]` and calling the service functions in `services/auth/users.py`. Map `DuplicateUsernameError`, `LastAdminError`, `UserHasReferencesError`, etc. via the existing `StructuredErrorExtension` middleware (no schema-level changes needed — the error_code on the exception flows through).
-- [ ] T031 [P] [US2] Add to `backend/styrmin_backend/api/schema/query.py`: `users(active: Boolean, role: Role, search: String) -> [User!]!` field declaring `extensions=[_requires(Role.ADMIN)]`. Resolver delegates to `list_users(...)`.
-- [ ] T032 [US2] Regenerate `schema.graphql` (depends on T030, T031). Confirm the diff matches contracts/graphql.md.
+- [X] T030 [P] [US2] Add to `backend/styrmin_backend/api/schema/mutation.py`: `create_user`, `update_user`, `reset_user_password`, `delete_user` mutations each declaring `extensions=[_requires(Role.ADMIN)]` and calling the service functions in `services/auth/users.py`. Map `DuplicateUsernameError`, `LastAdminError`, `UserHasReferencesError`, etc. via the existing `StructuredErrorExtension` middleware (no schema-level changes needed — the error_code on the exception flows through).
+- [X] T031 [P] [US2] Add to `backend/styrmin_backend/api/schema/query.py`: `users(active: Boolean, role: Role, search: String) -> [User!]!` field declaring `extensions=[_requires(Role.ADMIN)]`. Resolver delegates to `list_users(...)`.
+- [X] T032 [US2] Regenerate `schema.graphql` (depends on T030, T031). Confirm the diff matches contracts/graphql.md.
 
 ### Backend tests for US2
 
