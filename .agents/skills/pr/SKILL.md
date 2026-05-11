@@ -23,27 +23,22 @@ Handle the full workflow from current branch state to an open, CI-monitored pull
 
 ## Main Tasks
 
-### 1. Safety Checks & Branch Setup
+### 1. Safety Checks & Branch State
 
-First, verify the agent is on a safe branch and understand the current git state.
+First, verify the agent is on a safe branch and understand the current git state. Branch creation and commit logic are owned by the `commit` skill — this phase only inspects state and decides what to do next.
 
 1. Run `git status` to see uncommitted/staged/untracked files.
 2. Run `git branch --show-current` to identify the current branch.
-3. **If on `develop` or `main` — STOP:**
-   - Do NOT commit to these branches under any circumstances.
-   - Analyze the uncommitted changes to understand what they're about.
-   - Propose a branch name following repo conventions:
-     - If changes relate to a spec: `[SPEC_NUMBER]-[short-name]` (e.g., `058-frontend-testing`)
-     - Otherwise: `dga-[short-description]` (e.g., `dga-cleanup-graphql-queries`)
-   - Present the proposed branch name to the user and wait for approval.
-   - After approval, create the branch: `git checkout -b <branch-name>`.
+3. **If on `develop`, `stable`, or `main`:**
+   - **If `commit` was passed:** proceed to Phase 2; the `commit` skill will refuse the protected branch, propose a feature branch name (`NNN-short-name` when changes match a `specs/` directory, otherwise `dga-short-description`), and ask the user for approval before creating it. Do not pre-create the branch here — let the `commit` skill own that conversation so the rules stay in one place.
+   - **If `commit` was NOT passed:** STOP. There's no feature branch to open a PR from. Tell the user they need to either invoke `/pr commit` (so the `commit` skill creates a branch and captures the changes), or switch to a feature branch first.
 4. If already on a feature branch, continue to the next phase.
 
 ### 2. Commit Changes (only when `commit` argument is provided)
 
 **Skip this phase entirely if `commit` was NOT passed as an argument.** If there are uncommitted changes and `commit` was not provided, warn the user that uncommitted changes exist but will not be included in the PR.
 
-When `commit` IS provided:
+When `commit` IS provided, run the project-specific prep here in `pr` (because it depends on Styrmin's toolchain), then delegate the actual commit + push to the `commit` skill so branch discipline, secret hygiene, and message conventions stay in one place:
 
 1. Run formatters and linters first (required by project conventions):
 
@@ -51,20 +46,23 @@ When `commit` IS provided:
    uv run invoke format lint
    ```
 
-2. Check if any GraphQL schema files were modified. If so, regenerate:
+2. Check if any GraphQL schema files (under `backend/styrmin_backend/api/schema/`) or `.graphql` query files were modified. If so, regenerate and re-stage the regenerated artefacts:
 
    ```bash
    uv run styrmin export graphql-schema schema.graphql
    uv run invoke generate
    ```
 
-3. Stage all relevant changes (be specific — avoid `git add .` which can catch secrets or large files).
-4. Create a commit with a clear conventional commit message (e.g., `feat:`, `fix:`, `refactor:`, `docs:`).
-5. Push the branch upstream:
+3. Invoke the `commit` skill with the `push` argument: `/commit push`. The skill will:
+   - Refuse to commit on `develop` / `stable` / `main` and, if needed, propose a feature branch name (spec-prefixed or `dga-…`) for user approval before creating it via `git checkout -b`.
+   - Stage changes safely (explicit paths, secret-pattern warnings).
+   - Draft a conventional-commit message and confirm it with the user.
+   - Run pre-commit hooks (no `--no-verify`); fix violations and create a new commit on hook failure.
+   - Push the branch upstream (`git push -u origin <branch>` on first push).
 
-   ```bash
-   git push -u origin <branch-name>
-   ```
+   Do not duplicate any of that logic inline here. If the user has additional commit-message guidance specific to this PR (e.g., spec reference, conventional-commit scope), pass it along when invoking the skill.
+
+4. After `/commit push` returns, confirm the working tree is clean and the branch is published before continuing to Phase 3.
 
 ### 3. Analyze All Branch Changes
 
