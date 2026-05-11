@@ -36,6 +36,7 @@ from styrmin_backend.api.definitions.service.model import (
 )
 from styrmin_backend.api.definitions.task.model import Task
 from styrmin_backend.api.definitions.user.model import (
+    Group as GroupType,
     Role as RoleType,
     User as UserType,
 )
@@ -44,6 +45,7 @@ from styrmin_backend.services.application_drivers import (
     get_application_driver,
     get_application_drivers,
 )
+from styrmin_backend.services.auth.groups import list_groups as list_groups_service
 from styrmin_backend.services.auth.users import list_users as list_users_service
 from styrmin_backend.services.backup.scheduler import (
     get_backup_schedule,
@@ -110,6 +112,21 @@ class Query:
             uow, active=active, role=role_model, search=search
         )
         return [UserType.from_instance(u) for u in users]
+
+    @strawberry.field(extensions=[_requires_admin()])
+    async def groups(
+        self,
+        info: strawberry.Info,
+        search: str | None = None,
+    ) -> list[GroupType]:
+        """Admin-only filtered listing of groups.
+
+        See specs/011-admin-user-group-mgmt/contracts/graphql.md. ``search``
+        is a substring match (case-insensitive) over ``name``.
+        """
+        uow = info.context["uow"]
+        groups = await list_groups_service(uow, search=search)
+        return [GroupType.from_instance(g) for g in groups]
 
     @strawberry.field
     async def clusters(self, info: strawberry.Info) -> list[Cluster]:

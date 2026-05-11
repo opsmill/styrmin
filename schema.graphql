@@ -199,6 +199,12 @@ type CrdConditionType {
   lastTransitionTime: DateTime
 }
 
+input CreateGroupInput {
+  name: String!
+  role: Role!
+  memberIds: [ID!] = null
+}
+
 input CreateUserInput {
   username: String!
   password: String!
@@ -446,6 +452,9 @@ type Mutation {
   updateUser(id: UUID!, input: UpdateUserInput!): User! @requiresRole
   resetUserPassword(userId: UUID!, newPassword: String!): Boolean! @requiresRole
   deleteUser(id: UUID!): Boolean! @requiresRole
+  createGroup(input: CreateGroupInput!): Group! @requiresRole
+  updateGroup(id: UUID!, input: UpdateGroupInput!): Group! @requiresRole
+  deleteGroup(id: UUID!): Boolean! @requiresRole
   createCluster(name: String! = "default", config: JSON = null): Cluster @requiresRole
   deleteCluster(clusterId: UUID = null, clusterName: String = null): String @requiresRole
   createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment @requiresRole
@@ -534,6 +543,7 @@ input PostRenderInjectionInput {
 type Query {
   currentUser: User
   users(active: Boolean = null, role: Role = null, search: String = null): [User!]! @requiresRole
+  groups(search: String = null): [Group!]! @requiresRole
   clusters: [Cluster!]!
   cluster(clusterId: UUID = null, clusterName: String = null): Cluster
   backupStorageLocations: [BackupStorageLocation!]!
@@ -707,6 +717,12 @@ input UpdateEnvironmentInput {
   externalDnsEndpointsType: ExternalDnsEndpointsType = null
   ingressClass: String = null
   dbSize: String = null
+}
+
+input UpdateGroupInput {
+  name: String = null
+  role: Role = null
+  memberIds: [ID!] = null
 }
 
 input UpdateUserInput {

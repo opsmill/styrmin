@@ -148,14 +148,14 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### Backend — admin group mutations
 
-- [ ] T050 [P] [US3] Create `backend/styrmin_backend/services/auth/groups.py` exposing `create_group`, `update_group`, `delete_group`, `list_groups`, `get_group`. Same patterns as `users.py` from T029: lock admin-conferring rows FOR UPDATE when the operation touches admin state; call `would_leave_zero_admins` with `action=REMOVE_FROM_ADMIN_GROUP` for member-set changes against an admin-conferring group; call `replace_group_members(...)` from `auth/membership` when `input.member_ids` is present; emit FR-030 audit log line.
-- [ ] T051 [P] [US3] Add to `mutation.py`: `create_group`, `update_group`, `delete_group` each `extensions=[_requires(Role.ADMIN)]`.
-- [ ] T052 [P] [US3] Add to `query.py`: `groups(search: String) -> [Group!]!` admin-gated.
-- [ ] T053 [US3] Regenerate `schema.graphql` (depends on T051, T052).
+- [X] T050 [P] [US3] Create `backend/styrmin_backend/services/auth/groups.py` exposing `create_group`, `update_group`, `delete_group`, `list_groups`, `get_group`. Same patterns as `users.py` from T029: lock admin-conferring rows FOR UPDATE when the operation touches admin state; call `would_leave_zero_admins` with `action=REMOVE_FROM_ADMIN_GROUP` for member-set changes against an admin-conferring group; call `replace_group_members(...)` from `auth/membership` when `input.member_ids` is present; emit FR-030 audit log line.
+- [X] T051 [P] [US3] Add to `mutation.py`: `create_group`, `update_group`, `delete_group` each `extensions=[_requires(Role.ADMIN)]`.
+- [X] T052 [P] [US3] Add to `query.py`: `groups(search: String) -> [Group!]!` admin-gated.
+- [X] T053 [US3] Regenerate `schema.graphql` (depends on T051, T052).
 
 ### Backend tests for US3
 
-- [ ] T054 [P] [US3] `backend/tests/functional/auth/test_admin_group_mutations.py`: propagation matrix from contracts/graphql.md (create/update/delete/list/get; name, role, member_ids replacement). Role-gating matrix. Last-admin rejection on group changes. Audit-log lines.
+- [X] T054 [P] [US3] `backend/tests/functional/auth/test_admin_group_mutations.py`: propagation matrix from contracts/graphql.md (create/update/delete/list/get; name, role, member_ids replacement). Role-gating matrix. Last-admin rejection on group changes. Audit-log lines.
 
 ### SDK glue for US3
 

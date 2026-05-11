@@ -1,0 +1,7 @@
+mutation UpdateGroup($id: UUID!, $input: UpdateGroupInput!) {
+  updateGroup(id: $id, input: $input) {
+    id
+    name
+    role
+  }
+}

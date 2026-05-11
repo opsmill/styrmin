@@ -40,8 +40,11 @@ from styrmin_backend.api.definitions.environment.inputs import (
 )
 from styrmin_backend.api.definitions.environment.model import Environment
 from styrmin_backend.api.definitions.user.model import (
+    CreateGroupInput,
     CreateUserInput,
+    Group as GroupType,
     LoginResult,
+    UpdateGroupInput,
     UpdateUserInput,
     User as UserType,
 )
@@ -57,6 +60,13 @@ from styrmin_backend.services.applications import (
 from styrmin_backend.services.auth.login import authenticate
 from styrmin_backend.services.auth.password_change import (
     change_password as change_password_service,
+)
+from styrmin_backend.services.auth.groups import (
+    CreateGroupData,
+    UpdateGroupData,
+    create_group as create_group_service,
+    delete_group as delete_group_service,
+    update_group as update_group_service,
 )
 from styrmin_backend.services.auth.users import (
     CreateUserData,
@@ -282,6 +292,73 @@ class Mutation:
             "RequiresAuthentication should have rejected this request"
         )
         return await delete_user_service(uow, user_id=id, actor_user_id=current_user.id)
+
+    # ------------------------------------------------------------------
+    # Admin group mutations (specs/011-admin-user-group-mgmt).
+    # All admin-only; service-layer raises ServiceError subclasses with
+    # the appropriate error_code which StructuredErrorExtension surfaces
+    # through extensions.code unchanged.
+    # ------------------------------------------------------------------
+
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    async def create_group(
+        self, info: strawberry.Info, input: CreateGroupInput
+    ) -> GroupType:
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        data = CreateGroupData(
+            name=input.name,
+            role=Role[input.role.value],
+            member_ids=(
+                [UUID(str(mid)) for mid in input.member_ids]
+                if input.member_ids is not None
+                else None
+            ),
+        )
+        group = await create_group_service(
+            uow, input=data, actor_user_id=current_user.id
+        )
+        return GroupType.from_instance(group)
+
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    async def update_group(
+        self, info: strawberry.Info, id: UUID, input: UpdateGroupInput
+    ) -> GroupType:
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        data = UpdateGroupData(
+            name=input.name,
+            role=Role[input.role.value] if input.role is not None else None,
+            member_ids=(
+                [UUID(str(mid)) for mid in input.member_ids]
+                if input.member_ids is not None
+                else None
+            ),
+        )
+        group = await update_group_service(
+            uow,
+            group_id=id,
+            input=data,
+            actor_user_id=current_user.id,
+        )
+        return GroupType.from_instance(group)
+
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    async def delete_group(self, info: strawberry.Info, id: UUID) -> bool:
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        return await delete_group_service(
+            uow, group_id=id, actor_user_id=current_user.id
+        )
 
     @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def create_cluster(

@@ -58,6 +58,12 @@ class CrdConditionInput(BaseModel):
     )
 
 
+class CreateGroupInput(BaseModel):
+    name: str
+    role: Role
+    member_ids: Optional[list[str]] = Field(alias="memberIds", default=None)
+
+
 class CreateUserInput(BaseModel):
     username: str
     password: str
@@ -256,6 +262,12 @@ class UpdateEnvironmentInput(BaseModel):
     )
     ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
     db_size: Optional[str] = Field(alias="dbSize", default=None)
+
+
+class UpdateGroupInput(BaseModel):
+    name: Optional[str] = None
+    role: Optional[Role] = None
+    member_ids: Optional[list[str]] = Field(alias="memberIds", default=None)
 
 
 class UpdateUserInput(BaseModel):

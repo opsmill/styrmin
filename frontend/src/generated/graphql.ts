@@ -225,6 +225,12 @@ export type CrdConditionType = {
   type: Scalars['String']['output'];
 };
 
+export type CreateGroupInput = {
+  memberIds?: InputMaybe<Array<Scalars['ID']['input']>>;
+  name: Scalars['String']['input'];
+  role: Role;
+};
+
 export type CreateUserInput = {
   displayName: Scalars['String']['input'];
   groupIds?: InputMaybe<Array<Scalars['ID']['input']>>;
@@ -466,6 +472,7 @@ export type Mutation = {
   createBackupStorageLocation?: Maybe<BackupStorageLocation>;
   createCluster?: Maybe<Cluster>;
   createEnvironment?: Maybe<Environment>;
+  createGroup: Group;
   createRestore?: Maybe<Restore>;
   createUser: User;
   deleteBackup?: Maybe<Scalars['String']['output']>;
@@ -474,6 +481,7 @@ export type Mutation = {
   deleteCluster?: Maybe<Scalars['String']['output']>;
   deleteDeployment: Task;
   deleteEnvironment?: Maybe<Scalars['String']['output']>;
+  deleteGroup: Scalars['Boolean']['output'];
   deleteUser: Scalars['Boolean']['output'];
   deploy?: Maybe<Task>;
   loadLocalApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
@@ -492,6 +500,7 @@ export type Mutation = {
   updateDeployment?: Maybe<Task>;
   updateDeploymentVersion?: Maybe<Task>;
   updateEnvironment?: Maybe<Environment>;
+  updateGroup: Group;
   updateUser: User;
 };
 
@@ -555,6 +564,11 @@ export type MutationCreateEnvironmentArgs = {
 };
 
 
+export type MutationCreateGroupArgs = {
+  input: CreateGroupInput;
+};
+
+
 export type MutationCreateRestoreArgs = {
   backupId: Scalars['UUID']['input'];
   targetInstanceId?: InputMaybe<Scalars['UUID']['input']>;
@@ -598,6 +612,11 @@ export type MutationDeleteEnvironmentArgs = {
   clusterName?: InputMaybe<Scalars['String']['input']>;
   environmentId?: InputMaybe<Scalars['UUID']['input']>;
   environmentName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationDeleteGroupArgs = {
+  id: Scalars['UUID']['input'];
 };
 
 
@@ -720,6 +739,12 @@ export type MutationUpdateEnvironmentArgs = {
 };
 
 
+export type MutationUpdateGroupArgs = {
+  id: Scalars['UUID']['input'];
+  input: UpdateGroupInput;
+};
+
+
 export type MutationUpdateUserArgs = {
   id: Scalars['UUID']['input'];
   input: UpdateUserInput;
@@ -800,6 +825,7 @@ export type Query = {
   environment?: Maybe<Environment>;
   environmentServices: Array<DeployedService>;
   environments: Array<Environment>;
+  groups: Array<Group>;
   /** Health check probe */
   ok: Scalars['Boolean']['output'];
   podStatuses: Array<PodStatus>;
@@ -873,6 +899,11 @@ export type QueryEnvironmentArgs = {
 
 export type QueryEnvironmentServicesArgs = {
   environmentId: Scalars['UUID']['input'];
+};
+
+
+export type QueryGroupsArgs = {
+  search?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1050,6 +1081,12 @@ export type UpdateEnvironmentInput = {
   ingressClass?: InputMaybe<Scalars['String']['input']>;
   ipWhitelist?: InputMaybe<Array<Scalars['String']['input']>>;
   scheduling?: InputMaybe<SchedulingInput>;
+};
+
+export type UpdateGroupInput = {
+  memberIds?: InputMaybe<Array<Scalars['ID']['input']>>;
+  name?: InputMaybe<Scalars['String']['input']>;
+  role?: InputMaybe<Role>;
 };
 
 export type UpdateUserInput = {
