@@ -1,6 +1,7 @@
 import { rootRoute } from "./routes/__root";
 import { indexRoute } from "./routes/index";
 import { loginRoute } from "./routes/login";
+import { profileRoute } from "./routes/profile";
 import { environmentDetailRoute } from "./routes/environmentDetail";
 import { deployFormRoute } from "./routes/deployForm";
 import { deploymentDetailRoute } from "./routes/deploymentDetail";
@@ -19,6 +20,7 @@ import { groupDetailRoute } from "./routes/groupDetail";
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
+  profileRoute,
   environmentDetailRoute,
   deployFormRoute,
   deploymentDetailRoute,

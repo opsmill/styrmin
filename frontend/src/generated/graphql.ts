@@ -1127,6 +1127,14 @@ export type AssignBackupStorageLocationMutationVariables = Exact<{
 
 export type AssignBackupStorageLocationMutation = { __typename?: 'Mutation', assignBackupStorageLocation?: { __typename?: 'Environment', id: string, name: string, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null } | null };
 
+export type ChangePasswordMutationVariables = Exact<{
+  currentPassword: Scalars['String']['input'];
+  newPassword: Scalars['String']['input'];
+}>;
+
+
+export type ChangePasswordMutation = { __typename?: 'Mutation', changePassword: boolean };
+
 export type CreateBackupMutationVariables = Exact<{
   instanceId: Scalars['UUID']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
@@ -1494,6 +1502,25 @@ export const useAssignBackupStorageLocationMutation = <
       {
     mutationKey: ['AssignBackupStorageLocation'],
     mutationFn: (variables?: AssignBackupStorageLocationMutationVariables) => graphqlFetcher<AssignBackupStorageLocationMutation, AssignBackupStorageLocationMutationVariables>(AssignBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const ChangePasswordDocument = `
+    mutation ChangePassword($currentPassword: String!, $newPassword: String!) {
+  changePassword(currentPassword: $currentPassword, newPassword: $newPassword)
+}
+    `;
+
+export const useChangePasswordMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<ChangePasswordMutation, TError, ChangePasswordMutationVariables, TContext>) => {
+    
+    return useMutation<ChangePasswordMutation, TError, ChangePasswordMutationVariables, TContext>(
+      {
+    mutationKey: ['ChangePassword'],
+    mutationFn: (variables?: ChangePasswordMutationVariables) => graphqlFetcher<ChangePasswordMutation, ChangePasswordMutationVariables>(ChangePasswordDocument, variables)(),
     ...options
   }
     )};

@@ -10,11 +10,6 @@ interface RouterContext {
 
 const PUBLIC_PATHS: ReadonlySet<string> = new Set([
   "/login",
-  // /profile is authenticated-but-not-admin; chunk 12 adds the route. It must
-  // not be guarded by the root-level requireAuth so the chunk-12 route can run
-  // its own (still-authenticated) check. Until that chunk lands, hitting
-  // /profile produces a 404 from the not-found handler — which is fine.
-  "/profile",
 ]);
 
 function requireAuth({

@@ -69,11 +69,7 @@ export function HeaderUserMenu({ user, onLogout }: HeaderUserMenuProps) {
         <DropdownMenuItem
           data-testid="header-user-menu-profile"
           onClick={() => {
-            // /profile is added in a later chunk (US4). Cast loose so this
-            // component compiles before that route is registered.
-            void navigate({ to: "/profile" } as Parameters<
-              typeof navigate
-            >[0]);
+            void navigate({ to: "/profile" });
           }}
         >
           Profile

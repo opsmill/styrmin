@@ -184,9 +184,9 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### Frontend
 
-- [ ] T064 [P] [US4] Create `frontend/src/pages/profile/ProfilePage.tsx` per contracts/frontend.md: read-only `username` field with helper text "Username cannot be changed — contact an admin." (per spec acceptance scenario #4), display-name edit form calling `updateUser(self.id, { displayName })`, change-password form calling existing `changePassword(currentPassword, newPassword)` from #179. `newPasswordConfirm` is a client-side check only.
-- [ ] T065 [P] [US4] Create `frontend/src/routes/profile.tsx`: requires authenticated (inherited from root `beforeLoad`), no admin gate. Register in `routeTree.ts`.
-- [ ] T066 [P] [US4] Test `frontend/src/__tests__/ProfilePage.test.tsx`: (a) display-name save calls `updateUser`; (b) password change happy path; (c) wrong-current-password renders inline error; (d) password-mismatch on confirm renders inline error without submitting.
+- [X] T064 [P] [US4] Create `frontend/src/pages/profile/ProfilePage.tsx` per contracts/frontend.md: read-only `username` field with helper text "Username cannot be changed — contact an admin." (per spec acceptance scenario #4), display-name edit form calling `updateUser(self.id, { displayName })`, change-password form calling existing `changePassword(currentPassword, newPassword)` from #179. `newPasswordConfirm` is a client-side check only.
+- [X] T065 [P] [US4] Create `frontend/src/routes/profile.tsx`: requires authenticated (inherited from root `beforeLoad`), no admin gate. Register in `routeTree.ts`.
+- [X] T066 [P] [US4] Test `frontend/src/__tests__/ProfilePage.test.tsx`: (a) display-name save calls `updateUser`; (b) password change happy path; (c) wrong-current-password renders inline error; (d) password-mismatch on confirm renders inline error without submitting.
 
 **Checkpoint**: Profile page is reachable from the header menu (US1 T023) and works.
 
