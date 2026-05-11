@@ -24,6 +24,7 @@ from .create_environment import (
     CreateEnvironmentCreateEnvironmentCluster,
 )
 from .create_restore import CreateRestore, CreateRestoreCreateRestore
+from .create_user import CreateUser, CreateUserCreateUser, CreateUserCreateUserGroups
 from .current_user import CurrentUser, CurrentUserCurrentUser
 from .delete_backup import DeleteBackup
 from .delete_backup_schedule import DeleteBackupSchedule
@@ -31,6 +32,7 @@ from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_deployment import DeleteDeployment, DeleteDeploymentDeleteDeployment
 from .delete_environment import DeleteEnvironment
+from .delete_user import DeleteUser
 from .deploy import Deploy, DeployDeploy
 from .enums import (
     BackupStatus,
@@ -126,6 +128,7 @@ from .get_environment_services import (
 from .get_pod_statuses import GetPodStatuses, GetPodStatusesPodStatuses
 from .get_restore import GetRestore, GetRestoreRestore
 from .get_task import GetTask, GetTaskTask
+from .get_user import GetUser, GetUserUsers, GetUserUsersGroups
 from .input_types import (
     AffinityBlockInput,
     AffinityTermInput,
@@ -169,6 +172,7 @@ from .list_environments import (
 )
 from .list_restores import ListRestores, ListRestoresRestores
 from .list_tasks import ListTasks, ListTasksTasks
+from .list_users import ListUsers, ListUsersUsers, ListUsersUsersGroups
 from .load_local_application_driver_version import (
     LoadLocalApplicationDriverVersion,
     LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersion,
@@ -191,6 +195,7 @@ from .report_deployment_statuses import (
     ReportDeploymentStatusesReportDeploymentStatuses,
 )
 from .report_pod_statuses import ReportPodStatuses, ReportPodStatusesReportPodStatuses
+from .reset_user_password import ResetUserPassword
 from .run_job import RunJob, RunJobRunJob
 from .start_components import StartComponents, StartComponentsStartComponents
 from .stop_components import StopComponents, StopComponentsStopComponents
@@ -216,6 +221,7 @@ from .update_environment import (
     UpdateEnvironmentUpdateEnvironment,
     UpdateEnvironmentUpdateEnvironmentCluster,
 )
+from .update_user import UpdateUser, UpdateUserUpdateUser, UpdateUserUpdateUserGroups
 
 __all__ = [
     "AffinityBlockInput",
@@ -241,6 +247,9 @@ __all__ = [
     "CreateEnvironmentCreateEnvironmentCluster",
     "CreateRestore",
     "CreateRestoreCreateRestore",
+    "CreateUser",
+    "CreateUserCreateUser",
+    "CreateUserCreateUserGroups",
     "CreateUserInput",
     "CurrentUser",
     "CurrentUserCurrentUser",
@@ -252,6 +261,7 @@ __all__ = [
     "DeleteDeployment",
     "DeleteDeploymentDeleteDeployment",
     "DeleteEnvironment",
+    "DeleteUser",
     "Deploy",
     "DeployDeploy",
     "DeploymentPodStatusReport",
@@ -317,6 +327,9 @@ __all__ = [
     "GetRestoreRestore",
     "GetTask",
     "GetTaskTask",
+    "GetUser",
+    "GetUserUsers",
+    "GetUserUsersGroups",
     "GraphQLClientError",
     "GraphQLClientGraphQLError",
     "GraphQLClientGraphQLMultiError",
@@ -341,6 +354,9 @@ __all__ = [
     "ListRestoresRestores",
     "ListTasks",
     "ListTasksTasks",
+    "ListUsers",
+    "ListUsersUsers",
+    "ListUsersUsersGroups",
     "LoadLocalApplicationDriverVersion",
     "LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersion",
     "LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersionActions",
@@ -364,6 +380,7 @@ __all__ = [
     "ReportDeploymentStatusesReportDeploymentStatuses",
     "ReportPodStatuses",
     "ReportPodStatusesReportPodStatuses",
+    "ResetUserPassword",
     "ResourceRequirementsInput",
     "ResourceSpecInput",
     "RestoreStatus",
@@ -394,7 +411,10 @@ __all__ = [
     "UpdateEnvironmentInput",
     "UpdateEnvironmentUpdateEnvironment",
     "UpdateEnvironmentUpdateEnvironmentCluster",
+    "UpdateUser",
     "UpdateUserInput",
+    "UpdateUserUpdateUser",
+    "UpdateUserUpdateUserGroups",
     "Upload",
     "WeightedAffinityTermInput",
     "WhenUnsatisfiable",

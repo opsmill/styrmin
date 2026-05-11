@@ -121,11 +121,11 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### SDK glue for US2 (so the frontend tests + e2e can drive the admin paths)
 
-- [ ] T039 [P] [US2] Create the SDK `.graphql` files under `python_sdk/src/styrmin_sdk/graphql/`: `create_user.graphql`, `update_user.graphql`, `reset_user_password.graphql`, `delete_user.graphql`, `list_users.graphql`, `get_user.graphql`. Operation bodies per contracts/sdk.md.
-- [ ] T040 [P] [US2] Create `python_sdk/src/styrmin_sdk/resources/users.py` exposing `UserResource(BaseResource)` with `create`, `update`, `reset_password`, `delete`, `list`, `get`. Mirrors contracts/sdk.md.
-- [ ] T041 [US2] Register `self.users = UserResource(self._transport)` in `python_sdk/src/styrmin_sdk/client.py` (depends on T040).
-- [ ] T042 [US2] Run `uv run invoke generate` to regenerate `python_sdk/src/styrmin_sdk/graphql/_generated/` (depends on T032, T039).
-- [ ] T043 [P] [US2] SDK test `python_sdk/tests/test_resources_users.py`: create round-trip, update clears groups (`group_ids=[]`), reset_password returns true, delete raises `USER_HAS_REFERENCES`, list with filters, FORBIDDEN for non-admin token.
+- [X] T039 [P] [US2] Create the SDK `.graphql` files under `python_sdk/src/styrmin_sdk/graphql/`: `create_user.graphql`, `update_user.graphql`, `reset_user_password.graphql`, `delete_user.graphql`, `list_users.graphql`, `get_user.graphql`. Operation bodies per contracts/sdk.md.
+- [X] T040 [P] [US2] Create `python_sdk/src/styrmin_sdk/resources/users.py` exposing `UserResource(BaseResource)` with `create`, `update`, `reset_password`, `delete`, `list`, `get`. Mirrors contracts/sdk.md.
+- [X] T041 [US2] Register `self.users = UserResource(self._transport)` in `python_sdk/src/styrmin_sdk/client.py` (depends on T040).
+- [X] T042 [US2] Run `uv run invoke generate` to regenerate `python_sdk/src/styrmin_sdk/graphql/_generated/` (depends on T032, T039).
+- [X] T043 [P] [US2] SDK test `python_sdk/tests/test_resources_users.py`: create round-trip, update clears groups (`group_ids=[]`), reset_password returns true, delete raises `USER_HAS_REFERENCES`, list with filters, FORBIDDEN for non-admin token.
 
 ### Frontend for US2
 

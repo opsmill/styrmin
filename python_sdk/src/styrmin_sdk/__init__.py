@@ -14,6 +14,7 @@ from styrmin_sdk.exceptions import (
     StyrminGraphQLError,
     StyrminTransportError,
 )
+from styrmin_sdk.graphql._generated.enums import Role
 from styrmin_sdk.models import (
     Action,
     ApplicationDriver,
@@ -53,6 +54,7 @@ __all__ = [
     "ResourceAlreadyExistsError",
     "ResourceNotFoundError",
     "Restore",
+    "Role",
     "StyrminAPIError",
     "StyrminAuthenticationError",
     "StyrminAuthorizationError",

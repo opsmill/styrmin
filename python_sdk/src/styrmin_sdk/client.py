@@ -15,6 +15,7 @@ from styrmin_sdk.resources.drivers import DriverResource
 from styrmin_sdk.resources.environments import EnvironmentResource
 from styrmin_sdk.resources.schedules import ScheduleResource
 from styrmin_sdk.resources.tasks import TaskResource
+from styrmin_sdk.resources.users import UserResource
 
 
 class StyrminClient:
@@ -55,6 +56,7 @@ class StyrminClient:
         self.tasks = TaskResource(self._transport)
         self.backups = BackupResource(self._transport)
         self.schedules = ScheduleResource(self._transport)
+        self.users = UserResource(self._transport)
 
     async def close(self) -> None:
         await self._transport.close()

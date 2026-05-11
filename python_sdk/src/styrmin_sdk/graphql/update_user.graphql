@@ -1,0 +1,17 @@
+mutation UpdateUser($id: UUID!, $input: UpdateUserInput!) {
+    updateUser(id: $id, input: $input) {
+        id
+        username
+        displayName
+        role
+        effectiveRole
+        active
+        groups {
+            id
+            name
+            role
+        }
+        createdOn
+        updatedOn
+    }
+}

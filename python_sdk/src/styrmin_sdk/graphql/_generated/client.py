@@ -14,6 +14,7 @@ from .create_backup_storage_location import CreateBackupStorageLocation
 from .create_cluster import CreateCluster
 from .create_environment import CreateEnvironment
 from .create_restore import CreateRestore
+from .create_user import CreateUser
 from .current_user import CurrentUser
 from .delete_backup import DeleteBackup
 from .delete_backup_schedule import DeleteBackupSchedule
@@ -21,8 +22,9 @@ from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_deployment import DeleteDeployment
 from .delete_environment import DeleteEnvironment
+from .delete_user import DeleteUser
 from .deploy import Deploy
-from .enums import BackupStatus, RestoreStatus
+from .enums import BackupStatus, RestoreStatus, Role
 from .get_backup import GetBackup
 from .get_backup_schedule import GetBackupSchedule
 from .get_backup_storage_location import GetBackupStorageLocation
@@ -41,11 +43,14 @@ from .get_environment_services import GetEnvironmentServices
 from .get_pod_statuses import GetPodStatuses
 from .get_restore import GetRestore
 from .get_task import GetTask
+from .get_user import GetUser
 from .input_types import (
+    CreateUserInput,
     DeploymentPodStatusReport,
     DeploymentStatusReportInput,
     ServiceNameOverride,
     UpdateEnvironmentInput,
+    UpdateUserInput,
 )
 from .list_backup_schedules import ListBackupSchedules
 from .list_backup_storage_locations import ListBackupStorageLocations
@@ -54,12 +59,14 @@ from .list_clusters import ListClusters
 from .list_environments import ListEnvironments
 from .list_restores import ListRestores
 from .list_tasks import ListTasks
+from .list_users import ListUsers
 from .load_local_application_driver_version import LoadLocalApplicationDriverVersion
 from .load_remote_application_driver_version import LoadRemoteApplicationDriverVersion
 from .login import Login
 from .logout import Logout
 from .report_deployment_statuses import ReportDeploymentStatuses
 from .report_pod_statuses import ReportPodStatuses
+from .reset_user_password import ResetUserPassword
 from .run_job import RunJob
 from .start_components import StartComponents
 from .stop_components import StopComponents
@@ -69,6 +76,7 @@ from .update_backup_storage_location import UpdateBackupStorageLocation
 from .update_deployment import UpdateDeployment
 from .update_deployment_version import UpdateDeploymentVersion
 from .update_environment import UpdateEnvironment
+from .update_user import UpdateUser
 
 
 def gql(q: str) -> str:
@@ -345,6 +353,33 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return CreateBackupSchedule.model_validate(data)
 
+    async def create_user(self, input: CreateUserInput, **kwargs: Any) -> CreateUser:
+        query = gql("""
+            mutation CreateUser($input: CreateUserInput!) {
+              createUser(input: $input) {
+                id
+                username
+                displayName
+                role
+                effectiveRole
+                active
+                groups {
+                  id
+                  name
+                  role
+                }
+                createdOn
+                updatedOn
+              }
+            }
+            """)
+        variables: dict[str, object] = {"input": input}
+        response = await self.execute(
+            query=query, operation_name="CreateUser", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return CreateUser.model_validate(data)
+
     async def current_user(self, **kwargs: Any) -> CurrentUser:
         query = gql("""
             query CurrentUser {
@@ -490,6 +525,19 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return DeleteBackupSchedule.model_validate(data)
+
+    async def delete_user(self, id: UUID, **kwargs: Any) -> DeleteUser:
+        query = gql("""
+            mutation DeleteUser($id: UUID!) {
+              deleteUser(id: $id)
+            }
+            """)
+        variables: dict[str, object] = {"id": id}
+        response = await self.execute(
+            query=query, operation_name="DeleteUser", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return DeleteUser.model_validate(data)
 
     async def deploy(
         self,
@@ -1108,6 +1156,33 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetTask.model_validate(data)
 
+    async def get_user(self, **kwargs: Any) -> GetUser:
+        query = gql("""
+            query GetUser {
+              users {
+                id
+                username
+                displayName
+                role
+                effectiveRole
+                active
+                groups {
+                  id
+                  name
+                  role
+                }
+                createdOn
+                updatedOn
+              }
+            }
+            """)
+        variables: dict[str, object] = {}
+        response = await self.execute(
+            query=query, operation_name="GetUser", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return GetUser.model_validate(data)
+
     async def list_backup_storage_locations(
         self, **kwargs: Any
     ) -> ListBackupStorageLocations:
@@ -1284,6 +1359,43 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return ListTasks.model_validate(data)
 
+    async def list_users(
+        self,
+        active: Union[Optional[bool], UnsetType] = UNSET,
+        role: Union[Optional[Role], UnsetType] = UNSET,
+        search: Union[Optional[str], UnsetType] = UNSET,
+        **kwargs: Any,
+    ) -> ListUsers:
+        query = gql("""
+            query ListUsers($active: Boolean, $role: Role, $search: String) {
+              users(active: $active, role: $role, search: $search) {
+                id
+                username
+                displayName
+                role
+                effectiveRole
+                active
+                groups {
+                  id
+                  name
+                  role
+                }
+                createdOn
+                updatedOn
+              }
+            }
+            """)
+        variables: dict[str, object] = {
+            "active": active,
+            "role": role,
+            "search": search,
+        }
+        response = await self.execute(
+            query=query, operation_name="ListUsers", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return ListUsers.model_validate(data)
+
     async def load_local_application_driver_version(
         self, path: str, **kwargs: Any
     ) -> LoadLocalApplicationDriverVersion:
@@ -1453,6 +1565,24 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return ReportPodStatuses.model_validate(data)
+
+    async def reset_user_password(
+        self, user_id: UUID, new_password: str, **kwargs: Any
+    ) -> ResetUserPassword:
+        query = gql("""
+            mutation ResetUserPassword($userId: UUID!, $newPassword: String!) {
+              resetUserPassword(userId: $userId, newPassword: $newPassword)
+            }
+            """)
+        variables: dict[str, object] = {"userId": user_id, "newPassword": new_password}
+        response = await self.execute(
+            query=query,
+            operation_name="ResetUserPassword",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return ResetUserPassword.model_validate(data)
 
     async def run_job(
         self,
@@ -1727,6 +1857,35 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return UpdateBackupSchedule.model_validate(data)
+
+    async def update_user(
+        self, id: UUID, input: UpdateUserInput, **kwargs: Any
+    ) -> UpdateUser:
+        query = gql("""
+            mutation UpdateUser($id: UUID!, $input: UpdateUserInput!) {
+              updateUser(id: $id, input: $input) {
+                id
+                username
+                displayName
+                role
+                effectiveRole
+                active
+                groups {
+                  id
+                  name
+                  role
+                }
+                createdOn
+                updatedOn
+              }
+            }
+            """)
+        variables: dict[str, object] = {"id": id, "input": input}
+        response = await self.execute(
+            query=query, operation_name="UpdateUser", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return UpdateUser.model_validate(data)
 
     async def update_deployment_version(
         self, deployment_id: UUID, version: str, **kwargs: Any
