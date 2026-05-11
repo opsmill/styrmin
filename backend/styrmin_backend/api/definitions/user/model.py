@@ -95,3 +95,70 @@ class User:
 class LoginResult:
     token: str
     user: User
+
+
+# ---------------------------------------------------------------------
+# Admin mutation input types — see specs/011-admin-user-group-mgmt
+# (data-model.md, contracts/graphql.md). Validation (length / charset
+# / role-enum) is enforced in the service layer; declaring the shapes
+# here keeps the GraphQL schema small and the resolver bodies focused
+# on dispatch.
+# ---------------------------------------------------------------------
+
+
+@strawberry.input
+class CreateUserInput:
+    """Payload for ``createUser``. All required fields are non-null."""
+
+    username: str
+    password: str
+    display_name: str
+    role: Role
+    # Optional list of group memberships to attach on creation. ``None``
+    # and ``[]`` both mean "no groups"; explicit ids are inserted into
+    # ``user_group`` in the same transaction as the user row.
+    group_ids: list[strawberry.ID] | None = None
+
+
+@strawberry.input
+class UpdateUserInput:
+    """Partial-update payload for ``updateUser``.
+
+    Each field is nullable: ``None`` means "leave alone", a present
+    non-None value means "apply". ``group_ids`` follows the explicit
+    three-state contract from data-model.md (None = leave, [] = clear,
+    [...] = replace).
+
+    Note: **username is intentionally absent** — usernames are
+    immutable post-create. A client sending ``username`` gets a
+    schema-level error from Strawberry, not silent acceptance.
+    """
+
+    display_name: str | None = None
+    role: Role | None = None
+    active: bool | None = None
+    group_ids: list[strawberry.ID] | None = None
+
+
+@strawberry.input
+class CreateGroupInput:
+    """Payload for ``createGroup``."""
+
+    name: str
+    role: Role
+    # Optional initial member set. Same semantics as ``group_ids`` on
+    # :class:`CreateUserInput`.
+    member_ids: list[strawberry.ID] | None = None
+
+
+@strawberry.input
+class UpdateGroupInput:
+    """Partial-update payload for ``updateGroup``.
+
+    ``member_ids`` carries the same three-state contract as
+    ``UpdateUserInput.group_ids``.
+    """
+
+    name: str | None = None
+    role: Role | None = None
+    member_ids: list[strawberry.ID] | None = None

@@ -481,6 +481,48 @@ class UnresolvableAffinityReferenceError(ServiceError):
         return meta
 
 
+class UserNotFoundError(ServiceError):
+    """The user was not found."""
+
+    error_code = "USER_NOT_FOUND"
+    default_message = "User not found"
+
+
+class GroupNotFoundError(ServiceError):
+    """The group was not found."""
+
+    error_code = "GROUP_NOT_FOUND"
+    default_message = "Group not found"
+
+
+class DuplicateUsernameError(ServiceError):
+    """A user with that username already exists."""
+
+    error_code = "DUPLICATE_USERNAME"
+    default_message = "A user with that username already exists"
+
+
+class DuplicateGroupNameError(ServiceError):
+    """A group with that name already exists."""
+
+    error_code = "DUPLICATE_GROUP_NAME"
+    default_message = "A group with that name already exists"
+
+
+class LastAdminError(ServiceError):
+    """The requested change would leave zero active admins."""
+
+    error_code = "LAST_ADMIN"
+    default_message = "Operation would leave zero active admins"
+
+
+class UserHasReferencesError(ServiceError):
+    """The user cannot be hard-deleted because foreign-key references exist."""
+
+    error_code = "USER_HAS_REFERENCES"
+    default_message = "User has foreign-key references and cannot be deleted"
+
+
 class SchedulingPatchRenderingError(ServiceError):
     """Failed to serialise a scheduling post-renderer patch into YAML.
 
