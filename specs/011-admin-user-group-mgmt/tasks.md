@@ -167,10 +167,10 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### Frontend for US3
 
-- [ ] T060 [P] [US3] Add frontend `.graphql` operations for groups under `frontend/src/graphql/`.
-- [ ] T061 [P] [US3] Create `frontend/src/pages/groups/GroupsListPage.tsx` and `frontend/src/pages/groups/GroupDetailPage.tsx`. Detail page lets the admin set name, role, and `memberIds` (multi-select of `users(active=true)`). Member list uses set semantics on submission.
-- [ ] T062 [P] [US3] Create routes `frontend/src/routes/groupsList.tsx` and `frontend/src/routes/groupDetail.tsx` with admin `beforeLoad`. Register in `routeTree.ts`.
-- [ ] T063 [US3] Add "Groups" nav link to `AppShell.tsx` wrapped in `<IfRole minimum="ADMIN">`.
+- [X] T060 [P] [US3] Add frontend `.graphql` operations for groups under `frontend/src/graphql/`.
+- [X] T061 [P] [US3] Create `frontend/src/pages/groups/GroupsListPage.tsx` and `frontend/src/pages/groups/GroupDetailPage.tsx`. Detail page lets the admin set name, role, and `memberIds` (multi-select of `users(active=true)`). Member list uses set semantics on submission.
+- [X] T062 [P] [US3] Create routes `frontend/src/routes/groupsList.tsx` and `frontend/src/routes/groupDetail.tsx` with admin `beforeLoad`. Register in `routeTree.ts`.
+- [X] T063 [US3] Add "Groups" nav link to `AppShell.tsx` wrapped in `<IfRole minimum="ADMIN">`.
 
 **Checkpoint**: Group management is now complete; the admin tooling story is whole.
 

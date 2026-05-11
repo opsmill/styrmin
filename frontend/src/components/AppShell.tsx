@@ -8,6 +8,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   Users,
+  UsersRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/use-theme";
@@ -30,6 +31,7 @@ const navItems = [
 
 const adminNavItems = [
   { label: "Users", icon: Users, href: "/users", exact: false },
+  { label: "Groups", icon: UsersRound, href: "/groups", exact: false },
 ];
 
 const bottomNavItems = [

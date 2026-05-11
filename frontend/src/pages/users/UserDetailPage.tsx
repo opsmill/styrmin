@@ -5,10 +5,12 @@ import { AlertCircle, KeyRound, Save, Trash2 } from "lucide-react";
 
 import {
   useListUsersQuery,
+  useListGroupsQuery,
   useUpdateUserMutation,
   useResetUserPasswordMutation,
   useDeleteUserMutation,
   type ListUsersQuery,
+  type ListGroupsQuery,
   type Role,
 } from "@/generated/graphql";
 import {
@@ -39,7 +41,7 @@ import {
 } from "@/components/ui/select";
 
 type UserRow = ListUsersQuery["users"][number];
-type GroupSummary = UserRow["groups"][number];
+type GroupSummary = ListGroupsQuery["groups"][number];
 
 interface CodeError extends Error {
   code?: string;
@@ -65,29 +67,21 @@ export default function UserDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // The frontend deliberately does NOT have a top-level `groups` query in the
-  // current schema slice (US3 adds that). To populate the group-membership
-  // multi-select we reuse the admin `users` query and union every distinct
-  // group seen across all users. This keeps US2 functional today without
-  // depending on US3 backend work.
   const usersQuery = useListUsersQuery({ active: null, role: null, search: null });
+  const groupsQuery = useListGroupsQuery({ search: null });
 
   const user: UserRow | undefined = useMemo(
     () => usersQuery.data?.users.find((u) => u.id === id),
     [usersQuery.data, id],
   );
 
-  const allGroups: GroupSummary[] = useMemo(() => {
-    const map = new Map<string, GroupSummary>();
-    for (const u of usersQuery.data?.users ?? []) {
-      for (const g of u.groups) {
-        if (!map.has(g.id)) map.set(g.id, g);
-      }
-    }
-    return Array.from(map.values()).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
-  }, [usersQuery.data]);
+  const allGroups: GroupSummary[] = useMemo(
+    () =>
+      [...(groupsQuery.data?.groups ?? [])].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    [groupsQuery.data],
+  );
 
   // Form state — initialised from `user` once available. We track the user id
   // we last seeded from so that navigating to a different user (same component)

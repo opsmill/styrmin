@@ -1164,6 +1164,13 @@ export type CreateEnvironmentMutationVariables = Exact<{
 
 export type CreateEnvironmentMutation = { __typename?: 'Mutation', createEnvironment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string } } | null };
 
+export type CreateGroupMutationVariables = Exact<{
+  input: CreateGroupInput;
+}>;
+
+
+export type CreateGroupMutation = { __typename?: 'Mutation', createGroup: { __typename?: 'Group', id: string, name: string, role: Role } };
+
 export type CreateRestoreMutationVariables = Exact<{
   backupId: Scalars['UUID']['input'];
   targetNamespace: Scalars['String']['input'];
@@ -1205,6 +1212,13 @@ export type DeleteDeploymentMutationVariables = Exact<{
 
 
 export type DeleteDeploymentMutation = { __typename?: 'Mutation', deleteDeployment: { __typename?: 'Task', id: string, type: string, status: string, deploymentId?: string | null } };
+
+export type DeleteGroupMutationVariables = Exact<{
+  id: Scalars['UUID']['input'];
+}>;
+
+
+export type DeleteGroupMutation = { __typename?: 'Mutation', deleteGroup: boolean };
 
 export type DeleteUserMutationVariables = Exact<{
   id: Scalars['UUID']['input'];
@@ -1276,6 +1290,11 @@ export type GetEnvironmentQueryVariables = Exact<{
 
 export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, applicationDriverVersionId: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
 
+export type GetGroupQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetGroupQuery = { __typename?: 'Query', groups: Array<{ __typename?: 'Group', id: string, name: string, role: Role }> };
+
 export type GetRestoreQueryVariables = Exact<{
   restoreId: Scalars['UUID']['input'];
 }>;
@@ -1323,6 +1342,13 @@ export type ListEnvironmentsQueryVariables = Exact<{
 
 
 export type ListEnvironmentsQuery = { __typename?: 'Query', environments: Array<{ __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }> }> }> };
+
+export type ListGroupsQueryVariables = Exact<{
+  search?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type ListGroupsQuery = { __typename?: 'Query', groups: Array<{ __typename?: 'Group', id: string, name: string, role: Role }> };
 
 export type ListRestoresQueryVariables = Exact<{
   backupId: Scalars['UUID']['input'];
@@ -1424,6 +1450,14 @@ export type UpdateEnvironmentMutationVariables = Exact<{
 
 
 export type UpdateEnvironmentMutation = { __typename?: 'Mutation', updateEnvironment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string } } | null };
+
+export type UpdateGroupMutationVariables = Exact<{
+  id: Scalars['UUID']['input'];
+  input: UpdateGroupInput;
+}>;
+
+
+export type UpdateGroupMutation = { __typename?: 'Mutation', updateGroup: { __typename?: 'Group', id: string, name: string, role: Role } };
 
 export type UpdateUserMutationVariables = Exact<{
   id: Scalars['UUID']['input'];
@@ -1569,6 +1603,29 @@ export const useCreateEnvironmentMutation = <
       {
     mutationKey: ['CreateEnvironment'],
     mutationFn: (variables?: CreateEnvironmentMutationVariables) => graphqlFetcher<CreateEnvironmentMutation, CreateEnvironmentMutationVariables>(CreateEnvironmentDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const CreateGroupDocument = `
+    mutation CreateGroup($input: CreateGroupInput!) {
+  createGroup(input: $input) {
+    id
+    name
+    role
+  }
+}
+    `;
+
+export const useCreateGroupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateGroupMutation, TError, CreateGroupMutationVariables, TContext>) => {
+    
+    return useMutation<CreateGroupMutation, TError, CreateGroupMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateGroup'],
+    mutationFn: (variables?: CreateGroupMutationVariables) => graphqlFetcher<CreateGroupMutation, CreateGroupMutationVariables>(CreateGroupDocument, variables)(),
     ...options
   }
     )};
@@ -1727,6 +1784,25 @@ export const useDeleteDeploymentMutation = <
       {
     mutationKey: ['DeleteDeployment'],
     mutationFn: (variables?: DeleteDeploymentMutationVariables) => graphqlFetcher<DeleteDeploymentMutation, DeleteDeploymentMutationVariables>(DeleteDeploymentDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const DeleteGroupDocument = `
+    mutation DeleteGroup($id: UUID!) {
+  deleteGroup(id: $id)
+}
+    `;
+
+export const useDeleteGroupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeleteGroupMutation, TError, DeleteGroupMutationVariables, TContext>) => {
+    
+    return useMutation<DeleteGroupMutation, TError, DeleteGroupMutationVariables, TContext>(
+      {
+    mutationKey: ['DeleteGroup'],
+    mutationFn: (variables?: DeleteGroupMutationVariables) => graphqlFetcher<DeleteGroupMutation, DeleteGroupMutationVariables>(DeleteGroupDocument, variables)(),
     ...options
   }
     )};
@@ -2106,6 +2182,34 @@ export const useGetEnvironmentQuery = <
 
 useGetEnvironmentQuery.getKey = (variables: GetEnvironmentQueryVariables) => ['GetEnvironment', variables];
 
+export const GetGroupDocument = `
+    query GetGroup {
+  groups {
+    id
+    name
+    role
+  }
+}
+    `;
+
+export const useGetGroupQuery = <
+      TData = GetGroupQuery,
+      TError = Error
+    >(
+      variables?: GetGroupQueryVariables,
+      options?: Omit<UseQueryOptions<GetGroupQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetGroupQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetGroupQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['GetGroup'] : ['GetGroup', variables],
+    queryFn: graphqlFetcher<GetGroupQuery, GetGroupQueryVariables>(GetGroupDocument, variables),
+    ...options
+  }
+    )};
+
+useGetGroupQuery.getKey = (variables?: GetGroupQueryVariables) => variables === undefined ? ['GetGroup'] : ['GetGroup', variables];
+
 export const GetRestoreDocument = `
     query GetRestore($restoreId: UUID!) {
   restore(restoreId: $restoreId) {
@@ -2388,6 +2492,34 @@ export const useListEnvironmentsQuery = <
     )};
 
 useListEnvironmentsQuery.getKey = (variables?: ListEnvironmentsQueryVariables) => variables === undefined ? ['ListEnvironments'] : ['ListEnvironments', variables];
+
+export const ListGroupsDocument = `
+    query ListGroups($search: String) {
+  groups(search: $search) {
+    id
+    name
+    role
+  }
+}
+    `;
+
+export const useListGroupsQuery = <
+      TData = ListGroupsQuery,
+      TError = Error
+    >(
+      variables?: ListGroupsQueryVariables,
+      options?: Omit<UseQueryOptions<ListGroupsQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListGroupsQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListGroupsQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['ListGroups'] : ['ListGroups', variables],
+    queryFn: graphqlFetcher<ListGroupsQuery, ListGroupsQueryVariables>(ListGroupsDocument, variables),
+    ...options
+  }
+    )};
+
+useListGroupsQuery.getKey = (variables?: ListGroupsQueryVariables) => variables === undefined ? ['ListGroups'] : ['ListGroups', variables];
 
 export const ListRestoresDocument = `
     query ListRestores($backupId: UUID!, $status: RestoreStatus) {
@@ -2726,6 +2858,29 @@ export const useUpdateEnvironmentMutation = <
       {
     mutationKey: ['UpdateEnvironment'],
     mutationFn: (variables?: UpdateEnvironmentMutationVariables) => graphqlFetcher<UpdateEnvironmentMutation, UpdateEnvironmentMutationVariables>(UpdateEnvironmentDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateGroupDocument = `
+    mutation UpdateGroup($id: UUID!, $input: UpdateGroupInput!) {
+  updateGroup(id: $id, input: $input) {
+    id
+    name
+    role
+  }
+}
+    `;
+
+export const useUpdateGroupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateGroupMutation, TError, UpdateGroupMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateGroupMutation, TError, UpdateGroupMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateGroup'],
+    mutationFn: (variables?: UpdateGroupMutationVariables) => graphqlFetcher<UpdateGroupMutation, UpdateGroupMutationVariables>(UpdateGroupDocument, variables)(),
     ...options
   }
     )};

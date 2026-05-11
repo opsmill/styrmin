@@ -13,6 +13,8 @@ import { settingsRoute } from "./routes/settings";
 import { clusterDetailRoute } from "./routes/clusterDetail";
 import { usersListRoute } from "./routes/usersList";
 import { userDetailRoute } from "./routes/userDetail";
+import { groupsListRoute } from "./routes/groupsList";
+import { groupDetailRoute } from "./routes/groupDetail";
 
 export const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -29,4 +31,6 @@ export const routeTree = rootRoute.addChildren([
   clusterDetailRoute,
   usersListRoute,
   userDetailRoute,
+  groupsListRoute,
+  groupDetailRoute,
 ]);
