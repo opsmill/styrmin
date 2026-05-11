@@ -75,18 +75,26 @@ backend/styrmin_backend/
 │   ├── auth/
 │   │   ├── admin_guards.py               # NEW — pure functions: would_leave_zero_admins, can_hard_delete_user
 │   │   ├── membership.py                 # NEW — replace_user_groups, replace_group_members (set-semantics)
-│   │   ├── users.py                      # NEW — create/update/reset_password/delete service functions
-│   │   └── groups.py                     # NEW — create/update/delete service functions
-│   └── exceptions.py                     # add LastAdminError, DuplicateUsernameError, UserHasReferencesError
+│   │   ├── users.py                      # NEW — create/update/reset_password/delete service functions (locks admin rows FOR UPDATE; emits audit log)
+│   │   └── groups.py                     # NEW — create/update/delete service functions (same concurrency rule for admin-conferring group changes)
+│   └── exceptions.py                     # add LastAdminError, DuplicateUsernameError, UserHasReferencesError, UserNotFoundError, GroupNotFoundError, DuplicateGroupNameError
+├── api/
+│   └── logging/
+│       └── mask.py                       # NEW — MASKED_VARIABLE_NAMES = frozenset({"password","newPassword","currentPassword"}); applied by request-logging middleware
 └── tests/
     ├── unit/auth/
-    │   ├── test_admin_guards.py          # NEW — table-driven
-    │   └── test_membership.py            # NEW
+    │   ├── test_admin_guards.py          # NEW — table-driven (would_leave_zero_admins matrix)
+    │   ├── test_membership.py            # NEW — set-semantics + no-op SQL-count
+    │   └── test_request_log_masking.py   # NEW — D13 / FR-029 password masking
     ├── functional/auth/
-    │   ├── test_admin_user_mutations.py  # NEW — propagation + role gating
-    │   └── test_admin_group_mutations.py # NEW — propagation + role gating
+    │   ├── test_admin_user_mutations.py  # NEW — propagation, role gating, audit log, atomic-on-failure
+    │   ├── test_admin_group_mutations.py # NEW — propagation, role gating, audit log
+    │   ├── test_last_admin_concurrency.py # NEW — concurrent demote serialization (FR-010)
+    │   └── test_users_query_eager_loading.py # NEW — N+1 protection (D16)
     └── e2e/
         ├── test_auth_lifecycle.py        # NEW — dual-entrypoint, opts OUT of cookie injection
+        ├── fixtures/
+        │   └── auth.py                   # NEW — session-scoped cookie-injection fixture (D5, SC-007)
         └── pages/
             ├── login.py                  # NEW — LoginPage page object
             └── users_admin.py            # NEW — UsersAdminPage page object

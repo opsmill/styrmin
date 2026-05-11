@@ -42,6 +42,17 @@ def can_hard_delete_user(
 - *Inline checks in each mutation.* Rejected — duplicates the four-action matrix across four call sites, hides the rule in resolver code, and forces every test to hit the DB.
 - *A `LastAdminError` exception raised from the repository layer.* Rejected — the repository would have to know about authorization semantics, which violates Principle III layering.
 
+**Concurrency strategy** (FR-010): the pure-function check itself is stateless, but the *snapshot* it consumes MUST be captured under transactional guarantees. Approach:
+
+1. Each admin mutation that touches admin-conferring state opens its UnitOfWork transaction.
+2. The service-layer wrapper issues `SELECT id, role, active FROM "user" WHERE active = TRUE AND role = 'ADMIN' FOR UPDATE` to lock every active direct admin row, and `SELECT g.id, g.role FROM "group" g WHERE g.role = 'ADMIN' FOR UPDATE` plus the corresponding `user_group` rows for active admin-conferring memberships, so a concurrent demotion is forced to wait.
+3. The snapshot is built from the locked rows. `would_leave_zero_admins(...)` runs against it.
+4. The mutation proceeds. Commit releases the locks.
+
+PostgreSQL's default `READ COMMITTED` is sufficient given the explicit `FOR UPDATE`; we do NOT need to escalate to `REPEATABLE READ` or `SERIALIZABLE`. The lock surface is tiny (admin users + admin groups), so contention is negligible at any realistic admin headcount.
+
+Test: `test_concurrent_demote_last_admin_serialized` — opens two async sessions in parallel, has each call `updateUser(role=READ_WRITE)` against a different admin in an active pair, and asserts that at least one transaction raises `LastAdminError`.
+
 ### D2. Membership replacement — diff-and-mutate in one transaction
 
 **Decision**: `auth/membership` exposes two functions:
@@ -214,6 +225,47 @@ Tests that need a clean unauthenticated browser opt out with `@pytest.mark.no_co
 
 - *Lower the gate on the entire `User.username` field.* Rejected — username is already public, but the way it's reached (via `Deployment.createdBy`) is admin-gated by the parent. A dedicated string field is cleaner than weakening the gating story.
 - *Have drivers read username via a separate `users(id: ...)` lookup.* Rejected — `users` query is admin-gated; drivers run as the seeded admin in tests so this would work, but the scalar `createdByUsername` field is a lighter contract.
+
+### D13. Password masking in request logs (FR-029)
+
+**Decision**: extend the existing GraphQL request-logging path with a static mask-list of field names: `password`, `newPassword`, `currentPassword`. Before the logger emits a request, walk the `variables` dict (and any extracted-from-body field names matching the list) and replace each value with `"***"`. The list is a module-level constant in `backend/styrmin_backend/api/logging/mask.py` (NEW), exported as `MASKED_VARIABLE_NAMES: frozenset[str]`. The existing logging middleware imports this set and applies it in one place.
+
+**Rationale**: a static field-name allow-list is simple to audit (one import) and harder to break than per-mutation handling. Adding a new password field in the future means appending to the set, which is a one-line PR change that triggers code review.
+
+**Test**: `test_password_fields_masked_in_request_log` — issues `createUser`, `resetUserPassword`, `changePassword`, `login` and inspects the captured log lines via `loguru.logger.remove(); loguru.logger.add(sink, ...)`. Asserts each line contains `"***"` and does not contain the original password substring.
+
+### D14. Admin-mutation audit log (FR-030)
+
+**Decision**: every admin mutation, on success, emits one structured Loguru line:
+
+```python
+logger.info(
+    "admin_mutation actor={} action={} target={} changed_fields={}",
+    actor_id, action_name, target_id, comma_separated_field_names,
+)
+```
+
+The line is part of the mutation's service function (not the resolver) so it is recorded **only when the transaction commits**. No values are logged, only field names (`role`, `active`, `groupIds`) — values may contain passwords or PII.
+
+**Test**: each functional test in `test_admin_user_mutations.py` / `test_admin_group_mutations.py` captures Loguru output and asserts the audit line shape.
+
+### D15. Transaction ordering for "write + invalidate sessions"
+
+**Decision**: in `resetUserPassword` and `updateUser(active=False)`, the service function:
+
+1. Updates the user row (`password_hash` or `active`) and flushes — but does NOT commit.
+2. Calls `delete_all_sessions_for_user(...)` against the same `db_session`.
+3. Commits once.
+
+If step 2 raises, the password / active flag is also rolled back. If step 1 raises, sessions stay intact.
+
+**Test**: `test_reset_password_atomic_under_failure` monkeypatches `delete_all_sessions_for_user` to raise and asserts neither the password change nor any session deletion is observable post-rollback.
+
+### D16. Eager loading of `users.groups` to avoid N+1
+
+**Decision**: `list_users(...)` in `services/auth/users.py` uses `select(User).options(selectinload(User.groups))` so the `groups` field on each `User` is populated in a single follow-up query rather than per-row lazy-load. Mirrors the pattern `authenticate()` already uses in #179.
+
+**Test**: a unit test with an SQL-statement counter asserts that listing 10 users with varied memberships executes 2 queries total (users + groups), not 11.
 
 ## Open Risks / Watch-outs
 

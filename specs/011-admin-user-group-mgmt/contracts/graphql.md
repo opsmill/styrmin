@@ -155,6 +155,18 @@ A propagation test asserts that the value handed to the GraphQL endpoint reaches
 | `Group.id`, `Group.name`, `Group.role` | covered by `users` and `groups` query propagation tests when expanding nested groups |
 | `Deployment.createdByUsername` | `test_deployment_created_by_username_propagation` |
 
+## Concurrency, logging, and ordering tests (FR-010, FR-029, FR-030, D15, D16)
+
+| Test name | Asserts |
+|---|---|
+| `test_concurrent_demote_last_admin_serialized` | Two async tasks each demote a different admin in an active-admin pair; at least one raises `LAST_ADMIN`. |
+| `test_password_fields_masked_in_request_log` | For each of `createUser`, `resetUserPassword`, `changePassword`, `login`: captured log lines contain `"***"` and not the cleartext password. |
+| `test_admin_mutation_emits_audit_line` | Each admin mutation logs a structured `admin_mutation` line with `actor`, `action`, `target`, `changed_fields` on success — and does NOT log values. |
+| `test_admin_mutation_no_audit_on_rollback` | A mutation that raises inside the transaction does NOT emit an audit line. |
+| `test_reset_password_atomic_under_failure` | When session-delete raises, neither the password hash nor any session row is observably changed. |
+| `test_deactivate_user_atomic_under_failure` | Same property for `updateUser(active=False)`. |
+| `test_list_users_eager_loads_groups` | Listing N users with memberships issues 2 queries (users + groups), not N+1. |
+
 ## Role-gating tests (per mutation)
 
 For each admin mutation, a single functional test verifies the three-axis matrix:

@@ -90,6 +90,7 @@ Any authenticated user can open a Profile page where they edit their own display
 1. **Given** an authenticated user is on Profile, **When** they edit their display name and save, **Then** the change is persisted and the header reflects the new name.
 2. **Given** an authenticated user is on Profile, **When** they submit current + new password correctly, **Then** the password is changed and all of their *other* sessions are invalidated; the calling session continues to work.
 3. **Given** an authenticated user submits the wrong current password, **When** they save, **Then** the form shows a clear in-place error and nothing changes.
+4. **Given** an authenticated user is on Profile, **When** the page renders, **Then** the `username` field is shown read-only with helper text "Username cannot be changed — contact an admin." so users do not search for a missing affordance.
 
 ---
 
@@ -160,6 +161,8 @@ A single E2E scenario exercises the full auth lifecycle: log in as the seeded ad
 ### Edge Cases
 
 - **Last-admin protection covers four operations**: deactivate, hard-delete, demote (change role away from `admin`), and remove from the only admin-conferring group. Each must be rejected when it would result in zero active admins, **including when the acting admin operates on themselves**.
+- **Self-edit rejection surfaces inline**: when the last-admin guard rejects a self-edit on the admin's own user page, the rejection is shown as an inline error on the affected form control (the role select, the active toggle, or the group selector), not just a generic toast — so the cause is unambiguous.
+- **Concurrent demotions**: two admins simultaneously trying to demote each other (or each remove an admin role from the other's only admin-conferring group) MUST NOT both succeed. The last-admin guard runs inside each mutation's transaction with row-level locking or an isolation level that prevents the race; at least one of the conflicting transactions fails with `LAST_ADMIN`.
 - **Hard-delete with FK references**: rejected with a clear structured error. v1 hides or grays the Delete button when references exist; no dedicated "Users with FK references" UI.
 - **Self-demotion**: rejected by the same last-admin guard when the actor is the only active admin.
 - **Group-conferred admin promotion**: when a user's direct role is `read_only` but they belong to a group with role `admin`, their **effective role** is `admin`. UI gating reads effective role.
@@ -190,7 +193,7 @@ A single E2E scenario exercises the full auth lifecycle: log in as the seeded ad
 
 **Last-admin protection** (applies symmetrically to self and others):
 
-- **FR-010**: System MUST reject any single operation (`updateUser` setting `active: false`, `updateUser` changing role away from `admin`, `deleteUser`, `updateUser`/`updateGroup` removing the only admin from the only admin-conferring group) that would leave zero active admins. Pre-condition is checked at request time against current state.
+- **FR-010**: System MUST reject any single operation (`updateUser` setting `active: false`, `updateUser` changing role away from `admin`, `deleteUser`, `updateUser`/`updateGroup` removing the only admin from the only admin-conferring group) that would leave zero active admins. The pre-condition MUST be evaluated **within the same transaction as the mutation**, under a concurrency-safe strategy (row-level locks on the admin-conferring rows OR a transaction isolation level that prevents two concurrent demotions from both passing the snapshot check), so two simultaneous admin actions cannot together leave the system with zero admins. An integration test simulating two concurrent demote requests against an active-admin pair MUST assert that at least one transaction fails with `LAST_ADMIN`.
 
 **Membership replacement**:
 
@@ -240,6 +243,11 @@ A single E2E scenario exercises the full auth lifecycle: log in as the seeded ad
 
 - **FR-028**: System MUST expose `Deployment.createdBy.username` to deployment drivers (specifically the `UiScenarioDriver`) so a UI scenario can assert on attribution rendered in the UI.
 
+**Logging hygiene**:
+
+- **FR-029**: GraphQL request-logging middleware MUST mask password-bearing fields in variables and request bodies before emission. The masked-field allow-list MUST include at least `password`, `newPassword`, `currentPassword`, applied across `login`, `changePassword`, `createUser`, and `resetUserPassword`. A functional test MUST issue each of those mutations and assert the recorded log line does not contain the cleartext value (e.g., field replaced with `"***"` or absent).
+- **FR-030**: Every admin mutation (`createUser`, `updateUser`, `resetUserPassword`, `deleteUser`, `createGroup`, `updateGroup`, `deleteGroup`) MUST emit a structured stdout log line with at least `event=admin_mutation`, `actor_user_id`, `action`, and `target_id` (and, where applicable, the names of fields that changed — not their values). This is the operator's audit trail until a dedicated audit-log table is introduced.
+
 ### Key Entities
 
 - **User**: A human principal with `id`, `username` (immutable post-create), `displayName`, `role` (`admin | read_write | read_only`), `active` flag, `groups` (membership), `effectiveRole` (derived: max of direct role and group-conferred roles), and audit timestamps. Admin-only fields are gated by `RequiresRole(ADMIN)`.
@@ -257,7 +265,7 @@ A single E2E scenario exercises the full auth lifecycle: log in as the seeded ad
 - **SC-004**: The auth-lifecycle E2E scenario passes in **both** api-mode and ui-mode in CI.
 - **SC-005**: Admin password reset on a target user invalidates **all** of that target's existing sessions in the same transaction. Measured: an integration test that issues a session for the target, calls `resetUserPassword`, and asserts the prior session is rejected.
 - **SC-006**: Self password change invalidates **only** the user's *other* sessions; the calling session continues to work. Measured: integration test with two sessions for the same user — change password from session A, assert session A still works and session B is rejected.
-- **SC-007**: Existing UI-mode E2E scenarios show **no measurable runtime regression** after introducing cookie-injection-at-session-start (the auth requirement adds no per-test overhead). Measured: CI elapsed-time delta for the suite is ≤ +5% versus the pre-#180 baseline.
+- **SC-007**: Existing UI-mode E2E scenarios consume a session-scoped login fixture that performs **at most one login operation per pytest session**. Measured: the fixture is defined in `backend/tests/e2e/fixtures/auth.py` with `scope="session"`, every existing UI-mode test inherits cookie injection from it, and the only test that opts out (via `@pytest.mark.no_cookie_injection`) is the new auth-lifecycle test. (Replaces the brittle "≤ +5% wall-clock" bar with a structural fixture-shape check.)
 - **SC-008**: A new operator can read the `dev/guides/` guide and complete the admin-bootstrap → create-user → reset-password workflow **without reading source**. Measured: dry-run with a new operator (or a documentation-review subagent acting as one) finds no missing prerequisite step.
 
 ## Assumptions
