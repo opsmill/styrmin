@@ -13,6 +13,7 @@ from styrmin_sdk.resources.clusters import ClusterResource
 from styrmin_sdk.resources.deployments import DeploymentResource
 from styrmin_sdk.resources.drivers import DriverResource
 from styrmin_sdk.resources.environments import EnvironmentResource
+from styrmin_sdk.resources.groups import GroupResource
 from styrmin_sdk.resources.schedules import ScheduleResource
 from styrmin_sdk.resources.tasks import TaskResource
 from styrmin_sdk.resources.users import UserResource
@@ -57,6 +58,7 @@ class StyrminClient:
         self.backups = BackupResource(self._transport)
         self.schedules = ScheduleResource(self._transport)
         self.users = UserResource(self._transport)
+        self.groups = GroupResource(self._transport)
 
     async def close(self) -> None:
         await self._transport.close()

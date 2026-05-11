@@ -159,11 +159,11 @@ Web-app layout per plan.md: `backend/`, `frontend/`, `python_sdk/`, `dev/guides/
 
 ### SDK glue for US3
 
-- [ ] T055 [P] [US3] Create the SDK `.graphql` files for groups: `create_group.graphql`, `update_group.graphql`, `delete_group.graphql`, `list_groups.graphql`, `get_group.graphql`.
-- [ ] T056 [P] [US3] Create `python_sdk/src/styrmin_sdk/resources/groups.py`.
-- [ ] T057 [US3] Register `self.groups = GroupResource(self._transport)` in `client.py` (depends on T056).
-- [ ] T058 [US3] Re-run `uv run invoke generate` (depends on T053, T055).
-- [ ] T059 [P] [US3] SDK test `python_sdk/tests/test_resources_groups.py` mirroring T043.
+- [X] T055 [P] [US3] Create the SDK `.graphql` files for groups: `create_group.graphql`, `update_group.graphql`, `delete_group.graphql`, `list_groups.graphql`, `get_group.graphql`.
+- [X] T056 [P] [US3] Create `python_sdk/src/styrmin_sdk/resources/groups.py`.
+- [X] T057 [US3] Register `self.groups = GroupResource(self._transport)` in `client.py` (depends on T056).
+- [X] T058 [US3] Re-run `uv run invoke generate` (depends on T053, T055).
+- [X] T059 [P] [US3] SDK test `python_sdk/tests/test_resources_groups.py` mirroring T043.
 
 ### Frontend for US3
 

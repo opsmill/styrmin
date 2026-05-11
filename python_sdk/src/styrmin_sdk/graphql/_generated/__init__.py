@@ -23,6 +23,7 @@ from .create_environment import (
     CreateEnvironmentCreateEnvironment,
     CreateEnvironmentCreateEnvironmentCluster,
 )
+from .create_group import CreateGroup, CreateGroupCreateGroup
 from .create_restore import CreateRestore, CreateRestoreCreateRestore
 from .create_user import CreateUser, CreateUserCreateUser, CreateUserCreateUserGroups
 from .current_user import CurrentUser, CurrentUserCurrentUser
@@ -32,6 +33,7 @@ from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_deployment import DeleteDeployment, DeleteDeploymentDeleteDeployment
 from .delete_environment import DeleteEnvironment
+from .delete_group import DeleteGroup
 from .delete_user import DeleteUser
 from .deploy import Deploy, DeployDeploy
 from .enums import (
@@ -125,6 +127,7 @@ from .get_environment_services import (
     GetEnvironmentServices,
     GetEnvironmentServicesEnvironmentServices,
 )
+from .get_group import GetGroup, GetGroupGroups
 from .get_pod_statuses import GetPodStatuses, GetPodStatusesPodStatuses
 from .get_restore import GetRestore, GetRestoreRestore
 from .get_task import GetTask, GetTaskTask
@@ -172,6 +175,7 @@ from .list_environments import (
     ListEnvironmentsEnvironments,
     ListEnvironmentsEnvironmentsCluster,
 )
+from .list_groups import ListGroups, ListGroupsGroups
 from .list_restores import ListRestores, ListRestoresRestores
 from .list_tasks import ListTasks, ListTasksTasks
 from .list_users import ListUsers, ListUsersUsers, ListUsersUsersGroups
@@ -223,6 +227,7 @@ from .update_environment import (
     UpdateEnvironmentUpdateEnvironment,
     UpdateEnvironmentUpdateEnvironmentCluster,
 )
+from .update_group import UpdateGroup, UpdateGroupUpdateGroup
 from .update_user import UpdateUser, UpdateUserUpdateUser, UpdateUserUpdateUserGroups
 
 __all__ = [
@@ -247,6 +252,8 @@ __all__ = [
     "CreateEnvironment",
     "CreateEnvironmentCreateEnvironment",
     "CreateEnvironmentCreateEnvironmentCluster",
+    "CreateGroup",
+    "CreateGroupCreateGroup",
     "CreateGroupInput",
     "CreateRestore",
     "CreateRestoreCreateRestore",
@@ -264,6 +271,7 @@ __all__ = [
     "DeleteDeployment",
     "DeleteDeploymentDeleteDeployment",
     "DeleteEnvironment",
+    "DeleteGroup",
     "DeleteUser",
     "Deploy",
     "DeployDeploy",
@@ -324,6 +332,8 @@ __all__ = [
     "GetEnvironmentEnvironmentCluster",
     "GetEnvironmentServices",
     "GetEnvironmentServicesEnvironmentServices",
+    "GetGroup",
+    "GetGroupGroups",
     "GetPodStatuses",
     "GetPodStatusesPodStatuses",
     "GetRestore",
@@ -353,6 +363,8 @@ __all__ = [
     "ListEnvironments",
     "ListEnvironmentsEnvironments",
     "ListEnvironmentsEnvironmentsCluster",
+    "ListGroups",
+    "ListGroupsGroups",
     "ListRestores",
     "ListRestoresRestores",
     "ListTasks",
@@ -414,7 +426,9 @@ __all__ = [
     "UpdateEnvironmentInput",
     "UpdateEnvironmentUpdateEnvironment",
     "UpdateEnvironmentUpdateEnvironmentCluster",
+    "UpdateGroup",
     "UpdateGroupInput",
+    "UpdateGroupUpdateGroup",
     "UpdateUser",
     "UpdateUserInput",
     "UpdateUserUpdateUser",

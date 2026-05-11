@@ -13,6 +13,7 @@ from .create_backup_schedule import CreateBackupSchedule
 from .create_backup_storage_location import CreateBackupStorageLocation
 from .create_cluster import CreateCluster
 from .create_environment import CreateEnvironment
+from .create_group import CreateGroup
 from .create_restore import CreateRestore
 from .create_user import CreateUser
 from .current_user import CurrentUser
@@ -22,6 +23,7 @@ from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_deployment import DeleteDeployment
 from .delete_environment import DeleteEnvironment
+from .delete_group import DeleteGroup
 from .delete_user import DeleteUser
 from .deploy import Deploy
 from .enums import BackupStatus, RestoreStatus, Role
@@ -40,16 +42,19 @@ from .get_deployment_timeline_context_diff import GetDeploymentTimelineContextDi
 from .get_driver_env_var_docs import GetDriverEnvVarDocs
 from .get_environment import GetEnvironment
 from .get_environment_services import GetEnvironmentServices
+from .get_group import GetGroup
 from .get_pod_statuses import GetPodStatuses
 from .get_restore import GetRestore
 from .get_task import GetTask
 from .get_user import GetUser
 from .input_types import (
+    CreateGroupInput,
     CreateUserInput,
     DeploymentPodStatusReport,
     DeploymentStatusReportInput,
     ServiceNameOverride,
     UpdateEnvironmentInput,
+    UpdateGroupInput,
     UpdateUserInput,
 )
 from .list_backup_schedules import ListBackupSchedules
@@ -57,6 +62,7 @@ from .list_backup_storage_locations import ListBackupStorageLocations
 from .list_backups import ListBackups
 from .list_clusters import ListClusters
 from .list_environments import ListEnvironments
+from .list_groups import ListGroups
 from .list_restores import ListRestores
 from .list_tasks import ListTasks
 from .list_users import ListUsers
@@ -76,6 +82,7 @@ from .update_backup_storage_location import UpdateBackupStorageLocation
 from .update_deployment import UpdateDeployment
 from .update_deployment_version import UpdateDeploymentVersion
 from .update_environment import UpdateEnvironment
+from .update_group import UpdateGroup
 from .update_user import UpdateUser
 
 
@@ -265,6 +272,23 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return CreateEnvironment.model_validate(data)
+
+    async def create_group(self, input: CreateGroupInput, **kwargs: Any) -> CreateGroup:
+        query = gql("""
+            mutation CreateGroup($input: CreateGroupInput!) {
+              createGroup(input: $input) {
+                id
+                name
+                role
+              }
+            }
+            """)
+        variables: dict[str, object] = {"input": input}
+        response = await self.execute(
+            query=query, operation_name="CreateGroup", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return CreateGroup.model_validate(data)
 
     async def create_restore(
         self,
@@ -507,6 +531,19 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return DeleteEnvironment.model_validate(data)
+
+    async def delete_group(self, id: UUID, **kwargs: Any) -> DeleteGroup:
+        query = gql("""
+            mutation DeleteGroup($id: UUID!) {
+              deleteGroup(id: $id)
+            }
+            """)
+        variables: dict[str, object] = {"id": id}
+        response = await self.execute(
+            query=query, operation_name="DeleteGroup", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return DeleteGroup.model_validate(data)
 
     async def delete_backup_schedule(
         self, schedule_id: UUID, **kwargs: Any
@@ -1042,6 +1079,23 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetEnvironmentServices.model_validate(data)
 
+    async def get_group(self, **kwargs: Any) -> GetGroup:
+        query = gql("""
+            query GetGroup {
+              groups {
+                id
+                name
+                role
+              }
+            }
+            """)
+        variables: dict[str, object] = {}
+        response = await self.execute(
+            query=query, operation_name="GetGroup", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return GetGroup.model_validate(data)
+
     async def get_pod_statuses(
         self,
         deployment_id: Union[Optional[UUID], UnsetType] = UNSET,
@@ -1279,6 +1333,25 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return ListEnvironments.model_validate(data)
+
+    async def list_groups(
+        self, search: Union[Optional[str], UnsetType] = UNSET, **kwargs: Any
+    ) -> ListGroups:
+        query = gql("""
+            query ListGroups($search: String) {
+              groups(search: $search) {
+                id
+                name
+                role
+              }
+            }
+            """)
+        variables: dict[str, object] = {"search": search}
+        response = await self.execute(
+            query=query, operation_name="ListGroups", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return ListGroups.model_validate(data)
 
     async def list_restores(
         self,
@@ -1809,6 +1882,25 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return UpdateEnvironment.model_validate(data)
+
+    async def update_group(
+        self, id: UUID, input: UpdateGroupInput, **kwargs: Any
+    ) -> UpdateGroup:
+        query = gql("""
+            mutation UpdateGroup($id: UUID!, $input: UpdateGroupInput!) {
+              updateGroup(id: $id, input: $input) {
+                id
+                name
+                role
+              }
+            }
+            """)
+        variables: dict[str, object] = {"id": id, "input": input}
+        response = await self.execute(
+            query=query, operation_name="UpdateGroup", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return UpdateGroup.model_validate(data)
 
     async def update_backup_schedule(
         self,
