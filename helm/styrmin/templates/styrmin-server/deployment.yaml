@@ -91,6 +91,8 @@ spec:
                   name: {{ include "styrmin.secretName" . }}
                   key: admin-password
             {{- end }}
+            - name: STYRMIN_SESSION_COOKIE_SECURE
+              value: {{ .Values.styrmin.sessionCookieSecure | quote }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:

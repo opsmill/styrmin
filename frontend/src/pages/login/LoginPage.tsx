@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useLoginMutation } from "@/generated/graphql";
 import { useAuth } from "@/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ const GENERIC_ERROR = "Invalid username or password.";
 
 export default function LoginPage() {
   const { refresh } = useAuth();
+  const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -17,9 +19,12 @@ export default function LoginPage() {
   const loginMutation = useLoginMutation({
     onSuccess: async () => {
       setErrorMessage(null);
-      // Refetch currentUser so the AuthProvider transitions to authenticated
-      // state, which then triggers route guards to send the user to '/'.
+      // Refetch currentUser so the AuthProvider transitions to the
+      // authenticated state, then navigate to '/'. The /login route's
+      // beforeLoad guard only fires on navigation — staying on the same
+      // route after refresh() would leave the user stuck on the form.
       await refresh();
+      await navigate({ to: "/" });
     },
     onError: () => {
       // Surface a single generic message regardless of the server's reason

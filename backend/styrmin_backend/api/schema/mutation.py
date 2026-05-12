@@ -48,6 +48,7 @@ from styrmin_backend.api.definitions.user.model import (
     UpdateUserInput,
     User as UserType,
 )
+from styrmin_backend import config
 from styrmin_backend.api.dependency import SESSION_COOKIE_NAME
 from styrmin_backend.db.models import Role
 from styrmin_backend.api.definitions.service.model import ServiceNameOverride
@@ -144,14 +145,26 @@ class Mutation:
     ) -> LoginResult:
         uow = info.context["uow"]
         response = info.context["response"]
-        user, _session, raw_token = await authenticate(
+        user, session, raw_token = await authenticate(
             uow, username=username, password=password
         )
+        # Populate the auth context so nested ``LoginResult.user`` field
+        # resolvers (role / effectiveRole / active / groups, gated by
+        # IsSelfOrRole) see the just-authenticated caller as "self" and
+        # resolve their own values. Without this the gate rejects with
+        # UNAUTHENTICATED and non-null propagation nulls the whole
+        # ``login`` payload — the user can never see their own role.
+        info.context["current_user"] = user
+        info.context["current_session"] = session
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
             value=raw_token,
             httponly=True,
-            secure=True,
+            # ``secure`` is controlled by STYRMIN_SESSION_COOKIE_SECURE so the
+            # local HTTP demo can store the cookie (browsers drop ``Secure``
+            # cookies on non-HTTPS, non-localhost origins). Production must
+            # keep the default ``True``.
+            secure=config.SETTINGS.active_settings.session_cookie_secure,
             samesite="lax",
             path="/",
         )

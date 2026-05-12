@@ -86,6 +86,27 @@ async def test_login_happy_path_returns_token_and_sets_cookie(
 
 
 @pytest.mark.asyncio
+async def test_login_omits_secure_flag_when_cookie_secure_disabled(
+    unauth_client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # STYRMIN_SESSION_COOKIE_SECURE=false is required for the local HTTP demo:
+    # browsers drop ``Secure`` cookies on non-HTTPS, non-localhost origins, so
+    # leaving the flag on silently breaks login. The login resolver reads the
+    # value from ``config.SETTINGS.active_settings`` per-request.
+    from styrmin_backend import config
+
+    monkeypatch.setattr(config.SETTINGS.active_settings, "session_cookie_secure", False)
+    await _seed_user(session)
+
+    _, _, headers = await _post_login(
+        unauth_client, username="alice", password=PASSWORD
+    )
+    set_cookie = headers.get("set-cookie", "")
+    assert "styrmin_session=" in set_cookie
+    assert "Secure" not in set_cookie
+
+
+@pytest.mark.asyncio
 async def test_login_wrong_password_returns_invalid_credentials(
     unauth_client: AsyncClient, session: AsyncSession
 ) -> None:
@@ -146,6 +167,35 @@ async def test_login_invalid_credentials_messages_match(
     msg_b = no_user["errors"][0]["message"]
     msg_c = deactivated["errors"][0]["message"]
     assert msg_a == msg_b == msg_c
+
+
+@pytest.mark.asyncio
+async def test_login_resolves_role_gated_user_fields_for_self(
+    unauth_client: AsyncClient, session: AsyncSession
+) -> None:
+    # Regression: the frontend's Login mutation requests role / effectiveRole /
+    # active on the returned user. These fields are gated by IsSelfOrRole
+    # (admin or self) and previously failed with UNAUTHENTICATED because the
+    # login resolver did not populate ``info.context['current_user']`` after
+    # authenticating, so nested field resolvers saw an anonymous caller and
+    # non-null propagation nulled the whole ``login`` payload.
+    await _seed_user(session)
+
+    response = await unauth_client.post(
+        "/graphql",
+        json={
+            "query": load_query("login_with_role_fields"),
+            "variables": {"username": "alice", "password": PASSWORD},
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+    user_payload = payload["data"]["login"]["user"]
+    assert user_payload["username"] == "alice"
+    assert user_payload["role"] == "READ_ONLY"
+    assert user_payload["effectiveRole"] == "READ_ONLY"
+    assert user_payload["active"] is True
 
 
 @pytest.mark.asyncio

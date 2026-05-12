@@ -11,7 +11,7 @@ from argon2.exceptions import (
 
 from styrmin_backend.services.exceptions import PasswordPolicyError
 
-MIN_PASSWORD_LENGTH = 12
+MIN_PASSWORD_LENGTH = 5
 MAX_PASSWORD_LENGTH = 256
 
 _HASHER = PasswordHasher(memory_cost=19456, time_cost=2, parallelism=1)

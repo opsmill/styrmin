@@ -141,23 +141,35 @@ async def test_introspection_works_without_authentication(
 
 
 @pytest.mark.asyncio
-async def test_non_admin_querying_admin_only_user_field_is_forbidden(
+async def test_non_admin_can_query_own_admin_fields_via_current_user(
     unauth_client: AsyncClient, session: AsyncSession
 ) -> None:
-    """``role`` is admin-only on ``User``; READ_WRITE caller selecting it
-    must get FORBIDDEN."""
+    """A non-admin reading their OWN ``currentUser.role`` / ``effectiveRole``
+    must succeed (IsSelfOrRole carve-out). Without this the frontend's role
+    gating can't initialise and the user is bounced back to /login. See
+    ADR-025.
+    """
     _user, token = await _seed_user_with_role(session, Role.READ_WRITE)
     response = await unauth_client.post(
         "/graphql",
         json={
-            "query": "query { currentUser { id username role } }",
+            "query": "query { currentUser { id username role effectiveRole active } }",
         },
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
     payload = response.json()
-    errors = payload.get("errors") or []
-    assert errors, payload
-    # Field-level FORBIDDEN — the username field still resolves; the
-    # role field carries the error.
-    assert any(err["extensions"].get("code") == "FORBIDDEN" for err in errors), errors
+    assert "errors" not in payload, payload
+    data = payload["data"]["currentUser"]
+    assert data["username"] == "alice-read_write"
+    assert data["role"] == "READ_WRITE"
+    assert data["effectiveRole"] == "READ_WRITE"
+    assert data["active"] is True
+
+
+# The cross-user case ("READ_WRITE caller reading another User's admin
+# fields must still hit FORBIDDEN") is already pinned by
+# tests/functional/graphql/test_deployment_created_by.py::
+# test_non_admin_querying_admin_only_field_on_created_by_is_forbidden,
+# which exercises the field-level gate via Deployment.createdBy. No need to
+# duplicate it here.

@@ -12,11 +12,14 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // Mock the router module BEFORE importing anything that touches it.
-const { navigateMock, updateMock, routerOptions } = vi.hoisted(() => ({
-  navigateMock: vi.fn(() => Promise.resolve()),
-  updateMock: vi.fn(),
-  routerOptions: { context: {} as Record<string, unknown> },
-}));
+const { navigateMock, updateMock, routerOptions, useNavigateMock } = vi.hoisted(
+  () => ({
+    navigateMock: vi.fn(() => Promise.resolve()),
+    updateMock: vi.fn(),
+    routerOptions: { context: {} as Record<string, unknown> },
+    useNavigateMock: vi.fn(() => Promise.resolve()),
+  }),
+);
 
 vi.mock("@/router", () => ({
   router: {
@@ -24,6 +27,12 @@ vi.mock("@/router", () => ({
     update: updateMock,
     options: routerOptions,
   },
+}));
+
+// useNavigate() inside LoginPage would otherwise require a real
+// <RouterProvider>; stub it to a hookable mock so we can assert navigation.
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => useNavigateMock,
 }));
 
 // Provide a no-op router context for the route hooks that LoginPage's button
@@ -93,6 +102,7 @@ describe("LoginPage", () => {
   beforeEach(() => {
     navigateMock.mockClear();
     updateMock.mockClear();
+    useNavigateMock.mockClear();
     routerOptions.context = {};
   });
 
@@ -151,6 +161,13 @@ describe("LoginPage", () => {
     // CurrentUser was refetched (>= 2 calls now).
     await waitFor(() => {
       expect(currentUserCalls).toBeGreaterThanOrEqual(2);
+    });
+
+    // User is navigated to '/' after refresh — the /login beforeLoad guard
+    // only fires on navigation, so refresh() alone would leave the user
+    // stuck on the form.
+    await waitFor(() => {
+      expect(useNavigateMock).toHaveBeenCalledWith({ to: "/" });
     });
 
     // No error message rendered.

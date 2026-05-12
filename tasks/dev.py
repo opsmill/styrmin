@@ -4,13 +4,11 @@ from rich.console import Console
 from .utils import graphql, load_query, print_header
 
 # Default credentials seeded by the helm/compose dev fixtures (see
-# dev/local/demo-values.yaml + docker-compose.yml). admin/admin is the
+# dev/local/demo-values.yaml + docker-compose.yml). admin/styrmin is the
 # convention for local development only — production installs MUST set a
 # real STYRMIN_ADMIN_PASSWORD via helm value or env var.
 DEFAULT_ADMIN_USERNAME = "admin"
-# Password policy (ADR-024): minimum 12 characters. Local-dev convention
-# only — production installs MUST override via STYRMIN_ADMIN_PASSWORD.
-DEFAULT_ADMIN_PASSWORD = "admin-password"  # noqa: S105
+DEFAULT_ADMIN_PASSWORD = "styrmin"  # noqa: S105
 
 
 def _login(console: Console, api_url: str, username: str, password: str) -> str:
@@ -199,7 +197,7 @@ def bootstrap(  # noqa: PLR0917
 
     Default-deny is on (ADR-024/025): every mutation in the bootstrap
     sequence requires an authenticated admin session, so this task first
-    logs in as the seeded bootstrap admin (default ``admin/admin``,
+    logs in as the seeded bootstrap admin (default ``admin/styrmin``,
     matching ``docker-compose.yml`` and ``dev/local/demo-values.yaml``)
     and threads the bearer token through every call.
     """

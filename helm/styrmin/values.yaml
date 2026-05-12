@@ -168,6 +168,13 @@ styrmin:
   # environments that want a known credential baked into the install.
   adminPassword: ""
 
+  # -- Whether to set the Secure attribute on the session cookie. Production
+  # must serve over HTTPS and leave this as ``true``. Set to ``false`` only
+  # for local HTTP demos — browsers drop ``Secure`` cookies on non-HTTPS,
+  # non-localhost origins, so logging in over plain http://... would silently
+  # fail.
+  sessionCookieSecure: true
+
   # URL configuration
   url:
     # -- API URL for Kubernetes jobs (must be resolvable from K8s pods)

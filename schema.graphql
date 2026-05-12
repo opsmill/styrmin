@@ -1,3 +1,5 @@
+directive @isSelfOrRole on FIELD_DEFINITION
+
 directive @requiresRole on FIELD_DEFINITION
 
 type Action {
@@ -741,12 +743,12 @@ type User {
   id: UUID!
   username: String!
   displayName: String!
-  role: Role! @requiresRole
-  effectiveRole: Role! @requiresRole
-  active: Boolean! @requiresRole
-  groups: [Group!]! @requiresRole
-  createdOn: DateTime @requiresRole
-  updatedOn: DateTime @requiresRole
+  role: Role! @isSelfOrRole
+  effectiveRole: Role! @isSelfOrRole
+  active: Boolean! @isSelfOrRole
+  groups: [Group!]! @isSelfOrRole
+  createdOn: DateTime @isSelfOrRole
+  updatedOn: DateTime @isSelfOrRole
 }
 
 """Weighted affinity term for a ``preferred`` rule."""

@@ -33,7 +33,7 @@ A login mutation creates a `session` row keyed to the user. The token is `secret
 
 Each session is reachable through either transport:
 
-- **Browser**: `Set-Cookie: styrmin_session=<token>; HttpOnly; Secure; SameSite=Lax; Path=/` on the login response. The frontend never touches the token in JavaScript — a successful XSS cannot exfiltrate it.
+- **Browser**: `Set-Cookie: styrmin_session=<token>; HttpOnly; Secure; SameSite=Lax; Path=/` on the login response. The frontend never touches the token in JavaScript — a successful XSS cannot exfiltrate it. The `Secure` flag is controlled by `STYRMIN_SESSION_COOKIE_SECURE` (default `true`); the local HTTP demo sets it to `false` because browsers drop `Secure` cookies on non-HTTPS, non-`localhost` origins. Production installs MUST serve over HTTPS and leave the default.
 - **SDK / scripts**: `Authorization: Bearer <token>`. The SDK never touches a cookie jar.
 
 The auth middleware accepts either, prefers the bearer header when both are present (so an SDK call from a browser-loaded notebook is unambiguous), and resolves to the same session row.

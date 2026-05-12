@@ -7,7 +7,7 @@ from uuid import UUID
 import strawberry
 from strawberry.permission import PermissionExtension
 
-from styrmin_backend.api.auth.permissions import RequiresRole
+from styrmin_backend.api.auth.permissions import IsSelfOrRole
 from styrmin_backend.db.models import Group as GroupModel
 from styrmin_backend.db.models import Role as RoleModel
 from styrmin_backend.db.models import User as UserModel
@@ -44,29 +44,35 @@ class Group:
         )
 
 
-def _admin_only() -> PermissionExtension:
-    """Sugar — User fields gated to admins. See ADR-020."""
-    return PermissionExtension([RequiresRole(RoleModel.ADMIN)])
+def _self_or_admin() -> PermissionExtension:
+    """Sugar — User fields visible to admins or the user reading their own
+    record. See ADR-025: the "self" carve-out is required because the
+    frontend's role-gated UI needs ``currentUser.effectiveRole``, and
+    non-null GraphQL error propagation would otherwise null the whole
+    ``currentUser`` and bounce non-admins back to /login.
+    """
+    return PermissionExtension([IsSelfOrRole(RoleModel.ADMIN)])
 
 
 @strawberry.type
 class User:
-    """User account. Public subset = id/username/displayName; admin-only
-    subset gated via per-field RequiresRole(ADMIN). See ADR-020.
+    """User account. Public subset = id/username/displayName; the
+    administrative subset is gated by ``IsSelfOrRole(ADMIN)`` — admins see
+    every user's admin fields, every user sees their own. See ADR-025.
     """
 
     id: UUID
     username: str
     display_name: str
 
-    # Admin-only fields. Source of truth is one type — the GraphQL
+    # Admin-or-self fields. Source of truth is one type — the GraphQL
     # field-resolution behaviour is the gate.
-    role: Role = strawberry.field(extensions=[_admin_only()])
-    effective_role: Role = strawberry.field(extensions=[_admin_only()])
-    active: bool = strawberry.field(extensions=[_admin_only()])
-    groups: list[Group] = strawberry.field(extensions=[_admin_only()])
-    created_on: datetime | None = strawberry.field(extensions=[_admin_only()])
-    updated_on: datetime | None = strawberry.field(extensions=[_admin_only()])
+    role: Role = strawberry.field(extensions=[_self_or_admin()])
+    effective_role: Role = strawberry.field(extensions=[_self_or_admin()])
+    active: bool = strawberry.field(extensions=[_self_or_admin()])
+    groups: list[Group] = strawberry.field(extensions=[_self_or_admin()])
+    created_on: datetime | None = strawberry.field(extensions=[_self_or_admin()])
+    updated_on: datetime | None = strawberry.field(extensions=[_self_or_admin()])
 
     @classmethod
     def from_instance(cls, instance: UserModel) -> "User":

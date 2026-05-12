@@ -84,12 +84,14 @@ Per-field role checks on the `User` type partition fields into "any authenticate
 | Field | Visibility |
 |-------|------------|
 | `id`, `username`, `displayName` | any authenticated user |
-| `role`, `effectiveRole`, `active`, `groups`, `createdOn`, `updatedOn` | admin only |
+| `role`, `effectiveRole`, `active`, `groups`, `createdOn`, `updatedOn` | admin **or self** |
 | `passwordHash` | not in schema at all |
 
 The public subset is what's needed to render `Deployment.createdBy` attribution without leaking other users' administrative metadata (a `READ_WRITE` operator seeing "deployed by alice" should not also see alice's role and group memberships). An admin needs the full surface to investigate.
 
-This is implemented as per-field `RequiresRole` decorators on the admin-only fields, not as two separate types — one type is the source of truth; the GraphQL field-resolution behaviour is the gate.
+The "or self" carve-out is necessary because the frontend's role-gated UI reads `currentUser.effectiveRole` on every page load: without it, non-admins see a field error that — under GraphQL's non-null propagation — nulls the entire `currentUser` and the global `UNAUTHENTICATED` handler bounces them back to `/login`. Self-visibility of one's own role doesn't leak information ("you can see what you already are") while still hiding the same fields on other users from non-admin callers.
+
+This is implemented as per-field `IsSelfOrRole(ADMIN)` decorators on the admin-or-self fields, not as two separate types — one type is the source of truth; the GraphQL field-resolution behaviour is the gate. `IsSelfOrRole.has_permission` compares `source.id` (the resolved parent `User`) to `info.context['current_user'].id`; an admin passes the role check regardless of who they're looking at.
 
 ### Structured error codes
 
