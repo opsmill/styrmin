@@ -395,7 +395,7 @@ class Mutation:
         await delete_cluster(cluster_id=cluster.id, uow=uow)
         return "Cluster deleted"
 
-    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def create_environment(
         self,
         name: str,
