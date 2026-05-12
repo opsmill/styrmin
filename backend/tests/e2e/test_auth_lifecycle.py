@@ -31,15 +31,12 @@ from styrmin_sdk.graphql._generated.enums import Role
 from tests.e2e.pages.login import LoginPage
 
 
-# ``no_cookie_injection`` is the SC-007 opt-out: the session-scoped
-# Playwright BrowserContext that this test opens does NOT receive the
-# seeded admin's session cookie, so the ui-mode variant of "log in as
-# the new user" exercises the real login form rather than impersonating
-# the admin.
-pytestmark = [
-    pytest.mark.ci,
-    pytest.mark.no_cookie_injection,
-]
+# In ui-mode this test spins up its OWN short-lived BrowserContext (no
+# admin cookie) for the LoginPage flow — see ``test_user_client`` below.
+# We cannot gate the shared session-scoped page on a marker because the
+# session fixture is lazy: a marker on the first test to request it would
+# poison every subsequent test's UI session.
+pytestmark = [pytest.mark.ci]
 
 
 @pytest.fixture
@@ -91,17 +88,19 @@ async def test_user_client(
     auth_lifecycle_test_user: tuple[str, str, str, str],
     styrmin_deployment: str,
     driver_mode: str,
-    session_ui_page,  # noqa: ARG001 — ensures the UI session is up so the LoginPage flow has a Page
+    session_ui_page,
 ) -> AsyncGenerator[StyrminClient, None]:
     """Return a ``StyrminClient`` authenticated as the test user.
 
     - api-mode: SDK ``client.auth.login(...)``.
-    - ui-mode: drive the real ``/login`` form via ``LoginPage`` (the
-      cookie injection is opted-out at the module level), then build a
-      sibling SDK client carrying the same returned token so the
-      "permitted mutation" / "forbidden mutation" assertions are
-      mode-independent. The ui-mode variant therefore exercises BOTH
-      the form (visible side-effect on the page) and the API call
+    - ui-mode: drive the real ``/login`` form via ``LoginPage`` in a
+      short-lived fresh ``BrowserContext`` (no admin cookie) launched off
+      the same Playwright browser as ``session_ui_page``. The session
+      page itself stays admin-logged-in for the rest of the suite. After
+      the form drives, build a sibling SDK client carrying the new user's
+      credentials so the "permitted mutation" / "forbidden mutation"
+      assertions are mode-independent. The ui-mode variant therefore
+      exercises BOTH the form (visible side-effect) and the API call
       surface — matching the spec's wording that ui-mode "drives the
       actual login form, NOT cookie injection" while still letting the
       test assert on GraphQL behaviour.
@@ -109,17 +108,26 @@ async def test_user_client(
     _, username, _, password = auth_lifecycle_test_user
 
     if driver_mode == "ui":
-        # Drive the real form. The session-scoped Playwright Page has
-        # no admin cookie (this test opted out), so it lands on
-        # ``/login`` with a clean state.
-        page = session_ui_page
-        assert page is not None, "ui driver_mode must provide a session_ui_page"
-        login_page = LoginPage(page)
-        await login_page.goto()
-        await login_page.fill_username(username)
-        await login_page.fill_password(password)
-        await login_page.submit()
-        await login_page.wait_for_redirect()
+        assert session_ui_page is not None, (
+            "ui driver_mode must provide a session_ui_page"
+        )
+        # Spin up a clean (no admin cookie) context on the same browser
+        # so the login form is exercised against an unauthenticated
+        # browser, without disturbing the session page that the rest of
+        # the suite shares.
+        browser = session_ui_page.context.browser
+        assert browser is not None, "session_ui_page must be attached to a live browser"
+        clean_context = await browser.new_context(base_url=styrmin_deployment)
+        try:
+            clean_page = await clean_context.new_page()
+            login_page = LoginPage(clean_page)
+            await login_page.goto()
+            await login_page.fill_username(username)
+            await login_page.fill_password(password)
+            await login_page.submit()
+            await login_page.wait_for_redirect()
+        finally:
+            await clean_context.close()
 
     # SDK login. In api-mode this is the only login; in ui-mode it
     # provides the token the assertions need. Both flows go through the

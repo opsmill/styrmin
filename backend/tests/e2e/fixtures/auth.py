@@ -4,7 +4,8 @@ Implements the SC-007 contract: every existing UI-mode E2E scenario uses
 a session-scoped login (one SDK call per session) and the captured
 session cookie is injected onto every Playwright ``BrowserContext`` that
 the suite opens. Tests that genuinely need a clean unauthenticated
-browser opt out with ``@pytest.mark.no_cookie_injection``.
+browser open their own short-lived ``BrowserContext`` instead (see
+``test_auth_lifecycle.py``).
 
 The seeded admin's credentials are sourced from the test fixtures'
 ``styrmin-values.yaml`` (``styrmin.adminPassword``) and mirrored in
@@ -86,16 +87,3 @@ def inject_session_cookie(
         )
 
     return _inject
-
-
-def should_inject_session_cookie(request: pytest.FixtureRequest) -> bool:
-    """Return False if the current test opts out of session cookie injection.
-
-    Tests opt out by declaring ``@pytest.mark.no_cookie_injection``. The
-    primary consumer is ``test_auth_lifecycle.py`` (US8), which drives
-    the actual login form in ui-mode and therefore needs a clean browser.
-
-    Lifted to a module-level helper so the conftest fixture can re-use
-    the same predicate without re-deriving the marker lookup.
-    """
-    return request.node.get_closest_marker("no_cookie_injection") is None

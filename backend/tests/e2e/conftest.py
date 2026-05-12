@@ -29,7 +29,6 @@ from tests.e2e.drivers.ui_driver import UiScenarioDriver
 from tests.e2e.fixtures.auth import (
     InjectSessionCookie,
     inject_session_cookie,
-    should_inject_session_cookie,
 )
 
 # Re-export so the fixture is discoverable on the e2e conftest scope.
@@ -46,21 +45,13 @@ PROJECT_ROOT = Path(__file__).parent.resolve().parents[2]
 FIXTURES_DIR = Path(__file__).parent.resolve() / "fixtures"
 
 
-def pytest_configure(config: pytest.Config) -> None:
-    """Register E2E-only pytest markers.
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
+    """E2E-only pytest setup hook.
 
     The ``e2e`` / ``ci`` / ``api_only`` / ``ui_only`` markers live in the
-    project-level ``pyproject.toml``. ``no_cookie_injection`` is scoped
-    to the E2E suite (it tweaks the session-scoped Playwright cookie
-    injection introduced in 011-admin-user-group-mgmt) so it is
-    registered here rather than polluting the global pytest config.
+    project-level ``pyproject.toml``. No additional E2E-only markers are
+    currently needed.
     """
-    config.addinivalue_line(
-        "markers",
-        "no_cookie_injection: opt out of the session-scoped Playwright session "
-        "cookie injection (used by tests that drive the actual login form, "
-        "e.g. test_auth_lifecycle.py).",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +657,6 @@ async def authenticated_styrmin_client(
 
 @pytest.fixture(scope="session")
 async def session_ui_page(
-    request: pytest.FixtureRequest,
     driver_mode: str,
     styrmin_deployment: str,
     admin_token: str,  # noqa: ARG001 — kept for backwards compat; injection now flows through ``inject_session_cookie``
@@ -688,9 +678,15 @@ async def session_ui_page(
     adds ``-chromium`` to node IDs — that's what the CI filters
     ``-k "api-chromium"`` / ``-k "ui-chromium"`` match.
 
-    SC-007 contract: every ``BrowserContext`` opened by the suite goes
-    through ``inject_session_cookie`` unless the test opts out with
-    ``@pytest.mark.no_cookie_injection``. Default-deny is on (ADR-020).
+    The session-scoped page is always logged in as the seeded admin —
+    every UI test reuses it through this fixture, and ``styrmin_resources``
+    bootstraps platform state by driving the admin UI here. Tests that
+    need a genuinely unauthenticated browser (the auth-lifecycle US8 test
+    that drives the ``/login`` form) open their own short-lived
+    BrowserContext via ``new_clean_browser_context``; we cannot gate cookie
+    injection on a per-test marker here because the session fixture is
+    built lazily and the first-test marker would poison the rest of the
+    session.
     """
     if driver_mode != "ui":
         yield None
@@ -706,15 +702,7 @@ async def session_ui_page(
     async with async_playwright() as p:
         browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(base_url=styrmin_deployment)
-        # Session cookie injection: skip when the requesting test (if any
-        # at session-fixture-resolution time) opted out. The session
-        # fixture is built lazily on first request, so the marker check
-        # here covers the common case where the first test in the session
-        # is the auth-lifecycle test. Per-test contexts (none exist
-        # today; every UI scenario shares this session page) would re-
-        # apply the same predicate.
-        if should_inject_session_cookie(request):
-            await inject_session_cookie(context)
+        await inject_session_cookie(context)
         page = await context.new_page()
         try:
             yield page
