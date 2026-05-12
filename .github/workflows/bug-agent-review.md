@@ -14,7 +14,7 @@ permissions:
   pull-requests: read
   actions: read
 concurrency:
-  group: bug-pipeline-${{ github.event.issue.number }}
+  group: bug-pipeline-${{ github.workflow }}-${{ github.event.issue.number }}
   cancel-in-progress: false
 checkout:
   fetch-depth: 0
