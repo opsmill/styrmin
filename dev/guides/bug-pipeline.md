@@ -111,15 +111,17 @@ Each stage has a defined failure shape — no silent-pass behaviour anywhere in 
 
 ## Concurrency
 
-Each workflow uses a `concurrency:` block keyed on the issue number:
+Each workflow uses a `concurrency:` block keyed on the workflow name and issue number:
 
 ```yaml
 concurrency:
-  group: bug-pipeline-${{ github.event.issue.number }}
+  group: bug-pipeline-${{ github.workflow }}-${{ github.event.issue.number }}
   cancel-in-progress: false
 ```
 
-Same-stage invocations on the same issue serialise — a second `/bug-analyze 206` queues behind a still-running one. Cross-stage invocations on the same issue (e.g., `/bug-analyze 206` and `/bug-fix 206`) share the group and also serialise; this is intentional for v1, since the stages chain on each other's GitHub side effects. Different issues are independent.
+Same-stage invocations on the same issue serialise — a second `/bug-analyze 206` queues behind a still-running one. Cross-stage invocations on the same issue (e.g., `/bug-analyze 206` and `/bug-fix 206`) are independent: each stage has its own queue. Different issues are independent.
+
+The `${{ github.workflow }}` qualifier is load-bearing: every issue comment registers all four workflows simultaneously, so a shared group key would let later arrivals evict the matching workflow from GitHub's single-pending-slot queue before its activation gate could run.
 
 ## Inspecting the analyst summary
 
