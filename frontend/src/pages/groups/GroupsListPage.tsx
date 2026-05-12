@@ -57,7 +57,8 @@ export default function GroupsListPage() {
     search: search.trim() === "" ? null : search.trim(),
   };
 
-  const { data, isLoading, error, refetch } = useListGroupsQuery(queryVariables);
+  const { data, isLoading, error, refetch } =
+    useListGroupsQuery(queryVariables);
 
   // Pull every active user to compute membership counts client-side. The
   // backend's `type Group` does not expose members.

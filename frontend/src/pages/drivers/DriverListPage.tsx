@@ -23,8 +23,7 @@ export default function DriverListPage() {
   const navigate = useNavigate();
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const effectiveRole = useEffectiveRole();
-  const canWrite =
-    effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";
+  const canWrite = effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";
   const { data, isLoading, error, refetch, dataUpdatedAt } =
     useListDriversQuery(undefined, {
       refetchInterval: autoRefreshEnabled ? 10_000 : false,
@@ -62,7 +61,9 @@ export default function DriverListPage() {
           title="No drivers"
           description="No application drivers have been installed yet."
           actionLabel={canWrite ? "Add a driver" : undefined}
-          onAction={canWrite ? () => navigate({ to: "/drivers/add" }) : undefined}
+          onAction={
+            canWrite ? () => navigate({ to: "/drivers/add" }) : undefined
+          }
         />
       )}
 

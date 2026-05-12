@@ -22,11 +22,7 @@ export interface IfRoleProps {
  *
  * Unauthenticated users (no effective role) never satisfy the minimum.
  */
-export function IfRole({
-  minimum,
-  children,
-  fallback = null,
-}: IfRoleProps) {
+export function IfRole({ minimum, children, fallback = null }: IfRoleProps) {
   const effective = useEffectiveRole();
   if (effective === null) {
     return <>{fallback}</>;

@@ -87,10 +87,7 @@ function installFetch(
         return routes[opName]!(body);
       }
     }
-    return jsonResponse(
-      { errors: [{ message: `no mock for ${query}` }] },
-      500,
-    );
+    return jsonResponse({ errors: [{ message: `no mock for ${query}` }] }, 500);
   });
   vi.stubGlobal("fetch", fetchMock);
   return { fetchMock, calls };
@@ -171,8 +168,7 @@ describe("ProfilePage", () => {
   it("(a) display-name save calls updateUser with the new value", async () => {
     let updatedDisplayName: string | null = null;
     const { calls } = installFetch({
-      CurrentUser: () =>
-        jsonResponse({ data: { currentUser: AUTH_USER } }),
+      CurrentUser: () => jsonResponse({ data: { currentUser: AUTH_USER } }),
       UpdateUser: (body) => {
         const variables = body.variables as {
           id: string;
@@ -226,11 +222,12 @@ describe("ProfilePage", () => {
   });
 
   it("(b) password change happy path clears the form and shows success", async () => {
-    let receivedPasswords: { currentPassword: string; newPassword: string } | null =
-      null;
+    let receivedPasswords: {
+      currentPassword: string;
+      newPassword: string;
+    } | null = null;
     installFetch({
-      CurrentUser: () =>
-        jsonResponse({ data: { currentUser: AUTH_USER } }),
+      CurrentUser: () => jsonResponse({ data: { currentUser: AUTH_USER } }),
       ChangePassword: (body) => {
         receivedPasswords = body.variables as {
           currentPassword: string;
@@ -245,10 +242,7 @@ describe("ProfilePage", () => {
     await waitForReady();
 
     const user = userEvent.setup();
-    await user.type(
-      screen.getByTestId("profile-current-password"),
-      "old-pass",
-    );
+    await user.type(screen.getByTestId("profile-current-password"), "old-pass");
     await user.type(screen.getByTestId("profile-new-password"), "new-pass-1");
     await user.type(
       screen.getByTestId("profile-new-password-confirm"),
@@ -271,22 +265,21 @@ describe("ProfilePage", () => {
 
     // Form fields are cleared on success.
     expect(
-      (screen.getByTestId("profile-current-password") as HTMLInputElement).value,
+      (screen.getByTestId("profile-current-password") as HTMLInputElement)
+        .value,
     ).toBe("");
     expect(
       (screen.getByTestId("profile-new-password") as HTMLInputElement).value,
     ).toBe("");
     expect(
-      (screen.getByTestId(
-        "profile-new-password-confirm",
-      ) as HTMLInputElement).value,
+      (screen.getByTestId("profile-new-password-confirm") as HTMLInputElement)
+        .value,
     ).toBe("");
   });
 
   it("(c) wrong current password renders inline error on the current-password field", async () => {
     installFetch({
-      CurrentUser: () =>
-        jsonResponse({ data: { currentUser: AUTH_USER } }),
+      CurrentUser: () => jsonResponse({ data: { currentUser: AUTH_USER } }),
       ChangePassword: () =>
         jsonResponse({
           errors: [
@@ -333,8 +326,7 @@ describe("ProfilePage", () => {
 
   it("(d) password-mismatch on confirm shows inline error and does NOT submit", async () => {
     const { calls } = installFetch({
-      CurrentUser: () =>
-        jsonResponse({ data: { currentUser: AUTH_USER } }),
+      CurrentUser: () => jsonResponse({ data: { currentUser: AUTH_USER } }),
       ChangePassword: () => jsonResponse({ data: { changePassword: true } }),
     });
 
@@ -343,10 +335,7 @@ describe("ProfilePage", () => {
     await waitForReady();
 
     const user = userEvent.setup();
-    await user.type(
-      screen.getByTestId("profile-current-password"),
-      "old-pass",
-    );
+    await user.type(screen.getByTestId("profile-current-password"), "old-pass");
     await user.type(screen.getByTestId("profile-new-password"), "new-pass-1");
     await user.type(
       screen.getByTestId("profile-new-password-confirm"),

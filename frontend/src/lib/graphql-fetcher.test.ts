@@ -141,9 +141,7 @@ describe("graphqlFetcher", () => {
   it("throws ForbiddenError without invoking the unauthenticated handler on FORBIDDEN", async () => {
     mockFetchResponse(
       JSON.stringify({
-        errors: [
-          { message: "Forbidden", extensions: { code: "FORBIDDEN" } },
-        ],
+        errors: [{ message: "Forbidden", extensions: { code: "FORBIDDEN" } }],
       }),
       { contentType: "application/json" },
     );

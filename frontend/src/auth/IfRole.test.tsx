@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { AuthContext, type AuthContextValue, type CurrentUser } from "./AuthProvider";
+import {
+  AuthContext,
+  type AuthContextValue,
+  type CurrentUser,
+} from "./AuthProvider";
 import { IfRole } from "./IfRole";
 
 function makeUser(overrides: Partial<CurrentUser>): CurrentUser {

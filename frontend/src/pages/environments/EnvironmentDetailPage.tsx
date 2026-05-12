@@ -55,8 +55,7 @@ export default function EnvironmentDetailPage() {
   const unassignBslMutation = useUnassignBackupStorageLocationMutation();
   const queryClient = useQueryClient();
   const effectiveRole = useEffectiveRole();
-  const canWrite =
-    effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";
+  const canWrite = effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";
 
   const environment = data?.environment;
 

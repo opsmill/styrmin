@@ -1,7 +1,14 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Pencil, Trash2, Check, X, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Pencil,
+  Trash2,
+  Check,
+  X,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 
 import {
   useListUsersQuery,
@@ -159,7 +166,11 @@ export default function UsersListPage() {
       </div>
 
       {deleteError && (
-        <Alert variant="destructive" className="mb-4" data-testid="users-delete-error">
+        <Alert
+          variant="destructive"
+          className="mb-4"
+          data-testid="users-delete-error"
+        >
           <AlertTitle>Cannot delete user</AlertTitle>
           <AlertDescription>{deleteError}</AlertDescription>
         </Alert>
@@ -185,7 +196,9 @@ export default function UsersListPage() {
               <thead className="bg-muted/40">
                 <tr>
                   <th className="px-4 py-2 text-left font-medium">Username</th>
-                  <th className="px-4 py-2 text-left font-medium">Display name</th>
+                  <th className="px-4 py-2 text-left font-medium">
+                    Display name
+                  </th>
                   <th className="px-4 py-2 text-left font-medium">Role</th>
                   <th className="px-4 py-2 text-left font-medium">Groups</th>
                   <th className="px-4 py-2 text-left font-medium">Active</th>
@@ -273,7 +286,8 @@ export default function UsersListPage() {
             >
               <div className="text-muted-foreground">
                 Showing {safePage * PAGE_SIZE + 1}–
-                {Math.min((safePage + 1) * PAGE_SIZE, rows.length)} of {rows.length}
+                {Math.min((safePage + 1) * PAGE_SIZE, rows.length)} of{" "}
+                {rows.length}
               </div>
               <div className="flex items-center gap-2">
                 <Button
@@ -292,7 +306,9 @@ export default function UsersListPage() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  onClick={() =>
+                    setPage((p) => Math.min(totalPages - 1, p + 1))
+                  }
                   disabled={safePage >= totalPages - 1}
                   data-testid="users-pagination-next"
                 >

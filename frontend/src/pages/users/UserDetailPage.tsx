@@ -13,9 +13,7 @@ import {
   type ListGroupsQuery,
   type Role,
 } from "@/generated/graphql";
-import {
-  GraphQLOperationError,
-} from "@/lib/graphql-fetcher";
+import { GraphQLOperationError } from "@/lib/graphql-fetcher";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -67,7 +65,11 @@ export default function UserDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const usersQuery = useListUsersQuery({ active: null, role: null, search: null });
+  const usersQuery = useListUsersQuery({
+    active: null,
+    role: null,
+    search: null,
+  });
   const groupsQuery = useListGroupsQuery({ search: null });
 
   const user: UserRow | undefined = useMemo(
@@ -298,10 +300,7 @@ export default function UserDetailPage() {
               <DialogHeader>
                 <DialogTitle>Reset password</DialogTitle>
               </DialogHeader>
-              <form
-                onSubmit={handleResetPasswordSubmit}
-                className="space-y-4"
-              >
+              <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
                 {resetError && (
                   <Alert variant="destructive">
                     <AlertCircle className="h-4 w-4" />
@@ -390,15 +389,11 @@ export default function UserDetailPage() {
             </dd>
             <dt className="text-muted-foreground">Created</dt>
             <dd>
-              {user.createdOn
-                ? new Date(user.createdOn).toLocaleString()
-                : "—"}
+              {user.createdOn ? new Date(user.createdOn).toLocaleString() : "—"}
             </dd>
             <dt className="text-muted-foreground">Updated</dt>
             <dd>
-              {user.updatedOn
-                ? new Date(user.updatedOn).toLocaleString()
-                : "—"}
+              {user.updatedOn ? new Date(user.updatedOn).toLocaleString() : "—"}
             </dd>
           </dl>
         </div>

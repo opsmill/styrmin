@@ -106,10 +106,7 @@ describe("AuthProvider", () => {
   it("renders a loading indicator before the first currentUser response", async () => {
     const { resolve } = deferredFetch();
     const queryClient = makeQueryClient();
-    renderProvider(
-      queryClient,
-      <div data-testid="child">child-content</div>,
-    );
+    renderProvider(queryClient, <div data-testid="child">child-content</div>);
 
     // Initial render: query in flight, child should NOT yet be rendered.
     expect(screen.queryByTestId("child")).not.toBeInTheDocument();
@@ -205,10 +202,10 @@ describe("AuthProvider", () => {
 
     // Trigger a fetch by invoking graphqlFetcher directly. The fetcher's
     // module-scope handler was registered by AuthProvider's effect.
-    const fetcher = graphqlFetcher<unknown, undefined>(
-      "query Whatever { ok }",
-    );
-    await expect(fetcher()).rejects.toMatchObject({ name: "UnauthenticatedError" });
+    const fetcher = graphqlFetcher<unknown, undefined>("query Whatever { ok }");
+    await expect(fetcher()).rejects.toMatchObject({
+      name: "UnauthenticatedError",
+    });
 
     expect(clearSpy).toHaveBeenCalledTimes(1);
     expect(navigateMock).toHaveBeenCalledWith({ to: "/login" });

@@ -74,9 +74,7 @@ function jsonResponse(body: unknown, status = 200): Response {
  * single mock service the `CurrentUser` query (from <AuthProvider>) AND the
  * `Login` mutation.
  */
-function installFetchRouter(
-  routes: Record<string, () => Response>,
-): Mock {
+function installFetchRouter(routes: Record<string, () => Response>): Mock {
   const fetchMock = vi.fn(async (_url, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(init.body as string) : {};
     const query: string = body.query ?? "";
@@ -170,8 +168,7 @@ describe("LoginPage", () => {
             },
           ],
         }),
-      CurrentUser: () =>
-        jsonResponse({ data: { currentUser: null } }),
+      CurrentUser: () => jsonResponse({ data: { currentUser: null } }),
     });
 
     const qc = makeQueryClient();

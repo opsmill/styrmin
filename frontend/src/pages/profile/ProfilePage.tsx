@@ -44,10 +44,12 @@ export default function ProfilePage() {
   const { currentUser, refresh } = useAuth();
 
   // ----- Display name form state -----
-  const [displayName, setDisplayName] = useState(currentUser?.displayName ?? "");
-  const [displayNameSeededFor, setDisplayNameSeededFor] = useState<string | null>(
-    currentUser?.id ?? null,
+  const [displayName, setDisplayName] = useState(
+    currentUser?.displayName ?? "",
   );
+  const [displayNameSeededFor, setDisplayNameSeededFor] = useState<
+    string | null
+  >(currentUser?.id ?? null);
   const [displayNameSuccess, setDisplayNameSuccess] = useState<string | null>(
     null,
   );
@@ -65,9 +67,9 @@ export default function ProfilePage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
-  const [currentPasswordError, setCurrentPasswordError] = useState<string | null>(
-    null,
-  );
+  const [currentPasswordError, setCurrentPasswordError] = useState<
+    string | null
+  >(null);
   const [newPasswordConfirmError, setNewPasswordConfirmError] = useState<
     string | null
   >(null);
@@ -172,10 +174,7 @@ export default function ProfilePage() {
   const passwordSubmitting = changePasswordMutation.isPending;
 
   return (
-    <PageLayout
-      title="Profile"
-      breadcrumbs={[{ label: "Profile" }]}
-    >
+    <PageLayout title="Profile" breadcrumbs={[{ label: "Profile" }]}>
       <div className="flex flex-col gap-6 max-w-2xl">
         <Card data-testid="profile-display-name-card">
           <CardHeader>
@@ -276,9 +275,7 @@ export default function ProfilePage() {
                   type="password"
                   autoComplete="current-password"
                   value={currentPassword}
-                  onChange={(event) =>
-                    setCurrentPassword(event.target.value)
-                  }
+                  onChange={(event) => setCurrentPassword(event.target.value)}
                   disabled={passwordSubmitting}
                   required
                   data-testid="profile-current-password"

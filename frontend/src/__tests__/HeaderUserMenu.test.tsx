@@ -8,9 +8,9 @@ const { navigateMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-router", async () => {
-  const actual = await vi.importActual<
-    typeof import("@tanstack/react-router")
-  >("@tanstack/react-router");
+  const actual = await vi.importActual<typeof import("@tanstack/react-router")>(
+    "@tanstack/react-router",
+  );
   return {
     ...actual,
     useNavigate: () => navigateMock,

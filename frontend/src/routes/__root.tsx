@@ -8,9 +8,7 @@ interface RouterContext {
   auth?: AuthContextValue;
 }
 
-const PUBLIC_PATHS: ReadonlySet<string> = new Set([
-  "/login",
-]);
+const PUBLIC_PATHS: ReadonlySet<string> = new Set(["/login"]);
 
 function requireAuth({
   context,
