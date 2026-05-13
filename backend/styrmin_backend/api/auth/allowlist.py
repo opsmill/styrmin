@@ -45,5 +45,19 @@ MUTATION_ALLOW_LIST: frozenset[str] = frozenset(
 #: to discover which deployments to report on. It has no caller user
 #: identity in v1; the same #188 follow-up that introduces service-account
 #: session tokens for the report mutations covers this read path.
-#: TODO(#188): replace agent allow-list entries with service-account auth.
+#:
+#: TODO(#188): Two follow-ups land together once service-account auth
+#:   ships:
+#:     1. The agent status reporter (``agent/status/reporter.py``) must
+#:        pass an ``Authorization: Bearer <svc-token>`` header on every
+#:        request — today it uses bare ``httpx.AsyncClient()`` with no
+#:        credentials, so there is no token to validate against.
+#:     2. Replace ``environments`` here with a purpose-built
+#:        ``environmentsForAgent`` query that returns ONLY
+#:        ``deployments { id, status, internal }`` (the fields
+#:        ``ListDeploymentsForStatus`` actually reads), gated by
+#:        ``RequiresAuthentication`` alone (any authenticated principal).
+#:        Drop ``environments`` from this list at the same time.
+#:   Until step 1 lands, narrowing the allow-list breaks the agent loop —
+#:   so the broad ``environments`` entry stays as the documented gap.
 QUERY_ALLOW_LIST: frozenset[str] = frozenset({"currentUser", "ok", "environments"})

@@ -19,6 +19,7 @@ from styrmin_backend.services.auth.session import (
     SLIDING_REFRESH_DEBOUNCE,
     create_session,
     delete_all_sessions_for_user,
+    delete_other_sessions_for_user,
     delete_session_by_token,
     lookup_session,
     mint_token,
@@ -155,6 +156,8 @@ async def test_delete_all_sessions_for_user_removes_every_row(
     _row_a, raw_a = await create_session(db_session, user.id)
     _row_b, raw_b = await create_session(db_session, user.id)
     count = await delete_all_sessions_for_user(db_session, user.id)
+    # Helper stages deletes but doesn't commit; the caller does.
+    await db_session.commit()
     assert count == 2
     assert await lookup_session(db_session, raw_a) is None
     assert await lookup_session(db_session, raw_b) is None
@@ -178,9 +181,31 @@ async def test_delete_all_sessions_for_user_only_targets_that_user(
     _row_b, raw_bob = await create_session(db_session, bob.id)
 
     count = await delete_all_sessions_for_user(db_session, alice.id)
+    await db_session.commit()
     assert count == 1
     assert await lookup_session(db_session, raw_alice) is None
     assert await lookup_session(db_session, raw_bob) is not None
+
+
+async def test_delete_all_sessions_for_user_does_not_commit(
+    db_session: AsyncSession,
+) -> None:
+    """The helper must leave the transaction open so the caller can pair
+    the session-delete with the originating write in a single commit.
+    Rolling back must therefore drop the delete.
+    """
+    user = await _seed_user(db_session)
+    _row_a, raw_a = await create_session(db_session, user.id)
+    count = await delete_all_sessions_for_user(db_session, user.id)
+    assert count == 1
+    # No commit yet — roll back and prove the row reappears.
+    await db_session.rollback()
+    found = await lookup_session(db_session, raw_a)
+    assert found is not None, (
+        "delete_all_sessions_for_user must not commit on its own — rolling "
+        "back after the call must restore the session row so callers can "
+        "wrap the delete and their write in a single atomic transaction."
+    )
 
 
 def _aware(value: datetime) -> datetime:
@@ -227,3 +252,24 @@ async def test_touch_session_debounce(
 
 async def test_sliding_refresh_debounce_constant() -> None:
     assert SLIDING_REFRESH_DEBOUNCE == timedelta(seconds=60)
+
+
+async def test_delete_other_sessions_for_user_does_not_commit(
+    db_session: AsyncSession,
+) -> None:
+    """Sibling rollback test to the ``delete_all`` variant. See its docstring."""
+    user = await _seed_user(db_session)
+    row_keep, raw_keep = await create_session(db_session, user.id)
+    _row_drop, raw_drop = await create_session(db_session, user.id)
+
+    count = await delete_other_sessions_for_user(
+        db_session, user.id, except_session_id=row_keep.id
+    )
+    assert count == 1
+    await db_session.rollback()
+
+    assert await lookup_session(db_session, raw_keep) is not None
+    assert await lookup_session(db_session, raw_drop) is not None, (
+        "delete_other_sessions_for_user must not commit on its own — rolling "
+        "back after the call must restore the session row."
+    )

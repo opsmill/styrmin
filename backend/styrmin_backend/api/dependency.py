@@ -56,12 +56,24 @@ async def _resolve_current_user(
     await touch_session(session, session_row)
     # Eager-load groups so RequiresRole(effective_role) and the User
     # serialiser can read the membership without an async lazy-load.
+    #
+    # Inactive users return ``(None, None)``: a stale session whose user
+    # was deactivated mid-window must not surface a current_user, or the
+    # ``RequiresRole`` gate will read ``effective_role`` off the inactive
+    # row and let a deactivated principal keep operating until their
+    # session row is reaped. The session-delete in ``update_user`` is the
+    # primary defence; this filter is the belt-and-suspenders read-side
+    # guard that closes the race window.
     result = await session.exec(
         select(User)
         .where(User.id == session_row.user_id)
+        .where(User.active.is_(True))  # type: ignore[union-attr]
         .options(selectinload(User.groups))  # type: ignore[arg-type]
     )
-    return result.first(), session_row
+    user = result.first()
+    if user is None:
+        return None, None
+    return user, session_row
 
 
 async def get_context(

@@ -111,15 +111,22 @@ async def delete_session_by_token(db_session: AsyncSession, raw_token: str) -> b
 
 
 async def delete_all_sessions_for_user(db_session: AsyncSession, user_id: UUID) -> int:
-    """Delete every session belonging to ``user_id``. Returns the count deleted."""
+    """Delete every session belonging to ``user_id``. Returns the count deleted.
+
+    The caller owns the transaction: this helper stages the deletes but
+    does not commit. Pairing the session-delete with the originating
+    write (deactivate / role-change / password-reset) in a single commit
+    is what makes the operation atomic — if the write succeeds and the
+    delete fails (or vice versa) we must roll BOTH back. See research.md
+    §D15 and the audit comment in ``services/auth/users.py`` /
+    ``services/auth/password_change.py``.
+    """
     result = await db_session.exec(
         select(SessionModel).where(SessionModel.user_id == user_id)
     )
     rows = list(result.all())
     for row in rows:
         await db_session.delete(row)
-    if rows:
-        await db_session.commit()
     return len(rows)
 
 
@@ -131,6 +138,8 @@ async def delete_other_sessions_for_user(
     Caller-preserving variant used by ``changePassword``: rotating credentials
     must kick off any other device whose token might already be compromised
     without logging the user out of the device they're rotating from.
+
+    Caller owns the transaction; see :func:`delete_all_sessions_for_user`.
     """
     result = await db_session.exec(
         select(SessionModel)
@@ -140,8 +149,6 @@ async def delete_other_sessions_for_user(
     rows = list(result.all())
     for row in rows:
         await db_session.delete(row)
-    if rows:
-        await db_session.commit()
     return len(rows)
 
 
