@@ -56,11 +56,12 @@ export default function GroupDetailPage() {
   const queryClient = useQueryClient();
 
   // Backend `type Group` exposes only {id, name, role}, no `members`. To show
-  // current members we query active users and filter client-side. The same
-  // query feeds the multi-select.
+  // current members we query the full user list (active + inactive) and filter
+  // client-side. Loading inactive users too is required so the editor never
+  // silently drops them from the group on save (see B1 in spec 011).
   const groupsQuery = useListGroupsQuery({ search: null });
   const usersQuery = useListUsersQuery({
-    active: true,
+    active: null,
     role: null,
     search: null,
   });
@@ -70,18 +71,35 @@ export default function GroupDetailPage() {
     [groupsQuery.data, id],
   );
 
-  const activeUsers = useMemo(
+  const allUsers = useMemo(
     () => usersQuery.data?.users ?? [],
     [usersQuery.data],
   );
 
-  // Current members = users whose `.groups` contains this group id.
+  const activeUsers = useMemo(
+    () => allUsers.filter((u) => u.active),
+    [allUsers],
+  );
+
+  // Inactive users that are currently members of THIS group. Surfaced as a
+  // read-only sub-section in the members editor so the admin can see (and
+  // optionally remove) them, but cannot newly add an inactive user.
+  const currentInactiveMembers = useMemo(
+    () =>
+      allUsers.filter(
+        (u) => !u.active && u.groups.some((g) => g.id === id),
+      ),
+    [allUsers, id],
+  );
+
+  // Current members (full set, active + inactive) = users whose `.groups`
+  // contains this group id. Used to seed the form and detect changes.
   const currentMemberIds = useMemo(
     () =>
-      activeUsers
+      allUsers
         .filter((u) => u.groups.some((g) => g.id === id))
         .map((u) => u.id),
-    [activeUsers, id],
+    [allUsers, id],
   );
 
   // Form state — seed once per group id.
@@ -209,7 +227,10 @@ export default function GroupDetailPage() {
     });
   }
 
-  if (groupsQuery.isLoading || usersQuery.isLoading) {
+  // Only block on the groups query — the users query feeds the member editor
+  // and surfaces its own inline error/retry, so we render the page even when
+  // it fails or is still loading (B2 in spec 011).
+  if (groupsQuery.isLoading) {
     return (
       <PageLayout
         title="Group"
@@ -252,6 +273,9 @@ export default function GroupDetailPage() {
   }
 
   const submitting = updateGroupMutation.isPending;
+  // Members data must be loaded before submission, otherwise we'd send an
+  // empty memberIds replacement that wipes existing membership.
+  const membersReady = usersQuery.data !== undefined;
 
   return (
     <PageLayout
@@ -364,43 +388,102 @@ export default function GroupDetailPage() {
             )}
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-4">
             <Label>Members</Label>
-            {activeUsers.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No active users available.
-              </p>
-            ) : (
-              <div
-                className="space-y-2"
-                data-testid="group-members-multiselect"
-              >
-                {activeUsers.map((u) => {
-                  const checked = memberIds.includes(u.id);
-                  return (
-                    <div
-                      key={u.id}
-                      className="flex items-center gap-2"
-                      data-user-id={u.id}
-                    >
-                      <Checkbox
-                        id={`group-member-${u.id}`}
-                        checked={checked}
-                        onCheckedChange={(value) =>
-                          toggleMember(u.id, value === true)
-                        }
-                        disabled={submitting}
-                      />
-                      <Label htmlFor={`group-member-${u.id}`}>
-                        {u.username}{" "}
-                        <span className="text-xs text-muted-foreground">
-                          ({u.displayName})
-                        </span>
-                      </Label>
-                    </div>
-                  );
-                })}
+            {usersQuery.error ? (
+              <div data-testid="group-members-error">
+                <ErrorState
+                  title="Failed to load users"
+                  message={usersQuery.error.message}
+                  onRetry={() => usersQuery.refetch()}
+                />
               </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    Active members
+                  </p>
+                  {activeUsers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No active users available.
+                    </p>
+                  ) : (
+                    <div
+                      className="space-y-2"
+                      data-testid="group-members-multiselect"
+                    >
+                      {activeUsers.map((u) => {
+                        const checked = memberIds.includes(u.id);
+                        return (
+                          <div
+                            key={u.id}
+                            className="flex items-center gap-2"
+                            data-user-id={u.id}
+                          >
+                            <Checkbox
+                              id={`group-member-${u.id}`}
+                              checked={checked}
+                              onCheckedChange={(value) =>
+                                toggleMember(u.id, value === true)
+                              }
+                              disabled={submitting}
+                            />
+                            <Label htmlFor={`group-member-${u.id}`}>
+                              {u.username}{" "}
+                              <span className="text-xs text-muted-foreground">
+                                ({u.displayName})
+                              </span>
+                            </Label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {currentInactiveMembers.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Inactive members
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Will remain in group. Uncheck to remove.
+                    </p>
+                    <div
+                      className="space-y-2"
+                      data-testid="group-inactive-members-list"
+                    >
+                      {currentInactiveMembers.map((u) => {
+                        const checked = memberIds.includes(u.id);
+                        return (
+                          <div
+                            key={u.id}
+                            className="flex items-center gap-2"
+                            data-user-id={u.id}
+                            data-inactive="true"
+                          >
+                            <Checkbox
+                              id={`group-inactive-member-${u.id}`}
+                              checked={checked}
+                              onCheckedChange={(value) =>
+                                toggleMember(u.id, value === true)
+                              }
+                              disabled={submitting}
+                            />
+                            <Label htmlFor={`group-inactive-member-${u.id}`}>
+                              {u.username}{" "}
+                              <span className="text-xs text-muted-foreground">
+                                ({u.displayName} — inactive)
+                              </span>
+                            </Label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
             {membersFieldError && (
               <p
@@ -415,7 +498,7 @@ export default function GroupDetailPage() {
           <div className="flex justify-end">
             <Button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !membersReady}
               data-testid="group-edit-save"
             >
               <Save className="h-4 w-4 mr-1" />

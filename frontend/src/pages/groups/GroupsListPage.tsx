@@ -177,7 +177,9 @@ export default function GroupsListPage() {
                 <tr>
                   <th className="px-4 py-2 text-left font-medium">Name</th>
                   <th className="px-4 py-2 text-left font-medium">Role</th>
-                  <th className="px-4 py-2 text-left font-medium">Members</th>
+                  <th className="px-4 py-2 text-left font-medium">
+                    Active members
+                  </th>
                   <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
               </thead>
@@ -202,8 +204,27 @@ export default function GroupsListPage() {
                     <td className="px-4 py-2">
                       <Badge variant={roleBadgeVariant(g.role)}>{g.role}</Badge>
                     </td>
-                    <td className="px-4 py-2 text-muted-foreground">
-                      {memberCountByGroup.get(g.id) ?? 0}
+                    <td
+                      className="px-4 py-2 text-muted-foreground"
+                      data-testid="groups-row-member-count"
+                    >
+                      {usersQuery.isLoading ? (
+                        <span
+                          className="text-xs"
+                          data-testid="groups-row-member-count-loading"
+                        >
+                          Loading…
+                        </span>
+                      ) : usersQuery.error ? (
+                        <span
+                          title={usersQuery.error.message}
+                          data-testid="groups-row-member-count-error"
+                        >
+                          —
+                        </span>
+                      ) : (
+                        (memberCountByGroup.get(g.id) ?? 0)
+                      )}
                     </td>
                     <td className="px-4 py-2 text-right">
                       <div className="flex justify-end gap-1">

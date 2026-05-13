@@ -105,6 +105,7 @@ export default function UserDetailPage() {
   // Inline server-error state keyed to the affected control.
   const [roleFieldError, setRoleFieldError] = useState<string | null>(null);
   const [activeFieldError, setActiveFieldError] = useState<string | null>(null);
+  const [groupsFieldError, setGroupsFieldError] = useState<string | null>(null);
   const [deleteFieldError, setDeleteFieldError] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -115,14 +116,21 @@ export default function UserDetailPage() {
       setSuccessMessage("User updated.");
       setRoleFieldError(null);
       setActiveFieldError(null);
+      setGroupsFieldError(null);
       setGeneralError(null);
     },
-    onError: (err) => {
+    onError: (err, variables) => {
       const code = extractCode(err);
       const msg = errorMessage(err);
       if (code === "LAST_ADMIN") {
-        // Surface the error on the control that caused the demotion / deactivation.
-        if (user !== undefined && active !== user.active) {
+        // Surface the error on the control that caused the violation. Prefer
+        // the mutation payload as the source of truth — `groupIds` set means
+        // a membership change triggered the LAST_ADMIN guard (B4 in spec 011);
+        // otherwise fall back to active/role checks against current state.
+        const input = variables.input;
+        if (input.groupIds !== null && input.groupIds !== undefined) {
+          setGroupsFieldError(msg);
+        } else if (user !== undefined && active !== user.active) {
           setActiveFieldError(msg);
         } else if (user !== undefined && role !== user.role) {
           setRoleFieldError(msg);
@@ -171,6 +179,7 @@ export default function UserDetailPage() {
     setSuccessMessage(null);
     setRoleFieldError(null);
     setActiveFieldError(null);
+    setGroupsFieldError(null);
     setGeneralError(null);
 
     const currentGroupIds = user.groups.map((g) => g.id).sort();
@@ -495,6 +504,14 @@ export default function UserDetailPage() {
                   );
                 })}
               </div>
+            )}
+            {groupsFieldError && (
+              <p
+                className="text-sm text-destructive"
+                data-testid="user-groups-inline-error"
+              >
+                {groupsFieldError}
+              </p>
             )}
           </div>
 
