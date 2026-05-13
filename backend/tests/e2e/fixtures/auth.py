@@ -22,7 +22,6 @@ Playwright context identically to a freshly-logged-in browser.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Awaitable, Callable
-from urllib.parse import urlparse
 
 import pytest
 
@@ -44,18 +43,17 @@ InjectSessionCookie = Callable[["BrowserContext"], Awaitable[None]]
 def _build_cookie(*, token: str, base_url: str) -> dict[str, object]:
     """Construct the Playwright cookie payload for the seeded admin session.
 
-    ``base_url`` is the styrmin base URL (e.g. ``http://localhost:54321``)
-    so the cookie's ``domain`` matches the hostname the browser will
-    request. ``secure`` is True only when the scheme is HTTPS.
+    Using ``url`` (rather than separate ``domain`` + ``path``) lets
+    Playwright derive the cookie's effective scope — including the port —
+    from the same origin the browser uses for navigation. A bare
+    ``domain="localhost"`` cookie was being silently rejected on
+    port-forwarded test URLs in CI.
     """
-    parsed = urlparse(base_url)
     return {
         "name": SESSION_COOKIE_NAME,
         "value": token,
-        "domain": parsed.hostname or "localhost",
-        "path": "/",
+        "url": base_url,
         "httpOnly": True,
-        "secure": parsed.scheme == "https",
         "sameSite": "Lax",
     }
 
