@@ -86,7 +86,10 @@ export function ConfirmDialog({
               {description}
             </DialogDescription>
           ) : (
-            <div className="text-sm text-muted-foreground" data-testid={`${testId}-body`}>
+            <div
+              className="text-sm text-muted-foreground"
+              data-testid={`${testId}-body`}
+            >
               {description}
             </div>
           )}

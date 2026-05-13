@@ -41,8 +41,7 @@ export function AccessDenied({ area, requiredRole }: AccessDeniedProps) {
           </h2>
           <p className="max-w-md text-[13px] text-muted-foreground">
             Your account does not have permission to view this page. If you
-            think this is a mistake, ask an administrator to update your
-            role.
+            think this is a mistake, ask an administrator to update your role.
           </p>
         </div>
         <Button asChild variant="outline">

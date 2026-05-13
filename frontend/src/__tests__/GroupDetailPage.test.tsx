@@ -92,7 +92,13 @@ function defaultBuilder(
     }
     if (q.includes("mutation UpdateGroup")) {
       return jsonResponse({
-        data: { updateGroup: { id: GROUP_ID, name: "engineering", role: "READ_WRITE" } },
+        data: {
+          updateGroup: {
+            id: GROUP_ID,
+            name: "engineering",
+            role: "READ_WRITE",
+          },
+        },
       });
     }
     return jsonResponse({ data: {} });
@@ -161,9 +167,24 @@ describe("GroupDetailPage — inactive member safety", () => {
 
   it("shows both the active member (in picker) and the inactive member (read-only section)", async () => {
     const users = [
-      makeUser({ id: "u-active", username: "alice", active: true, inGroup: true }),
-      makeUser({ id: "u-inactive", username: "bob", active: false, inGroup: true }),
-      makeUser({ id: "u-other", username: "carol", active: true, inGroup: false }),
+      makeUser({
+        id: "u-active",
+        username: "alice",
+        active: true,
+        inGroup: true,
+      }),
+      makeUser({
+        id: "u-inactive",
+        username: "bob",
+        active: false,
+        inGroup: true,
+      }),
+      makeUser({
+        id: "u-other",
+        username: "carol",
+        active: true,
+        inGroup: false,
+      }),
     ];
     installFetch(defaultBuilder(users));
 
@@ -183,16 +204,33 @@ describe("GroupDetailPage — inactive member safety", () => {
     // toggle. We rely on the save round-trip test below to verify the
     // pre-checked state ends up in memberIds.
     const inactive = screen.getByTestId("group-inactive-members-list");
-    expect(inactive.querySelector('[data-user-id="u-inactive"]')).not.toBeNull();
+    expect(
+      inactive.querySelector('[data-user-id="u-inactive"]'),
+    ).not.toBeNull();
     expect(inactive.textContent).toContain("bob");
     expect(inactive.textContent).toContain("inactive");
   });
 
   it("toggling a new active member into the group preserves the inactive member in memberIds", async () => {
     const users = [
-      makeUser({ id: "u-active", username: "alice", active: true, inGroup: true }),
-      makeUser({ id: "u-inactive", username: "bob", active: false, inGroup: true }),
-      makeUser({ id: "u-other", username: "carol", active: true, inGroup: false }),
+      makeUser({
+        id: "u-active",
+        username: "alice",
+        active: true,
+        inGroup: true,
+      }),
+      makeUser({
+        id: "u-inactive",
+        username: "bob",
+        active: false,
+        inGroup: true,
+      }),
+      makeUser({
+        id: "u-other",
+        username: "carol",
+        active: true,
+        inGroup: false,
+      }),
     ];
     const { calls } = installFetch(defaultBuilder(users));
 
@@ -204,7 +242,9 @@ describe("GroupDetailPage — inactive member safety", () => {
 
     // Wait for the inactive member to be present (proves seeding completed).
     await waitFor(() => {
-      expect(screen.getByTestId("group-inactive-members-list")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("group-inactive-members-list"),
+      ).toBeInTheDocument();
     });
 
     // Add carol (a new active member) — this makes membersChanged true so we
@@ -227,8 +267,9 @@ describe("GroupDetailPage — inactive member safety", () => {
     const updateCall = calls
       .filter((c) => (c.query ?? "").includes("mutation UpdateGroup"))
       .pop()!;
-    const input = (updateCall.variables as { input: { memberIds: string[] | null } })
-      .input;
+    const input = (
+      updateCall.variables as { input: { memberIds: string[] | null } }
+    ).input;
     expect(input.memberIds).not.toBeNull();
     expect(input.memberIds).toEqual(
       expect.arrayContaining(["u-active", "u-inactive", "u-other"]),
@@ -237,15 +278,27 @@ describe("GroupDetailPage — inactive member safety", () => {
 
   it("unchecking the inactive member removes only that one from the saved memberIds", async () => {
     const users = [
-      makeUser({ id: "u-active", username: "alice", active: true, inGroup: true }),
-      makeUser({ id: "u-inactive", username: "bob", active: false, inGroup: true }),
+      makeUser({
+        id: "u-active",
+        username: "alice",
+        active: true,
+        inGroup: true,
+      }),
+      makeUser({
+        id: "u-inactive",
+        username: "bob",
+        active: false,
+        inGroup: true,
+      }),
     ];
     const { calls } = installFetch(defaultBuilder(users));
 
     await renderGroupDetail();
 
     await waitFor(() => {
-      expect(screen.getByTestId("group-inactive-members-list")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("group-inactive-members-list"),
+      ).toBeInTheDocument();
     });
 
     const user = userEvent.setup();
@@ -266,8 +319,9 @@ describe("GroupDetailPage — inactive member safety", () => {
     const updateCall = calls
       .filter((c) => (c.query ?? "").includes("mutation UpdateGroup"))
       .pop()!;
-    const input = (updateCall.variables as { input: { memberIds: string[] | null } })
-      .input;
+    const input = (
+      updateCall.variables as { input: { memberIds: string[] | null } }
+    ).input;
     expect(input.memberIds).not.toBeNull();
     expect(input.memberIds).toContain("u-active");
     expect(input.memberIds).not.toContain("u-inactive");
@@ -283,10 +337,7 @@ describe("GroupDetailPage — inactive member safety", () => {
       if (q.includes("query ListUsers")) {
         usersCalls += 1;
         if (usersCalls === 1) {
-          return jsonResponse(
-            { errors: [{ message: "boom" }] },
-            500,
-          );
+          return jsonResponse({ errors: [{ message: "boom" }] }, 500);
         }
         return jsonResponse({
           data: {
@@ -321,7 +372,9 @@ describe("GroupDetailPage — inactive member safety", () => {
     await user.click(retryBtn!);
 
     await waitFor(() => {
-      expect(screen.getByTestId("group-members-multiselect")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("group-members-multiselect"),
+      ).toBeInTheDocument();
     });
   });
 });

@@ -283,8 +283,8 @@ export default function GroupsListPage() {
                 <>
                   <p>
                     This will permanently delete{" "}
-                    <strong>{pendingDelete.name}</strong> and remove all of
-                    its memberships.
+                    <strong>{pendingDelete.name}</strong> and remove all of its
+                    memberships.
                   </p>
                   <p className="mt-2">This action cannot be undone.</p>
                 </>

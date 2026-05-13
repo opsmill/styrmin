@@ -469,8 +469,12 @@ export default function UserDetailPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="READ_ONLY">{roleLabel("READ_ONLY")}</SelectItem>
-                <SelectItem value="READ_WRITE">{roleLabel("READ_WRITE")}</SelectItem>
+                <SelectItem value="READ_ONLY">
+                  {roleLabel("READ_ONLY")}
+                </SelectItem>
+                <SelectItem value="READ_WRITE">
+                  {roleLabel("READ_WRITE")}
+                </SelectItem>
                 <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
               </SelectContent>
             </Select>
@@ -570,9 +574,8 @@ export default function UserDetailPage() {
           description={
             <>
               <p>
-                This will permanently delete{" "}
-                <strong>{user.username}</strong> and revoke all their
-                sessions.
+                This will permanently delete <strong>{user.username}</strong>{" "}
+                and revoke all their sessions.
               </p>
               <p className="mt-2">This action cannot be undone.</p>
             </>

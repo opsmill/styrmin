@@ -155,8 +155,12 @@ export function CreateUserDialog({ onCreated }: CreateUserDialogProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="READ_ONLY">{roleLabel("READ_ONLY")}</SelectItem>
-                <SelectItem value="READ_WRITE">{roleLabel("READ_WRITE")}</SelectItem>
+                <SelectItem value="READ_ONLY">
+                  {roleLabel("READ_ONLY")}
+                </SelectItem>
+                <SelectItem value="READ_WRITE">
+                  {roleLabel("READ_WRITE")}
+                </SelectItem>
                 <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
               </SelectContent>
             </Select>

@@ -88,9 +88,7 @@ export default function GroupDetailPage() {
   // optionally remove) them, but cannot newly add an inactive user.
   const currentInactiveMembers = useMemo(
     () =>
-      allUsers.filter(
-        (u) => !u.active && u.groups.some((g) => g.id === id),
-      ),
+      allUsers.filter((u) => !u.active && u.groups.some((g) => g.id === id)),
     [allUsers, id],
   );
 
@@ -389,8 +387,12 @@ export default function GroupDetailPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="READ_ONLY">{roleLabel("READ_ONLY")}</SelectItem>
-                <SelectItem value="READ_WRITE">{roleLabel("READ_WRITE")}</SelectItem>
+                <SelectItem value="READ_ONLY">
+                  {roleLabel("READ_ONLY")}
+                </SelectItem>
+                <SelectItem value="READ_WRITE">
+                  {roleLabel("READ_WRITE")}
+                </SelectItem>
                 <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
               </SelectContent>
             </Select>
@@ -529,9 +531,8 @@ export default function GroupDetailPage() {
           description={
             <>
               <p>
-                This will permanently delete{" "}
-                <strong>{group.name}</strong> and remove all of its
-                memberships.
+                This will permanently delete <strong>{group.name}</strong> and
+                remove all of its memberships.
               </p>
               <p className="mt-2">This action cannot be undone.</p>
             </>
