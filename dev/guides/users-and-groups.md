@@ -8,11 +8,14 @@ equivalent, and the "hide-not-disable" UI principle.
 
 Styrmin has three flat roles:
 
-| Role | Permitted operations |
-|------|----------------------|
-| `READ_ONLY` | Read every non-admin resource (deployments, environments, drivers, clusters, services, status). |
-| `READ_WRITE` | Everything `READ_ONLY` can do, plus create / edit / delete deployments, environments, env vars, backups, schedules. |
-| `ADMIN` | Everything `READ_WRITE` can do, plus manage users, groups, the bootstrap admin, and every admin-only field on the `User` type. |
+| Role (label / enum) | Permitted operations |
+|---------------------|----------------------|
+| Read-only (`READ_ONLY`) | Read every non-admin resource (deployments, environments, drivers, clusters, services, status). |
+| Read/write (`READ_WRITE`) | Everything Read-only can do, plus create / edit / delete deployments, environments, env vars, backups, schedules. |
+| Admin (`ADMIN`) | Everything Read/write can do, plus manage users, groups, the bootstrap admin, and every admin-only field on the `User` type. |
+
+The UI displays the human labels ("Admin", "Read/write", "Read-only"); the
+GraphQL API and SDK use the raw enum values shown in parentheses.
 
 ### Direct role vs. effective role
 
@@ -52,21 +55,29 @@ If you lose it, see [Lockout recovery](#lockout-recovery).
 
 ## Admin UI walkthrough
 
-The admin UI lives at `/users` and `/groups`. These nav entries only
-render for users whose `effectiveRole` is `ADMIN`.
+The admin UI is reached via **Settings → Access**, which exposes the
+**Users** and **Groups** tabs. The Access section of Settings only
+renders for users whose effective role is Admin. The direct URLs
+`/users` and `/groups` continue to work as deep links, but non-admins
+who navigate there directly land on an in-app access-denied page rather
+than being silently redirected.
 
 ### Users
 
-1. Navigate to `/users`. The table lists every user with their direct
-   role, active flag, and group memberships.
+1. Open **Settings → Access → Users** (deep link: `/users`). The table
+   lists every user with their direct role, active flag, and group
+   memberships.
 2. Click **Create user** to open the create dialog. Required: username,
-   display name, password (≥ 8 chars), role. Optional: group memberships.
+   display name, password (≥ 8 chars; inline guidance below the field
+   describes the policy), role. Optional: group memberships.
 3. Click any row to open `/users/$id` (the detail page). Inline-edit
    display name, role, active flag, and group memberships from there.
-4. **Reset password** opens a confirm dialog and then issues a new
+   Username is **not** editable — see below.
+4. **Reset password** opens a confirmation dialog and then issues a new
    password. *Every existing session for that user is invalidated* —
    they will be logged out everywhere.
-5. **Delete user** hard-deletes the user row. Two guards apply:
+5. **Delete user** hard-deletes the user row after an in-app
+   confirmation dialog. Two guards apply:
    - `USER_HAS_REFERENCES` — the user owns deployments (or any FK
      reference). Reassign or remove those references first.
    - `LAST_ADMIN` — deleting (or deactivating, or demoting) this user
@@ -74,8 +85,8 @@ render for users whose `effectiveRole` is `ADMIN`.
 
 ### Groups
 
-1. Navigate to `/groups`. The table lists every group with its
-   role and member count.
+1. Open **Settings → Access → Groups** (deep link: `/groups`). The
+   table lists every group with its role and member count.
 2. Create a group with **Create group**: name, role, optional initial
    member set.
 3. Click any row to open `/groups/$id`. The member multi-select uses
@@ -88,11 +99,27 @@ render for users whose `effectiveRole` is `ADMIN`.
 
 Every authenticated user (regardless of role) has a `/profile` page,
 reachable from the header avatar menu. Users can edit their own display
-name and change their own password from there. Username is read-only —
-only an admin can change it (via `/users/$id`).
+name and change their own password from there. Username is read-only:
+it is immutable for everyone, including admins (see [Usernames are
+immutable](#usernames-are-immutable)).
 
 Changing your own password from `/profile` invalidates **every other**
 session you have. Your current session is preserved.
+
+### Usernames are immutable
+
+Usernames cannot be changed after creation — there is no
+`updateUser.username` field on the GraphQL API and no UI affordance for
+it. To change a user's login identity, deactivate the existing user and
+create a new one with the desired username. Display name remains
+editable and is what surfaces in most UI surfaces.
+
+### Login redirect preservation
+
+When an unauthenticated user opens a deep link (for example,
+`/deployments/some-id`), the router sends them to `/login?next=<path>`.
+After a successful login they are redirected back to the original
+target rather than dropped on the dashboard.
 
 ## Lockout recovery
 
@@ -168,3 +195,24 @@ query { currentUser { id username role effectiveRole } }
 If `effectiveRole` is not what you expect, check the user's group
 memberships at `/users/$id` (admin view) — `effectiveRole` is the max
 of `role` and the role of every group the user belongs to.
+
+## Known limitations / out of scope for v1
+
+The following are deliberately out of scope for the v1 user/group/auth
+surface. They are not bugs — track them as follow-up features.
+
+- **MFA / 2FA** — there is no second factor. Username + password is the
+  only credential.
+- **Brute-force lockout** — `/login` does not rate-limit failed
+  attempts. Run behind an upstream that enforces rate limiting if you
+  need it.
+- **SSO / OIDC / SAML** — no external identity provider integration.
+  All users are local rows in the Styrmin database.
+- **Service accounts** — the in-cluster agent still authenticates with
+  the bootstrap admin token until a dedicated service-account flow
+  ships (see the `TODO(#188)` follow-up in
+  `backend/styrmin_backend/api/auth/allowlist.py`).
+- **Audit-log tables** — admin mutations are emitted to stdout via the
+  structured audit log line. There is no queryable history table; if
+  you need durable audit history, ship the stdout stream to your log
+  aggregator.

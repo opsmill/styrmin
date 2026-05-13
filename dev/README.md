@@ -110,3 +110,4 @@ Frontend architecture documentation in [knowledge/frontend/](knowledge/frontend/
 - [local-demo.md](guides/local-demo.md) - Local vCluster demo lifecycle
 - [pod-scheduling.md](guides/pod-scheduling.md) - Pod scheduling configuration reference
 - [session-retrospectives.md](guides/session-retrospectives.md) - End-of-session workflow for turning agent friction into approved context-management improvements
+- [users-and-groups.md](guides/users-and-groups.md) - Operator guide to users, groups, roles, the bootstrap admin, the Settings → Access UI, lockout recovery, and v1 limitations
