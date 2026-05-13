@@ -2,7 +2,7 @@
 
 **Feature Branch**: `011-admin-user-group-mgmt`
 **Created**: 2026-05-11
-**Status**: Draft
+**Status**: Extracted
 **Input**: GitHub issue [opsmill/styrmin#180](https://github.com/opsmill/styrmin/issues/180) — "feat: admin user & group management — CRUD mutations and admin UI"
 
 ## Context

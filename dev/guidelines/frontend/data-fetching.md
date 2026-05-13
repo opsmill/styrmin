@@ -59,6 +59,16 @@ Conventions for using TanStack Query in the frontend. See [knowledge/frontend/da
 
 - `@tanstack/react-query-devtools` is mounted lazily and gated by `import.meta.env.DEV`. Do not unconditionally import or render it; it must not ship to production.
 
+<!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
+
+### Auth-aware fetching
+
+See [`knowledge/frontend/data-fetching.md`](../../knowledge/frontend/data-fetching.md) → "Authenticated requests and error mapping" for the architectural shape.
+
+- All GraphQL calls MUST go through `graphqlFetcher` (the codegen-wired fetcher). Do not add ad-hoc `fetch('/graphql', ...)` calls — they will not carry the `credentials: 'include'` flag, the unauthenticated handler, or the typed-error mapping.
+- Error handlers MUST consume the typed error classes (`UnauthenticatedError`, `ForbiddenError`, `GraphQLOperationError`) via `instanceof`. Never string-match `error.message` to detect auth state — messages are localised, refactored, or wrapped without warning.
+- Code MUST NOT attempt to read the session cookie from JavaScript. The cookie is `HttpOnly`; the browser handles transport when `credentials: 'include'` is set. There is no in-memory token mirror, no `document.cookie` read, no `localStorage` shadow.
+
 ### Tests
 
 - Use the `customRender` from `src/test/utils.tsx`, which already wraps children in a `QueryClientProvider` with retries off and gc off. Do not construct a `QueryClient` per test by hand.

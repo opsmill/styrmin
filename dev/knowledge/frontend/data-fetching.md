@@ -95,6 +95,66 @@ useGetDeploymentQuery({ id }, { refetchInterval: 3000 });
 
 TanStack Router's `loader` + `queryClient.ensureQueryData` integration is **not** in use today — the migration kept component-level fetching to bound scope. Adding route loaders is a separate architectural change, evaluated independently.
 
+<!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
+
+### Authenticated requests and error mapping
+
+Feature 011 extends `graphqlFetcher` with auth-aware transport and typed error mapping so consumers can branch on error category without string-matching messages.
+
+#### Cookie transport
+
+Every GraphQL request goes out with `credentials: 'include'`. The session cookie set by `login` on the backend is `HttpOnly` — the browser attaches it automatically; JavaScript MUST NOT (and cannot) read it. There is no in-memory token mirror.
+
+#### Typed error classes
+
+The fetcher inspects `response.errors?.[0]?.extensions?.code` and maps it to a typed error class so callers can branch with `instanceof`:
+
+| `extensions.code` | Thrown class | Caller intent |
+|-------------------|--------------|---------------|
+| `UNAUTHENTICATED` | `UnauthenticatedError` | Session missing / expired / revoked — redirect to `/login`. |
+| `FORBIDDEN` | `ForbiddenError` | Authenticated but lacks role — surface an in-place toast, do NOT redirect. |
+| anything else | `GraphQLOperationError` | Generic typed error carrying `code` + `message`. |
+
+These classes survive minification (consumers branch on the class, not on `error.name`).
+
+#### Unauthenticated handler registration
+
+`graphqlFetcher` exports a small registration API that decouples it from React Context:
+
+```ts
+type ErrorCallback = () => void;
+let onUnauthenticated: ErrorCallback | null = null;
+export function setUnauthenticatedHandler(cb: ErrorCallback | null): void {
+  onUnauthenticated = cb;
+}
+```
+
+`AuthProvider` registers `() => { queryClient.clear(); window.location.assign('/login'); }` on mount and clears it on unmount. Before the fetcher throws `UnauthenticatedError`, it invokes the handler — which is what triggers the redirect. The throw still happens so calling hooks see an error and stop their loading state.
+
+This shape keeps the fetcher transport-only (no React imports), avoids a React Context dependency on every call, and isolates the side-effect to one registered callback.
+
+#### Consumer pattern
+
+Client code consumes typed error classes:
+
+```ts
+try {
+  await someMutation.mutateAsync(input);
+} catch (err) {
+  if (err instanceof ForbiddenError) {
+    toast.error(err.message);
+    return;
+  }
+  if (err instanceof UnauthenticatedError) {
+    // handler already navigated — nothing to do here.
+    return;
+  }
+  throw err;
+}
+```
+
+Never string-match error messages to detect auth state.
+
 ### What Was Replaced
 
 | Concept | Before (urql) | After (TanStack Query) |

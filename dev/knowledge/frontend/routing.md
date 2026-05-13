@@ -123,6 +123,66 @@ function createTestRouter(initialLocation = "/") {
 
 For component tests that just need router context (e.g. anything rendering a `<Link>`), an empty child-route tree is sufficient. Tests that need a typed `useParams` should add the relevant route.
 
+<!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
+
+### Auth and role-gated routes
+
+Feature 011 adds an authenticated-user surface and role-gated admin routes on top of the auth foundation from #179 (see [ADR-024](../../adr/adr-024-authentication-and-sessions.md) / [ADR-025](../../adr/adr-025-authorization-model.md)).
+
+#### Routes
+
+| Path | Purpose | Gating |
+|------|---------|--------|
+| `/login` | Username/password form | Redirect to `/` if already authenticated |
+| `/profile` | Self-service: change password, view own role + group memberships | Any authenticated user |
+| `/users` | Admin: list/filter users, create | `effectiveRole === ADMIN` |
+| `/users/$id` | Admin: edit user, reset password, deactivate, delete | `effectiveRole === ADMIN` |
+| `/groups` | Admin: list groups, create | `effectiveRole === ADMIN` |
+| `/groups/$id` | Admin: edit group, replace member set, delete | `effectiveRole === ADMIN` |
+
+All admin-only pages share the same `beforeLoad` guard.
+
+#### Router context and `AuthProvider`
+
+`AuthProvider` queries `currentUser` and pushes an `auth` object into the TanStack Router context **synchronously** — not via `useEffect`. The synchronous push (commit `c37d896`) was the fix for a flicker / race where a `beforeLoad` guard could read a stale `undefined` context on the first navigation. Concretely:
+
+```ts
+// router.ts — the context shape
+export const router = createRouter({
+  routeTree,
+  context: { auth: undefined as unknown as AuthContextValue },
+});
+
+// AuthProvider — updates the context on every render where currentUser changes
+router.update({ context: { auth: { currentUser, ... } } });
+
+// route file
+beforeLoad: ({ context }) => {
+  if (context.auth.currentUser?.effectiveRole !== "ADMIN") {
+    throw redirect({ to: "/" });
+  }
+},
+
+// /login — inverse guard
+beforeLoad: ({ context }) => {
+  if (context.auth.currentUser != null) throw redirect({ to: "/" });
+},
+```
+
+`router.update({ context })` rerunning every route's `beforeLoad` when `auth` changes is the desired behaviour — becoming admin should re-evaluate guards.
+
+#### UI affordance gating
+
+In addition to route-level guards, **UI affordances** (nav links, action buttons, menu items) for admin actions are hidden — not disabled — using the role-gating component:
+
+```tsx
+<IfRole minimum="ADMIN">
+  <Link to="/users">Users</Link>
+</IfRole>
+```
+
+`useEffectiveRole()` is the hook form for conditional logic. Both read `context.auth.currentUser.effectiveRole`. Gating MUST always read `effectiveRole` — the aggregate of direct role and group-conferred roles — never the raw `role` field on the user. Reading `role` directly bypasses the group-conferred admin pathway and is a bug.
+
 ### What Was Replaced
 
 | Concept | Before (React Router) | After (TanStack Router) |
