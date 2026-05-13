@@ -63,8 +63,17 @@ class UsersAdminPage:
         await self._page.locator("#create-user-password").fill(password)
 
         # Open the role select trigger and click the matching option.
+        # SelectItem renders the human label (``roleLabel``) as visible
+        # text — ``get_by_role("option", name=...)`` matches on
+        # accessible name, so we translate the canonical role enum to
+        # its rendered label here.
         await self._page.locator("#create-user-role").click()
-        option = self._page.get_by_role("option", name=role)
+        role_label = {
+            "READ_ONLY": "Read-only",
+            "READ_WRITE": "Read/write",
+            "ADMIN": "Admin",
+        }[role]
+        option = self._page.get_by_role("option", name=role_label, exact=True)
         await option.wait_for(state="visible", timeout=5_000)
         await option.click()
 
@@ -131,16 +140,57 @@ class UsersAdminPage:
         await dialog.wait_for(state="hidden", timeout=10_000)
 
     async def delete_user(self) -> None:
-        """Click the Delete button and accept the confirm dialog.
+        """Click the Delete button, confirm via the in-app ConfirmDialog,
+        and wait for the redirect back to ``/users``.
 
-        The page uses ``window.confirm`` for the destructive prompt.
-        Playwright auto-accepts dialogs when we register the handler
-        before the click; we install a one-shot handler here so
-        unrelated dialogs (e.g. created by a later test step) are not
-        affected.
+        Phase 4 G2 replaced ``window.confirm`` with an in-app
+        ``ConfirmDialog`` (testid ``user-delete-confirm``); we drive that
+        modal instead of registering a JS dialog handler. The successful
+        navigation away from the detail page is the assertion.
         """
-        self._page.once("dialog", lambda dlg: dlg.accept())
         await self._page.locator("[data-testid=user-delete-button]").click()
+        confirm = self._page.locator("[data-testid=user-delete-confirm-confirm]")
+        await confirm.wait_for(state="visible", timeout=5_000)
+        await confirm.click()
         # On success the page navigates back to ``/users``; the
         # successful navigation away is the assertion.
         await self._page.wait_for_url("**/users", timeout=10_000)
+
+    async def set_display_name(self, value: str) -> None:
+        """Replace the display-name input and save the form.
+
+        Saving is asserted by the inline success banner.
+        """
+        field = self._page.locator("#user-display-name")
+        await field.fill(value)
+        await self._page.locator("[data-testid=user-edit-save]").click()
+        await expect(
+            self._page.locator("[data-testid=user-detail-success]")
+        ).to_be_visible(timeout=10_000)
+
+    async def set_role(self, role: str) -> None:
+        """Pick ``role`` (``READ_ONLY`` / ``READ_WRITE`` / ``ADMIN``) and save.
+
+        Uses the Radix Select on ``#user-role``; the option's display
+        text is the human label, so we look up the option by the long-
+        form text rendered by ``roleLabel``.
+        """
+        await self._page.locator("[data-testid=user-role-trigger]").click()
+        # The SelectItem renders the human label as visible text. Use
+        # the role's value attribute to disambiguate: Radix sets it on
+        # the option element, but the visible text is the label. We
+        # match on the role-string title fallback, which the badge sets
+        # but the option does not — so match by the label values
+        # directly.
+        label = {
+            "READ_ONLY": "Read-only",
+            "READ_WRITE": "Read/write",
+            "ADMIN": "Admin",
+        }[role]
+        option = self._page.get_by_role("option", name=label, exact=True)
+        await option.wait_for(state="visible", timeout=5_000)
+        await option.click()
+        await self._page.locator("[data-testid=user-edit-save]").click()
+        await expect(
+            self._page.locator("[data-testid=user-detail-success]")
+        ).to_be_visible(timeout=10_000)
