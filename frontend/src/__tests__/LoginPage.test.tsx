@@ -12,14 +12,20 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // Mock the router module BEFORE importing anything that touches it.
-const { navigateMock, updateMock, routerOptions, useNavigateMock } = vi.hoisted(
-  () => ({
-    navigateMock: vi.fn(() => Promise.resolve()),
-    updateMock: vi.fn(),
-    routerOptions: { context: {} as Record<string, unknown> },
-    useNavigateMock: vi.fn(() => Promise.resolve()),
-  }),
-);
+const {
+  navigateMock,
+  updateMock,
+  routerOptions,
+  useNavigateMock,
+  searchValue,
+} = vi.hoisted(() => ({
+  navigateMock: vi.fn(() => Promise.resolve()),
+  updateMock: vi.fn(),
+  routerOptions: { context: {} as Record<string, unknown> },
+  useNavigateMock: vi.fn(() => Promise.resolve()),
+  // Mutable container so individual tests can prime `?next=` before render.
+  searchValue: { current: {} as Record<string, unknown> },
+}));
 
 vi.mock("@/router", () => ({
   router: {
@@ -29,10 +35,12 @@ vi.mock("@/router", () => ({
   },
 }));
 
-// useNavigate() inside LoginPage would otherwise require a real
-// <RouterProvider>; stub it to a hookable mock so we can assert navigation.
+// useNavigate() / useSearch() inside LoginPage would otherwise require a
+// real <RouterProvider>; stub them so we can assert navigation and inject
+// `next` into the search.
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => useNavigateMock,
+  useSearch: () => searchValue.current,
 }));
 
 // Provide a no-op router context for the route hooks that LoginPage's button
@@ -104,6 +112,7 @@ describe("LoginPage", () => {
     updateMock.mockClear();
     useNavigateMock.mockClear();
     routerOptions.context = {};
+    searchValue.current = {};
   });
 
   afterEach(() => {
@@ -204,6 +213,76 @@ describe("LoginPage", () => {
       expect(
         screen.getByText("Invalid username or password."),
       ).toBeInTheDocument();
+    });
+  });
+
+  it("redirects to a safe ?next path after successful login", async () => {
+    searchValue.current = { next: "/users/abc-123" };
+    let currentUserCalls = 0;
+    installFetchRouter({
+      Login: () =>
+        jsonResponse({
+          data: { login: { token: "tok-1", user: AUTH_USER } },
+        }),
+      CurrentUser: () => {
+        currentUserCalls += 1;
+        return jsonResponse({
+          data: {
+            currentUser: currentUserCalls === 1 ? null : AUTH_USER,
+          },
+        });
+      },
+    });
+
+    const qc = makeQueryClient();
+    renderLogin(qc);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Username"), "alice");
+    await user.type(screen.getByLabelText("Password"), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(useNavigateMock).toHaveBeenCalledWith({ to: "/users/abc-123" });
+    });
+  });
+
+  it("falls back to '/' when ?next is an open-redirect attempt", async () => {
+    searchValue.current = { next: "//evil.com/phish" };
+    let currentUserCalls = 0;
+    installFetchRouter({
+      Login: () =>
+        jsonResponse({
+          data: { login: { token: "tok-1", user: AUTH_USER } },
+        }),
+      CurrentUser: () => {
+        currentUserCalls += 1;
+        return jsonResponse({
+          data: {
+            currentUser: currentUserCalls === 1 ? null : AUTH_USER,
+          },
+        });
+      },
+    });
+
+    const qc = makeQueryClient();
+    renderLogin(qc);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Username"), "alice");
+    await user.type(screen.getByLabelText("Password"), "secret");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(useNavigateMock).toHaveBeenCalledWith({ to: "/" });
     });
   });
 

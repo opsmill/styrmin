@@ -1,17 +1,21 @@
-import {
-  createRoute,
-  lazyRouteComponent,
-  redirect,
-} from "@tanstack/react-router";
+import { createRoute, lazyRouteComponent } from "@tanstack/react-router";
+import { AdminOnly } from "@/auth/AdminOnly";
 import { rootRoute } from "./__root";
+
+const LazyGroupsListPage = lazyRouteComponent(
+  () => import("@/pages/groups/GroupsListPage"),
+);
+
+function GroupsListRouteComponent() {
+  return (
+    <AdminOnly area="Groups">
+      <LazyGroupsListPage />
+    </AdminOnly>
+  );
+}
 
 export const groupsListRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups",
-  beforeLoad: ({ context }) => {
-    if (context.auth?.currentUser?.effectiveRole !== "ADMIN") {
-      throw redirect({ to: "/" });
-    }
-  },
-  component: lazyRouteComponent(() => import("@/pages/groups/GroupsListPage")),
+  component: GroupsListRouteComponent,
 });

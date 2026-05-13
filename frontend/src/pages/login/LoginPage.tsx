@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useLoginMutation } from "@/generated/graphql";
 import { useAuth } from "@/auth/AuthProvider";
+import { safeNext } from "@/lib/safe-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +13,10 @@ const GENERIC_ERROR = "Invalid username or password.";
 export default function LoginPage() {
   const { refresh } = useAuth();
   const navigate = useNavigate();
+  // The /login route's `validateSearch` has already filtered `next` through
+  // `safeNext`; we re-validate at submit time to defend against any in-flight
+  // change to `location.search`.
+  const search = useSearch({ from: "/login" });
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -20,11 +25,13 @@ export default function LoginPage() {
     onSuccess: async () => {
       setErrorMessage(null);
       // Refetch currentUser so the AuthProvider transitions to the
-      // authenticated state, then navigate to '/'. The /login route's
-      // beforeLoad guard only fires on navigation — staying on the same
-      // route after refresh() would leave the user stuck on the form.
+      // authenticated state, then navigate to the originally requested
+      // destination (or '/' if no safe `next` was provided). The /login
+      // route's beforeLoad guard only fires on navigation — staying on the
+      // same route after refresh() would leave the user stuck on the form.
       await refresh();
-      await navigate({ to: "/" });
+      const dest = safeNext(search.next) ?? "/";
+      await navigate({ to: dest });
     },
     onError: () => {
       // Surface a single generic message regardless of the server's reason

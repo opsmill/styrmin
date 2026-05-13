@@ -1,5 +1,6 @@
 import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
+import { safeNext } from "@/lib/safe-next";
 import type { AuthContextValue } from "@/auth/AuthProvider";
 
 // Re-declare the router context shape here to avoid a circular import with
@@ -21,7 +22,15 @@ function requireAuth({
     return;
   }
   if (context.auth?.currentUser == null) {
-    throw redirect({ to: "/login" });
+    // Preserve the intended destination so the user lands back where they
+    // were trying to go after sign-in. Only the pathname is forwarded —
+    // search/hash are dropped to avoid leaking tokens or other sensitive
+    // query params through the login URL bar / browser history.
+    const next = safeNext(location.pathname);
+    throw redirect({
+      to: "/login",
+      search: next == null ? undefined : { next },
+    });
   }
 }
 
