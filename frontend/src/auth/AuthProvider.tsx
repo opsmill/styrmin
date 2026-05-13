@@ -87,13 +87,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     [currentUser, loading, refresh, logout],
   );
 
-  // Push the auth context into the router so route `beforeLoad` guards see
-  // a fresh value synchronously.
-  useEffect(() => {
-    router.update({
-      context: { ...router.options.context, auth: value },
-    });
-  }, [value]);
+  // Push the auth context into the router synchronously, BEFORE we mount
+  // the router as a child. A useEffect-based update would run after
+  // ``children`` mount on this same commit, and the router's beforeLoad
+  // guards would observe a stale ``auth = undefined`` on the very first
+  // route resolution — bouncing a deep link like ``/settings`` to /login,
+  // then immediately back to / once the effect lands. ``router.options``
+  // is TanStack Router's own mutable config bag, not React state; the
+  // react-hooks/immutability rule fires on the assignment but this is a
+  // deliberate, deterministic write.
+  // eslint-disable-next-line react-hooks/immutability
+  router.options.context = { ...router.options.context, auth: value };
 
   if (loading) {
     return (

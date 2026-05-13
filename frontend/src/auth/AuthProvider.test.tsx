@@ -154,12 +154,19 @@ describe("AuthProvider", () => {
     await waitFor(() => {
       expect(screen.getByTestId("user")).toHaveTextContent("alice");
     });
-    // Router context was updated with the auth value.
-    expect(updateMock).toHaveBeenCalled();
-    const lastCall = updateMock.mock.calls.at(-1)![0] as {
-      context: { auth: { currentUser: { username: string } } };
-    };
-    expect(lastCall.context.auth.currentUser.username).toBe("alice");
+    // Router context was updated with the auth value. AuthProvider
+    // mutates ``router.options.context`` directly (synchronously, before
+    // rendering children) so beforeLoad guards observe a fresh ``auth``
+    // on the very first route resolution. The legacy ``router.update``
+    // call was removed because its useEffect-based timing produced a
+    // race where deep-linking a route ran through a stale auth and
+    // bounced via /login.
+    const auth = (
+      routerOptions.context as {
+        auth?: { currentUser?: { username?: string } | null };
+      }
+    ).auth;
+    expect(auth?.currentUser?.username).toBe("alice");
   });
 
   it("invokes the registered handler, clears the query cache, and navigates to /login when a later request returns UNAUTHENTICATED", async () => {
