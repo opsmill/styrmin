@@ -21,7 +21,20 @@ class SettingsPage:
         await self._page.goto("/settings")
         # Wait for either the cluster card or the create-cluster button to exist,
         # whichever the page chose to render.
-        await expect(self._page.get_by_text("Cluster", exact=True)).to_be_visible()
+        try:
+            await expect(self._page.get_by_text("Cluster", exact=True)).to_be_visible()
+        except AssertionError:
+            # Surface what the browser is actually showing — most
+            # auth-misconfiguration paths land us on /login or on the
+            # AuthProvider "Loading..." gate, and the raw assertion error
+            # ("element(s) not found") doesn't say which.
+            url = self._page.url
+            body_text = await self._page.locator("body").inner_text()
+            print(f"SettingsPage.goto() failed at url={url!r}")
+            print(
+                f"--- body text (truncated) ---\n{body_text[:1000]}\n--- end body ---"
+            )
+            raise
 
     async def create_cluster(self, *, name: str, config: dict[str, Any]) -> ClusterRef:
         """Create a cluster by driving the CreateClusterDialog form.

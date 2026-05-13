@@ -8,7 +8,9 @@ from __future__ import annotations
 from uuid import UUID
 
 import strawberry
+from strawberry.permission import PermissionExtension
 
+from styrmin_backend.api.auth.permissions import RequiresRole
 from styrmin_backend.api.definitions.backup.backup import (
     Backup as BackupType,
     BackupStatusType,
@@ -33,9 +35,23 @@ from styrmin_backend.api.definitions.service.model import (
     DeployedService as DeployedServiceType,
 )
 from styrmin_backend.api.definitions.task.model import Task
+from styrmin_backend.api.definitions.user.model import (
+    Group as GroupType,
+    Role as RoleType,
+    User as UserType,
+)
+from styrmin_backend.db.models import Role as RoleModel
 from styrmin_backend.services.application_drivers import (
     get_application_driver,
     get_application_drivers,
+)
+from styrmin_backend.services.auth.groups import (
+    get_group as get_group_service,
+    list_groups as list_groups_service,
+)
+from styrmin_backend.services.auth.users import (
+    get_user as get_user_service,
+    list_users as list_users_service,
 )
 from styrmin_backend.services.backup.scheduler import (
     get_backup_schedule,
@@ -68,8 +84,89 @@ from styrmin_backend.services.pod_status import get_pod_statuses
 from styrmin_backend.services.tasks import get_task, get_tasks
 
 
+def _requires_admin() -> PermissionExtension:
+    """Sugar for admin-only query fields. See ADR-020."""
+    return PermissionExtension([RequiresRole(RoleModel.ADMIN)])
+
+
 @strawberry.type
 class Query:
+    @strawberry.field
+    async def current_user(self, info: strawberry.Info) -> UserType | None:
+        user = info.context.get("current_user")
+        if user is None:
+            return None
+        return UserType.from_instance(user)
+
+    @strawberry.field(extensions=[_requires_admin()])
+    async def users(
+        self,
+        info: strawberry.Info,
+        active: bool | None = None,
+        role: RoleType | None = None,
+        search: str | None = None,
+    ) -> list[UserType]:
+        """Admin-only filtered listing of users.
+
+        See specs/011-admin-user-group-mgmt/contracts/graphql.md. Filters
+        apply independently in any combination. Search is a substring
+        match (case-insensitive) over username and display_name.
+        """
+        uow = info.context["uow"]
+        role_model = RoleModel[role.value] if role is not None else None
+        users = await list_users_service(
+            uow, active=active, role=role_model, search=search
+        )
+        return [UserType.from_instance(u) for u in users]
+
+    @strawberry.field(extensions=[_requires_admin()])
+    async def groups(
+        self,
+        info: strawberry.Info,
+        search: str | None = None,
+    ) -> list[GroupType]:
+        """Admin-only filtered listing of groups.
+
+        See specs/011-admin-user-group-mgmt/contracts/graphql.md. ``search``
+        is a substring match (case-insensitive) over ``name``.
+        """
+        uow = info.context["uow"]
+        groups = await list_groups_service(uow, search=search)
+        return [GroupType.from_instance(g) for g in groups]
+
+    @strawberry.field(extensions=[_requires_admin()])
+    async def user(
+        self,
+        info: strawberry.Info,
+        id: UUID,  # noqa: A002 — GraphQL convention; the field is named `id`.
+    ) -> UserType | None:
+        """Admin-only single-user lookup by id.
+
+        Surfaces ``USER_NOT_FOUND`` via ``extensions.code`` when the id is
+        unknown. The field is nullable to keep the schema honest about the
+        possibility of a missing row, but the not-found path is delivered
+        as a structured error rather than a silent null so SDK callers can
+        branch on the code.
+        """
+        uow = info.context["uow"]
+        user = await get_user_service(uow, user_id=id)
+        return UserType.from_instance(user)
+
+    @strawberry.field(extensions=[_requires_admin()])
+    async def group(
+        self,
+        info: strawberry.Info,
+        id: UUID,  # noqa: A002 — GraphQL convention; the field is named `id`.
+    ) -> GroupType | None:
+        """Admin-only single-group lookup by id.
+
+        Surfaces ``GROUP_NOT_FOUND`` via ``extensions.code`` when the id is
+        unknown — see :py:meth:`Query.user` for the rationale.
+        """
+        uow = info.context["uow"]
+        group = await get_group_service(uow, group_id=id)
+        return GroupType.from_instance(group)
+
     @strawberry.field
     async def clusters(self, info: strawberry.Info) -> list[Cluster]:
         uow = info.context["uow"]

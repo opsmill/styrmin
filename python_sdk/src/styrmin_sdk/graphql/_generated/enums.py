@@ -48,6 +48,12 @@ class RestoreStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class Role(str, Enum):
+    READ_ONLY = "READ_ONLY"
+    READ_WRITE = "READ_WRITE"
+    ADMIN = "ADMIN"
+
+
 class TolerationEffect(str, Enum):
     NO_SCHEDULE = "NO_SCHEDULE"
     PREFER_NO_SCHEDULE = "PREFER_NO_SCHEDULE"

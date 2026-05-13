@@ -189,6 +189,28 @@ queryable via `Deployment.timeline` after the fact; see [ADR-020 §commit
 ordering](../../adr/adr-020-environment-config-fanout.md) for the
 durability contract.
 
+<!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
+
+### Admin & authorization mutations
+
+Rules for any mutation that touches user/group state, admin-conferring rows, or session lifecycle. See [`knowledge/backend/services.md`](../../knowledge/backend/services.md) → "Authorization helpers" for the helper modules and [`knowledge/backend/api.md`](../../knowledge/backend/api.md) → "Admin user/group surface" for the wire contract.
+
+- New mutations that change admin-conferring state (role assignment, group membership, active flag, hard-delete) MUST attach `PermissionExtension([RequiresRole(Role.ADMIN)])`. Do not invent ad-hoc role checks in the resolver body.
+- Any operation that could violate the last-admin invariant MUST call through `auth/admin_guards` inside its own transaction, with the admin-conferring rows locked via `SELECT ... FOR UPDATE`. Inline rule re-implementations are forbidden — the four-action matrix (`DEACTIVATE` / `DELETE` / `DEMOTE` / `REMOVE_FROM_ADMIN_GROUP`) lives in one place.
+- Membership replacements MUST go through `auth/membership.replace_user_groups` / `replace_group_members`. Do not issue a full `DELETE all → INSERT all` pattern; diff-and-mutate is the only acceptable shape (zero statements on no-change is required).
+- Mutations that invalidate sessions (`resetUserPassword`, `updateUser(active=False)`, role downgrade where the new role removes admin) MUST share a single transaction with the originating change. The write order is: mutate the user row → flush (no commit) → delete affected sessions → commit. A failure in the session delete MUST roll back the user-row change.
+- Admin mutations MUST emit one Loguru audit line on success, after the transaction commits, in the shape:
+
+  ```python
+  logger.info(
+      "admin_mutation actor={} action={} target={} changed_fields={}",
+      actor_id, action_name, target_id, comma_separated_field_names,
+  )
+  ```
+
+  Field **names only** — never values. Emit from the service function so it only fires on commit, never from the resolver.
+- Password-bearing GraphQL variables MUST be added to the `MASKED_VARIABLE_NAMES` frozenset in `api/logging/mask.py`. Per-mutation ad-hoc masking is forbidden — every password field on the schema goes through that one allow-list. Adding a new password field is a one-line PR change that triggers code review on the import site.
+
 ## Database Models (SQLModel)
 
 - Inherit from `StyrminModel` (provides `id`, `created_on`, `updated_on`)

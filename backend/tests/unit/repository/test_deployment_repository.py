@@ -12,6 +12,8 @@ from styrmin_backend.db.models import (
     Environment,
     HelmChart,
     HelmRepository,
+    Role,
+    User,
 )
 from styrmin_backend.context.models.contexts import (
     ApplicationContext,
@@ -100,6 +102,15 @@ async def prerequisites(session: AsyncSession):
     environment = Environment(id=uuid4(), name="test-env", cluster_id=cluster.id)
     session.add(environment)
 
+    creator = User(
+        id=uuid4(),
+        username="repo-test-creator",
+        password_hash="x",
+        display_name="repo-test-creator",
+        role=Role.ADMIN,
+    )
+    session.add(creator)
+
     await session.flush()
 
     return {
@@ -107,6 +118,7 @@ async def prerequisites(session: AsyncSession):
         "helm_chart": helm_chart,
         "app_driver_version": app_driver_version,
         "environment": environment,
+        "creator": creator,
     }
 
 
@@ -116,6 +128,7 @@ async def test_save_deployment_with_new_instance(session: AsyncSession, prerequi
     repo = SQLModelDeploymentRepository(session)
     adv = prerequisites["app_driver_version"]
     env = prerequisites["environment"]
+    creator = prerequisites["creator"]
     helm_chart = prerequisites["helm_chart"]
     helm_repo = prerequisites["helm_repo"]
 
@@ -132,6 +145,7 @@ async def test_save_deployment_with_new_instance(session: AsyncSession, prerequi
         application_driver_version_id=adv.id,
         environment_id=env.id,
         status=DeploymentStateEntity.PENDING,
+        created_by_user_id=creator.id,
     )
     deployment.set_active_instance(
         InstanceEntity(
@@ -170,6 +184,7 @@ async def test_save_preserves_active_instance_on_round_trip(
     repo = SQLModelDeploymentRepository(session)
     adv = prerequisites["app_driver_version"]
     env = prerequisites["environment"]
+    creator = prerequisites["creator"]
     helm_chart = prerequisites["helm_chart"]
     helm_repo = prerequisites["helm_repo"]
 
@@ -187,6 +202,7 @@ async def test_save_preserves_active_instance_on_round_trip(
         application_driver_version_id=adv.id,
         environment_id=env.id,
         status=DeploymentStateEntity.PENDING,
+        created_by_user_id=creator.id,
     )
     deployment.set_active_instance(
         InstanceEntity(
@@ -233,6 +249,7 @@ def _seed_deployment(
     name: str,
     env_id,
     adv_id,
+    creator_id,
     deleted_at=None,
     status: DeploymentStateEntity = DeploymentStateEntity.PENDING,
 ) -> DeploymentEntity:
@@ -245,6 +262,7 @@ def _seed_deployment(
         environment_id=env_id,
         status=status,
         deleted_at=deleted_at,
+        created_by_user_id=creator_id,
     )
 
 
@@ -262,7 +280,12 @@ async def test_get_by_name_scopes_to_environment(session: AsyncSession, prerequi
     session.add(env_b)
     await session.flush()
 
-    await repo.save(_seed_deployment(name="ansible", env_id=env_a.id, adv_id=adv.id))
+    creator_id = prerequisites["creator"].id
+    await repo.save(
+        _seed_deployment(
+            name="ansible", env_id=env_a.id, adv_id=adv.id, creator_id=creator_id
+        )
+    )
     await session.commit()
 
     found_in_a = await repo.get_by_name("ansible", env_a.id)
@@ -287,11 +310,13 @@ async def test_get_by_name_excludes_tombstoned_by_default(
     repo = SQLModelDeploymentRepository(session)
     adv = prerequisites["app_driver_version"]
     env = prerequisites["environment"]
+    creator_id = prerequisites["creator"].id
 
     tombstoned = _seed_deployment(
         name="ansible",
         env_id=env.id,
         adv_id=adv.id,
+        creator_id=creator_id,
         deleted_at=datetime.now(tz=timezone.utc),
         status=DeploymentStateEntity.DELETED,
     )
@@ -316,6 +341,7 @@ async def test_find_names_with_prefix_scopes_to_environment_and_excludes_tombsto
     repo = SQLModelDeploymentRepository(session)
     adv = prerequisites["app_driver_version"]
     env_a = prerequisites["environment"]
+    creator_id = prerequisites["creator"].id
 
     cluster_b = Cluster(id=uuid4(), name="cluster-b-2")
     session.add(cluster_b)
@@ -324,18 +350,27 @@ async def test_find_names_with_prefix_scopes_to_environment_and_excludes_tombsto
     await session.flush()
 
     # env A: one active "ansible-1", one tombstoned "ansible-2"
-    await repo.save(_seed_deployment(name="ansible-1", env_id=env_a.id, adv_id=adv.id))
+    await repo.save(
+        _seed_deployment(
+            name="ansible-1", env_id=env_a.id, adv_id=adv.id, creator_id=creator_id
+        )
+    )
     await repo.save(
         _seed_deployment(
             name="ansible-2",
             env_id=env_a.id,
             adv_id=adv.id,
+            creator_id=creator_id,
             deleted_at=datetime.now(tz=timezone.utc),
             status=DeploymentStateEntity.DELETED,
         )
     )
     # env B: one active "ansible-99" — must not show up in env A's prefix search.
-    await repo.save(_seed_deployment(name="ansible-99", env_id=env_b.id, adv_id=adv.id))
+    await repo.save(
+        _seed_deployment(
+            name="ansible-99", env_id=env_b.id, adv_id=adv.id, creator_id=creator_id
+        )
+    )
     await session.commit()
 
     names_in_a = await repo.find_names_with_prefix("ansible", env_a.id)
@@ -362,8 +397,13 @@ async def test_partial_unique_index_blocks_active_collisions(
     repo = SQLModelDeploymentRepository(session)
     adv = prerequisites["app_driver_version"]
     env = prerequisites["environment"]
+    creator_id = prerequisites["creator"].id
 
-    await repo.save(_seed_deployment(name="ansible", env_id=env.id, adv_id=adv.id))
+    await repo.save(
+        _seed_deployment(
+            name="ansible", env_id=env.id, adv_id=adv.id, creator_id=creator_id
+        )
+    )
     await session.commit()
 
     # The IntegrityError can fire on either the repo.save() (which
@@ -371,7 +411,11 @@ async def test_partial_unique_index_blocks_active_collisions(
     # is doing its job. Wrap both so the test captures the violation
     # regardless of when SQLite chooses to enforce it.
     with pytest.raises(IntegrityError):
-        await repo.save(_seed_deployment(name="ansible", env_id=env.id, adv_id=adv.id))
+        await repo.save(
+            _seed_deployment(
+                name="ansible", env_id=env.id, adv_id=adv.id, creator_id=creator_id
+            )
+        )
         await session.commit()
     await session.rollback()
 
@@ -388,11 +432,13 @@ async def test_partial_unique_index_allows_tombstone_then_recreate(
     repo = SQLModelDeploymentRepository(session)
     adv = prerequisites["app_driver_version"]
     env = prerequisites["environment"]
+    creator_id = prerequisites["creator"].id
 
     tombstoned = _seed_deployment(
         name="ansible",
         env_id=env.id,
         adv_id=adv.id,
+        creator_id=creator_id,
         deleted_at=datetime.now(tz=timezone.utc),
         status=DeploymentStateEntity.DELETED,
     )
@@ -400,6 +446,8 @@ async def test_partial_unique_index_allows_tombstone_then_recreate(
     await session.commit()
 
     # New active deployment with the same name — must succeed.
-    fresh = _seed_deployment(name="ansible", env_id=env.id, adv_id=adv.id)
+    fresh = _seed_deployment(
+        name="ansible", env_id=env.id, adv_id=adv.id, creator_id=creator_id
+    )
     await repo.save(fresh)
     await session.commit()  # would raise IntegrityError if the index was wrong

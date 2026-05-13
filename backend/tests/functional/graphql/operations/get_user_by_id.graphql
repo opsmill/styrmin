@@ -1,0 +1,15 @@
+query GetUserById($id: UUID!) {
+    user(id: $id) {
+        id
+        username
+        displayName
+        role
+        effectiveRole
+        active
+        groups {
+            id
+            name
+            role
+        }
+    }
+}

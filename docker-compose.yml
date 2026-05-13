@@ -60,6 +60,12 @@ services:
       STYRMIN_AGENT_SOURCE_BRANCH: ${STYRMIN_AGENT_SOURCE_BRANCH}
       STYRMIN_URL_API_K8S: http://host.docker.internal:8000
       STYRMIN_DB_NAME: /source/data/styrmin.db
+      # Local-dev convention. Production installs MUST override this via
+      # helm value styrmin.adminPassword or the equivalent env var.
+      STYRMIN_ADMIN_USERNAME: admin
+      STYRMIN_ADMIN_PASSWORD: styrmin
+      # Compose serves over plain HTTP, so the session cookie cannot be Secure.
+      STYRMIN_SESSION_COOKIE_SECURE: "false"
 
     healthcheck:
       test: curl --fail http://localhost:8000/graphql || exit 1

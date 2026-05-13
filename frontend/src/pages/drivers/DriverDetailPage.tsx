@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Plus } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
+import { IfRole } from "@/auth/IfRole";
 
 export default function DriverDetailPage() {
   const { driverId } = useParams({ from: "/drivers/$driverId" });
@@ -52,10 +53,12 @@ export default function DriverDetailPage() {
             lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
             onRefreshNow={() => refetch()}
           />
-          <Button onClick={() => navigate({ to: "/drivers/add" })}>
-            <Plus className="h-4 w-4" />
-            Add Version
-          </Button>
+          <IfRole minimum="READ_WRITE">
+            <Button onClick={() => navigate({ to: "/drivers/add" })}>
+              <Plus className="h-4 w-4" />
+              Add Version
+            </Button>
+          </IfRole>
         </>
       }
     >

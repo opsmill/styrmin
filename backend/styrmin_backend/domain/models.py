@@ -84,6 +84,8 @@ class Deployment(BaseModel):
 
     deleted_at: datetime | None = None
 
+    created_by_user_id: UUID
+
     _components: Dict[str, Component] = PrivateAttr(default_factory=dict)
 
     # Application instance
@@ -133,6 +135,7 @@ class Deployment(BaseModel):
         application_version: str,
         application_driver_version_id: UUID,
         environment_id: UUID,
+        created_by_user_id: UUID,
         config: dict | None = None,
         parameters: dict | None = None,
         name: str | None = None,
@@ -144,6 +147,8 @@ class Deployment(BaseModel):
             name: Optional deployment name. If provided, it is validated.
                   If None, the caller must have resolved the name beforehand
                   (e.g., via auto-generation in the service layer).
+            created_by_user_id: The id of the user creating the deployment.
+                  Used for attribution (Deployment.createdBy in the schema).
         """
         if not name or not name.strip():
             raise ValueError(
@@ -161,6 +166,7 @@ class Deployment(BaseModel):
             internal=internal,
             application_driver_version_id=application_driver_version_id,
             environment_id=environment_id,
+            created_by_user_id=created_by_user_id,
         )
 
 

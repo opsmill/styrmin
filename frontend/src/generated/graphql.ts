@@ -225,6 +225,20 @@ export type CrdConditionType = {
   type: Scalars['String']['output'];
 };
 
+export type CreateGroupInput = {
+  memberIds?: InputMaybe<Array<Scalars['ID']['input']>>;
+  name: Scalars['String']['input'];
+  role: Role;
+};
+
+export type CreateUserInput = {
+  displayName: Scalars['String']['input'];
+  groupIds?: InputMaybe<Array<Scalars['ID']['input']>>;
+  password: Scalars['String']['input'];
+  role: Role;
+  username: Scalars['String']['input'];
+};
+
 /** Dedicated per-environment ingress controller configuration. */
 export type DedicatedIngressInput = {
   implementation?: InputMaybe<Scalars['String']['input']>;
@@ -259,6 +273,9 @@ export type Deployment = {
   components: Array<Component>;
   config: Scalars['JSON']['output'];
   crdStatus?: Maybe<DeploymentStatusType>;
+  createdBy: User;
+  /** Username of the user who created this deployment, or ``null`` if the creator row has been removed (forward-compatible with ``ondelete=SET NULL`` even though the FK is currently non-null). Unlike ``createdBy``, this field is NOT admin-gated — drivers and the UI can surface attribution without elevated access per FR-028. */
+  createdByUsername?: Maybe<Scalars['String']['output']>;
   deletedAt?: Maybe<Scalars['DateTime']['output']>;
   deployedServices: Array<DeployedService>;
   /** Effective deployment-level env vars (after merging environment & deployment scopes, but BEFORE component-level overrides). Empty when none are set. */
@@ -378,6 +395,13 @@ export type ExternalUrlScheme =
   | 'HTTP'
   | 'HTTPS';
 
+export type Group = {
+  __typename?: 'Group';
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  role: Role;
+};
+
 export type HelmChart = {
   __typename?: 'HelmChart';
   id: Scalars['UUID']['output'];
@@ -417,6 +441,12 @@ export type LabelSelectorRequirementInput = {
   values?: InputMaybe<Array<Scalars['String']['input']>>;
 };
 
+export type LoginResult = {
+  __typename?: 'LoginResult';
+  token: Scalars['String']['output'];
+  user: User;
+};
+
 export type ManagedResourceCountsInput = {
   helmReleases?: Scalars['Int']['input'];
   middlewares?: Scalars['Int']['input'];
@@ -438,23 +468,31 @@ export type Mutation = {
   __typename?: 'Mutation';
   assignBackupStorageLocation?: Maybe<Environment>;
   callback: CallbackResponse;
+  changePassword: Scalars['Boolean']['output'];
   createBackup?: Maybe<Backup>;
   createBackupSchedule?: Maybe<BackupSchedule>;
   createBackupStorageLocation?: Maybe<BackupStorageLocation>;
   createCluster?: Maybe<Cluster>;
   createEnvironment?: Maybe<Environment>;
+  createGroup: Group;
   createRestore?: Maybe<Restore>;
+  createUser: User;
   deleteBackup?: Maybe<Scalars['String']['output']>;
   deleteBackupSchedule?: Maybe<Scalars['String']['output']>;
   deleteBackupStorageLocation?: Maybe<Scalars['String']['output']>;
   deleteCluster?: Maybe<Scalars['String']['output']>;
   deleteDeployment: Task;
   deleteEnvironment?: Maybe<Scalars['String']['output']>;
+  deleteGroup: Scalars['Boolean']['output'];
+  deleteUser: Scalars['Boolean']['output'];
   deploy?: Maybe<Task>;
   loadLocalApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
   loadRemoteApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
+  login: LoginResult;
+  logout: Scalars['Boolean']['output'];
   reportDeploymentStatuses: ReportDeploymentStatusesResponse;
   reportPodStatuses: ReportPodStatusesResponse;
+  resetUserPassword: Scalars['Boolean']['output'];
   runJob?: Maybe<Task>;
   startComponents?: Maybe<Task>;
   stopComponents?: Maybe<Task>;
@@ -464,6 +502,8 @@ export type Mutation = {
   updateDeployment?: Maybe<Task>;
   updateDeploymentVersion?: Maybe<Task>;
   updateEnvironment?: Maybe<Environment>;
+  updateGroup: Group;
+  updateUser: User;
 };
 
 
@@ -478,6 +518,12 @@ export type MutationCallbackArgs = {
   stateName: Scalars['String']['input'];
   stateType: Scalars['String']['input'];
   taskId: Scalars['UUID']['input'];
+};
+
+
+export type MutationChangePasswordArgs = {
+  currentPassword: Scalars['String']['input'];
+  newPassword: Scalars['String']['input'];
 };
 
 
@@ -520,10 +566,20 @@ export type MutationCreateEnvironmentArgs = {
 };
 
 
+export type MutationCreateGroupArgs = {
+  input: CreateGroupInput;
+};
+
+
 export type MutationCreateRestoreArgs = {
   backupId: Scalars['UUID']['input'];
   targetInstanceId?: InputMaybe<Scalars['UUID']['input']>;
   targetNamespace: Scalars['String']['input'];
+};
+
+
+export type MutationCreateUserArgs = {
+  input: CreateUserInput;
 };
 
 
@@ -561,6 +617,16 @@ export type MutationDeleteEnvironmentArgs = {
 };
 
 
+export type MutationDeleteGroupArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
+export type MutationDeleteUserArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
 export type MutationDeployArgs = {
   clusterId?: InputMaybe<Scalars['UUID']['input']>;
   clusterName?: InputMaybe<Scalars['String']['input']>;
@@ -586,6 +652,12 @@ export type MutationLoadRemoteApplicationDriverVersionArgs = {
 };
 
 
+export type MutationLoginArgs = {
+  password: Scalars['String']['input'];
+  username: Scalars['String']['input'];
+};
+
+
 export type MutationReportDeploymentStatusesArgs = {
   reports: Array<DeploymentStatusReportInput>;
 };
@@ -593,6 +665,12 @@ export type MutationReportDeploymentStatusesArgs = {
 
 export type MutationReportPodStatusesArgs = {
   reports: Array<DeploymentPodStatusReport>;
+};
+
+
+export type MutationResetUserPasswordArgs = {
+  newPassword: Scalars['String']['input'];
+  userId: Scalars['UUID']['input'];
 };
 
 
@@ -660,6 +738,18 @@ export type MutationUpdateDeploymentVersionArgs = {
 export type MutationUpdateEnvironmentArgs = {
   environmentId: Scalars['UUID']['input'];
   input: UpdateEnvironmentInput;
+};
+
+
+export type MutationUpdateGroupArgs = {
+  id: Scalars['UUID']['input'];
+  input: UpdateGroupInput;
+};
+
+
+export type MutationUpdateUserArgs = {
+  id: Scalars['UUID']['input'];
+  input: UpdateUserInput;
 };
 
 export type ParameterDefinition = {
@@ -730,12 +820,15 @@ export type Query = {
   backups: Array<Backup>;
   cluster?: Maybe<Cluster>;
   clusters: Array<Cluster>;
+  currentUser?: Maybe<User>;
   deployment?: Maybe<Deployment>;
   deploymentServices: Array<DeployedService>;
   deploymentTimeline: Array<DeploymentTimelineEntry>;
   environment?: Maybe<Environment>;
   environmentServices: Array<DeployedService>;
   environments: Array<Environment>;
+  group?: Maybe<Group>;
+  groups: Array<Group>;
   /** Health check probe */
   ok: Scalars['Boolean']['output'];
   podStatuses: Array<PodStatus>;
@@ -743,6 +836,8 @@ export type Query = {
   restores: Array<Restore>;
   task?: Maybe<Task>;
   tasks: Array<Task>;
+  user?: Maybe<User>;
+  users: Array<User>;
 };
 
 
@@ -811,6 +906,16 @@ export type QueryEnvironmentServicesArgs = {
 };
 
 
+export type QueryGroupArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
+export type QueryGroupsArgs = {
+  search?: InputMaybe<Scalars['String']['input']>;
+};
+
+
 export type QueryPodStatusesArgs = {
   clusterId?: InputMaybe<Scalars['UUID']['input']>;
   deploymentId?: InputMaybe<Scalars['UUID']['input']>;
@@ -831,6 +936,18 @@ export type QueryRestoresArgs = {
 
 export type QueryTaskArgs = {
   taskId: Scalars['UUID']['input'];
+};
+
+
+export type QueryUserArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
+export type QueryUsersArgs = {
+  active?: InputMaybe<Scalars['Boolean']['input']>;
+  role?: InputMaybe<Role>;
+  search?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type ReportDeploymentStatusesResponse = {
@@ -892,6 +1009,11 @@ export type RestoreStatus =
   | 'FAILED'
   | 'IN_PROGRESS'
   | 'PENDING';
+
+export type Role =
+  | 'ADMIN'
+  | 'READ_ONLY'
+  | 'READ_WRITE';
 
 /** Hierarchical pod scheduling & resource configuration section. */
 export type SchedulingInput = {
@@ -975,6 +1097,32 @@ export type UpdateEnvironmentInput = {
   scheduling?: InputMaybe<SchedulingInput>;
 };
 
+export type UpdateGroupInput = {
+  memberIds?: InputMaybe<Array<Scalars['ID']['input']>>;
+  name?: InputMaybe<Scalars['String']['input']>;
+  role?: InputMaybe<Role>;
+};
+
+export type UpdateUserInput = {
+  active?: InputMaybe<Scalars['Boolean']['input']>;
+  displayName?: InputMaybe<Scalars['String']['input']>;
+  groupIds?: InputMaybe<Array<Scalars['ID']['input']>>;
+  role?: InputMaybe<Role>;
+};
+
+export type User = {
+  __typename?: 'User';
+  active: Scalars['Boolean']['output'];
+  createdOn?: Maybe<Scalars['DateTime']['output']>;
+  displayName: Scalars['String']['output'];
+  effectiveRole: Role;
+  groups: Array<Group>;
+  id: Scalars['UUID']['output'];
+  role: Role;
+  updatedOn?: Maybe<Scalars['DateTime']['output']>;
+  username: Scalars['String']['output'];
+};
+
 /** Weighted affinity term for a ``preferred`` rule. */
 export type WeightedAffinityTermInput = {
   term: AffinityTermInput;
@@ -992,6 +1140,14 @@ export type AssignBackupStorageLocationMutationVariables = Exact<{
 
 
 export type AssignBackupStorageLocationMutation = { __typename?: 'Mutation', assignBackupStorageLocation?: { __typename?: 'Environment', id: string, name: string, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null } | null };
+
+export type ChangePasswordMutationVariables = Exact<{
+  currentPassword: Scalars['String']['input'];
+  newPassword: Scalars['String']['input'];
+}>;
+
+
+export type ChangePasswordMutation = { __typename?: 'Mutation', changePassword: boolean };
 
 export type CreateBackupMutationVariables = Exact<{
   instanceId: Scalars['UUID']['input'];
@@ -1030,6 +1186,13 @@ export type CreateEnvironmentMutationVariables = Exact<{
 
 export type CreateEnvironmentMutation = { __typename?: 'Mutation', createEnvironment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string } } | null };
 
+export type CreateGroupMutationVariables = Exact<{
+  input: CreateGroupInput;
+}>;
+
+
+export type CreateGroupMutation = { __typename?: 'Mutation', createGroup: { __typename?: 'Group', id: string, name: string, role: Role } };
+
 export type CreateRestoreMutationVariables = Exact<{
   backupId: Scalars['UUID']['input'];
   targetNamespace: Scalars['String']['input'];
@@ -1038,6 +1201,18 @@ export type CreateRestoreMutationVariables = Exact<{
 
 
 export type CreateRestoreMutation = { __typename?: 'Mutation', createRestore?: { __typename?: 'Restore', id: string, name: string, status: string, backupId: string, targetNamespace: string, targetInstanceId?: string | null, errorMessage?: string | null, createdOn: any } | null };
+
+export type CreateUserMutationVariables = Exact<{
+  input: CreateUserInput;
+}>;
+
+
+export type CreateUserMutation = { __typename?: 'Mutation', createUser: { __typename?: 'User', id: string, username: string, displayName: string, role: Role, effectiveRole: Role, active: boolean, createdOn?: any | null, updatedOn?: any | null, groups: Array<{ __typename?: 'Group', id: string, name: string, role: Role }> } };
+
+export type CurrentUserQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type CurrentUserQuery = { __typename?: 'Query', currentUser?: { __typename?: 'User', id: string, username: string, displayName: string, role: Role, effectiveRole: Role, active: boolean } | null };
 
 export type DeleteBackupMutationVariables = Exact<{
   backupId: Scalars['UUID']['input'];
@@ -1059,6 +1234,20 @@ export type DeleteDeploymentMutationVariables = Exact<{
 
 
 export type DeleteDeploymentMutation = { __typename?: 'Mutation', deleteDeployment: { __typename?: 'Task', id: string, type: string, status: string, deploymentId?: string | null } };
+
+export type DeleteGroupMutationVariables = Exact<{
+  id: Scalars['UUID']['input'];
+}>;
+
+
+export type DeleteGroupMutation = { __typename?: 'Mutation', deleteGroup: boolean };
+
+export type DeleteUserMutationVariables = Exact<{
+  id: Scalars['UUID']['input'];
+}>;
+
+
+export type DeleteUserMutation = { __typename?: 'Mutation', deleteUser: boolean };
 
 export type DeployMutationVariables = Exact<{
   version?: InputMaybe<Scalars['String']['input']>;
@@ -1123,6 +1312,11 @@ export type GetEnvironmentQueryVariables = Exact<{
 
 export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, applicationDriverVersionId: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
 
+export type GetGroupQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetGroupQuery = { __typename?: 'Query', groups: Array<{ __typename?: 'Group', id: string, name: string, role: Role }> };
+
 export type GetRestoreQueryVariables = Exact<{
   restoreId: Scalars['UUID']['input'];
 }>;
@@ -1171,6 +1365,13 @@ export type ListEnvironmentsQueryVariables = Exact<{
 
 export type ListEnvironmentsQuery = { __typename?: 'Query', environments: Array<{ __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }> }> }> };
 
+export type ListGroupsQueryVariables = Exact<{
+  search?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type ListGroupsQuery = { __typename?: 'Query', groups: Array<{ __typename?: 'Group', id: string, name: string, role: Role }> };
+
 export type ListRestoresQueryVariables = Exact<{
   backupId: Scalars['UUID']['input'];
   status?: InputMaybe<RestoreStatus>;
@@ -1178,6 +1379,15 @@ export type ListRestoresQueryVariables = Exact<{
 
 
 export type ListRestoresQuery = { __typename?: 'Query', restores: Array<{ __typename?: 'Restore', id: string, name: string, status: string, createdOn: any, startedAt?: any | null, completedAt?: any | null, targetNamespace: string, errorMessage?: string | null, componentStatuses?: Array<{ __typename?: 'ComponentRestoreStatus', componentName: string, status: string, errorMessage?: string | null }> | null }> };
+
+export type ListUsersQueryVariables = Exact<{
+  active?: InputMaybe<Scalars['Boolean']['input']>;
+  role?: InputMaybe<Role>;
+  search?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type ListUsersQuery = { __typename?: 'Query', users: Array<{ __typename?: 'User', id: string, username: string, displayName: string, role: Role, effectiveRole: Role, active: boolean, createdOn?: any | null, updatedOn?: any | null, groups: Array<{ __typename?: 'Group', id: string, name: string, role: Role }> }> };
 
 export type LoadLocalDriverMutationVariables = Exact<{
   path: Scalars['String']['input'];
@@ -1193,6 +1403,27 @@ export type LoadRemoteDriverMutationVariables = Exact<{
 
 
 export type LoadRemoteDriverMutation = { __typename?: 'Mutation', loadRemoteApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, applicationDriverId: string } | null };
+
+export type LoginMutationVariables = Exact<{
+  username: Scalars['String']['input'];
+  password: Scalars['String']['input'];
+}>;
+
+
+export type LoginMutation = { __typename?: 'Mutation', login: { __typename?: 'LoginResult', token: string, user: { __typename?: 'User', id: string, username: string, displayName: string, role: Role, effectiveRole: Role, active: boolean } } };
+
+export type LogoutMutationVariables = Exact<{ [key: string]: never; }>;
+
+
+export type LogoutMutation = { __typename?: 'Mutation', logout: boolean };
+
+export type ResetUserPasswordMutationVariables = Exact<{
+  userId: Scalars['UUID']['input'];
+  newPassword: Scalars['String']['input'];
+}>;
+
+
+export type ResetUserPasswordMutation = { __typename?: 'Mutation', resetUserPassword: boolean };
 
 export type UnassignBackupStorageLocationMutationVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -1242,6 +1473,22 @@ export type UpdateEnvironmentMutationVariables = Exact<{
 
 export type UpdateEnvironmentMutation = { __typename?: 'Mutation', updateEnvironment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string } } | null };
 
+export type UpdateGroupMutationVariables = Exact<{
+  id: Scalars['UUID']['input'];
+  input: UpdateGroupInput;
+}>;
+
+
+export type UpdateGroupMutation = { __typename?: 'Mutation', updateGroup: { __typename?: 'Group', id: string, name: string, role: Role } };
+
+export type UpdateUserMutationVariables = Exact<{
+  id: Scalars['UUID']['input'];
+  input: UpdateUserInput;
+}>;
+
+
+export type UpdateUserMutation = { __typename?: 'Mutation', updateUser: { __typename?: 'User', id: string, username: string, displayName: string, role: Role, effectiveRole: Role, active: boolean, createdOn?: any | null, updatedOn?: any | null, groups: Array<{ __typename?: 'Group', id: string, name: string, role: Role }> } };
+
 
 
 export const AssignBackupStorageLocationDocument = `
@@ -1269,6 +1516,25 @@ export const useAssignBackupStorageLocationMutation = <
       {
     mutationKey: ['AssignBackupStorageLocation'],
     mutationFn: (variables?: AssignBackupStorageLocationMutationVariables) => graphqlFetcher<AssignBackupStorageLocationMutation, AssignBackupStorageLocationMutationVariables>(AssignBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const ChangePasswordDocument = `
+    mutation ChangePassword($currentPassword: String!, $newPassword: String!) {
+  changePassword(currentPassword: $currentPassword, newPassword: $newPassword)
+}
+    `;
+
+export const useChangePasswordMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<ChangePasswordMutation, TError, ChangePasswordMutationVariables, TContext>) => {
+    
+    return useMutation<ChangePasswordMutation, TError, ChangePasswordMutationVariables, TContext>(
+      {
+    mutationKey: ['ChangePassword'],
+    mutationFn: (variables?: ChangePasswordMutationVariables) => graphqlFetcher<ChangePasswordMutation, ChangePasswordMutationVariables>(ChangePasswordDocument, variables)(),
     ...options
   }
     )};
@@ -1382,6 +1648,29 @@ export const useCreateEnvironmentMutation = <
   }
     )};
 
+export const CreateGroupDocument = `
+    mutation CreateGroup($input: CreateGroupInput!) {
+  createGroup(input: $input) {
+    id
+    name
+    role
+  }
+}
+    `;
+
+export const useCreateGroupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateGroupMutation, TError, CreateGroupMutationVariables, TContext>) => {
+    
+    return useMutation<CreateGroupMutation, TError, CreateGroupMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateGroup'],
+    mutationFn: (variables?: CreateGroupMutationVariables) => graphqlFetcher<CreateGroupMutation, CreateGroupMutationVariables>(CreateGroupDocument, variables)(),
+    ...options
+  }
+    )};
+
 export const CreateRestoreDocument = `
     mutation CreateRestore($backupId: UUID!, $targetNamespace: String!, $targetInstanceId: UUID) {
   createRestore(
@@ -1413,6 +1702,70 @@ export const useCreateRestoreMutation = <
     ...options
   }
     )};
+
+export const CreateUserDocument = `
+    mutation CreateUser($input: CreateUserInput!) {
+  createUser(input: $input) {
+    id
+    username
+    displayName
+    role
+    effectiveRole
+    active
+    groups {
+      id
+      name
+      role
+    }
+    createdOn
+    updatedOn
+  }
+}
+    `;
+
+export const useCreateUserMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CreateUserMutation, TError, CreateUserMutationVariables, TContext>) => {
+    
+    return useMutation<CreateUserMutation, TError, CreateUserMutationVariables, TContext>(
+      {
+    mutationKey: ['CreateUser'],
+    mutationFn: (variables?: CreateUserMutationVariables) => graphqlFetcher<CreateUserMutation, CreateUserMutationVariables>(CreateUserDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const CurrentUserDocument = `
+    query CurrentUser {
+  currentUser {
+    id
+    username
+    displayName
+    role
+    effectiveRole
+    active
+  }
+}
+    `;
+
+export const useCurrentUserQuery = <
+      TData = CurrentUserQuery,
+      TError = Error
+    >(
+      variables?: CurrentUserQueryVariables,
+      options?: Omit<UseQueryOptions<CurrentUserQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<CurrentUserQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<CurrentUserQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['CurrentUser'] : ['CurrentUser', variables],
+    queryFn: graphqlFetcher<CurrentUserQuery, CurrentUserQueryVariables>(CurrentUserDocument, variables),
+    ...options
+  }
+    )};
+
+useCurrentUserQuery.getKey = (variables?: CurrentUserQueryVariables) => variables === undefined ? ['CurrentUser'] : ['CurrentUser', variables];
 
 export const DeleteBackupDocument = `
     mutation DeleteBackup($backupId: UUID!) {
@@ -1472,6 +1825,44 @@ export const useDeleteDeploymentMutation = <
       {
     mutationKey: ['DeleteDeployment'],
     mutationFn: (variables?: DeleteDeploymentMutationVariables) => graphqlFetcher<DeleteDeploymentMutation, DeleteDeploymentMutationVariables>(DeleteDeploymentDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const DeleteGroupDocument = `
+    mutation DeleteGroup($id: UUID!) {
+  deleteGroup(id: $id)
+}
+    `;
+
+export const useDeleteGroupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeleteGroupMutation, TError, DeleteGroupMutationVariables, TContext>) => {
+    
+    return useMutation<DeleteGroupMutation, TError, DeleteGroupMutationVariables, TContext>(
+      {
+    mutationKey: ['DeleteGroup'],
+    mutationFn: (variables?: DeleteGroupMutationVariables) => graphqlFetcher<DeleteGroupMutation, DeleteGroupMutationVariables>(DeleteGroupDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const DeleteUserDocument = `
+    mutation DeleteUser($id: UUID!) {
+  deleteUser(id: $id)
+}
+    `;
+
+export const useDeleteUserMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeleteUserMutation, TError, DeleteUserMutationVariables, TContext>) => {
+    
+    return useMutation<DeleteUserMutation, TError, DeleteUserMutationVariables, TContext>(
+      {
+    mutationKey: ['DeleteUser'],
+    mutationFn: (variables?: DeleteUserMutationVariables) => graphqlFetcher<DeleteUserMutation, DeleteUserMutationVariables>(DeleteUserDocument, variables)(),
     ...options
   }
     )};
@@ -1832,6 +2223,34 @@ export const useGetEnvironmentQuery = <
 
 useGetEnvironmentQuery.getKey = (variables: GetEnvironmentQueryVariables) => ['GetEnvironment', variables];
 
+export const GetGroupDocument = `
+    query GetGroup {
+  groups {
+    id
+    name
+    role
+  }
+}
+    `;
+
+export const useGetGroupQuery = <
+      TData = GetGroupQuery,
+      TError = Error
+    >(
+      variables?: GetGroupQueryVariables,
+      options?: Omit<UseQueryOptions<GetGroupQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetGroupQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetGroupQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['GetGroup'] : ['GetGroup', variables],
+    queryFn: graphqlFetcher<GetGroupQuery, GetGroupQueryVariables>(GetGroupDocument, variables),
+    ...options
+  }
+    )};
+
+useGetGroupQuery.getKey = (variables?: GetGroupQueryVariables) => variables === undefined ? ['GetGroup'] : ['GetGroup', variables];
+
 export const GetRestoreDocument = `
     query GetRestore($restoreId: UUID!) {
   restore(restoreId: $restoreId) {
@@ -2115,6 +2534,34 @@ export const useListEnvironmentsQuery = <
 
 useListEnvironmentsQuery.getKey = (variables?: ListEnvironmentsQueryVariables) => variables === undefined ? ['ListEnvironments'] : ['ListEnvironments', variables];
 
+export const ListGroupsDocument = `
+    query ListGroups($search: String) {
+  groups(search: $search) {
+    id
+    name
+    role
+  }
+}
+    `;
+
+export const useListGroupsQuery = <
+      TData = ListGroupsQuery,
+      TError = Error
+    >(
+      variables?: ListGroupsQueryVariables,
+      options?: Omit<UseQueryOptions<ListGroupsQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListGroupsQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListGroupsQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['ListGroups'] : ['ListGroups', variables],
+    queryFn: graphqlFetcher<ListGroupsQuery, ListGroupsQueryVariables>(ListGroupsDocument, variables),
+    ...options
+  }
+    )};
+
+useListGroupsQuery.getKey = (variables?: ListGroupsQueryVariables) => variables === undefined ? ['ListGroups'] : ['ListGroups', variables];
+
 export const ListRestoresDocument = `
     query ListRestores($backupId: UUID!, $status: RestoreStatus) {
   restores(backupId: $backupId, status: $status) {
@@ -2152,6 +2599,44 @@ export const useListRestoresQuery = <
     )};
 
 useListRestoresQuery.getKey = (variables: ListRestoresQueryVariables) => ['ListRestores', variables];
+
+export const ListUsersDocument = `
+    query ListUsers($active: Boolean, $role: Role, $search: String) {
+  users(active: $active, role: $role, search: $search) {
+    id
+    username
+    displayName
+    role
+    effectiveRole
+    active
+    groups {
+      id
+      name
+      role
+    }
+    createdOn
+    updatedOn
+  }
+}
+    `;
+
+export const useListUsersQuery = <
+      TData = ListUsersQuery,
+      TError = Error
+    >(
+      variables?: ListUsersQueryVariables,
+      options?: Omit<UseQueryOptions<ListUsersQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListUsersQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListUsersQuery, TError, TData>(
+      {
+    queryKey: variables === undefined ? ['ListUsers'] : ['ListUsers', variables],
+    queryFn: graphqlFetcher<ListUsersQuery, ListUsersQueryVariables>(ListUsersDocument, variables),
+    ...options
+  }
+    )};
+
+useListUsersQuery.getKey = (variables?: ListUsersQueryVariables) => variables === undefined ? ['ListUsers'] : ['ListUsers', variables];
 
 export const LoadLocalDriverDocument = `
     mutation LoadLocalDriver($path: String!) {
@@ -2198,6 +2683,73 @@ export const useLoadRemoteDriverMutation = <
       {
     mutationKey: ['LoadRemoteDriver'],
     mutationFn: (variables?: LoadRemoteDriverMutationVariables) => graphqlFetcher<LoadRemoteDriverMutation, LoadRemoteDriverMutationVariables>(LoadRemoteDriverDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const LoginDocument = `
+    mutation Login($username: String!, $password: String!) {
+  login(username: $username, password: $password) {
+    token
+    user {
+      id
+      username
+      displayName
+      role
+      effectiveRole
+      active
+    }
+  }
+}
+    `;
+
+export const useLoginMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<LoginMutation, TError, LoginMutationVariables, TContext>) => {
+    
+    return useMutation<LoginMutation, TError, LoginMutationVariables, TContext>(
+      {
+    mutationKey: ['Login'],
+    mutationFn: (variables?: LoginMutationVariables) => graphqlFetcher<LoginMutation, LoginMutationVariables>(LoginDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const LogoutDocument = `
+    mutation Logout {
+  logout
+}
+    `;
+
+export const useLogoutMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<LogoutMutation, TError, LogoutMutationVariables, TContext>) => {
+    
+    return useMutation<LogoutMutation, TError, LogoutMutationVariables, TContext>(
+      {
+    mutationKey: ['Logout'],
+    mutationFn: (variables?: LogoutMutationVariables) => graphqlFetcher<LogoutMutation, LogoutMutationVariables>(LogoutDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const ResetUserPasswordDocument = `
+    mutation ResetUserPassword($userId: UUID!, $newPassword: String!) {
+  resetUserPassword(userId: $userId, newPassword: $newPassword)
+}
+    `;
+
+export const useResetUserPasswordMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<ResetUserPasswordMutation, TError, ResetUserPasswordMutationVariables, TContext>) => {
+    
+    return useMutation<ResetUserPasswordMutation, TError, ResetUserPasswordMutationVariables, TContext>(
+      {
+    mutationKey: ['ResetUserPassword'],
+    mutationFn: (variables?: ResetUserPasswordMutationVariables) => graphqlFetcher<ResetUserPasswordMutation, ResetUserPasswordMutationVariables>(ResetUserPasswordDocument, variables)(),
     ...options
   }
     )};
@@ -2347,6 +2899,62 @@ export const useUpdateEnvironmentMutation = <
       {
     mutationKey: ['UpdateEnvironment'],
     mutationFn: (variables?: UpdateEnvironmentMutationVariables) => graphqlFetcher<UpdateEnvironmentMutation, UpdateEnvironmentMutationVariables>(UpdateEnvironmentDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateGroupDocument = `
+    mutation UpdateGroup($id: UUID!, $input: UpdateGroupInput!) {
+  updateGroup(id: $id, input: $input) {
+    id
+    name
+    role
+  }
+}
+    `;
+
+export const useUpdateGroupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateGroupMutation, TError, UpdateGroupMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateGroupMutation, TError, UpdateGroupMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateGroup'],
+    mutationFn: (variables?: UpdateGroupMutationVariables) => graphqlFetcher<UpdateGroupMutation, UpdateGroupMutationVariables>(UpdateGroupDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateUserDocument = `
+    mutation UpdateUser($id: UUID!, $input: UpdateUserInput!) {
+  updateUser(id: $id, input: $input) {
+    id
+    username
+    displayName
+    role
+    effectiveRole
+    active
+    groups {
+      id
+      name
+      role
+    }
+    createdOn
+    updatedOn
+  }
+}
+    `;
+
+export const useUpdateUserMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateUserMutation, TError, UpdateUserMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateUserMutation, TError, UpdateUserMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateUser'],
+    mutationFn: (variables?: UpdateUserMutationVariables) => graphqlFetcher<UpdateUserMutation, UpdateUserMutationVariables>(UpdateUserDocument, variables)(),
     ...options
   }
     )};

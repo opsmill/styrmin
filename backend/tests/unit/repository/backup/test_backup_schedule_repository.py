@@ -9,6 +9,8 @@ from styrmin_backend.db.models import (
     Deployment,
     DeploymentState,
     Environment,
+    Role,
+    User,
 )
 from styrmin_backend.repository.backup_schedule import SQLModelBackupScheduleRepository
 
@@ -30,13 +32,29 @@ async def environment(session: AsyncSession, cluster: Cluster) -> Environment:
 
 
 @pytest.fixture
-async def deployment(session: AsyncSession, environment: Environment) -> Deployment:
+async def creator(session: AsyncSession) -> User:
+    user = User(
+        username="repo-test-creator",
+        password_hash="x",
+        display_name="repo-test-creator",
+        role=Role.ADMIN,
+    )
+    session.add(user)
+    await session.flush()
+    return user
+
+
+@pytest.fixture
+async def deployment(
+    session: AsyncSession, environment: Environment, creator: User
+) -> Deployment:
     dep = Deployment(
         name="test-deployment",
         application_version="1.0.0",
         status=DeploymentState.RUNNING,
         application_driver_version_id=uuid4(),
         environment_id=environment.id,
+        created_by_user_id=creator.id,
     )
     session.add(dep)
     await session.flush()

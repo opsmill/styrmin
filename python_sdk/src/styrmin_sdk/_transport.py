@@ -68,5 +68,12 @@ class Transport:
 
         return response.json()
 
+    def set_authorization(self, token: str | None) -> None:
+        """Set or clear the Bearer Authorization header for subsequent requests."""
+        if token is None:
+            self._client.headers.pop("Authorization", None)
+        else:
+            self._client.headers["Authorization"] = f"Bearer {token}"
+
     async def close(self) -> None:
         await self._client.aclose()

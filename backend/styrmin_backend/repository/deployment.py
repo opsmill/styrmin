@@ -131,6 +131,7 @@ class SQLModelDeploymentRepository(
             deleted_at=deployment.deleted_at,
             application_driver_version_id=deployment.application_driver_version_id,
             environment_id=deployment.environment_id,
+            created_by_user_id=deployment.created_by_user_id,
             components=components,
             active_application_instance=instance_model,
         )
@@ -164,6 +165,7 @@ class SQLModelDeploymentRepository(
             environment_id=entity.environment_id,
             status=DeploymentStateEntity(entity.status.value),
             deleted_at=entity.deleted_at,
+            created_by_user_id=entity.created_by_user_id,
         )
         for component in entity.components:
             deployment.add_component(
@@ -310,6 +312,7 @@ class SQLModelDeploymentRepository(
             environment_id=entity.environment_id,
             status=DeploymentStateEntity(entity.status.value),
             deleted_at=entity.deleted_at,
+            created_by_user_id=entity.created_by_user_id,
         )
         for component in entity.components:
             deployment.add_component(

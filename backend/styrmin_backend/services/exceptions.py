@@ -24,6 +24,20 @@ class NoInstanceError(ServiceError):
     default_message = "Application instance not found"
 
 
+class InvalidCredentialsError(ServiceError):
+    """Authentication failed: nonexistent user, wrong password, or deactivated account."""
+
+    error_code = "INVALID_CREDENTIALS"
+    default_message = "Invalid credentials"
+
+
+class PasswordPolicyError(ServiceError):
+    """Password fails the length policy (12-256 chars)."""
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "Password does not meet the password policy"
+
+
 class ServiceUnexpectedError(ServiceError):
     """An unexpected error occurred."""
 
@@ -465,6 +479,59 @@ class UnresolvableAffinityReferenceError(ServiceError):
         if self.path is not None:
             meta["path"] = self.path
         return meta
+
+
+class ValidationError(ServiceError):
+    """Generic input validation failure (length, charset, enum).
+
+    Used by admin user / group mutations when a free-form input fails a
+    shape constraint that does not have a more specific code.
+    """
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "Input validation failed"
+
+
+class UserNotFoundError(ServiceError):
+    """The user was not found."""
+
+    error_code = "USER_NOT_FOUND"
+    default_message = "User not found"
+
+
+class GroupNotFoundError(ServiceError):
+    """The group was not found."""
+
+    error_code = "GROUP_NOT_FOUND"
+    default_message = "Group not found"
+
+
+class DuplicateUsernameError(ServiceError):
+    """A user with that username already exists."""
+
+    error_code = "DUPLICATE_USERNAME"
+    default_message = "A user with that username already exists"
+
+
+class DuplicateGroupNameError(ServiceError):
+    """A group with that name already exists."""
+
+    error_code = "DUPLICATE_GROUP_NAME"
+    default_message = "A group with that name already exists"
+
+
+class LastAdminError(ServiceError):
+    """The requested change would leave zero active admins."""
+
+    error_code = "LAST_ADMIN"
+    default_message = "Operation would leave zero active admins"
+
+
+class UserHasReferencesError(ServiceError):
+    """The user cannot be hard-deleted because foreign-key references exist."""
+
+    error_code = "USER_HAS_REFERENCES"
+    default_message = "User has foreign-key references and cannot be deleted"
 
 
 class SchedulingPatchRenderingError(ServiceError):

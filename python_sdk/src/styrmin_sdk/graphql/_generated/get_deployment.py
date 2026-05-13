@@ -23,6 +23,7 @@ class GetDeploymentDeployment(BaseModel):
     application_version: str = Field(alias="applicationVersion")
     application_driver_version_id: UUID = Field(alias="applicationDriverVersionId")
     environment_id: UUID = Field(alias="environmentId")
+    created_by: "GetDeploymentDeploymentCreatedBy" = Field(alias="createdBy")
     application_instance: Optional["GetDeploymentDeploymentApplicationInstance"] = (
         Field(alias="applicationInstance")
     )
@@ -30,6 +31,12 @@ class GetDeploymentDeployment(BaseModel):
     deployed_services: list["GetDeploymentDeploymentDeployedServices"] = Field(
         alias="deployedServices"
     )
+
+
+class GetDeploymentDeploymentCreatedBy(BaseModel):
+    id: UUID
+    username: str
+    display_name: str = Field(alias="displayName")
 
 
 class GetDeploymentDeploymentApplicationInstance(BaseModel):

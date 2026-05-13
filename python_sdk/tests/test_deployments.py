@@ -60,6 +60,11 @@ async def test_get_deployment_success(client: StyrminClient, mock_transport: Asy
                 "applicationDriverVersionId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
                 "applicationDriverVersion": None,
                 "environmentId": "22222222-3333-4444-5555-666666666666",
+                "createdBy": {
+                    "id": "55555555-6666-7777-8888-999999999999",
+                    "username": "alice",
+                    "displayName": "Alice",
+                },
                 "applicationInstance": {"id": "33333333-4444-5555-6666-777777777777", "status": "running"},
                 "components": [
                     {"id": "44444444-5555-6666-7777-888888888888", "name": "web", "enabled": True},

@@ -71,6 +71,8 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [adr-021-driver-env-var-consumption.md](adr/adr-021-driver-env-var-consumption.md) - Driver-side env var consumption via the values template, replacing platform post-render injection
 - [adr-022-schema-walking-input-propagation-tests.md](adr/adr-022-schema-walking-input-propagation-tests.md) - Schema-walking propagation tests for Strawberry input completeness against Pydantic config models
 - [adr-023-frontend-value-transform-boundary.md](adr/adr-023-frontend-value-transform-boundary.md) - Frontend value-transform layer at the GraphQL submit boundary for full-replacement inputs
+- [adr-024-authentication-and-sessions.md](adr/adr-024-authentication-and-sessions.md) - Opaque server-side session tokens with dual transport (HttpOnly cookie + bearer header), 30-day absolute / 7-day idle lifetime, argon2id passwords
+- [adr-025-authorization-model.md](adr/adr-025-authorization-model.md) - Three-tier role-based authorization (`READ_ONLY` / `READ_WRITE` / `ADMIN`) with default-deny `RequiresAuthentication` extension and per-resolver `RequiresRole`
 
 ## Current Knowledge
 
@@ -108,3 +110,4 @@ Frontend architecture documentation in [knowledge/frontend/](knowledge/frontend/
 - [local-demo.md](guides/local-demo.md) - Local vCluster demo lifecycle
 - [pod-scheduling.md](guides/pod-scheduling.md) - Pod scheduling configuration reference
 - [session-retrospectives.md](guides/session-retrospectives.md) - End-of-session workflow for turning agent friction into approved context-management improvements
+- [users-and-groups.md](guides/users-and-groups.md) - Operator guide to users, groups, roles, the bootstrap admin, the Settings → Access UI, lockout recovery, and v1 limitations

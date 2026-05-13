@@ -25,6 +25,7 @@ dependencies = [
     "rich>=14.2.0",
     "cyclopts>=3.0.0",
     "kopf>=1.37.0",
+    "argon2-cffi>=23.1.0",
 ]
 
 

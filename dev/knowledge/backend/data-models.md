@@ -328,6 +328,31 @@ class PodPhase(str, Enum):
     UNKNOWN = "unknown"  # Used when the observed phase doesn't match a known value
 ```
 
+<!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
+
+## Auth & Authorization
+
+The `user`, `group`, `user_group`, and `session` tables ship in #179 (see [ADR-024](../../adr/adr-024-authentication-and-sessions.md) and [ADR-025](../../adr/adr-025-authorization-model.md) for column-level schema and rationale). Feature 011 introduces **no** schema changes; the notes below describe how the admin mutation surface consumes the existing tables.
+
+### Effective role
+
+Authorization checks MUST consume `User.effective_role`, not `User.role`. The effective role is computed as:
+
+```python
+effective_role = max(user.role, max((g.role for g in user.groups), default=Role.READ_ONLY))
+```
+
+A user with direct role `READ_WRITE` who belongs to a group whose role is `ADMIN` has effective role `ADMIN`. The frontend `<IfRole>` gate and the backend `RequiresRole` check both read `effective_role`. Raw `role` is only meaningful as one of the inputs to that computation; reading it directly skips the group-conferred path and is a bug.
+
+### User lifecycle when FK references exist
+
+The user lifecycle prioritises **deactivation over deletion** whenever attribution history must be preserved:
+
+- `updateUser(setActive: false)` is always permitted (subject to the last-admin guard). It invalidates all of the target's sessions in the same transaction and stops them logging back in, but leaves the row intact so `deployment.created_by_user_id` and similar FKs remain resolvable.
+- `deleteUser(userId)` only succeeds when **no** FK references point to the user. If any do, the mutation rejects with `USER_HAS_REFERENCES` and the admin is expected to use `updateUser(setActive:false)` instead. The presence of `Deployment.created_by_user_id` referencing the target is the dominant trigger in practice.
+
+The last-admin invariant applies to **both** lifecycle paths: deactivating, deleting, demoting, or removing-from-admin-group any user that is the sole remaining active admin (including the admin acting on themselves) raises `LAST_ADMIN`. See [`services.md` → Authorization helpers](services.md) for the pure-function guard.
+
 ## Domain Models
 
 Located in `styrmin_backend/domain/models.py`, these are Pydantic models used in business logic.

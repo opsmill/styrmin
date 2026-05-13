@@ -21,6 +21,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { IfRole } from "@/auth/IfRole";
 
 import { RedeployConfirmDialog } from "./RedeployConfirmDialog";
 
@@ -352,14 +353,16 @@ export function EnvVarsForm({
             {validation.totalBytes.toLocaleString()} /{" "}
             {PER_SCOPE_BYTES.toLocaleString()} bytes
           </span>
-          <Button
-            type="button"
-            onClick={handleSaveClick}
-            disabled={hasErrors || isSubmitting || Boolean(blockedReason)}
-            data-testid="env-vars-form-save-button"
-          >
-            {isSubmitting ? "Saving..." : "Save"}
-          </Button>
+          <IfRole minimum="READ_WRITE">
+            <Button
+              type="button"
+              onClick={handleSaveClick}
+              disabled={hasErrors || isSubmitting || Boolean(blockedReason)}
+              data-testid="env-vars-form-save-button"
+            >
+              {isSubmitting ? "Saving..." : "Save"}
+            </Button>
+          </IfRole>
         </div>
       </div>
 

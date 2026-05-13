@@ -1,0 +1,63 @@
+"""Documented allow-list for unauthenticated GraphQL fields. See ADR-020.
+
+Two layers consult this list: the ``RequiresAuthentication`` schema
+extension at request time, and the schema-walk completeness test in CI.
+A name added here is reviewable in the same PR that adds the unguarded
+field — there is no externalised config that would let an unguarded
+field ship through config drift.
+"""
+
+from __future__ import annotations
+
+#: Mutation fields that may be invoked without an authenticated session.
+#:
+#: ``login`` is the entry point; gating it would lock everyone out.
+#:
+#: ``logout`` is allow-listed per ADR-020 — a deactivated user must still
+#: be able to terminate their existing session. Gating logout behind
+#: ``RequiresAuthentication`` would defeat deactivation; idempotent for
+#: pre-auth callers (returns true and clears the cookie regardless).
+#:
+#: ``callback``, ``report_pod_statuses``, ``report_deployment_statuses`` are
+#: agent-to-server endpoints called from Prefect workflows and the in-cluster
+#: status reporter. They have no caller user identity in v1; a follow-up
+#: issue introduces service-account session tokens so these can move to
+#: ``RequiresRole(ADMIN)``. Documented here so the gap is auditable.
+#: TODO(#188): replace agent allow-list entries with service-account auth.
+MUTATION_ALLOW_LIST: frozenset[str] = frozenset(
+    {
+        "login",
+        "logout",
+        "callback",
+        "reportPodStatuses",
+        "reportDeploymentStatuses",
+    }
+)
+
+#: Query fields that may be invoked without an authenticated session.
+#:
+#: ``currentUser`` returns null when unauthenticated so that callers booting
+#: the app distinguish "logged out" from "errored" without an error branch.
+#:
+#: ``environments`` is the read-side counterpart to the agent allow-list
+#: above: the in-cluster status reporter polls
+#: ``ListDeploymentsForStatus`` (a traversal under ``Query.environments``)
+#: to discover which deployments to report on. It has no caller user
+#: identity in v1; the same #188 follow-up that introduces service-account
+#: session tokens for the report mutations covers this read path.
+#:
+#: TODO(#188): Two follow-ups land together once service-account auth
+#:   ships:
+#:     1. The agent status reporter (``agent/status/reporter.py``) must
+#:        pass an ``Authorization: Bearer <svc-token>`` header on every
+#:        request — today it uses bare ``httpx.AsyncClient()`` with no
+#:        credentials, so there is no token to validate against.
+#:     2. Replace ``environments`` here with a purpose-built
+#:        ``environmentsForAgent`` query that returns ONLY
+#:        ``deployments { id, status, internal }`` (the fields
+#:        ``ListDeploymentsForStatus`` actually reads), gated by
+#:        ``RequiresAuthentication`` alone (any authenticated principal).
+#:        Drop ``environments`` from this list at the same time.
+#:   Until step 1 lands, narrowing the allow-list breaks the agent loop —
+#:   so the broad ``environments`` entry stays as the documented gap.
+QUERY_ALLOW_LIST: frozenset[str] = frozenset({"currentUser", "ok", "environments"})

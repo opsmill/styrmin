@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/use-theme";
+import { useAuth } from "@/auth/AuthProvider";
+import { HeaderUserMenu } from "@/components/HeaderUserMenu";
 
 const STORAGE_KEY = "sidebar-collapsed";
 
@@ -24,6 +26,10 @@ const navItems = [
   },
 ];
 
+// Users/Groups admin surfaces are reachable from the Settings page,
+// not the top-level sidebar — see SettingsPage. Keeping them off the
+// sidebar means a non-admin browser only ever sees the same five nav
+// entries every other role does.
 const bottomNavItems = [
   { label: "Settings", icon: Settings, href: "/settings", exact: false },
 ];
@@ -34,6 +40,8 @@ export function AppShell() {
   });
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { theme } = useTheme();
+  const { currentUser, logout } = useAuth();
+  const isLoginRoute = pathname === "/login";
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(collapsed));
@@ -62,6 +70,23 @@ export function AppShell() {
         <item.icon className="h-[18px] w-[18px] shrink-0" />
         {!collapsed && <span>{item.label}</span>}
       </Link>
+    );
+  }
+
+  if (isLoginRoute) {
+    // Login is a full-screen experience; we still render the shared top
+    // header so global affordances (future theme toggle, etc.) remain visible,
+    // but the navigation sidebar and the authenticated user menu are hidden.
+    return (
+      <div className="flex min-h-screen flex-col">
+        <header
+          className="flex h-12 items-center justify-end border-b border-border bg-background px-4"
+          data-testid="app-header"
+        />
+        <main className="flex-1 overflow-auto">
+          <Outlet />
+        </main>
+      </div>
     );
   }
 
@@ -129,8 +154,18 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div className="flex-1 overflow-auto">
-        <Outlet />
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <header
+          className="flex h-12 items-center justify-end gap-3 border-b border-border bg-background px-4"
+          data-testid="app-header"
+        >
+          {currentUser !== null && (
+            <HeaderUserMenu user={currentUser} onLogout={logout} />
+          )}
+        </header>
+        <main className="flex-1 overflow-auto">
+          <Outlet />
+        </main>
       </div>
     </div>
   );

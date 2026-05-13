@@ -41,6 +41,9 @@ class ErrorCode(StrEnum):
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     UNAUTHORIZED = "UNAUTHORIZED"
+    UNAUTHENTICATED = "UNAUTHENTICATED"
+    FORBIDDEN = "FORBIDDEN"
+    INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
     # Env vars (008-deployment-env-vars, data-model.md §7)
     INVALID_ENV_VAR_NAME = "INVALID_ENV_VAR_NAME"
     INVALID_ENV_VAR_VALUE = "INVALID_ENV_VAR_VALUE"
@@ -73,8 +76,16 @@ class StructuredErrorExtension(SchemaExtension):
             )
 
         if original is None or isinstance(original, GraphQLError):
-            # Request-validation / parse / variable-coercion error from
-            # graphql-core — the message is spec-defined as client-safe.
+            # Two cases share this branch:
+            #   - Request-validation / parse / variable-coercion errors
+            #     from graphql-core (no original_error).
+            #   - Pre-coded errors raised by our schema extensions
+            #     (RequiresAuthentication → UNAUTHENTICATED, RequiresRole
+            #     → FORBIDDEN), which arrive with extensions.code already
+            #     set and must ship through unchanged.
+            # ``setdefault`` preserves an existing code (UNAUTHENTICATED /
+            # FORBIDDEN) and only falls back to VALIDATION_ERROR for the
+            # bare graphql-core path.
             self._log_validation_error(error)
             existing = dict(error.extensions or {})
             existing.setdefault("code", ErrorCode.VALIDATION_ERROR)

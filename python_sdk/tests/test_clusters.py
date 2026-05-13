@@ -67,6 +67,7 @@ async def test_get_cluster_success(client: StyrminClient, mock_transport: AsyncM
                 "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
                 "name": "test-cluster",
                 "config": None,
+                "capabilities": None,
             }
         }
     }

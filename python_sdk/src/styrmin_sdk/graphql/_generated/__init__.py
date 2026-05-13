@@ -6,6 +6,7 @@ from .assign_backup_storage_location import (
 )
 from .async_base_client import AsyncBaseClient
 from .base_model import BaseModel, Upload
+from .change_password import ChangePassword
 from .client import Client
 from .create_backup import CreateBackup, CreateBackupCreateBackup
 from .create_backup_schedule import (
@@ -22,13 +23,18 @@ from .create_environment import (
     CreateEnvironmentCreateEnvironment,
     CreateEnvironmentCreateEnvironmentCluster,
 )
+from .create_group import CreateGroup, CreateGroupCreateGroup
 from .create_restore import CreateRestore, CreateRestoreCreateRestore
+from .create_user import CreateUser, CreateUserCreateUser, CreateUserCreateUserGroups
+from .current_user import CurrentUser, CurrentUserCurrentUser
 from .delete_backup import DeleteBackup
 from .delete_backup_schedule import DeleteBackupSchedule
 from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_deployment import DeleteDeployment, DeleteDeploymentDeleteDeployment
 from .delete_environment import DeleteEnvironment
+from .delete_group import DeleteGroup
+from .delete_user import DeleteUser
 from .deploy import Deploy, DeployDeploy
 from .enums import (
     BackupStatus,
@@ -38,6 +44,7 @@ from .enums import (
     LabelSelectorOperator,
     PodPhase,
     RestoreStatus,
+    Role,
     TolerationEffect,
     TolerationOperator,
     WhenUnsatisfiable,
@@ -61,6 +68,7 @@ from .get_deployment import (
     GetDeploymentDeployment,
     GetDeploymentDeploymentApplicationInstance,
     GetDeploymentDeploymentComponents,
+    GetDeploymentDeploymentCreatedBy,
     GetDeploymentDeploymentDeployedServices,
 )
 from .get_deployment_component_env_vars_full import (
@@ -119,13 +127,17 @@ from .get_environment_services import (
     GetEnvironmentServices,
     GetEnvironmentServicesEnvironmentServices,
 )
+from .get_group import GetGroup, GetGroupGroup
 from .get_pod_statuses import GetPodStatuses, GetPodStatusesPodStatuses
 from .get_restore import GetRestore, GetRestoreRestore
 from .get_task import GetTask, GetTaskTask
+from .get_user import GetUser, GetUserUser, GetUserUserGroups
 from .input_types import (
     AffinityBlockInput,
     AffinityTermInput,
     CrdConditionInput,
+    CreateGroupInput,
+    CreateUserInput,
     DedicatedIngressInput,
     DeploymentPodStatusReport,
     DeploymentReferenceInput,
@@ -144,6 +156,8 @@ from .input_types import (
     TolerationInput,
     TopologySpreadConstraintInput,
     UpdateEnvironmentInput,
+    UpdateGroupInput,
+    UpdateUserInput,
     WeightedAffinityTermInput,
 )
 from .list_backup_schedules import (
@@ -161,8 +175,10 @@ from .list_environments import (
     ListEnvironmentsEnvironments,
     ListEnvironmentsEnvironmentsCluster,
 )
+from .list_groups import ListGroups, ListGroupsGroups
 from .list_restores import ListRestores, ListRestoresRestores
 from .list_tasks import ListTasks, ListTasksTasks
+from .list_users import ListUsers, ListUsersUsers, ListUsersUsersGroups
 from .load_local_application_driver_version import (
     LoadLocalApplicationDriverVersion,
     LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersion,
@@ -178,11 +194,14 @@ from .load_remote_application_driver_version import (
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs,
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart,
 )
+from .login import Login, LoginLogin, LoginLoginUser
+from .logout import Logout
 from .report_deployment_statuses import (
     ReportDeploymentStatuses,
     ReportDeploymentStatusesReportDeploymentStatuses,
 )
 from .report_pod_statuses import ReportPodStatuses, ReportPodStatusesReportPodStatuses
+from .reset_user_password import ResetUserPassword
 from .run_job import RunJob, RunJobRunJob
 from .start_components import StartComponents, StartComponentsStartComponents
 from .stop_components import StopComponents, StopComponentsStopComponents
@@ -208,6 +227,8 @@ from .update_environment import (
     UpdateEnvironmentUpdateEnvironment,
     UpdateEnvironmentUpdateEnvironmentCluster,
 )
+from .update_group import UpdateGroup, UpdateGroupUpdateGroup
+from .update_user import UpdateUser, UpdateUserUpdateUser, UpdateUserUpdateUserGroups
 
 __all__ = [
     "AffinityBlockInput",
@@ -217,6 +238,7 @@ __all__ = [
     "AsyncBaseClient",
     "BackupStatus",
     "BaseModel",
+    "ChangePassword",
     "Client",
     "CrdConditionInput",
     "CreateBackup",
@@ -230,8 +252,17 @@ __all__ = [
     "CreateEnvironment",
     "CreateEnvironmentCreateEnvironment",
     "CreateEnvironmentCreateEnvironmentCluster",
+    "CreateGroup",
+    "CreateGroupCreateGroup",
+    "CreateGroupInput",
     "CreateRestore",
     "CreateRestoreCreateRestore",
+    "CreateUser",
+    "CreateUserCreateUser",
+    "CreateUserCreateUserGroups",
+    "CreateUserInput",
+    "CurrentUser",
+    "CurrentUserCurrentUser",
     "DedicatedIngressInput",
     "DeleteBackup",
     "DeleteBackupSchedule",
@@ -240,6 +271,8 @@ __all__ = [
     "DeleteDeployment",
     "DeleteDeploymentDeleteDeployment",
     "DeleteEnvironment",
+    "DeleteGroup",
+    "DeleteUser",
     "Deploy",
     "DeployDeploy",
     "DeploymentPodStatusReport",
@@ -265,6 +298,7 @@ __all__ = [
     "GetDeploymentDeployment",
     "GetDeploymentDeploymentApplicationInstance",
     "GetDeploymentDeploymentComponents",
+    "GetDeploymentDeploymentCreatedBy",
     "GetDeploymentDeploymentDeployedServices",
     "GetDeploymentPodStatuses",
     "GetDeploymentPodStatusesDeployment",
@@ -298,12 +332,17 @@ __all__ = [
     "GetEnvironmentEnvironmentCluster",
     "GetEnvironmentServices",
     "GetEnvironmentServicesEnvironmentServices",
+    "GetGroup",
+    "GetGroupGroup",
     "GetPodStatuses",
     "GetPodStatusesPodStatuses",
     "GetRestore",
     "GetRestoreRestore",
     "GetTask",
     "GetTaskTask",
+    "GetUser",
+    "GetUserUser",
+    "GetUserUserGroups",
     "GraphQLClientError",
     "GraphQLClientGraphQLError",
     "GraphQLClientGraphQLMultiError",
@@ -324,10 +363,15 @@ __all__ = [
     "ListEnvironments",
     "ListEnvironmentsEnvironments",
     "ListEnvironmentsEnvironmentsCluster",
+    "ListGroups",
+    "ListGroupsGroups",
     "ListRestores",
     "ListRestoresRestores",
     "ListTasks",
     "ListTasksTasks",
+    "ListUsers",
+    "ListUsersUsers",
+    "ListUsersUsersGroups",
     "LoadLocalApplicationDriverVersion",
     "LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersion",
     "LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersionActions",
@@ -339,6 +383,10 @@ __all__ = [
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionApplicationDriver",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart",
+    "Login",
+    "LoginLogin",
+    "LoginLoginUser",
+    "Logout",
     "ManagedResourceCountsInput",
     "PodPhase",
     "PodStatusInput",
@@ -347,9 +395,11 @@ __all__ = [
     "ReportDeploymentStatusesReportDeploymentStatuses",
     "ReportPodStatuses",
     "ReportPodStatusesReportPodStatuses",
+    "ResetUserPassword",
     "ResourceRequirementsInput",
     "ResourceSpecInput",
     "RestoreStatus",
+    "Role",
     "RunJob",
     "RunJobRunJob",
     "SchedulingInput",
@@ -376,6 +426,13 @@ __all__ = [
     "UpdateEnvironmentInput",
     "UpdateEnvironmentUpdateEnvironment",
     "UpdateEnvironmentUpdateEnvironmentCluster",
+    "UpdateGroup",
+    "UpdateGroupInput",
+    "UpdateGroupUpdateGroup",
+    "UpdateUser",
+    "UpdateUserInput",
+    "UpdateUserUpdateUser",
+    "UpdateUserUpdateUserGroups",
     "Upload",
     "WeightedAffinityTermInput",
     "WhenUnsatisfiable",

@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
+import { IfRole } from "@/auth/IfRole";
 import { CreateEnvironmentDialog } from "./CreateEnvironmentDialog";
 
 function deriveEnvHealth(deployments: { status: string }[]): string {
@@ -52,7 +53,9 @@ export default function EnvironmentListPage() {
             onRefreshNow={() => refetch()}
           />
           <ThemeToggle />
-          <CreateEnvironmentDialog onCreated={() => refetch()} />
+          <IfRole minimum="READ_WRITE">
+            <CreateEnvironmentDialog onCreated={() => refetch()} />
+          </IfRole>
         </div>
       </div>
 

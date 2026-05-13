@@ -24,10 +24,13 @@ from styrmin_backend.db.models import (
     HelmChart,
     HelmRepository,
     InstanceStatus,
+    Role,
     Task,
     TaskStatus,
     TaskType,
+    User,
 )
+from styrmin_backend.services.auth.password import hash_password
 
 VALID_CLUSTER_CONFIG = {"runtime_class": "example_runtime_class"}
 
@@ -111,6 +114,33 @@ async def seed_application_driver_version(
     return adv
 
 
+async def seed_user(
+    session: AsyncSession,
+    *,
+    username: str | None = None,
+    role: Role = Role.ADMIN,
+    display_name: str | None = None,
+) -> User:
+    """Seed a User row used as the ``created_by`` target for a deployment.
+
+    The default role is ADMIN so seeded deployments default to an
+    attribution that satisfies admin-only User field gates when those
+    are exercised by the test.
+    """
+    resolved_username = username or f"user-{uuid4().hex[:8]}"
+    user = User(
+        username=resolved_username,
+        password_hash=hash_password("seed-password-not-used"),
+        display_name=display_name or resolved_username,
+        active=True,
+        role=role,
+    )
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
 async def seed_deployment(
     session: AsyncSession,
     *,
@@ -118,11 +148,14 @@ async def seed_deployment(
     adv: ApplicationDriverVersion | None = None,
     name: str | None = None,
     internal: bool = False,
+    creator: User | None = None,
 ) -> Deployment:
     if environment is None:
         environment = await seed_environment(session)
     if adv is None:
         adv = await seed_application_driver_version(session)
+    if creator is None:
+        creator = await seed_user(session)
     deployment = Deployment(
         name=name or f"deployment-{uuid4().hex[:8]}",
         application_version="1.0.0",
@@ -130,6 +163,7 @@ async def seed_deployment(
         environment_id=environment.id,
         application_driver_version_id=adv.id,
         internal=internal,
+        created_by_user_id=creator.id,
     )
     session.add(deployment)
     await session.commit()

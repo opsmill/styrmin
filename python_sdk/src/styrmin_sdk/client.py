@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import os
 from typing import Self
 
 from styrmin_sdk._transport import Transport
+from styrmin_sdk.resources.auth import AuthResource
 from styrmin_sdk.resources.backup_storage_locations import BackupStorageLocationResource
 from styrmin_sdk.resources.backups import BackupResource
 from styrmin_sdk.resources.clusters import ClusterResource
 from styrmin_sdk.resources.deployments import DeploymentResource
 from styrmin_sdk.resources.drivers import DriverResource
 from styrmin_sdk.resources.environments import EnvironmentResource
+from styrmin_sdk.resources.groups import GroupResource
 from styrmin_sdk.resources.schedules import ScheduleResource
 from styrmin_sdk.resources.tasks import TaskResource
+from styrmin_sdk.resources.users import UserResource
 
 
 class StyrminClient:
@@ -22,6 +26,9 @@ class StyrminClient:
 
         async with StyrminClient(server_address="http://localhost:8000") as client:
             cluster = await client.clusters.create(name="prod")
+
+    Authentication: pass ``token=...`` to authenticate, or set the
+    ``STYRMIN_TOKEN`` env var. The explicit kwarg wins when both are present.
     """
 
     def __init__(
@@ -29,12 +36,19 @@ class StyrminClient:
         server_address: str = "http://localhost:8000",
         timeout: float = 30.0,
         headers: dict[str, str] | None = None,
+        token: str | None = None,
     ) -> None:
+        if token is None:
+            token = os.environ.get("STYRMIN_TOKEN")
+        merged_headers = dict(headers or {})
+        if token:
+            merged_headers["Authorization"] = f"Bearer {token}"
         self._transport = Transport(
             server_address=server_address,
             timeout=timeout,
-            headers=headers,
+            headers=merged_headers,
         )
+        self.auth = AuthResource(self._transport)
         self.backup_storage_locations = BackupStorageLocationResource(self._transport)
         self.clusters = ClusterResource(self._transport)
         self.environments = EnvironmentResource(self._transport)
@@ -43,6 +57,8 @@ class StyrminClient:
         self.tasks = TaskResource(self._transport)
         self.backups = BackupResource(self._transport)
         self.schedules = ScheduleResource(self._transport)
+        self.users = UserResource(self._transport)
+        self.groups = GroupResource(self._transport)
 
     async def close(self) -> None:
         await self._transport.close()

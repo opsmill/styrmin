@@ -22,6 +22,13 @@ ingress:
 styrmin:
   url:
     apiK8s: http://styrmin-server.styrmin.svc.cluster.local:8000
+  # Local-demo convention (see ADR-024). Production installs MUST override.
+  adminUsername: admin
+  adminPassword: styrmin
+  # The demo serves over plain HTTP at styrmin.local.styrmin.io:8080.
+  # ``Secure`` cookies are dropped by browsers on non-HTTPS, non-localhost
+  # origins, so disable the flag for the demo only.
+  sessionCookieSecure: false
 
 velero:
   backupsEnabled: false

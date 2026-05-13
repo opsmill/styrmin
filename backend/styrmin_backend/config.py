@@ -162,6 +162,27 @@ class Settings(BaseSettings):
         default="INFO",
         description="Log level for the application. Can be one of DEBUG, INFO, WARNING, ERROR, CRITICAL",
     )
+    admin_username: str = Field(
+        default="admin",
+        description="Username seeded by the bootstrap routine on first boot. See ADR-019.",
+    )
+    admin_password: Optional[str] = Field(
+        default=None,
+        description=(
+            "Password seeded by the bootstrap routine on first boot. When unset, "
+            "a random password is generated and logged once at WARN level. See ADR-019."
+        ),
+    )
+    session_cookie_secure: bool = Field(
+        default=True,
+        alias="STYRMIN_SESSION_COOKIE_SECURE",
+        description=(
+            "Whether to set the Secure attribute on the session cookie. "
+            "Defaults to True; production must serve over HTTPS. Set to False "
+            "only for local HTTP demos — browsers drop Secure cookies on "
+            "non-HTTPS, non-localhost origins."
+        ),
+    )
 
 
 @dataclass

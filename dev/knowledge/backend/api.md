@@ -170,6 +170,71 @@ On the client side, errors arrive as standard GraphQL errors with `extensions.co
 
 The validator type-checks every env-var value against `isinstance(value, str)` *before* any encoding or size computation. Non-string inputs surface as a typed `INVALID_ENV_VAR_VALUE` rather than crashing the resolver with a generic `AttributeError` from a downstream `.encode("utf-8")` call. See [`adr-022`](../../adr/adr-022-schema-walking-input-propagation-tests.md) for the matching schema-walking input-completeness test pattern that prevents the upstream "missing field" class of bugs.
 
+<!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
+
+## Admin user/group surface
+
+Issue #179 shipped the auth foundation (login/logout/`currentUser`/`changePassword`, default-deny + `RequiresRole`). Feature 011 builds the admin CRUD layer on top of it. All surface below is admin-gated (`PermissionExtension([RequiresRole(Role.ADMIN)])`); none of it is on the public allow-list.
+
+### Mutations
+
+| Mutation | Arguments | Return | Notes |
+|----------|-----------|--------|-------|
+| `createUser` | `input: CreateUserInput!` | `User` | Username is server-side `.casefold()`-canonicalized. Duplicate → `DUPLICATE_USERNAME`. |
+| `updateUser` | `userId: UUID!, input: UpdateUserInput!` | `User` | Partial update; **no `username` field** (immutable post-create). `groupIds: [UUID!]` replaces the user's group set (see "Set-semantics" below). Deactivating (`active=false`) invalidates **all** of the target's sessions in the same transaction. |
+| `resetUserPassword` | `userId: UUID!, newPassword: String!` | `User` | Admin sets another user's password without knowing the old one. Invalidates **all** of the target's sessions in the same transaction. |
+| `deleteUser` | `userId: UUID!` | `String` | Hard-delete only when no FK references exist (deployments created by the user, etc.). If references exist → `USER_HAS_REFERENCES` and the admin must use `updateUser(setActive:false)` to soft-deactivate. Sessions and memberships cascade. |
+| `createGroup` | `input: CreateGroupInput!` | `Group` | |
+| `updateGroup` | `groupId: UUID!, input: UpdateGroupInput!` | `Group` | `memberIds: [UUID!]` replaces the group's member set. Renaming honours unique-name constraint. |
+| `deleteGroup` | `groupId: UUID!` | `String` | Membership rows cascade. |
+
+### Queries
+
+| Query | Arguments | Return |
+|-------|-----------|--------|
+| `users` | `active: Boolean?, role: Role?, search: String?` | `[User!]!` |
+| `groups` | `search: String?` | `[Group!]!` |
+| `currentUser` | — | `User` (shipped in #179, public — kept here for completeness of the admin UI's auth surface) |
+
+The `users` resolver uses `selectinload(User.groups)` so `User.groups` populates in a single follow-up query rather than per-row (see [`services.md` → Authorization helpers](services.md)). `users` and `groups` filters are server-side; the admin UI paginates the filtered list client-side (cursor pagination is deferred).
+
+### Deployment attribution
+
+`Deployment` exposes two attribution fields:
+
+- `createdBy: User` — full user shape, admin-gated by the existing `_admin_only()` extension from #179.
+- `createdByUsername: String` — username-only, **not** admin-gated. Added in 011 so drivers and the `UiScenarioDriver` can assert attribution without admin rights. A dedicated scalar field is cleaner than weakening the `User`-type gating story.
+
+### Set-semantics for membership replacement
+
+`updateUser.groupIds` and `updateGroup.memberIds` are nullable lists with three-state semantics:
+
+| Wire value | Meaning |
+|------------|---------|
+| Omitted / `null` | Leave the existing set unchanged |
+| `[]` | Clear all memberships |
+| `[id, id, ...]` | Replace the set with exactly these ids |
+
+The resolver diffs against the existing set and issues only the minimum `INSERT`/`DELETE` rows (see `auth/membership` in [`services.md`](services.md)). A no-change update produces zero statements.
+
+`UpdateUserInput` and `UpdateGroupInput` apply the same "omitted = no change, `null` = clear, value = apply" semantics to every scalar field. `UpdateUserInput` deliberately has **no** `username` field — usernames are immutable; a client sending one gets a Strawberry schema error.
+
+### Structured error codes
+
+Admin mutations surface the following typed codes via `extensions.code`:
+
+| Code | Source | Surface |
+|------|--------|---------|
+| `LAST_ADMIN` | `LastAdminError` | Any operation that would leave zero active admins — deactivate / delete / demote the only admin, remove the only admin from the only admin-conferring group, or any of those acting on self. |
+| `DUPLICATE_USERNAME` | `DuplicateUsernameError` | `createUser` on unique-constraint violation (case-insensitive after server-side casefold). |
+| `USER_HAS_REFERENCES` | `UserHasReferencesError` | `deleteUser` when FK references exist. The admin should fall back to `updateUser(setActive:false)`. |
+| `USER_NOT_FOUND` | `UserNotFoundError` | `updateUser` / `resetUserPassword` / `deleteUser` with an unknown id. |
+| `GROUP_NOT_FOUND` | `GroupNotFoundError` | Any mutation referencing an unknown `group_id` / `member_id`. |
+| `DUPLICATE_GROUP_NAME` | `DuplicateGroupNameError` | `createGroup` / `updateGroup` rename hitting the unique-name constraint. |
+| `WEAK_PASSWORD` | `WeakPasswordError` | Password rejected by the argon2 length/strength policy. |
+
+These ride the existing `StructuredErrorExtension` envelope; clients consume them via `extensions.code` exactly like every other typed error.
+
 ## GraphQL Types
 
 Below is a sample of the most-frequently-touched types; consult `schema.graphql` for the full set.

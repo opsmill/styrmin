@@ -1,0 +1,17 @@
+query ListUsers($active: Boolean, $role: Role, $search: String) {
+    users(active: $active, role: $role, search: $search) {
+        id
+        username
+        displayName
+        role
+        effectiveRole
+        active
+        groups {
+            id
+            name
+            role
+        }
+        createdOn
+        updatedOn
+    }
+}

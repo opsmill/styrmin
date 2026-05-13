@@ -395,6 +395,7 @@ def _make_deployment_with_active_instance(
         application_version="1.0.0",
         application_driver_version_id=uuid4(),
         environment_id=uuid4(),
+        created_by_user_id=uuid4(),
         name="test-deployment",
     )
     if instance_env_config is None:
@@ -514,6 +515,7 @@ def _make_fanout_deployment(
         application_version="1.0.0",
         application_driver_version_id=uuid4(),
         environment_id=environment_id,
+        created_by_user_id=uuid4(),
         name=name,
         internal=internal,
     )

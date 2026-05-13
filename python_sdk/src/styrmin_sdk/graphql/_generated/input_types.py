@@ -13,6 +13,7 @@ from .enums import (
     ExternalUrlScheme,
     LabelSelectorOperator,
     PodPhase,
+    Role,
     TolerationEffect,
     TolerationOperator,
     WhenUnsatisfiable,
@@ -55,6 +56,20 @@ class CrdConditionInput(BaseModel):
     last_transition_time: Optional[datetime] = Field(
         alias="lastTransitionTime", default=None
     )
+
+
+class CreateGroupInput(BaseModel):
+    name: str
+    role: Role
+    member_ids: Optional[list[str]] = Field(alias="memberIds", default=None)
+
+
+class CreateUserInput(BaseModel):
+    username: str
+    password: str
+    display_name: str = Field(alias="displayName")
+    role: Role
+    group_ids: Optional[list[str]] = Field(alias="groupIds", default=None)
 
 
 class DedicatedIngressInput(BaseModel):
@@ -247,6 +262,19 @@ class UpdateEnvironmentInput(BaseModel):
     )
     ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
     db_size: Optional[str] = Field(alias="dbSize", default=None)
+
+
+class UpdateGroupInput(BaseModel):
+    name: Optional[str] = None
+    role: Optional[Role] = None
+    member_ids: Optional[list[str]] = Field(alias="memberIds", default=None)
+
+
+class UpdateUserInput(BaseModel):
+    display_name: Optional[str] = Field(alias="displayName", default=None)
+    role: Optional[Role] = None
+    active: Optional[bool] = None
+    group_ids: Optional[list[str]] = Field(alias="groupIds", default=None)
 
 
 class WeightedAffinityTermInput(BaseModel):

@@ -1,3 +1,7 @@
+directive @isSelfOrRole on FIELD_DEFINITION
+
+directive @requiresRole on FIELD_DEFINITION
+
 type Action {
   id: UUID!
   name: String!
@@ -197,6 +201,20 @@ type CrdConditionType {
   lastTransitionTime: DateTime
 }
 
+input CreateGroupInput {
+  name: String!
+  role: Role!
+  memberIds: [ID!] = null
+}
+
+input CreateUserInput {
+  username: String!
+  password: String!
+  displayName: String!
+  role: Role!
+  groupIds: [ID!] = null
+}
+
 """Date with time (isoformat)"""
 scalar DateTime
 
@@ -251,6 +269,12 @@ type Deployment {
   """
   componentEnvVars: [ComponentEnvVars!]!
   crdStatus: DeploymentStatusType
+  createdBy: User!
+
+  """
+  Username of the user who created this deployment, or ``null`` if the creator row has been removed (forward-compatible with ``ondelete=SET NULL`` even though the FK is currently non-null). Unlike ``createdBy``, this field is NOT admin-gated — drivers and the UI can surface attribution without elevated access per FR-028.
+  """
+  createdByUsername: String
 }
 
 input DeploymentPodStatusReport {
@@ -356,6 +380,12 @@ enum ExternalUrlScheme {
   HTTPS
 }
 
+type Group {
+  id: UUID!
+  name: String!
+  role: Role!
+}
+
 type HelmChart {
   id: UUID!
   name: String!
@@ -400,6 +430,11 @@ input LabelSelectorRequirementInput {
   values: [String!] = null
 }
 
+type LoginResult {
+  token: String!
+  user: User!
+}
+
 input ManagedResourceCountsInput {
   networkPolicies: Int! = 0
   secrets: Int! = 0
@@ -417,32 +452,42 @@ type ManagedResourceCountsType {
 }
 
 type Mutation {
-  createCluster(name: String! = "default", config: JSON = null): Cluster
-  deleteCluster(clusterId: UUID = null, clusterName: String = null): String
-  createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment
-  updateEnvironment(environmentId: UUID!, input: UpdateEnvironmentInput!): Environment
-  deleteEnvironment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): String
-  createBackupStorageLocation(name: String!, endpoint: String!, bucket: String!, region: String!, accessKeyId: String!, secretAccessKey: String!): BackupStorageLocation
-  updateBackupStorageLocation(backupStorageLocationId: UUID!, name: String = null, endpoint: String = null, bucket: String = null, region: String = null, accessKeyId: String = null, secretAccessKey: String = null): BackupStorageLocation
-  deleteBackupStorageLocation(backupStorageLocationId: UUID!): String
-  assignBackupStorageLocation(environmentId: UUID!, backupStorageLocationId: UUID!): Environment
-  unassignBackupStorageLocation(environmentId: UUID!): Environment
-  loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion
-  loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!): ApplicationDriverVersion
-  deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task
-  updateDeployment(deploymentId: UUID!, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task
-  deleteDeployment(deploymentId: UUID!): Task!
-  createBackup(instanceId: UUID!, name: String = null): Backup
-  deleteBackup(backupId: UUID!): String
-  createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore
-  createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int! = 10, enabled: Boolean! = true): BackupSchedule
-  updateBackupSchedule(scheduleId: UUID!, name: String = null, cronExpression: String = null, retentionCount: Int = null, enabled: Boolean = null): BackupSchedule
-  deleteBackupSchedule(scheduleId: UUID!): String
+  login(username: String!, password: String!): LoginResult!
+  logout: Boolean!
+  changePassword(currentPassword: String!, newPassword: String!): Boolean! @requiresRole
+  createUser(input: CreateUserInput!): User! @requiresRole
+  updateUser(id: UUID!, input: UpdateUserInput!): User! @requiresRole
+  resetUserPassword(userId: UUID!, newPassword: String!): Boolean! @requiresRole
+  deleteUser(id: UUID!): Boolean! @requiresRole
+  createGroup(input: CreateGroupInput!): Group! @requiresRole
+  updateGroup(id: UUID!, input: UpdateGroupInput!): Group! @requiresRole
+  deleteGroup(id: UUID!): Boolean! @requiresRole
+  createCluster(name: String! = "default", config: JSON = null): Cluster @requiresRole
+  deleteCluster(clusterId: UUID = null, clusterName: String = null): String @requiresRole
+  createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment @requiresRole
+  updateEnvironment(environmentId: UUID!, input: UpdateEnvironmentInput!): Environment @requiresRole
+  deleteEnvironment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): String @requiresRole
+  createBackupStorageLocation(name: String!, endpoint: String!, bucket: String!, region: String!, accessKeyId: String!, secretAccessKey: String!): BackupStorageLocation @requiresRole
+  updateBackupStorageLocation(backupStorageLocationId: UUID!, name: String = null, endpoint: String = null, bucket: String = null, region: String = null, accessKeyId: String = null, secretAccessKey: String = null): BackupStorageLocation @requiresRole
+  deleteBackupStorageLocation(backupStorageLocationId: UUID!): String @requiresRole
+  assignBackupStorageLocation(environmentId: UUID!, backupStorageLocationId: UUID!): Environment @requiresRole
+  unassignBackupStorageLocation(environmentId: UUID!): Environment @requiresRole
+  loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion @requiresRole
+  loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!): ApplicationDriverVersion @requiresRole
+  deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task @requiresRole
+  updateDeployment(deploymentId: UUID!, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task @requiresRole
+  deleteDeployment(deploymentId: UUID!): Task! @requiresRole
+  createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
+  deleteBackup(backupId: UUID!): String @requiresRole
+  createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore @requiresRole
+  createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int! = 10, enabled: Boolean! = true): BackupSchedule @requiresRole
+  updateBackupSchedule(scheduleId: UUID!, name: String = null, cronExpression: String = null, retentionCount: Int = null, enabled: Boolean = null): BackupSchedule @requiresRole
+  deleteBackupSchedule(scheduleId: UUID!): String @requiresRole
   callback(taskId: UUID!, stateName: String!, stateMessage: String, stateType: String!): CallbackResponse!
-  stopComponents(deploymentId: UUID!, components: [String!]!): Task
-  startComponents(deploymentId: UUID!, components: [String!]!): Task
-  runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task
-  updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null): Task
+  stopComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
+  startComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
+  runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task @requiresRole
+  updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null): Task @requiresRole
   reportPodStatuses(reports: [DeploymentPodStatusReport!]!): ReportPodStatusesResponse!
   reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!): ReportDeploymentStatusesResponse!
 }
@@ -503,6 +548,11 @@ input PostRenderInjectionInput {
 }
 
 type Query {
+  currentUser: User
+  users(active: Boolean = null, role: Role = null, search: String = null): [User!]! @requiresRole
+  groups(search: String = null): [Group!]! @requiresRole
+  user(id: UUID!): User @requiresRole
+  group(id: UUID!): Group @requiresRole
   clusters: [Cluster!]!
   cluster(clusterId: UUID = null, clusterName: String = null): Cluster
   backupStorageLocations: [BackupStorageLocation!]!
@@ -584,6 +634,12 @@ enum RestoreStatus {
   IN_PROGRESS
   COMPLETED
   FAILED
+}
+
+enum Role {
+  READ_ONLY
+  READ_WRITE
+  ADMIN
 }
 
 """Hierarchical pod scheduling & resource configuration section."""
@@ -670,6 +726,31 @@ input UpdateEnvironmentInput {
   externalDnsEndpointsType: ExternalDnsEndpointsType = null
   ingressClass: String = null
   dbSize: String = null
+}
+
+input UpdateGroupInput {
+  name: String = null
+  role: Role = null
+  memberIds: [ID!] = null
+}
+
+input UpdateUserInput {
+  displayName: String = null
+  role: Role = null
+  active: Boolean = null
+  groupIds: [ID!] = null
+}
+
+type User {
+  id: UUID!
+  username: String!
+  displayName: String!
+  role: Role! @isSelfOrRole
+  effectiveRole: Role! @isSelfOrRole
+  active: Boolean! @isSelfOrRole
+  groups: [Group!]! @isSelfOrRole
+  createdOn: DateTime @isSelfOrRole
+  updatedOn: DateTime @isSelfOrRole
 }
 
 """Weighted affinity term for a ``preferred`` rule."""

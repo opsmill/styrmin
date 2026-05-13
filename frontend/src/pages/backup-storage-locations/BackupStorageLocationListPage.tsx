@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { HardDrive } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
+import { IfRole } from "@/auth/IfRole";
 import { CreateBackupStorageLocationDialog } from "./CreateBackupStorageLocationDialog";
 
 export default function BackupStorageLocationListPage() {
@@ -34,7 +35,9 @@ export default function BackupStorageLocationListPage() {
             lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
             onRefreshNow={() => refetch()}
           />
-          <CreateBackupStorageLocationDialog onCreated={() => refetch()} />
+          <IfRole minimum="READ_WRITE">
+            <CreateBackupStorageLocationDialog onCreated={() => refetch()} />
+          </IfRole>
         </div>
       }
     >

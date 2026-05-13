@@ -35,6 +35,7 @@ def _db_deployment_to_domain(db_deployment: DeploymentDBModel) -> DeploymentEnti
         environment_id=db_deployment.environment_id,
         status=DeploymentStateEntity(db_deployment.status.value),
         deleted_at=db_deployment.deleted_at,
+        created_by_user_id=db_deployment.created_by_user_id,
     )
     for component in db_deployment.components:
         entity.add_component(

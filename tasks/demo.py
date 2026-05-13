@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import socket
 import time
+from typing import Any
 
+import yaml
 from invoke import Context, task
 from rich.console import Console
 from rich.panel import Panel
@@ -136,6 +138,14 @@ def start(context: Context, build_image: bool = False) -> None:
     )
 
     print_header("Bootstrapping cluster, environment, and local driver...")
+    admin_username, admin_password = _admin_credentials()
+    if admin_password.startswith("<"):
+        msg = (
+            "demo-values.yaml has no adminPassword set — the server will "
+            "generate a random one and bootstrap login will fail. Set "
+            "styrmin.adminPassword in dev/local/demo-values.yaml."
+        )
+        raise RuntimeError(msg)
     try:
         dev.bootstrap(
             context,
@@ -143,6 +153,8 @@ def start(context: Context, build_image: bool = False) -> None:
             fqdn_suffix=DEMO_FQDN_SUFFIX,
             external_url_scheme="http",
             external_url_port=DEMO_PORT,
+            admin_username=admin_username,
+            admin_password=admin_password,
         )
     except SystemExit as exc:
         console.print(f"[yellow]⚠[/yellow] Bootstrap skipped (already initialized): {exc}")
@@ -179,6 +191,21 @@ def reset(context: Context) -> None:
     start(context)
 
 
+def _admin_credentials() -> tuple[str, str]:
+    """Read the admin username/password the demo will seed.
+
+    Source of truth is ``demo-values.yaml`` — the same file Helm reads — so
+    customising it keeps the printed summary in sync. An empty/unset
+    ``adminPassword`` means the bootstrap routine will generate one and log
+    it once at WARN level; surface that instead of inventing a value.
+    """
+    values: dict[str, Any] = yaml.safe_load(DEMO_VALUES.read_text()) or {}
+    styrmin = values.get("styrmin") or {}
+    username = styrmin.get("adminUsername") or "admin"
+    password = styrmin.get("adminPassword") or "<generated — see server logs>"
+    return username, password
+
+
 def _print_summary(context: Context) -> None:
     """Print the final summary panel with URLs and component status."""
     console = Console()
@@ -189,9 +216,11 @@ def _print_summary(context: Context) -> None:
         warn=True,
     )
     deploy_output = deployments.stdout if deployments and deployments.ok else "(unavailable)"
+    admin_username, admin_password = _admin_credentials()
     body = (
         f"[bold]Styrmin UI:[/bold]     {url}\n"
         f"[bold]GraphQL:[/bold]        {url}/graphql\n"
+        f"[bold]Admin login:[/bold]    {admin_username} / {admin_password}\n"
         f"[bold]MinIO console:[/bold]  kubectl port-forward svc/minio 9001:9001 -n {KUBERNETES_ROOT_NAMESPACE}\n"
         f"[bold]MinIO creds:[/bold]    minioadmin / minioadmin\n\n"
         f"[bold]Deployments:[/bold]\n{deploy_output}"

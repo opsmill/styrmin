@@ -439,6 +439,62 @@ ServiceError (base)
 └── UnknownComponentEnvVarError
 ```
 
+<!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
+
+## Authorization helpers
+
+Feature 011 adds two small helper modules under `backend/styrmin_backend/api/auth/` that admin mutations compose to enforce the auth invariants without scattering the rules across resolvers.
+
+### `auth/admin_guards.py` — pure functions over a snapshot
+
+The last-admin invariant lives in two **pure** functions that take their state as parameters:
+
+```python
+@dataclass(frozen=True, slots=True)
+class AdminSnapshot:
+    direct_admin_user_ids: frozenset[UUID]
+    group_admin_user_ids: frozenset[UUID]   # admin via group only
+    active_by_user_id: Mapping[UUID, bool]
+
+def would_leave_zero_admins(
+    action: AdminAction,             # DEACTIVATE | DELETE | DEMOTE | REMOVE_FROM_ADMIN_GROUP
+    target_user_id: UUID,
+    snapshot: AdminSnapshot,
+) -> bool: ...
+
+def can_hard_delete_user(user_id: UUID, fk_refs_present: bool) -> bool: ...
+```
+
+Both functions are table-driven testable without a database. The **service-layer caller** is responsible for the concurrency story:
+
+1. Open the UnitOfWork transaction.
+2. Lock the admin-conferring rows: `SELECT ... FROM "user" WHERE active = TRUE AND role = 'ADMIN' FOR UPDATE`, plus the matching `"group"` and `user_group` rows for active admin-conferring memberships. A concurrent demotion is forced to wait.
+3. Build `AdminSnapshot` from the locked rows.
+4. Call `would_leave_zero_admins(...)` and either continue or raise `LastAdminError`.
+5. Commit. The locks release.
+
+PostgreSQL's default `READ COMMITTED` is sufficient given the explicit `FOR UPDATE` — no escalation to `REPEATABLE READ`. The lock surface is tiny (admin users + admin groups) so contention is negligible at any realistic admin headcount.
+
+### `auth/membership.py` — diff-and-mutate set replacement
+
+Membership writes go through two functions that implement set-semantics replacement:
+
+```python
+async def replace_user_groups(
+    uow: UnitOfWork, *, user_id: UUID, group_ids: list[UUID]
+) -> tuple[int, int]:
+    """Return (added, removed). No-change → (0, 0) with no INSERT/DELETE statements."""
+
+async def replace_group_members(
+    uow: UnitOfWork, *, group_id: UUID, member_ids: list[UUID]
+) -> tuple[int, int]:
+    """Symmetric."""
+```
+
+Both load the existing membership, compute `to_add = new - existing` and `to_remove = existing - new`, and issue **only** those `INSERT`/`DELETE` rows. When both sets are empty, zero SQL statements are emitted (the unit test asserts this with `sqlalchemy.event.listens_for(engine, "before_execute")`). A full `DELETE all → INSERT all` is **not** acceptable — it produces spurious churn on no-change paths.
+
+The resolver hands the user-supplied list straight in; normalisation (dedup, ordering) belongs inside the helper, not in every call site.
+
 ## Key Files
 
 | File | Purpose |
@@ -448,3 +504,5 @@ ServiceError (base)
 | [services/applications.py](backend/styrmin_backend/services/applications.py) | Driver management |
 | [services/reconciliation/remediation.py](backend/styrmin_backend/services/reconciliation/remediation.py) | State reconciliation |
 | [services/driver/provider.py](backend/styrmin_backend/services/driver/provider.py) | Git-based driver loading |
+| [api/auth/admin_guards.py](backend/styrmin_backend/api/auth/admin_guards.py) | Pure last-admin guard functions over `AdminSnapshot` |
+| [api/auth/membership.py](backend/styrmin_backend/api/auth/membership.py) | Set-semantics membership replacement (diff-and-mutate) |

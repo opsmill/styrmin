@@ -45,6 +45,7 @@ def _make_deployment(
         application_driver_version_id=uuid4(),
         environment_id=environment_id,
         status=DeploymentState.PENDING,
+        created_by_user_id=uuid4(),
     )
 
 

@@ -47,6 +47,16 @@ Conventions for adding and modifying routes with TanStack Router. See [knowledge
 
 - Add `notFoundComponent` on the root route, not a `*` catch-all child. TanStack Router handles unmatched routes structurally.
 
+<!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
+
+### Role-gated routes
+
+See [`knowledge/frontend/routing.md`](../../knowledge/frontend/routing.md) → "Auth and role-gated routes" for the architectural shape and the list of gated paths.
+
+- Admin-only routes MUST gate in `beforeLoad` against `context.auth.currentUser.effectiveRole`, throwing `redirect({ to: "/" })` when the effective role is insufficient. The check MUST be synchronous — no `useEffect`, no loading flicker, no rendering of the page body before redirecting. The URL bar must never flash an admin path that the user cannot access.
+- UI affordances for admin actions (nav links, action buttons, menu items) MUST be hidden via `<IfRole minimum="ADMIN">` (or `useEffectiveRole()` for conditional logic). They MUST NOT merely be disabled — a disabled control still reveals the feature's existence and tempts the user to look for a workaround.
+- Role checks MUST read `effectiveRole`, which aggregates the user's direct role with every group-conferred role. Never read the raw `role` field for gating — it skips the group-conferred admin pathway and produces incorrect denials for users who are admin only via group membership.
+
 ### Tests
 
 - Every test that renders a routed component goes through the `customRender` in `src/test/utils.tsx`, which builds a fresh `Router` per test from `createMemoryHistory`. Do not import `MemoryRouter` from `react-router` (it has been removed) and do not share router instances across tests.

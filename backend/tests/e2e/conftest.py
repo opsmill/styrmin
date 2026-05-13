@@ -26,6 +26,13 @@ from tests.e2e.drivers.api_driver import ApiScenarioDriver
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import DeploymentRef
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
+from tests.e2e.fixtures.auth import (
+    InjectSessionCookie,
+    inject_session_cookie,
+)
+
+# Re-export so the fixture is discoverable on the e2e conftest scope.
+__all__ = ["inject_session_cookie"]
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -36,6 +43,15 @@ _LOG = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.resolve().parents[2]
 FIXTURES_DIR = Path(__file__).parent.resolve() / "fixtures"
+
+
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
+    """E2E-only pytest setup hook.
+
+    The ``e2e`` / ``ci`` / ``api_only`` / ``ui_only`` markers live in the
+    project-level ``pyproject.toml``. No additional E2E-only markers are
+    currently needed.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -587,10 +603,64 @@ def driver_mode(request: pytest.FixtureRequest) -> str:
     return request.param
 
 
+# ---------------------------------------------------------------------------
+# Auth fixtures — admin_credentials, admin_token, authenticated_styrmin_client
+# ---------------------------------------------------------------------------
+#
+# Default-deny is on (ADR-020). Every E2E flow logs in as the seeded admin
+# (helm value: styrmin.adminPassword) and routes its calls through the
+# production auth path — there is no STYRMIN_DISABLE_AUTH bypass.
+
+# Must match the value in fixtures/styrmin-values.yaml:styrmin.adminPassword.
+# Lifting it into a Python constant keeps the test fixtures self-describing
+# without each test having to read the YAML at runtime.
+_E2E_ADMIN_USERNAME = "admin"
+_E2E_ADMIN_PASSWORD = "e2e-admin-password"
+
+
+@pytest.fixture(scope="session")
+def admin_credentials() -> tuple[str, str]:
+    """Static (username, password) for the seeded bootstrap admin."""
+    return _E2E_ADMIN_USERNAME, _E2E_ADMIN_PASSWORD
+
+
+@pytest.fixture(scope="session")
+async def admin_token(
+    styrmin_deployment: str,
+    admin_credentials: tuple[str, str],
+) -> str:
+    """Login as the seeded admin and return the raw bearer token.
+
+    Logging in via the public ``Mutation.login`` keeps the auth path
+    identical to production traffic — no test-only bypass and no
+    handcrafted session row.
+    """
+    username, password = admin_credentials
+    async with StyrminClient(server_address=styrmin_deployment) as bootstrap_client:
+        result = await bootstrap_client.auth.login(username=username, password=password)
+        return result.token
+
+
+@pytest.fixture(scope="session")
+async def authenticated_styrmin_client(
+    styrmin_deployment: str,
+    admin_token: str,
+) -> AsyncGenerator[StyrminClient, None]:
+    """SDK client carrying the admin bearer token. Drop-in replacement for
+    callers that previously instantiated their own ``StyrminClient``.
+    """
+    async with StyrminClient(
+        server_address=styrmin_deployment, token=admin_token
+    ) as client:
+        yield client
+
+
 @pytest.fixture(scope="session")
 async def session_ui_page(
     driver_mode: str,
     styrmin_deployment: str,
+    admin_token: str,  # noqa: ARG001 — kept for backwards compat; injection now flows through ``inject_session_cookie``
+    inject_session_cookie: InjectSessionCookie,
     browser_name: str,  # noqa: ARG001 — declared so pytest-playwright parametrizes node IDs with `-chromium`
 ) -> AsyncGenerator["Page | None", None]:
     """Playwright page at session scope for styrmin_resources UI-mode setup.
@@ -607,6 +677,16 @@ async def session_ui_page(
     ``browser_name`` is kept as a declared parameter so pytest-playwright
     adds ``-chromium`` to node IDs — that's what the CI filters
     ``-k "api-chromium"`` / ``-k "ui-chromium"`` match.
+
+    The session-scoped page is always logged in as the seeded admin —
+    every UI test reuses it through this fixture, and ``styrmin_resources``
+    bootstraps platform state by driving the admin UI here. Tests that
+    need a genuinely unauthenticated browser (the auth-lifecycle US8 test
+    that drives the ``/login`` form) open their own short-lived
+    BrowserContext via ``new_clean_browser_context``; we cannot gate cookie
+    injection on a per-test marker here because the session fixture is
+    built lazily and the first-test marker would poison the rest of the
+    session.
     """
     if driver_mode != "ui":
         yield None
@@ -622,6 +702,7 @@ async def session_ui_page(
     async with async_playwright() as p:
         browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(base_url=styrmin_deployment)
+        await inject_session_cookie(context)
         page = await context.new_page()
         try:
             yield page
@@ -635,16 +716,21 @@ async def session_ui_page(
 async def session_scenario_driver(
     driver_mode: str,
     styrmin_deployment: str,
+    admin_token: str,
     session_ui_page: "Page | None",
 ) -> AsyncGenerator[tuple[ScenarioDriver, StyrminClient], None]:
     """Session-scoped driver used by ``styrmin_resources`` for platform setup.
 
-    Yields ``(driver, client)``. The SDK client is exposed alongside the
-    driver so session-scoped fixtures that still drive SDK-only flows
-    (auxiliary driver loads, infrahub setup, etc.) keep working until
-    they're converted to the driver abstraction.
+    Yields ``(driver, client)``. The SDK client is constructed with the
+    admin bearer token (single change point — every test routes through
+    here) so all E2E traffic traverses the production auth path.
+
+    The Playwright UI driver picks up the same admin session via the
+    cookie seeded on ``session_ui_page``'s browser context.
     """
-    async with StyrminClient(server_address=styrmin_deployment) as client:
+    async with StyrminClient(
+        server_address=styrmin_deployment, token=admin_token
+    ) as client:
         driver: ScenarioDriver
         if driver_mode == "api":
             driver = ApiScenarioDriver(client)

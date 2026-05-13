@@ -3,6 +3,33 @@ from rich.console import Console
 
 from .utils import graphql, load_query, print_header
 
+# Default credentials seeded by the helm/compose dev fixtures (see
+# dev/local/demo-values.yaml + docker-compose.yml). admin/styrmin is the
+# convention for local development only — production installs MUST set a
+# real STYRMIN_ADMIN_PASSWORD via helm value or env var.
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "styrmin"  # noqa: S105
+
+
+def _login(console: Console, api_url: str, username: str, password: str) -> str:
+    """Authenticate against the bootstrap admin and return a bearer token."""
+    print_header(f"Logging in as '{username}'...")
+    result = graphql(
+        api_url,
+        load_query("login"),
+        {"username": username, "password": password},
+    )
+    if result.get("errors"):
+        error = result["errors"][0]
+        raise RuntimeError(
+            f"Login failed for '{username}': {error['message']}. "
+            f"Check STYRMIN_ADMIN_PASSWORD on the server (helm value "
+            f"styrmin.adminPassword or env var)."
+        )
+    token: str = result["data"]["login"]["token"]
+    console.print(f"[green]✓[/green] Logged in as '{username}'")
+    return token
+
 
 @task
 def start(context: Context, background: bool = True) -> None:
@@ -45,6 +72,8 @@ def _bootstrap_cluster(
     console: Console,
     api_url: str,
     fqdn_suffix: str,
+    *,
+    token: str,
     external_url_scheme: str | None = None,
     external_url_port: int | None = None,
 ) -> str:
@@ -63,6 +92,7 @@ def _bootstrap_cluster(
         api_url,
         load_query("create_cluster"),
         {"name": "local", "config": config},
+        token=token,
     )
     if result.get("errors"):
         error = result["errors"][0]
@@ -77,12 +107,13 @@ def _bootstrap_cluster(
     return cluster_id
 
 
-def _bootstrap_environment(console: Console, api_url: str, cluster_id: str) -> str | None:
+def _bootstrap_environment(console: Console, api_url: str, cluster_id: str, token: str) -> str | None:
     print_header("Creating environment record...")
     result = graphql(
         api_url,
         load_query("create_environment"),
         {"name": "local", "clusterId": cluster_id, "config": {}},
+        token=token,
     )
     if result.get("errors"):
         error = result["errors"][0]
@@ -95,7 +126,7 @@ def _bootstrap_environment(console: Console, api_url: str, cluster_id: str) -> s
     return environment_id
 
 
-def _bootstrap_backup_storage(console: Console, api_url: str, environment_id: str | None) -> None:
+def _bootstrap_backup_storage(console: Console, api_url: str, environment_id: str | None, token: str) -> None:
     # Create a backup storage location pointing at the in-cluster MinIO and
     # assign it to the environment. Mirrors the e2e bootstrap flow.
     print_header("Creating backup storage location (MinIO)...")
@@ -110,6 +141,7 @@ def _bootstrap_backup_storage(console: Console, api_url: str, environment_id: st
             "accessKeyId": "minioadmin",
             "secretAccessKey": "minioadmin",
         },
+        token=token,
     )
     if result.get("errors"):
         error = result["errors"][0]
@@ -127,6 +159,7 @@ def _bootstrap_backup_storage(console: Console, api_url: str, environment_id: st
         api_url,
         load_query("assign_backup_storage_location"),
         {"environmentId": environment_id, "backupStorageLocationId": bsl_id},
+        token=token,
     )
     if result.get("errors"):
         raise RuntimeError(f"Failed to assign backup storage location: {result['errors'][0]['message']}")
@@ -136,12 +169,13 @@ def _bootstrap_backup_storage(console: Console, api_url: str, environment_id: st
 BUNDLED_DRIVERS: tuple[str, ...] = ("infrahub", "semaphore")
 
 
-def _bootstrap_driver_version(console: Console, api_url: str, name: str) -> None:
+def _bootstrap_driver_version(console: Console, api_url: str, name: str, token: str) -> None:
     print_header(f"Loading local driver version ({name})...")
     result = graphql(
         api_url,
         load_query("load_local_driver_version"),
         {"path": f"/styrmin/drivers/{name}"},
+        token=token,
     )
     if result.get("errors"):
         raise RuntimeError(f"Failed to load driver version: {result['errors'][0]['message']}")
@@ -150,26 +184,37 @@ def _bootstrap_driver_version(console: Console, api_url: str, name: str) -> None
 
 
 @task
-def bootstrap(
+def bootstrap(  # noqa: PLR0917
     context: Context,  # noqa: ARG001
     api_url: str = "http://localhost:8000/graphql",
     fqdn_suffix: str = "styrmin.com",
     external_url_scheme: str | None = None,
     external_url_port: int | None = None,
+    admin_username: str = DEFAULT_ADMIN_USERNAME,
+    admin_password: str = DEFAULT_ADMIN_PASSWORD,
 ) -> None:
-    """Bootstrap Styrmin entities: cluster, environment, BSL, and local driver version."""
+    """Bootstrap Styrmin entities: cluster, environment, BSL, and local driver version.
+
+    Default-deny is on (ADR-024/025): every mutation in the bootstrap
+    sequence requires an authenticated admin session, so this task first
+    logs in as the seeded bootstrap admin (default ``admin/styrmin``,
+    matching ``docker-compose.yml`` and ``dev/local/demo-values.yaml``)
+    and threads the bearer token through every call.
+    """
     console = Console()
+    token = _login(console, api_url, admin_username, admin_password)
     cluster_id = _bootstrap_cluster(
         console,
         api_url,
         fqdn_suffix,
+        token=token,
         external_url_scheme=external_url_scheme,
         external_url_port=external_url_port,
     )
-    environment_id = _bootstrap_environment(console, api_url, cluster_id)
-    _bootstrap_backup_storage(console, api_url, environment_id)
+    environment_id = _bootstrap_environment(console, api_url, cluster_id, token=token)
+    _bootstrap_backup_storage(console, api_url, environment_id, token=token)
     for driver_name in BUNDLED_DRIVERS:
-        _bootstrap_driver_version(console, api_url, driver_name)
+        _bootstrap_driver_version(console, api_url, driver_name, token=token)
     console.print(
         "\n[bold green]Bootstrap complete![/bold green]"
         " Deploy an application from the Styrmin UI or with"

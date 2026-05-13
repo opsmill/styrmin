@@ -23,6 +23,7 @@ import { AlertCircle, Trash2, KeyRound } from "lucide-react";
 import { useState } from "react";
 import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
+import { IfRole } from "@/auth/IfRole";
 
 const updateCredentialsSchema = z.object({
   accessKeyId: z.string().min(1, "Access key ID is required"),
@@ -98,88 +99,94 @@ export default function BackupStorageLocationDetailPage() {
       ]}
       actions={
         <div className="flex items-center gap-2">
-          <Dialog open={credentialsOpen} onOpenChange={setCredentialsOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" variant="outline">
-                <KeyRound className="h-4 w-4 mr-1" />
-                Update Credentials
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Update Credentials</DialogTitle>
-              </DialogHeader>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  credForm.handleSubmit();
-                }}
-                className="space-y-4"
-              >
-                {credentialsError && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Error</AlertTitle>
-                    <AlertDescription>{credentialsError}</AlertDescription>
-                  </Alert>
-                )}
-                <credForm.Field name="accessKeyId">
-                  {(field) => (
-                    <div className="space-y-2">
-                      <Label htmlFor="cred-access-key">Access Key ID</Label>
-                      <Input
-                        id="cred-access-key"
-                        value={field.state.value}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                        onBlur={field.handleBlur}
-                      />
-                      {field.state.meta.errors.length > 0 && (
-                        <p className="text-sm text-destructive">
-                          {field.state.meta.errors[0]?.toString()}
-                        </p>
-                      )}
-                    </div>
+          <IfRole minimum="READ_WRITE">
+            <Dialog open={credentialsOpen} onOpenChange={setCredentialsOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline">
+                  <KeyRound className="h-4 w-4 mr-1" />
+                  Update Credentials
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Update Credentials</DialogTitle>
+                </DialogHeader>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    credForm.handleSubmit();
+                  }}
+                  className="space-y-4"
+                >
+                  {credentialsError && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle>Error</AlertTitle>
+                      <AlertDescription>{credentialsError}</AlertDescription>
+                    </Alert>
                   )}
-                </credForm.Field>
-                <credForm.Field name="secretAccessKey">
-                  {(field) => (
-                    <div className="space-y-2">
-                      <Label htmlFor="cred-secret-key">Secret Access Key</Label>
-                      <Input
-                        id="cred-secret-key"
-                        type="password"
-                        value={field.state.value}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                        onBlur={field.handleBlur}
-                      />
-                      {field.state.meta.errors.length > 0 && (
-                        <p className="text-sm text-destructive">
-                          {field.state.meta.errors[0]?.toString()}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </credForm.Field>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setCredentialsOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={credSubmitting}>
-                    {credSubmitting ? "Updating..." : "Update"}
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
-          <Button size="sm" variant="destructive" onClick={handleDelete}>
-            <Trash2 className="h-4 w-4 mr-1" />
-            Delete
-          </Button>
+                  <credForm.Field name="accessKeyId">
+                    {(field) => (
+                      <div className="space-y-2">
+                        <Label htmlFor="cred-access-key">Access Key ID</Label>
+                        <Input
+                          id="cred-access-key"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          onBlur={field.handleBlur}
+                        />
+                        {field.state.meta.errors.length > 0 && (
+                          <p className="text-sm text-destructive">
+                            {field.state.meta.errors[0]?.toString()}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </credForm.Field>
+                  <credForm.Field name="secretAccessKey">
+                    {(field) => (
+                      <div className="space-y-2">
+                        <Label htmlFor="cred-secret-key">
+                          Secret Access Key
+                        </Label>
+                        <Input
+                          id="cred-secret-key"
+                          type="password"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          onBlur={field.handleBlur}
+                        />
+                        {field.state.meta.errors.length > 0 && (
+                          <p className="text-sm text-destructive">
+                            {field.state.meta.errors[0]?.toString()}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </credForm.Field>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setCredentialsOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={credSubmitting}>
+                      {credSubmitting ? "Updating..." : "Update"}
+                    </Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </IfRole>
+          <IfRole minimum="READ_WRITE">
+            <Button size="sm" variant="destructive" onClick={handleDelete}>
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete
+            </Button>
+          </IfRole>
         </div>
       }
     >

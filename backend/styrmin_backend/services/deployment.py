@@ -169,7 +169,9 @@ async def refresh_deployment(
 
         # Ensure dedicated ingress controller is healthy if configured
         await _ensure_ingress_controller(
-            environment_id=deployment.environment_id, uow=uow
+            environment_id=deployment.environment_id,
+            uow=uow,
+            created_by_user_id=deployment.created_by_user_id,
         )
 
         # Get the current instance
@@ -301,7 +303,9 @@ async def update_deployment(
             deployment.config = deployment_config
         # Ensure dedicated ingress controller is healthy if configured
         await _ensure_ingress_controller(
-            environment_id=deployment.environment_id, uow=uow
+            environment_id=deployment.environment_id,
+            uow=uow,
+            created_by_user_id=deployment.created_by_user_id,
         )
 
         # Merge and validate parameters if provided
@@ -422,7 +426,9 @@ async def update_deployment_version(
 
         # Ensure dedicated ingress controller is healthy if configured
         await _ensure_ingress_controller(
-            environment_id=deployment.environment_id, uow=uow
+            environment_id=deployment.environment_id,
+            uow=uow,
+            created_by_user_id=deployment.created_by_user_id,
         )
 
         # Get the application driver version
@@ -678,12 +684,18 @@ async def _resolve_dedicated_ingress(
 async def _ensure_ingress_controller(
     environment_id: UUID,
     uow: UnitOfWork,
+    created_by_user_id: UUID,
 ) -> None:
     """Ensure a dedicated ingress controller is deployed for the environment.
 
     If dedicated_ingress is configured and no internal deployment exists,
     creates one. If one exists but is not healthy, raises an error.
     If dedicated_ingress is not configured, does nothing.
+
+    Args:
+        created_by_user_id: Attribution for the system-managed internal
+            deployment when it must be created. Threaded through from the
+            outer mutation so the FK to ``user`` is satisfied.
     """
     dedicated_ingress = await _resolve_dedicated_ingress(environment_id, uow)
     if dedicated_ingress is None:
@@ -737,6 +749,7 @@ async def _ensure_ingress_controller(
         application_version=ingress_driver_version.version,
         application_driver_version_id=ingress_driver_version.id,
         environment_id=environment_id,
+        created_by_user_id=created_by_user_id,
         internal=True,
         name=ingress_name,
     )
@@ -763,6 +776,7 @@ async def deploy_application(
     version: str | None,
     environment_id: UUID,
     uow: UnitOfWork,
+    created_by_user_id: UUID,
     deployment_config: dict | None = None,
     deployment_parameters: dict | None = None,
     deployment_name: str | None = None,
@@ -776,6 +790,8 @@ async def deploy_application(
             default_version is used.
         environment_id: The id of the environment to instantiate the application in.
         uow: The unit of work to use.
+        created_by_user_id: The id of the user creating the deployment. Used for
+            audit attribution exposed via ``Deployment.createdBy`` in the API.
         deployment_config: Optional deployment configuration.
         deployment_parameters: Optional parameter values.
         deployment_name: Optional custom name for the deployment. If not provided,
@@ -863,8 +879,15 @@ async def deploy_application(
                 f"Environment {environment_id} could not be found"
             )
 
-        # Ensure dedicated ingress controller is deployed if configured (FR-009)
-        await _ensure_ingress_controller(environment_id=environment_id, uow=uow)
+        # Ensure dedicated ingress controller is deployed if configured (FR-009).
+        # The internal ingress deployment is system-managed; we attribute it to
+        # the user who triggered the first deploy in the environment so the FK
+        # to ``user`` is satisfied and the audit trail still resolves.
+        await _ensure_ingress_controller(
+            environment_id=environment_id,
+            uow=uow,
+            created_by_user_id=created_by_user_id,
+        )
 
         # Validate and resolve parameter values against driver definitions
         definitions = parse_parameter_definitions(application_driver_version.parameters)
@@ -903,6 +926,7 @@ async def deploy_application(
             application_version=version,
             application_driver_version_id=application_driver_version.id,
             environment_id=environment_id,
+            created_by_user_id=created_by_user_id,
             config=deployment_config,
             parameters=resolved_parameters,
             name=resolved_name,
