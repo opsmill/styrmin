@@ -48,8 +48,14 @@ describe("HeaderUserMenu", () => {
     expect(screen.getByTestId("header-user-display-name")).toHaveTextContent(
       "Alice",
     );
-    // The badge must reflect effectiveRole (ADMIN), not the direct role (READ_ONLY).
+    // The badge must reflect effectiveRole (ADMIN, rendered via roleLabel
+    // as "Admin"), not the direct role (READ_ONLY).
     expect(screen.getByTestId("header-user-role-badge")).toHaveTextContent(
+      "Admin",
+    );
+    // The raw enum is still available in a tooltip for context.
+    expect(screen.getByTestId("header-user-role-badge")).toHaveAttribute(
+      "title",
       "ADMIN",
     );
   });

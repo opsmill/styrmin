@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, KeyRound, Save, Trash2 } from "lucide-react";
@@ -14,6 +14,9 @@ import {
   type Role,
 } from "@/generated/graphql";
 import { GraphQLOperationError } from "@/lib/graphql-fetcher";
+import { roleLabel } from "@/auth/roleLabel";
+import { PASSWORD_REQUIREMENTS_SUMMARY } from "@/auth/password-policy";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -85,22 +88,28 @@ export default function UserDetailPage() {
     [groupsQuery.data],
   );
 
-  // Form state — initialised from `user` once available. We track the user id
-  // we last seeded from so that navigating to a different user (same component)
-  // re-seeds without resorting to a setState-in-effect pattern.
-  const [seededId, setSeededId] = useState<string | null>(null);
+  // Form state — initialised from `user` once available. Reseeding is driven
+  // by an effect keyed on the loaded user id so we don't violate React's
+  // "no setState during render" rule. We deliberately only reseed when the
+  // id changes (route change to a different user); seeding from the upstream
+  // record on every refetch would discard in-progress edits.
   const [displayName, setDisplayName] = useState("");
   const [role, setRole] = useState<Role>("READ_ONLY");
   const [active, setActive] = useState(true);
   const [groupIds, setGroupIds] = useState<string[]>([]);
 
-  if (user !== undefined && seededId !== user.id) {
-    setSeededId(user.id);
+  // Keep a ref-style mirror of the *initial* user record so the effect can
+  // seed once per id without re-running on every parent re-render. Using
+  // `user?.id` as the sole dependency triggers a reseed only on identity
+  // change; the seed-time values are pulled fresh from the closure.
+  useEffect(() => {
+    if (user === undefined) return;
     setDisplayName(user.displayName);
     setRole(user.role);
     setActive(user.active);
     setGroupIds(user.groups.map((g) => g.id));
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // Inline server-error state keyed to the affected control.
   const [roleFieldError, setRoleFieldError] = useState<string | null>(null);
@@ -173,6 +182,9 @@ export default function UserDetailPage() {
   const [newPassword, setNewPassword] = useState("");
   const [resetError, setResetError] = useState<string | null>(null);
 
+  // Delete-confirm dialog state.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (user === undefined) return;
@@ -221,15 +233,26 @@ export default function UserDetailPage() {
     );
   }
 
-  function handleDelete(): void {
+  function requestDelete(): void {
     if (user === undefined) return;
     setDeleteFieldError(null);
     setGeneralError(null);
-    const ok = window.confirm(
-      `Delete user "${user.username}"? This cannot be undone.`,
+    setDeleteOpen(true);
+  }
+
+  function confirmDelete(): void {
+    if (user === undefined) return;
+    deleteUserMutation.mutate(
+      { id: user.id },
+      {
+        onSettled: () => setDeleteOpen(false),
+      },
     );
-    if (!ok) return;
-    deleteUserMutation.mutate({ id: user.id });
+  }
+
+  function cancelDelete(): void {
+    if (deleteUserMutation.isPending) return;
+    setDeleteOpen(false);
   }
 
   function toggleGroup(groupId: string, checked: boolean): void {
@@ -326,10 +349,19 @@ export default function UserDetailPage() {
                   <Input
                     id="reset-password-new"
                     type="password"
+                    autoComplete="new-password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     required
+                    aria-describedby="reset-password-policy"
                   />
+                  <p
+                    id="reset-password-policy"
+                    className="text-xs text-muted-foreground"
+                    data-testid="reset-password-policy"
+                  >
+                    {PASSWORD_REQUIREMENTS_SUMMARY}
+                  </p>
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button
@@ -354,7 +386,7 @@ export default function UserDetailPage() {
             <Button
               size="sm"
               variant="destructive"
-              onClick={handleDelete}
+              onClick={requestDelete}
               disabled={deleteUserMutation.isPending}
               data-testid="user-delete-button"
             >
@@ -394,7 +426,9 @@ export default function UserDetailPage() {
             <dd className="font-mono">{user.username}</dd>
             <dt className="text-muted-foreground">Effective role</dt>
             <dd>
-              <Badge>{user.effectiveRole}</Badge>
+              <Badge title={user.effectiveRole}>
+                {roleLabel(user.effectiveRole)}
+              </Badge>
             </dd>
             <dt className="text-muted-foreground">Created</dt>
             <dd>
@@ -435,9 +469,9 @@ export default function UserDetailPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="READ_ONLY">READ_ONLY</SelectItem>
-                <SelectItem value="READ_WRITE">READ_WRITE</SelectItem>
-                <SelectItem value="ADMIN">ADMIN</SelectItem>
+                <SelectItem value="READ_ONLY">{roleLabel("READ_ONLY")}</SelectItem>
+                <SelectItem value="READ_WRITE">{roleLabel("READ_WRITE")}</SelectItem>
+                <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
               </SelectContent>
             </Select>
             {roleFieldError && (
@@ -496,8 +530,11 @@ export default function UserDetailPage() {
                       />
                       <Label htmlFor={`user-group-${g.id}`}>
                         {g.name}{" "}
-                        <span className="text-xs text-muted-foreground">
-                          ({g.role})
+                        <span
+                          className="text-xs text-muted-foreground"
+                          title={g.role}
+                        >
+                          ({roleLabel(g.role)})
                         </span>
                       </Label>
                     </div>
@@ -526,6 +563,26 @@ export default function UserDetailPage() {
             </Button>
           </div>
         </form>
+
+        <ConfirmDialog
+          open={deleteOpen}
+          title="Delete user?"
+          description={
+            <>
+              <p>
+                This will permanently delete{" "}
+                <strong>{user.username}</strong> and revoke all their
+                sessions.
+              </p>
+              <p className="mt-2">This action cannot be undone.</p>
+            </>
+          }
+          confirmLabel="Delete user"
+          busy={deleteUserMutation.isPending}
+          onConfirm={confirmDelete}
+          onCancel={cancelDelete}
+          data-testid="user-delete-confirm"
+        />
       </div>
     </PageLayout>
   );

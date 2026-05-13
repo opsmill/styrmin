@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Save, Trash2 } from "lucide-react";
@@ -12,6 +12,8 @@ import {
   type Role,
 } from "@/generated/graphql";
 import { GraphQLOperationError } from "@/lib/graphql-fetcher";
+import { roleLabel } from "@/auth/roleLabel";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -102,30 +104,32 @@ export default function GroupDetailPage() {
     [allUsers, id],
   );
 
-  // Form state — seed once per group id.
-  const [seededId, setSeededId] = useState<string | null>(null);
+  // Form state — seeded by effects keyed on the loaded entity. The name/role
+  // half seeds from `group`; the memberIds half seeds from the derived
+  // membership list (and waits for the users query to arrive). Splitting the
+  // two effects mirrors the original guard pattern but keeps the setState
+  // calls out of the render path.
   const [name, setName] = useState("");
   const [role, setRole] = useState<Role>("READ_ONLY");
   const [memberIds, setMemberIds] = useState<string[]>([]);
 
-  // We seed name/role from the `group` and memberIds from the derived
-  // membership list. Both data sources arrive independently, so seed each
-  // half as soon as it's available; the per-half guard prevents oscillation.
-  const [seededMembers, setSeededMembers] = useState<string | null>(null);
-
-  if (group !== undefined && seededId !== group.id) {
-    setSeededId(group.id);
+  useEffect(() => {
+    if (group === undefined) return;
     setName(group.name);
     setRole(group.role);
-  }
-  if (
-    group !== undefined &&
-    usersQuery.data !== undefined &&
-    seededMembers !== group.id
-  ) {
-    setSeededMembers(group.id);
+    // Only reseed when we land on a different group; in-progress edits to
+    // the same group must survive refetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group?.id]);
+
+  useEffect(() => {
+    if (group === undefined || usersQuery.data === undefined) return;
     setMemberIds(currentMemberIds);
-  }
+    // Reseed when the group id changes OR the users query first arrives.
+    // currentMemberIds is recomputed by useMemo from those inputs, so we
+    // drive the dependency array off the underlying data.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group?.id, usersQuery.data !== undefined]);
 
   const [nameFieldError, setNameFieldError] = useState<string | null>(null);
   const [roleFieldError, setRoleFieldError] = useState<string | null>(null);
@@ -135,6 +139,7 @@ export default function GroupDetailPage() {
   const [deleteFieldError, setDeleteFieldError] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const updateGroupMutation = useUpdateGroupMutation({
     onSuccess: () => {
@@ -207,15 +212,26 @@ export default function GroupDetailPage() {
     });
   }
 
-  function handleDelete(): void {
+  function requestDelete(): void {
     if (group === undefined) return;
     setDeleteFieldError(null);
     setGeneralError(null);
-    const ok = window.confirm(
-      `Delete group "${group.name}"? This cannot be undone.`,
+    setDeleteOpen(true);
+  }
+
+  function confirmDelete(): void {
+    if (group === undefined) return;
+    deleteGroupMutation.mutate(
+      { id: group.id },
+      {
+        onSettled: () => setDeleteOpen(false),
+      },
     );
-    if (!ok) return;
-    deleteGroupMutation.mutate({ id: group.id });
+  }
+
+  function cancelDelete(): void {
+    if (deleteGroupMutation.isPending) return;
+    setDeleteOpen(false);
   }
 
   function toggleMember(userId: string, checked: boolean): void {
@@ -290,7 +306,7 @@ export default function GroupDetailPage() {
             <Button
               size="sm"
               variant="destructive"
-              onClick={handleDelete}
+              onClick={requestDelete}
               disabled={deleteGroupMutation.isPending}
               data-testid="group-delete-button"
             >
@@ -330,7 +346,7 @@ export default function GroupDetailPage() {
             <dd className="font-mono">{group.name}</dd>
             <dt className="text-muted-foreground">Role</dt>
             <dd>
-              <Badge>{group.role}</Badge>
+              <Badge title={group.role}>{roleLabel(group.role)}</Badge>
             </dd>
             <dt className="text-muted-foreground">Members</dt>
             <dd>{currentMemberIds.length}</dd>
@@ -373,9 +389,9 @@ export default function GroupDetailPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="READ_ONLY">READ_ONLY</SelectItem>
-                <SelectItem value="READ_WRITE">READ_WRITE</SelectItem>
-                <SelectItem value="ADMIN">ADMIN</SelectItem>
+                <SelectItem value="READ_ONLY">{roleLabel("READ_ONLY")}</SelectItem>
+                <SelectItem value="READ_WRITE">{roleLabel("READ_WRITE")}</SelectItem>
+                <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
               </SelectContent>
             </Select>
             {roleFieldError && (
@@ -506,6 +522,26 @@ export default function GroupDetailPage() {
             </Button>
           </div>
         </form>
+
+        <ConfirmDialog
+          open={deleteOpen}
+          title="Delete group?"
+          description={
+            <>
+              <p>
+                This will permanently delete{" "}
+                <strong>{group.name}</strong> and remove all of its
+                memberships.
+              </p>
+              <p className="mt-2">This action cannot be undone.</p>
+            </>
+          }
+          confirmLabel="Delete group"
+          busy={deleteGroupMutation.isPending}
+          onConfirm={confirmDelete}
+          onCancel={cancelDelete}
+          data-testid="group-delete-confirm"
+        />
       </div>
     </PageLayout>
   );

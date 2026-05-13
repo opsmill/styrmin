@@ -173,7 +173,8 @@ describe("UsersListPage", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("users-filter-role-trigger"));
-    const adminOption = await screen.findByRole("option", { name: "ADMIN" });
+    // Options are rendered with the humanised role label (see roleLabel).
+    const adminOption = await screen.findByRole("option", { name: "Admin" });
     await user.click(adminOption);
 
     await waitFor(() => {

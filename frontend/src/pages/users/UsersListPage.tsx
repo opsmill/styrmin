@@ -16,6 +16,8 @@ import {
   type ListUsersQuery,
   type Role,
 } from "@/generated/graphql";
+import { roleLabel } from "@/auth/roleLabel";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -54,6 +56,7 @@ export default function UsersListPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<UserRow | null>(null);
 
   const queryVariables = {
     active: activeFilter === "any" ? null : activeFilter === "true",
@@ -68,9 +71,11 @@ export default function UsersListPage() {
   const deleteUserMutation = useDeleteUserMutation({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["ListUsers"] });
+      setPendingDelete(null);
     },
     onError: (err) => {
       setDeleteError(err instanceof Error ? err.message : "Unknown error");
+      setPendingDelete(null);
     },
   });
 
@@ -91,11 +96,17 @@ export default function UsersListPage() {
 
   function handleDelete(user: UserRow): void {
     setDeleteError(null);
-    const ok = window.confirm(
-      `Delete user "${user.username}"? This cannot be undone.`,
-    );
-    if (!ok) return;
-    deleteUserMutation.mutate({ id: user.id });
+    setPendingDelete(user);
+  }
+
+  function confirmDelete(): void {
+    if (pendingDelete === null) return;
+    deleteUserMutation.mutate({ id: pendingDelete.id });
+  }
+
+  function cancelDelete(): void {
+    if (deleteUserMutation.isPending) return;
+    setPendingDelete(null);
   }
 
   return (
@@ -146,9 +157,9 @@ export default function UsersListPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="any">Any</SelectItem>
-              <SelectItem value="READ_ONLY">READ_ONLY</SelectItem>
-              <SelectItem value="READ_WRITE">READ_WRITE</SelectItem>
-              <SelectItem value="ADMIN">ADMIN</SelectItem>
+              <SelectItem value="READ_ONLY">{roleLabel("READ_ONLY")}</SelectItem>
+              <SelectItem value="READ_WRITE">{roleLabel("READ_WRITE")}</SelectItem>
+              <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -225,7 +236,9 @@ export default function UsersListPage() {
                     </td>
                     <td className="px-4 py-2">{u.displayName}</td>
                     <td className="px-4 py-2">
-                      <Badge variant={roleBadgeVariant(u.role)}>{u.role}</Badge>
+                      <Badge variant={roleBadgeVariant(u.role)} title={u.role}>
+                        {roleLabel(u.role)}
+                      </Badge>
                     </td>
                     <td className="px-4 py-2 text-muted-foreground">
                       {u.groups.length === 0
@@ -278,6 +291,30 @@ export default function UsersListPage() {
               </tbody>
             </table>
           </div>
+
+          <ConfirmDialog
+            open={pendingDelete !== null}
+            title="Delete user?"
+            description={
+              pendingDelete === null ? (
+                ""
+              ) : (
+                <>
+                  <p>
+                    This will permanently delete{" "}
+                    <strong>{pendingDelete.username}</strong> and revoke all
+                    their sessions.
+                  </p>
+                  <p className="mt-2">This action cannot be undone.</p>
+                </>
+              )
+            }
+            confirmLabel="Delete user"
+            busy={deleteUserMutation.isPending}
+            onConfirm={confirmDelete}
+            onCancel={cancelDelete}
+            data-testid="users-delete-confirm"
+          />
 
           {rows.length > PAGE_SIZE && (
             <div

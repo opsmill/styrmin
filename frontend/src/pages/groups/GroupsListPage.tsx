@@ -11,6 +11,8 @@ import {
   type Role,
 } from "@/generated/graphql";
 import { GraphQLOperationError } from "@/lib/graphql-fetcher";
+import { roleLabel } from "@/auth/roleLabel";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -52,6 +54,7 @@ export default function GroupsListPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<GroupRow | null>(null);
 
   const queryVariables = {
     search: search.trim() === "" ? null : search.trim(),
@@ -74,6 +77,7 @@ export default function GroupsListPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["ListGroups"] });
       void queryClient.invalidateQueries({ queryKey: ["ListUsers"] });
+      setPendingDelete(null);
     },
     onError: (err) => {
       const code = extractCode(err);
@@ -83,6 +87,7 @@ export default function GroupsListPage() {
       } else {
         setDeleteError(msg);
       }
+      setPendingDelete(null);
     },
   });
 
@@ -116,11 +121,17 @@ export default function GroupsListPage() {
 
   function handleDelete(group: GroupRow): void {
     setDeleteError(null);
-    const ok = window.confirm(
-      `Delete group "${group.name}"? This cannot be undone.`,
-    );
-    if (!ok) return;
-    deleteGroupMutation.mutate({ id: group.id });
+    setPendingDelete(group);
+  }
+
+  function confirmDelete(): void {
+    if (pendingDelete === null) return;
+    deleteGroupMutation.mutate({ id: pendingDelete.id });
+  }
+
+  function cancelDelete(): void {
+    if (deleteGroupMutation.isPending) return;
+    setPendingDelete(null);
   }
 
   return (
@@ -202,7 +213,9 @@ export default function GroupsListPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-2">
-                      <Badge variant={roleBadgeVariant(g.role)}>{g.role}</Badge>
+                      <Badge variant={roleBadgeVariant(g.role)} title={g.role}>
+                        {roleLabel(g.role)}
+                      </Badge>
                     </td>
                     <td
                       className="px-4 py-2 text-muted-foreground"
@@ -259,6 +272,30 @@ export default function GroupsListPage() {
               </tbody>
             </table>
           </div>
+
+          <ConfirmDialog
+            open={pendingDelete !== null}
+            title="Delete group?"
+            description={
+              pendingDelete === null ? (
+                ""
+              ) : (
+                <>
+                  <p>
+                    This will permanently delete{" "}
+                    <strong>{pendingDelete.name}</strong> and remove all of
+                    its memberships.
+                  </p>
+                  <p className="mt-2">This action cannot be undone.</p>
+                </>
+              )
+            }
+            confirmLabel="Delete group"
+            busy={deleteGroupMutation.isPending}
+            onConfirm={confirmDelete}
+            onCancel={cancelDelete}
+            data-testid="groups-delete-confirm"
+          />
 
           {rows.length > PAGE_SIZE && (
             <div

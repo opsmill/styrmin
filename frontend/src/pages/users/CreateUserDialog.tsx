@@ -3,6 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Plus, AlertCircle } from "lucide-react";
 
 import { useCreateUserMutation, type Role } from "@/generated/graphql";
+import { roleLabel } from "@/auth/roleLabel";
+import { PASSWORD_REQUIREMENTS_SUMMARY } from "@/auth/password-policy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -127,11 +129,20 @@ export function CreateUserDialog({ onCreated }: CreateUserDialogProps) {
             <Input
               id="create-user-password"
               type="password"
+              autoComplete="new-password"
               value={password}
               required
               onChange={(e) => setPassword(e.target.value)}
               disabled={submitting}
+              aria-describedby="create-user-password-policy"
             />
+            <p
+              id="create-user-password-policy"
+              className="text-xs text-muted-foreground"
+              data-testid="create-user-password-policy"
+            >
+              {PASSWORD_REQUIREMENTS_SUMMARY}
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -144,9 +155,9 @@ export function CreateUserDialog({ onCreated }: CreateUserDialogProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="READ_ONLY">READ_ONLY</SelectItem>
-                <SelectItem value="READ_WRITE">READ_WRITE</SelectItem>
-                <SelectItem value="ADMIN">ADMIN</SelectItem>
+                <SelectItem value="READ_ONLY">{roleLabel("READ_ONLY")}</SelectItem>
+                <SelectItem value="READ_WRITE">{roleLabel("READ_WRITE")}</SelectItem>
+                <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
 import type { CurrentUser, Role } from "@/auth/AuthProvider";
+import { roleLabel } from "@/auth/roleLabel";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -60,8 +61,9 @@ export function HeaderUserMenu({ user, onLogout }: HeaderUserMenuProps) {
         <Badge
           variant={roleBadgeVariant(user.effectiveRole)}
           data-testid="header-user-role-badge"
+          title={user.effectiveRole}
         >
-          {user.effectiveRole}
+          {roleLabel(user.effectiveRole)}
         </Badge>
         <ChevronDown className="h-4 w-4 opacity-60" aria-hidden="true" />
       </DropdownMenuTrigger>

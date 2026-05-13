@@ -7,6 +7,7 @@ import {
 } from "@/generated/graphql";
 import { GraphQLOperationError } from "@/lib/graphql-fetcher";
 import { useAuth } from "@/auth/AuthProvider";
+import { PASSWORD_REQUIREMENTS_SUMMARY } from "@/auth/password-policy";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { Button } from "@/components/ui/button";
@@ -301,8 +302,16 @@ export default function ProfilePage() {
                   onChange={(event) => setNewPassword(event.target.value)}
                   disabled={passwordSubmitting}
                   required
+                  aria-describedby="profile-new-password-policy"
                   data-testid="profile-new-password"
                 />
+                <p
+                  id="profile-new-password-policy"
+                  className="text-xs text-muted-foreground"
+                  data-testid="profile-new-password-policy"
+                >
+                  {PASSWORD_REQUIREMENTS_SUMMARY}
+                </p>
               </div>
 
               <div className="flex flex-col gap-1.5">
