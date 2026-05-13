@@ -36,6 +36,7 @@ import {
 } from "@/auth/AuthProvider";
 import { AppShell } from "@/components/AppShell";
 import BackupStorageLocationListPage from "@/pages/backup-storage-locations/BackupStorageLocationListPage";
+import SettingsPage from "@/pages/settings/SettingsPage";
 import { ThemeProvider } from "@/hooks/use-theme";
 
 type Role = "READ_ONLY" | "READ_WRITE" | "ADMIN";
@@ -68,12 +69,15 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function installFetch(): void {
-  // The BSL list page issues a `listBackupStorageLocations` query on
-  // mount. Stub it to return an empty list so the page renders without
-  // network errors and the create-button surface is rendered.
-  const fetchMock = vi.fn(async () =>
-    jsonResponse({ data: { backupStorageLocations: [] } }),
-  );
+  // Both pages issue list queries on mount. Dispatch on the request body
+  // so each page receives a shape its codegen expects.
+  const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+    const body = typeof init?.body === "string" ? init.body : "";
+    if (body.includes("ListClusters")) {
+      return jsonResponse({ data: { clusters: [] } });
+    }
+    return jsonResponse({ data: { backupStorageLocations: [] } });
+  });
   vi.stubGlobal("fetch", fetchMock);
 }
 
@@ -92,6 +96,11 @@ function makeTestRouter() {
       <>
         <AppShell />
         <BackupStorageLocationListPage />
+        {/* SettingsPage is rendered alongside so the admin Users/Groups
+            cards are in the DOM under the same auth context — the
+            cards now live under Settings rather than the top-level
+            sidebar. */}
+        <SettingsPage />
       </>
     ),
   });

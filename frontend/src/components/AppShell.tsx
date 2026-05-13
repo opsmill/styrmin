@@ -7,14 +7,11 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeft,
-  Users,
-  UsersRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/use-theme";
 import { useAuth } from "@/auth/AuthProvider";
 import { HeaderUserMenu } from "@/components/HeaderUserMenu";
-import { IfRole } from "@/auth/IfRole";
 
 const STORAGE_KEY = "sidebar-collapsed";
 
@@ -29,11 +26,10 @@ const navItems = [
   },
 ];
 
-const adminNavItems = [
-  { label: "Users", icon: Users, href: "/users", exact: false },
-  { label: "Groups", icon: UsersRound, href: "/groups", exact: false },
-];
-
+// Users/Groups admin surfaces are reachable from the Settings page,
+// not the top-level sidebar — see SettingsPage. Keeping them off the
+// sidebar means a non-admin browser only ever sees the same five nav
+// entries every other role does.
 const bottomNavItems = [
   { label: "Settings", icon: Settings, href: "/settings", exact: false },
 ];
@@ -134,7 +130,6 @@ export function AppShell() {
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3">
           {navItems.map(renderNavLink)}
-          <IfRole minimum="ADMIN">{adminNavItems.map(renderNavLink)}</IfRole>
         </nav>
 
         {/* Bottom */}
