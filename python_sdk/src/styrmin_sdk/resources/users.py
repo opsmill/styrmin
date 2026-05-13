@@ -16,7 +16,7 @@ from styrmin_sdk.graphql._generated.create_user import (
     CreateUserCreateUser,
 )
 from styrmin_sdk.graphql._generated.delete_user import DeleteUser
-from styrmin_sdk.graphql._generated.get_user import GetUser, GetUserUsers
+from styrmin_sdk.graphql._generated.get_user import GetUser, GetUserUser
 from styrmin_sdk.graphql._generated.list_users import ListUsers, ListUsersUsers
 from styrmin_sdk.graphql._generated.reset_user_password import ResetUserPassword
 from styrmin_sdk.graphql._generated.update_user import (
@@ -153,19 +153,22 @@ class UserResource(BaseResource):
         data = ListUsers.model_validate(result["data"])
         return data.users or []
 
-    async def get(self, user_id: str | UUID) -> GetUserUsers:
+    async def get(self, user_id: str | UUID) -> GetUserUser:
         """Fetch a single user by id.
 
-        The backend Query type does not expose a single-user field, so
-        the SDK fetches the admin-only ``users`` list and selects the
-        matching row. Raises :class:`ResourceNotFoundError` (code
-        ``USER_NOT_FOUND``) if no user matches.
+        Calls the server-side ``Query.user(id:)`` resolver — the backend
+        does the lookup, so we do not pay the cost of fetching the full
+        admin user list and filtering client-side. Raises
+        :class:`ResourceNotFoundError` (code ``USER_NOT_FOUND``) if no
+        user matches; the server surfaces that via ``extensions.code``
+        which ``_check_graphql_errors`` maps to the SDK exception. The
+        null fallback below defends against a hypothetical schema where
+        the resolver returned null instead of erroring.
         """
-        result = await self._transport.execute(load_query("get_user"))
+        target = str(user_id)
+        result = await self._transport.execute(load_query("get_user"), {"id": target})
         self._check_graphql_errors(result)
         data = GetUser.model_validate(result["data"])
-        target = str(user_id)
-        for user in data.users:
-            if str(user.id) == target:
-                return user
-        raise ResourceNotFoundError(f"User {target} not found", "USER_NOT_FOUND")
+        if data.user is None:
+            raise ResourceNotFoundError(f"User {target} not found", "USER_NOT_FOUND")
+        return data.user

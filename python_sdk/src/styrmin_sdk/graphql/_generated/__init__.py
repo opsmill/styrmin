@@ -127,11 +127,11 @@ from .get_environment_services import (
     GetEnvironmentServices,
     GetEnvironmentServicesEnvironmentServices,
 )
-from .get_group import GetGroup, GetGroupGroups
+from .get_group import GetGroup, GetGroupGroup
 from .get_pod_statuses import GetPodStatuses, GetPodStatusesPodStatuses
 from .get_restore import GetRestore, GetRestoreRestore
 from .get_task import GetTask, GetTaskTask
-from .get_user import GetUser, GetUserUsers, GetUserUsersGroups
+from .get_user import GetUser, GetUserUser, GetUserUserGroups
 from .input_types import (
     AffinityBlockInput,
     AffinityTermInput,
@@ -333,7 +333,7 @@ __all__ = [
     "GetEnvironmentServices",
     "GetEnvironmentServicesEnvironmentServices",
     "GetGroup",
-    "GetGroupGroups",
+    "GetGroupGroup",
     "GetPodStatuses",
     "GetPodStatusesPodStatuses",
     "GetRestore",
@@ -341,8 +341,8 @@ __all__ = [
     "GetTask",
     "GetTaskTask",
     "GetUser",
-    "GetUserUsers",
-    "GetUserUsersGroups",
+    "GetUserUser",
+    "GetUserUserGroups",
     "GraphQLClientError",
     "GraphQLClientGraphQLError",
     "GraphQLClientGraphQLMultiError",

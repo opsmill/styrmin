@@ -1,0 +1,7 @@
+query GetGroupById($id: UUID!) {
+    group(id: $id) {
+        id
+        name
+        role
+    }
+}

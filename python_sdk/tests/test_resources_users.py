@@ -215,13 +215,10 @@ async def test_forbidden_for_non_admin_token(client: StyrminClient, mock_transpo
 
 
 async def test_get_returns_matching_user(client: StyrminClient, mock_transport: AsyncMock) -> None:
-    """``get`` filters the admin-only ``users`` list client-side."""
+    """``get`` issues ``Query.user(id:)`` and returns the matching row."""
     mock_transport.execute.return_value = {
         "data": {
-            "users": [
-                _user_row(user_id="11111111-1111-1111-1111-111111111111", username="alice"),
-                _user_row(user_id="22222222-2222-2222-2222-222222222222", username="bob"),
-            ]
+            "user": _user_row(user_id="22222222-2222-2222-2222-222222222222", username="bob"),
         }
     }
 
@@ -229,15 +226,36 @@ async def test_get_returns_matching_user(client: StyrminClient, mock_transport: 
 
     assert user.username == "bob"
 
+    # The id is forwarded to the server — the SDK must not fetch the
+    # entire user list any more.
+    args, kwargs = mock_transport.execute.call_args
+    variables = args[1] if len(args) > 1 else kwargs["variables"]
+    assert variables == {"id": "22222222-2222-2222-2222-222222222222"}
 
-async def test_get_raises_when_missing(client: StyrminClient, mock_transport: AsyncMock) -> None:
+
+async def test_get_raises_when_server_returns_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """``USER_NOT_FOUND`` from the server surfaces as ResourceNotFoundError."""
     mock_transport.execute.return_value = {
-        "data": {
-            "users": [
-                _user_row(user_id="11111111-1111-1111-1111-111111111111", username="alice"),
-            ]
-        }
+        "data": {"user": None},
+        "errors": [
+            {
+                "message": "User not found",
+                "extensions": {"code": "USER_NOT_FOUND"},
+            }
+        ],
     }
+
+    with pytest.raises(ResourceNotFoundError) as exc_info:
+        await client.users.get(UUID("99999999-9999-9999-9999-999999999999"))
+
+    assert exc_info.value.typename == "USER_NOT_FOUND"
+
+
+async def test_get_raises_when_server_returns_null_without_error(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """Defensive fallback: a null user without an error still raises."""
+    mock_transport.execute.return_value = {"data": {"user": None}}
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
         await client.users.get(UUID("99999999-9999-9999-9999-999999999999"))

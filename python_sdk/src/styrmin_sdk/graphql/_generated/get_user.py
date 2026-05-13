@@ -12,26 +12,26 @@ from .enums import Role
 
 
 class GetUser(BaseModel):
-    users: list["GetUserUsers"]
+    user: Optional["GetUserUser"]
 
 
-class GetUserUsers(BaseModel):
+class GetUserUser(BaseModel):
     id: UUID
     username: str
     display_name: str = Field(alias="displayName")
     role: Role
     effective_role: Role = Field(alias="effectiveRole")
     active: bool
-    groups: list["GetUserUsersGroups"]
+    groups: list["GetUserUserGroups"]
     created_on: Optional[datetime] = Field(alias="createdOn")
     updated_on: Optional[datetime] = Field(alias="updatedOn")
 
 
-class GetUserUsersGroups(BaseModel):
+class GetUserUserGroups(BaseModel):
     id: UUID
     name: str
     role: Role
 
 
 GetUser.model_rebuild()
-GetUserUsers.model_rebuild()
+GetUserUser.model_rebuild()

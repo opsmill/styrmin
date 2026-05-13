@@ -16,7 +16,7 @@ from styrmin_sdk.graphql._generated.create_group import (
     CreateGroupCreateGroup,
 )
 from styrmin_sdk.graphql._generated.delete_group import DeleteGroup
-from styrmin_sdk.graphql._generated.get_group import GetGroup, GetGroupGroups
+from styrmin_sdk.graphql._generated.get_group import GetGroup, GetGroupGroup
 from styrmin_sdk.graphql._generated.list_groups import ListGroups, ListGroupsGroups
 from styrmin_sdk.graphql._generated.update_group import (
     UpdateGroup,
@@ -122,19 +122,22 @@ class GroupResource(BaseResource):
         data = ListGroups.model_validate(result["data"])
         return data.groups or []
 
-    async def get(self, group_id: str | UUID) -> GetGroupGroups:
+    async def get(self, group_id: str | UUID) -> GetGroupGroup:
         """Fetch a single group by id.
 
-        The backend Query type does not expose a single-group field, so
-        the SDK fetches the admin-only ``groups`` list and selects the
-        matching row. Raises :class:`ResourceNotFoundError` (code
-        ``GROUP_NOT_FOUND``) if no group matches.
+        Calls the server-side ``Query.group(id:)`` resolver — the backend
+        does the lookup, so we do not pay the cost of fetching the full
+        admin group list and filtering client-side. Raises
+        :class:`ResourceNotFoundError` (code ``GROUP_NOT_FOUND``) if no
+        group matches; the server surfaces that via ``extensions.code``
+        which ``_check_graphql_errors`` maps to the SDK exception. The
+        null fallback below defends against a hypothetical schema where
+        the resolver returned null instead of erroring.
         """
-        result = await self._transport.execute(load_query("get_group"))
+        target = str(group_id)
+        result = await self._transport.execute(load_query("get_group"), {"id": target})
         self._check_graphql_errors(result)
         data = GetGroup.model_validate(result["data"])
-        target = str(group_id)
-        for group in data.groups:
-            if str(group.id) == target:
-                return group
-        raise ResourceNotFoundError(f"Group {target} not found", "GROUP_NOT_FOUND")
+        if data.group is None:
+            raise ResourceNotFoundError(f"Group {target} not found", "GROUP_NOT_FOUND")
+        return data.group

@@ -551,6 +551,8 @@ type Query {
   currentUser: User
   users(active: Boolean = null, role: Role = null, search: String = null): [User!]! @requiresRole
   groups(search: String = null): [Group!]! @requiresRole
+  user(id: UUID!): User @requiresRole
+  group(id: UUID!): Group @requiresRole
   clusters: [Cluster!]!
   cluster(clusterId: UUID = null, clusterName: String = null): Cluster
   backupStorageLocations: [BackupStorageLocation!]!

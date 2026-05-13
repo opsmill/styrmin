@@ -827,6 +827,7 @@ export type Query = {
   environment?: Maybe<Environment>;
   environmentServices: Array<DeployedService>;
   environments: Array<Environment>;
+  group?: Maybe<Group>;
   groups: Array<Group>;
   /** Health check probe */
   ok: Scalars['Boolean']['output'];
@@ -835,6 +836,7 @@ export type Query = {
   restores: Array<Restore>;
   task?: Maybe<Task>;
   tasks: Array<Task>;
+  user?: Maybe<User>;
   users: Array<User>;
 };
 
@@ -904,6 +906,11 @@ export type QueryEnvironmentServicesArgs = {
 };
 
 
+export type QueryGroupArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
 export type QueryGroupsArgs = {
   search?: InputMaybe<Scalars['String']['input']>;
 };
@@ -929,6 +936,11 @@ export type QueryRestoresArgs = {
 
 export type QueryTaskArgs = {
   taskId: Scalars['UUID']['input'];
+};
+
+
+export type QueryUserArgs = {
+  id: Scalars['UUID']['input'];
 };
 
 

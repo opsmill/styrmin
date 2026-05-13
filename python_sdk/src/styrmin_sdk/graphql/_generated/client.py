@@ -1079,17 +1079,17 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetEnvironmentServices.model_validate(data)
 
-    async def get_group(self, **kwargs: Any) -> GetGroup:
+    async def get_group(self, id: UUID, **kwargs: Any) -> GetGroup:
         query = gql("""
-            query GetGroup {
-              groups {
+            query GetGroup($id: UUID!) {
+              group(id: $id) {
                 id
                 name
                 role
               }
             }
             """)
-        variables: dict[str, object] = {}
+        variables: dict[str, object] = {"id": id}
         response = await self.execute(
             query=query, operation_name="GetGroup", variables=variables, **kwargs
         )
@@ -1210,10 +1210,10 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetTask.model_validate(data)
 
-    async def get_user(self, **kwargs: Any) -> GetUser:
+    async def get_user(self, id: UUID, **kwargs: Any) -> GetUser:
         query = gql("""
-            query GetUser {
-              users {
+            query GetUser($id: UUID!) {
+              user(id: $id) {
                 id
                 username
                 displayName
@@ -1230,7 +1230,7 @@ class Client(AsyncBaseClient):
               }
             }
             """)
-        variables: dict[str, object] = {}
+        variables: dict[str, object] = {"id": id}
         response = await self.execute(
             query=query, operation_name="GetUser", variables=variables, **kwargs
         )

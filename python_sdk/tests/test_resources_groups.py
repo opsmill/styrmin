@@ -174,13 +174,10 @@ async def test_forbidden_for_non_admin_token(client: StyrminClient, mock_transpo
 
 
 async def test_get_returns_matching_group(client: StyrminClient, mock_transport: AsyncMock) -> None:
-    """``get`` filters the admin-only ``groups`` list client-side."""
+    """``get`` issues ``Query.group(id:)`` and returns the matching row."""
     mock_transport.execute.return_value = {
         "data": {
-            "groups": [
-                _group_row(group_id="22222222-2222-2222-2222-222222222222", name="engineers"),
-                _group_row(group_id="33333333-3333-3333-3333-333333333333", name="ops"),
-            ]
+            "group": _group_row(group_id="33333333-3333-3333-3333-333333333333", name="ops"),
         }
     }
 
@@ -188,15 +185,34 @@ async def test_get_returns_matching_group(client: StyrminClient, mock_transport:
 
     assert group.name == "ops"
 
+    args, kwargs = mock_transport.execute.call_args
+    variables = args[1] if len(args) > 1 else kwargs["variables"]
+    assert variables == {"id": "33333333-3333-3333-3333-333333333333"}
 
-async def test_get_raises_when_missing(client: StyrminClient, mock_transport: AsyncMock) -> None:
+
+async def test_get_raises_when_server_returns_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """``GROUP_NOT_FOUND`` from the server surfaces as ResourceNotFoundError."""
     mock_transport.execute.return_value = {
-        "data": {
-            "groups": [
-                _group_row(group_id="22222222-2222-2222-2222-222222222222", name="engineers"),
-            ]
-        }
+        "data": {"group": None},
+        "errors": [
+            {
+                "message": "Group not found",
+                "extensions": {"code": "GROUP_NOT_FOUND"},
+            }
+        ],
     }
+
+    with pytest.raises(ResourceNotFoundError) as exc_info:
+        await client.groups.get(UUID("99999999-9999-9999-9999-999999999999"))
+
+    assert exc_info.value.typename == "GROUP_NOT_FOUND"
+
+
+async def test_get_raises_when_server_returns_null_without_error(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """Defensive fallback: a null group without an error still raises."""
+    mock_transport.execute.return_value = {"data": {"group": None}}
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
         await client.groups.get(UUID("99999999-9999-9999-9999-999999999999"))

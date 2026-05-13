@@ -45,8 +45,14 @@ from styrmin_backend.services.application_drivers import (
     get_application_driver,
     get_application_drivers,
 )
-from styrmin_backend.services.auth.groups import list_groups as list_groups_service
-from styrmin_backend.services.auth.users import list_users as list_users_service
+from styrmin_backend.services.auth.groups import (
+    get_group as get_group_service,
+    list_groups as list_groups_service,
+)
+from styrmin_backend.services.auth.users import (
+    get_user as get_user_service,
+    list_users as list_users_service,
+)
 from styrmin_backend.services.backup.scheduler import (
     get_backup_schedule,
     get_backup_schedules,
@@ -127,6 +133,39 @@ class Query:
         uow = info.context["uow"]
         groups = await list_groups_service(uow, search=search)
         return [GroupType.from_instance(g) for g in groups]
+
+    @strawberry.field(extensions=[_requires_admin()])
+    async def user(
+        self,
+        info: strawberry.Info,
+        id: UUID,  # noqa: A002 — GraphQL convention; the field is named `id`.
+    ) -> UserType | None:
+        """Admin-only single-user lookup by id.
+
+        Surfaces ``USER_NOT_FOUND`` via ``extensions.code`` when the id is
+        unknown. The field is nullable to keep the schema honest about the
+        possibility of a missing row, but the not-found path is delivered
+        as a structured error rather than a silent null so SDK callers can
+        branch on the code.
+        """
+        uow = info.context["uow"]
+        user = await get_user_service(uow, user_id=id)
+        return UserType.from_instance(user)
+
+    @strawberry.field(extensions=[_requires_admin()])
+    async def group(
+        self,
+        info: strawberry.Info,
+        id: UUID,  # noqa: A002 — GraphQL convention; the field is named `id`.
+    ) -> GroupType | None:
+        """Admin-only single-group lookup by id.
+
+        Surfaces ``GROUP_NOT_FOUND`` via ``extensions.code`` when the id is
+        unknown — see :py:meth:`Query.user` for the rationale.
+        """
+        uow = info.context["uow"]
+        group = await get_group_service(uow, group_id=id)
+        return GroupType.from_instance(group)
 
     @strawberry.field
     async def clusters(self, info: strawberry.Info) -> list[Cluster]:

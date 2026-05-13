@@ -1,5 +1,5 @@
-query GetUser {
-    users {
+query GetUser($id: UUID!) {
+    user(id: $id) {
         id
         username
         displayName

@@ -54,9 +54,17 @@ class BaseResource:
         extensions = error.get("extensions", {})
         code = extensions.get("code", "")
 
-        if code == "NOT_FOUND":
+        # NOT_FOUND-shaped codes all surface as ResourceNotFoundError so
+        # callers can rely on a single ``except`` clause regardless of which
+        # resource was missing. The server-side codes are listed
+        # in ``backend/styrmin_backend/services/exceptions.py``.
+        if code in {"NOT_FOUND", "USER_NOT_FOUND", "GROUP_NOT_FOUND"}:
             raise ResourceNotFoundError(message, code)
-        if code == "ALREADY_EXISTS":
+        # Duplicate-resource codes (admin user/group mutations) reuse the
+        # existing AlreadyExists hierarchy so callers do not need to know
+        # the specific code to handle the conflict path. The generic
+        # ``ALREADY_EXISTS`` is retained for legacy resources.
+        if code in {"ALREADY_EXISTS", "DUPLICATE_USERNAME", "DUPLICATE_GROUP_NAME"}:
             raise ResourceAlreadyExistsError(message, code)
         if code == "DEPLOYMENT_RESTORING":
             raise DeploymentRestoringError(message, code)
