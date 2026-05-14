@@ -123,10 +123,10 @@ Web-application repository:
 
 ### 3.9 Validation
 
-- [ ] T035 [US1] Run `uv run invoke validate-graphql` from repo root; assert it passes for the updated `.graphql` operation files.
-- [ ] T036 [US1] Run `uv run invoke format lint` from repo root; assert clean.
-- [ ] T037 [US1] Run `cd frontend && pnpm lint && pnpm test` from repo root; assert clean.
-- [ ] T038 [US1] Run the new E2E to a pass: `sleep infinity | uv run pytest backend/tests/e2e/test_deployment_typed_input.py -v -s --pdb 2>&1 | tee /tmp/pdb.log` (per AGENTS.md non-interactive shell guidance). Capture timing and confirm the assertions described in T032 actually fire.
+- [X] T035 [US1] Run `uv run invoke validate-graphql` from repo root; assert it passes for the updated `.graphql` operation files.
+- [X] T036 [US1] Run `uv run invoke format lint` from repo root; assert clean.
+- [X] T037 [US1] Run `cd frontend && pnpm lint && pnpm test` from repo root; assert clean.
+- [X] T038 [US1] Run the new E2E to a pass: `sleep infinity | uv run pytest backend/tests/e2e/test_deployment_typed_input.py -v -s --pdb 2>&1 | tee /tmp/pdb.log` (per AGENTS.md non-interactive shell guidance). Capture timing and confirm the assertions described in T032 actually fire.
 
 **Checkpoint**: User Story 1 complete. The new typed input is the only way to call `updateDeployment`; the SDK, frontend, and every in-tree test exercise the new shape; all four success criteria (SC-001 through SC-004) are verifiable from a green test suite.
 

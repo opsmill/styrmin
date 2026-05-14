@@ -34,6 +34,7 @@ from typing import Any, AsyncGenerator, Callable
 import pytest
 from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
+from styrmin_sdk.exceptions import StyrminAPIError
 from styrmin_sdk.graphql._generated.input_types import (
     ComponentConfigInput,
     EnvVarInput,
@@ -275,18 +276,14 @@ async def test_update_deployment_typed_input_propagates_component_env_var_and_sc
     raised = False
     try:
         await client.deployments.update(deployment_id, input=bad_input)
-    except Exception as exc:  # noqa: BLE001 — SDK surfaces typed errors via exceptions
+    except StyrminAPIError as exc:
         raised = True
-        # The SDK wraps GraphQL extensions onto its own typed error
-        # objects; look for both the code string and the offending name
-        # in the stringified exception so the assertion is robust to
-        # exact wrapper class names across SDK revisions.
-        message = str(exc)
-        assert "INVALID_ENV_VAR_NAME" in message, (
-            f"expected INVALID_ENV_VAR_NAME in {exc!r} (str={message!r})"
+        assert exc.typename == "INVALID_ENV_VAR_NAME", (
+            f"expected typename INVALID_ENV_VAR_NAME, got {exc.typename!r} "
+            f"(message={str(exc)!r})"
         )
-        assert "1invalid" in message, (
-            f"expected offending name '1invalid' in {exc!r} (str={message!r})"
+        assert "1invalid" in str(exc), (
+            f"expected offending name '1invalid' in message, got {str(exc)!r}"
         )
     assert raised, (
         "submitting an invalid env var name must surface a typed error; "
