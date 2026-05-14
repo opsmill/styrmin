@@ -16,7 +16,7 @@ survive)."""
 input UpdateDeploymentInput {
   name: String
   parameters: [ParameterValueInput!]    # merge semantics
-  serviceNameOverrides: [ServiceNameOverrideInput!]
+  serviceNameOverrides: [ServiceNameOverride!]
   components: [ComponentConfigInput!]
 
   # Mirrors EnvironmentConfig + ClusterConfig + BaseConfigSection fields
@@ -58,7 +58,7 @@ input StandardStorageInput {
 
 **Reused from `UpdateEnvironmentInput`** (no duplication; same Python objects post-extraction): `EnvVarInput`, `LabelSelectorInput`, `LabelSelectorRequirementInput`, `DeploymentReferenceInput`, `AffinityTermInput`, `WeightedAffinityTermInput`, `AffinityBlockInput`, `ResourceSpecInput`, `ResourceRequirementsInput`, `TolerationInput`, `TopologySpreadConstraintInput`, `PostRenderInjectionInput`, `SchedulingInput`, `IngressServiceConfigInput`, `DedicatedIngressInput`, `ExternalUrlScheme`, `ExternalDnsEndpointsType`, `TolerationOperator`, `TolerationEffect`, `WhenUnsatisfiable`, `LabelSelectorOperator`.
 
-**Reused from existing**: `ServiceNameOverrideInput` — the existing `ServiceNameOverride` input type at `backend/styrmin_backend/api/definitions/service/model.py:97` is renamed to `ServiceNameOverrideInput` for consistency with the rest of the input-naming convention. The schema-side rename is the only change.
+**Reused from existing**: `ServiceNameOverride` — the existing input type at `backend/styrmin_backend/api/definitions/service/model.py:97` is reused **unchanged** and nested under `UpdateDeploymentInput.serviceNameOverrides: [ServiceNameOverride!]`. The type is also referenced by the `Deploy` mutation (which is explicitly out of scope), so a rename would ripple beyond this feature's bounds; the cosmetic naming inconsistency (`*Override` vs. the `*Input` suffix convention used by the new types) is accepted as the lesser cost.
 
 ## 2. Mutation signature change
 
@@ -86,6 +86,8 @@ type Mutation {
   ): Task
 }
 ```
+
+`ServiceNameOverride` itself is **unchanged** (still defined at `api/definitions/service/model.py:97`); the `Deploy` mutation continues to reference it as today. The only schema effect on `ServiceNameOverride` is that it now also appears as a nested input field on `UpdateDeploymentInput`.
 
 **Cutover rule**: the `Before` shape is removed in the same release that ships the `After` shape. No deprecation period.
 
@@ -129,6 +131,8 @@ Every row maps to one mandatory unit test under `backend/tests/functional/graphq
 
 Rows 02 (parameters merge) and 04 (components.envVars) need the test body to **also** assert the merge / flatten semantics, not just round-trip.
 
+**Implementation note**: the 22 rows above SHOULD be expressed as `pytest.mark.parametrize` cases against one test function (e.g. `test_update_deployment_input_field_propagates`), not as 22 separate `def test_*` functions. Each parametrized case still reports independently in CI; the test code stays a single readable function. The same applies to the error-propagation matrix in §5.
+
 ## 5. Error-propagation matrix (FR-008, FR-009; SC-002)
 
 | # | Input scope | Trigger | Expected `extensions.code` |
@@ -145,12 +149,13 @@ Rows 02 (parameters merge) and 04 (components.envVars) need the test body to **a
 
 Each row is one mandatory test under `backend/tests/functional/graphql/test_update_deployment_input_errors.py`.
 
-## 6. Schema-introspection assertions (SC-001, SC-003)
+## 6. Schema-introspection assertions (SC-001, SC-003, FR-012)
 
-Add two unit tests under `backend/tests/functional/graphql/test_update_deployment_input_introspection.py`:
+Add three unit tests under `backend/tests/functional/graphql/test_update_deployment_input_introspection.py`:
 
 - **`test_update_deployment_input_field_coverage`** — asserts the set of fields on `UpdateDeploymentInput` (camelCase) equals `set(DeploymentConfig.model_fields) ∪ {"name", "parameters", "serviceNameOverrides"}` (snake_case → camelCase normalized).
 - **`test_update_deployment_arguments_have_no_json_typed_args`** — asserts the `updateDeployment` mutation argument list contains zero arguments whose GraphQL type is `JSON` (the previous `config: JSON` and `parameters: JSON` are gone).
+- **`test_update_deployment_input_fields_have_descriptions`** — asserts that **every** field on `UpdateDeploymentInput`, `ComponentConfigInput`, `ParameterValueInput`, and `StandardStorageInput` carries a non-empty `description`. Drives FR-012; required for SC-001 to be meaningful beyond bare field presence.
 
 ## 7. Behaviour-regression coverage (SC-004)
 

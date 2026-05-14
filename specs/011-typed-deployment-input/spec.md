@@ -71,6 +71,10 @@ An API consumer — SDK user, GraphiQL user, frontend developer, or CLI user —
 - **FR-010**: The Python SDK MUST be regenerated to consume the new input shape. The resulting `client.deployments.update(...)` method MUST accept a typed Pydantic model whose fields mirror the deployment-configuration shape and MUST NOT carry any free-form-dict-typed `config` or `parameters` parameters.
 - **FR-011**: The frontend GraphQL codegen output MUST be regenerated and the existing deployment-edit caller MUST be updated to send the structured input. No new frontend UI screens or form work is in scope; only the existing caller is retargeted to the new input shape so that the existing edit flow continues to function.
 
+**Discoverability**
+
+- **FR-012**: Every field on `UpdateDeploymentInput`, `ComponentConfigInput`, `ParameterValueInput`, and `StandardStorageInput` MUST carry a non-empty human-readable `description` on its GraphQL declaration so introspection clients (GraphiQL, SDK consumers) can read both the *shape* and the *meaning* of each field without consulting source. Verifiable by an introspection assertion that asserts every input field's description is set and non-empty.
+
 ### Key Entities
 
 - **`UpdateDeploymentInput`** (new) — top-level GraphQL input for the `updateDeployment` mutation. Full-replacement semantics for every field except `parameters` (which preserves merge semantics).
@@ -94,6 +98,7 @@ An API consumer — SDK user, GraphiQL user, frontend developer, or CLI user —
 - No external (non-frontend, non-SDK, non-CLI) consumers depend on the current `updateDeployment(name, config, parameters, serviceNameOverrides)` argument list. The hard-cutover plan rests on this assumption; planning will include an in-tree search to confirm and will surface any internal automation, vendored scripts, or doc snippets that need updating in the same release.
 - The existing `update_deployment` service function signature and the persisted dict shapes on the deployment row stay unchanged. This is a pure GraphQL-surface change; no behavioural change reaches the service layer, the database, or the reconciliation pipeline.
 - Driver-defined parameter values must remain JSON-typed on the GraphQL surface because parameter shapes are dynamic per driver version. A deeper static typing would require per-driver schema generation, which is explicitly out of scope (track separately if desired).
+- This feature does not change the existing parameter-value validation contract. Today the parameter validator constrains each `value` to match its driver-declared kind (`STRING`, `INTEGER`, `BOOLEAN`, `ENUM`) and rejects type mismatches with a typed `ServiceError`; there is no explicit byte-size cap on string-typed values. The typed input preserves this contract exactly — `ParameterValueInput.value: JSON!` round-trips through the existing validator unchanged. Adding a byte-size cap, or further constraining value shapes, is a separate behavioural change and out of scope.
 - The existing frontend deployment-edit screen is sufficient as the post-cutover edit experience. No new screens, no new form work, and no new visual treatment is in scope for this feature.
 - The fanout pattern from the 009 environment-update spec does not apply here. `updateDeployment` is itself the per-deployment redeploy trigger; there is no second-level fanout to other entities.
 
