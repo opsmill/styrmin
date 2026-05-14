@@ -1283,6 +1283,13 @@ export type GetDeploymentQueryVariables = Exact<{
 
 export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
 
+export type GetDeploymentPodsQueryVariables = Exact<{
+  deploymentId: Scalars['UUID']['input'];
+}>;
+
+
+export type GetDeploymentPodsQuery = { __typename?: 'Query', podStatuses: Array<{ __typename?: 'PodStatus', id: string, podName: string, namespace: string, phase: PodPhase, ready: boolean, restartCount: number, nodeName?: string | null, componentName?: string | null, startedAt?: any | null, createdOn?: any | null, lastPolledAt?: any | null, containerStatuses: Record<string, unknown> }> };
+
 export type GetDeploymentResolvedSchedulingQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
 }>;
@@ -2032,6 +2039,43 @@ export const useGetDeploymentQuery = <
     )};
 
 useGetDeploymentQuery.getKey = (variables: GetDeploymentQueryVariables) => ['GetDeployment', variables];
+
+export const GetDeploymentPodsDocument = `
+    query GetDeploymentPods($deploymentId: UUID!) {
+  podStatuses(deploymentId: $deploymentId) {
+    id
+    podName
+    namespace
+    phase
+    ready
+    restartCount
+    nodeName
+    componentName
+    startedAt
+    createdOn
+    lastPolledAt
+    containerStatuses
+  }
+}
+    `;
+
+export const useGetDeploymentPodsQuery = <
+      TData = GetDeploymentPodsQuery,
+      TError = Error
+    >(
+      variables: GetDeploymentPodsQueryVariables,
+      options?: Omit<UseQueryOptions<GetDeploymentPodsQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetDeploymentPodsQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetDeploymentPodsQuery, TError, TData>(
+      {
+    queryKey: ['GetDeploymentPods', variables],
+    queryFn: graphqlFetcher<GetDeploymentPodsQuery, GetDeploymentPodsQueryVariables>(GetDeploymentPodsDocument, variables),
+    ...options
+  }
+    )};
+
+useGetDeploymentPodsQuery.getKey = (variables: GetDeploymentPodsQueryVariables) => ['GetDeploymentPods', variables];
 
 export const GetDeploymentResolvedSchedulingDocument = `
     query GetDeploymentResolvedScheduling($deploymentId: UUID!) {
