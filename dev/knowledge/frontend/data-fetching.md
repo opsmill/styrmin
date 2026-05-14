@@ -69,10 +69,15 @@ Direct `setQueryData` is intentionally not used — server response shapes vary,
 
 ### Conditional Fetching
 
-`enabled: cond` replaces urql's `pause: !cond`. Only two call sites use it (both in `DeploymentDetailPage`).
+`enabled: cond` replaces urql's `pause: !cond`. Used in `DeploymentDetailPage` and by the Pods tab, which gates fetching on whether the tab is the active one so the 10s poll only runs while the operator is looking at it.
 
 ```ts
 useGetDeploymentQuery({ id }, { enabled: !!id });
+
+useGetDeploymentPodsQuery(
+  { deploymentId },
+  { enabled: isActive, refetchInterval: isActive && autoRefreshEnabled ? 10_000 : false },
+);
 ```
 
 ### Auto-Refresh / Polling
