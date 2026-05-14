@@ -34,13 +34,13 @@
 
 ## Functional Requirements
 
-**Schema surface**
+### Schema surface
 
 - **FR-001**: System MUST expose a `UpdateDeploymentInput` Strawberry input type whose top-level fields cover every field of `DeploymentConfig` (i.e. `BaseConfigSection` + `ClusterConfig`-added + `EnvironmentConfig`-added + `components`) plus the four deployment-only fields `name`, `parameters`, `serviceNameOverrides`, and `components`. *Verified by*: schema introspection test diffing input fields against `DeploymentConfig.model_fields` ∪ deployment-only set.
 - **FR-002**: System MUST reuse the existing leaf input types (`EnvVarInput`, `SchedulingInput`, `DedicatedIngressInput`, `IngressServiceConfigInput`, `ResourceRequirementsInput`, `TolerationInput`, `TopologySpreadConstraintInput`, `AffinityBlockInput`, `LabelSelectorInput`, etc. — currently in `api/definitions/environment/inputs.py`) without duplication. The extraction location is a plan-time decision but the *invariant* is "one definition per leaf input, shared across environment and deployment top-level inputs". *Verified by*: type-identity assertion (`UpdateEnvironmentInput.scheduling.__class__ is UpdateDeploymentInput.scheduling.__class__`).
 - **FR-003**: System MUST change the `updateDeployment` mutation signature to `(deploymentId: ID!, input: UpdateDeploymentInput!)` and remove the previous `name` / `config` / `parameters` / `serviceNameOverrides` arguments in the same commit (hard cutover; no transitional dual-signature period — matches the 009 cutover precedent and avoids `JSON` regrowing through deprecated args).
 
-**Conversion helper**
+### Conversion helper
 
 - **FR-004**: System MUST provide `update_deployment_input_to_dict(input: UpdateDeploymentInput) -> dict[str, Any]` that:
   - Omits top-level fields whose value is `None` / `strawberry.UNSET` (full-replacement semantics: an omitted field means "do not touch the corresponding persisted column").
@@ -51,18 +51,18 @@
   - Translates GraphQL enums to their Pydantic-side string `.value`.
   *Verified by*: unit tests on the helper itself, one per branch.
 
-**Resolver behaviour**
+### Resolver behaviour
 
 - **FR-005**: The `updateDeployment` resolver MUST derive the split `(deployment_config, deployment_parameters, deployment_name, service_name_overrides)` from the input dict and forward to the existing `update_deployment` service function unchanged. *Verified by*: resolver-level integration test that asserts service-function call args for each combination of input fields.
 - **FR-006**: The resolver MUST preserve today's merge semantics for `parameters` (existing values are the base; input-provided entries override on a per-key basis). Documented on the `UpdateDeploymentInput.parameters` field description so the asymmetry vs. `config`-style full-replacement is discoverable. *Verified by*: scenario 6 above.
 - **FR-007**: The resolver MUST continue to raise `InternalDeploymentError` ahead of any input conversion for `deployment.internal == True`, and continue to raise `InvalidContextError` (from the service) when the input is empty (no field set). *Verified by*: existing tests for both error paths, retargeted to the new input shape.
 
-**Error propagation (constitution §IV)**
+### Error propagation (constitution §IV)
 
 - **FR-008**: System MUST preserve the typed env-var error codes (`INVALID_ENV_VAR_NAME`, `ENV_VAR_SIZE_LIMIT_EXCEEDED`, `DUPLICATE_ENV_VAR_NAME`, `UNKNOWN_COMPONENT_ENV_VAR`) at the GraphQL boundary for both top-level `envVars` and any `components.*.envVars` block. *Verified by*: one propagation test per code per scope (8 tests).
 - **FR-009**: System MUST introduce two new typed errors with stable `error_code` values (`DUPLICATE_PARAMETER_NAME`, `DUPLICATE_COMPONENT_NAME`) and surface them at the GraphQL boundary for the corresponding input shapes. *Verified by*: scenarios 4 and 5; one propagation test per new code.
 
-**Codegen propagation**
+### Codegen propagation
 
 - **FR-010**: The Python SDK MUST be regenerated to consume the new input shape (`uv run styrmin export graphql-schema schema.graphql && uv run invoke generate`); the resulting `client.deployments.update(...)` method MUST accept a typed `UpdateDeploymentInput` Pydantic model and no `dict`-typed `config` / `parameters` parameters. *Verified by*: SDK contract test.
 - **FR-011**: The frontend GraphQL codegen output MUST be regenerated; the existing deployment edit caller MUST be updated to send the structured input. *Verified by*: `pnpm lint` + `pnpm test` clean; Vitest test on the edit caller hitting the new typed mutation signature.
