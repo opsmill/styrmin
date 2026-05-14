@@ -107,7 +107,7 @@ Web-application repository:
 
 ### 3.6 SDK test retargeting
 
-- [ ] T028 [US1] [P] Retarget `python_sdk/tests/test_deployments.py` to call `update(deployment_id, input=UpdateDeploymentInput(...))` and assert against the typed-model fields rather than dicts.
+- [X] T028 [US1] [P] Retarget `python_sdk/tests/test_deployments.py` to call `update(deployment_id, input=UpdateDeploymentInput(...))` and assert against the typed-model fields rather than dicts.
 
 ### 3.7 New tests (Constitution §V mandatory)
 
