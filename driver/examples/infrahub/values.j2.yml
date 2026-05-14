@@ -13,15 +13,14 @@ infrahubServer:
         path: /
   infrahubServer:
     # Hardcoded chart wiring + operator-supplied env vars for the `server`
-    # component.
+    # component. The infrahub chart expects this as a map (key: value), not
+    # a [{name, value}] list — see chart's templates/_env.tpl which does
+    # `.Values.infrahubServer.infrahubServer.env.<KEY>` lookups directly.
     env:
-      - name: PREFECT_API_URL
-        value: "http://styrmin-task-manager:4200/api"
-      - name: INFRAHUB_WORKFLOW_ADDRESS
-        value: styrmin-task-manager
+      PREFECT_API_URL: "http://styrmin-task-manager:4200/api"
+      INFRAHUB_WORKFLOW_ADDRESS: styrmin-task-manager
 {%- for entry in components | component_env_vars("server") %}
-      - name: {{ entry.name | tojson }}
-        value: {{ entry.value | tojson }}
+      {{ entry.name }}: {{ entry.value | tojson }}
 {%- endfor %}
   persistence:
     accessMode: ReadWriteOnce
@@ -31,15 +30,12 @@ infrahubServer:
 infrahubTaskWorker:
   infrahubTaskWorker:
     # Hardcoded chart wiring + operator-supplied env vars for the
-    # `task-worker` component.
+    # `task-worker` component. Map shape — see infrahubServer note above.
     env:
-      - name: PREFECT_API_URL
-        value: "http://styrmin-task-manager:4200/api"
-      - name: INFRAHUB_WORKFLOW_ADDRESS
-        value: styrmin-task-manager
+      PREFECT_API_URL: "http://styrmin-task-manager:4200/api"
+      INFRAHUB_WORKFLOW_ADDRESS: styrmin-task-manager
 {%- for entry in components | component_env_vars("task-worker") %}
-      - name: {{ entry.name | tojson }}
-        value: {{ entry.value | tojson }}
+      {{ entry.name }}: {{ entry.value | tojson }}
 {%- endfor %}
   replicas: "{{ parameters.replicas_task_worker }}"
 nats:
