@@ -25,6 +25,16 @@ from styrmin_sdk.graphql._generated.get_environment import (
 )
 from styrmin_sdk.graphql._generated.get_restore import GetRestoreRestore as Restore
 from styrmin_sdk.graphql._generated.get_task import GetTaskTask as Task
+from styrmin_sdk.graphql._generated.input_types import (
+    ComponentConfigInput,
+    EnvVarInput,
+    ParameterValueInput,
+    ResourceRequirementsInput,
+    ResourceSpecInput,
+    SchedulingInput,
+    StandardStorageInput,
+    UpdateDeploymentInput,
+)
 from styrmin_sdk.graphql._generated.load_remote_application_driver_version import (
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion as ApplicationDriverVersion,
 )
@@ -53,10 +63,18 @@ __all__ = [
     "ClusterRef",
     "Component",
     "ComponentConfig",
+    "ComponentConfigInput",
     "Context",
     "Deployment",
+    "EnvVarInput",
     "Environment",
     "HelmChart",
+    "ParameterValueInput",
+    "ResourceRequirementsInput",
+    "ResourceSpecInput",
     "Restore",
+    "SchedulingInput",
+    "StandardStorageInput",
     "Task",
+    "UpdateDeploymentInput",
 ]

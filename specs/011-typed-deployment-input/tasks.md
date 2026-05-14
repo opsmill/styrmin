@@ -200,3 +200,7 @@ Within Phase 4, T039 / T040 / T041 are independent and can run in parallel; T042
 5. T035–T038 are the validation gates that say "ready to merge".
 
 **Definition of done for this feature**: every checkbox above is `[x]`, `uv run invoke format lint` clean, `pnpm lint && pnpm test` clean, `uv run invoke validate-graphql` clean, the full backend test suite (`uv run invoke test`) green, the new E2E green per T038, and the resulting PR carries the `Breaking changes` release-notes entry from T041.
+
+## Orchestrator-inserted tasks
+
+- [X] (orchestrator-inserted) Re-export new input types from `styrmin_sdk.models` so the quickstart's documented public path works.
