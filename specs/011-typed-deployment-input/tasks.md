@@ -79,10 +79,10 @@ Web-application repository:
 
 ### 3.2 Schema + SDK regeneration
 
-- [ ] T012 [US1] Regenerate `schema.graphql` from repo root: `uv run styrmin export graphql-schema schema.graphql`. Confirm the `updateDeployment` mutation argument list shows `(deploymentId: UUID!, input: UpdateDeploymentInput!)` and that `UpdateDeploymentInput`, `ComponentConfigInput`, `ParameterValueInput`, and `StandardStorageInput` types are present.
-- [ ] T013 [US1] Update `python_sdk/src/styrmin_sdk/graphql/update_deployment.graphql` to match the new signature: `mutation UpdateDeployment($deploymentId: UUID!, $input: UpdateDeploymentInput!) { updateDeployment(deploymentId: $deploymentId, input: $input) { id status type message deploymentId } }`.
-- [ ] T014 [US1] Regenerate SDK types: `uv run invoke generate`. Confirm `python_sdk/src/styrmin_sdk/graphql/_generated/update_deployment.py` and `_generated/input_types.py` include `UpdateDeploymentInput` and the four new types as Pydantic models with type-hinted fields.
-- [ ] T015 [US1] Update `python_sdk/src/styrmin_sdk/resources/deployments.py` `update(...)` method to accept `input: UpdateDeploymentInput` instead of the four loose `name` / `config` / `parameters` / `service_name_overrides` keyword arguments. Forward `input` as the GraphQL variable.
+- [X] T012 [US1] Regenerate `schema.graphql` from repo root: `uv run styrmin export graphql-schema schema.graphql`. Confirm the `updateDeployment` mutation argument list shows `(deploymentId: UUID!, input: UpdateDeploymentInput!)` and that `UpdateDeploymentInput`, `ComponentConfigInput`, `ParameterValueInput`, and `StandardStorageInput` types are present.
+- [X] T013 [US1] Update `python_sdk/src/styrmin_sdk/graphql/update_deployment.graphql` to match the new signature: `mutation UpdateDeployment($deploymentId: UUID!, $input: UpdateDeploymentInput!) { updateDeployment(deploymentId: $deploymentId, input: $input) { id status type message deploymentId } }`.
+- [X] T014 [US1] Regenerate SDK types: `uv run invoke generate`. Confirm `python_sdk/src/styrmin_sdk/graphql/_generated/update_deployment.py` and `_generated/input_types.py` include `UpdateDeploymentInput` and the four new types as Pydantic models with type-hinted fields.
+- [X] T015 [US1] Update `python_sdk/src/styrmin_sdk/resources/deployments.py` `update(...)` method to accept `input: UpdateDeploymentInput` instead of the four loose `name` / `config` / `parameters` / `service_name_overrides` keyword arguments. Forward `input` as the GraphQL variable.
 
 ### 3.3 Frontend codegen + helper + dialog
 

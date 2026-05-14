@@ -53,6 +53,7 @@ from .input_types import (
     DeploymentPodStatusReport,
     DeploymentStatusReportInput,
     ServiceNameOverride,
+    UpdateDeploymentInput,
     UpdateEnvironmentInput,
     UpdateGroupInput,
     UpdateUserInput,
@@ -1814,25 +1815,11 @@ class Client(AsyncBaseClient):
         return UpdateBackupStorageLocation.model_validate(data)
 
     async def update_deployment(
-        self,
-        deployment_id: UUID,
-        name: Union[Optional[str], UnsetType] = UNSET,
-        config: Union[Optional[Any], UnsetType] = UNSET,
-        parameters: Union[Optional[Any], UnsetType] = UNSET,
-        service_name_overrides: Union[
-            Optional[list[ServiceNameOverride]], UnsetType
-        ] = UNSET,
-        **kwargs: Any,
+        self, deployment_id: UUID, input: UpdateDeploymentInput, **kwargs: Any
     ) -> UpdateDeployment:
         query = gql("""
-            mutation UpdateDeployment($deploymentId: UUID!, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
-              updateDeployment(
-                deploymentId: $deploymentId
-                name: $name
-                config: $config
-                parameters: $parameters
-                serviceNameOverrides: $serviceNameOverrides
-              ) {
+            mutation UpdateDeployment($deploymentId: UUID!, $input: UpdateDeploymentInput!) {
+              updateDeployment(deploymentId: $deploymentId, input: $input) {
                 id
                 status
                 type
@@ -1841,13 +1828,7 @@ class Client(AsyncBaseClient):
               }
             }
             """)
-        variables: dict[str, object] = {
-            "deploymentId": deployment_id,
-            "name": name,
-            "config": config,
-            "parameters": parameters,
-            "serviceNameOverrides": service_name_overrides,
-        }
+        variables: dict[str, object] = {"deploymentId": deployment_id, "input": input}
         response = await self.execute(
             query=query,
             operation_name="UpdateDeployment",
