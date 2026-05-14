@@ -101,9 +101,9 @@ Web-application repository:
 
 ### 3.5 E2E retargeting (existing tests)
 
-- [ ] T025 [US1] [P] Retarget `backend/tests/e2e/drivers/api_driver.py` (the SDK-backed entrypoint) to call `client.deployments.update(deployment_id, input=UpdateDeploymentInput(...))`. Update the corresponding method signature in `backend/tests/e2e/drivers/protocol.py` (the abstract base) and `backend/tests/e2e/drivers/ui_driver.py` (the Playwright-backed entrypoint).
-- [ ] T026 [US1] [P] Retarget call sites in `backend/tests/e2e/test_pod_scheduling.py` to use the updated driver entrypoint signature.
-- [ ] T027 [US1] [P] Retarget call sites in `backend/tests/e2e/test_deployment_env_vars.py` to use the updated driver entrypoint signature.
+- [X] T025 [US1] [P] Retarget `backend/tests/e2e/drivers/api_driver.py` (the SDK-backed entrypoint) to call `client.deployments.update(deployment_id, input=UpdateDeploymentInput(...))`. Update the corresponding method signature in `backend/tests/e2e/drivers/protocol.py` (the abstract base) and `backend/tests/e2e/drivers/ui_driver.py` (the Playwright-backed entrypoint).
+- [X] T026 [US1] [P] Retarget call sites in `backend/tests/e2e/test_pod_scheduling.py` to use the updated driver entrypoint signature.
+- [X] T027 [US1] [P] Retarget call sites in `backend/tests/e2e/test_deployment_env_vars.py` to use the updated driver entrypoint signature.
 
 ### 3.6 SDK test retargeting
 

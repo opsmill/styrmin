@@ -200,8 +200,70 @@ class ApiScenarioDriver:
     async def update_deployment(
         self, *, deployment_id: str, config: dict[str, Any]
     ) -> None:
+        """Translate the legacy ``config`` dict into a typed
+        ``UpdateDeploymentInput`` and submit via the SDK.
+
+        ``config`` mirrors the read-side ``Deployment.config`` JSON blob:
+        snake_case keys with ``env_vars`` and ``components`` as dicts keyed
+        by name. The SDK now expects ``list[EnvVarInput]`` and
+        ``list[ComponentConfigInput]`` — the two dict-shape→list-shape
+        translations happen here so test scenarios keep their compact
+        dict literals.
+
+        Every other top-level key (``scheduling``, ``ip_whitelist``,
+        ``dedicated_ingress``, ``fqdn_suffix``, scheme/port/dns enum
+        fields, ``parameters``, ``service_name_overrides``, etc.) is
+        passed through to ``UpdateDeploymentInput.model_validate``; the
+        generated Pydantic model has ``populate_by_name=True`` so it
+        accepts snake_case field names or their camelCase aliases
+        transparently. Nested ``SchedulingInput`` / ``AffinityTermInput``
+        / ``DeploymentReferenceInput`` etc. coerce automatically.
+        """
+        # Imported locally so importing the api_driver doesn't pull the
+        # full SDK input-types graph at module-load time (the test suite
+        # imports this driver from many fixtures).
+        from styrmin_sdk.graphql._generated.input_types import (
+            ComponentConfigInput,
+            EnvVarInput,
+            UpdateDeploymentInput,
+        )
+
+        prepared: dict[str, Any] = dict(config)
+
+        env_vars = prepared.pop("env_vars", None)
+        if isinstance(env_vars, dict):
+            prepared["envVars"] = [
+                EnvVarInput(name=name, value=value) for name, value in env_vars.items()
+            ]
+        elif env_vars is not None:
+            # already in list-shape (typed callers) — preserve as-is.
+            prepared["envVars"] = env_vars
+
+        components = prepared.pop("components", None)
+        if isinstance(components, dict):
+            prepared["components"] = [
+                ComponentConfigInput(
+                    name=name,
+                    envVars=(
+                        [
+                            EnvVarInput(name=ev_name, value=ev_value)
+                            for ev_name, ev_value in (
+                                block.get("env_vars") or {}
+                            ).items()
+                        ]
+                        if isinstance(block, dict) and block.get("env_vars") is not None
+                        else None
+                    ),
+                )
+                for name, block in components.items()
+            ]
+        elif components is not None:
+            prepared["components"] = components
+
+        input_obj = UpdateDeploymentInput.model_validate(prepared)
+
         try:
-            await self._client.deployments.update(deployment_id, config=config)
+            await self._client.deployments.update(deployment_id, input=input_obj)
         except StyrminError as exc:
             raise _normalise(exc) from exc
 

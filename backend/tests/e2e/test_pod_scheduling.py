@@ -469,47 +469,41 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
     the full Styrmin → Flux pipeline) is identical for preferred and required
     terms; actual placement guarantees require multi-node clusters.
     """
+    from styrmin_sdk.graphql._generated.input_types import (
+        AffinityBlockInput,
+        AffinityTermInput,
+        DeploymentReferenceInput,
+        SchedulingInput,
+        UpdateDeploymentInput,
+        WeightedAffinityTermInput,
+    )
+
     client: StyrminClient = scheduling_environment["client"]
     dep_a_id = scheduling_deployment["deployment_id"]
     dep_b_id = scheduling_deployment_b["deployment_id"]
 
+    def _anti_affinity_input(target_deployment_id: str) -> UpdateDeploymentInput:
+        return UpdateDeploymentInput(
+            scheduling=SchedulingInput(
+                podAntiAffinity=AffinityBlockInput(
+                    preferred=[
+                        WeightedAffinityTermInput(
+                            weight=100,
+                            term=AffinityTermInput(
+                                topologyKey="kubernetes.io/hostname",
+                                deploymentRef=DeploymentReferenceInput(
+                                    deploymentId=target_deployment_id,
+                                ),
+                            ),
+                        )
+                    ]
+                )
+            )
+        )
+
     try:
-        await client.deployments.update(
-            dep_a_id,
-            config={
-                "scheduling": {
-                    "pod_anti_affinity": {
-                        "preferred": [
-                            {
-                                "weight": 100,
-                                "term": {
-                                    "topology_key": "kubernetes.io/hostname",
-                                    "deployment_ref": {"deployment_id": dep_b_id},
-                                },
-                            }
-                        ]
-                    }
-                }
-            },
-        )
-        await client.deployments.update(
-            dep_b_id,
-            config={
-                "scheduling": {
-                    "pod_anti_affinity": {
-                        "preferred": [
-                            {
-                                "weight": 100,
-                                "term": {
-                                    "topology_key": "kubernetes.io/hostname",
-                                    "deployment_ref": {"deployment_id": dep_a_id},
-                                },
-                            }
-                        ]
-                    }
-                }
-            },
-        )
+        await client.deployments.update(dep_a_id, input=_anti_affinity_input(dep_b_id))
+        await client.deployments.update(dep_b_id, input=_anti_affinity_input(dep_a_id))
 
         async def _wait_running(deployment_id: str) -> None:
             # Scoped to this test's api-only path — we drive the SDK
@@ -568,8 +562,9 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
     finally:
         # This test touches two deployments — clean both up so the
         # post-test state matches what other tests expect.
+        cleanup_input = UpdateDeploymentInput(scheduling=SchedulingInput())
         for did in (dep_a_id, dep_b_id):
             try:
-                await client.deployments.update(did, config={"scheduling": {}})
+                await client.deployments.update(did, input=cleanup_input)
             except Exception:  # noqa: BLE001
                 pass

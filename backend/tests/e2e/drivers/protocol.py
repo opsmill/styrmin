@@ -107,8 +107,18 @@ class ScenarioDriver(Protocol):
     ) -> None:
         """Submit a new ``config`` for an existing deployment.
 
+        ``config`` is the test-friendly dict shape that mirrors the read
+        API's ``Deployment.config`` JSON blob: snake_case keys, with
+        ``env_vars`` and ``components`` as dicts keyed by name. The API
+        driver translates this into the typed ``UpdateDeploymentInput`` it
+        forwards to ``client.deployments.update(deployment_id,
+        input=...)`` so each driver owns its own SDK<->dict adapter and
+        callers don't have to import codegen types.
+
         The UI driver drives the Edit Scheduling dialog on the deployment
-        detail page; the API driver calls ``client.deployments.update``.
+        detail page; today it only supports the ``config['scheduling']``
+        sub-tree (other keys are rejected with ``ScenarioActionError``).
+
         Both implementations block until the server has accepted the
         mutation — callers still need ``wait_for_deployment_running`` to
         observe the reconciliation completing.
