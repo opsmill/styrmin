@@ -8,7 +8,7 @@ Covers:
   runtime class) surface as :class:`InvalidDeploymentContextError` from the
   validator, which the GraphQL mutation layer converts into a
   VALIDATION_ERROR GraphQL extension on
-  ``updateDeployment(deploymentId, config)``.
+  ``updateDeployment(deploymentId, input)``.
 * The full HTTP-driven ``updateDeployment`` round-trip requires a live
   fixture stack (cluster + environment + driver version); it is scaffolded
   below with ``pytest.skip(...)`` and picked up by the functional harness

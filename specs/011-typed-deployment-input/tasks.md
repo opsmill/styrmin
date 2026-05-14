@@ -93,11 +93,11 @@ Web-application repository:
 
 ### 3.4 Backend test retargeting (existing tests, semantic-equivalence)
 
-- [ ] T020 [US1] [P] Update `backend/tests/functional/graphql/operations/update_deployment.graphql` and `update_deployment_config.graphql` to the new mutation signature shape.
-- [ ] T021 [US1] [P] Retarget call sites in `backend/tests/functional/graphql/test_deployment.py` to the new input shape.
-- [ ] T022 [US1] [P] Retarget call sites in `backend/tests/functional/graphql/test_env_vars_propagation.py` to the new input shape.
-- [ ] T023 [US1] [P] Retarget call sites in `backend/tests/functional/test_api_scheduling_config.py` to the new input shape.
-- [ ] T024 [US1] [P] Retarget helper functions in `backend/tests/functional/helpers.py` that build `updateDeployment` payloads to the new input shape.
+- [X] T020 [US1] [P] Update `backend/tests/functional/graphql/operations/update_deployment.graphql` and `update_deployment_config.graphql` to the new mutation signature shape.
+- [X] T021 [US1] [P] Retarget call sites in `backend/tests/functional/graphql/test_deployment.py` to the new input shape.
+- [X] T022 [US1] [P] Retarget call sites in `backend/tests/functional/graphql/test_env_vars_propagation.py` to the new input shape.
+- [X] T023 [US1] [P] Retarget call sites in `backend/tests/functional/test_api_scheduling_config.py` to the new input shape.
+- [X] T024 [US1] [P] Retarget helper functions in `backend/tests/functional/helpers.py` that build `updateDeployment` payloads to the new input shape.
 
 ### 3.5 E2E retargeting (existing tests)
 
