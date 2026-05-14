@@ -75,7 +75,7 @@ Web-application repository:
 
 ### 3.1 Resolver
 
-- [ ] T011 [US1] Update `backend/styrmin_backend/api/schema/mutation.py` `update_deployment` resolver (currently at `mutation.py:761-788`) to accept `(deployment_id: UUID, input: UpdateDeploymentInput, info: strawberry.Info)`. Inside the resolver, call `update_deployment_input_to_dict(input)`, then `pop` `name` / `parameters` / `service_name_overrides` off the result, treat the remainder as `deployment_config`, and forward to the existing `update_deployment` service function unchanged. Preserve the existing `InternalDeploymentError` check ahead of input conversion. Drop the four old keyword arguments and the import of `ServiceNameOverride` from this file if it's not still used elsewhere in the module (it is — keep the import).
+- [X] T011 [US1] Update `backend/styrmin_backend/api/schema/mutation.py` `update_deployment` resolver (currently at `mutation.py:761-788`) to accept `(deployment_id: UUID, input: UpdateDeploymentInput, info: strawberry.Info)`. Inside the resolver, call `update_deployment_input_to_dict(input)`, then `pop` `name` / `parameters` / `service_name_overrides` off the result, treat the remainder as `deployment_config`, and forward to the existing `update_deployment` service function unchanged. Preserve the existing `InternalDeploymentError` check ahead of input conversion. Drop the four old keyword arguments and the import of `ServiceNameOverride` from this file if it's not still used elsewhere in the module (it is — keep the import).
 
 ### 3.2 Schema + SDK regeneration
 
