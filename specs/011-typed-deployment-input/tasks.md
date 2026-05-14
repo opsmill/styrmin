@@ -136,10 +136,10 @@ Web-application repository:
 
 **Purpose**: Documentation, release notes, and stale-reference clean-up.
 
-- [ ] T039 [P] Grep `docs/` for stale references to the old signature: `grep -rn "config: JSON\|parameters: JSON\|updateDeployment(name" docs/`. Update any matches to reference the new typed-input shape; if zero matches, leave a one-line note in the PR description confirming the audit found nothing.
-- [ ] T040 [P] Update `python_sdk/CHANGELOG.md` (create the file if absent) with a `## Unreleased` entry describing the `client.deployments.update(...)` signature change, including a before/after code snippet pulled from `quickstart.md`. Required for external SDK consumer signal (X1).
-- [ ] T041 [P] Update the project release notes (`CHANGELOG.md` at repo root, or whatever the project convention is) with a `Breaking changes` entry under the next-release header, calling out the `updateDeployment` mutation argument-list change with a before/after schema snippet.
-- [ ] T042 Run the full backend test suite once to confirm no unrelated regression: `uv run invoke test`. Investigate and fix any failure.
+- [X] T039 [P] Grep `docs/` for stale references to the old signature: `grep -rn "config: JSON\|parameters: JSON\|updateDeployment(name" docs/`. Update any matches to reference the new typed-input shape; if zero matches, leave a one-line note in the PR description confirming the audit found nothing. — Audit returned **zero hits** in `docs/`; no updates needed.
+- [X] T040 [P] Update `python_sdk/CHANGELOG.md` (create the file if absent) with a `## Unreleased` entry describing the `client.deployments.update(...)` signature change, including a before/after code snippet pulled from `quickstart.md`. Required for external SDK consumer signal (X1). — Created `python_sdk/CHANGELOG.md` with `## Unreleased` → `Breaking changes`.
+- [X] T041 [P] Update the project release notes (`CHANGELOG.md` at repo root, or whatever the project convention is) with a `Breaking changes` entry under the next-release header, calling out the `updateDeployment` mutation argument-list change with a before/after schema snippet. — No top-level `CHANGELOG.md` exists; project uses release-notes-as-PR-descriptions, so the entry will be added to the PR body instead.
+- [X] T042 Run the full backend test suite once to confirm no unrelated regression: `uv run invoke test`. Investigate and fix any failure. — **1529 passed, 2 skipped** in 64.67s; no failures.
 - [X] T043 (orchestrator-inserted) Retarget `cli/src/styrminctl/commands/deployments.py` `update` subcommand to the typed `UpdateDeploymentInput` shape: build the input via `UpdateDeploymentInput.model_validate(parsed_json)` (relies on `populate_by_name=True` so snake_case or camelCase keys work) and pass `input=...` to `client.deployments.update(...)`. tasks.md originally missed this in-tree caller, which left two `[missing-argument]` / `[unknown-argument]` lint errors at `commands/deployments.py:88`.
 
 ---
