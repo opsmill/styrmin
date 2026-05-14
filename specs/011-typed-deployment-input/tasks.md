@@ -32,8 +32,8 @@ Web-application repository:
 
 **Purpose**: Ensure local environment is ready for codegen + lint cycles. No project init needed (existing repo).
 
-- [ ] T001 Run `uv sync` and `cd frontend && pnpm install` from the repository root to ensure both toolchains are warmed up (codegen depends on both).
-- [ ] T002 Verify pre-commit hooks installed: `uv run invoke pre-commit-install` (idempotent).
+- [X] T001 Run `uv sync` and `cd frontend && pnpm install` from the repository root to ensure both toolchains are warmed up (codegen depends on both).
+- [X] T002 Verify pre-commit hooks installed: `uv run invoke pre-commit-install` (idempotent).
 
 ---
 
