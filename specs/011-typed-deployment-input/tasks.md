@@ -118,8 +118,8 @@ Web-application repository:
 
 ### 3.8 New frontend tests
 
-- [ ] T033 [US1] [P] Create `frontend/src/lib/deployment-input.test.ts` covering `deploymentConfigToInput()` per `plan.md` "Frontend Testing Scope": (a) empty config → empty input, (b) config with `envVars` dict → input with `envVars` list, (c) config with `components` dict → input with `components` list, (d) fully populated config → all fields preserved in the converted input.
-- [ ] T034 [US1] [P] Add dialog integration tests to `frontend/src/components/deployment/scheduling/SchedulingConfigDialog.test.tsx` (create the file if absent): (a) submitting a new scheduling block sends the typed input with all pre-existing config fields preserved, (b) explicit no-regression test asserting submission does NOT clear `envVars`, `ipWhitelist`, or `components`.
+- [X] T033 [US1] [P] Create `frontend/src/lib/deployment-input.test.ts` covering `deploymentConfigToInput()` per `plan.md` "Frontend Testing Scope": (a) empty config → empty input, (b) config with `envVars` dict → input with `envVars` list, (c) config with `components` dict → input with `components` list, (d) fully populated config → all fields preserved in the converted input.
+- [X] T034 [US1] [P] Add dialog integration tests to `frontend/src/components/deployment/scheduling/SchedulingConfigDialog.test.tsx` (create the file if absent): (a) submitting a new scheduling block sends the typed input with all pre-existing config fields preserved, (b) explicit no-regression test asserting submission does NOT clear `envVars`, `ipWhitelist`, or `components`.
 
 ### 3.9 Validation
 
