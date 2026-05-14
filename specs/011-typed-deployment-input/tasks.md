@@ -140,6 +140,7 @@ Web-application repository:
 - [ ] T040 [P] Update `python_sdk/CHANGELOG.md` (create the file if absent) with a `## Unreleased` entry describing the `client.deployments.update(...)` signature change, including a before/after code snippet pulled from `quickstart.md`. Required for external SDK consumer signal (X1).
 - [ ] T041 [P] Update the project release notes (`CHANGELOG.md` at repo root, or whatever the project convention is) with a `Breaking changes` entry under the next-release header, calling out the `updateDeployment` mutation argument-list change with a before/after schema snippet.
 - [ ] T042 Run the full backend test suite once to confirm no unrelated regression: `uv run invoke test`. Investigate and fix any failure.
+- [X] T043 (orchestrator-inserted) Retarget `cli/src/styrminctl/commands/deployments.py` `update` subcommand to the typed `UpdateDeploymentInput` shape: build the input via `UpdateDeploymentInput.model_validate(parsed_json)` (relies on `populate_by_name=True` so snake_case or camelCase keys work) and pass `input=...` to `client.deployments.update(...)`. tasks.md originally missed this in-tree caller, which left two `[missing-argument]` / `[unknown-argument]` lint errors at `commands/deployments.py:88`.
 
 ---
 

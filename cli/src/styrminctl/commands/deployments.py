@@ -6,6 +6,13 @@ from typing import Annotated
 
 from cyclopts import App, Parameter
 
+# ``PLC2701`` is the ruff-preview "private-name import" rule; the codegen
+# package is private by convention but is the only source of truth for the
+# typed ``UpdateDeploymentInput`` model, so the suppression is intentional.
+from styrmin_sdk.graphql._generated.input_types import (  # noqa: PLC2701
+    UpdateDeploymentInput,
+)
+
 from styrminctl import client
 from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
 from styrminctl.types import ClusterContextId, ClusterContextName, DeploymentId, EnvironmentName, OptionalEnvironmentId
@@ -79,13 +86,19 @@ async def get(deployment_id: DeploymentId) -> None:
 async def update(
     deployment_id: DeploymentId,
     *,
-    config: Annotated[str, Parameter(help="JSON config (inline or @filepath).")],
+    config: Annotated[
+        str,
+        Parameter(
+            help="JSON UpdateDeploymentInput payload (inline or @filepath); snake_case or camelCase keys accepted."
+        ),
+    ],
 ) -> None:
     """Update a deployment's configuration."""
     with styrmin_error_handler():
         parsed_config = parse_json_argument(config)
+        update_input = UpdateDeploymentInput.model_validate(parsed_config)
         async with client.get_client() as sdk:
-            task = await sdk.deployments.update(deployment_id, config=parsed_config)
+            task = await sdk.deployments.update(deployment_id, input=update_input)
 
     print_success(f"Deployment update in progress (task: {task.id})")
     console.print(f"  Status: {task.status}")
