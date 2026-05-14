@@ -790,7 +790,10 @@ class Mutation:
         name = payload.pop("name", None)
         parameters = payload.pop("parameters", None)
         service_name_overrides = payload.pop("service_name_overrides", None)
-        deployment_config = payload
+        # If only legacy kwargs were set, remaining payload is `{}` — pass
+        # `None` so the service does not interpret an empty dict as
+        # "clear the persisted config" (fix-1 / regression guard).
+        deployment_config = payload if payload else None
         task = await update_deployment(
             deployment_id=deployment_id,
             deployment_config=deployment_config,

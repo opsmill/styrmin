@@ -210,8 +210,13 @@ _ERROR_ROWS = [
         _e4_duplicate_env_var_name_component,
         "DUPLICATE_ENV_VAR_NAME",
         # The component scope is encoded as ``component:<name>`` per
-        # research.md §4 and the ``_flatten_components`` helper.
-        {"name": "BAR"},
+        # research.md §4 and the ``_flatten_components`` helper; the
+        # seeded fixture's first component is ``"api"`` so the scope
+        # reaching the GraphQL extensions payload is ``component:api``.
+        # FR-009 mandates the scope reach the boundary intact, so assert
+        # on it explicitly. The matcher already does substring-match on
+        # the ``scope`` key.
+        {"name": "BAR", "scope": "component:api"},
         True,
     ),
     (
@@ -247,9 +252,10 @@ _ERROR_ROWS = [
         _e9_duplicate_component_name,
         "DUPLICATE_COMPONENT_NAME",
         # The duplicate-component check fires on the second occurrence;
-        # the offending name is the driver-known component name we used
-        # in the seeded fixture (looked up at runtime).
-        {},
+        # the offending name is the seeded fixture's first component
+        # ("api"). FR-009 mandates the typed payload identify the
+        # offending name.
+        {"name": "api"},
         True,
     ),
 ]

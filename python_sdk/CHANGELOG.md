@@ -11,9 +11,9 @@ All notable changes to the Styrmin Python SDK will be documented in this file.
   `service_name_overrides: list` keyword arguments. The only keyword arguments
   are now `deployment_id: UUID` and `input: UpdateDeploymentInput`. Every
   writable field (top-level env vars, scheduling, components, parameters,
-  ip_whitelist, public_endpoints, name, service_name_overrides) is now a
-  named, type-checked attribute on the new `UpdateDeploymentInput` model,
-  re-exported from `styrmin_sdk.models`.
+  ip_whitelist, name, service_name_overrides) is now a named, type-checked
+  attribute on the new `UpdateDeploymentInput` model, re-exported from
+  `styrmin_sdk.models`.
 
   **Before:**
 
@@ -73,7 +73,7 @@ All notable changes to the Styrmin Python SDK will be documented in this file.
 - Omitted fields on `UpdateDeploymentInput` are **no-ops** (the persisted value
   is not touched). Submitting `field=None` is also a no-op.
 - Submitting `field=[]` (empty list) for list-shaped fields (`ip_whitelist`,
-  `public_endpoints`, `service_name_overrides`) is an **explicit clear**.
+  `service_name_overrides`) is an **explicit clear**.
 - `parameters` keeps **merge semantics**: entries in the input merge on top of
   the persisted parameters dict; existing keys not named in the input survive.
 - Duplicate names within a single input scope return a typed error

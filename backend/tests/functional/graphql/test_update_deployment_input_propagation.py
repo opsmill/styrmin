@@ -568,6 +568,291 @@ async def test_update_deployment_input_components_env_vars(
 
 
 # ---------------------------------------------------------------------------
+# Row 03 follow-up — service_name_overrides actually persists (FR-005)
+#
+# The parametrized ``service_name_overrides`` row above only proves the
+# resolver-side flatten succeeded (the seeded driver has zero service
+# definitions, so no DeployedService rows are created). This dedicated
+# test seeds a driver with one declared service, submits the override,
+# and reads the DeployedService row back to confirm the override name
+# reached the persisted ``resolved_name`` column.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_input_service_name_overrides_persists(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """``input.serviceNameOverrides`` flattens to ``dict[driver_name → override]``
+    and the override reaches ``DeployedService.resolved_name``.
+
+    Regression guard for the case where a refactor drops
+    ``service_name_overrides`` from the resolver-derived legacy kwargs —
+    the parametrized row 03 only round-trips the resolver, not the DB
+    write, so it would not catch a missing forward.
+    """
+    from styrmin_backend.db.models import DeployedService
+
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+    adv = await seed_application_driver_version(session)
+    adv.services = [
+        {
+            "name": "simple-app",
+            "kind": "http",
+            "scope": "internal",
+            "port": 8080,
+            "component": "web",
+        }
+    ]
+    session.add(adv)
+    await session.commit()
+    deployment = await seed_deployment(session, adv=adv)
+    deployment_id = deployment.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {
+                    "serviceNameOverrides": [
+                        {"driverServiceName": "simple-app", "overrideName": "renamed"}
+                    ]
+                },
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+
+    # Confirm the override reached the DeployedService row.
+    session.expire_all()
+    from sqlmodel import select
+
+    result = await session.exec(
+        select(DeployedService).where(DeployedService.deployment_id == deployment_id)
+    )
+    services = list(result.all())
+    assert len(services) == 1, (
+        f"expected exactly one DeployedService row, got {len(services)}"
+    )
+    assert services[0].driver_service_name == "simple-app"
+    assert services[0].resolved_name == "renamed", (
+        "service_name_overrides did not propagate to DeployedService.resolved_name"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Clearing semantics (spec.md Acceptance Scenarios AS-2, AS-7, AS-8)
+#
+# These three tests exercise the full-replacement clear path — they
+# differ from the parametrized matrix by *seeding existing state* and
+# then submitting a typed input that explicitly clears it. The matrix
+# only sets fields from empty / default; clearing has its own failure
+# mode (silent drop, wrong dict shape) that the matrix cannot catch.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_full_replacement_clears_ip_whitelist(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """AS-2: submitting ``ipWhitelist: []`` clears the persisted allowlist."""
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+    deployment = await seed_deployment(session)
+    deployment.config = {"ip_whitelist": ["10.0.0.0/8", "192.168.0.0/16"]}
+    session.add(deployment)
+    await session.commit()
+    deployment_id = deployment.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {"ipWhitelist": []},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+
+    session.expire_all()
+    db_row = await session.get(Deployment, deployment_id)
+    assert db_row is not None
+    # Empty list reaches the persisted dict as ``[]`` (explicit clear),
+    # not as "missing key" or as the prior value.
+    assert db_row.config.get("ip_whitelist") == [], (
+        f"expected explicit clear (``[]``); got {db_row.config!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_components_empty_list_clears_components(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """AS-7: submitting ``components: []`` clears every per-component block."""
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+    deployment = await _seed_deployment_with_components(
+        session, component_names=["api"]
+    )
+    deployment.config = {
+        "components": {"api": {"env_vars": {"FOO": "bar"}}},
+    }
+    session.add(deployment)
+    await session.commit()
+    deployment_id = deployment.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {"components": []},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+
+    session.expire_all()
+    db_row = await session.get(Deployment, deployment_id)
+    assert db_row is not None
+    # Empty list flattens to ``{}`` — the components key is present but
+    # the dict is empty (no surviving per-component blocks).
+    assert db_row.config.get("components") == {}, (
+        f"expected components cleared to {{}}; got {db_row.config!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_components_empty_env_vars_clears_component_env_vars(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """AS-8: ``components: [{name, envVars: []}]`` keeps the component but
+    clears its env vars.
+    """
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+    deployment = await _seed_deployment_with_components(
+        session, component_names=["api"]
+    )
+    deployment.config = {
+        "components": {"api": {"env_vars": {"FOO": "bar", "BAZ": "qux"}}},
+    }
+    session.add(deployment)
+    await session.commit()
+    deployment_id = deployment.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {
+                    "components": [
+                        {"name": "api", "envVars": []},
+                    ],
+                },
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+
+    session.expire_all()
+    db_row = await session.get(Deployment, deployment_id)
+    assert db_row is not None
+    # Component entry survives; its env_vars dict is empty.
+    assert db_row.config.get("components") == {"api": {"env_vars": {}}}, (
+        f"expected env_vars cleared on api; got {db_row.config!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Edge case — empty input (spec.md Edge Cases / Fix-1 regression guard)
+#
+# After Fix-1, the resolver routes ``deployment_config={}`` to ``None``
+# so an empty typed input does not silently wipe the persisted config.
+# The service-layer "at least one of …" guard then surfaces a
+# ``VALIDATION_ERROR`` (``InvalidContextError``).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_empty_input_rejects_with_validation_error(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,  # noqa: ARG001 — guards against accidental Prefect dispatch
+) -> None:
+    """Edge case: submitting ``input: {}`` rejects with ``VALIDATION_ERROR``
+    and does not touch the persisted config.
+
+    Without Fix-1, the resolver would forward ``deployment_config={}`` to
+    the service, which would overwrite ``deployment.config`` with the
+    empty dict — silently wiping the operator's persisted state. After
+    Fix-1, an empty typed input collapses to "all four legacy kwargs are
+    None" and the service-layer guard raises ``InvalidContextError``
+    (``VALIDATION_ERROR``).
+    """
+    deployment = await seed_deployment(session)
+    original_config = {"ip_whitelist": ["10.0.0.0/8"]}
+    deployment.config = original_config
+    session.add(deployment)
+    await session.commit()
+    deployment_id = deployment.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, f"expected an errors array, got data only: {payload}"
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "VALIDATION_ERROR", (
+        f"expected VALIDATION_ERROR; got {extensions.get('code')!r}"
+    )
+
+    # Persisted config untouched — Fix-1 guard prevents the silent wipe.
+    session.expire_all()
+    db_row = await session.get(Deployment, deployment_id)
+    assert db_row is not None
+    assert db_row.config == original_config, (
+        f"empty input must not touch persisted config; got {db_row.config!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Distinct-deployment fixture sanity (defensive: ensures the parametrized
 # matrix never accidentally reuses a row across rows by holding shared
 # state). Each parametrized invocation seeds its own deployment via
