@@ -1,12 +1,31 @@
 import type {
+  AffinityBlockInput,
+  AffinityTermInput,
+  LabelSelectorInput,
+  LabelSelectorOperator,
+  LabelSelectorRequirementInput,
+  ResourceRequirementsInput,
+  SchedulingInput,
+  TolerationEffect,
+  TolerationInput,
+  TolerationOperator,
+  TopologySpreadConstraintInput,
+  WeightedAffinityTermInput,
+  WhenUnsatisfiable,
+} from "@/generated/graphql";
+import type {
   AffinityBlock,
   AffinityTerm,
   LabelSelector,
   ResourceRequirements,
   SchedulingConfig,
   Toleration,
+  TolerationEffect as LocalTolerationEffect,
+  TolerationOperator as LocalTolerationOperator,
+  LabelSelectorOperator as LocalLabelSelectorOperator,
   TopologySpreadConstraint,
   WeightedAffinityTerm,
+  WhenUnsatisfiable as LocalWhenUnsatisfiable,
 } from "./types";
 
 function isPlainObjectNonEmpty(
@@ -131,6 +150,153 @@ function sanitizeTopologySpread(
       if (ls) out.label_selector = ls;
       return out;
     });
+}
+
+// ---------------------------------------------------------------------------
+// Translators from local snake_case `SchedulingConfig` (UI/draft shape) to
+// the GraphQL-typed `SchedulingInput` (camelCase + screaming-snake-case
+// enums). The local types existed before `UpdateDeploymentInput` was typed
+// and the dialog used to ship its draft as a JSON blob; the typed input now
+// requires an explicit translation step at submission time.
+// ---------------------------------------------------------------------------
+
+const TOLERATION_OPERATOR_MAP = {
+  Equal: "EQUAL",
+  Exists: "EXISTS",
+} as const satisfies Record<LocalTolerationOperator, TolerationOperator>;
+
+const TOLERATION_EFFECT_MAP = {
+  NoSchedule: "NO_SCHEDULE",
+  PreferNoSchedule: "PREFER_NO_SCHEDULE",
+  NoExecute: "NO_EXECUTE",
+} as const satisfies Record<LocalTolerationEffect, TolerationEffect>;
+
+const LABEL_SELECTOR_OPERATOR_MAP = {
+  In: "IN",
+  NotIn: "NOT_IN",
+  Exists: "EXISTS",
+  DoesNotExist: "DOES_NOT_EXIST",
+} as const satisfies Record<LocalLabelSelectorOperator, LabelSelectorOperator>;
+
+const WHEN_UNSATISFIABLE_MAP = {
+  DoNotSchedule: "DO_NOT_SCHEDULE",
+  ScheduleAnyway: "SCHEDULE_ANYWAY",
+} as const satisfies Record<LocalWhenUnsatisfiable, WhenUnsatisfiable>;
+
+function labelSelectorToInput(
+  ls: LabelSelector,
+): LabelSelectorInput {
+  const out: LabelSelectorInput = {};
+  if (ls.match_labels) out.matchLabels = ls.match_labels;
+  if (ls.match_expressions) {
+    out.matchExpressions = ls.match_expressions.map(
+      (e): LabelSelectorRequirementInput => ({
+        key: e.key,
+        operator: LABEL_SELECTOR_OPERATOR_MAP[e.operator],
+        values: e.values,
+      }),
+    );
+  }
+  return out;
+}
+
+function affinityTermToInput(term: AffinityTerm): AffinityTermInput {
+  const out: AffinityTermInput = { topologyKey: term.topology_key };
+  if (term.label_selector) {
+    out.labelSelector = labelSelectorToInput(term.label_selector);
+  }
+  if (term.deployment_ref) {
+    out.deploymentRef = {
+      deploymentId: term.deployment_ref.deployment_id,
+      deploymentName: term.deployment_ref.deployment_name,
+      components: term.deployment_ref.components,
+    };
+  }
+  return out;
+}
+
+function affinityBlockToInput(block: AffinityBlock): AffinityBlockInput {
+  const out: AffinityBlockInput = {};
+  if (block.required) {
+    out.required = block.required.map(affinityTermToInput);
+  }
+  if (block.preferred) {
+    out.preferred = block.preferred.map(
+      (wt: WeightedAffinityTerm): WeightedAffinityTermInput => ({
+        weight: wt.weight,
+        term: affinityTermToInput(wt.term),
+      }),
+    );
+  }
+  if (block.replace !== undefined) out.replace = block.replace;
+  return out;
+}
+
+function tolerationToInput(t: Toleration): TolerationInput {
+  return {
+    key: t.key,
+    operator: t.operator ? TOLERATION_OPERATOR_MAP[t.operator] : undefined,
+    value: t.value,
+    effect: t.effect ? TOLERATION_EFFECT_MAP[t.effect] : undefined,
+    tolerationSeconds: t.toleration_seconds,
+  };
+}
+
+function resourcesToInput(
+  r: ResourceRequirements,
+): ResourceRequirementsInput {
+  const map = (
+    spec: ResourceRequirements["requests"],
+  ): ResourceRequirementsInput["requests"] => {
+    if (!spec) return undefined;
+    return {
+      cpu: spec.cpu,
+      memory: spec.memory,
+      ephemeralStorage: spec.ephemeral_storage,
+      extended: spec.extended,
+    };
+  };
+  return { requests: map(r.requests), limits: map(r.limits) };
+}
+
+function topologySpreadToInput(
+  c: TopologySpreadConstraint,
+): TopologySpreadConstraintInput {
+  return {
+    maxSkew: c.max_skew,
+    topologyKey: c.topology_key,
+    whenUnsatisfiable: WHEN_UNSATISFIABLE_MAP[c.when_unsatisfiable],
+    labelSelector: c.label_selector
+      ? labelSelectorToInput(c.label_selector)
+      : undefined,
+  };
+}
+
+/**
+ * Translate the local snake_case `SchedulingConfig` (produced by the UI
+ * and post-processed by `sanitizeSchedulingConfig`) into the camelCase
+ * `SchedulingInput` shape expected by the typed `UpdateDeploymentInput`.
+ * Enum values are mapped from the local Pydantic-style spellings
+ * (``"NoSchedule"``) to the GraphQL screaming-snake spellings
+ * (``"NO_SCHEDULE"``).
+ */
+export function schedulingConfigToInput(
+  draft: SchedulingConfig,
+): SchedulingInput {
+  const out: SchedulingInput = {};
+  if (draft.tolerations) out.tolerations = draft.tolerations.map(tolerationToInput);
+  if (draft.resources) out.resources = resourcesToInput(draft.resources);
+  if (draft.topology_spread_constraints) {
+    out.topologySpreadConstraints =
+      draft.topology_spread_constraints.map(topologySpreadToInput);
+  }
+  if (draft.pod_affinity) out.podAffinity = affinityBlockToInput(draft.pod_affinity);
+  if (draft.pod_anti_affinity) {
+    out.podAntiAffinity = affinityBlockToInput(draft.pod_anti_affinity);
+  }
+  if (draft.node_affinity) out.nodeAffinity = affinityBlockToInput(draft.node_affinity);
+  if (draft.runtime_class) out.runtimeClass = draft.runtime_class;
+  return out;
 }
 
 export function sanitizeSchedulingConfig(

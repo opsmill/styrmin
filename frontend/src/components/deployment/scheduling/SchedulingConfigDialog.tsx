@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUpdateDeploymentMutation } from "@/generated/graphql";
+import { deploymentConfigToInput } from "@/lib/deployment-input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,7 +18,7 @@ import { AffinityEditor } from "./AffinityEditor";
 import { ResourcesEditor } from "./ResourcesEditor";
 import { TolerationsEditor } from "./TolerationsEditor";
 import { TopologySpreadEditor } from "./TopologySpreadEditor";
-import { sanitizeSchedulingConfig } from "./sanitize";
+import { sanitizeSchedulingConfig, schedulingConfigToInput } from "./sanitize";
 import type { SchedulingConfig } from "./types";
 import { IfRole } from "@/auth/IfRole";
 
@@ -67,16 +68,21 @@ export function SchedulingConfigDialog({
   async function handleSubmit(): Promise<void> {
     setError(null);
     const scheduling = sanitizeSchedulingConfig(draft);
-    const nextConfig = { ...currentConfig };
-    if (Object.keys(scheduling).length === 0) {
-      delete nextConfig.scheduling;
-    } else {
-      nextConfig.scheduling = scheduling;
-    }
+    // Repopulate the typed input from the read-side config so the
+    // full-replacement mutation preserves every field the dialog does
+    // not touch (envVars, ipWhitelist, components, etc.). Then override
+    // the scheduling block with the dialog's draft — passing `undefined`
+    // when the draft sanitises to empty so the field is omitted rather
+    // than persisted as `{}`.
+    const input = deploymentConfigToInput(currentConfig);
+    input.scheduling =
+      Object.keys(scheduling).length === 0
+        ? undefined
+        : schedulingConfigToInput(scheduling);
     try {
       await updateMutation.mutateAsync({
         deploymentId,
-        config: nextConfig,
+        input,
       });
       queryClient.invalidateQueries({ queryKey: ["GetDeployment"] });
       onOpenChange(false);

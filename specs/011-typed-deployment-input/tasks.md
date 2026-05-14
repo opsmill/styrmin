@@ -86,10 +86,10 @@ Web-application repository:
 
 ### 3.3 Frontend codegen + helper + dialog
 
-- [ ] T016 [US1] Update `frontend/src/graphql/update_deployment.graphql` to match the new mutation signature (same change as T013, plus the urql-flavoured variable declarations).
-- [ ] T017 [US1] Regenerate frontend codegen: `cd frontend && pnpm run codegen`. Confirm `frontend/src/generated/graphql.ts` exports `UpdateDeploymentInput`, `ComponentConfigInput`, `ParameterValueInput`, `StandardStorageInput` as TS types and that `useUpdateDeploymentMutation()`'s variable type now expects `{ deploymentId; input }`.
-- [ ] T018 [US1] [P] Create `frontend/src/lib/deployment-input.ts` exporting `deploymentConfigToInput(config: DeploymentConfig): UpdateDeploymentInput` that converts the read-API config (dict-shaped `envVars` and `components`) to the typed input list-shape, preserving every other field. Document the conversion rules in a short JSDoc comment.
-- [ ] T019 [US1] Update `frontend/src/components/deployment/scheduling/SchedulingConfigDialog.tsx` `handleSubmit()` (currently at lines 67-87) to use `deploymentConfigToInput(currentConfig)`, mutate the resulting `input.scheduling`, and submit. Preserves today's "submitting the scheduling dialog does not affect env vars / IP allowlist" behaviour under the new full-replacement contract.
+- [X] T016 [US1] Update `frontend/src/graphql/update_deployment.graphql` to match the new mutation signature (same change as T013, plus the urql-flavoured variable declarations).
+- [X] T017 [US1] Regenerate frontend codegen: `cd frontend && pnpm run codegen`. Confirm `frontend/src/generated/graphql.ts` exports `UpdateDeploymentInput`, `ComponentConfigInput`, `ParameterValueInput`, `StandardStorageInput` as TS types and that `useUpdateDeploymentMutation()`'s variable type now expects `{ deploymentId; input }`.
+- [X] T018 [US1] [P] Create `frontend/src/lib/deployment-input.ts` exporting `deploymentConfigToInput(config: DeploymentConfig): UpdateDeploymentInput` that converts the read-API config (dict-shaped `envVars` and `components`) to the typed input list-shape, preserving every other field. Document the conversion rules in a short JSDoc comment.
+- [X] T019 [US1] Update `frontend/src/components/deployment/scheduling/SchedulingConfigDialog.tsx` `handleSubmit()` (currently at lines 67-87) to use `deploymentConfigToInput(currentConfig)`, mutate the resulting `input.scheduling`, and submit. Preserves today's "submitting the scheduling dialog does not affect env vars / IP allowlist" behaviour under the new full-replacement contract.
 
 ### 3.4 Backend test retargeting (existing tests, semantic-equivalence)
 
