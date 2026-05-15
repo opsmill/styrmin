@@ -22,6 +22,7 @@ from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 from kr8s.asyncio.objects import new_class
 from styrmin_sdk import StyrminClient
+from styrmin_sdk.models import UpdateDeploymentInput
 
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
@@ -670,8 +671,8 @@ async def test_ip_whitelist_enforcement_allows_and_rejects(
     async with _portforward(traefik_svc, remote_port=8000) as local_port:
         # Phase 1: configure an allowlist that matches our synthetic XFF → 200
         await client.deployments.update(
-            deployment_id=deployment_id,
-            config={"ip_whitelist": [in_range_cidr]},
+            deployment_id,
+            input=UpdateDeploymentInput(ipWhitelist=[in_range_cidr]),
         )
         await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
         # Active allowlist takes a few seconds to propagate to Traefik.
@@ -682,8 +683,8 @@ async def test_ip_whitelist_enforcement_allows_and_rejects(
 
         # Phase 2: narrow deny CIDR (XFF is outside it) → 403
         await client.deployments.update(
-            deployment_id=deployment_id,
-            config={"ip_whitelist": [deny_cidr]},
+            deployment_id,
+            input=UpdateDeploymentInput(ipWhitelist=[deny_cidr]),
         )
         await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
         await probe_until(local_port, expected=403, timeout_s=60.0)
@@ -713,8 +714,8 @@ async def test_ip_whitelist_enforcement_allows_and_rejects(
 
         # Phase 4: round-trip back to a matching allowlist → 200
         await client.deployments.update(
-            deployment_id=deployment_id,
-            config={"ip_whitelist": [in_range_cidr]},
+            deployment_id,
+            input=UpdateDeploymentInput(ipWhitelist=[in_range_cidr]),
         )
         await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
         await probe_until(local_port, expected=200, timeout_s=60.0)

@@ -40,6 +40,48 @@ def _normalise(exc: Exception) -> Exception:
     return exc
 
 
+# Kubernetes-style enum string values used in test fixture configs vs. the
+# SCREAMING_SNAKE values the typed `UpdateDeploymentInput` expects. Tests
+# author scheduling blocks with K8s-doc-style strings (`NoSchedule`,
+# `ScheduleAnyway`, `In`, `Equal`) for readability; the api_driver
+# translates before `model_validate`.
+_SCHEDULING_ENUM_MAP: dict[str, str] = {
+    # tolerations.operator / match_expressions.operator
+    "Equal": "EQUAL",
+    "Exists": "EXISTS",
+    "In": "IN",
+    "NotIn": "NOT_IN",
+    "DoesNotExist": "DOES_NOT_EXIST",
+    # tolerations.effect
+    "NoSchedule": "NO_SCHEDULE",
+    "PreferNoSchedule": "PREFER_NO_SCHEDULE",
+    "NoExecute": "NO_EXECUTE",
+    # topology_spread_constraints.when_unsatisfiable
+    "DoNotSchedule": "DO_NOT_SCHEDULE",
+    "ScheduleAnyway": "SCHEDULE_ANYWAY",
+}
+_SCHEDULING_ENUM_KEYS = frozenset(
+    {"operator", "effect", "when_unsatisfiable", "whenUnsatisfiable"}
+)
+
+
+def _translate_scheduling_enums(value: Any) -> Any:
+    """Recursively rewrite known scheduling enum string values to the
+    typed-input form. Leaves unknown keys and non-string values untouched."""
+    if isinstance(value, dict):
+        return {
+            k: (
+                _SCHEDULING_ENUM_MAP.get(v, v)
+                if k in _SCHEDULING_ENUM_KEYS and isinstance(v, str)
+                else _translate_scheduling_enums(v)
+            )
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_translate_scheduling_enums(v) for v in value]
+    return value
+
+
 class ApiScenarioDriver:
     def __init__(self, client: StyrminClient) -> None:
         self._client = client
@@ -222,13 +264,13 @@ class ApiScenarioDriver:
         # Imported locally so importing the api_driver doesn't pull the
         # full SDK input-types graph at module-load time (the test suite
         # imports this driver from many fixtures).
-        from styrmin_sdk.graphql._generated.input_types import (
+        from styrmin_sdk.models import (
             ComponentConfigInput,
             EnvVarInput,
             UpdateDeploymentInput,
         )
 
-        prepared: dict[str, Any] = dict(config)
+        prepared: dict[str, Any] = _translate_scheduling_enums(dict(config))
 
         env_vars = prepared.pop("env_vars", None)
         if isinstance(env_vars, dict):
