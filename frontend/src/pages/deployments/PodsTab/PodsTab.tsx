@@ -4,7 +4,9 @@ import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { groupPodsByComponent } from "./groupPodsByComponent";
+import { NamespaceStrip } from "./NamespaceStrip";
 import { PodSection } from "./PodSection";
+import { shouldSectionAutoExpand } from "./shouldSectionAutoExpand";
 
 interface PodsTabProps {
   deploymentId: string;
@@ -74,6 +76,8 @@ export function PodsTab({
         />
       </div>
 
+      <NamespaceStrip namespace={`styrmin-${deploymentId}`} />
+
       {query.isLoading && podCount === 0 ? (
         <LoadingState />
       ) : query.isError ? (
@@ -90,7 +94,7 @@ export function PodsTab({
           onOpenTimeline={onOpenTimeline}
         />
       ) : (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4">
           {groups.declared.map(({ componentName, pods }) => (
             <PodSection
               key={`declared:${componentName}`}
@@ -98,6 +102,7 @@ export function PodsTab({
               componentName={componentName}
               pods={pods}
               now={now}
+              defaultOpen={shouldSectionAutoExpand("declared", pods, now)}
             />
           ))}
           {groups.drifting.map(({ componentName, pods }) => (
@@ -107,6 +112,7 @@ export function PodsTab({
               componentName={componentName}
               pods={pods}
               now={now}
+              defaultOpen={shouldSectionAutoExpand("drifting", pods, now)}
             />
           ))}
           {groups.unlabeled.length > 0 && (
@@ -115,6 +121,11 @@ export function PodsTab({
               componentName="Unlabeled"
               pods={groups.unlabeled}
               now={now}
+              defaultOpen={shouldSectionAutoExpand(
+                "unlabeled",
+                groups.unlabeled,
+                now,
+              )}
             />
           )}
         </div>

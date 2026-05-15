@@ -122,13 +122,6 @@ function ExpandedPanel({
     <div className="flex flex-col gap-4 px-14 pb-5 pt-1">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
         <span>
-          Namespace{" "}
-          <span className="font-mono font-medium text-foreground">
-            {pod.namespace}
-          </span>
-        </span>
-        <span className="text-border">·</span>
-        <span>
           {ageSource.kind === "createdOn" ? "Observed since " : "Started "}
           <span className="font-medium text-foreground">
             {ageSource.iso ? formatDuration(ageSource.iso, now) : "—"} ago

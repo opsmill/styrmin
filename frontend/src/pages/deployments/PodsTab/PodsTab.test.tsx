@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@/test/utils";
+import { render, screen, userEvent } from "@/test/utils";
 import { PodsTab } from "./PodsTab";
 
 // Mock the generated hook so each test can control the query state.
@@ -74,7 +74,32 @@ describe("PodsTab", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders declared sections (including empty ones) when the deployment has pods", async () => {
+  it("renders the global namespace strip above the section list", async () => {
+    useGetDeploymentPodsQuery.mockReturnValue({
+      data: { podStatuses: [] },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+      dataUpdatedAt: Date.now(),
+    });
+
+    await render(
+      <PodsTab
+        {...baseProps}
+        deploymentId="abc-123"
+        deploymentStatus="creating"
+      />,
+    );
+
+    const strip = screen.getByTestId("pods-namespace-strip");
+    expect(strip).toBeInTheDocument();
+    expect(screen.getByTestId("pods-namespace-value")).toHaveTextContent(
+      "styrmin-abc-123",
+    );
+    expect(screen.getByTestId("copy-namespace-button")).toBeInTheDocument();
+  });
+
+  it("renders all-healthy declared sections collapsed by default; click expands them", async () => {
     useGetDeploymentPodsQuery.mockReturnValue({
       data: {
         podStatuses: [
@@ -110,11 +135,63 @@ describe("PodsTab", () => {
 
     const sections = screen.getAllByTestId("pod-section");
     expect(sections).toHaveLength(2);
-    expect(sections[0]).toHaveAttribute("data-variant", "declared");
-    expect(sections[0]).toHaveAttribute("data-component", "api");
-    expect(sections[1]).toHaveAttribute("data-component", "worker");
-    expect(sections[1]).toHaveTextContent(
-      /No pods reported for this component/i,
+    // Both declared sections (1 healthy pod, 1 empty) start collapsed.
+    expect(sections[0]).toHaveAttribute("data-open", "false");
+    expect(sections[1]).toHaveAttribute("data-open", "false");
+    // Empty placeholder is not in the DOM while collapsed; the chip
+    // summary "no pods" is the only signal.
+    expect(
+      screen.queryByText(/No pods reported for this component/i),
+    ).not.toBeInTheDocument();
+
+    // Clicking the api header expands it.
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: /Expand api section/i }),
+    );
+    expect(screen.getAllByTestId("pod-section")[0]).toHaveAttribute(
+      "data-open",
+      "true",
+    );
+  });
+
+  it("auto-expands sections with anything not RUNNING/ready/fresh", async () => {
+    useGetDeploymentPodsQuery.mockReturnValue({
+      data: {
+        podStatuses: [
+          {
+            id: "p1",
+            podName: "api-bad",
+            namespace: "ns",
+            phase: "PENDING",
+            ready: false,
+            restartCount: 0,
+            nodeName: null,
+            componentName: "api",
+            startedAt: null,
+            createdOn: new Date().toISOString(),
+            lastPolledAt: new Date().toISOString(),
+            containerStatuses: [],
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+      dataUpdatedAt: Date.now(),
+    });
+
+    await render(
+      <PodsTab
+        {...baseProps}
+        declaredComponents={[{ name: "api" }]}
+        deploymentStatus="running"
+      />,
+    );
+
+    expect(screen.getByTestId("pod-section")).toHaveAttribute(
+      "data-open",
+      "true",
     );
   });
 });

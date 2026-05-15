@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
 import type { GetDeploymentPodsQuery } from "@/generated/graphql";
 import { PodRow } from "./PodRow";
+import { PhaseChips } from "./PhaseChips";
 
 type Pod = GetDeploymentPodsQuery["podStatuses"][number];
 
@@ -12,6 +14,8 @@ interface PodSectionProps {
   componentName: string;
   pods: Pod[];
   now: Date;
+  /** Initial open state. Caller (PodsTab) computes this via shouldSectionAutoExpand. */
+  defaultOpen: boolean;
 }
 
 export function PodSection({
@@ -19,13 +23,16 @@ export function PodSection({
   componentName,
   pods,
   now,
+  defaultOpen,
 }: PodSectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
   const isDrift = variant === "drifting";
   return (
     <div
       data-testid="pod-section"
       data-variant={variant}
       data-component={componentName}
+      data-open={open}
       className={
         isDrift
           ? "overflow-hidden rounded-xl border border-amber-300 bg-background"
@@ -37,10 +44,12 @@ export function PodSection({
         componentName={componentName}
         pods={pods}
         isDrift={isDrift}
+        now={now}
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
       />
-      {pods.length === 0 ? (
-        <EmptyDeclaredPlaceholder />
-      ) : (
+      {open && pods.length === 0 && <EmptyDeclaredPlaceholder />}
+      {open && pods.length > 0 && (
         <>
           <ColumnHeaders />
           {pods.map((pod) => (
@@ -62,22 +71,33 @@ function Header({
   componentName,
   pods,
   isDrift,
+  now,
+  open,
+  onToggle,
 }: {
   variant: SectionVariant;
   componentName: string;
   pods: Pod[];
   isDrift: boolean;
+  now: Date;
+  open: boolean;
+  onToggle: () => void;
 }) {
-  const readyCount = pods.filter((p) => p.ready).length;
-  const totalCount = pods.length;
   return (
-    <div
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-label={`${open ? "Collapse" : "Expand"} ${componentName} section`}
       className={
         isDrift
-          ? "flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-5 py-3.5"
-          : "flex items-center gap-3 border-b border-border bg-muted/40 px-5 py-3.5"
+          ? "flex w-full items-center gap-3 border-b border-amber-200 bg-amber-50 px-5 py-3.5 text-left hover:bg-amber-100/60"
+          : "flex w-full items-center gap-3 border-b border-border bg-muted/40 px-5 py-3.5 text-left hover:bg-muted/60"
       }
     >
+      <ChevronRight
+        className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+      />
       {variant === "unlabeled" ? (
         <span className="text-[13px] font-semibold text-foreground">
           Unlabeled
@@ -89,13 +109,8 @@ function Header({
       )}
       <VariantTag variant={variant} />
       <span className="flex-1" />
-      <PodCountSummary
-        pods={pods}
-        readyCount={readyCount}
-        totalCount={totalCount}
-        isDrift={isDrift}
-      />
-    </div>
+      <PhaseChips pods={pods} now={now} />
+    </button>
   );
 }
 
@@ -126,48 +141,6 @@ function Tag({
       className={`rounded px-2 py-0.5 text-[11px] font-medium tracking-wide ${cls[tone]}`}
     >
       {children}
-    </span>
-  );
-}
-
-function PodCountSummary({
-  pods,
-  readyCount,
-  totalCount,
-  isDrift,
-}: {
-  pods: Pod[];
-  readyCount: number;
-  totalCount: number;
-  isDrift: boolean;
-}) {
-  if (totalCount === 0) {
-    return <span className="text-[12px] text-muted-foreground">0 pods</span>;
-  }
-  if (isDrift) {
-    return (
-      <span className="text-[12px] text-amber-800">
-        Observed label · not in driver spec
-      </span>
-    );
-  }
-  return (
-    <span className="text-[12px] text-muted-foreground">
-      {totalCount} {totalCount === 1 ? "pod" : "pods"}
-      {readyCount > 0 && (
-        <>
-          {" · "}
-          <span className="font-medium text-emerald-700">
-            {readyCount} ready
-          </span>
-        </>
-      )}
-      {(() => {
-        // Reserved for future readyCount === 0 styling; pods param keeps
-        // the closure honest about the dataset shape.
-        void pods;
-        return null;
-      })()}
     </span>
   );
 }
