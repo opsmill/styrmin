@@ -96,7 +96,7 @@ Defined on `type Mutation`:
 | `loadLocalApplicationDriverVersion` | `path` | `ApplicationDriverVersion` |
 | `loadRemoteApplicationDriverVersion` | `repositoryUrl, branch` | `ApplicationDriverVersion` |
 | `deploy` | `driver, environmentId?, environmentName?, clusterId?, clusterName?, version?, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
-| `updateDeployment` | `deploymentId, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
+| `updateDeployment` | `deploymentId, input: UpdateDeploymentInput!` | `Task` |
 | `deleteDeployment` | `deploymentId` | `Task!` (born-complete `DELETE_DEPLOYMENT` audit record; patches `spec.deletionRequested` on the CR — operator drives teardown asynchronously) |
 | `createBackup` | `instanceId, name?` | `Backup` |
 | `deleteBackup` | `backupId` | `String` |
@@ -166,7 +166,7 @@ On the client side, errors arrive as standard GraphQL errors with `extensions.co
 
 | Code | Source | Surface |
 |------|--------|---------|
-| `INVALID_ENV_VAR_VALUE` | `validate_env_var_value` rejecting a non-string value at the validator entry point (spec 011 / US3) | Raised on JSON-config write paths to `Environment.config.env_vars`, `Deployment.config.env_vars`, and `Deployment.config.components.<name>.env_vars`; `error_metadata` carries `name`, `value_type`, and (when known) `scope`. |
+| `INVALID_ENV_VAR_VALUE` | `validate_env_var_value` rejecting a non-string value at the validator entry point (spec 011 / US3) | Reachable only on the JSON-config write path through `deploy()` (the env-var write paths through `updateDeployment()` and `updateEnvironment()` are now typed — `EnvVarInput.value: String!` — and reject non-string values at the GraphQL wire boundary before the validator runs). `error_metadata` carries `name`, `value_type`, and (when known) `scope`. |
 
 The validator type-checks every env-var value against `isinstance(value, str)` *before* any encoding or size computation. Non-string inputs surface as a typed `INVALID_ENV_VAR_VALUE` rather than crashing the resolver with a generic `AttributeError` from a downstream `.encode("utf-8")` call. See [`adr-022`](../../adr/adr-022-schema-walking-input-propagation-tests.md) for the matching schema-walking input-completeness test pattern that prevents the upstream "missing field" class of bugs.
 
@@ -294,7 +294,7 @@ type Deployment {
 }
 ```
 
-`Environment` gains a parallel `envVars: [EnvVar!]!`. Operator-set env vars travel through the existing `config: JSON` argument on `deploy()` and `updateDeployment()` (Pydantic-validated against `DeploymentConfig`). Environment-scope edits go through the typed `updateEnvironment(environmentId, input: UpdateEnvironmentInput!)` mutation — see "Environment-config update + fanout" below for the full contract. Driver-side documentation (`ApplicationDriverVersion.envVars`), orphan tracking on per-component blocks (`ComponentEnvVars.isOrphaned = true`), and chart-vs-user collision warnings (`DeploymentTimelineEntry.envVarCollisions`) are scoped for follow-up user stories (US4/US5/US7) and will be added as those ship.
+`Environment` gains a parallel `envVars: [EnvVar!]!`. Operator-set env vars travel through the typed `input: UpdateDeploymentInput!` argument on `updateDeployment()` (`envVars: [EnvVarInput!]` per scope) and through the typed `input: UpdateEnvironmentInput!` on `updateEnvironment()`. The legacy `config: JSON` write path persists on `deploy()` (Pydantic-validated against `DeploymentConfig`) until the analogous deploy-side migration ships. See "Environment-config update + fanout" below for the environment-scope contract; see [`specs/011-typed-deployment-input/spec.md`](../../../specs/011-typed-deployment-input/spec.md) for the deployment-scope contract. Driver-side documentation (`ApplicationDriverVersion.envVars`), orphan tracking on per-component blocks (`ComponentEnvVars.isOrphaned = true`), and chart-vs-user collision warnings (`DeploymentTimelineEntry.envVarCollisions`) are scoped for follow-up user stories (US4/US5/US7) and will be added as those ship.
 
 #### Environment-config update + fanout
 
