@@ -183,9 +183,7 @@ const WHEN_UNSATISFIABLE_MAP = {
   ScheduleAnyway: "SCHEDULE_ANYWAY",
 } as const satisfies Record<LocalWhenUnsatisfiable, WhenUnsatisfiable>;
 
-function labelSelectorToInput(
-  ls: LabelSelector,
-): LabelSelectorInput {
+function labelSelectorToInput(ls: LabelSelector): LabelSelectorInput {
   const out: LabelSelectorInput = {};
   if (ls.match_labels) out.matchLabels = ls.match_labels;
   if (ls.match_expressions) {
@@ -242,9 +240,7 @@ function tolerationToInput(t: Toleration): TolerationInput {
   };
 }
 
-function resourcesToInput(
-  r: ResourceRequirements,
-): ResourceRequirementsInput {
+function resourcesToInput(r: ResourceRequirements): ResourceRequirementsInput {
   const map = (
     spec: ResourceRequirements["requests"],
   ): ResourceRequirementsInput["requests"] => {
@@ -284,17 +280,21 @@ export function schedulingConfigToInput(
   draft: SchedulingConfig,
 ): SchedulingInput {
   const out: SchedulingInput = {};
-  if (draft.tolerations) out.tolerations = draft.tolerations.map(tolerationToInput);
+  if (draft.tolerations)
+    out.tolerations = draft.tolerations.map(tolerationToInput);
   if (draft.resources) out.resources = resourcesToInput(draft.resources);
   if (draft.topology_spread_constraints) {
-    out.topologySpreadConstraints =
-      draft.topology_spread_constraints.map(topologySpreadToInput);
+    out.topologySpreadConstraints = draft.topology_spread_constraints.map(
+      topologySpreadToInput,
+    );
   }
-  if (draft.pod_affinity) out.podAffinity = affinityBlockToInput(draft.pod_affinity);
+  if (draft.pod_affinity)
+    out.podAffinity = affinityBlockToInput(draft.pod_affinity);
   if (draft.pod_anti_affinity) {
     out.podAntiAffinity = affinityBlockToInput(draft.pod_anti_affinity);
   }
-  if (draft.node_affinity) out.nodeAffinity = affinityBlockToInput(draft.node_affinity);
+  if (draft.node_affinity)
+    out.nodeAffinity = affinityBlockToInput(draft.node_affinity);
   if (draft.runtime_class) out.runtimeClass = draft.runtime_class;
   return out;
 }
