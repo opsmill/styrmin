@@ -80,3 +80,41 @@ All wrappers retain `forwardRef` and assign `displayName`. React 19 supports ref
 | Dropdown | `DropdownMenu.Content` (auto-positioned) | `Menu.Positioner` + `Menu.Popup` |
 | Select | `Select.Content` + `Select.Viewport` + scroll Buttons | `Select.Positioner` + `Select.Popup` + `Select.List` + scroll Arrows |
 | Label | `@radix-ui/react-label` `Label.Root` | native `<label>` |
+
+<!-- Extracted from specs/012-deployment-pods-tab on 2026-05-15 -->
+
+### Clipboard hook
+
+`frontend/src/hooks/use-copy-to-clipboard.ts` is the shared wrapper around `navigator.clipboard.writeText`. It exposes:
+
+- `copy(text: string) → Promise<boolean>` — writes the string and returns `true` on success, `false` if the browser rejected the request (denied permission, insecure context, focus loss).
+- `copied: boolean` — flips to `true` on a successful write and resets to `false` after 2 s. A second copy inside that window resets the timer.
+
+The hook clears its own timeout on unmount; callers never need to deal with `useEffect` cleanup for the toggle.
+
+### Hand-rolled collapsible-section pattern
+
+For chevron-fronted sections that toggle child content (Pods tab section cards, the per-pod `KubectlCommands` block), the project uses a hand-rolled pattern rather than always reaching for the Base UI `Collapsible` wrapper:
+
+```tsx
+const [open, setOpen] = useState(defaultOpen);
+return (
+  <div data-open={open}>
+    <button
+      type="button"
+      onClick={() => setOpen((v) => !v)}
+      aria-expanded={open}
+      aria-label={`${open ? "Collapse" : "Expand"} <thing>`}
+    >
+      <ChevronRight className={`transition-transform ${open ? "rotate-90" : ""}`} />
+      {/* …rest of the header… */}
+    </button>
+    {open && /* …body… */}
+  </div>
+);
+```
+
+When to use this vs. the Base UI `Collapsible` wrapper:
+
+- **Use `Collapsible`** when you want the animated expand/collapse, the ARIA wiring handled for you, and child content that stays mounted while hidden.
+- **Use the hand-rolled pattern** when you want children to actually unmount on collapse (so expensive child render paths don't run until needed) or when you need a `data-open` attribute on the wrapper for downstream selectors / E2E test assertions.

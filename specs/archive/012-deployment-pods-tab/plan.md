@@ -1,6 +1,6 @@
 # Implementation Plan — Pods Tab on Deployment Detail Page
 
-**Status:** Approved, not yet started
+**Status:** Extracted
 **PRD:** https://github.com/opsmill/styrmin/issues/204#issuecomment-4412816851
 **Design:** Paper artboard "Pods Tab — Option A (Grouped Sections)" in `Styrmin Design Apr 6th`
 **Direction:** Option A — grouped sections with inline expand (chosen over Option B single-table and Option C master-detail; see PRD User Stories 4–5 for why drift-as-its-own-section makes A the natural fit)
