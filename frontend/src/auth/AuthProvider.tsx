@@ -53,6 +53,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
     await queryClient.invalidateQueries({
       queryKey: useCurrentUserQuery.getKey(),
     });
+    // After the refetch the cache holds fresh data, but React's automatic
+    // batching defers AuthProvider's re-render (and its synchronous
+    // router.options.context assignment below) until after the current
+    // microtask chain. Eagerly propagate the new currentUser into
+    // router.options.context here so that any navigate() call made
+    // immediately after refresh() sees the authenticated state.
+    const data = queryClient.getQueryData<CurrentUserQuery>(
+      useCurrentUserQuery.getKey(),
+    );
+    // eslint-disable-next-line react-hooks/immutability
+    router.options.context = {
+      ...router.options.context,
+      auth: {
+        ...router.options.context?.auth,
+        currentUser: data?.currentUser ?? null,
+      } as AuthContextValue,
+    };
   }, [queryClient]);
 
   const logout = useCallback(async () => {
