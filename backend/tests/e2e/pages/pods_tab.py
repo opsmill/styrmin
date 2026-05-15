@@ -35,13 +35,27 @@ class PodsTabPage:
     async def wait_for_at_least_one_running_pod(self, *, timeout: float = 120.0) -> str:
         """Wait until at least one pod row renders with phase RUNNING.
 
+        Healthy sections start collapsed (see ``shouldSectionAutoExpand``
+        on the frontend), so pod rows are not mounted until the section
+        opens. This waits for a section to advertise a RUNNING pod via
+        its phase-chip summary, expands that section if it isn't open,
+        and then resolves the pod row inside it.
+
         Returns the pod name (``data-pod-name`` attribute) of the first such
         row, so the caller can build per-pod assertions.
         """
-        running_rows = self._page.locator(
+        timeout_ms = int(timeout * 1000)
+        section = self._page.locator(
+            '[data-testid="pod-section"]:has([data-testid="phase-chip-running"])'
+        ).first
+        await expect(section).to_be_visible(timeout=timeout_ms)
+        if await section.get_attribute("data-open") != "true":
+            await section.locator("button").first.click()
+            await expect(section).to_have_attribute("data-open", "true", timeout=5_000)
+        running_rows = section.locator(
             '[data-testid="pod-row"]:has([data-pod-phase="RUNNING"])'
         )
-        await expect(running_rows.first).to_be_visible(timeout=int(timeout * 1000))
+        await expect(running_rows.first).to_be_visible(timeout=timeout_ms)
         name = await running_rows.first.get_attribute("data-pod-name")
         assert name, "pod row rendered without a data-pod-name attribute"
         return name
