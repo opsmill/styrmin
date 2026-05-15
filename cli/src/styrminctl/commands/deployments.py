@@ -5,13 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from cyclopts import App, Parameter
-
-# ``PLC2701`` is the ruff-preview "private-name import" rule; the codegen
-# package is private by convention but is the only source of truth for the
-# typed ``UpdateDeploymentInput`` model, so the suppression is intentional.
-from styrmin_sdk.graphql._generated.input_types import (  # noqa: PLC2701
-    UpdateDeploymentInput,
-)
+from styrmin_sdk.models import UpdateDeploymentInput
 
 from styrminctl import client
 from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler

@@ -97,13 +97,7 @@ async def test_get_deployment_not_found(client: StyrminClient, mock_transport: A
 
 async def test_update_deployment_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
     # Imported locally — matches the precedent in
-    # ``backend/tests/e2e/drivers/api_driver.py`` of pulling typed-input
-    # models from the generated package only where they're used, so the
-    # rest of the test module stays free of internal-package imports.
-    # ``PLC2701`` is the ruff-preview "private-name import" rule; the
-    # codegen package is private by convention but is the only source of
-    # truth for these typed inputs, so the suppression is intentional.
-    from styrmin_sdk.graphql._generated.input_types import (  # noqa: PLC2701
+    from styrmin_sdk.models import (
         ComponentConfigInput,
         EnvVarInput,
         ParameterValueInput,
