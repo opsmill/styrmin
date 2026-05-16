@@ -20,7 +20,7 @@ import { SECTION_ORDER } from "./configuration-types";
  * snapshots, attributing each entry to one of the eight `SectionId`s.
  *
  * Array fields whose entries have a stable identity (env vars keyed by
- * `name`, tolerations keyed by `key`+`operator`+`effect`, components
+ * `name`, tolerations keyed by `key`+`operator`, components
  * keyed by `name`, service overrides keyed by `driverServiceName`,
  * parameters keyed by `name`) use those keys instead of positional
  * indices, so a pure reorder produces no diff entries. Fields without

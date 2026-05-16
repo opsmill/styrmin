@@ -76,6 +76,28 @@ function componentsDictToList(
  * full-replacement contract must read them from the top-level `Deployment`
  * and set them on the returned input separately.
  */
+/**
+ * Convert the row-level `Deployment.parameters` dict (snake-case JSON,
+ * `{ [name]: value }`) into the `ParameterValueInput[]` shape expected by
+ * `UpdateDeploymentInput.parameters`.
+ *
+ * Returns `undefined` when the dict is empty/absent so the diff and
+ * inheritance helpers see the same "unset" sentinel.
+ *
+ * Lives alongside {@link deploymentConfigToInput} because both project a
+ * persisted GraphQL surface into the `UpdateDeploymentInput` shape; keeping
+ * them next to each other prevents the projection layer from fragmenting
+ * across multiple modules.
+ */
+export function deploymentParametersToInput(
+  parameters: Record<string, unknown> | null | undefined,
+): UpdateDeploymentInput["parameters"] {
+  if (parameters == null) return undefined;
+  const entries = Object.entries(parameters);
+  if (entries.length === 0) return undefined;
+  return entries.map(([name, value]) => ({ name, value }));
+}
+
 export function deploymentConfigToInput(
   config: DeploymentConfig,
 ): UpdateDeploymentInput {

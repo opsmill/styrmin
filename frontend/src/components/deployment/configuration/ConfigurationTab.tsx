@@ -4,7 +4,10 @@ import type {
   UpdateDeploymentInput,
 } from "@/generated/graphql";
 import { useEffectiveRole } from "@/auth/useEffectiveRole";
-import { deploymentConfigToInput } from "@/lib/deployment-input";
+import {
+  deploymentConfigToInput,
+  deploymentParametersToInput,
+} from "@/lib/deployment-input";
 import { computeInheritance } from "@/lib/config-inheritance";
 import type {
   DriverParameterSchema,
@@ -160,21 +163,4 @@ export function ConfigurationTab({ deployment }: Props) {
       />
     </div>
   );
-}
-
-/**
- * Convert the row-level `Deployment.parameters` dict (snake-case JSON,
- * `{ [name]: value }`) into the `ParameterValueInput[]` shape expected by
- * `UpdateDeploymentInput.parameters`.
- *
- * Returns `undefined` when the dict is empty/absent so the diff and
- * inheritance helpers see the same "unset" sentinel.
- */
-function deploymentParametersToInput(
-  parameters: Record<string, unknown> | null | undefined,
-): UpdateDeploymentInput["parameters"] {
-  if (parameters == null) return undefined;
-  const entries = Object.entries(parameters);
-  if (entries.length === 0) return undefined;
-  return entries.map(([name, value]) => ({ name, value }));
 }
