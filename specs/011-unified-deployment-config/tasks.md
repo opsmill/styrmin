@@ -41,9 +41,9 @@ description: "Task list for 011-unified-deployment-config"
 
 ### GraphQL query and codegen
 
-- [ ] T004 Audit `frontend/src/graphql/get_deployment.graphql` and extend it to fetch `environment { id name config }`, `driver { parameterSchema }`, and `components { name }` if not already present. Validate with `uv run invoke validate-graphql`.
-- [ ] T005 Regenerate types: `uv run invoke generate` (SDK + frontend codegen). Commit the regenerated files.
-- [ ] T006 Audit `Deployment` GraphQL type for a `lastUpdateEvent` field or a server-issued version stamp (`updatedAt`). Record findings in a comment block in `specs/011-unified-deployment-config/research.md` under R-009 / R-012. If a small additive schema change is needed for slice 4's concurrent-edit detection, document it here — do NOT implement yet.
+- [X] T004 Audit `frontend/src/graphql/get_deployment.graphql` and extend it to fetch `environment { id name config }`, `driver { parameterSchema }`, and `components { name }` if not already present. Validate with `uv run invoke validate-graphql`.
+- [X] T005 Regenerate types: `uv run invoke generate` (SDK + frontend codegen). Commit the regenerated files.
+- [X] T006 Audit `Deployment` GraphQL type for a `lastUpdateEvent` field or a server-issued version stamp (`updatedAt`). Record findings in a comment block in `specs/011-unified-deployment-config/research.md` under R-009 / R-012. If a small additive schema change is needed for slice 4's concurrent-edit detection, document it here — do NOT implement yet.
 
 ### Pure-function libraries (no UI dependencies)
 

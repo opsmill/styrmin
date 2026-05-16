@@ -267,3 +267,46 @@ This document resolves all design unknowns surfaced when filling Technical Conte
 ## Summary
 
 All NEEDS CLARIFICATION items are resolved. The one open question (backend-side: does `Deployment` expose a `lastUpdateEvent`?) is captured in R-009 with a v1 fallback that requires no backend changes. The critique phase added R-012 (concurrent-edit detection) and R-013 (env-var plaintext decision). R-012 may require a small additive backend change in slice 4 — that decision is made during slice 4's GraphQL audit; if it triggers Governance Gate review, the slice's PR handles it under the standard propagation-test rule.
+
+---
+
+## R-009 / R-012 audit (from Chunk 2a)
+
+**Date**: 2026-05-16 — performed as part of Phase 2 T006 (GraphQL audit).
+
+**Question**: does the `Deployment` GraphQL type already expose a server-issued version stamp (`updatedAt` / `lastUpdateEvent` / `version`) that slice 4 can use for optimistic-concurrency / stale-write detection?
+
+### Version-stamp candidates surveyed
+
+| Candidate | Location | Exposed via GraphQL? |
+|---|---|---|
+| `Deployment.updated_on` (column) | `backend/styrmin_backend/db/models.py` — inherited from `StyrminModel` base class, defined with `sa_column_kwargs={"onupdate": func.now(), "server_default": func.now()}` so it is refreshed automatically on every UPDATE. | ❌ Not exposed on the Strawberry `Deployment` type (`backend/styrmin_backend/api/definitions/deployment/model.py`). |
+| `Deployment.created_on` (column) | Same — also inherited from `StyrminModel`. | ❌ Not exposed; would not help for stale-write detection (never changes after creation). |
+| `Deployment.version` / `lastUpdateEvent` | — | ❌ Does not exist on the model or in the schema. |
+| `DeploymentStatusType.updatedOn` | Exposed at `Deployment.crdStatus.updatedOn`. | ✅ But this reflects the **status report** stream from the agent, not the spec/config row. A spec edit via `updateDeployment` does not touch this value, so it is unsuitable as an OCC version stamp for spec edits. |
+| `Task` rows from `Deployment.applicationInstance` | Indirect — every `updateDeployment` enqueues a Prefect task whose row is timestamped. | ⚠️ Reachable but indirect, and edits that are no-ops or rejected do not produce a task row. Not a clean version stamp. |
+
+### Findings
+
+- The underlying row already has a monotonically-increasing server-set timestamp (`updated_on`) that bumps on every UPDATE statement, including the `updateDeployment` mutation path. It is the natural OCC version stamp for this feature.
+- The Strawberry type currently hides it. No other field on `Deployment` is suitable.
+
+### Recommendation for slice 4
+
+**Path (b): expose the existing internal field via a small additive schema change.**
+
+Concretely, slice 4 should add a single Strawberry field on `Deployment`:
+
+```python
+updated_on: datetime | None  # maps to db column already present on StyrminModel
+```
+
+which in the GraphQL schema becomes `updatedOn: DateTime` on `Deployment`. The frontend will:
+
+1. Select `updatedOn` in `get_deployment.graphql` at drawer-open time, capturing it into the draft state.
+2. On Apply, compare against a freshly-refetched `updatedOn` immediately before issuing `updateDeployment`. If the value moved, surface the concurrent-edit dialog from R-012 instead of overwriting.
+3. (Optional v1.1) Pass the original `updatedOn` as an `expectedUpdatedOn` argument on `updateDeployment` so the backend can reject server-side and return a typed `STALE_DEPLOYMENT_WRITE` error; this is the path that triggers Governance Gate's propagation-test rule.
+
+This is purely additive (new field, no breakage) and satisfies the Constitution §V propagation-test obligation by pairing the schema change with both an SDK propagation test and the slice's concurrent-edit E2E.
+
+**Do not implement now** — recorded here so slice 4 can act with full context. Slice 1 (this chunk) stops at the audit.
