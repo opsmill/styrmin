@@ -27,9 +27,9 @@ description: "Task list for 011-unified-deployment-config"
 
 **Purpose**: Repo-level preparation. No story-specific work.
 
-- [ ] T001 Verify `frontend/node_modules/` is populated and `pnpm` works (`cd frontend && pnpm install`)
-- [ ] T002 [P] Confirm TanStack Form and Radix Dialog versions are pinned to their feature-001 versions in `frontend/package.json`; no new top-level dependencies are introduced
-- [ ] T003 Create the feature directory `frontend/src/components/deployment/configuration/` and an empty `index.ts` barrel file
+- [X] T001 Verify `frontend/node_modules/` is populated and `pnpm` works (`cd frontend && pnpm install`)
+- [X] T002 [P] Confirm TanStack Form and Radix Dialog versions are pinned to their feature-001 versions in `frontend/package.json`; no new top-level dependencies are introduced
+- [X] T003 Create the feature directory `frontend/src/components/deployment/configuration/` and an empty `index.ts` barrel file
 
 ---
 
