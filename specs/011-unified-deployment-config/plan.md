@@ -12,7 +12,7 @@ This is a **frontend-only feature**. No backend schema, mutation, or resolver ch
 ## Technical Context
 
 **Language/Version**: TypeScript 5.9.3, Node 22 (frontend only; backend untouched)
-**Primary Dependencies**: React 19.2.4, Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI primitives, TanStack Form (already adopted via feature 001-tanstack-form-migration), TanStack Router 1.168.x (already adopted via 001-tanstack-router-migration), TanStack Query v5, Tailwind, lucide-react. Fonts: Inter, JetBrains Mono.
+**Primary Dependencies**: React 19.2.4, Vite 8.0.1, urql 5.0.1 (GraphQL), Base UI primitives (`@base-ui/react`), TanStack Form (already adopted via feature 001-tanstack-form-migration), TanStack Router 1.168.x (already adopted via 001-tanstack-router-migration), TanStack Query v5, Tailwind, lucide-react. Fonts: Inter, JetBrains Mono.
 **Storage**: N/A — all state is client-side draft + persisted GraphQL response; deployment config is already stored as JSON on the existing `Deployment` row, no schema changes.
 **Testing**: Vitest + React Testing Library (frontend unit / component), pytest E2E suite under `backend/tests/e2e/` driven via Playwright in `[ui-chromium]` mode (per `dev/guides/dual-entrypoint-e2e.md`). Specific test obligations from critique:
 - **Per-rule impact tests**: every entry in `frontend/src/lib/impact-rules.ts` ships with at least one positive case (rule fires on a matching diff) and at least one negative case (rule does not fire on a similar but non-matching diff). The matcher's glob engine has a dedicated unit suite covering each syntax form (`*`, `**`, `[*]`, `value:`, `kind:`).
@@ -22,7 +22,7 @@ This is a **frontend-only feature**. No backend schema, mutation, or resolver ch
 **Target Platform**: Web — Styrmin frontend single-page app, served via Vite dev server in development and bundled for production. Browser baseline matches the rest of the Styrmin frontend (modern evergreen Chrome / Firefox / Safari per `frontend/AGENTS.md`).
 **Project Type**: Web application — frontend + backend repo; this feature touches `frontend/` only.
 **Performance Goals**: Configuration tab first paint ≤ 200 ms after deployment fetch resolves (parallel to existing Overview tab). Drawer open animation ≤ 16 ms per frame at 60 fps. Diff computation across the full deployment config (~200 leaf fields max) ≤ 5 ms — well within frame budget.
-**Constraints**: Drawer width fixed at 760 px on viewports ≥ 1280 px, collapses to full-width sheet below. No backend schema changes (Governance Gate). No new dependencies beyond what TanStack Form / Radix already bring. Must not regress the existing Scheduling edit flow during slice 11 cleanup.
+**Constraints**: Drawer width fixed at 760 px on viewports ≥ 1280 px, collapses to full-width sheet below. No backend schema changes (Governance Gate). No new dependencies beyond what TanStack Form / Base UI already bring. Must not regress the existing Scheduling edit flow during slice 11 cleanup.
 **Scale/Scope**: ~21 new components, ~3 lib modules, 7 GraphQL queries (all existing, reused), 7+ Playwright `[ui-chromium]` E2E scenarios (one per editable section, plus a multi-section roll-up). The deployment config dict typically has 50–200 leaf fields across the 9 groups.
 
 ## Constitution Check
@@ -139,6 +139,6 @@ backend/tests/e2e/configuration/                          [NEW directory]
 No constitution-check violations to justify. The feature stays within established patterns:
 
 - TanStack Form is already on the project (no new form library).
-- Radix Dialog is already used for existing dialogs (drawer animation is a Radix Dialog with a `data-side="right"` CSS variant rather than introducing Vaul or a custom drawer library — see `research.md`).
+- Base UI Dialog is already used for existing dialogs (drawer animation is a Base UI Dialog with a `data-side="right"` CSS variant rather than introducing Vaul or a custom drawer library — see `research.md`).
 - Diff and impact are pure-function modules under `lib/`, mirroring the existing `lib/deployment-input.ts` pattern.
 - No new lib/test directories beyond what the project already uses.

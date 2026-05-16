@@ -28,7 +28,7 @@ description: "Task list for 011-unified-deployment-config"
 **Purpose**: Repo-level preparation. No story-specific work.
 
 - [X] T001 Verify `frontend/node_modules/` is populated and `pnpm` works (`cd frontend && pnpm install`)
-- [X] T002 [P] Confirm TanStack Form and Radix Dialog versions are pinned to their feature-001 versions in `frontend/package.json`; no new top-level dependencies are introduced
+- [X] T002 [P] Confirm TanStack Form and Base UI Dialog versions are pinned to their feature-001 versions in `frontend/package.json`; no new top-level dependencies are introduced
 - [X] T003 Create the feature directory `frontend/src/components/deployment/configuration/` and an empty `index.ts` barrel file
 
 ---
@@ -85,7 +85,7 @@ description: "Task list for 011-unified-deployment-config"
 ### Tab shell, hero, View JSON
 
 - [ ] T025 [US1] Create `frontend/src/components/deployment/configuration/HeroSummaryBar.tsx` — dark hero with total/inherited/overridden field counts, "Last changed" line (derived client-side from the deployment's most recent successful `update_deployment` task per research R-009 fallback), "View JSON" action, and "Edit configuration" CTA. The Edit button is rendered only when the auth context grants edit permission (FR-030); supply a `canEdit: boolean` prop that the parent computes.
-- [ ] T026 [US1] Create `frontend/src/components/deployment/configuration/ViewJsonDialog.tsx` — Radix Dialog presenting `deployment.config` as syntax-highlighted JSON, read-only, with a copy-to-clipboard action.
+- [ ] T026 [US1] Create `frontend/src/components/deployment/configuration/ViewJsonDialog.tsx` — Base UI Dialog presenting `deployment.config` as syntax-highlighted JSON, read-only, with a copy-to-clipboard action.
 - [ ] T027 [US1] Create `frontend/src/components/deployment/configuration/ConfigurationTab.tsx` — composes `HeroSummaryBar` + the 6 summary cards in the order Driver Parameters → Scheduling → Networking → Env Vars → Storage & Runtime → Service Overrides. Component Overrides summary is added in US4. Reads the deployment + environment from the urql query bound to `get_deployment.graphql`.
 
 ### Tab integration
@@ -112,8 +112,8 @@ description: "Task list for 011-unified-deployment-config"
 
 - [ ] T032 [US2] Create `frontend/src/components/deployment/configuration/DrawerFooter.tsx` — sticky footer with pending-change count (subscribed via `form.useStore`), "Discard" button, "Review & apply" primary action. Disabled when no pending changes.
 - [ ] T033 [US2] Create `frontend/src/components/deployment/configuration/SectionNav.tsx` — left rail listing every section; uses `IntersectionObserver` to highlight the in-view section; renders a per-section "changed" dot when that section has dirty fields.
-- [ ] T034 [US2] Create `frontend/src/components/deployment/configuration/ConfigEditDrawer.tsx` — Radix Dialog with right-side slide-in animation (Tailwind utilities, 200 ms ease-out). Drawer width 760 px ≥1280 px viewport; full-width otherwise. Single TanStack Form instance whose initial value is `deploymentConfigToInput(deployment.config)`. Wires `SectionNav`, the scrollable form body, and `DrawerFooter`. Handles focus trap (Radix), keyboard navigation, focus restoration on close (FR-028).
-- [ ] T035 [US2] Implement drawer close-with-dirty confirmation (FR-018): if the form is dirty when the user clicks X / presses Escape / clicks the backdrop, render a nested `Radix AlertDialog` "Discard pending changes?" with "Keep editing" (default) and "Discard" buttons.
+- [ ] T034 [US2] Create `frontend/src/components/deployment/configuration/ConfigEditDrawer.tsx` — Base UI Dialog with right-side slide-in animation (Tailwind utilities, 200 ms ease-out). Drawer width 760 px ≥1280 px viewport; full-width otherwise. Single TanStack Form instance whose initial value is `deploymentConfigToInput(deployment.config)`. Wires `SectionNav`, the scrollable form body, and `DrawerFooter`. Handles focus trap (Base UI), keyboard navigation, focus restoration on close (FR-028).
+- [ ] T035 [US2] Implement drawer close-with-dirty confirmation (FR-018): if the form is dirty when the user clicks X / presses Escape / clicks the backdrop, render a nested `Base UI AlertDialog` "Discard pending changes?" with "Keep editing" (default) and "Discard" buttons.
 - [ ] T036 [US2] Wire the "Edit configuration" button in `HeroSummaryBar` to open `ConfigEditDrawer`. The button is conditionally rendered based on `canEdit`, which is derived from the same authorization check that the `updateDeployment` resolver performs server-side (FR-030). If the auth context exposes a permission helper, use it; otherwise compute via a feature-flag fallback documented in `research.md` and flag an audit task.
 
 ### Identity section
@@ -129,7 +129,7 @@ description: "Task list for 011-unified-deployment-config"
 
 - [ ] T040 [US2] Create `frontend/src/components/deployment/configuration/DiffEntryRow.tsx` — one row in the dialog's diff section. Renders the path-segment label, kind (`add`/`remove`/`change`) with appropriate colour treatment, before and after values.
 - [ ] T041 [US2] Create `frontend/src/components/deployment/configuration/ImpactList.tsx` — renders `ImpactSummary` as a vertical list of consequences with severity icons; surfaces "disruptive" amber banner when `topSeverity === 'high'`.
-- [ ] T042 [US2] Create `frontend/src/components/deployment/configuration/ConfigDiffDialog.tsx` — Radix Dialog showing the path-level diff (grouped by section, scrollable), the `ImpactList`, "Back to edit" and primary "Apply & redeploy" buttons. No type-to-confirm input (FR-022). Dispatches the `updateDeployment` mutation on Apply; on success closes itself and the drawer and triggers urql cache invalidation so the Configuration tab refreshes. On failure, stays open and surfaces the error.
+- [ ] T042 [US2] Create `frontend/src/components/deployment/configuration/ConfigDiffDialog.tsx` — Base UI Dialog showing the path-level diff (grouped by section, scrollable), the `ImpactList`, "Back to edit" and primary "Apply & redeploy" buttons. No type-to-confirm input (FR-022). Dispatches the `updateDeployment` mutation on Apply; on success closes itself and the drawer and triggers urql cache invalidation so the Configuration tab refreshes. On failure, stays open and surfaces the error.
 - [ ] T043 [US2] Implement concurrent-edit handling (FR-029) inside `ConfigDiffDialog`'s Apply handler. If the deployment's version stamp at apply time differs from the version stamp at drawer-open time (or the resolver returns a typed stale-write error code), render the "this deployment was modified by Y at Z" reload panel with a Reload action that refetches and recomputes the diff baseline against the new persisted state, preserving the operator's pending edits against the new baseline. The mutation does not retry until reload completes.
 
 ### Remaining editable sections (slices 5–9)
@@ -188,7 +188,7 @@ description: "Task list for 011-unified-deployment-config"
 
 - [ ] T065 [P] [US4] Create `frontend/src/components/deployment/configuration/sections/read/ComponentOverridesSummary.tsx` — list every component declared by the driver; each row shows status (overridden vs no override) and a one-line summary of the override scope when present.
 - [ ] T066 [US4] Wire `ComponentOverridesSummary` into `ConfigurationTab` after Service Name Overrides.
-- [ ] T067 [P] [US4] Create `frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx` — collapsible block per component (Radix Collapsible). Inside each block: per-component resources (CPU/memory request+limit), replicas override, future-extension placeholder section. Field array semantics keyed on component name; never positional. Export `componentOverridesSchema`.
+- [ ] T067 [P] [US4] Create `frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx` — collapsible block per component (Base UI Collapsible). Inside each block: per-component resources (CPU/memory request+limit), replicas override, future-extension placeholder section. Field array semantics keyed on component name; never positional. Export `componentOverridesSchema`.
 - [ ] T068 [US4] Wire `ComponentOverridesSection` into `ConfigEditDrawer`'s form body and `SectionNav`'s nav list as the last section.
 - [ ] T069 [P] [US4] Create `backend/tests/e2e/configuration/test_drawer_component_overrides_edit.py` (`@pytest.mark.ui_only`). Seed a deployment with 3 components; set CPU resource overrides on one component via the drawer; assert only that component's Deployment resource gets the new request/limit and the other two are untouched.
 - [ ] T070 [US4] Run T069 to a pass.

@@ -29,19 +29,21 @@ This document resolves all design unknowns surfaced when filling Technical Conte
 
 ## R-002 · Drawer primitive and animation
 
-**Decision**: Use Radix Dialog (`@radix-ui/react-dialog`) with custom CSS for the right-side slide-in. Do not introduce Vaul or another drawer library.
+**Decision**: Use Base UI Dialog (`@base-ui/react`) with custom CSS for the right-side slide-in. Do not introduce Vaul or another drawer library.
+
+> **Plan-phase correction (2026-05-16, during Chunk 1 execution)**: the original draft of this entry said "Radix Dialog" / `@radix-ui/react-dialog`. The project actually uses **Base UI** (`@base-ui/react ^1.3.0`) per `frontend/package.json` and `frontend/AGENTS.md`. References throughout `plan.md`, `research.md`, and `tasks.md` were updated to match. Base UI provides equivalent headless primitives (Dialog, AlertDialog, Collapsible) and is the project's standard choice for new modal work.
 
 **Rationale**:
-- Radix Dialog is already used elsewhere in the project; reusing it keeps focus-trap, escape-handling, and a11y semantics consistent.
+- Base UI Dialog is already used elsewhere in the project; reusing it keeps focus-trap, escape-handling, and a11y semantics consistent.
 - A right-side slide-in is a Dialog with `data-state="open"` driving a `transform: translateX(...)` animation — Tailwind utility classes plus a 200 ms ease-out transition. No new dependency.
 - Vaul is appealing for mobile-style bottom sheets but adds a dependency and a different mental model; the desktop use case here is unambiguously a side panel.
 
 **Alternatives considered**:
 - `vaul` (Emil Kowalski's drawer library) — rejected: extra dependency, wrong default ergonomics for desktop side panels.
-- Custom `<aside>` with portal and `useEffect`-driven escape/focus management — rejected: reinvents Radix and is a known source of accessibility bugs.
+- Custom `<aside>` with portal and `useEffect`-driven escape/focus management — rejected: reinvents Base UI and is a known source of accessibility bugs.
 
 **Implementation notes**:
-- Backdrop uses `Radix Dialog.Overlay` with `bg-black/55` to match the Paper mock's dimmed page treatment.
+- Backdrop uses `Base UI Dialog.Overlay` with `bg-black/55` to match the Paper mock's dimmed page treatment.
 - Drawer width: `760px` on `≥1280px` viewports; `100vw - 32px` below — Tailwind responsive utilities.
 - Closing the drawer (X button, Escape, backdrop click) when dirty triggers a nested `AlertDialog` confirmation; not dirty closes immediately.
 
@@ -142,7 +144,7 @@ This document resolves all design unknowns surfaced when filling Technical Conte
 
 ## R-007 · Closing the drawer with unsaved changes
 
-**Decision**: Show a `Radix AlertDialog` "Discard pending changes?" confirmation. Two buttons: "Keep editing" (default), "Discard". No auto-save to local storage in v1.
+**Decision**: Show a `Base UI AlertDialog` "Discard pending changes?" confirmation. Two buttons: "Keep editing" (default), "Discard". No auto-save to local storage in v1.
 
 **Rationale**:
 - Auto-save (e.g., to `sessionStorage`) was considered as an alternative — rejected because the drawer is a synchronous workflow, not a long-running compose surface like an email draft. Losing five fields of pending edits is annoying but not catastrophic, and auto-save would surprise operators if a saved draft re-opened next time they clicked Edit.
