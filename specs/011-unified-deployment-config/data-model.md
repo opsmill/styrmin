@@ -16,7 +16,7 @@ Where a type derives from the GraphQL schema, the generated TypeScript type from
 | `UpdateDeploymentInput` | `frontend/src/graphql/__generated__/...` | The mutation input shape. Used as the drawer form's domain model. |
 | `Deployment` | `frontend/src/graphql/__generated__/...` | The GraphQL `Deployment` type — includes `config: JSON`, `parameters: [ParameterValue!]`, `environment: Environment`, etc. |
 | `Environment` | `frontend/src/graphql/__generated__/...` | The parent environment record — `config: JSON`. Used to compute inheritance. |
-| `DriverParameterSchema` | `frontend/src/graphql/__generated__/...` | Driver-defined parameter declarations — names, types, defaults, descriptions. Drives Driver Parameters renderers. |
+| `DriverParameterSchema` *(notional)* | `frontend/src/graphql/__generated__/...` | Driver-defined parameter declarations — names, types, defaults, descriptions. Drives Driver Parameters renderers. **Actual generated type**: `ParameterDefinition[]` on `applicationDriverVersion.parameters` (per the get_deployment query extended in T004). Treat `DriverParameterSchema` as a TS alias `type DriverParameterSchema = readonly ParameterDefinition[]` in code. |
 | `Task` | `frontend/src/graphql/__generated__/...` | Used to surface "last changed" hero summary line (most recent successful `update_deployment` task). |
 
 ---
