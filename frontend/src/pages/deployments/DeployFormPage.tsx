@@ -5,7 +5,6 @@ import {
   useListApplicationDriversQuery,
   useDeployMutation,
 } from "@/generated/graphql";
-import type { ListApplicationDriversQuery } from "@/generated/graphql";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
@@ -14,7 +13,6 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -27,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertCircle } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { IfRole } from "@/auth/IfRole";
+import { ParameterField } from "@/components/deployment/configuration/ParameterField";
 
 const deployFormSchema = z.object({
   name: z.string().min(1, "Deployment name is required"),
@@ -35,10 +34,6 @@ const deployFormSchema = z.object({
     .min(1, "Application driver version is required"),
   applicationVersion: z.string().optional(),
 });
-
-type DriverVersion = NonNullable<
-  ListApplicationDriversQuery["applicationDrivers"]
->[number]["versions"][number];
 
 export default function DeployFormPage() {
   const { environmentId } = useParams({
@@ -328,7 +323,7 @@ export default function DeployFormPage() {
           <div className="space-y-4">
             <Label className="text-base">Parameters</Label>
             {selectedVersion.parameters.map((param) => (
-              <DynamicParameterField
+              <ParameterField
                 key={param.name}
                 parameter={param}
                 value={dynamicParams[param.name]}
@@ -452,77 +447,4 @@ export default function DeployFormPage() {
       </form>
     </PageLayout>
   );
-}
-
-function DynamicParameterField({
-  parameter,
-  value,
-  onChange,
-}: {
-  parameter: DriverVersion["parameters"][number];
-  value: unknown;
-  onChange: (value: unknown) => void;
-}) {
-  const defaultVal = parameter.default as unknown;
-
-  switch (parameter.kind) {
-    case "boolean":
-      return (
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id={parameter.name}
-            checked={(value as boolean) ?? (defaultVal as boolean) ?? false}
-            onCheckedChange={(checked) => onChange(checked)}
-          />
-          <Label htmlFor={parameter.name}>{parameter.label}</Label>
-        </div>
-      );
-
-    case "select":
-      return (
-        <div className="space-y-2">
-          <Label htmlFor={parameter.name}>{parameter.label}</Label>
-          <Select
-            value={(value as string) ?? (defaultVal as string) ?? ""}
-            onValueChange={(v) => onChange(v)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {parameter.values?.map((v) => (
-                <SelectItem key={v} value={v}>
-                  {v}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      );
-
-    case "integer":
-      return (
-        <div className="space-y-2">
-          <Label htmlFor={parameter.name}>{parameter.label}</Label>
-          <Input
-            id={parameter.name}
-            type="number"
-            value={String(value ?? defaultVal ?? "")}
-            onChange={(e) => onChange(parseInt(e.target.value, 10) || 0)}
-          />
-        </div>
-      );
-
-    default:
-      return (
-        <div className="space-y-2">
-          <Label htmlFor={parameter.name}>{parameter.label}</Label>
-          <Input
-            id={parameter.name}
-            value={(value as string) ?? (defaultVal as string) ?? ""}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        </div>
-      );
-  }
 }

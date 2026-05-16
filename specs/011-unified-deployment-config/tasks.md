@@ -57,11 +57,11 @@ description: "Task list for 011-unified-deployment-config"
 
 ### Shared UI primitives
 
-- [ ] T014 [P] Create `frontend/src/components/deployment/configuration/ConfigSummaryCard.tsx` — shared shell taking `{title, inheritance, children}` props; renders the section heading, inheritance badge, and slot for body.
-- [ ] T015 [P] Create `frontend/src/components/deployment/configuration/InheritanceBadge.tsx` — read-only badge component taking `InheritanceState`; renders blue "overridden (N)" or gray "inherited".
-- [ ] T016 [P] Create `frontend/src/components/deployment/configuration/ChangedFieldFrame.tsx` — wrapper that scopes TanStack Form `useStore` to one field, renders amber border + "changed" pill + "from X" annotation when dirty, no decoration when clean. Pulls original value from `initial` prop, env value from `environment` prop.
-- [ ] T017 [P] Create `frontend/src/components/deployment/configuration/ChangedFieldFrame.test.tsx` — RTL coverage: renders children unchanged when value matches initial; renders amber border + pill + "from X" annotation when value differs; renders "from X (env)" suffix when the original came from the environment.
-- [ ] T018 Extract `ParameterField` from `frontend/src/pages/deployments/DeployFormPage.tsx` into `frontend/src/components/deployment/configuration/ParameterField.tsx`. Keep imports in `DeployFormPage.tsx` pointed at the new location so the create form continues to work. Run `pnpm test` to confirm no regression.
+- [X] T014 [P] Create `frontend/src/components/deployment/configuration/ConfigSummaryCard.tsx` — shared shell taking `{title, inheritance, children}` props; renders the section heading, inheritance badge, and slot for body.
+- [X] T015 [P] Create `frontend/src/components/deployment/configuration/InheritanceBadge.tsx` — read-only badge component taking `InheritanceState`; renders blue "overridden (N)" or gray "inherited".
+- [X] T016 [P] Create `frontend/src/components/deployment/configuration/ChangedFieldFrame.tsx` — wrapper that scopes TanStack Form `useStore` to one field, renders amber border + "changed" pill + "from X" annotation when dirty, no decoration when clean. Pulls original value from `initial` prop, env value from `environment` prop.
+- [X] T017 [P] Create `frontend/src/components/deployment/configuration/ChangedFieldFrame.test.tsx` — RTL coverage: renders children unchanged when value matches initial; renders amber border + pill + "from X" annotation when value differs; renders "from X (env)" suffix when the original came from the environment.
+- [X] T018 Extract `ParameterField` from `frontend/src/pages/deployments/DeployFormPage.tsx` into `frontend/src/components/deployment/configuration/ParameterField.tsx`. Keep imports in `DeployFormPage.tsx` pointed at the new location so the create form continues to work. Run `pnpm test` to confirm no regression.
 
 **Checkpoint**: Foundation ready — user story work can now begin.
 
