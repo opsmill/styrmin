@@ -106,8 +106,8 @@ get_deployment_query = """
 """
 
 update_deployment_mutation = """
-    mutation UpdateDeployment($deploymentId: UUID!, $config: JSON!) {
-        updateDeployment(deploymentId: $deploymentId, config: $config) {
+    mutation UpdateDeployment($deploymentId: UUID!, $input: UpdateDeploymentInput!) {
+        updateDeployment(deploymentId: $deploymentId, input: $input) {
             id
         }
     }

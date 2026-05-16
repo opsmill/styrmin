@@ -1,5 +1,5 @@
-mutation UpdateDeployment($deploymentId: UUID!, $name: String) {
-    updateDeployment(deploymentId: $deploymentId, name: $name) {
+mutation UpdateDeployment($deploymentId: UUID!, $input: UpdateDeploymentInput!) {
+    updateDeployment(deploymentId: $deploymentId, input: $input) {
         id
     }
 }

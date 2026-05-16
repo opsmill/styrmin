@@ -76,6 +76,36 @@ class DuplicateEnvVarNameError(ServiceError):
         return {"name": self.name, "scope": self.scope}
 
 
+class DuplicateComponentNameError(ServiceError):
+    """The ``components`` input list contains the same component name twice.
+
+    Detected before the list is flattened to the persisted
+    ``dict[str, dict]`` shape so the typed error code reaches the GraphQL
+    boundary intact (FR-009).
+    """
+
+    error_code = "DUPLICATE_COMPONENT_NAME"
+    default_message = "Duplicate component name in input list"
+
+    def __init__(
+        self,
+        message: str = "",
+        name: str = "",
+    ) -> None:
+        self.name = name
+        super().__init__(
+            message
+            or (
+                f"Component name {name!r} appears more than once in the input "
+                "list; remove the duplicate before submitting."
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"name": self.name}
+
+
 class InvalidEnvVarValueError(ServiceError):
     """The env var value is not a string.
 

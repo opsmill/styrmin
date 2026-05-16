@@ -73,6 +73,7 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [adr-023-frontend-value-transform-boundary.md](adr/adr-023-frontend-value-transform-boundary.md) - Frontend value-transform layer at the GraphQL submit boundary for full-replacement inputs
 - [adr-024-authentication-and-sessions.md](adr/adr-024-authentication-and-sessions.md) - Opaque server-side session tokens with dual transport (HttpOnly cookie + bearer header), 30-day absolute / 7-day idle lifetime, argon2id passwords
 - [adr-025-authorization-model.md](adr/adr-025-authorization-model.md) - Three-tier role-based authorization (`READ_ONLY` / `READ_WRITE` / `ADMIN`) with default-deny `RequiresAuthentication` extension and per-resolver `RequiresRole`
+- [adr-026-typed-update-deployment-input.md](adr/adr-026-typed-update-deployment-input.md) - Typed `UpdateDeploymentInput` — list-shaped named-dict fields with typed duplicate detection, `parameters`-merge asymmetry, shared leaf inputs under `config/inputs.py`
 
 ## Current Knowledge
 

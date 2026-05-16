@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from styrmin_sdk._queries import load_query
@@ -30,6 +30,9 @@ from styrmin_sdk.graphql._generated.update_deployment_version import (
 )
 from styrmin_sdk.models.context import Context
 from styrmin_sdk.resources._base import BaseResource, JsonValue
+
+if TYPE_CHECKING:
+    from styrmin_sdk.graphql._generated.input_types import UpdateDeploymentInput
 
 
 class DeploymentResource(BaseResource):
@@ -81,20 +84,22 @@ class DeploymentResource(BaseResource):
         self,
         deployment_id: str | UUID,
         *,
-        name: str | None = None,
-        config: JsonValue | None = None,
-        parameters: JsonValue | None = None,
-        service_name_overrides: list[dict[str, str]] | None = None,
+        input: UpdateDeploymentInput,
     ) -> UpdateDeploymentUpdateDeployment:
-        variables: dict[str, Any] = {"deploymentId": str(deployment_id)}
-        if name is not None:
-            variables["name"] = name
-        if config is not None:
-            variables["config"] = config
-        if parameters is not None:
-            variables["parameters"] = parameters
-        if service_name_overrides is not None:
-            variables["serviceNameOverrides"] = service_name_overrides
+        """Update a deployment with a typed ``UpdateDeploymentInput``.
+
+        ``input`` is the regenerated Pydantic model that mirrors the GraphQL
+        ``UpdateDeploymentInput`` input type. Top-level fields use
+        full-replacement semantics: any field omitted (``None``) leaves the
+        corresponding persisted state untouched; an empty list/dict explicitly
+        clears it. The single exception is ``parameters``, which uses merge
+        semantics — entries in the list merge on top of the persisted
+        parameters dict.
+        """
+        variables: dict[str, Any] = {
+            "deploymentId": str(deployment_id),
+            "input": input.model_dump(by_alias=True, exclude_none=True),
+        }
         result = await self._transport.execute(
             load_query("update_deployment"),
             variables,

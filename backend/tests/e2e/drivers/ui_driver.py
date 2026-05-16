@@ -229,6 +229,7 @@ class UiScenarioDriver:
     async def update_deployment(
         self, *, deployment_id: str, config: dict[str, Any]
     ) -> None:
+        # ``config`` is the test-friendly dict shape (see protocol docstring).
         # The Edit Scheduling dialog only surfaces the ``scheduling`` sub-tree
         # today — mirroring the frontend form's scope. Scenarios that need to
         # mutate other config keys via UI must grow the dialog first.

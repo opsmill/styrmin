@@ -177,6 +177,14 @@ export type ComponentConfig = {
   name: Scalars['String']['output'];
 };
 
+/** Per-component override block for a deployment. Carries env-var overrides today; future per-component knobs (e.g. replicas) slot into this same input without a schema renumber. */
+export type ComponentConfigInput = {
+  /** Environment-variable overrides scoped to this component. Submitted as a list of ``{name, value}`` rows; duplicates within the list raise ``DUPLICATE_ENV_VAR_NAME`` with the component scope in the payload. */
+  envVars?: InputMaybe<Array<EnvVarInput>>;
+  /** The component name as declared by the deployment's currently pinned application-driver version. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. */
+  name: Scalars['String']['input'];
+};
+
 /** A bundle of environment variables targeting one component of a deployment, plus an ``isOrphaned`` flag indicating whether the deployment's current driver still declares the targeted component. Orphaned blocks remain visible in the API but are NOT injected into rendered pods. */
 export type ComponentEnvVars = {
   __typename?: 'ComponentEnvVars';
@@ -720,11 +728,8 @@ export type MutationUpdateBackupStorageLocationArgs = {
 
 
 export type MutationUpdateDeploymentArgs = {
-  config?: InputMaybe<Scalars['JSON']['input']>;
   deploymentId: Scalars['UUID']['input'];
-  name?: InputMaybe<Scalars['String']['input']>;
-  parameters?: InputMaybe<Scalars['JSON']['input']>;
-  serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride>>;
+  input: UpdateDeploymentInput;
 };
 
 
@@ -759,6 +764,14 @@ export type ParameterDefinition = {
   label: Scalars['String']['output'];
   name: Scalars['String']['output'];
   values?: Maybe<Array<Scalars['String']['output']>>;
+};
+
+/** A single driver-defined parameter assignment. Parameter shapes are dynamic per driver version, so ``value`` remains JSON-typed. */
+export type ParameterValueInput = {
+  /** The name of the parameter as declared by the driver. */
+  name: Scalars['String']['input'];
+  /** The JSON-typed value to assign to the parameter. The driver's parameter definition determines the accepted value shape (string, integer, boolean, or enum) at validation time. */
+  value: Scalars['JSON']['input'];
 };
 
 export type PodPhase =
@@ -1041,6 +1054,12 @@ export type ServiceNameOverride = {
   overrideName: Scalars['String']['input'];
 };
 
+/** Standard storage configuration for the cluster, naming the Kubernetes ``StorageClass`` used as the default for deployments. */
+export type StandardStorageInput = {
+  /** The Kubernetes storage class name used as the standard storage option for this cluster. */
+  storageClass: Scalars['String']['input'];
+};
+
 export type Task = {
   __typename?: 'Task';
   createdOn?: Maybe<Scalars['DateTime']['output']>;
@@ -1081,6 +1100,44 @@ export type TopologySpreadConstraintInput = {
   nodeTaintsPolicy?: InputMaybe<Scalars['String']['input']>;
   topologyKey: Scalars['String']['input'];
   whenUnsatisfiable: WhenUnsatisfiable;
+};
+
+/** Full-replacement input for the ``updateDeployment`` mutation. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive). */
+export type UpdateDeploymentInput = {
+  /** Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block. */
+  components?: InputMaybe<Array<ComponentConfigInput>>;
+  /** Default database size hint applied to managed-database components in this deployment. */
+  dbSize?: InputMaybe<Scalars['String']['input']>;
+  /** Dedicated per-environment ingress controller configuration for this deployment. */
+  dedicatedIngress?: InputMaybe<DedicatedIngressInput>;
+  /** Deployment-scoped environment-variable overrides. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload. */
+  envVars?: InputMaybe<Array<EnvVarInput>>;
+  /** Endpoint source type used by external-DNS when publishing records for services in this deployment. */
+  externalDnsEndpointsType?: InputMaybe<ExternalDnsEndpointsType>;
+  /** Port used when constructing external URLs for services in this deployment. Pydantic enforces ``1 <= port <= 65535`` at validation time. */
+  externalUrlPort?: InputMaybe<Scalars['Int']['input']>;
+  /** URL scheme (``http`` or ``https``) used when constructing external URLs for services in this deployment. */
+  externalUrlScheme?: InputMaybe<ExternalUrlScheme>;
+  /** Suffix appended to the auto-derived FQDN for every service in this deployment. */
+  fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
+  /** Name of the IngressClass used by services in this deployment. */
+  ingressClass?: InputMaybe<Scalars['String']['input']>;
+  /** CIDR allowlist applied at the ingress layer. An empty list explicitly clears the persisted allowlist. */
+  ipWhitelist?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** New name for the deployment. Omitted means "do not rename". */
+  name?: InputMaybe<Scalars['String']['input']>;
+  /** Node-selector expression applied to pods in this deployment. */
+  nodeSelector?: InputMaybe<Scalars['String']['input']>;
+  /** Driver-defined parameter assignments. **Merge semantics** (asymmetric with the rest of this input): entries in the list merge on top of the persisted parameters dict, so existing keys not named in the input survive. Duplicate ``name`` entries within the list raise ``DUPLICATE_PARAMETER_NAME``. */
+  parameters?: InputMaybe<Array<ParameterValueInput>>;
+  /** Kubernetes RuntimeClass name applied to pods in this deployment. */
+  runtimeClass?: InputMaybe<Scalars['String']['input']>;
+  /** Hierarchical pod scheduling & resource configuration (affinities, tolerations, topology spread, resource requests/limits, runtime class, post-render injection opt-outs). */
+  scheduling?: InputMaybe<SchedulingInput>;
+  /** Full-replacement list of service-name overrides applied at deploy time. Each entry maps a driver-declared service name to the operator-chosen override name. */
+  serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride>>;
+  /** Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment. */
+  standardStorage?: InputMaybe<StandardStorageInput>;
 };
 
 /** Full-replacement input for environment configuration updates. Submit the complete desired configuration; any field omitted (``null``) is persisted as its unset state on the underlying EnvironmentConfig. */
@@ -1454,10 +1511,7 @@ export type UpdateBackupStorageLocationMutation = { __typename?: 'Mutation', upd
 
 export type UpdateDeploymentMutationVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
-  name?: InputMaybe<Scalars['String']['input']>;
-  config?: InputMaybe<Scalars['JSON']['input']>;
-  parameters?: InputMaybe<Scalars['JSON']['input']>;
-  serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride> | ServiceNameOverride>;
+  input: UpdateDeploymentInput;
 }>;
 
 
@@ -2861,14 +2915,8 @@ export const useUpdateBackupStorageLocationMutation = <
     )};
 
 export const UpdateDeploymentDocument = `
-    mutation UpdateDeployment($deploymentId: UUID!, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
-  updateDeployment(
-    deploymentId: $deploymentId
-    name: $name
-    config: $config
-    parameters: $parameters
-    serviceNameOverrides: $serviceNameOverrides
-  ) {
+    mutation UpdateDeployment($deploymentId: UUID!, $input: UpdateDeploymentInput!) {
+  updateDeployment(deploymentId: $deploymentId, input: $input) {
     id
     type
     status

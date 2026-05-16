@@ -1,5 +1,5 @@
-mutation UpdateDeploymentConfig($deploymentId: UUID!, $config: JSON) {
-    updateDeployment(deploymentId: $deploymentId, config: $config) {
+mutation UpdateDeploymentConfig($deploymentId: UUID!, $input: UpdateDeploymentInput!) {
+    updateDeployment(deploymentId: $deploymentId, input: $input) {
         id
     }
 }

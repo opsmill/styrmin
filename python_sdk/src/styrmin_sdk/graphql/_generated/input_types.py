@@ -48,6 +48,15 @@ class AffinityTermInput(BaseModel):
     )
 
 
+class ComponentConfigInput(BaseModel):
+    """Per-component override block for a deployment. Carries env-var overrides today; future per-component knobs (e.g. replicas) slot into this same input without a schema renumber."""
+
+    name: str
+    "The component name as declared by the deployment's currently pinned application-driver version. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``."
+    env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
+    "Environment-variable overrides scoped to this component. Submitted as a list of ``{name, value}`` rows; duplicates within the list raise ``DUPLICATE_ENV_VAR_NAME`` with the component scope in the payload."
+
+
 class CrdConditionInput(BaseModel):
     type_: str = Field(alias="type")
     status: str
@@ -151,6 +160,15 @@ class ManagedResourceCountsInput(BaseModel):
     middlewares: int = 0
 
 
+class ParameterValueInput(BaseModel):
+    """A single driver-defined parameter assignment. Parameter shapes are dynamic per driver version, so ``value`` remains JSON-typed."""
+
+    name: str
+    "The name of the parameter as declared by the driver."
+    value: Any
+    "The JSON-typed value to assign to the parameter. The driver's parameter definition determines the accepted value shape (string, integer, boolean, or enum) at validation time."
+
+
 class PodStatusInput(BaseModel):
     pod_name: str = Field(alias="podName")
     namespace: str
@@ -216,6 +234,13 @@ class ServiceNameOverride(BaseModel):
     override_name: str = Field(alias="overrideName")
 
 
+class StandardStorageInput(BaseModel):
+    """Standard storage configuration for the cluster, naming the Kubernetes ``StorageClass`` used as the default for deployments."""
+
+    storage_class: str = Field(alias="storageClass")
+    "The Kubernetes storage class name used as the standard storage option for this cluster."
+
+
 class TolerationInput(BaseModel):
     """Single pod toleration entry."""
 
@@ -241,6 +266,55 @@ class TopologySpreadConstraintInput(BaseModel):
     )
     node_taints_policy: Optional[str] = Field(alias="nodeTaintsPolicy", default=None)
     match_label_keys: Optional[list[str]] = Field(alias="matchLabelKeys", default=None)
+
+
+class UpdateDeploymentInput(BaseModel):
+    """Full-replacement input for the ``updateDeployment`` mutation. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive)."""
+
+    name: Optional[str] = None
+    'New name for the deployment. Omitted means "do not rename".'
+    parameters: Optional[list["ParameterValueInput"]] = None
+    "Driver-defined parameter assignments. **Merge semantics** (asymmetric with the rest of this input): entries in the list merge on top of the persisted parameters dict, so existing keys not named in the input survive. Duplicate ``name`` entries within the list raise ``DUPLICATE_PARAMETER_NAME``."
+    service_name_overrides: Optional[list["ServiceNameOverride"]] = Field(
+        alias="serviceNameOverrides", default=None
+    )
+    "Full-replacement list of service-name overrides applied at deploy time. Each entry maps a driver-declared service name to the operator-chosen override name."
+    components: Optional[list["ComponentConfigInput"]] = None
+    "Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block."
+    env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
+    'Deployment-scoped environment-variable overrides. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.'
+    ip_whitelist: Optional[list[str]] = Field(alias="ipWhitelist", default=None)
+    "CIDR allowlist applied at the ingress layer. An empty list explicitly clears the persisted allowlist."
+    dedicated_ingress: Optional["DedicatedIngressInput"] = Field(
+        alias="dedicatedIngress", default=None
+    )
+    "Dedicated per-environment ingress controller configuration for this deployment."
+    scheduling: Optional["SchedulingInput"] = None
+    "Hierarchical pod scheduling & resource configuration (affinities, tolerations, topology spread, resource requests/limits, runtime class, post-render injection opt-outs)."
+    fqdn_suffix: Optional[str] = Field(alias="fqdnSuffix", default=None)
+    "Suffix appended to the auto-derived FQDN for every service in this deployment."
+    external_url_scheme: Optional[ExternalUrlScheme] = Field(
+        alias="externalUrlScheme", default=None
+    )
+    "URL scheme (``http`` or ``https``) used when constructing external URLs for services in this deployment."
+    external_url_port: Optional[int] = Field(alias="externalUrlPort", default=None)
+    "Port used when constructing external URLs for services in this deployment. Pydantic enforces ``1 <= port <= 65535`` at validation time."
+    external_dns_endpoints_type: Optional[ExternalDnsEndpointsType] = Field(
+        alias="externalDnsEndpointsType", default=None
+    )
+    "Endpoint source type used by external-DNS when publishing records for services in this deployment."
+    ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
+    "Name of the IngressClass used by services in this deployment."
+    db_size: Optional[str] = Field(alias="dbSize", default=None)
+    "Default database size hint applied to managed-database components in this deployment."
+    runtime_class: Optional[str] = Field(alias="runtimeClass", default=None)
+    "Kubernetes RuntimeClass name applied to pods in this deployment."
+    node_selector: Optional[str] = Field(alias="nodeSelector", default=None)
+    "Node-selector expression applied to pods in this deployment."
+    standard_storage: Optional["StandardStorageInput"] = Field(
+        alias="standardStorage", default=None
+    )
+    "Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment."
 
 
 class UpdateEnvironmentInput(BaseModel):
@@ -286,6 +360,7 @@ class WeightedAffinityTermInput(BaseModel):
 
 AffinityBlockInput.model_rebuild()
 AffinityTermInput.model_rebuild()
+ComponentConfigInput.model_rebuild()
 DedicatedIngressInput.model_rebuild()
 DeploymentPodStatusReport.model_rebuild()
 DeploymentStatusReportInput.model_rebuild()
@@ -293,5 +368,6 @@ LabelSelectorInput.model_rebuild()
 ResourceRequirementsInput.model_rebuild()
 SchedulingInput.model_rebuild()
 TopologySpreadConstraintInput.model_rebuild()
+UpdateDeploymentInput.model_rebuild()
 UpdateEnvironmentInput.model_rebuild()
 WeightedAffinityTermInput.model_rebuild()

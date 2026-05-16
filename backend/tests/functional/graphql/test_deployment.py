@@ -55,7 +55,10 @@ async def test_update_internal_deployment_raises(
         "/graphql",
         json={
             "query": load_query("update_deployment"),
-            "variables": {"deploymentId": str(deployment_id), "name": "renamed"},
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {"name": "renamed"},
+            },
         },
     )
     assert response.status_code == 200
@@ -133,7 +136,10 @@ async def test_rename_to_active_name_in_same_env_raises_conflict(
         "/graphql",
         json={
             "query": load_query("update_deployment"),
-            "variables": {"deploymentId": str(target.id), "name": "ansible"},
+            "variables": {
+                "deploymentId": str(target.id),
+                "input": {"name": "ansible"},
+            },
         },
     )
     assert response.status_code == 200

@@ -328,7 +328,7 @@ async def test_update_deployment_rejects_unknown_component_env_var(
     session: AsyncSession,
     prefect_manager_mock,  # noqa: ARG001 — prevents Prefect dispatch in mutation path
 ) -> None:
-    """``updateDeployment(config: { components: { does_not_exist: { env_vars: ... } } })``
+    """``updateDeployment(input: { components: [{ name: "does_not_exist", envVars: ... }] })``
     is rejected at the service boundary with
     ``extensions.code = "UNKNOWN_COMPONENT_ENV_VAR"`` listing the driver's
     known component names (FR-010 / Quickstart Step 4 negative case).
@@ -347,10 +347,13 @@ async def test_update_deployment_rejects_unknown_component_env_var(
             "query": load_query("update_deployment_config"),
             "variables": {
                 "deploymentId": str(deployment.id),
-                "config": {
-                    "components": {
-                        "does_not_exist": {"env_vars": {"X": "y"}},
-                    },
+                "input": {
+                    "components": [
+                        {
+                            "name": "does_not_exist",
+                            "envVars": [{"name": "X", "value": "y"}],
+                        },
+                    ],
                 },
             },
         },
@@ -375,7 +378,7 @@ async def test_update_deployment_rejects_invalid_env_var_name(
     session: AsyncSession,
     prefect_manager_mock,  # noqa: ARG001 — prevents Prefect dispatch in mutation path
 ) -> None:
-    """``updateDeployment(config: { env_vars: { "1BAD": "x" } })`` is rejected
+    """``updateDeployment(input: { envVars: [{ name: "1BAD", value: "x" }] })`` is rejected
     at the service boundary with ``extensions.code = "INVALID_ENV_VAR_NAME"``
     (FR-006 / SC-003). Pre-validation runs ahead of Pydantic's
     ``ValidationError`` rewrap so the typed code reaches the GraphQL caller
@@ -388,7 +391,7 @@ async def test_update_deployment_rejects_invalid_env_var_name(
             "query": load_query("update_deployment_config"),
             "variables": {
                 "deploymentId": str(deployment.id),
-                "config": {"env_vars": {"1BAD": "x"}},
+                "input": {"envVars": [{"name": "1BAD", "value": "x"}]},
             },
         },
     )
@@ -406,13 +409,16 @@ async def test_update_deployment_rejects_non_string_env_var_value(
     session: AsyncSession,
     prefect_manager_mock,  # noqa: ARG001 — prevents Prefect dispatch in mutation path
 ) -> None:
-    """``updateDeployment(config: { env_vars: { X: 1 } })`` is rejected with
-    ``extensions.code = "INVALID_ENV_VAR_VALUE"`` (FR-008..FR-011 / 011-US3 /
-    SC-003).
+    """``updateDeployment(input: { envVars: [{ name: "X", value: 1 }] })`` is rejected
+    at the GraphQL schema boundary.
 
-    Pre-validation in ``_prevalidate_deployment_env_vars`` runs ahead of
-    Pydantic's ``ValidationError`` rewrap so the typed code reaches the
-    GraphQL caller intact instead of collapsing to ``INVALID_CONTEXT``.
+    Under the legacy ``config: JSON`` shape, non-string values reached the
+    service layer and surfaced ``INVALID_ENV_VAR_VALUE``. Under the typed
+    :class:`UpdateDeploymentInput`, ``EnvVarInput.value`` is declared
+    ``String!`` so the parser/coercion layer rejects non-string values
+    before the service runs — the typed-code path is now structurally
+    enforced by the schema (FR-008..FR-011 / SC-003 still hold, by
+    construction).
     """
     deployment = await seed_deployment(session)
     response = await client.post(
@@ -421,17 +427,13 @@ async def test_update_deployment_rejects_non_string_env_var_value(
             "query": load_query("update_deployment_config"),
             "variables": {
                 "deploymentId": str(deployment.id),
-                "config": {"env_vars": {"X": 1}},
+                "input": {"envVars": [{"name": "X", "value": 1}]},
             },
         },
     )
     assert response.status_code == 200
     payload = response.json()
     assert "errors" in payload, payload
-    extensions = payload["errors"][0].get("extensions") or {}
-    assert extensions.get("code") == "INVALID_ENV_VAR_VALUE"
-    assert extensions.get("name") == "X"
-    assert extensions.get("value_type") == "int"
 
 
 @pytest.mark.asyncio
@@ -440,8 +442,14 @@ async def test_update_deployment_rejects_non_string_component_env_var_value(
     session: AsyncSession,
     prefect_manager_mock,  # noqa: ARG001 — prevents Prefect dispatch in mutation path
 ) -> None:
-    """A non-string value inside a per-component env var block is rejected
-    with the same ``INVALID_ENV_VAR_VALUE`` typed code (011-US3 / FR-011).
+    """A non-string value inside a per-component env var block is rejected at
+    the GraphQL schema boundary.
+
+    Same shift as :func:`test_update_deployment_rejects_non_string_env_var_value`:
+    under the typed :class:`UpdateDeploymentInput`, ``EnvVarInput.value`` is
+    declared ``String!`` so the parser/coercion layer rejects non-string
+    values inside ``components[].envVars`` before the service runs (011-US3 /
+    FR-011 still hold, by construction).
     """
     deployment = await _seed_deployment_with_components(
         session, component_names=["api", "worker"]
@@ -452,10 +460,13 @@ async def test_update_deployment_rejects_non_string_component_env_var_value(
             "query": load_query("update_deployment_config"),
             "variables": {
                 "deploymentId": str(deployment.id),
-                "config": {
-                    "components": {
-                        "worker": {"env_vars": {"FLAG": True}},
-                    },
+                "input": {
+                    "components": [
+                        {
+                            "name": "worker",
+                            "envVars": [{"name": "FLAG", "value": True}],
+                        },
+                    ],
                 },
             },
         },
@@ -463,10 +474,6 @@ async def test_update_deployment_rejects_non_string_component_env_var_value(
     assert response.status_code == 200
     payload = response.json()
     assert "errors" in payload, payload
-    extensions = payload["errors"][0].get("extensions") or {}
-    assert extensions.get("code") == "INVALID_ENV_VAR_VALUE"
-    assert extensions.get("name") == "FLAG"
-    assert extensions.get("value_type") == "bool"
 
 
 @pytest.mark.asyncio
@@ -486,7 +493,7 @@ async def test_update_deployment_rejects_oversized_env_var_value(
             "query": load_query("update_deployment_config"),
             "variables": {
                 "deploymentId": str(deployment.id),
-                "config": {"env_vars": {"BIG": oversized}},
+                "input": {"envVars": [{"name": "BIG", "value": oversized}]},
             },
         },
     )

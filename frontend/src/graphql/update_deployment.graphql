@@ -1,17 +1,8 @@
 mutation UpdateDeployment(
   $deploymentId: UUID!
-  $name: String
-  $config: JSON
-  $parameters: JSON
-  $serviceNameOverrides: [ServiceNameOverride!]
+  $input: UpdateDeploymentInput!
 ) {
-  updateDeployment(
-    deploymentId: $deploymentId
-    name: $name
-    config: $config
-    parameters: $parameters
-    serviceNameOverrides: $serviceNameOverrides
-  ) {
+  updateDeployment(deploymentId: $deploymentId, input: $input) {
     id
     type
     status

@@ -34,6 +34,10 @@ from styrmin_backend.api.definitions.deployment_status.model import (
     ReportDeploymentStatusesResponse,
 )
 from styrmin_backend.api.definitions.cluster.model import Cluster
+from styrmin_backend.api.definitions.deployment.inputs import (
+    UpdateDeploymentInput,
+    update_deployment_input_to_dict,
+)
 from styrmin_backend.api.definitions.environment.inputs import (
     UpdateEnvironmentInput,
     update_environment_input_to_dict,
@@ -761,28 +765,41 @@ class Mutation:
     async def update_deployment(
         self,
         deployment_id: UUID,
+        input: UpdateDeploymentInput,
         info: strawberry.Info,
-        name: str | None = None,
-        config: JSON | None = None,
-        parameters: JSON | None = None,
-        service_name_overrides: list[ServiceNameOverride] | None = None,
     ) -> Task | None:
-        """Update the configuration and/or name of a deployment."""
+        """Update a deployment's config / name / parameters / overrides.
+
+        The typed :class:`UpdateDeploymentInput` is converted to a plain
+        dict (``None``-valued fields omitted to express full-replacement
+        semantics) and split into the four legacy keyword arguments the
+        service-layer ``update_deployment`` accepts. List-shape fields
+        (``parameters``, ``service_name_overrides``, ``components``,
+        ``env_vars``) are flattened to dicts with typed duplicate-name
+        detection by ``update_deployment_input_to_dict`` so codes like
+        ``DUPLICATE_PARAMETER_NAME`` / ``DUPLICATE_ENV_VAR_NAME`` /
+        ``DUPLICATE_COMPONENT_NAME`` reach the GraphQL boundary intact.
+        The ``InternalDeploymentError`` guard runs before conversion so
+        internal deployments reject without doing any input work.
+        """
         uow = info.context["uow"]
         deployment = await get_deployment(deployment_id=deployment_id, uow=uow)
         if deployment.internal:
             raise InternalDeploymentError()
-        overrides_dict = (
-            {o.driver_service_name: o.override_name for o in service_name_overrides}
-            if service_name_overrides
-            else None
-        )
+        payload = update_deployment_input_to_dict(input)
+        name = payload.pop("name", None)
+        parameters = payload.pop("parameters", None)
+        service_name_overrides = payload.pop("service_name_overrides", None)
+        # If only legacy kwargs were set, remaining payload is `{}` — pass
+        # `None` so the service does not interpret an empty dict as
+        # "clear the persisted config" (fix-1 / regression guard).
+        deployment_config = payload if payload else None
         task = await update_deployment(
             deployment_id=deployment_id,
-            deployment_config=config,
+            deployment_config=deployment_config,
             deployment_parameters=parameters,
             deployment_name=name,
-            service_name_overrides=overrides_dict,
+            service_name_overrides=service_name_overrides,
             uow=uow,
         )
         return Task.from_instance(task)

@@ -96,6 +96,14 @@ async def test_get_deployment_not_found(client: StyrminClient, mock_transport: A
 
 
 async def test_update_deployment_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    # Imported locally — matches the precedent in
+    from styrmin_sdk.models import (
+        ComponentConfigInput,
+        EnvVarInput,
+        ParameterValueInput,
+        UpdateDeploymentInput,
+    )
+
     mock_transport.execute.return_value = {
         "data": {
             "updateDeployment": {
@@ -108,8 +116,38 @@ async def test_update_deployment_success(client: StyrminClient, mock_transport: 
         }
     }
 
-    task = await client.deployments.update("11111111-2222-3333-4444-555555555555", config={"replicas": 3})
+    task = await client.deployments.update(
+        "11111111-2222-3333-4444-555555555555",
+        input=UpdateDeploymentInput(
+            name="renamed-app",
+            env_vars=[EnvVarInput(name="LOG_LEVEL", value="debug")],
+            parameters=[ParameterValueInput(name="replicas", value=3)],
+            components=[
+                ComponentConfigInput(
+                    name="web",
+                    env_vars=[EnvVarInput(name="WEB_FLAG", value="on")],
+                ),
+            ],
+        ),
+    )
     assert task.status == "pending"
+
+    # Verify the transport received the typed input serialised under the
+    # ``input`` variable with camelCase aliases and no None-valued fields.
+    mock_transport.execute.assert_awaited_once()
+    sent_variables = mock_transport.execute.await_args.args[1]
+    assert sent_variables["deploymentId"] == "11111111-2222-3333-4444-555555555555"
+    assert sent_variables["input"] == {
+        "name": "renamed-app",
+        "parameters": [{"name": "replicas", "value": 3}],
+        "components": [
+            {
+                "name": "web",
+                "envVars": [{"name": "WEB_FLAG", "value": "on"}],
+            },
+        ],
+        "envVars": [{"name": "LOG_LEVEL", "value": "debug"}],
+    }
 
 
 # ---------------------------------------------------------------------------

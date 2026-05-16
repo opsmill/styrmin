@@ -1,5 +1,5 @@
-mutation UpdateDeployment($deploymentId: UUID!, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
-    updateDeployment(deploymentId: $deploymentId, name: $name, config: $config, parameters: $parameters, serviceNameOverrides: $serviceNameOverrides) {
+mutation UpdateDeployment($deploymentId: UUID!, $input: UpdateDeploymentInput!) {
+    updateDeployment(deploymentId: $deploymentId, input: $input) {
         id
         status
         type

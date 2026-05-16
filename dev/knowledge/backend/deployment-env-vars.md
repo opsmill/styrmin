@@ -61,18 +61,20 @@ mutation {
 }
 ```
 
-**Deployment and per-component scopes** still ride the `config: JSON`
-argument on `deploy()` / `updateDeployment()`. Migrating these to typed
-inputs is tracked separately; the typed-validator hardening from spec 011
-protects the still-active JSON write path against non-string values
-(see the `INVALID_ENV_VAR_VALUE` error in [`api.md`](api.md)).
+**Deployment and per-component scopes** now ride the typed
+`input: UpdateDeploymentInput!` argument on `updateDeployment()`
+(`deploy()` retains the `config: JSON` write path until the analogous
+deploy-side migration ships). The wire layer (`EnvVarInput.value: String!`)
+rejects non-string values structurally — the legacy `INVALID_ENV_VAR_VALUE`
+error code is no longer reachable through `updateDeployment()` and survives
+only on the deploy-side JSON path.
 
 ```graphql
 # Deployment scope
 mutation {
   updateDeployment(
     deploymentId: "..."
-    config: { env_vars: { LOG_LEVEL: "debug" } }
+    input: { envVars: [{ name: "LOG_LEVEL", value: "debug" }] }
   ) { id }
 }
 
@@ -80,10 +82,13 @@ mutation {
 mutation {
   updateDeployment(
     deploymentId: "..."
-    config: {
-      components: {
-        worker: { env_vars: { WORKER_QUEUE: "orders" } }
-      }
+    input: {
+      components: [
+        {
+          name: "worker",
+          envVars: [{ name: "WORKER_QUEUE", value: "orders" }]
+        }
+      ]
     }
   ) { id }
 }

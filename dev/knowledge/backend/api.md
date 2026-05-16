@@ -96,7 +96,7 @@ Defined on `type Mutation`:
 | `loadLocalApplicationDriverVersion` | `path` | `ApplicationDriverVersion` |
 | `loadRemoteApplicationDriverVersion` | `repositoryUrl, branch` | `ApplicationDriverVersion` |
 | `deploy` | `driver, environmentId?, environmentName?, clusterId?, clusterName?, version?, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
-| `updateDeployment` | `deploymentId, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
+| `updateDeployment` | `deploymentId, input: UpdateDeploymentInput!` | `Task` |
 | `deleteDeployment` | `deploymentId` | `Task!` (born-complete `DELETE_DEPLOYMENT` audit record; patches `spec.deletionRequested` on the CR — operator drives teardown asynchronously) |
 | `createBackup` | `instanceId, name?` | `Backup` |
 | `deleteBackup` | `backupId` | `String` |
@@ -166,7 +166,7 @@ On the client side, errors arrive as standard GraphQL errors with `extensions.co
 
 | Code | Source | Surface |
 |------|--------|---------|
-| `INVALID_ENV_VAR_VALUE` | `validate_env_var_value` rejecting a non-string value at the validator entry point (spec 011 / US3) | Raised on JSON-config write paths to `Environment.config.env_vars`, `Deployment.config.env_vars`, and `Deployment.config.components.<name>.env_vars`; `error_metadata` carries `name`, `value_type`, and (when known) `scope`. |
+| `INVALID_ENV_VAR_VALUE` | `validate_env_var_value` rejecting a non-string value at the validator entry point (spec 011 / US3) | Reachable only on the JSON-config write path through `deploy()` (the env-var write paths through `updateDeployment()` and `updateEnvironment()` are now typed — `EnvVarInput.value: String!` — and reject non-string values at the GraphQL wire boundary before the validator runs). `error_metadata` carries `name`, `value_type`, and (when known) `scope`. |
 
 The validator type-checks every env-var value against `isinstance(value, str)` *before* any encoding or size computation. Non-string inputs surface as a typed `INVALID_ENV_VAR_VALUE` rather than crashing the resolver with a generic `AttributeError` from a downstream `.encode("utf-8")` call. See [`adr-022`](../../adr/adr-022-schema-walking-input-propagation-tests.md) for the matching schema-walking input-completeness test pattern that prevents the upstream "missing field" class of bugs.
 
@@ -294,7 +294,7 @@ type Deployment {
 }
 ```
 
-`Environment` gains a parallel `envVars: [EnvVar!]!`. Operator-set env vars travel through the existing `config: JSON` argument on `deploy()` and `updateDeployment()` (Pydantic-validated against `DeploymentConfig`). Environment-scope edits go through the typed `updateEnvironment(environmentId, input: UpdateEnvironmentInput!)` mutation — see "Environment-config update + fanout" below for the full contract. Driver-side documentation (`ApplicationDriverVersion.envVars`), orphan tracking on per-component blocks (`ComponentEnvVars.isOrphaned = true`), and chart-vs-user collision warnings (`DeploymentTimelineEntry.envVarCollisions`) are scoped for follow-up user stories (US4/US5/US7) and will be added as those ship.
+`Environment` gains a parallel `envVars: [EnvVar!]!`. Operator-set env vars travel through the typed `input: UpdateDeploymentInput!` argument on `updateDeployment()` (`envVars: [EnvVarInput!]` per scope) and through the typed `input: UpdateEnvironmentInput!` on `updateEnvironment()`. The legacy `config: JSON` write path persists on `deploy()` (Pydantic-validated against `DeploymentConfig`) until the analogous deploy-side migration ships. See "Environment-config update + fanout" below for the environment-scope contract; see [`specs/011-typed-deployment-input/spec.md`](../../../specs/011-typed-deployment-input/spec.md) for the deployment-scope contract. Driver-side documentation (`ApplicationDriverVersion.envVars`), orphan tracking on per-component blocks (`ComponentEnvVars.isOrphaned = true`), and chart-vs-user collision warnings (`DeploymentTimelineEntry.envVarCollisions`) are scoped for follow-up user stories (US4/US5/US7) and will be added as those ship.
 
 #### Environment-config update + fanout
 
@@ -314,6 +314,32 @@ Observability:
 
 - One structured log line per fanout dispatch (`env_config_fanout_dispatched ...`) records `evaluated`, `dispatched`, `skipped_noop`, `dispatch_failed` counts (FR-023).
 - Per-deployment outcomes are emitted via `_emit_fanout_metric` against the metric `env_config_fanout_deployments_total{environment, outcome}` (FR-023a). The metric backend is **not yet wired**: the helper at `services/environments.py::_emit_fanout_metric` currently logs the would-be metric at `info` level with a clear marker. Replacing the log call with a real counter increment is a one-line edit once a metrics client is registered. Until then, dashboards consume the structured log lines.
+
+#### Deployment-config update + typed input
+
+<!-- Extracted from specs/011-typed-deployment-input on 2026-05-16 -->
+
+`updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!)` is the single typed write surface for deployment configuration. The prior loose-argument shape (`name`, `config: JSON`, `parameters: JSON`, `serviceNameOverrides: [ServiceNameOverride!]`) is **gone** in the same release that ships the typed input — clean replace, no deprecation window (mirrors the 009 cutover precedent; see [ADR-020](../adr/adr-020-environment-config-fanout.md) §3 and [ADR-026](../adr/adr-026-typed-update-deployment-input.md)).
+
+`UpdateDeploymentInput` is **full-replacement** at the top level with **one deliberate exception**: `parameters` keeps merge semantics. Omitting any other top-level field (`envVars`, `ipWhitelist`, `dedicatedIngress`, `scheduling`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `ingressClass`, `dbSize`, `runtimeClass`, `nodeSelector`, `standardStorage`, `components`, `serviceNameOverrides`, `name`) persists it as its unset state; omitting `parameters` leaves the persisted parameters dict alone. The asymmetry is documented on the GraphQL field description so introspection consumers see it without reading source. See [ADR-026](../adr/adr-026-typed-update-deployment-input.md) for the rationale (operators bumping one parameter value continue to work with a single-entry input; the unnamed keys survive).
+
+Named-dict-typed config fields (`parameters`, `components`, top-level `envVars`, per-component `envVars`) travel as `list[{name, value, …}]` on the wire and are flattened to `dict` at the GraphQL-input boundary with typed duplicate detection. The flatten step raises:
+
+- `DUPLICATE_PARAMETER_NAME` (`DuplicateParameterNameError`) — two `parameters` entries with the same `name`.
+- `DUPLICATE_COMPONENT_NAME` (`DuplicateComponentNameError`) — two `components` entries with the same `name`.
+- `DUPLICATE_ENV_VAR_NAME` (existing) — two env-var entries with the same `name`, with scope `"deployment"` (top-level) or `"component:<name>"` (per-component).
+
+Detection at the flatten step is the only natural location — by the time the dict is built, duplicate keys silently collapse with last-wins semantics. Future typed inputs that mirror a Pydantic `dict[str, T]` field MUST use the same list-shape grammar; JSON-typed dict inputs are forbidden ([ADR-026](../adr/adr-026-typed-update-deployment-input.md)).
+
+Explicit empty list = full clear; omitted/null field = "do not touch". `components: []` clears every per-component block; `components: [{name: "web", envVars: null}]` keeps the `web` key but collapses its inner env-vars block to its absent state (recursive nested-omission rule inherited from the shared `_convert_value` helper in `api/definitions/config/inputs.py`).
+
+The full per-scope env-var error matrix from 008 — `INVALID_ENV_VAR_NAME`, `ENV_VAR_SIZE_LIMIT_EXCEEDED`, `DUPLICATE_ENV_VAR_NAME`, `UNKNOWN_COMPONENT_ENV_VAR` — surfaces at the GraphQL boundary for **both** the top-level `envVars` field and every per-component `envVars` field, with the offending name and scope in the payload. The wire layer (`EnvVarInput.value: String!`) rejects non-string values structurally — the legacy `INVALID_ENV_VAR_VALUE` error code is no longer reachable through `updateDeployment()` (it survives only on the JSON-config write path through `deploy()`).
+
+Submitting an empty input (`input: {}`) surfaces a `VALIDATION_ERROR` from the existing service-side "at least one of config / parameters / name / serviceNameOverrides must be provided" check — no new GraphQL-level non-empty constraint is introduced.
+
+Shared leaf inputs (`EnvVarInput`, `SchedulingInput`, `DedicatedIngressInput`, `AffinityBlockInput`, `ResourceRequirementsInput`, the enum mirrors, …) live in `api/definitions/config/inputs.py` and are reused unchanged by `UpdateEnvironmentInput` and `UpdateDeploymentInput`. Top-level inputs and their conversion helpers (`update_environment_input_to_dict`, `update_deployment_input_to_dict`) stay co-located with their entities under `api/definitions/{environment,deployment}/inputs.py`.
+
+The frontend `deploymentConfigToInput()` helper in `frontend/src/lib/deployment-input.ts` converts the read-API config dict (with dict-shaped `envVars` and `components`) into the new list-shaped input shape; the `SchedulingConfigDialog` and any future caller submitting `UpdateDeploymentInput` go through this helper (mirrors the submit-boundary-transform discipline in [ADR-023](../adr/adr-023-frontend-value-transform-boundary.md)).
 
 There is no `tasks` field on `Deployment` — query `tasks` at the root and filter by `deploymentId` if you need a deployment's task history.
 
