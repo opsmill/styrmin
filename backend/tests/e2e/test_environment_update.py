@@ -35,13 +35,10 @@ Scenarios:
 
 from __future__ import annotations
 
-import asyncio
-import time
 import uuid
-from typing import Any, AsyncGenerator, Callable
+from typing import Any, AsyncGenerator
 
 import pytest
-from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.graphql._generated.input_types import (
     EnvVarInput,
@@ -50,41 +47,9 @@ from styrmin_sdk.graphql._generated.input_types import (
 )
 
 from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.helpers.workloads import _wait_for_pod_template
 
 RECONCILE_TIMEOUT_SECONDS = 480.0
-RECONCILE_POLL_INTERVAL = 3.0
-
-
-async def _wait_for_pod_template(
-    vcluster: dict,
-    *,
-    namespace: str,
-    label_selector: str,
-    predicate: Callable[[Any], bool],
-    description: str,
-    timeout: float = RECONCILE_TIMEOUT_SECONDS,
-) -> Any:
-    apps = kubeclient.AppsV1Api(vcluster["api"])
-    deadline = time.time() + timeout
-    last_seen: str = "(no matching Deployments)"
-    while time.time() < deadline:
-        resp = await apps.list_namespaced_deployment(
-            namespace=namespace, label_selector=label_selector
-        )
-        deployments = list(resp.items)
-        for dep in deployments:
-            try:
-                if predicate(dep):
-                    return dep
-            except Exception:
-                continue
-        if deployments:
-            last_seen = f"{len(deployments)} deployment(s) did not satisfy predicate"
-        await asyncio.sleep(RECONCILE_POLL_INTERVAL)
-    raise TimeoutError(
-        f"Timed out waiting for {description} in namespace {namespace} "
-        f"(selector={label_selector!r}): {last_seen}"
-    )
 
 
 def _container_zero_envs(dep: Any) -> list[dict[str, str]]:
