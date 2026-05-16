@@ -2,7 +2,7 @@
 
 **Feature Branch**: `011-typed-deployment-input`
 **Created**: 2026-05-14
-**Status**: Draft
+**Status**: Extracted
 **Input**: Replace the unstructured `JSON config`/`parameters` arguments on the `updateDeployment` GraphQL mutation with a typed, hand-rolled Strawberry input mirroring the pattern already shipped for `updateEnvironment` in archived spec `009-environment-update`. Operators today pass an opaque blob; we should give them a discoverable, schema-validated input surface for every field that `DeploymentConfig` accepts, plus deployment-only fields (`name`, driver `parameters`, `serviceNameOverrides`, per-component overrides). Source: [GitHub #219](https://github.com/opsmill/styrmin/issues/219) and `.specify/idea-brief.md`.
 
 ## User Scenarios & Testing *(mandatory)*
