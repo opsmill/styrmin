@@ -16,7 +16,7 @@ import {
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
-import { ParameterCards } from "@/components/ParameterCards";
+import { ConfigurationTab } from "@/components/deployment/configuration";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,7 +50,7 @@ import { PodsTab } from "./PodsTab";
 
 const DEPLOYMENT_TABS = [
   { id: "overview", label: "Overview" },
-  { id: "parameters", label: "Parameters" },
+  { id: "configuration", label: "Configuration" },
   { id: "backups", label: "Backups" },
   { id: "pods", label: "Pods" },
   { id: "timeline", label: "Timeline" },
@@ -212,13 +212,6 @@ export default function DeploymentDetailPage() {
   if (error)
     return <ErrorState message={error.message} onRetry={() => refetch()} />;
   if (!deployment) return <ErrorState message="Deployment not found" />;
-
-  const deploymentParams = deployment.parameters
-    ? Object.entries(deployment.parameters).map(([key, value]) => ({
-        key,
-        value,
-      }))
-    : [];
 
   const deployColors = getStatusColor(deployment.status);
   // While the styrmin restore flow is in flight, the deployment status is
@@ -547,19 +540,9 @@ export default function DeploymentDetailPage() {
         </div>
       </TabPanel>
 
-      {/* Parameters Tab */}
-      <TabPanel active={activeTab === "parameters"}>
-        {deploymentParams.length > 0 ? (
-          <ParameterCards
-            parameters={deploymentParams}
-            title="Deployment Parameters"
-            description="Configuration values passed to the driver at deploy time"
-          />
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            No parameters configured for this deployment.
-          </p>
-        )}
+      {/* Configuration Tab (spec 011-unified-deployment-config — US1) */}
+      <TabPanel active={activeTab === "configuration"}>
+        <ConfigurationTab deployment={deployment} />
       </TabPanel>
 
       {/* Backups Tab */}

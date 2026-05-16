@@ -11,3 +11,9 @@ export { NetworkingSummary } from "./sections/read/NetworkingSummary";
 export { EnvVarsSummary } from "./sections/read/EnvVarsSummary";
 export { StorageRuntimeSummary } from "./sections/read/StorageRuntimeSummary";
 export { ServiceOverridesSummary } from "./sections/read/ServiceOverridesSummary";
+
+// US1 tab composition (chunk 3b, T025–T027)
+export { HeroSummaryBar } from "./HeroSummaryBar";
+export type { LastUpdateEvent } from "./HeroSummaryBar";
+export { ViewJsonDialog } from "./ViewJsonDialog";
+export { ConfigurationTab } from "./ConfigurationTab";

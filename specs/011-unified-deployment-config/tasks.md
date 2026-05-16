@@ -84,13 +84,13 @@ description: "Task list for 011-unified-deployment-config"
 
 ### Tab shell, hero, View JSON
 
-- [ ] T025 [US1] Create `frontend/src/components/deployment/configuration/HeroSummaryBar.tsx` — dark hero with total/inherited/overridden field counts, "Last changed" line (derived client-side from the deployment's most recent successful `update_deployment` task per research R-009 fallback), "View JSON" action, and "Edit configuration" CTA. The Edit button is rendered only when the auth context grants edit permission (FR-030); supply a `canEdit: boolean` prop that the parent computes.
-- [ ] T026 [US1] Create `frontend/src/components/deployment/configuration/ViewJsonDialog.tsx` — Base UI Dialog presenting `deployment.config` as syntax-highlighted JSON, read-only, with a copy-to-clipboard action.
-- [ ] T027 [US1] Create `frontend/src/components/deployment/configuration/ConfigurationTab.tsx` — composes `HeroSummaryBar` + the 6 summary cards in the order Driver Parameters → Scheduling → Networking → Env Vars → Storage & Runtime → Service Overrides. Component Overrides summary is added in US4. Reads the deployment + environment from the urql query bound to `get_deployment.graphql`.
+- [X] T025 [US1] Create `frontend/src/components/deployment/configuration/HeroSummaryBar.tsx` — dark hero with total/inherited/overridden field counts, "Last changed" line (derived client-side from the deployment's most recent successful `update_deployment` task per research R-009 fallback), "View JSON" action, and "Edit configuration" CTA. The Edit button is rendered only when the auth context grants edit permission (FR-030); supply a `canEdit: boolean` prop that the parent computes.
+- [X] T026 [US1] Create `frontend/src/components/deployment/configuration/ViewJsonDialog.tsx` — Base UI Dialog presenting `deployment.config` as syntax-highlighted JSON, read-only, with a copy-to-clipboard action.
+- [X] T027 [US1] Create `frontend/src/components/deployment/configuration/ConfigurationTab.tsx` — composes `HeroSummaryBar` + the 6 summary cards in the order Driver Parameters → Scheduling → Networking → Env Vars → Storage & Runtime → Service Overrides. Component Overrides summary is added in US4. Reads the deployment + environment from the urql query bound to `get_deployment.graphql`.
 
 ### Tab integration
 
-- [ ] T028 [US1] Modify `frontend/src/pages/deployments/DeploymentDetailPage.tsx`: replace the existing "Parameters" tab with "Configuration"; route the tab to `ConfigurationTab`. Remove the parameters-tab-only code paths. Do not yet remove the "Scheduling" header button (slice 11).
+- [X] T028 [US1] Modify `frontend/src/pages/deployments/DeploymentDetailPage.tsx`: replace the existing "Parameters" tab with "Configuration"; route the tab to `ConfigurationTab`. Remove the parameters-tab-only code paths. Do not yet remove the "Scheduling" header button (slice 11).
 
 ### E2E
 
