@@ -381,3 +381,23 @@ For debugging, prefer `-v -s --pdb` (see `dev/CLAUDE.md`).
 | [tests/e2e/test_deploy_app.py](backend/tests/e2e/test_deploy_app.py) | Canonical end-to-end deploy test |
 | [driver/examples/simple-app/](driver/examples/simple-app/) | Test application (FastAPI + PostgreSQL + Helm chart) |
 | [python_sdk/](python_sdk/) | Python SDK used by the api driver |
+
+<!-- Extracted from specs/012-deployment-pods-tab on 2026-05-15 -->
+
+## Testing clipboard interactions
+
+Chromium denies clipboard reads by default. A test that asserts on clipboard contents (e.g. verifying a "Copy" button wrote the expected string) must explicitly grant the permission on the browser context before driving the button:
+
+```python
+await page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+```
+
+Then read with:
+
+```python
+text = await page.evaluate("() => navigator.clipboard.readText()")
+```
+
+Permissions are scoped to the context (not the page), so the grant survives across navigations within the same test. Page objects that depend on clipboard reads should expose a `grant_clipboard_permissions()` method and call it once at the start of the test rather than per-action — see `tests/e2e/pages/pods_tab.py` for the canonical example.
+
+The Copy button itself does not need the grant — `writeText` is allowed by default. The grant is only required to read the clipboard back for an assertion.

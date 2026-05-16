@@ -73,3 +73,25 @@ See [`knowledge/frontend/data-fetching.md`](../../knowledge/frontend/data-fetchi
 
 - Use the `customRender` from `src/test/utils.tsx`, which already wraps children in a `QueryClientProvider` with retries off and gc off. Do not construct a `QueryClient` per test by hand.
 - Do not assume cache state survives across tests — each test builds a fresh `QueryClient`.
+
+<!-- Extracted from specs/012-deployment-pods-tab on 2026-05-15 -->
+
+### Tab-scoped polling
+
+When a query lives inside an in-app tab or panel that the user may not currently be looking at, gate **both** the query's `enabled` and its `refetchInterval` on the same active-tab boolean:
+
+```ts
+useGetDeploymentPodsQuery(
+  { deploymentId },
+  {
+    enabled: isActive,
+    refetchInterval: isActive && autoRefreshEnabled ? 10_000 : false,
+  },
+);
+```
+
+- `refetchIntervalInBackground: false` (the default) only suppresses polling on hidden **browser** tabs. It does not help with an in-app tab the user has navigated away from — the gating must be explicit.
+- Pair with the existing `AutoRefreshIndicator` if the operator should be able to pause and resume manually; `autoRefreshEnabled` is local component state, `isActive` is the prop from the parent tab container.
+- Gating with `enabled: isActive` alone is also acceptable when the previous data should disappear when the tab is inactive. Keep `refetchInterval: false` in the inactive branch either way; otherwise an interval timer keeps firing against a stale `enabled: false` state and refreshes the data the moment the tab reactivates.
+
+The Pods tab on the deployment detail page is the canonical example.

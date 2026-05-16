@@ -46,11 +46,13 @@ import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
 import { SchedulingConfigDialog } from "@/components/deployment/scheduling/SchedulingConfigDialog";
 import { IfRole } from "@/auth/IfRole";
+import { PodsTab } from "./PodsTab";
 
 const DEPLOYMENT_TABS = [
   { id: "overview", label: "Overview" },
   { id: "parameters", label: "Parameters" },
   { id: "backups", label: "Backups" },
+  { id: "pods", label: "Pods" },
   { id: "timeline", label: "Timeline" },
 ];
 
@@ -633,6 +635,17 @@ export default function DeploymentDetailPage() {
             </>
           )}
         </div>
+      </TabPanel>
+
+      {/* Pods Tab */}
+      <TabPanel active={activeTab === "pods"}>
+        <PodsTab
+          deploymentId={deploymentId}
+          isActive={activeTab === "pods"}
+          declaredComponents={deployment?.components ?? []}
+          deploymentStatus={deployment?.status ?? "unknown"}
+          onOpenTimeline={() => setActiveTab("timeline")}
+        />
       </TabPanel>
 
       {/* Timeline Tab */}

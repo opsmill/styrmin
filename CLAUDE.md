@@ -46,7 +46,10 @@
 
 - Python 3.14+ + Strawberry GraphQL, SQLModel, Loguru (backend); TypeScript + React 19 + TanStack Router + TanStack Query (frontend); no schema changes (011-admin-user-group-mgmt)
 
+- TypeScript 5.9.3, React 19.2.4 + TanStack Query v5, Tailwind, lucide-react (frontend); reuses existing PodStatus GraphQL surface (012-deployment-pods-tab)
+
 ## Recent Changes
 
+- 012-deployment-pods-tab: Added Pods tab to the deployment detail page — observed per-pod state grouped by component (declared / drifting / unlabeled per ADR-014), inline expand with container detail and copy-to-clipboard kubectl helpers, 10s auto-refresh paused when the tab is inactive
 - 011-admin-user-group-mgmt: Added admin user/group GraphQL surface + auth UX (login, profile, role gating) on top of the #179 auth foundation
 - 058-frontend-testing: Added TypeScript 5.9.3, React 19.2.4, Node 22 + Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI, React Router 7, React Hook Form 7

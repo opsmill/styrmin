@@ -46,3 +46,10 @@ Base UI exposes state via boolean presence attributes. Tailwind selectors must u
 ### Tests
 
 - Do not assert on `data-state="..."` in tests. Match against the new boolean attributes (`data-open`, `data-checked`, etc.) or, preferably, against accessible roles and names — those are what users and screen readers see.
+
+<!-- Extracted from specs/012-deployment-pods-tab on 2026-05-15 -->
+
+### Clipboard
+
+- Use the shared `useCopyToClipboard` hook from `@/hooks/use-copy-to-clipboard` for any Copy button. Do not call `navigator.clipboard.writeText` directly — the hook owns the post-copy `copied` flag (2 s window), the failure swallowing, and the unmount cleanup. Two divergent implementations of that state machine are guaranteed to drift.
+- Surface the `copied` state in the UI (typically by swapping the Copy icon for a check + "Copied" label) so the operator gets feedback even when the clipboard write succeeded silently.
