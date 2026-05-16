@@ -43,8 +43,9 @@ Loop over the chunks identified in Phase 0. For **each chunk**:
    - The **exact chunk** of tasks to implement, copied verbatim from `tasks.md` (task IDs, descriptions, and any `[P]` parallel markers).
    - An explicit instruction to invoke the `speckit-implement` skill scoped to **only those task IDs** — not the full `tasks.md`.
    - The commit policy: the subagent should run formatters/linters and commit its own work via the `speckit-checkpoint-commit` skill before returning.
-   - A short response contract: return (a) a one-line outcome per task ID (✅ done / ⚠️ partial / ❌ blocked + reason), (b) the commit SHA(s) it produced, (c) any decisions worth flagging upward, (d) test/lint status.
-   - Length cap on the report (e.g. "under 250 words") so the orchestrator's context does not balloon.
+   - **The E2E local-pass policy (Constitution §V).** Any E2E test the subagent adds or modifies MUST be observed to PASS locally at least once before the chunk is reported as done. Marker-clean / lint-clean / type-clean is NOT a substitute. For each such test the subagent MUST return the evidence specified in the response contract below; if it cannot produce the evidence, the chunk's outcome line for that task MUST be `⚠️ partial` or `❌ blocked` (not ✅ done) with the reason.
+   - A short response contract: return (a) a one-line outcome per task ID (✅ done / ⚠️ partial / ❌ blocked + reason), (b) the commit SHA(s) it produced, (c) any decisions worth flagging upward, (d) test/lint status, (e) **for every new/modified E2E test: node ID, exact pytest command, ISO 8601 wall-clock timestamp of the passing run, cluster identifier (e.g. `vcluster<N>` + kubeconfig path), and the verbatim `PASSED ...` line from pytest output**. If the chunk added or modified no E2E tests, the subagent MUST say so explicitly so the orchestrator can record "n/a" rather than an omission.
+   - Length cap on the report (e.g. "under 250 words", excluding the E2E evidence block which has no cap) so the orchestrator's context does not balloon.
 
 3. **Wait for the subagent to return**, then:
    - Pull its outcome lines into your running ledger of chunk results.
@@ -82,9 +83,17 @@ Write a markdown report to `<spec-dir>/auto-implement-report.md` and also print 
    - Commit SHA(s) produced by the subagent.
    - Any decisions or surprises the subagent flagged upward.
 3. **Tasks not completed** — task IDs still `[ ]` in `tasks.md`, with the reason from the relevant subagent's report. Empty section if everything is `[X]`.
-4. **Review findings** — table of severity / file / one-line summary. Mark which were fixed inline and which were deferred.
-5. **Autonomous decisions** — any judgment calls the orchestrator made that the user might want to revisit (chunk splits, blocked-task handling, review-finding triage choices).
-6. **Suggested next steps** — e.g. "open a PR", "rerun `speckit.auto.implement` to retry the 2 blocked tasks", "address the deferred review findings".
+4. **E2E local-pass evidence (REQUIRED — Constitution §V).** A table of every E2E test added or modified by this run, with one row per test:
+
+   | Node ID | Pytest command | Passed at (ISO 8601) | Cluster id | Verbatim PASSED line |
+   |---------|----------------|----------------------|------------|----------------------|
+
+   Aggregate the rows from each chunk subagent's response. If a chunk added/modified an E2E test but did not return evidence, the row's "Passed at" cell MUST be `MISSING — see chunk <N>` and the test MUST also appear in §3 "Tasks not completed" as a blocker — never silently elide it. If no E2E tests were added or modified by the whole run, write `n/a — no new or modified E2E tests in this implementation` instead of the table and state it explicitly so reviewers can verify the claim against the diff.
+5. **Review findings** — table of severity / file / one-line summary. Mark which were fixed inline and which were deferred.
+6. **Autonomous decisions** — any judgment calls the orchestrator made that the user might want to revisit (chunk splits, blocked-task handling, review-finding triage choices).
+7. **Suggested next steps** — e.g. "open a PR", "rerun `speckit.auto.implement` to retry the 2 blocked tasks", "address the deferred review findings".
+
+**Blocking rule.** If §4 contains any `MISSING` row, the report header MUST mark the run `INCOMPLETE` and §7 MUST list "produce local-pass evidence for the listed E2E tests" as the first next step. Do not declare the spec done while local-pass evidence is missing.
 
 Commit the report via `speckit-checkpoint-commit` as the final action.
 
