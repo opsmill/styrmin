@@ -75,12 +75,12 @@ description: "Task list for 011-unified-deployment-config"
 
 ### Read summary components
 
-- [ ] T019 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/DriverParametersSummary.tsx` — chip-style row of `name value` for every parameter in `driverSchema`. Uses `ConfigSummaryCard` shell.
-- [ ] T020 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/SchedulingSummary.tsx` — resources summary, runtime class, tolerations count, topology spread, node affinity, pod anti-affinity.
-- [ ] T021 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/NetworkingSummary.tsx` — FQDN suffix, external URL, ingress class, external DNS source, dedicated ingress, IP allowlist.
-- [ ] T022 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/EnvVarsSummary.tsx` — list deployment-scoped overrides; summarize inherited count.
-- [ ] T023 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/StorageRuntimeSummary.tsx` — db size, standard storage class, node selector.
-- [ ] T024 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/ServiceOverridesSummary.tsx` — `driver service → override name` list.
+- [x] T019 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/DriverParametersSummary.tsx` — chip-style row of `name value` for every parameter in `driverSchema`. Uses `ConfigSummaryCard` shell.
+- [x] T020 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/SchedulingSummary.tsx` — resources summary, runtime class, tolerations count, topology spread, node affinity, pod anti-affinity.
+- [x] T021 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/NetworkingSummary.tsx` — FQDN suffix, external URL, ingress class, external DNS source, dedicated ingress, IP allowlist.
+- [x] T022 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/EnvVarsSummary.tsx` — list deployment-scoped overrides; summarize inherited count.
+- [x] T023 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/StorageRuntimeSummary.tsx` — db size, standard storage class, node selector.
+- [x] T024 [P] [US1] Create `frontend/src/components/deployment/configuration/sections/read/ServiceOverridesSummary.tsx` — `driver service → override name` list.
 
 ### Tab shell, hero, View JSON
 
