@@ -14,7 +14,11 @@ This is a **frontend-only feature**. No backend schema, mutation, or resolver ch
 **Language/Version**: TypeScript 5.9.3, Node 22 (frontend only; backend untouched)
 **Primary Dependencies**: React 19.2.4, Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI primitives, TanStack Form (already adopted via feature 001-tanstack-form-migration), TanStack Router 1.168.x (already adopted via 001-tanstack-router-migration), TanStack Query v5, Tailwind, lucide-react. Fonts: Inter, JetBrains Mono.
 **Storage**: N/A — all state is client-side draft + persisted GraphQL response; deployment config is already stored as JSON on the existing `Deployment` row, no schema changes.
-**Testing**: Vitest + React Testing Library (frontend unit / component), pytest E2E suite under `backend/tests/e2e/` driven via Playwright in `[ui-chromium]` mode (per `dev/guides/dual-entrypoint-e2e.md`).
+**Testing**: Vitest + React Testing Library (frontend unit / component), pytest E2E suite under `backend/tests/e2e/` driven via Playwright in `[ui-chromium]` mode (per `dev/guides/dual-entrypoint-e2e.md`). Specific test obligations from critique:
+- **Per-rule impact tests**: every entry in `frontend/src/lib/impact-rules.ts` ships with at least one positive case (rule fires on a matching diff) and at least one negative case (rule does not fire on a similar but non-matching diff). The matcher's glob engine has a dedicated unit suite covering each syntax form (`*`, `**`, `[*]`, `value:`, `kind:`).
+- **Concurrent-edit E2E**: the multi-section roll-up E2E in `backend/tests/e2e/configuration/test_drawer_multi_section_edit.py` includes a scenario where a second client mutates the deployment via SDK between drawer-open and Apply; the test asserts that the dialog surfaces the conflict UX and that no silent overwrite occurs.
+- **Permission-gating component test**: an RTL test confirms the "Edit configuration" button is omitted when the user's auth context lacks edit permission.
+- **Accessibility**: each E2E scenario includes a keyboard-only path (no mouse) for the slice's primary user flow.
 **Target Platform**: Web — Styrmin frontend single-page app, served via Vite dev server in development and bundled for production. Browser baseline matches the rest of the Styrmin frontend (modern evergreen Chrome / Firefox / Safari per `frontend/AGENTS.md`).
 **Project Type**: Web application — frontend + backend repo; this feature touches `frontend/` only.
 **Performance Goals**: Configuration tab first paint ≤ 200 ms after deployment fetch resolves (parallel to existing Overview tab). Drawer open animation ≤ 16 ms per frame at 60 fps. Diff computation across the full deployment config (~200 leaf fields max) ≤ 5 ms — well within frame budget.
@@ -33,12 +37,12 @@ This is a **frontend-only feature**. No backend schema, mutation, or resolver ch
 | IV. Type Safety and Typed Errors | ✅ Pass | All new code is TypeScript with strict types. Generated GraphQL types from `pnpm codegen` are used for the form's domain model. Error handling is per-field validation (Zod) plus mutation-error surfacing in the dialog. |
 | V. Test-First Development & E2E | ✅ Pass | FR-027 / SC-006 enforce E2E per editable section. Each slice ships its own `[ui-chromium]` E2E scenario and must run green before the slice is "done". No deferral is acceptable; this is explicitly captured in `tasks.md`. |
 | VI. Format and Lint Before Commit | ✅ Pass | `pnpm lint` / `pnpm format` and `uv run invoke format lint` run pre-commit per existing hooks. No exemptions. |
-| Governance Gate — GraphQL schema | ✅ N/A | No schema modifications. The propagation-test gate is therefore inapplicable. |
+| Governance Gate — GraphQL schema | ⚠️ Conditional | No schema modifications planned. **Slice 4 conditionally introduces** a typed stale-write error code on `updateDeployment` if one does not already exist (see research R-012). If that change lands, it is additive (new error code, no schema-breaking change) and ships with a propagation test per Constitution §V. The audit happens in slice 1's GraphQL audit. |
 | Governance Gate — Database schema | ✅ N/A | No DB changes. |
 | Governance Gate — New dependencies | ✅ Pass | No new top-level dependencies. TanStack Form is already in `package.json` via 001-tanstack-form-migration. |
 | Governance Gate — Auth/AuthZ | ✅ N/A | No auth changes; uses existing per-deployment edit-permission gating. |
 
-**Result**: All gates pass. No complexity-tracking justifications needed.
+**Result**: All gates pass, with one conditional flag on the GraphQL row tied to slice 4's concurrent-edit work (additive only). No complexity-tracking justifications needed.
 
 ## Project Structure
 

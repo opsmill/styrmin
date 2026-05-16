@@ -223,6 +223,45 @@ This document resolves all design unknowns surfaced when filling Technical Conte
 
 ---
 
+## R-012 · Concurrent-edit detection and reload UX
+
+**Decision**: On Apply, the client passes the deployment's `updatedAt` timestamp (or equivalent server-issued version stamp) that was present at drawer-open time. The backend's `updateDeployment` resolver compares against the persisted record and raises a typed conflict error (`STALE_WRITE` or similar) when they diverge. The dialog renders a "this deployment was modified by Y at Z — reload to merge?" panel with a Reload action that refetches the deployment, recomputes the diff baseline against the new persisted state, and keeps the operator's pending edits visible against the new baseline. The mutation does not proceed until reload.
+
+**Rationale**:
+- Optimistic concurrency on a server-issued version stamp is the standard idiom and avoids the read-your-writes ambiguity of relying on the operator to manually reconcile.
+- The "Reload, keep pending edits" UX preserves the operator's work; it does not throw away the draft.
+- Forcing reload (no overwrite) for v1 is the safer default. An "overwrite anyway" affordance can be added later if telemetry shows operators need it.
+
+**Alternatives considered**:
+- Long-polling the deployment from the drawer to detect concurrent edits live — rejected: heavier, requires subscriptions infra, and the conflict is rare enough that a synchronous check at apply time is fine.
+- Silent server-side last-write-wins — rejected: directly contradicts FR-029 and the spec's silent-overwrite-is-unacceptable stance.
+
+**Implementation notes**:
+- **Backend touch required**: if the resolver does not already raise a typed stale-write error, this needs a small additive change (and triggers the propagation-test gate per Constitution §V). Audit during slice 4. If the resolver currently last-writes-wins, the slice-4 PR introduces the typed error and the propagation test.
+- The version stamp field on `Deployment` (e.g., `updatedAt: DateTime!`) is likely already present from SQLModel auditing; verify in slice 1's GraphQL audit.
+- Fallback for v1 if no server-side support exists: client compares the deployment's `updatedAt` from the original fetch to a re-fetch issued right before mutation. Race window remains but is tiny (single round-trip). Document this trade-off in the slice-4 PR.
+
+---
+
+## R-013 · Environment variable plaintext exposure
+
+**Decision**: The unified drawer continues today's posture: env-var values are visible in plaintext to any user with deployment-read access, identical to what `View JSON`, the SDK, and the Kubernetes ConfigMap already expose. The feature **does not** introduce a new exposure surface, but it **does** make these values one click more discoverable than they used to be.
+
+**Rationale**:
+- The GraphQL `EnvVar.value` contract documents that values are not for secret material (the type's docstring is the authoritative source). Operators have been told via tooling for as long as the field has existed.
+- Anyone with deployment-read can already read `deployment.config`, which embeds env vars; the unified drawer surfaces them in a friendlier UI but does not lower a trust boundary.
+- A first-class secrets facility (Kubernetes Secret references, external secret manager) is a separate feature and out of scope here.
+
+**Alternatives considered**:
+- Mask env-var values behind a "Reveal" toggle — rejected for v1: gives a false impression that the UI is the trust boundary, when in reality the backend GraphQL response carries the plaintext.
+- Block this feature on a secrets facility landing first — rejected: secrets are a much bigger workstream, and operators would lose the env-var edit capability for the entire intervening time.
+
+**Implementation notes**:
+- The Configuration tab's Environment Variables summary card and the drawer's Env Vars section render values in plaintext (`JetBrains Mono` colour-coded by inherited vs overridden), matching the existing `View JSON` posture.
+- A non-blocking telemetry follow-up may track adoption of env-var edits to inform a future secrets-facility prioritization.
+
+---
+
 ## Summary
 
-All NEEDS CLARIFICATION items are resolved. The one open question (backend-side: does `Deployment` expose a `lastUpdateEvent`?) is captured in R-009 with a v1 fallback that requires no backend changes. The critique phase will revisit whether that fallback is sufficient or whether a small additive GraphQL change is preferable.
+All NEEDS CLARIFICATION items are resolved. The one open question (backend-side: does `Deployment` expose a `lastUpdateEvent`?) is captured in R-009 with a v1 fallback that requires no backend changes. The critique phase added R-012 (concurrent-edit detection) and R-013 (env-var plaintext decision). R-012 may require a small additive backend change in slice 4 — that decision is made during slice 4's GraphQL audit; if it triggers Governance Gate review, the slice's PR handles it under the standard propagation-test rule.

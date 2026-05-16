@@ -81,6 +81,8 @@ An operator wants to set per-component resource caps (e.g., raise the `rate-limi
 - **Driver schema drift**: The driver version's parameter schema changed between the deployment's last apply and now (new required parameter added, existing parameter removed). The Driver Parameters section flags removed parameters as deprecated values and prompts the operator to provide a value for any newly required parameter before "Review & apply" enables.
 - **Mutation failure**: The `Apply & redeploy` action fails server-side (validation error, backend down). The dialog stays open, surfaces the server error message, and preserves the pending changes; the operator can fix and retry.
 - **Brand-new deployment with no overrides at all**: Every section shows "inherited" with no overridden count, the hero bar reads "0 overridden", and the Component Overrides section shows components with "no override" affordances.
+- **Screen-reader users**: A user navigating with VoiceOver or NVDA opens the drawer; focus is announced moving into the drawer, each section heading is reachable by heading navigation, dirty state on a field is announced when it changes (e.g., "field changed, original value 500m"), and the diff dialog announces itself as a modal with its primary action reachable.
+- **Viewer without edit permission**: A user with read-only access to the deployment sees the Configuration tab and every summary card, but the hero bar shows no "Edit configuration" button and the drawer route is unreachable. The "View JSON" affordance remains available.
 
 ## Requirements *(mandatory)*
 
@@ -128,6 +130,23 @@ An operator wants to set per-component resource caps (e.g., raise the `rate-limi
 
 - **FR-027**: Each editable section MUST ship with end-to-end test coverage that drives a change through the drawer and confirmation dialog and asserts the persisted result.
 
+#### Accessibility
+
+- **FR-028**: The Configuration tab and the edit drawer MUST be operable by keyboard alone (open drawer, navigate sections, edit fields, submit, dismiss) and MUST follow the project's a11y baseline. Specifically:
+  - Opening the drawer MUST move focus to the first editable control in the drawer; closing MUST return focus to the "Edit configuration" button.
+  - The drawer MUST trap focus while open and release it on close.
+  - The diff dialog MUST be a labelled modal; primary and secondary actions MUST be reachable in tab order.
+  - "Changed" state on a field MUST be communicated to assistive technologies via an `aria-describedby`-style mechanism (not by colour alone).
+  - The amber "changed" border, blue "overridden" badge, and green "running" indicator MUST meet WCAG 2.1 AA contrast against the surfaces they sit on.
+
+#### Concurrency
+
+- **FR-029**: When the operator clicks "Apply & redeploy", the mutation MUST detect whether the underlying deployment has been modified since the drawer was opened. On detection of a concurrent modification, the confirmation dialog MUST surface a clear "this deployment was modified by another actor since you started editing" message with a "Reload" action that refetches the deployment, recomputes the diff baseline against the new persisted state, and keeps the operator's pending edits visible against the new baseline. The mutation MUST NOT proceed until the operator reloads or explicitly chooses to overwrite (overwrite is a follow-up; v1 only supports reload).
+
+#### Permissions
+
+- **FR-030**: The "Edit configuration" button in the hero summary bar MUST be visible only to users with edit permission on the deployment, per the same authorization check the `updateDeployment` mutation enforces server-side. Users without edit permission see the read-only Configuration tab without an Edit affordance, no misleading disabled-button tooltip, and no route by which to open the drawer.
+
 ### Key Entities
 
 - **Deployment Configuration**: The set of values applied to a deployment, organized into the 9 groups listed in FR-002 plus an Identity group (name, driver version, app version). Each value is either inherited from the parent environment or explicitly set on the deployment.
@@ -148,12 +167,15 @@ An operator wants to set per-component resource caps (e.g., raise the `rate-limi
 - **SC-005**: The legacy Scheduling-only dialog and the "Scheduling" header button are removed in this feature's PR sequence; no parallel scheduling-edit affordance survives.
 - **SC-006**: For every editable section, an end-to-end test exists that drives a change through the drawer, completes the confirmation dialog, and asserts the persisted result. CI passes for all of them as a precondition for shipping the feature.
 - **SC-007**: The Component Overrides section is present in v1 and supports at least the same level of per-component edit as the legacy Scheduling dialog supported globally, with the section structure visibly designed to accommodate richer per-component fields in future iterations (e.g., per-component env vars, per-component image overrides).
+- **SC-008**: 100% of editable fields and interactive controls in the Configuration tab and drawer are operable by keyboard alone and meet WCAG 2.1 AA contrast on the amber "changed" border, blue "overridden" badge, and green "running" indicator. The diff dialog is announced as a modal by VoiceOver and NVDA in manual smoke testing on the first slice that ships it (slice 4).
+- **SC-009**: When two operators edit the same deployment concurrently, the second operator's Apply attempt is detected as a conflict and routed through the reload UX rather than silently overwriting; 0% of concurrent edits result in silent overwrite (verified by an E2E scenario in the multi-section roll-up test).
 
 ## Assumptions
 
 - The existing deployment update contract is sufficient to support every editable field in v1; no backend schema changes are required.
 - The parent environment configuration is available alongside the deployment configuration in the same data fetch, so inheritance state can be computed client-side without a second round-trip.
-- Operators who can view a deployment also have permission to edit it; permission-gated read-only mode is out of scope for v1.
+- Users without edit permission on a deployment see the Configuration tab in read-only mode (no "Edit configuration" affordance); see FR-030. The drawer is the only mutation surface and is gated on the same server-side authorization check that `updateDeployment` enforces.
+- Environment variable values are not considered secret material per the existing GraphQL `EnvVar.value` contract. The unified drawer continues today's posture (env values are visible to anyone with deployment read access via this UI, View JSON, or the SDK). Secret material belongs in a separate facility outside this feature's scope; see `research.md` R-013.
 - The impact heuristic table can be expressed entirely client-side from the configuration diff in v1. A future iteration may add a backend-computed impact preview; the dialog's contract is designed to absorb that change without UI restructuring.
 - Driver-version upgrades stay on the existing "Upgrade" header button; the unified drawer does not change driver versions.
 - The create-deployment form and the environment-level configuration UI are explicitly out of scope for this feature; both will reuse the section components from this feature in follow-up work.
