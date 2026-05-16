@@ -26,7 +26,7 @@ export interface ImpactRule {
    * Examples:
    *   "name"
    *   "scheduling.resources.**"
-   *   "tolerations[*].effect value:NoExecute"
+   *   "tolerations[*].effect value:NO_EXECUTE"  (GraphQL TolerationEffect enum wire form)
    *   "envVars[*] kind:add"
    */
   matcher: string;
@@ -58,7 +58,7 @@ The rules below ship in slice 4. They are deliberately approximate; the critique
 | `parameters.**` | Driver will be re-rendered; pods may restart depending on parameter semantics | warning |
 | `scheduling.resources.**` | Pods will be recreated with new resource limits | warning |
 | `scheduling.tolerations` | Pods on affected tainted nodes may be evicted | warning |
-| `scheduling.tolerations[*].effect value:NoExecute` | Existing pods on tainted nodes will be drained immediately | high |
+| `scheduling.tolerations[*].effect value:NO_EXECUTE` | Existing pods on tainted nodes will be drained immediately | high |
 | `scheduling.nodeAffinity` | Pods will be rescheduled to match new node affinity | warning |
 | `scheduling.podAffinity` | Pods will be rescheduled to match new pod affinity | warning |
 | `scheduling.podAntiAffinity` | Pods will be rescheduled to match new pod anti-affinity | warning |

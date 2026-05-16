@@ -35,7 +35,7 @@ export const impactRules: ImpactRule[] = [
     severity: "warning",
   },
   {
-    matcher: "scheduling.tolerations[*].effect value:NoExecute",
+    matcher: "scheduling.tolerations[*].effect value:NO_EXECUTE",
     consequence: "Existing pods on tainted nodes will be drained immediately",
     severity: "high",
   },

@@ -77,15 +77,15 @@ describe("matchPath glob engine", () => {
   it("`value:X` qualifier requires DiffEntry.after === X", () => {
     expect(
       matchPath(
-        "scheduling.tolerations[*].effect value:NoExecute",
+        "scheduling.tolerations[*].effect value:NO_EXECUTE",
         "scheduling.tolerations[gpu].effect",
         "change",
-        "NoExecute",
+        "NO_EXECUTE",
       ),
     ).toBe(true);
     expect(
       matchPath(
-        "scheduling.tolerations[*].effect value:NoExecute",
+        "scheduling.tolerations[*].effect value:NO_EXECUTE",
         "scheduling.tolerations[gpu].effect",
         "change",
         "NoSchedule",
@@ -219,12 +219,12 @@ const ruleCases: RuleCase[] = [
     negative: diffEntry("scheduling.runtimeClass"),
   },
   {
-    matcher: "scheduling.tolerations[*].effect value:NoExecute",
+    matcher: "scheduling.tolerations[*].effect value:NO_EXECUTE",
     positive: diffEntry("scheduling.tolerations[gpu].effect", {
-      after: "NoExecute",
+      after: "NO_EXECUTE",
     }),
     negative: diffEntry("scheduling.tolerations[gpu].effect", {
-      after: "NoSchedule",
+      after: "NO_SCHEDULE",
     }),
   },
   {
