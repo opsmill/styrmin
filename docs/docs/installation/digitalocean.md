@@ -327,7 +327,7 @@ You can also forward the Prefect UI for a richer view of async tasks:
 kubectl port-forward svc/prefect-server 4200:4200 -n styrmin &
 ```
 
-Then open <http://localhost:4200>.
+Then open [http://localhost:4200](http://localhost:4200).
 
 ### 17. Access applications via Ingress
 

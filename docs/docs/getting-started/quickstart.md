@@ -126,7 +126,7 @@ When the command finishes, you should see something like:
 
 ### 5. Log in and look around
 
-Open <http://styrmin.local.styrmin.io:8080> and log in with `admin` /
+Open [http://styrmin.local.styrmin.io:8080](http://styrmin.local.styrmin.io:8080) and log in with `admin` /
 `styrmin` (these come from `dev/local/demo-values.yaml`; change them there
 if you want different credentials).
 
@@ -140,7 +140,7 @@ You should see:
   in action
 
 To explore the GraphQL API directly, head to
-<http://styrmin.local.styrmin.io:8080/graphql>.
+[http://styrmin.local.styrmin.io:8080/graphql](http://styrmin.local.styrmin.io:8080/graphql).
 
 ### 6. Pause, resume, or tear down
 

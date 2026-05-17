@@ -342,7 +342,7 @@ uv run styrminctl deployments get <DEPLOYMENT_ID>
 kubectl port-forward svc/prefect-server 4200:4200 -n styrmin
 ```
 
-Then open <http://localhost:4200>.
+Then open [http://localhost:4200](http://localhost:4200).
 
 ### Lifecycle
 
