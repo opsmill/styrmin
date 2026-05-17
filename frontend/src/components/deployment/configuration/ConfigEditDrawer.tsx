@@ -23,6 +23,8 @@ import { cn } from "@/lib/utils";
 
 import { DrawerFooter } from "./DrawerFooter";
 import { SectionNav } from "./SectionNav";
+import { IdentitySection } from "./sections/edit/IdentitySection";
+import { SchedulingSection } from "./sections/edit/SchedulingSection";
 
 type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
 type Environment = Deployment["environment"];
@@ -94,6 +96,14 @@ export function ConfigEditDrawer({
       parameters: deploymentParametersToInput(deployment.parameters),
     };
   }, [deployment.config, deployment.name, deployment.parameters]);
+
+  // Parent environment configuration projected through the same helper, so
+  // section components can decide whether a field's `initial` value came
+  // from the environment (drives the "from X (env)" annotation in
+  // ChangedFieldFrame).
+  const environmentValues = useMemo<UpdateDeploymentInput>(() => {
+    return deploymentConfigToInput(environment.config);
+  }, [environment.config]);
 
   const form = useForm({
     defaultValues: initialValues,
@@ -231,27 +241,62 @@ export function ConfigEditDrawer({
                 and an `id` for direct linking.
               */}
               <div className="flex flex-col gap-12">
-                {SECTION_ORDER.map((sectionId) => (
-                  <section
-                    key={sectionId}
-                    data-section={sectionId}
-                    id={`${sectionId}-anchor`}
-                    className="scroll-mt-4"
-                  >
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
-                      {SECTION_LABELS[sectionId]}
-                    </h2>
-                    <p
-                      className="mt-2 text-sm italic text-slate-400"
-                      data-testid={`section-placeholder-${sectionId}`}
+                {SECTION_ORDER.map((sectionId) => {
+                  if (sectionId === "identity") {
+                    const driverVersion =
+                      deployment.applicationDriverVersion?.version ?? "";
+                    const driverName =
+                      deployment.applicationDriverVersion?.applicationDriver
+                        ?.name ?? "";
+                    const driverLabel =
+                      driverName && driverVersion
+                        ? `${driverName}@${driverVersion}`
+                        : driverName || driverVersion;
+                    return (
+                      <IdentitySection
+                        key={sectionId}
+                        form={form}
+                        initial={initialValues}
+                        environment={environmentValues}
+                        anchorId={sectionId}
+                        driverLabel={driverLabel}
+                        appVersion={deployment.applicationVersion ?? ""}
+                      />
+                    );
+                  }
+                  if (sectionId === "scheduling") {
+                    return (
+                      <SchedulingSection
+                        key={sectionId}
+                        form={form}
+                        initial={initialValues}
+                        environment={environmentValues}
+                        anchorId={sectionId}
+                      />
+                    );
+                  }
+                  return (
+                    <section
+                      key={sectionId}
+                      data-section={sectionId}
+                      id={`${sectionId}-anchor`}
+                      className="scroll-mt-4"
                     >
-                      Section editor lands in a follow-up slice.
-                    </p>
-                    {/* Section content height padding so scroll-spy can resolve
-                        between adjacent placeholders without snap-back. */}
-                    <div className="h-32" />
-                  </section>
-                ))}
+                      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+                        {SECTION_LABELS[sectionId]}
+                      </h2>
+                      <p
+                        className="mt-2 text-sm italic text-slate-400"
+                        data-testid={`section-placeholder-${sectionId}`}
+                      >
+                        Section editor lands in a follow-up slice.
+                      </p>
+                      {/* Section content height padding so scroll-spy can resolve
+                          between adjacent placeholders without snap-back. */}
+                      <div className="h-32" />
+                    </section>
+                  );
+                })}
               </div>
             </div>
           </div>

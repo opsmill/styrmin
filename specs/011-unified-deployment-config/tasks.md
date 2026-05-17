@@ -118,12 +118,12 @@ description: "Task list for 011-unified-deployment-config"
 
 ### Identity section
 
-- [ ] T037 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/IdentitySection.tsx` — input for `name` (validated by the existing deployment-name Zod schema); read-only display of driver version and app version (those mutations live on the existing Upgrade button per spec out-of-scope).
+- [x] T037 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/IdentitySection.tsx` — input for `name` (validated by the existing deployment-name Zod schema); read-only display of driver version and app version (those mutations live on the existing Upgrade button per spec out-of-scope).
 
 ### Scheduling section (slice 3 — first editable section)
 
-- [ ] T038 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/SchedulingSection.tsx` porting the form structure from `frontend/src/components/deployment/scheduling/SchedulingConfigDialog.tsx`. Sub-blocks: Resources (CPU/memory request+limit), Tolerations (field array), Topology Spread (field array), Node Affinity (field array), Pod Affinity, Pod Anti-Affinity, Runtime Class, Post-Render Injection toggles. Every input wrapped in `ChangedFieldFrame`. Export `schedulingSchema` Zod object.
-- [ ] T039 [P] [US2] Migrate any helpers from `frontend/src/components/deployment/scheduling/sanitize.ts` that `SchedulingSection` needs into a new co-located file `frontend/src/components/deployment/configuration/sections/edit/schedulingSanitize.ts`. Do NOT delete the original `sanitize.ts` yet — that happens in slice 11.
+- [x] T038 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/SchedulingSection.tsx` porting the form structure from `frontend/src/components/deployment/scheduling/SchedulingConfigDialog.tsx`. Sub-blocks: Resources (CPU/memory request+limit), Tolerations (field array), Topology Spread (field array), Node Affinity (field array), Pod Affinity, Pod Anti-Affinity, Runtime Class, Post-Render Injection toggles. Every input wrapped in `ChangedFieldFrame`. Export `schedulingSchema` Zod object.
+- [x] T039 [P] [US2] Migrate any helpers from `frontend/src/components/deployment/scheduling/sanitize.ts` that `SchedulingSection` needs into a new co-located file `frontend/src/components/deployment/configuration/sections/edit/schedulingSanitize.ts`. Do NOT delete the original `sanitize.ts` yet — that happens in slice 11.
 
 ### Confirmation dialog (slice 4 — required for any section to be "done")
 
