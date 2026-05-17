@@ -26,7 +26,7 @@ styrminctl login [--username U]
 4. Print `Authenticating against <STYRMIN_ADDRESS> …` BEFORE the round-trip, so the user can abort if the address is wrong. (Satisfies FR-012.)
 5. Call `await client.auth.login(username, password)`. This returns a `LoginLogin` containing `token` and `user`.
 6. Compute canonical URL from `STYRMIN_ADDRESS`.
-7. Persist `token` to the token store under that canonical URL via `TokenStore.set(...)`. The store creates the parent directory (mode `0700`) and file (mode `0600`) if missing.
+7. Persist `token` to the token store under that canonical URL via `TokenStore.set(...)`. The store creates the parent directory (mode `0700`) if missing and **writes the file atomically** (temp-file + `os.rename()`), with the resulting file at mode `0600`. Concurrent `login`s against different canonical URLs never lose entries.
 8. Print `Logged in to <STYRMIN_ADDRESS> as <username>` on stdout. Exit 0.
 
 ## Output (stdout)

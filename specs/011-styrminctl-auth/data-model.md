@@ -53,7 +53,7 @@ Examples:
 
 | Operation | Effect on file |
 |---|---|
-| `login` | Resolves canonical key from `STYRMIN_ADDRESS`. Creates parent dir (mode `0700`) and file (mode `0600`) if missing. Sets `tokens[<key>] = <new token>`. Writes back with `schema_version: 1`. |
+| `login` | Resolves canonical key from `STYRMIN_ADDRESS`. Creates parent dir (mode `0700`) if missing. Reads current store. Sets `tokens[<key>] = <new token>`. **Writes atomically**: serialise JSON → write to `<target>.tmp.<pid>.<random>` with mode `0600` → `os.rename()` over the target. `os.rename()` is atomic on POSIX, so a concurrent reader sees either the old or the new file but never a partial one, and a concurrent save against a *different* canonical key is guarded by re-reading inside the same load-then-rename cycle (see E2 in critique 2026-05-17). |
 | `logout` | Calls backend `logout` (best-effort). Deletes `tokens[<key>]` if present. If `tokens` becomes empty, the file is rewritten with `tokens: {}` (file is NOT removed — easier `whoami`/`login` UX next time). |
 | `whoami` / authenticated command | Read-only. Reads `tokens[<key>]`. Never mutates. |
 | Token rejected as stale | Read-only. The CLI does NOT auto-delete the entry — the user can inspect and `rm` manually. |
@@ -62,6 +62,7 @@ Examples:
 
 - `schema_version == 1` for everything this feature ships. A future contributor may add `2`; until then, any other value is a `TokenStoreError`.
 - File mode is `0600` after every successful save. Parent directory mode is `0700` after every successful save.
+- **Save is atomic** via temp-file + `os.rename()`. A reader at any point sees either the prior valid state or the new valid state, never an interleaved or truncated file. The temp filename includes pid + random suffix so two concurrent saves do not race on the temp file itself.
 - Empty string is NEVER a valid token value. An entry whose value is `""` is treated as absent (so an accidental empty assignment never masquerades as authenticated).
 - The file is human-readable JSON on purpose; we accept the trade-off of "user could `cat` and copy the token" because the file is `0600` anyway, and the alternative (binary / encrypted blob) needs a key-management story that v1 explicitly defers.
 

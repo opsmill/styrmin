@@ -71,7 +71,7 @@ cli/
 │   │   └── resolver.py            # NEW — deep module: 4-rung credential resolver, returns (token, source)
 │   ├── commands/
 │   │   └── auth.py                # NEW — Cyclopts subapp: login / logout / whoami
-│   ├── client.py                  # MODIFIED — get_client() delegates to CredentialResolver; returns (client, source)
+│   ├── client.py                  # MODIFIED — get_client() unchanged shape (-> StyrminClient); new get_auth_context() -> AuthContext used by whoami; both delegate to CredentialResolver
 │   ├── cli_commands.py            # MODIFIED — register auth subapp; install top-level error boundary
 │   └── errors.py                  # NEW (small) — CLI-side error rendering for StyrminAuthenticationError + TokenStoreError
 └── tests/
@@ -88,6 +88,8 @@ cli/README.md                       # MODIFIED — new "Authentication" section
 ```
 
 **Structure Decision**: The CLI is the only component touched. Two new helper modules under a new `cli/src/styrminctl/auth/` package keep `TokenStore` and `CredentialResolver` deep and independently testable. The CLI commands live under the existing `commands/` package alongside `clusters`, `environments`, etc. The E2E test lives under `backend/tests/e2e/` to share the project's vcluster fixtures and follow the existing dual-entrypoint convention (`api_only` marker).
+
+**Backwards-compatible `get_client()`**: per critique E1, `get_client() -> StyrminClient` keeps its existing signature so the seven existing command modules do not need to change. A new sibling `get_auth_context() -> AuthContext` (a small dataclass exposing `.client` and `.source`) is added for `whoami` only. Both delegate to the same `CredentialResolver`. Source-attribution surfaces are contained to one caller.
 
 ## Phase 0: Outline & Research
 

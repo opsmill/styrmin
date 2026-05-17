@@ -15,7 +15,7 @@ No arguments.
 
 ## Behaviour
 
-1. Call `get_client()` which returns `(client, source)` via `CredentialResolver`.
+1. Call `get_auth_context()` (a new sibling helper, see plan and research E1) which returns `AuthContext(client, source)` via `CredentialResolver`. Note: the existing `get_client() -> StyrminClient` continues to work unchanged for every other command; only `whoami` consumes the source.
 2. If `source == "none"` → exit non-zero with the friendly "Not logged in" message (see Error contract below). Do NOT call any GraphQL.
 3. Otherwise call `await client.auth.current_user()`. The SDK returns a `CurrentUserCurrentUser | None`.
 4. If the result is `None`, exit non-zero with "Not logged in" (treating null `currentUser` as unauthenticated).

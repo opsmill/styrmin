@@ -134,11 +134,19 @@ Surveyed before planning:
 - SDK `StyrminClient.__init__` already accepts `token=` and reads `STYRMIN_TOKEN` itself. The CLI must NOT double-read the env var — when we pass a resolved token explicitly, the SDK uses it; we never let it silently fall back.
 - `python_sdk/src/styrmin_sdk/resources/auth.py` exposes `login`, `logout`, `current_user`, `change_password`. We consume the first three; `change_password` is out-of-scope.
 
-## R10 — Testing strategy
+## R10 — Backwards-compatible `get_client()` (from critique E1)
 
-- **`TokenStore` unit suite** (`cli/tests/auth/test_token_store.py`): round-trip; canonical-URL collision check; missing-file is no error; corrupt-JSON raises `TokenStoreError`; mode `0600` on file, `0700` on parent; multiple servers coexist; `schema_version` mismatch raises `TokenStoreError`.
+`get_client() -> StyrminClient` keeps its existing signature so the seven existing command modules (`clusters`, `environments`, `drivers`, `deployments`, `backups`, `backup_storage_locations`, `tasks`) need no edit. A new sibling `get_auth_context() -> AuthContext` is the only consumer of source attribution; it is called from `whoami` exclusively. Both helpers delegate to the same `CredentialResolver` so behaviour stays unified.
+
+## R11 — Atomic token-store save (from critique E2)
+
+`TokenStore.save()` MUST be atomic: serialise → write to `<target>.tmp.<pid>.<random>` with mode `0600` → `os.rename()` over the target. `os.rename()` is atomic on POSIX; this guarantees that two concurrent `login`s against different canonical URLs cannot clobber each other's entries, which would have violated FR-013 / SC-005. Unit test `test_concurrent_saves_preserve_both_entries` covers the race.
+
+## R12 — Testing strategy
+
+- **`TokenStore` unit suite** (`cli/tests/auth/test_token_store.py`): round-trip; canonical-URL collision check; missing-file is no error; corrupt-JSON raises `TokenStoreError`; mode `0600` on file, `0700` on parent; multiple servers coexist; `schema_version` mismatch raises `TokenStoreError`; atomic-save preserves both entries under concurrent writes.
 - **`CredentialResolver` unit suite** (`cli/tests/auth/test_resolver.py`): one assertion per precedence rung (env / file / auto-login / none); asymmetric env-var error; empty `STYRMIN_TOKEN` treated as unset; `STYRMIN_TOKEN` wins over disk; auto-login wins over disk.
-- **CLI tests** (`cli/tests/commands/test_auth_commands.py`): `login` happy path with mocked SDK; `logout` no-op when no store; `whoami` source line per rung; friendly-error rendering for `StyrminAuthenticationError`.
+- **CLI tests** (`cli/tests/commands/test_auth_commands.py`): `login` happy path with mocked SDK; `login` non-TTY EOF gives a friendly single-line error (per critique E5); `logout` no-op when no store; `whoami` source line per rung; friendly-error rendering for `StyrminAuthenticationError`.
 - **E2E** (`backend/tests/e2e/test_cli_auth.py`): see `quickstart.md` for the scenario blueprint. Single scenario, `@pytest.mark.api_only(reason=…)`.
 
 Per AGENTS.md, no `--reruns` markers and no mocked backend in the E2E.

@@ -113,4 +113,5 @@ The implementer MUST record in `tasks.md` (or the PR body):
 | FR-010 (no prior file) | E2E step 2 + `test_token_store.py::test_first_save_creates_dir_and_file` |
 | FR-011 (CI auth) | `test_resolver.py` row 4 + cli/README.md doc |
 | FR-012 (login prints address) | `test_auth_commands.py::test_login_prints_resolved_address` |
-| FR-013 (multiple servers coexist) | `test_token_store.py::test_two_servers_dont_collide` |
+| FR-013 (multiple servers coexist) | `test_token_store.py::test_two_servers_dont_collide` and `test_token_store.py::test_concurrent_saves_preserve_both_entries` (atomic save, per critique E2) |
+| (E5) non-TTY login | `test_auth_commands.py::test_login_handles_non_tty_stdin_with_friendly_error` |
