@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, X } from "lucide-react";
+import { Check, Copy, ExternalLink, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -63,6 +63,10 @@ export function DeploymentContextDialog({
     staleTime: 30_000,
   });
 
+  // Relative path — matches what fetchDeploymentContext requests and what
+  // the user sees in the "Open API" link's right-click → Copy Link Address.
+  const apiPath = `/deployments/${encodeURIComponent(deploymentId)}/context`;
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -71,7 +75,7 @@ export function DeploymentContextDialog({
           data-testid="deployment-context-dialog"
           className={cn(
             "fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[min(900px,90vw)]",
-            "-translate-x-1/2 -translate-y-1/2 flex-col",
+            "-translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden",
             "rounded-lg border border-border bg-background text-foreground shadow-2xl outline-none",
           )}
         >
@@ -98,15 +102,17 @@ export function DeploymentContextDialog({
             </Dialog.Close>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
-            {isLoading ? (
+          {isLoading ? (
+            <div className="px-6 py-4">
               <p
                 className="text-sm text-muted-foreground"
                 data-testid="deployment-context-loading"
               >
                 Loading context…
               </p>
-            ) : isError ? (
+            </div>
+          ) : isError ? (
+            <div className="px-6 py-4">
               <div
                 role="alert"
                 data-testid="deployment-context-error"
@@ -116,10 +122,10 @@ export function DeploymentContextDialog({
                   ? error.message
                   : "Failed to load deployment context."}
               </div>
-            ) : (
-              <ContextBody data={data} />
-            )}
-          </div>
+            </div>
+          ) : (
+            <ContextBody data={data} apiPath={apiPath} />
+          )}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
@@ -127,11 +133,14 @@ export function DeploymentContextDialog({
 }
 
 /**
- * Renders the pretty-printed JSON with a "Copy" button. Pulled out so the
- * `useState` for copy feedback doesn't get re-mounted on every parent
- * loading/error transition.
+ * Renders the pretty-printed JSON inside a scrollable region, with a Copy
+ * button and an "Open API" link that points back at the REST endpoint.
+ *
+ * The body owns its own flex layout (action bar shrinks, `<pre>` flexes to
+ * fill and scrolls) so the parent Dialog.Popup can be a simple
+ * `max-h-[85vh]` container without juggling `h-full` percentage heights.
  */
-function ContextBody({ data }: { data: unknown }) {
+function ContextBody({ data, apiPath }: { data: unknown; apiPath: string }) {
   const [copied, setCopied] = useState(false);
   const formatted = JSON.stringify(data, null, 2);
 
@@ -147,8 +156,24 @@ function ContextBody({ data }: { data: unknown }) {
   };
 
   return (
-    <div className="flex h-full flex-col gap-2">
-      <div className="flex justify-end">
+    <div className="flex min-h-0 flex-1 flex-col gap-2 px-6 py-4">
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <a
+          href={apiPath}
+          target="_blank"
+          rel="noreferrer noopener"
+          data-testid="deployment-context-open-api-link"
+          title={`Open ${apiPath} in a new tab — right-click to copy the URL`}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1",
+            "font-mono text-xs text-muted-foreground transition-colors",
+            "hover:bg-muted hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+          <span className="truncate">GET {apiPath}</span>
+        </a>
         <Button
           type="button"
           variant="outline"
