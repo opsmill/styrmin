@@ -148,6 +148,8 @@ async def test_current_user_returns_user_when_authenticated(client: StyrminClien
                 "id": "11111111-1111-1111-1111-111111111111",
                 "username": "alice",
                 "displayName": "Alice",
+                "role": "READ_WRITE",
+                "effectiveRole": "READ_WRITE",
             },
         },
     }

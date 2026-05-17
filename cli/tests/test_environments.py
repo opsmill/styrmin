@@ -28,9 +28,11 @@ def test_environments_create(mock_client: MagicMock, capsys: pytest.CaptureFixtu
     mock_client.environments.create = AsyncMock(return_value=mock_env)
 
     with pytest.raises(SystemExit) as exc:
-        app(["environments", "create", "staging", CLUSTER_UUID])
+        app(["environments", "create", "staging", "--cluster-id", CLUSTER_UUID])
     assert exc.value.code == 0
-    mock_client.environments.create.assert_called_once_with(name="staging", cluster_id=CLUSTER_UUID, config=None)
+    mock_client.environments.create.assert_called_once_with(
+        name="staging", cluster_id=CLUSTER_UUID, cluster_name=None, config=None
+    )
     output = capsys.readouterr().out
     assert "staging" in output
 
@@ -63,7 +65,9 @@ def test_environments_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[
     with pytest.raises(SystemExit) as exc:
         app(["environments", "get", ENV_UUID])
     assert exc.value.code == 0
-    mock_client.environments.get.assert_called_once_with(ENV_UUID)
+    mock_client.environments.get.assert_called_once_with(
+        environment_name=ENV_UUID, cluster_id=None, cluster_name="default"
+    )
 
 
 def test_environments_delete(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
@@ -72,7 +76,9 @@ def test_environments_delete(mock_client: MagicMock, capsys: pytest.CaptureFixtu
     with pytest.raises(SystemExit) as exc:
         app(["environments", "delete", ENV_UUID])
     assert exc.value.code == 0
-    mock_client.environments.delete.assert_called_once_with(ENV_UUID)
+    mock_client.environments.delete.assert_called_once_with(
+        environment_name=ENV_UUID, cluster_id=None, cluster_name="default"
+    )
     output = capsys.readouterr().out
     assert "deleted" in output.lower()
 
@@ -81,5 +87,5 @@ def test_environments_create_error(mock_client: MagicMock) -> None:
     mock_client.environments.create = AsyncMock(side_effect=StyrminError("API error"))
 
     with pytest.raises(SystemExit) as exc:
-        app(["environments", "create", "bad-env", CLUSTER_UUID])
+        app(["environments", "create", "bad-env", "--cluster-id", CLUSTER_UUID])
     assert exc.value.code == 1

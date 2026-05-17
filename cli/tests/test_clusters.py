@@ -70,7 +70,7 @@ def test_clusters_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
     with pytest.raises(SystemExit) as exc:
         app(["clusters", "get", CLUSTER_UUID])
     assert exc.value.code == 0
-    mock_client.clusters.get.assert_called_once_with(CLUSTER_UUID)
+    mock_client.clusters.get.assert_called_once_with(cluster_id=None, cluster_name=CLUSTER_UUID)
     output = capsys.readouterr().out
     assert "cluster-1" in output
 
@@ -81,7 +81,7 @@ def test_clusters_delete(mock_client: MagicMock, capsys: pytest.CaptureFixture[s
     with pytest.raises(SystemExit) as exc:
         app(["clusters", "delete", CLUSTER_UUID])
     assert exc.value.code == 0
-    mock_client.clusters.delete.assert_called_once_with(CLUSTER_UUID)
+    mock_client.clusters.delete.assert_called_once_with(cluster_id=None, cluster_name=CLUSTER_UUID)
     output = capsys.readouterr().out
     assert "deleted" in output.lower()
 
