@@ -255,6 +255,12 @@ def _scheduling_driver_bound(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.api_only(
+    reason="Feature 011 removed the standalone Scheduling header button; the unified "
+    "drawer's E2E coverage lives in backend/tests/e2e/configuration/test_drawer_scheduling_edit.py. "
+    "This test still exercises the scheduling mutation through the SDK path, which is the "
+    "same code path the drawer ultimately calls.",
+)
 @pytest.mark.ci
 async def test_scheduling_end_to_end(
     scheduling_environment: dict,
