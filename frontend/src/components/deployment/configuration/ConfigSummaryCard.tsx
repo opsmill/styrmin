@@ -1,30 +1,21 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import type { InheritanceState } from "@/lib/configuration-types";
-import { InheritanceBadge } from "./InheritanceBadge";
 
 interface Props {
   title: string;
-  inheritance: InheritanceState;
   children: ReactNode;
   className?: string;
 }
 
 /**
- * Shared shell for every read-only section card on the Configuration tab.
+ * Shared shell for every read-only section card on the Settings tab.
  *
- * Renders the section heading, the inheritance badge, a divider, and a slot
- * for the section-specific body. Matches Paper mock `D2 — Configuration Tab
- * (Read)`: white background, 1px light-gray border, 12px (rounded-xl) radius.
- *
- * See `specs/011-unified-deployment-config/plan.md` and `data-model.md`.
+ * Renders the section heading, a divider, and a slot for the section-specific
+ * body. The previous section-level "inherited" / "overridden" badge was
+ * removed — the per-row "deployment-defined" highlighting that lives inside
+ * each card body is enough signal.
  */
-export function ConfigSummaryCard({
-  title,
-  inheritance,
-  children,
-  className,
-}: Props) {
+export function ConfigSummaryCard({ title, children, className }: Props) {
   return (
     <section
       className={cn(
@@ -40,7 +31,6 @@ export function ConfigSummaryCard({
         >
           {title}
         </h3>
-        <InheritanceBadge inheritance={inheritance} />
       </header>
       <div className="border-t border-border" />
       <div className="px-5 py-4">{children}</div>

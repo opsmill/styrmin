@@ -1,4 +1,3 @@
-import type { InheritanceState } from "@/lib/configuration-types";
 import {
   computeEffectiveServices,
   type DeployedServiceRow,
@@ -9,7 +8,6 @@ import { ConfigSummaryCard } from "../../ConfigSummaryCard";
 interface Props {
   /** Pass-through from `deployment.deployedServices` in the `GetDeployment` query. */
   deployedServices: readonly DeployedServiceRow[] | null | undefined;
-  inheritance: InheritanceState;
 }
 
 /**
@@ -24,14 +22,11 @@ interface Props {
  * The section identity is "Services" — overrides are a per-row attribute,
  * not the section's framing.
  */
-export function ServiceOverridesSummary({
-  deployedServices,
-  inheritance,
-}: Props) {
+export function ServiceOverridesSummary({ deployedServices }: Props) {
   const services = computeEffectiveServices(deployedServices);
 
   return (
-    <ConfigSummaryCard title="Services" inheritance={inheritance}>
+    <ConfigSummaryCard title="Services">
       {services.length === 0 ? (
         <p className="text-sm italic text-muted-foreground">
           no services declared by the driver

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeEffectiveEnvVars,
   computeEffectiveServices,
+  resolveConfigValue,
   type DeployedServiceRow,
 } from "./effective-config";
 
@@ -137,5 +138,85 @@ describe("computeEffectiveServices", () => {
     expect(result[0].primaryFqdn).toBe("api.example.com");
     expect(result[0].humanReadableUrl).toBe("https://api.example.com");
     expect(result[0].humanReadableFqdn).toBe("api.example.com");
+  });
+});
+
+describe("resolveConfigValue", () => {
+  it("returns { value: null, fromDeployment: false } when no layer defines the path", () => {
+    expect(resolveConfigValue(null, null, null, "fqdn_suffix")).toEqual({
+      value: null,
+      fromDeployment: false,
+    });
+    expect(resolveConfigValue({}, {}, {}, "scheduling.runtime_class")).toEqual({
+      value: null,
+      fromDeployment: false,
+    });
+  });
+
+  it("returns the cluster value with fromDeployment=false when only the cluster defines it", () => {
+    const result = resolveConfigValue(
+      { fqdn_suffix: "cluster.local" },
+      null,
+      null,
+      "fqdn_suffix",
+    );
+    expect(result).toEqual({ value: "cluster.local", fromDeployment: false });
+  });
+
+  it("environment value wins over cluster value at the same path", () => {
+    const result = resolveConfigValue(
+      { ingress_class: "cluster-nginx" },
+      { ingress_class: "env-nginx" },
+      null,
+      "ingress_class",
+    );
+    expect(result).toEqual({ value: "env-nginx", fromDeployment: false });
+  });
+
+  it("deployment value wins and fromDeployment is true even when same as env/cluster", () => {
+    const result = resolveConfigValue(
+      { ingress_class: "nginx" },
+      { ingress_class: "nginx" },
+      { ingress_class: "nginx" },
+      "ingress_class",
+    );
+    expect(result).toEqual({ value: "nginx", fromDeployment: true });
+  });
+
+  it("walks nested snake_case paths through scheduling.resources", () => {
+    const result = resolveConfigValue<string>(
+      null,
+      {
+        scheduling: { resources: { requests: { cpu: "250m" } } },
+      },
+      {
+        scheduling: { resources: { requests: { cpu: "500m" } } },
+      },
+      "scheduling.resources.requests.cpu",
+    );
+    expect(result).toEqual({ value: "500m", fromDeployment: true });
+  });
+
+  it("distinguishes explicit null at the deployment layer from absent", () => {
+    // Explicit `null` at the deployment layer is still "defined" — the
+    // operator wrote it, so fromDeployment is true and value is null.
+    const result = resolveConfigValue(
+      { fqdn_suffix: "cluster.local" },
+      null,
+      { fqdn_suffix: null },
+      "fqdn_suffix",
+    );
+    expect(result).toEqual({ value: null, fromDeployment: true });
+  });
+
+  it("returns array values verbatim when the leaf is an array", () => {
+    const result = resolveConfigValue<readonly string[]>(
+      null,
+      null,
+      { ip_whitelist: ["10.0.0.0/8", "192.168.0.0/16"] },
+      "ip_whitelist",
+    );
+    expect(result.value).toEqual(["10.0.0.0/8", "192.168.0.0/16"]);
+    expect(result.fromDeployment).toBe(true);
   });
 });

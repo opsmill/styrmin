@@ -1,12 +1,10 @@
 import type { UpdateDeploymentInput } from "@/generated/graphql";
-import type { InheritanceState } from "@/lib/configuration-types";
 import { cn } from "@/lib/utils";
 import { ConfigSummaryCard } from "../../ConfigSummaryCard";
 
 interface Props {
   current: UpdateDeploymentInput;
   environment: UpdateDeploymentInput;
-  inheritance: InheritanceState;
 }
 
 /**
@@ -14,11 +12,7 @@ interface Props {
  * `nodeSelector`. Rendered as a horizontal strip of three label/value
  * pairs in small-caps mono labels (per Paper mock D2).
  */
-export function StorageRuntimeSummary({
-  current,
-  environment,
-  inheritance,
-}: Props) {
+export function StorageRuntimeSummary({ current, environment }: Props) {
   const dbSize = resolve(current.dbSize, environment.dbSize, (v) => v ?? "—");
   const storageClass = resolve(
     current.standardStorage?.storageClass,
@@ -32,7 +26,7 @@ export function StorageRuntimeSummary({
   );
 
   return (
-    <ConfigSummaryCard title="Storage & Runtime" inheritance={inheritance}>
+    <ConfigSummaryCard title="Storage & Runtime">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Pair label="DB SIZE" {...dbSize} />
         <Pair label="STORAGE CLASS" {...storageClass} />

@@ -1,4 +1,3 @@
-import type { InheritanceState } from "@/lib/configuration-types";
 import {
   computeEffectiveEnvVars,
   type ConfigOrigin,
@@ -17,7 +16,6 @@ interface Props {
   environmentName: string;
   /** Display name of the parent cluster, for the badge. */
   clusterName: string;
-  inheritance: InheritanceState;
 }
 
 /**
@@ -36,7 +34,6 @@ export function EnvVarsSummary({
   clusterConfig,
   environmentName,
   clusterName,
-  inheritance,
 }: Props) {
   const effective = computeEffectiveEnvVars(
     clusterConfig,
@@ -45,7 +42,7 @@ export function EnvVarsSummary({
   );
 
   return (
-    <ConfigSummaryCard title="Environment Variables" inheritance={inheritance}>
+    <ConfigSummaryCard title="Environment Variables">
       {effective.length === 0 ? (
         <p className="text-sm italic text-muted-foreground">
           no environment variables defined at any level

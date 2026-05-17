@@ -1,15 +1,11 @@
 import type { UpdateDeploymentInput } from "@/generated/graphql";
-import type {
-  DriverParameterSchema,
-  InheritanceState,
-} from "@/lib/configuration-types";
+import type { DriverParameterSchema } from "@/lib/configuration-types";
 import { ConfigSummaryCard } from "../../ConfigSummaryCard";
 
 interface Props {
   current: UpdateDeploymentInput;
   environment: UpdateDeploymentInput;
   driverSchema?: DriverParameterSchema;
-  inheritance: InheritanceState;
 }
 
 /**
@@ -22,19 +18,15 @@ interface Props {
  *
  * Driver parameters are not inherited from the environment — they live only
  * on the deployment row — so the "inherited" baseline here is the driver's
- * own default value (mirrored from `computeInheritance()`).
+ * own default value.
  */
-export function DriverParametersSummary({
-  current,
-  driverSchema,
-  inheritance,
-}: Props) {
+export function DriverParametersSummary({ current, driverSchema }: Props) {
   const params = current.parameters ?? [];
   const valueByName = new Map(params.map((p) => [p.name, p.value]));
   const schema = driverSchema ?? [];
 
   return (
-    <ConfigSummaryCard title="Driver Parameters" inheritance={inheritance}>
+    <ConfigSummaryCard title="Driver Parameters">
       {schema.length === 0 ? (
         <p className="text-sm text-muted-foreground italic">
           no parameters declared

@@ -143,3 +143,75 @@ export function computeEffectiveServices(
     humanReadableFqdn: row.humanReadableFqdn,
   }));
 }
+
+/**
+ * Result of a chain-walk lookup on a single dotted path. `value` is the
+ * most-specific defined value across the cluster → environment → deployment
+ * chain (or `null` when no layer defines the path). `fromDeployment` is the
+ * per-row signal the read summaries use to render the small "deployment-set"
+ * dot: it's `true` iff the deployment layer carried a defined value at the
+ * path (whether or not it differs from the env/cluster values — the operator's
+ * explicit intent at the deployment level is what we surface).
+ */
+export interface ResolvedValue<T> {
+  value: T | null;
+  /** True when the deployment.config layer defined this exact field. */
+  fromDeployment: boolean;
+}
+
+/**
+ * Walk a dotted snake_case path through `cluster.config →
+ * environment.config → deployment.config` and resolve the most-specific
+ * defined value.
+ *
+ * The configs are raw JSON blobs (snake_case keys, matching the Pydantic
+ * models on the backend) — same convention as `computeEffectiveEnvVars`.
+ * `path` mirrors that convention (e.g. `"scheduling.resources.requests.cpu"`,
+ * `"fqdn_suffix"`).
+ *
+ * Distinguishes "explicitly set" from "absent" using `Object.hasOwn` at each
+ * segment so an explicit `null`/empty-string at a layer wins over a defined
+ * value at a less-specific layer. Returns `{ value: null, fromDeployment:
+ * false }` when no layer defines the path.
+ */
+export function resolveConfigValue<T = unknown>(
+  clusterConfig: Record<string, unknown> | null | undefined,
+  environmentConfig: Record<string, unknown> | null | undefined,
+  deploymentConfig: Record<string, unknown> | null | undefined,
+  path: string,
+): ResolvedValue<T> {
+  const segments = path.split(".");
+
+  const lookup = (
+    root: Record<string, unknown> | null | undefined,
+  ): { found: boolean; value: unknown } => {
+    if (root == null) return { found: false, value: undefined };
+    let cursor: unknown = root;
+    for (const segment of segments) {
+      if (
+        cursor == null ||
+        typeof cursor !== "object" ||
+        Array.isArray(cursor) ||
+        !Object.hasOwn(cursor as Record<string, unknown>, segment)
+      ) {
+        return { found: false, value: undefined };
+      }
+      cursor = (cursor as Record<string, unknown>)[segment];
+    }
+    return { found: true, value: cursor };
+  };
+
+  const deployment = lookup(deploymentConfig);
+  if (deployment.found) {
+    return { value: deployment.value as T | null, fromDeployment: true };
+  }
+  const environment = lookup(environmentConfig);
+  if (environment.found) {
+    return { value: environment.value as T | null, fromDeployment: false };
+  }
+  const cluster = lookup(clusterConfig);
+  if (cluster.found) {
+    return { value: cluster.value as T | null, fromDeployment: false };
+  }
+  return { value: null, fromDeployment: false };
+}

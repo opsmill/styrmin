@@ -9,13 +9,9 @@ import {
   deploymentConfigToInput,
   deploymentParametersToInput,
 } from "@/lib/deployment-input";
-import { computeInheritance } from "@/lib/config-inheritance";
-import type {
-  DriverParameterSchema,
-  InheritanceState,
-  SectionId,
-} from "@/lib/configuration-types";
+import type { DriverParameterSchema } from "@/lib/configuration-types";
 import { ConfigEditDrawer } from "./ConfigEditDrawer";
+import { DeploymentContextDialog } from "./DeploymentContextDialog";
 import { DriverParametersSummary } from "./sections/read/DriverParametersSummary";
 import { SchedulingSummary } from "./sections/read/SchedulingSummary";
 import { NetworkingSummary } from "./sections/read/NetworkingSummary";
@@ -37,32 +33,32 @@ interface Props {
   deployment: Deployment;
 }
 
-const DEFAULT_INHERITED: InheritanceState = { kind: "inherited" };
-
 /**
  * Top-level composition for the Settings tab on the Deployment detail page.
  *
  * Layout (top to bottom):
- *   - A thin toolbar with a single "Update Settings" CTA (visible only when
- *     the operator has edit permission per FR-030).
- *   - 7 section summary cards in the order set by `SECTION_ORDER` minus the
- *     drawer-only "identity" section: env vars and service overrides come
- *     first (environment-shaped concerns), driver parameters and infrastructure
- *     in the middle, scheduling last as the advanced/disruptive section.
+ *   - A thin toolbar with "View Context" (open to all roles) and, when
+ *     the operator has edit permission per FR-030, "Update Settings".
+ *   - 7 section summary cards. Each card shows the *effective* value at
+ *     every row (cluster → environment → deployment chain) with a small
+ *     blue dot when the deployment layer explicitly defines the field.
  *
- * The unified edit surface (drawer + diff/impact dialog) opens from the CTA.
+ * The unified edit surface (drawer + diff/impact dialog) opens from the
+ * Update Settings CTA. "View Context" opens a read-only JSON dialog
+ * fed by the existing REST endpoint at `/deployments/{id}/context`.
  */
 export function ConfigurationTab({ deployment }: Props) {
   const [editDrawerOpen, setEditDrawerOpen] = useState(false);
+  const [contextDialogOpen, setContextDialogOpen] = useState(false);
 
   // Project the deployment's persisted config + parent environment's persisted
-  // config through the same read-side helper so every section sees the same
-  // typed shape and the diff/inheritance helpers can run unchanged.
+  // config through the same read-side helper so the legacy summaries (driver
+  // parameters, storage & runtime) still see the typed shape they expect.
   const current = useMemo<UpdateDeploymentInput>(() => {
     const base = deploymentConfigToInput(deployment.config);
     // `deploymentConfigToInput` intentionally ignores the row-level
     // `parameters`, `name`, and `serviceNameOverrides` fields. Merge them in
-    // here so the inheritance/diff helpers see the full deployment view.
+    // here so the diff helpers see the full deployment view.
     return {
       ...base,
       name: deployment.name,
@@ -80,31 +76,31 @@ export function ConfigurationTab({ deployment }: Props) {
     [deployment.applicationDriverVersion?.parameters],
   );
 
-  const inheritanceMap = useMemo(
-    () => computeInheritance(current, environment, driverSchema),
-    [current, environment, driverSchema],
-  );
-
   const effectiveRole = useEffectiveRole();
   // FR-030: the Update CTA mirrors the server-side authorization on
   // `updateDeployment`, which requires READ_WRITE or higher.
   const canEdit = effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";
 
-  const getInheritance = (section: SectionId): InheritanceState =>
-    inheritanceMap.get(section) ?? DEFAULT_INHERITED;
-
   return (
     <div className="flex flex-col gap-5" data-testid="settings-tab">
-      {canEdit ? (
-        <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          data-testid="settings-view-context-button"
+          onClick={() => setContextDialogOpen(true)}
+        >
+          View Context
+        </Button>
+        {canEdit ? (
           <Button
             data-testid="settings-update-button"
             onClick={() => setEditDrawerOpen(true)}
           >
             Update Settings
           </Button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       <EnvVarsSummary
         deploymentConfig={deployment.config}
@@ -112,38 +108,29 @@ export function ConfigurationTab({ deployment }: Props) {
         clusterConfig={deployment.environment.cluster.config}
         environmentName={deployment.environment.name}
         clusterName={deployment.environment.cluster.name}
-        inheritance={getInheritance("envVars")}
       />
-      <ServiceOverridesSummary
-        deployedServices={deployment.deployedServices}
-        inheritance={getInheritance("serviceOverrides")}
-      />
+      <ServiceOverridesSummary deployedServices={deployment.deployedServices} />
       <DriverParametersSummary
         current={current}
         environment={environment}
         driverSchema={driverSchema}
-        inheritance={getInheritance("driverParameters")}
       />
       <NetworkingSummary
-        current={current}
-        environment={environment}
-        inheritance={getInheritance("networking")}
+        deploymentConfig={deployment.config}
+        environmentConfig={deployment.environment.config}
+        clusterConfig={deployment.environment.cluster.config}
       />
-      <StorageRuntimeSummary
-        current={current}
-        environment={environment}
-        inheritance={getInheritance("storageRuntime")}
-      />
+      <StorageRuntimeSummary current={current} environment={environment} />
       <ComponentOverridesSummary
-        current={current}
-        environment={environment}
-        inheritance={getInheritance("componentOverrides")}
+        deploymentConfig={deployment.config}
+        environmentConfig={deployment.environment.config}
+        clusterConfig={deployment.environment.cluster.config}
         components={deployment.components}
       />
       <SchedulingSummary
-        current={current}
-        environment={environment}
-        inheritance={getInheritance("scheduling")}
+        deploymentConfig={deployment.config}
+        environmentConfig={deployment.environment.config}
+        clusterConfig={deployment.environment.cluster.config}
       />
 
       {canEdit ? (
@@ -155,6 +142,12 @@ export function ConfigurationTab({ deployment }: Props) {
           driverSchema={driverSchema}
         />
       ) : null}
+
+      <DeploymentContextDialog
+        deploymentId={deployment.id}
+        open={contextDialogOpen}
+        onOpenChange={setContextDialogOpen}
+      />
     </div>
   );
 }
