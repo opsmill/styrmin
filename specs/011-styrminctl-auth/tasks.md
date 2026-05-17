@@ -81,9 +81,9 @@ description: "Task list for 011-styrminctl-auth — CLI login/logout/whoami + pe
 
 ### Implementation for User Story 2
 
-- [ ] T016 [US2] Confirm `CredentialResolver` (T007) handles the auto-login rung end-to-end: the rung-3 path inside `cli/src/styrminctl/auth/resolver.py` MUST create a `StyrminClient` configured with `server_address` and `timeout` from `Settings`, call `auth.login(username, password)`, return `(token, "auto-login")`, and ensure the in-process client is closed so the per-invocation lifetime is bounded. Add the missing wiring if T007 deferred any of this.
-- [ ] T017 [P] [US2] Extend `cli/tests/auth/test_resolver.py` with `test_auto_login_does_not_persist_to_disk` (asserts `TokenStore.set` is never called for source `"auto-login"`) and `test_auto_login_wins_over_disk_token` (row 5 of the decision table — included in T009 if scheduled together; otherwise add here).
-- [ ] T018 [P] [US2] Add a CLI-level test in `cli/tests/commands/test_auth_commands.py`: `test_authenticated_command_uses_auto_login_when_env_vars_set` — runs a mocked-SDK invocation of any authenticated command (e.g. `clusters list`) with the env-var rung active and asserts: (a) `client.auth.login` was called exactly once, (b) the command call succeeded, (c) `TokenStore.set` was never called.
+- [X] T016 [US2] Confirm `CredentialResolver` (T007) handles the auto-login rung end-to-end: the rung-3 path inside `cli/src/styrminctl/auth/resolver.py` MUST create a `StyrminClient` configured with `server_address` and `timeout` from `Settings`, call `auth.login(username, password)`, return `(token, "auto-login")`, and ensure the in-process client is closed so the per-invocation lifetime is bounded. Add the missing wiring if T007 deferred any of this.
+- [X] T017 [P] [US2] Extend `cli/tests/auth/test_resolver.py` with `test_auto_login_does_not_persist_to_disk` (asserts `TokenStore.set` is never called for source `"auto-login"`) and `test_auto_login_wins_over_disk_token` (row 5 of the decision table — included in T009 if scheduled together; otherwise add here).
+- [X] T018 [P] [US2] Add a CLI-level test in `cli/tests/commands/test_auth_commands.py`: `test_authenticated_command_uses_auto_login_when_env_vars_set` — runs a mocked-SDK invocation of any authenticated command (e.g. `clusters list`) with the env-var rung active and asserts: (a) `client.auth.login` was called exactly once, (b) the command call succeeded, (c) `TokenStore.set` was never called.
 
 **Checkpoint**: US2 functional. CI path verified end-to-end through CLI tests.
 

@@ -278,6 +278,61 @@ def test_whoami_friendly_error_when_unauthenticated(mocker: MockerFixture, capsy
     assert "Traceback" not in captured.err
 
 
+# ---------------------------------------------------------------------------
+# T018 — US2: env-var auto-login from an authenticated command
+# ---------------------------------------------------------------------------
+
+
+def test_authenticated_command_uses_auto_login_when_env_vars_set(
+    mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Rung 3: env-var creds drive an in-process ``auth.login`` for each invocation.
+
+    Asserts the contract from
+    ``specs/011-styrminctl-auth/contracts/credential-precedence.md`` (row 4):
+    (a) ``auth.login`` is called exactly once, (b) the command succeeds,
+    (c) no token file is persisted to disk.
+    """
+    # Strip any leftover env vars, then set the env-var rung explicitly.
+    monkeypatch.delenv("STYRMIN_TOKEN", raising=False)
+    monkeypatch.setenv("STYRMIN_USERNAME", "ci-bot")
+    monkeypatch.setenv("STYRMIN_PASSWORD", "ci-secret")
+
+    # The resolver instantiates a short-lived ``StyrminClient`` for rung 3
+    # (auto-login) and ``_build_client`` instantiates the request client.
+    # Patch the constructor at both seams so neither builds a real transport.
+    auto_login_client = MagicMock()
+    auto_login_client.auth = MagicMock()
+    auto_login_client.auth.login = AsyncMock(return_value=MagicMock(token="tok-auto"))
+    auto_login_client.close = AsyncMock()
+
+    request_client = _make_mock_client()
+    request_client.clusters = MagicMock()
+    request_client.clusters.list = AsyncMock(return_value=[])
+
+    from styrminctl.auth import resolver as resolver_mod
+
+    mocker.patch.object(resolver_mod, "StyrminClient", return_value=auto_login_client)
+    mocker.patch("styrminctl.client._build_client", return_value=request_client)
+
+    # Spy on ``TokenStore.set`` to assert the auto-login rung never persists.
+    from styrminctl.auth import token_store as token_store_mod
+
+    set_spy = mocker.spy(token_store_mod.TokenStore, "set")
+
+    with pytest.raises(SystemExit) as exc:
+        app(["clusters", "list"])
+    assert exc.value.code == 0
+
+    # (a) auth.login called exactly once with the env-var credentials.
+    auto_login_client.auth.login.assert_awaited_once_with("ci-bot", "ci-secret")
+    # (b) command actually ran — the SDK ``clusters.list`` was awaited.
+    request_client.clusters.list.assert_awaited_once()
+    # (c) auto-login must never write the token to disk.
+    set_spy.assert_not_called()
+    assert not _token_file_path(tmp_path).exists()
+
+
 def test_whoami_friendly_error_on_stale_token(
     mocker: MockerFixture, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
