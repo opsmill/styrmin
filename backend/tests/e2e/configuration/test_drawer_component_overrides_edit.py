@@ -187,9 +187,9 @@ async def test_drawer_component_overrides_edit(
         )
     )
 
-    await page.get_by_role("button", name="Configuration", exact=True).click()
-    await expect(page.locator("[data-testid=configuration-tab]")).to_be_visible()
-    await page.locator("[data-testid=hero-edit-config-button]").click()
+    await page.get_by_role("button", name="Settings", exact=True).click()
+    await expect(page.locator("[data-testid=settings-tab]")).to_be_visible()
+    await page.locator("[data-testid=settings-update-button]").click()
     drawer = page.locator("[role=dialog][aria-labelledby=config-edit-drawer-title]")
     await expect(drawer).to_be_visible()
 

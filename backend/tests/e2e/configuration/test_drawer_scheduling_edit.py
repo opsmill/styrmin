@@ -150,9 +150,9 @@ async def _open_drawer_to_scheduling(page: "Page", deployment_id: str) -> None:
     where the FR-028 invariant actually matters.
     """
     detail = DeploymentDetailPage(page)
-    await page.get_by_role("button", name="Configuration", exact=True).click()
-    await expect(page.locator("[data-testid=configuration-tab]")).to_be_visible()
-    await page.locator("[data-testid=hero-edit-config-button]").click()
+    await page.get_by_role("button", name="Settings", exact=True).click()
+    await expect(page.locator("[data-testid=settings-tab]")).to_be_visible()
+    await page.locator("[data-testid=settings-update-button]").click()
     drawer = page.locator("[role=dialog][aria-labelledby=config-edit-drawer-title]")
     await expect(drawer).to_be_visible()
     # Click the Scheduling entry in the section-nav rail so the scroll

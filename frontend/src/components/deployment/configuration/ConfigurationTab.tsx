@@ -4,6 +4,7 @@ import type {
   UpdateDeploymentInput,
 } from "@/generated/graphql";
 import { useEffectiveRole } from "@/auth/useEffectiveRole";
+import { Button } from "@/components/ui/button";
 import {
   deploymentConfigToInput,
   deploymentParametersToInput,
@@ -15,8 +16,6 @@ import type {
   SectionId,
 } from "@/lib/configuration-types";
 import { ConfigEditDrawer } from "./ConfigEditDrawer";
-import { HeroSummaryBar } from "./HeroSummaryBar";
-import { ViewJsonDialog } from "./ViewJsonDialog";
 import { DriverParametersSummary } from "./sections/read/DriverParametersSummary";
 import { SchedulingSummary } from "./sections/read/SchedulingSummary";
 import { NetworkingSummary } from "./sections/read/NetworkingSummary";
@@ -41,20 +40,19 @@ interface Props {
 const DEFAULT_INHERITED: InheritanceState = { kind: "inherited" };
 
 /**
- * Top-level composition for the Configuration tab on the Deployment detail
- * page (Paper mock `D2 — Configuration Tab (Read)`).
+ * Top-level composition for the Settings tab on the Deployment detail page.
  *
- * Composes:
- *   - `HeroSummaryBar` (dark navy strip with aggregate counts + actions)
- *   - 7 section summary cards in the order:
- *     Driver Parameters → Scheduling → Networking → Env Vars
- *     → Storage & Runtime → Service Overrides → Component Overrides
+ * Layout (top to bottom):
+ *   - A thin toolbar with a single "Update Settings" CTA (visible only when
+ *     the operator has edit permission per FR-030).
+ *   - 7 section summary cards in the order set by `SECTION_ORDER` minus the
+ *     drawer-only "identity" section: env vars and service overrides come
+ *     first (environment-shaped concerns), driver parameters and infrastructure
+ *     in the middle, scheduling last as the advanced/disruptive section.
  *
- * The Edit drawer wiring lives in Phase 4 (US2). For this slice, the Edit
- * CTA's `onClick` is a no-op placeholder.
+ * The unified edit surface (drawer + diff/impact dialog) opens from the CTA.
  */
 export function ConfigurationTab({ deployment }: Props) {
-  const [viewJsonOpen, setViewJsonOpen] = useState(false);
   const [editDrawerOpen, setEditDrawerOpen] = useState(false);
 
   // Project the deployment's persisted config + parent environment's persisted
@@ -88,62 +86,51 @@ export function ConfigurationTab({ deployment }: Props) {
   );
 
   const effectiveRole = useEffectiveRole();
-  // FR-030: the Edit CTA mirrors the server-side authorization on
-  // `updateDeployment`, which requires READ_WRITE or higher. The full
-  // per-deployment permission helper is wired in slice 2 (US2); for the
-  // read-only tab the role check is sufficient because the CTA itself is
-  // a no-op stub here.
+  // FR-030: the Update CTA mirrors the server-side authorization on
+  // `updateDeployment`, which requires READ_WRITE or higher.
   const canEdit = effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";
 
   const getInheritance = (section: SectionId): InheritanceState =>
     inheritanceMap.get(section) ?? DEFAULT_INHERITED;
 
   return (
-    <div className="flex flex-col gap-5" data-testid="configuration-tab">
-      <HeroSummaryBar
-        deployment={{ id: deployment.id, name: deployment.name }}
-        environment={{
-          id: deployment.environment.id,
-          name: deployment.environment.name,
-        }}
-        driverSchema={driverSchema}
-        inheritance={inheritanceMap}
-        current={current}
-        canEdit={canEdit}
-        onEditClick={() => setEditDrawerOpen(true)}
-        onViewJsonClick={() => setViewJsonOpen(true)}
-      />
+    <div className="flex flex-col gap-5" data-testid="settings-tab">
+      {canEdit ? (
+        <div className="flex justify-end">
+          <Button
+            data-testid="settings-update-button"
+            onClick={() => setEditDrawerOpen(true)}
+          >
+            Update Settings
+          </Button>
+        </div>
+      ) : null}
 
+      <EnvVarsSummary
+        current={current}
+        environment={environment}
+        inheritance={getInheritance("envVars")}
+      />
+      <ServiceOverridesSummary
+        current={current}
+        environment={environment}
+        inheritance={getInheritance("serviceOverrides")}
+      />
       <DriverParametersSummary
         current={current}
         environment={environment}
         driverSchema={driverSchema}
         inheritance={getInheritance("driverParameters")}
       />
-      <SchedulingSummary
-        current={current}
-        environment={environment}
-        inheritance={getInheritance("scheduling")}
-      />
       <NetworkingSummary
         current={current}
         environment={environment}
         inheritance={getInheritance("networking")}
       />
-      <EnvVarsSummary
-        current={current}
-        environment={environment}
-        inheritance={getInheritance("envVars")}
-      />
       <StorageRuntimeSummary
         current={current}
         environment={environment}
         inheritance={getInheritance("storageRuntime")}
-      />
-      <ServiceOverridesSummary
-        current={current}
-        environment={environment}
-        inheritance={getInheritance("serviceOverrides")}
       />
       <ComponentOverridesSummary
         current={current}
@@ -151,15 +138,10 @@ export function ConfigurationTab({ deployment }: Props) {
         inheritance={getInheritance("componentOverrides")}
         components={deployment.components}
       />
-
-      <ViewJsonDialog
-        open={viewJsonOpen}
-        onOpenChange={setViewJsonOpen}
-        deployment={{
-          id: deployment.id,
-          name: deployment.name,
-          config: deployment.config,
-        }}
+      <SchedulingSummary
+        current={current}
+        environment={environment}
+        inheritance={getInheritance("scheduling")}
       />
 
       {canEdit ? (

@@ -17,16 +17,23 @@ export type SectionId =
   | "serviceOverrides"
   | "componentOverrides";
 
-/** Ordered list of section ids — drives section-nav ordering and `sectionsChanged`. */
+/**
+ * Ordered list of section ids — drives section-nav ordering and `sectionsChanged`.
+ *
+ * Ordering rationale: environment-shaped concerns (env vars, service-name
+ * overrides) come before parameter/driver knobs; scheduling lives at the bottom
+ * as the advanced / disruptive section. Identity stays first because it carries
+ * the deployment's primary identifier.
+ */
 export const SECTION_ORDER: readonly SectionId[] = [
   "identity",
-  "driverParameters",
-  "scheduling",
-  "networking",
   "envVars",
-  "storageRuntime",
   "serviceOverrides",
+  "driverParameters",
+  "networking",
+  "storageRuntime",
   "componentOverrides",
+  "scheduling",
 ] as const;
 
 /**

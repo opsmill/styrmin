@@ -176,9 +176,9 @@ async def test_drawer_networking_edit(
     await detail.goto(environment_id=environment_id, deployment_id=deployment_id)
     await detail.wait_for_status(expected="running", timeout=180.0)
 
-    await page.get_by_role("button", name="Configuration", exact=True).click()
-    await expect(page.locator("[data-testid=configuration-tab]")).to_be_visible()
-    await page.locator("[data-testid=hero-edit-config-button]").click()
+    await page.get_by_role("button", name="Settings", exact=True).click()
+    await expect(page.locator("[data-testid=settings-tab]")).to_be_visible()
+    await page.locator("[data-testid=settings-update-button]").click()
     drawer = page.locator("[role=dialog][aria-labelledby=config-edit-drawer-title]")
     await expect(drawer).to_be_visible()
 

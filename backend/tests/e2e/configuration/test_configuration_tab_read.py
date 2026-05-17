@@ -1,24 +1,21 @@
-"""E2E coverage for the read-only Configuration tab (011 / US1, T029).
+"""E2E coverage for the read-only Settings tab (011 / US1, T029).
 
 Seeds a deployment with a mix of inherited vs. overridden values across
 multiple configuration groups (Scheduling, Env Vars, Storage), then
 drives Playwright to:
 
 1. Navigate to the deployment detail page.
-2. Switch to the new "Configuration" tab.
-3. Assert the dark hero bar reports plausible
-   ``N fields configured · M inherited · K overridden`` counts.
+2. Switch to the new "Settings" tab.
+3. Assert the "Update Settings" CTA is present (read-side permission gate).
 4. Assert each summary card carries the correct
    ``inheritance-badge-overridden`` / ``inheritance-badge-inherited``
    treatment for the seeded shape (Scheduling, Env Vars, Storage &
    Runtime overridden; Networking inherited).
 5. Assert the Driver Parameters card renders one chip per parameter
    declared by the driver schema.
-6. Open the "View JSON" dialog and assert it shows the persisted
-   ``deployment.config`` blob.
 
 Marked ``@pytest.mark.ui_only`` per AGENTS.md: this exercises the
-deployment-detail UI rendering of the Configuration tab. The SDK has no
+deployment-detail UI rendering of the Settings tab. The SDK has no
 equivalent endpoint that "renders" the tab, so an ``[api-chromium]``
 variant would not add coverage — it would only re-fetch the same
 GraphQL payload that the UI is asserted on here.
@@ -149,7 +146,7 @@ async def config_tab_deployment(
 @pytest.mark.ci
 @pytest.mark.ui_only(
     reason=(
-        "Exercises the Configuration read tab UI (hero counts, "
+        "Exercises the Settings read tab UI (inheritance badges, "
         "per-section inheritance badges, driver-parameter chips, View "
         "JSON dialog). The SDK has no equivalent flow — an "
         "[api-chromium] variant would only re-fetch the same GraphQL "
@@ -173,45 +170,21 @@ async def test_configuration_tab_renders_inheritance_and_overrides(
     await detail_page.wait_for_status(expected="running", timeout=180.0)
 
     # ------------------------------------------------------------------
-    # 1) Switch to the Configuration tab.
+    # 1) Switch to the Settings tab.
     # ------------------------------------------------------------------
     # The shared Tabs primitive renders each tab as a plain <button>
     # (see frontend/src/components/ui/tabs.tsx) — match it by role +
     # accessible name.
-    await page.get_by_role("button", name="Configuration", exact=True).click()
-    config_tab = page.locator("[data-testid=configuration-tab]")
-    await expect(config_tab).to_be_visible()
+    await page.get_by_role("button", name="Settings", exact=True).click()
+    settings_tab = page.locator("[data-testid=settings-tab]")
+    await expect(settings_tab).to_be_visible()
 
     # ------------------------------------------------------------------
-    # 2) Hero bar — assert the three count spans render with non-empty,
-    #    plausible content. We don't pin exact integers because the
-    #    `configured`/`inherited` counts are derived from the schema
-    #    walker and would couple this test to internal counting logic;
-    #    the load-bearing invariants are:
-    #      - configured >= overridden (overrides are a subset)
-    #      - inherited == configured - overridden
-    #      - overridden >= 3 (we seeded scheduling + env_vars + db_size)
+    # 2) Update Settings CTA renders (the role check passes for the
+    #    seeded admin user).
     # ------------------------------------------------------------------
-    hero = page.locator("[data-testid=config-hero]")
-    await expect(hero).to_be_visible()
-
-    configured = await _read_count(page, "[data-testid=hero-configured-count]")
-    inherited = await _read_count(page, "[data-testid=hero-inherited-count]")
-    overridden = await _read_count(page, "[data-testid=hero-overridden-count]")
-
-    assert overridden >= 3, (
-        f"hero should report at least 3 overridden fields after seeding "
-        f"scheduling + 2 env_vars + db_size; got overridden={overridden}"
-    )
-    assert configured >= overridden, (
-        f"hero 'configured' count ({configured}) must be >= 'overridden' "
-        f"count ({overridden}) — overridden is a subset of configured."
-    )
-    assert inherited == max(0, configured - overridden), (
-        f"hero 'inherited' should equal configured - overridden; got "
-        f"configured={configured}, inherited={inherited}, "
-        f"overridden={overridden}"
-    )
+    update_button = page.locator("[data-testid=settings-update-button]")
+    await expect(update_button).to_be_visible()
 
     # ------------------------------------------------------------------
     # 3) Per-section inheritance badges. Each summary card scopes its
@@ -245,30 +218,6 @@ async def test_configuration_tab_renders_inheritance_and_overrides(
         "the empty placeholder)."
     )
 
-    # ------------------------------------------------------------------
-    # 5) View JSON dialog opens and shows the persisted blob.
-    # ------------------------------------------------------------------
-    await page.locator("[data-testid=hero-view-json-button]").click()
-    dialog = page.locator("[data-testid=view-json-dialog]")
-    await expect(dialog).to_be_visible()
-    content = dialog.locator("[data-testid=view-json-content]")
-    await expect(content).to_be_visible()
-    body = (await content.inner_text()).strip()
-    assert body.startswith("{") and body.endswith("}"), (
-        f"View JSON dialog should display a JSON object; got {body[:80]!r}..."
-    )
-    # The seeded LOG_LEVEL override must surface in the JSON view since
-    # it is part of the persisted server-side config.
-    assert "LOG_LEVEL" in body, (
-        f"View JSON content should include the seeded LOG_LEVEL override; "
-        f"got body={body[:200]!r}"
-    )
-
-    # Close the dialog so the page object stays in a clean state for
-    # any follow-up scenarios that reuse the same session_ui_page.
-    await page.locator("[data-testid=view-json-close-button]").click()
-    await expect(dialog).to_be_hidden()
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -289,21 +238,3 @@ def _section_by_title(page: "Page", title: str) -> "Locator":
     while "--" in slug:
         slug = slug.replace("--", "-")
     return page.locator(f"section[aria-labelledby='config-summary-{slug}']")
-
-
-async def _read_count(page: "Page", selector: str) -> int:
-    """Read the leading integer from a hero count span's text content.
-
-    The hero spans embed the count followed by units — e.g.
-    "5 fields configured" or "2 overridden on this deployment". The
-    test asserts on the numeric prefix, ignoring the human-readable
-    suffix (which changes shape across cards).
-    """
-    text = (await page.locator(selector).inner_text()).strip()
-    head = text.split()[0]
-    try:
-        return int(head)
-    except ValueError as exc:  # pragma: no cover — defensive
-        raise AssertionError(
-            f"expected leading integer in {selector!r} text; got {text!r}"
-        ) from exc

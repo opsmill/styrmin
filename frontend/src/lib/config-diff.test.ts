@@ -311,8 +311,8 @@ describe("config-diff: diff()", () => {
     const result = diff(before, after, emptySchema);
     expect(result.sectionsChanged).toEqual([
       "identity",
-      "networking",
       "envVars",
+      "networking",
     ]);
   });
 

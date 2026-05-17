@@ -49,7 +49,7 @@ import { PodsTab } from "./PodsTab";
 
 const DEPLOYMENT_TABS = [
   { id: "overview", label: "Overview" },
-  { id: "configuration", label: "Configuration" },
+  { id: "settings", label: "Settings" },
   { id: "backups", label: "Backups" },
   { id: "pods", label: "Pods" },
   { id: "timeline", label: "Timeline" },
@@ -528,7 +528,7 @@ export default function DeploymentDetailPage() {
       </TabPanel>
 
       {/* Configuration Tab (spec 011-unified-deployment-config — US1) */}
-      <TabPanel active={activeTab === "configuration"}>
+      <TabPanel active={activeTab === "settings"}>
         <ConfigurationTab deployment={deployment} />
       </TabPanel>
 
