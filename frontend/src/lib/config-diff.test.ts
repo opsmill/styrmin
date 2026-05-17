@@ -259,10 +259,14 @@ describe("config-diff: diff()", () => {
 
   it("parameters are diffed keyed by name and attributed to driverParameters", () => {
     const before: UpdateDeploymentInput = {
-      parameters: [{ name: "replicas", value: 1 }],
+      parameters: [
+        { name: "replicas", value: 1 as unknown as Record<string, unknown> },
+      ],
     };
     const after: UpdateDeploymentInput = {
-      parameters: [{ name: "replicas", value: 3 }],
+      parameters: [
+        { name: "replicas", value: 3 as unknown as Record<string, unknown> },
+      ],
     };
     const result = diff(before, after, emptySchema);
     expect(result.entries).toHaveLength(1);

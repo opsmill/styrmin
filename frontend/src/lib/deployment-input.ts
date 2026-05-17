@@ -95,7 +95,13 @@ export function deploymentParametersToInput(
   if (parameters == null) return undefined;
   const entries = Object.entries(parameters);
   if (entries.length === 0) return undefined;
-  return entries.map(([name, value]) => ({ name, value }));
+  // The codegen narrows the JSON scalar to `Record<string, unknown>`. Real
+  // parameter values may be primitives (string/integer/boolean), so cast at
+  // the boundary. See generated/graphql.ts `Scalars.JSON`.
+  return entries.map(([name, value]) => ({
+    name,
+    value: value as Record<string, unknown>,
+  }));
 }
 
 export function deploymentConfigToInput(

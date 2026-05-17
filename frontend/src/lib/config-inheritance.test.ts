@@ -15,6 +15,11 @@ import { SECTION_ORDER } from "./configuration-types";
 
 const emptySchema: DriverParameterSchema = [];
 
+// The codegen narrows the JSON scalar to `Record<string, unknown>`. Real
+// parameter values and defaults are primitives in the test fixtures below;
+// cast at the construction site. See generated/graphql.ts `Scalars.JSON`.
+const j = <T>(v: T) => v as unknown as Record<string, unknown>;
+
 function expectInherited(
   result: Map<SectionId, InheritanceState>,
   section: SectionId,
@@ -72,7 +77,7 @@ describe("computeInheritance", () => {
         name: "replicas",
         label: "Replicas",
         kind: "integer",
-        default: 1,
+        default: j(1),
         values: null,
       } as ParameterDefinition,
       {
@@ -80,7 +85,7 @@ describe("computeInheritance", () => {
         name: "logLevel",
         label: "Log level",
         kind: "string",
-        default: "info",
+        default: j("info"),
         values: null,
       } as ParameterDefinition,
     ];
@@ -89,8 +94,8 @@ describe("computeInheritance", () => {
     const env: UpdateDeploymentInput = {};
     const dep: UpdateDeploymentInput = {
       parameters: [
-        { name: "replicas", value: 3 }, // != default 1
-        { name: "logLevel", value: "info" }, // == default
+        { name: "replicas", value: j(3) }, // != default 1
+        { name: "logLevel", value: j("info") }, // == default
       ],
     };
     const result = computeInheritance(dep, env, driverSchema);
@@ -107,12 +112,12 @@ describe("computeInheritance", () => {
         name: "replicas",
         label: "Replicas",
         kind: "integer",
-        default: 1,
+        default: j(1),
         values: null,
       } as ParameterDefinition,
     ];
     const dep: UpdateDeploymentInput = {
-      parameters: [{ name: "replicas", value: 1 }],
+      parameters: [{ name: "replicas", value: j(1) }],
     };
     const result = computeInheritance(dep, {}, driverSchema);
     expectInherited(result, "driverParameters");
