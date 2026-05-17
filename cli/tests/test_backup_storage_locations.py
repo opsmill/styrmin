@@ -117,22 +117,30 @@ def test_backup_locations_delete(mock_client: MagicMock, capsys: pytest.CaptureF
 
 
 def test_backup_locations_assign(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.environments.get = AsyncMock(return_value=MagicMock(id=ENV_UUID))
     mock_client.backup_storage_locations.assign = AsyncMock(return_value=None)
 
     with pytest.raises(SystemExit) as exc:
         app(["backup-locations", "assign", ENV_UUID, BSL_UUID])
     assert exc.value.code == 0
+    mock_client.environments.get.assert_called_once_with(
+        environment_name=ENV_UUID, cluster_id=None, cluster_name="default"
+    )
     mock_client.backup_storage_locations.assign.assert_called_once_with(ENV_UUID, BSL_UUID)
     output = capsys.readouterr().out
     assert "assigned" in output.lower()
 
 
 def test_backup_locations_unassign(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.environments.get = AsyncMock(return_value=MagicMock(id=ENV_UUID))
     mock_client.backup_storage_locations.unassign = AsyncMock(return_value=None)
 
     with pytest.raises(SystemExit) as exc:
         app(["backup-locations", "unassign", ENV_UUID])
     assert exc.value.code == 0
+    mock_client.environments.get.assert_called_once_with(
+        environment_name=ENV_UUID, cluster_id=None, cluster_name="default"
+    )
     mock_client.backup_storage_locations.unassign.assert_called_once_with(ENV_UUID)
     output = capsys.readouterr().out
     assert "unassigned" in output.lower()

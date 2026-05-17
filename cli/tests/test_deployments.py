@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from styrmin_sdk.exceptions import StyrminError
+from styrmin_sdk.models import UpdateDeploymentInput
 from styrminctl.cli import app
 
 DEPLOYMENT_UUID = "a7b8c9d0-e1f2-3456-0123-456789abcdef"
@@ -37,7 +38,10 @@ def test_deployments_create(mock_client: MagicMock, capsys: pytest.CaptureFixtur
     mock_client.deployments.create.assert_called_once_with(
         driver="postgres",
         version="14.0",
-        environment_id=ENV_UUID,
+        environment_id=None,
+        environment_name=ENV_UUID,
+        cluster_id=None,
+        cluster_name="default",
         name=None,
         config=None,
     )
@@ -55,7 +59,10 @@ def test_deployments_create_with_options(mock_client: MagicMock) -> None:
     mock_client.deployments.create.assert_called_once_with(
         driver="postgres",
         version="14.0",
-        environment_id=ENV_UUID,
+        environment_id=None,
+        environment_name=ENV_UUID,
+        cluster_id=None,
+        cluster_name="default",
         name="my-db",
         config={"key": "val"},
     )
@@ -88,9 +95,11 @@ def test_deployments_update(mock_client: MagicMock, capsys: pytest.CaptureFixtur
     mock_client.deployments.update = AsyncMock(return_value=mock_task)
 
     with pytest.raises(SystemExit) as exc:
-        app(["deployments", "update", DEPLOYMENT_UUID, "--config", '{"key": "val"}'])
+        app(["deployments", "update", DEPLOYMENT_UUID, "--config", '{"name": "renamed-db"}'])
     assert exc.value.code == 0
-    mock_client.deployments.update.assert_called_once_with(DEPLOYMENT_UUID, config={"key": "val"})
+    mock_client.deployments.update.assert_called_once_with(
+        DEPLOYMENT_UUID, input=UpdateDeploymentInput(name="renamed-db")
+    )
     output = capsys.readouterr().out
     assert "t-1" in output
 
