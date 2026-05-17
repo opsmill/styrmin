@@ -23,23 +23,23 @@ class TestNetworkPolicyReconciliation:
     async def test_helmrelease_create_triggers_networkpolicy_creation(self) -> None:
         """Verify that creating a HelmRelease with operator-managed label
         triggers the operator to create NetworkPolicies."""
-        # TODO: Implement with Kind cluster and kopf.testing
-        pytest.skip("Requires Kind cluster infrastructure")
+        # TODO: Implement with vcluster and kopf.testing
+        pytest.skip("Requires vcluster infrastructure")
 
     @pytest.mark.anyio
     async def test_networkpolicy_deletion_triggers_recreation(self) -> None:
         """Verify that deleting an operator-managed NetworkPolicy
         triggers the operator to recreate it."""
-        pytest.skip("Requires Kind cluster infrastructure")
+        pytest.skip("Requires vcluster infrastructure")
 
     @pytest.mark.anyio
     async def test_networkpolicy_modification_triggers_correction(self) -> None:
         """Verify that modifying an operator-managed NetworkPolicy
         triggers the operator to restore the desired state."""
-        pytest.skip("Requires Kind cluster infrastructure")
+        pytest.skip("Requires vcluster infrastructure")
 
     @pytest.mark.anyio
     async def test_operator_ignores_unmanaged_resources(self) -> None:
         """Verify that the operator does not touch resources without
         Styrmin ownership labels."""
-        pytest.skip("Requires Kind cluster infrastructure")
+        pytest.skip("Requires vcluster infrastructure")

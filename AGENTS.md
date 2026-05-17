@@ -2,6 +2,13 @@
 
 Styrmin is a **deployment orchestration platform** that manages application deployments on Kubernetes clusters. It provides a declarative approach to deploying applications through "Application Drivers" - versioned deployment specifications that define how applications should be deployed, configured, and managed.
 
+## Read before exploring
+
+- **[`CONTEXT.md`](CONTEXT.md)** at the repo root — the project glossary. Defines the canonical name for every domain concept (cluster, environment, deployment, instance, driver, context, agent, operator, …) and the synonyms to avoid. Use these terms verbatim in code, schema, specs, ADRs, commit messages, and conversation. If a concept is missing or drifts from how the code actually uses it, update CONTEXT.md in the same change.
+- **[`dev/constitution.md`](dev/constitution.md)** — the prescriptive non-negotiable principles (declarative reconciliation, driver-based deployment, layered architecture, typed errors, E2E definition-of-done, propagation tests).
+- **[`dev/knowledge/architecture.md`](dev/knowledge/architecture.md)** — the descriptive companion explaining how the principles are realised today.
+- **[`dev/adr/`](dev/adr/)** — read ADRs that touch the area you're about to work in.
+
 ## Tech Stack
 
 - **Backend:** Python, GraphQL with Strawberry, Pydantic, SQLModel, Prefect
@@ -200,6 +207,7 @@ Use `git commit --no-verify` only for genuine emergencies — e.g., a hook that 
 
 | Question | Location |
 |----------|----------|
+| What do we call this concept? | [`CONTEXT.md`](CONTEXT.md) |
 | How does the system work? | `dev/knowledge/` |
 | How do I do X? | `dev/guides/` |
 | How do I manage users, groups, and roles? | `dev/guides/users-and-groups.md` |

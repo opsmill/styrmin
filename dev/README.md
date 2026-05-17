@@ -89,7 +89,7 @@ Backend (server) architecture documentation in [knowledge/backend/](knowledge/ba
 - [hooks-and-actions.md](knowledge/backend/hooks-and-actions.md) - Hook system, driver actions, setup/upgrade hooks
 - [orchestration-flows.md](knowledge/backend/orchestration-flows.md) - Prefect orchestration flows, callbacks, execution patterns (the agent runs the Prefect worker that executes these flows)
 - [backup-restore.md](knowledge/backend/backup-restore.md) - Backup/restore system, Velero integration, strategies
-- [e2e-testing.md](knowledge/backend/e2e-testing.md) - E2E testing architecture, Kind cluster setup, fixture graph
+- [e2e-testing.md](knowledge/backend/e2e-testing.md) - E2E testing architecture, vcluster setup, fixture graph
 - [dead-code.md](knowledge/backend/dead-code.md) - Remaining dead code and cleanup tracking
 
 Agent (in-cluster) architecture documentation in [knowledge/agent/](knowledge/agent/):

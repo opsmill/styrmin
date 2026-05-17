@@ -12,7 +12,7 @@ Add periodic pod status polling to the Styrmin K8s agent. A new async loop runs 
 **Language/Version**: Python 3.12  
 **Primary Dependencies**: Strawberry (GraphQL), SQLModel, kubernetes-asyncio, Prefect, kopf, fast-depends  
 **Storage**: SQLite/PostgreSQL via SQLModel + Alembic migrations  
-**Testing**: pytest (unit + integration + E2E with Kind cluster)  
+**Testing**: pytest (unit + integration + E2E with vcluster)  
 **Target Platform**: Linux container (Kubernetes agent) + Linux server (backend)  
 **Project Type**: Web application (backend only — frontend out of scope)  
 **Performance Goals**: Poll completes within 5 seconds for up to 500 managed pods  

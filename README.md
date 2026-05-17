@@ -8,7 +8,7 @@ Styrmin is a deployment orchestration platform.
 
 In order to run the demo, you must have the following tools installed locally
 
-- [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
+- [`vcluster`](https://www.vcluster.com/docs/vcluster/getting-started/setup)
 - [`helm`](https://helm.sh/docs/intro/install/)
 - [Docker](https://docs.docker.com/get-docker/)
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
@@ -24,7 +24,7 @@ This installs all dependencies (including dev tools) and ensures the CLI and SDK
 ### 2. Set up the cluster and start services
 
 ```shell
-uv run invoke cluster.create cluster.connect cluster.init   # Create a local kind cluster and Install required CRDs via Helm
+uv run invoke cluster.create cluster.connect cluster.init   # Create a local vcluster and install required CRDs via Helm
 uv run invoke cluster.minio                                 # Install MinIO for backup storage
 uv run invoke dev.build dev.start                           # Build the Docker image and start all services
 ```
@@ -54,7 +54,7 @@ You can monitor the deployment with **Get deployment** (seq 10) and track async 
 
 ```shell
 uv run invoke dev.stop dev.clean   # Stop and remove volumes
-uv run invoke cluster.delete       # Delete the kind cluster
+uv run invoke cluster.delete       # Delete the vcluster
 ```
 
 ## DigitalOcean Demo
