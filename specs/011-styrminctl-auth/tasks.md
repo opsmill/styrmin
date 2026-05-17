@@ -110,17 +110,17 @@ description: "Task list for 011-styrminctl-auth — CLI login/logout/whoami + pe
 
 ### E2E (NON-NEGOTIABLE per Constitution §V)
 
-- [ ] T021 Author the E2E scenario in `backend/tests/e2e/test_cli_auth.py` per the blueprint in `quickstart.md`. Marked `@pytest.mark.ci` and `@pytest.mark.api_only(reason="Drives the styrminctl subprocess; no UI flow. The [ui-chromium] variant would re-execute the same subprocess and the same SDK login path with no incremental coverage.")`. Test name: `test_cli_login_persists_token_and_subsequent_command_succeeds`. Uses an isolated `XDG_DATA_HOME=<tmp_path>` per test. Steps 1–8 from `quickstart.md` (seed user; `login` subprocess with password on stdin; assert exit 0, stdout, file mode `0600`, parent dir `0700`, JSON schema_version, canonical-URL key; fresh-subprocess `clusters list` succeeds; `whoami` shows source line; `logout` removes entry; second `whoami` fails friendly).
+- [X] T021 Author the E2E scenario in `backend/tests/e2e/test_cli_auth.py` per the blueprint in `quickstart.md`. Marked `@pytest.mark.ci` and `@pytest.mark.api_only(reason="Drives the styrminctl subprocess; no UI flow. The [ui-chromium] variant would re-execute the same subprocess and the same SDK login path with no incremental coverage.")`. Test name: `test_cli_login_persists_token_and_subsequent_command_succeeds`. Uses an isolated `XDG_DATA_HOME=<tmp_path>` per test. Steps 1–8 from `quickstart.md` (seed user; `login` subprocess with password on stdin; assert exit 0, stdout, file mode `0600`, parent dir `0700`, JSON schema_version, canonical-URL key; fresh-subprocess `clusters list` succeeds; `whoami` shows source line; `logout` removes entry; second `whoami` fails friendly).
 - [ ] T022 Run the E2E to a local PASS per Constitution §V "Local PASS evidence required". Record in this `tasks.md` (under "PASS evidence" below) for the test: (a) pytest node ID, (b) exact pytest command, (c) ISO 8601 timestamp of the PASS, (d) cluster identifier (vcluster fixture id + kubeconfig path under `/tmp/pytest-of-*/pytest-*/`), (e) the verbatim `PASSED …` line from pytest output. Do NOT mark this spec complete without this evidence.
 
 ### Documentation
 
-- [ ] T023 [P] Add the new "Authentication" section to `cli/README.md` covering: (1) the three flows (`login`, `STYRMIN_TOKEN`, `STYRMIN_USERNAME`+`PASSWORD`), (2) the precedence ladder verbatim from `contracts/credential-precedence.md`, (3) file path and permissions, (4) a paragraph on the auto-login network cost ("every invocation hits the backend", critique E3) recommending job-level retry/timeout rather than expecting a built-in cache, (5) a paragraph on `STYRMIN_PASSWORD` env-var trade-offs (process-list visibility, leak risk; recommend `STYRMIN_TOKEN` with a short-lived token when the CI platform supports it — critique E4).
-- [ ] T024 [P] Add a one-line pointer in `AGENTS.md` Navigation table for the CLI Authentication section (critique P1): `| How do I authenticate the CLI? | cli/README.md#authentication |` (or matching column shape of the existing table).
+- [X] T023 [P] Add the new "Authentication" section to `cli/README.md` covering: (1) the three flows (`login`, `STYRMIN_TOKEN`, `STYRMIN_USERNAME`+`PASSWORD`), (2) the precedence ladder verbatim from `contracts/credential-precedence.md`, (3) file path and permissions, (4) a paragraph on the auto-login network cost ("every invocation hits the backend", critique E3) recommending job-level retry/timeout rather than expecting a built-in cache, (5) a paragraph on `STYRMIN_PASSWORD` env-var trade-offs (process-list visibility, leak risk; recommend `STYRMIN_TOKEN` with a short-lived token when the CI platform supports it — critique E4).
+- [X] T024 [P] Add a one-line pointer in `AGENTS.md` Navigation table for the CLI Authentication section (critique P1): `| How do I authenticate the CLI? | cli/README.md#authentication |` (or matching column shape of the existing table).
 
 ### Lint and format
 
-- [ ] T025 Run `uv run invoke format lint` and resolve any findings on the new files.
+- [X] T025 Run `uv run invoke format lint` and resolve any findings on the new files.
 
 ### Spec hygiene
 
