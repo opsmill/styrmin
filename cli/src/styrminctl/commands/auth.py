@@ -182,11 +182,7 @@ async def whoami() -> None:
 
     print(f"Username: {user.username}")
     print(f"Display name: {user.display_name}")
-    # ``role`` is not yet exposed by ``current_user`` (see SDK
-    # ``CurrentUserCurrentUser``); print it only when the field is added.
-    role = getattr(user, "role", None)
-    if role is not None:
-        print(f"Role: {role}")
+    print(f"Role: {user.effective_role.value}")
     print(f"Authenticated via: {_format_source(ctx.source)}")
 
 

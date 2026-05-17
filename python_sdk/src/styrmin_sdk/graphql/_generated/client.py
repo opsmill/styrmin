@@ -412,6 +412,8 @@ class Client(AsyncBaseClient):
                 id
                 username
                 displayName
+                role
+                effectiveRole
               }
             }
             """)

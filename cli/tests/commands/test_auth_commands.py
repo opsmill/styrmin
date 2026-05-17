@@ -213,10 +213,18 @@ def _patch_get_auth_context(
     return sdk
 
 
-def _user(username: str = "alice", display_name: str = "Alice Example") -> MagicMock:
-    user = MagicMock(spec=["username", "display_name"])
+def _user(
+    username: str = "alice",
+    display_name: str = "Alice Example",
+    effective_role: str = "PLATFORM_ENGINEER",
+) -> MagicMock:
+    user = MagicMock(spec=["username", "display_name", "role", "effective_role"])
     user.username = username
     user.display_name = display_name
+    role_value = MagicMock()
+    role_value.value = effective_role
+    user.effective_role = role_value
+    user.role = role_value
     return user
 
 
@@ -230,6 +238,7 @@ def test_whoami_source_line_env(mocker: MockerFixture, capsys: pytest.CaptureFix
     out = capsys.readouterr().out
     assert "Username: alice" in out
     assert "Display name: Alice Example" in out
+    assert "Role: PLATFORM_ENGINEER" in out
     assert "Authenticated via: env (STYRMIN_TOKEN)" in out
 
 
