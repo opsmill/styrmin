@@ -223,7 +223,7 @@ export function ConfigDiffDialog({
           data-testid="config-diff-dialog"
           className={cn(
             "fixed left-1/2 top-1/2 z-[70] flex max-h-[85vh] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col",
-            "rounded-xl border border-slate-200 bg-white shadow-2xl outline-none",
+            "rounded-xl border border-border bg-card shadow-2xl outline-none",
           )}
         >
           <header
@@ -231,7 +231,9 @@ export function ConfigDiffDialog({
             data-disruptive={disruptive ? "true" : "false"}
             className={cn(
               "flex items-start justify-between gap-4 border-b px-6 py-4",
-              disruptive ? "border-amber-300 bg-amber-50" : "border-slate-200",
+              disruptive
+                ? "border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40"
+                : "border-border",
             )}
           >
             <div className="min-w-0">
@@ -240,7 +242,9 @@ export function ConfigDiffDialog({
                   id={titleId}
                   className={cn(
                     "text-base font-semibold",
-                    disruptive ? "text-amber-900" : "text-slate-900",
+                    disruptive
+                      ? "text-amber-900 dark:text-amber-200"
+                      : "text-foreground",
                   )}
                 >
                   Review configuration changes
@@ -248,7 +252,7 @@ export function ConfigDiffDialog({
                 {disruptive && (
                   <span
                     data-testid="diff-dialog-disruptive-banner"
-                    className="inline-flex items-center gap-1 rounded-full border border-amber-400 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900"
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-400 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200"
                   >
                     <AlertTriangle className="h-3 w-3" aria-hidden="true" />
                     Disruptive
@@ -258,7 +262,9 @@ export function ConfigDiffDialog({
               <p
                 className={cn(
                   "mt-1 text-xs",
-                  disruptive ? "text-amber-900/80" : "text-slate-500",
+                  disruptive
+                    ? "text-amber-900/80 dark:text-amber-200/80"
+                    : "text-muted-foreground",
                 )}
               >
                 {deployment.name} ·{" "}
@@ -278,8 +284,8 @@ export function ConfigDiffDialog({
                   className={cn(
                     "rounded-md p-1.5 transition-colors focus:outline-none focus-visible:ring-2",
                     disruptive
-                      ? "text-amber-800 hover:bg-amber-100 hover:text-amber-950 focus-visible:ring-amber-400"
-                      : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-slate-400",
+                      ? "text-amber-800 hover:bg-amber-100 hover:text-amber-950 focus-visible:ring-amber-400 dark:text-amber-300 dark:hover:bg-amber-950/60 dark:hover:text-amber-100"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring",
                   )}
                 />
               }
@@ -306,7 +312,7 @@ export function ConfigDiffDialog({
                 {noChanges ? (
                   <p
                     data-testid="diff-dialog-empty"
-                    className="rounded-md border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500"
+                    className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground"
                   >
                     No pending changes. Close this dialog and edit a field to
                     enable Apply.
@@ -317,7 +323,7 @@ export function ConfigDiffDialog({
                       aria-label="Diff"
                       data-testid="diff-dialog-diff-section"
                     >
-                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Diff
                       </h3>
                       <div className="flex flex-col gap-4">
@@ -329,7 +335,7 @@ export function ConfigDiffDialog({
                             data-testid={`diff-section-${id}`}
                             className="flex flex-col gap-2"
                           >
-                            <h4 className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                            <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                               {SECTION_LABELS[id]}
                             </h4>
                             <div className="flex flex-col gap-1.5">
@@ -350,7 +356,7 @@ export function ConfigDiffDialog({
                         aria-label="Impact"
                         data-testid="diff-dialog-impact-section"
                       >
-                        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                           Impact
                         </h3>
                         <ImpactList summary={impactSummary} />
@@ -360,7 +366,7 @@ export function ConfigDiffDialog({
                 )}
               </div>
 
-              <footer className="flex items-center justify-end gap-2 border-t border-slate-200 px-6 py-4">
+              <footer className="flex items-center justify-end gap-2 border-t border-border px-6 py-4">
                 <Button
                   type="button"
                   variant="outline"
@@ -407,16 +413,16 @@ function ConflictPanel({
       data-testid="diff-dialog-conflict-panel"
       className="flex flex-1 flex-col gap-4 px-6 py-6"
     >
-      <div className="flex items-start gap-3 rounded-md border border-amber-400 bg-amber-50 px-4 py-3 text-amber-900">
+      <div className="flex items-start gap-3 rounded-md border border-amber-400 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-200">
         <AlertTriangle
-          className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
+          className="mt-0.5 h-5 w-5 shrink-0 text-amber-700 dark:text-amber-300"
           aria-hidden="true"
         />
         <div className="min-w-0">
           <p className="text-sm font-semibold">
             This deployment was modified while you were editing
           </p>
-          <p className="mt-1 text-xs text-amber-900/80">
+          <p className="mt-1 text-xs text-amber-900/80 dark:text-amber-200/80">
             Another client saved changes since you opened the drawer. Reload to
             merge against the latest persisted state. Your pending edits will be
             preserved on top of the new baseline.

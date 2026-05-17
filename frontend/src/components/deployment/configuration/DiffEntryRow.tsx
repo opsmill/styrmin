@@ -35,7 +35,7 @@ export function DiffEntryRow({ entry }: Props) {
       data-testid="diff-entry-row"
       data-path={entry.path}
       data-kind={entry.kind}
-      className="flex flex-col gap-px overflow-hidden rounded-md border border-slate-200 font-mono text-xs"
+      className="flex flex-col gap-px overflow-hidden rounded-md border border-border font-mono text-xs"
     >
       {showBefore && (
         <DiffLine
@@ -92,7 +92,7 @@ function DiffLine({ marker, path, label, value, tone }: DiffLineProps) {
         <span className="text-slate-600 dark:text-slate-300" title={path}>
           {label}
         </span>
-        <span className="text-slate-400"> · </span>
+        <span className="text-slate-400 dark:text-slate-500"> · </span>
         <span className="whitespace-pre-wrap">{displayValue(value)}</span>
       </span>
     </div>

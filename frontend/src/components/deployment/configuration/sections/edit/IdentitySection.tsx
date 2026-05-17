@@ -90,14 +90,14 @@ export function IdentitySection({
       <div className="mb-3 flex items-center gap-3">
         <h3
           id={`${anchorId}-heading`}
-          className="text-sm font-semibold uppercase tracking-wide text-slate-700"
+          className="text-sm font-semibold uppercase tracking-wide text-foreground"
         >
           Identity
         </h3>
         {changedCount > 0 && (
           <span
             data-testid={`section-changed-chip-${anchorId}`}
-            className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900"
+            className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
           >
             {changedCount} changed
           </span>
@@ -134,32 +134,32 @@ export function IdentitySection({
           )}
         </form.Field>
 
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="rounded-md border border-border bg-muted p-3">
           <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Application driver
               </dt>
               <dd
                 data-testid="identity-driver-label"
-                className="font-mono text-sm text-slate-900"
+                className="font-mono text-sm text-foreground"
               >
                 {driverLabel || "—"}
               </dd>
             </div>
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Application version
               </dt>
               <dd
                 data-testid="identity-app-version"
-                className="font-mono text-sm text-slate-900"
+                className="font-mono text-sm text-foreground"
               >
                 {appVersion || "—"}
               </dd>
             </div>
           </dl>
-          <p className="mt-2 text-xs italic text-slate-500">
+          <p className="mt-2 text-xs italic text-muted-foreground">
             Use the Upgrade button on the deployment header to change these.
           </p>
         </div>

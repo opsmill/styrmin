@@ -126,7 +126,7 @@ export function SectionNav({
     <nav
       aria-label="Configuration sections"
       data-testid="drawer-section-nav"
-      className="flex w-[200px] shrink-0 flex-col gap-1 border-r border-slate-200 bg-slate-50 px-3 py-4"
+      className="flex w-[200px] shrink-0 flex-col gap-1 border-r border-border bg-muted px-3 py-4"
     >
       {SECTION_ORDER.map((sectionId) => {
         const isActive = sectionId === activeSection;
@@ -142,8 +142,8 @@ export function SectionNav({
             className={cn(
               "group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
               isActive
-                ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200"
-                : "text-slate-600 hover:bg-white/60 hover:text-slate-900",
+                ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
             )}
           >
             <span

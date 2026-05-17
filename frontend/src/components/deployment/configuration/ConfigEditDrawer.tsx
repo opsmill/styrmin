@@ -234,7 +234,7 @@ export function ConfigEditDrawer({
         <Dialog.Popup
           aria-labelledby={titleId}
           className={cn(
-            "fixed right-0 top-0 z-50 flex h-screen flex-col bg-white text-slate-900 shadow-2xl outline-none",
+            "fixed right-0 top-0 z-50 flex h-screen flex-col bg-background text-foreground shadow-2xl outline-none",
             // Width: full below xl, 760px from xl up
             "w-full xl:w-[760px]",
             // Slide-in animation — 200 ms ease-out
@@ -243,17 +243,17 @@ export function ConfigEditDrawer({
           )}
         >
           {/* Header */}
-          <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+          <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-4">
             <div className="flex min-w-0 flex-col gap-1">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Edit configuration
               </span>
               <Dialog.Title
                 id={titleId}
-                className="truncate text-base font-semibold text-slate-900"
+                className="truncate text-base font-semibold text-foreground"
               >
                 {deployment.name}{" "}
-                <span className="font-normal text-slate-500">
+                <span className="font-normal text-muted-foreground">
                   · {environment.name}
                 </span>
               </Dialog.Title>
@@ -264,7 +264,7 @@ export function ConfigEditDrawer({
                   type="button"
                   data-testid="drawer-close-button"
                   aria-label="Close edit configuration"
-                  className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               }
             >
@@ -402,11 +402,11 @@ export function ConfigEditDrawer({
                       id={`${sectionId}-anchor`}
                       className="scroll-mt-4"
                     >
-                      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+                      <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">
                         {SECTION_LABELS[sectionId]}
                       </h2>
                       <p
-                        className="mt-2 text-sm italic text-slate-400"
+                        className="mt-2 text-sm italic text-muted-foreground"
                         data-testid={`section-placeholder-${sectionId}`}
                       >
                         Section editor lands in a follow-up slice.
@@ -440,13 +440,13 @@ export function ConfigEditDrawer({
                 data-testid="discard-confirm-dialog"
                 className={cn(
                   "fixed left-1/2 top-1/2 z-[70] w-[420px] -translate-x-1/2 -translate-y-1/2",
-                  "rounded-lg border border-slate-200 bg-white p-6 shadow-xl outline-none",
+                  "rounded-lg border border-border bg-card p-6 shadow-xl outline-none",
                 )}
               >
-                <AlertDialog.Title className="text-base font-semibold text-slate-900">
+                <AlertDialog.Title className="text-base font-semibold text-foreground">
                   Discard pending changes?
                 </AlertDialog.Title>
-                <AlertDialog.Description className="mt-2 text-sm text-slate-600">
+                <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">
                   You have unsaved edits in this drawer. Discarding will revert
                   every pending change to its persisted value.
                 </AlertDialog.Description>

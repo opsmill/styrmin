@@ -158,14 +158,14 @@ export function ServiceOverridesSection({
       <div className="mb-3 flex items-center gap-3">
         <h3
           id={`${anchorId}-heading`}
-          className="text-sm font-semibold uppercase tracking-wide text-slate-700"
+          className="text-sm font-semibold uppercase tracking-wide text-foreground"
         >
           Services
         </h3>
         {changedCount > 0 && (
           <span
             data-testid={`section-changed-chip-${anchorId}`}
-            className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900"
+            className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
           >
             {changedCount} changed
           </span>

@@ -189,14 +189,14 @@ export function ComponentOverridesSection({
       <div className="mb-3 flex items-center gap-3">
         <h3
           id={`${anchorId}-heading`}
-          className="text-sm font-semibold uppercase tracking-wide text-slate-700"
+          className="text-sm font-semibold uppercase tracking-wide text-foreground"
         >
           Component Overrides
         </h3>
         {changedCount > 0 && (
           <span
             data-testid={`section-changed-chip-${anchorId}`}
-            className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900"
+            className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
           >
             {changedCount} changed
           </span>
@@ -233,18 +233,18 @@ export function ComponentOverridesSection({
                     key={component.id}
                     data-testid="component-override-block"
                     data-component={componentName}
-                    className="rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
+                    className="rounded-md border border-border bg-card"
                   >
                     <CollapsibleTrigger
                       data-testid={`component-override-trigger-${componentName}`}
-                      className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                      className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <span className="flex items-center gap-2">
                         <ChevronDown
                           aria-hidden="true"
-                          className="h-4 w-4 text-slate-500 transition-transform group-data-[panel-open]:rotate-0 group-data-[panel-closed]:-rotate-90"
+                          className="h-4 w-4 text-muted-foreground transition-transform group-data-[panel-open]:rotate-0 group-data-[panel-closed]:-rotate-90"
                         />
-                        <span className="font-mono text-xs text-slate-900 dark:text-slate-100">
+                        <span className="font-mono text-xs text-foreground">
                           {componentName}
                         </span>
                         {hasOverride && (
@@ -263,9 +263,7 @@ export function ComponentOverridesSection({
                       </span>
                     </CollapsibleTrigger>
                     <CollapsibleContent
-                      className={cn(
-                        "border-t border-slate-200 px-3 py-3 dark:border-slate-700",
-                      )}
+                      className={cn("border-t border-border px-3 py-3")}
                     >
                       <ComponentOverrideBody
                         form={form}
@@ -369,7 +367,7 @@ function ComponentOverrideBody({
   return (
     <div className="space-y-4">
       <div>
-        <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+        <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Environment variables
         </Label>
         <form.Field name={`${blockPath}.envVars`} mode="array">
@@ -401,7 +399,7 @@ function ComponentOverrideBody({
                             <div className="space-y-1">
                               <Label
                                 htmlFor={`comp-${componentName}-env-name-${index}`}
-                                className="text-[10px] uppercase tracking-wide text-slate-500"
+                                className="text-[10px] uppercase tracking-wide text-muted-foreground"
                               >
                                 Name
                               </Label>
@@ -436,7 +434,7 @@ function ComponentOverrideBody({
                             <div className="space-y-1">
                               <Label
                                 htmlFor={`comp-${componentName}-env-value-${index}`}
-                                className="text-[10px] uppercase tracking-wide text-slate-500"
+                                className="text-[10px] uppercase tracking-wide text-muted-foreground"
                               >
                                 Value
                               </Label>
@@ -515,7 +513,7 @@ function ComponentOverrideBody({
 function FutureExtensionPlaceholder() {
   return (
     <p
-      className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-[11px] italic text-slate-500 dark:border-slate-700 dark:bg-slate-900/30 dark:text-slate-400"
+      className="rounded-md border border-dashed border-border bg-muted/40 px-3 py-2 text-[11px] italic text-muted-foreground"
       data-testid="component-override-future-placeholder"
     >
       More per-component fields (CPU / memory requests &amp; limits, replicas,
