@@ -211,6 +211,7 @@ Use `git commit --no-verify` only for genuine emergencies — e.g., a hook that 
 | How does the system work? | `dev/knowledge/` |
 | How do I do X? | `dev/guides/` |
 | How do I manage users, groups, and roles? | `dev/guides/users-and-groups.md` |
+| How do I authenticate the CLI? | `cli/README.md#authentication` |
 | Why was this decided? | `dev/adr/` |
 | What are we building? | `specs/` |
 | How should I write code? | `dev/guidelines/` |
@@ -226,7 +227,7 @@ Use `git commit --no-verify` only for genuine emergencies — e.g., a hook that 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/011-typed-deployment-input/plan.md`.
+at `specs/011-styrminctl-auth/plan.md`.
 <!-- SPECKIT END -->
 
 ## Active Technologies

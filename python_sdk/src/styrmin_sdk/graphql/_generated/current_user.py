@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import Field
 
 from .base_model import BaseModel
+from .enums import Role
 
 
 class CurrentUser(BaseModel):
@@ -17,6 +18,8 @@ class CurrentUserCurrentUser(BaseModel):
     id: UUID
     username: str
     display_name: str = Field(alias="displayName")
+    role: Role
+    effective_role: Role = Field(alias="effectiveRole")
 
 
 CurrentUser.model_rebuild()
