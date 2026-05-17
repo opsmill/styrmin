@@ -310,3 +310,15 @@ which in the GraphQL schema becomes `updatedOn: DateTime` on `Deployment`. The f
 This is purely additive (new field, no breakage) and satisfies the Constitution §V propagation-test obligation by pairing the schema change with both an SDK propagation test and the slice's concurrent-edit E2E.
 
 **Do not implement now** — recorded here so slice 4 can act with full context. Slice 1 (this chunk) stops at the audit.
+
+### Slice 4 decision (Chunk 4c, T040–T043)
+
+**Shipped: Strategy B (client-side fingerprint compare).**
+
+The `ConfigDiffDialog` Apply handler:
+1. Re-fetches `GetDeployment` in the foreground (via a `useGetDeploymentQuery(..., {enabled: false})` instance whose `refetch()` is driven from the click handler).
+2. Computes a fingerprint hash of `{name, parameters, config}` on the refreshed deployment and compares it to the same hash captured at drawer-open time.
+3. If unchanged → dispatches `updateDeployment` and invalidates `GetDeployment` on success.
+4. If changed → renders an in-dialog `ConflictPanel` with a "Reload" action that hands the refreshed deployment back to `ConfigEditDrawer`, which swaps its baseline (`initialValues`) to the new persisted state while keeping the form's pending edits intact.
+
+**Strategy A** (server-issued `updatedOn` + typed `STALE_DEPLOYMENT_WRITE` error) is captured as the follow-up in `tasks.md` T077. Reasoning: the v1 race window is tiny (single round-trip), the UX is identical, and the backend change can land without touching the dialog code — the dialog's `setConflictDeployment` path will be triggered by a typed error response just as readily as by a fingerprint mismatch.

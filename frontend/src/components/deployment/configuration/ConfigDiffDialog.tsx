@@ -1,0 +1,458 @@
+import { useCallback, useMemo, useState } from "react";
+import { Dialog } from "@base-ui/react/dialog";
+import { useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, X } from "lucide-react";
+
+import type {
+  GetDeploymentQuery,
+  UpdateDeploymentInput,
+} from "@/generated/graphql";
+import {
+  useGetDeploymentQuery,
+  useUpdateDeploymentMutation,
+} from "@/generated/graphql";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { diff } from "@/lib/config-diff";
+import { evaluateImpact } from "@/lib/config-impact";
+import {
+  SECTION_ORDER,
+  type DriverParameterSchema,
+  type SectionId,
+} from "@/lib/configuration-types";
+import { impactRules } from "@/lib/impact-rules";
+import {
+  deploymentConfigToInput,
+  deploymentParametersToInput,
+} from "@/lib/deployment-input";
+import { cn } from "@/lib/utils";
+
+import { DiffEntryRow } from "./DiffEntryRow";
+import { ImpactList } from "./ImpactList";
+
+type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
+
+interface Props {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  deployment: Deployment;
+  /** Snapshot of `UpdateDeploymentInput` captured when the drawer opened. */
+  initialValues: UpdateDeploymentInput;
+  /** Current edited form values from the drawer. */
+  currentValues: UpdateDeploymentInput;
+  driverSchema: DriverParameterSchema;
+  /**
+   * Called after a successful Apply. The drawer wires this to its
+   * `forceClose()` helper so the drawer skips the close-with-dirty
+   * AlertDialog (the edits are now persisted, not "dirty").
+   */
+  onApplySuccess: () => void;
+  /**
+   * "Back to edit" handler — close the dialog only, leaving the drawer
+   * and every pending edit intact (FR-023).
+   */
+  onBackToEdit: () => void;
+  /**
+   * Called by the conflict panel's "Reload" action when the persisted
+   * baseline has moved. Receives the freshly-refetched deployment so the
+   * drawer can reset its `initialValues` to the new baseline while
+   * preserving the operator's pending edits on top.
+   */
+  onReloadBaseline: (refreshed: Deployment) => void;
+}
+
+const SECTION_LABELS: Record<SectionId, string> = {
+  identity: "Identity",
+  driverParameters: "Driver Parameters",
+  scheduling: "Scheduling",
+  networking: "Networking",
+  envVars: "Environment Vars",
+  storageRuntime: "Storage & Runtime",
+  serviceOverrides: "Service Overrides",
+  componentOverrides: "Component Overrides",
+};
+
+/**
+ * Review & apply confirmation dialog (FR-020..FR-025, FR-029).
+ *
+ * Renders the path-level diff grouped by section, the
+ * `ImpactList`, and the action footer. No type-to-confirm input
+ * (FR-022). On Apply:
+ *
+ *  1. Re-fetch the deployment and compute a "fingerprint" of the
+ *     persisted state (Strategy B from research R-012 — no backend
+ *     change required for v1). If the fingerprint differs from the
+ *     baseline we captured at drawer open, render the
+ *     `<ConflictPanel>` instead of dispatching the mutation. The
+ *     operator's pending edits are preserved against the new baseline.
+ *  2. If the fingerprint is unchanged, fire `useUpdateDeploymentMutation`
+ *     with `currentValues`. On success, invalidate the `GetDeployment`
+ *     query and call `onApplySuccess()` so the drawer closes.
+ *  3. On error, stay open and surface the message in an inline alert
+ *     (FR-025). Pending edits are not cleared.
+ *
+ * **Concurrency strategy (R-012)**: Strategy B (client-side fingerprint
+ * compare) is shipped here. Strategy A (server-issued `updatedOn` stamp
+ * + typed `STALE_DEPLOYMENT_WRITE` error) is captured as a follow-up in
+ * `specs/011-unified-deployment-config/research.md` and `tasks.md` T077.
+ * The dialog detects a moved baseline; it does NOT yet honour a typed
+ * server-side stale-write error code — that wiring lands when the
+ * backend exposes the stamp.
+ */
+export function ConfigDiffDialog({
+  open,
+  onOpenChange,
+  deployment,
+  initialValues,
+  currentValues,
+  driverSchema,
+  onApplySuccess,
+  onBackToEdit,
+  onReloadBaseline,
+}: Props) {
+  const queryClient = useQueryClient();
+
+  // Capture the fingerprint of the deployment as we saw it at drawer-open
+  // time. We deliberately compute this from the `deployment` prop (the
+  // drawer's snapshot) rather than from any live query so the value is
+  // stable across re-renders triggered by background refetches.
+  const baselineFingerprint = useMemo(
+    () => fingerprintDeployment(deployment),
+    [deployment],
+  );
+
+  // Compute the diff once per `currentValues` change.
+  const diffResult = useMemo(
+    () => diff(initialValues, currentValues, driverSchema),
+    [initialValues, currentValues, driverSchema],
+  );
+
+  const impactSummary = useMemo(
+    () => evaluateImpact(diffResult, impactRules),
+    [diffResult],
+  );
+
+  const grouped = useMemo(
+    () => groupBySection(diffResult.entries),
+    [diffResult.entries],
+  );
+
+  const updateMutation = useUpdateDeploymentMutation();
+  // The conflict-detection re-fetch — only enabled while the dialog is open.
+  // We pull `refetch` off this hook to drive the foreground re-fetch from the
+  // Apply handler. `enabled: false` ensures we never poll in the background.
+  const conflictQuery = useGetDeploymentQuery(
+    { deploymentId: deployment.id },
+    { enabled: false },
+  );
+
+  const [error, setError] = useState<string | null>(null);
+  const [conflictDeployment, setConflictDeployment] =
+    useState<Deployment | null>(null);
+
+  const handleApply = useCallback(async () => {
+    setError(null);
+    // Strategy B: foreground re-fetch + fingerprint compare.
+    try {
+      const fresh = await conflictQuery.refetch();
+      const freshDeployment = fresh.data?.deployment;
+      if (!freshDeployment) {
+        setError(
+          "Failed to verify deployment state before applying. Please retry.",
+        );
+        return;
+      }
+      const freshFingerprint = fingerprintDeployment(freshDeployment);
+      if (freshFingerprint !== baselineFingerprint) {
+        setConflictDeployment(freshDeployment);
+        return;
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Failed to verify deployment state: ${err.message}`
+          : "Failed to verify deployment state.",
+      );
+      return;
+    }
+
+    try {
+      await updateMutation.mutateAsync({
+        deploymentId: deployment.id,
+        input: currentValues,
+      });
+      queryClient.invalidateQueries({ queryKey: ["GetDeployment"] });
+      onApplySuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }, [
+    baselineFingerprint,
+    conflictQuery,
+    currentValues,
+    deployment.id,
+    onApplySuccess,
+    queryClient,
+    updateMutation,
+  ]);
+
+  const handleReload = useCallback(() => {
+    if (!conflictDeployment) return;
+    onReloadBaseline(conflictDeployment);
+    setConflictDeployment(null);
+    setError(null);
+    onOpenChange(false);
+  }, [conflictDeployment, onOpenChange, onReloadBaseline]);
+
+  const titleId = "config-diff-dialog-title";
+  const noChanges = !diffResult.hasChanges;
+  const disruptive = impactSummary.topSeverity === "high";
+  const isApplying = updateMutation.isPending || conflictQuery.isFetching;
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Backdrop
+          className={cn(
+            "fixed inset-0 z-[60] bg-black/50 transition-opacity duration-150",
+            "data-[open]:opacity-100 data-[closed]:opacity-0",
+          )}
+        />
+        <Dialog.Popup
+          aria-labelledby={titleId}
+          data-testid="config-diff-dialog"
+          className={cn(
+            "fixed left-1/2 top-1/2 z-[70] flex max-h-[85vh] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col",
+            "rounded-xl border border-slate-200 bg-white shadow-2xl outline-none",
+          )}
+        >
+          <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+            <div className="min-w-0">
+              <Dialog.Title
+                id={titleId}
+                className="text-base font-semibold text-slate-900"
+              >
+                Review configuration changes
+              </Dialog.Title>
+              <p className="mt-1 text-xs text-slate-500">
+                {deployment.name} ·{" "}
+                {diffResult.entries.length === 0
+                  ? "No pending changes"
+                  : `${diffResult.entries.length} pending change${
+                      diffResult.entries.length === 1 ? "" : "s"
+                    }`}
+              </p>
+            </div>
+            <Dialog.Close
+              render={
+                <button
+                  type="button"
+                  aria-label="Close review dialog"
+                  data-testid="diff-dialog-close-button"
+                  className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                />
+              }
+            >
+              <X className="h-4 w-4" />
+            </Dialog.Close>
+          </header>
+
+          {conflictDeployment ? (
+            <ConflictPanel onReload={handleReload} onBack={onBackToEdit} />
+          ) : (
+            <>
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+                {error && (
+                  <Alert
+                    variant="destructive"
+                    data-testid="diff-dialog-error"
+                    className="mb-4"
+                  >
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+
+                {noChanges ? (
+                  <p
+                    data-testid="diff-dialog-empty"
+                    className="rounded-md border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500"
+                  >
+                    No pending changes. Close this dialog and edit a field to
+                    enable Apply.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-6">
+                    <section
+                      aria-label="Diff"
+                      data-testid="diff-dialog-diff-section"
+                    >
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Diff
+                      </h3>
+                      <div className="flex flex-col gap-4">
+                        {SECTION_ORDER.filter(
+                          (id) => grouped[id] && grouped[id].length > 0,
+                        ).map((id) => (
+                          <div
+                            key={id}
+                            data-testid={`diff-section-${id}`}
+                            className="flex flex-col gap-2"
+                          >
+                            <h4 className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                              {SECTION_LABELS[id]}
+                            </h4>
+                            <div className="flex flex-col gap-1.5">
+                              {grouped[id]?.map((entry) => (
+                                <DiffEntryRow
+                                  key={`${entry.path}-${entry.kind}`}
+                                  entry={entry}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    {impactSummary.entries.length > 0 && (
+                      <section
+                        aria-label="Impact"
+                        data-testid="diff-dialog-impact-section"
+                      >
+                        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Impact
+                        </h3>
+                        <ImpactList summary={impactSummary} />
+                      </section>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <footer className="flex items-center justify-end gap-2 border-t border-slate-200 px-6 py-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onBackToEdit}
+                  disabled={isApplying}
+                  data-testid="diff-dialog-back-button"
+                >
+                  ← Back to edit
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    void handleApply();
+                  }}
+                  disabled={noChanges || isApplying}
+                  data-testid="diff-dialog-apply-button"
+                  className={cn(
+                    disruptive &&
+                      "bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-400",
+                  )}
+                >
+                  {isApplying ? "Applying…" : "Apply & redeploy"}
+                </Button>
+              </footer>
+            </>
+          )}
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function ConflictPanel({
+  onReload,
+  onBack,
+}: {
+  onReload: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <div
+      data-testid="diff-dialog-conflict-panel"
+      className="flex flex-1 flex-col gap-4 px-6 py-6"
+    >
+      <div className="flex items-start gap-3 rounded-md border border-amber-400 bg-amber-50 px-4 py-3 text-amber-900">
+        <AlertTriangle
+          className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
+          aria-hidden="true"
+        />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">
+            This deployment was modified while you were editing
+          </p>
+          <p className="mt-1 text-xs text-amber-900/80">
+            Another client saved changes since you opened the drawer. Reload to
+            merge against the latest persisted state. Your pending edits will be
+            preserved on top of the new baseline.
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onBack}
+          data-testid="diff-dialog-conflict-back-button"
+        >
+          ← Back to edit
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          onClick={onReload}
+          data-testid="diff-dialog-reload-button"
+        >
+          Reload
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a stable fingerprint of a deployment's persisted state for
+ * Strategy-B concurrency detection (research R-012).
+ *
+ * We hash the same fields the operator can edit: `name`, `parameters`,
+ * and `config` (which carries every editable section). If any of those
+ * have moved on the server between drawer-open time and Apply time, the
+ * fingerprint changes and we surface the conflict panel.
+ *
+ * `JSON.stringify` ordering depends on insertion order, but the GraphQL
+ * resolver returns these fields with stable shapes, so the order is
+ * deterministic across consecutive fetches of the same row.
+ */
+function fingerprintDeployment(deployment: Deployment): string {
+  const input = deploymentConfigToInput(deployment.config);
+  const parameters = deploymentParametersToInput(deployment.parameters);
+  return JSON.stringify({
+    name: deployment.name,
+    parameters,
+    config: input,
+  });
+}
+
+function groupBySection(
+  entries: ReturnType<typeof diff>["entries"],
+): Partial<Record<SectionId, typeof entries>> {
+  const out: Partial<Record<SectionId, typeof entries>> = {};
+  for (const entry of entries) {
+    const existing = out[entry.section];
+    if (existing) {
+      existing.push(entry);
+    } else {
+      out[entry.section] = [entry];
+    }
+  }
+  return out;
+}

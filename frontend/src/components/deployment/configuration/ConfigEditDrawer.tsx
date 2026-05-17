@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { AlertDialog } from "@base-ui/react/alert-dialog";
 import { Dialog } from "@base-ui/react/dialog";
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { X } from "lucide-react";
 
 import type {
@@ -21,12 +21,14 @@ import {
 } from "@/lib/configuration-types";
 import { cn } from "@/lib/utils";
 
+import { ConfigDiffDialog } from "./ConfigDiffDialog";
 import { DrawerFooter } from "./DrawerFooter";
 import { SectionNav } from "./SectionNav";
 import { IdentitySection } from "./sections/edit/IdentitySection";
 import { SchedulingSection } from "./sections/edit/SchedulingSection";
 
 type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
+
 type Environment = Deployment["environment"];
 
 interface Props {
@@ -85,17 +87,30 @@ export function ConfigEditDrawer({
   environment,
   driverSchema,
 }: Props) {
+  // After a concurrent-edit reload (FR-029), the dialog hands us a refreshed
+  // deployment snapshot. That snapshot becomes the new baseline ("before"
+  // side of the diff) while the operator's pending edits in the form remain
+  // intact on top of it. Until reload, this is `null` and `initialValues`
+  // tracks the `deployment` prop directly.
+  const [rebaselineDeployment, setRebaselineDeployment] =
+    useState<Deployment | null>(null);
+  const baselineDeployment = rebaselineDeployment ?? deployment;
+
   // Snapshot the persisted state once per "open" — used as both the form's
   // initial values AND the "before" side of the diff helper that powers the
   // footer pending-change count and the section-nav change dots.
   const initialValues = useMemo<UpdateDeploymentInput>(() => {
-    const base = deploymentConfigToInput(deployment.config);
+    const base = deploymentConfigToInput(baselineDeployment.config);
     return {
       ...base,
-      name: deployment.name,
-      parameters: deploymentParametersToInput(deployment.parameters),
+      name: baselineDeployment.name,
+      parameters: deploymentParametersToInput(baselineDeployment.parameters),
     };
-  }, [deployment.config, deployment.name, deployment.parameters]);
+  }, [
+    baselineDeployment.config,
+    baselineDeployment.name,
+    baselineDeployment.parameters,
+  ]);
 
   // Parent environment configuration projected through the same helper, so
   // section components can decide whether a field's `initial` value came
@@ -118,6 +133,16 @@ export function ConfigEditDrawer({
   // T035: close-with-dirty AlertDialog state.
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
 
+  // T042: Review & apply confirmation dialog state.
+  const [diffDialogOpen, setDiffDialogOpen] = useState(false);
+
+  // Subscribe to the live form values so the diff dialog always shows the
+  // operator's most recent edits without re-mounting on every keystroke.
+  const currentValues = useStore(
+    form.store,
+    (s) => (s as { values: UpdateDeploymentInput }).values,
+  );
+
   const hasPendingChanges = useCallback((): boolean => {
     const current = form.state.values as UpdateDeploymentInput;
     return diff(initialValues, current, driverSchema).hasChanges;
@@ -125,18 +150,15 @@ export function ConfigEditDrawer({
 
   /**
    * Force-close bypasses the dirty-confirmation prompt. The Review & apply
-   * dialog (T042) will call this after a successful mutation so the drawer
-   * unmounts cleanly without re-showing the discard confirmation against
-   * pending-but-now-applied changes.
+   * dialog calls this after a successful mutation so the drawer unmounts
+   * cleanly without re-showing the discard confirmation against pending-
+   * but-now-applied changes.
    */
   const forceClose = useCallback(() => {
     setConfirmDiscardOpen(false);
+    setDiffDialogOpen(false);
     onOpenChange(false);
   }, [onOpenChange]);
-  // `forceClose` is intentionally not yet wired to a callback prop — slice 4
-  // (T042) will pass an `onApplied` prop that calls it. Avoid the unused
-  // warning until then.
-  void forceClose;
 
   const requestClose = useCallback(() => {
     if (hasPendingChanges()) {
@@ -163,10 +185,20 @@ export function ConfigEditDrawer({
     [requestClose, onOpenChange],
   );
 
-  // T042 will replace this stub.
   const handleReviewApply = useCallback(() => {
-    // TODO(US2 / slice 4): open ConfigDiffDialog
-    console.info("[ConfigEditDrawer] Review & apply — dialog arrives in T042");
+    setDiffDialogOpen(true);
+  }, []);
+
+  /**
+   * Concurrent-edit reload handler (FR-029). The dialog hands us a
+   * freshly-refetched deployment whose persisted state differs from what
+   * we saw at drawer-open time. We swap the baseline to the new
+   * deployment — the form values stay untouched, so the operator's
+   * pending edits now sit on top of the refreshed persisted state and
+   * the diff recomputes accordingly.
+   */
+  const handleReloadBaseline = useCallback((refreshed: Deployment) => {
+    setRebaselineDeployment(refreshed);
   }, []);
 
   const titleId = "config-edit-drawer-title";
@@ -357,6 +389,22 @@ export function ConfigEditDrawer({
               </AlertDialog.Popup>
             </AlertDialog.Portal>
           </AlertDialog.Root>
+
+          {/* T042/T043: Review & apply confirmation dialog. Rendered inside
+              the drawer Popup so the Base UI focus-trap stack nests correctly
+              (the dialog gets focus while open; on close, focus returns to
+              the drawer's Review & apply button). */}
+          <ConfigDiffDialog
+            open={diffDialogOpen}
+            onOpenChange={setDiffDialogOpen}
+            deployment={baselineDeployment}
+            initialValues={initialValues}
+            currentValues={currentValues}
+            driverSchema={driverSchema}
+            onApplySuccess={forceClose}
+            onBackToEdit={() => setDiffDialogOpen(false)}
+            onReloadBaseline={handleReloadBaseline}
+          />
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
