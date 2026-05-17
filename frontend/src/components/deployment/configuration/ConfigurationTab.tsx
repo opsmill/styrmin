@@ -23,6 +23,7 @@ import { NetworkingSummary } from "./sections/read/NetworkingSummary";
 import { EnvVarsSummary } from "./sections/read/EnvVarsSummary";
 import { StorageRuntimeSummary } from "./sections/read/StorageRuntimeSummary";
 import { ServiceOverridesSummary } from "./sections/read/ServiceOverridesSummary";
+import { ComponentOverridesSummary } from "./sections/read/ComponentOverridesSummary";
 
 /**
  * Non-null `deployment` payload returned by the `GetDeployment` query.
@@ -45,12 +46,9 @@ const DEFAULT_INHERITED: InheritanceState = { kind: "inherited" };
  *
  * Composes:
  *   - `HeroSummaryBar` (dark navy strip with aggregate counts + actions)
- *   - 6 section summary cards in the order:
+ *   - 7 section summary cards in the order:
  *     Driver Parameters → Scheduling → Networking → Env Vars
- *     → Storage & Runtime → Service Overrides
- *
- * Component Overrides is added by Phase 6 (US4), so it is intentionally
- * omitted here.
+ *     → Storage & Runtime → Service Overrides → Component Overrides
  *
  * The Edit drawer wiring lives in Phase 4 (US2). For this slice, the Edit
  * CTA's `onClick` is a no-op placeholder.
@@ -146,6 +144,12 @@ export function ConfigurationTab({ deployment }: Props) {
         current={current}
         environment={environment}
         inheritance={getInheritance("serviceOverrides")}
+      />
+      <ComponentOverridesSummary
+        current={current}
+        environment={environment}
+        inheritance={getInheritance("componentOverrides")}
+        components={deployment.components}
       />
 
       <ViewJsonDialog

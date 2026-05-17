@@ -189,12 +189,12 @@ description: "Task list for 011-unified-deployment-config"
 
 **Independent Test**: Open the drawer, expand Component Overrides, set a CPU resource override on one component, apply, and verify only that component's pods are recreated with the new limit.
 
-- [ ] T065 [P] [US4] Create `frontend/src/components/deployment/configuration/sections/read/ComponentOverridesSummary.tsx` — list every component declared by the driver; each row shows status (overridden vs no override) and a one-line summary of the override scope when present.
-- [ ] T066 [US4] Wire `ComponentOverridesSummary` into `ConfigurationTab` after Service Name Overrides.
-- [ ] T067 [P] [US4] Create `frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx` — collapsible block per component (Base UI Collapsible). Inside each block: per-component resources (CPU/memory request+limit), replicas override, future-extension placeholder section. Field array semantics keyed on component name; never positional. Export `componentOverridesSchema`.
-- [ ] T068 [US4] Wire `ComponentOverridesSection` into `ConfigEditDrawer`'s form body and `SectionNav`'s nav list as the last section.
-- [ ] T069 [P] [US4] Create `backend/tests/e2e/configuration/test_drawer_component_overrides_edit.py` (`@pytest.mark.ui_only`). Seed a deployment with 3 components; set CPU resource overrides on one component via the drawer; assert only that component's Deployment resource gets the new request/limit and the other two are untouched.
-- [ ] T070 [US4] Run T069 to a pass.
+- [X] T065 [P] [US4] Create `frontend/src/components/deployment/configuration/sections/read/ComponentOverridesSummary.tsx` — list every component declared by the driver; each row shows status (overridden vs no override) and a one-line summary of the override scope when present.
+- [X] T066 [US4] Wire `ComponentOverridesSummary` into `ConfigurationTab` after Service Name Overrides.
+- [X] T067 [P] [US4] Create `frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx` — collapsible block per component (Base UI Collapsible). Inside each block: per-component resources (CPU/memory request+limit), replicas override, future-extension placeholder section. Field array semantics keyed on component name; never positional. Export `componentOverridesSchema`.
+- [X] T068 [US4] Wire `ComponentOverridesSection` into `ConfigEditDrawer`'s form body and `SectionNav`'s nav list as the last section.
+- [X] T069 [P] [US4] Create `backend/tests/e2e/configuration/test_drawer_component_overrides_edit.py` (`@pytest.mark.ui_only`). Seed a deployment with 3 components; set CPU resource overrides on one component via the drawer; assert only that component's Deployment resource gets the new request/limit and the other two are untouched.
+- [⚠️] T070 [US4] Run T069 to a pass. (static review only — harness limit; full E2E needs vcluster + Docker.)
 
 **Checkpoint**: US4 fully functional. Component Overrides ships as a first-class section in both surfaces with room to grow.
 

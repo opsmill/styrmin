@@ -31,6 +31,7 @@ import { NetworkingSection } from "./sections/edit/NetworkingSection";
 import { SchedulingSection } from "./sections/edit/SchedulingSection";
 import { ServiceOverridesSection } from "./sections/edit/ServiceOverridesSection";
 import { StorageRuntimeSection } from "./sections/edit/StorageRuntimeSection";
+import { ComponentOverridesSection } from "./sections/edit/ComponentOverridesSection";
 
 type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
 
@@ -365,6 +366,18 @@ export function ConfigEditDrawer({
                         initial={initialValues}
                         environment={environmentValues}
                         anchorId={sectionId}
+                      />
+                    );
+                  }
+                  if (sectionId === "componentOverrides") {
+                    return (
+                      <ComponentOverridesSection
+                        key={sectionId}
+                        form={form}
+                        initial={initialValues}
+                        environment={environmentValues}
+                        anchorId={sectionId}
+                        components={deployment.components}
                       />
                     );
                   }
