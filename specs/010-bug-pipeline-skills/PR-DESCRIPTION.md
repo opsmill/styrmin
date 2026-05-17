@@ -23,7 +23,7 @@ This file holds the body content the reviewer should paste into the implementati
 
 ## Constitution §V deviation
 
-This feature is meta-tooling (developer-facing automation; no application code, no GraphQL schema change). Per Constitution §V the new-feature E2E rule applies, but the project's pytest E2E suite (`backend/tests/e2e/`) targets the deployment platform on a real Kind cluster and is not a fit for skills whose user-visible flow is "type a slash command on a GitHub issue → side effect appears on GitHub".
+This feature is meta-tooling (developer-facing automation; no application code, no GraphQL schema change). Per Constitution §V the new-feature E2E rule applies, but the project's pytest E2E suite (`backend/tests/e2e/`) targets the deployment platform on a real vcluster and is not a fit for skills whose user-visible flow is "type a slash command on a GitHub issue → side effect appears on GitHub".
 
 The deviation — `yamllint` automation plus a manual smoke-test procedure documented in `quickstart.md` in lieu of a pytest E2E — is recorded in `plan.md` → Complexity Tracking and was explicitly approved by the reviewer (@damien) during `/speckit-auto-implement` preflight. The approval is captured in `tasks.md` under T002.
 

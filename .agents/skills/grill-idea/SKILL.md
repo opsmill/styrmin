@@ -2,7 +2,7 @@
 name: grill-idea
 description: Relentless interview-style session that stress-tests a raw feature idea against the Styrmin constitution and existing domain, producing a PRD-ready brief that can be handed straight to /speckit-specify. Use when the user has a fuzzy idea and wants to harden it before writing a spec.
 argument-hint: A short description of the idea to grill (optional — if absent, ask once for the seed idea)
-compatibility: Requires `dev/constitution.md` and `.specify/templates/spec-template.md`. Designed as the pre-step before `/speckit-specify`.
+compatibility: Requires `CONTEXT.md`, `dev/constitution.md`, and `.specify/templates/spec-template.md`. Designed as the pre-step before `/speckit-specify`.
 metadata:
   inspiration: https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md
 user-invocable: true
@@ -36,15 +36,44 @@ Do **not** use this skill for:
 - A bug fix or refactor with no user-visible behaviour change — go straight to `/speckit-tinyspec-tinyspec` or a regular PR.
 - An idea the user has already turned into a spec — use `/speckit-clarify` instead.
 
+## Read before grilling
+
+Before the first question, read these so your terminology is aligned with the project:
+
+- **[`CONTEXT.md`](../../../CONTEXT.md)** — the project glossary. This is the canonical name for every domain concept (cluster, environment, deployment, instance, driver, context, agent, operator, hook, mode, phase, …) and the synonyms to avoid. Use these terms verbatim throughout the interview and in `.specify/idea-brief.md`. If the user uses a synonym `CONTEXT.md` explicitly avoids ("workflow" instead of "flow", "soft-delete" instead of "tombstone", etc.), surface the canonical term and use it.
+- **[`dev/constitution.md`](../../../dev/constitution.md)** — the principles you will grill against in lens 7.
+- **[`dev/knowledge/architecture.md`](../../../dev/knowledge/architecture.md)** — the descriptive system overview.
+
 ## How to interview
 
 - **One question at a time.** Do not batch. Wait for an answer before the next question.
 - **Lead with your recommendation.** Format each turn as: short context → question → your recommended answer with reasoning → invite confirmation or redirection.
-- **Explore before asking.** If the codebase, `dev/constitution.md`, `dev/knowledge/`, `dev/adr/`, or existing `specs/` can answer the question, read them and report findings rather than asking.
+- **Explore before asking.** If `CONTEXT.md`, the codebase, `dev/constitution.md`, `dev/knowledge/`, `dev/adr/`, or existing `specs/` can answer the question, read them and report findings rather than asking.
 - **Cross-reference with code.** When the user asserts how something works today, verify against the relevant files in `backend/`, `frontend/`, `python_sdk/`, or `driver/`. Surface contradictions immediately.
-- **Sharpen fuzzy terms.** When the user says "deployment", "environment", "cluster", "driver", "instance" — pin down which existing domain entity they mean. Use the project's canonical vocabulary, not synonyms.
+- **Sharpen fuzzy terms against `CONTEXT.md`.** When the user says "deployment", "environment", "cluster", "driver", "instance", "context", "workflow", "delete", "status", etc. — pin down which entry in `CONTEXT.md` they mean. Use the canonical vocabulary, not synonyms. If the user genuinely names a concept that is not in `CONTEXT.md`, treat that as a glossary gap (see "Updating CONTEXT.md when concepts are missing").
 - **Use concrete scenarios.** When relationships are vague, invent a specific example ("imagine a user upgrades driver v1.2 → v1.3 mid-reconciliation — what should happen?") and force a precise answer.
 - **Capture clarifications inline.** Update `.specify/idea-brief.md` as decisions land. Don't batch at the end.
+
+## Updating CONTEXT.md when concepts are missing
+
+`CONTEXT.md` is the project's living glossary. Grilling regularly exposes concepts that are either undefined or named inconsistently across the codebase. When that happens during the interview, fix it inline — do not defer.
+
+**You MUST update `CONTEXT.md` in the same session if any of the following happens during grilling:**
+
+1. The idea introduces a genuinely new domain concept (a new entity, a new lifecycle slot, a new state, a new orchestration role). Add a bolded glossary entry with a one-sentence definition and an `_Avoid_:` line naming the synonyms it displaces.
+2. You discover an existing concept is used in the codebase but is missing from `CONTEXT.md`. Add it — even if the idea being grilled does not strictly require it — because future grilling sessions need it too.
+3. The user (or the code) reveals that `CONTEXT.md`'s current definition is wrong, stale, or ambiguous. Correct the entry and, if relevant, add the older phrasing to its `_Avoid_:` line.
+4. A new ambiguity emerges between two terms (e.g. "phase" vs "mode" vs "hook"). Add or extend an entry under **Flagged ambiguities**.
+
+When you update `CONTEXT.md`:
+
+- Keep edits surgical — one concept per entry, written in the same voice as the existing entries.
+- Use the canonical structure: `**Term**: definition. _Avoid_: synonyms.`
+- Cross-link to ADRs in `dev/adr/` and knowledge docs in `dev/knowledge/` rather than restating their content.
+- After editing, point at the new/changed entry in your next turn so the user can confirm the wording.
+- Reflect the change in the idea brief: use the canonical term from `CONTEXT.md` everywhere in `.specify/idea-brief.md`.
+
+If you are unsure whether something deserves a glossary entry, ask the user once: "This concept (`<term>`) is not in `CONTEXT.md` — should I add it as a first-class term, or is it a one-off label for this idea?" Default to adding it when in doubt; an over-broad glossary is recoverable, a drifted one is not.
 
 ## Grilling lenses
 
@@ -72,8 +101,9 @@ The spec template requires **prioritized, independently testable** user stories.
 
 ### 4. Key entities and domain fit
 
-- Which existing entities are touched? (`Cluster`, `Environment`, `Deployment`, `Instance`, `Driver`, `Component`, `Workflow`, etc.)
+- Which existing entities are touched? Look them up in `CONTEXT.md` and use the canonical name (`Cluster`, `Environment`, `Deployment`, `Instance` / `ApplicationInstance`, `Application Driver`, `Application Driver Version`, `Component`, `Service`, `Action`, `Task`, `Flow`, `GlobalContext`, `StyrminDeployment` CRD, `Utility`, `BackupStorageLocation`, …).
 - Are any new entities required, or can the idea be expressed in terms of existing ones? Strongly prefer the latter.
+- If the idea uses a term that is not yet in `CONTEXT.md`, follow "Updating CONTEXT.md when concepts are missing" — add the entry now, do not defer.
 - If a new entity is needed: what is its lifecycle, who owns it, and what is its relationship to existing entities?
 
 ### 5. Edge cases
@@ -190,8 +220,9 @@ The brief is "Ready for /speckit-specify" when **all** of the following hold:
 4. The constitution alignment section names the **E2E scenario** that will be shipped, even if just as a sentence.
 5. Every Governance Gate the idea crosses is explicitly checked or explicitly ruled out.
 6. No more than three `[NEEDS CLARIFICATION]` markers remain.
+7. Every domain term used in the brief either exists in `CONTEXT.md` or was added to it during this session.
 
-When all six hold, flip **Status** to `Ready for /speckit-specify`, tell the user, and recommend running `/speckit-specify` with the brief as input.
+When all seven hold, flip **Status** to `Ready for /speckit-specify`, tell the user, and recommend running `/speckit-specify` with the brief as input.
 
 ## Anti-patterns
 
@@ -199,6 +230,7 @@ When all six hold, flip **Status** to `Ready for /speckit-specify`, tell the use
 - **Do not invent edge cases the user has not signalled care about.** Stress-test the boundaries the idea actually touches, not a generic checklist.
 - **Do not stall on perfect requirements.** Three crisp testable FRs that ship is better than ten that don't.
 - **Do not skip the constitution lens.** Even if the idea seems UI-only, walk §I–§VI explicitly — the constitution is the project's non-negotiable contract and missing alignment here costs rework at plan time.
+- **Do not drift from `CONTEXT.md` vocabulary.** If you find yourself reaching for a synonym ("workflow" for **flow**, "soft-delete" for **tombstone**, "config" for **GlobalContext**, "K8s agent" for **agent**), stop and use the canonical term. If the canonical term is genuinely missing, add it to `CONTEXT.md` — do not invent a parallel vocabulary in the brief.
 - **Do not write the spec.** This skill produces a brief, not a spec. The spec is `/speckit-specify`'s job.
 
 ## Expected outcome
