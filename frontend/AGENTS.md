@@ -34,6 +34,12 @@ frontend/
 │   │   ├── drivers/      # Driver list, detail, add
 │   │   ├── environments/ # Environment list, detail, create dialog
 │   │   └── settings/     # Settings, cluster detail, create cluster dialog
+│   ├── components/deployment/configuration/
+│   │                     # Canonical location for the unified deployment-config UI
+│   │                     # (Configuration tab + edit drawer + per-section read/edit
+│   │                     # blocks). Added in feature 011-unified-deployment-config,
+│   │                     # which also removed the legacy
+│   │                     # `components/deployment/scheduling/` directory.
 │   ├── routes/           # TanStack Router route definitions (code-based)
 │   ├── routeTree.ts      # Assembled route tree (all routes as children of root)
 │   ├── router.ts         # Router instance + type registration (declare module)

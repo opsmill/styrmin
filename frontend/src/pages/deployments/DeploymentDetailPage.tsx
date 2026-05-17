@@ -44,7 +44,6 @@ import {
 } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
-import { SchedulingConfigDialog } from "@/components/deployment/scheduling/SchedulingConfigDialog";
 import { IfRole } from "@/auth/IfRole";
 import { PodsTab } from "./PodsTab";
 
@@ -96,7 +95,6 @@ export default function DeploymentDetailPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
-  const [schedulingOpen, setSchedulingOpen] = useState(false);
 
   // Deployment-deletion state (spec 008).
   const deleteDeploymentMutation = useDeleteDeploymentMutation();
@@ -285,17 +283,6 @@ export default function DeploymentDetailPage() {
             lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
             onRefreshNow={() => refetch()}
           />
-          <IfRole minimum="READ_WRITE">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isTerminal}
-              onClick={() => setSchedulingOpen(true)}
-              title={isTerminal ? "This deployment is retired" : undefined}
-            >
-              Scheduling
-            </Button>
-          </IfRole>
           <IfRole minimum="READ_WRITE">
             <Button
               variant="outline"
@@ -782,13 +769,6 @@ export default function DeploymentDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <SchedulingConfigDialog
-        open={schedulingOpen}
-        onOpenChange={setSchedulingOpen}
-        deploymentId={deploymentId}
-        currentConfig={deployment.config}
-      />
 
       {/* Delete deployment dialog (spec 008) — type-to-confirm. */}
       <Dialog

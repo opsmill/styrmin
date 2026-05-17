@@ -1,16 +1,12 @@
 /**
  * Sanitisation helpers for the unified-configuration `SchedulingSection`.
  *
- * Ported (and re-shaped) from
- * `frontend/src/components/deployment/scheduling/sanitize.ts`. The legacy
- * dialog worked on a snake_case `SchedulingConfig` shape and re-mapped it to
- * the GraphQL `SchedulingInput` at submit time. The unified drawer binds
- * the form directly to `SchedulingInput` (camelCase, screaming-snake enums),
- * so this file only keeps the "prune empties" half of the original helper —
- * the enum/case translation is no longer needed.
- *
- * Slice 11 (chunk 7) will delete the legacy file once the legacy dialog is
- * removed; until then both files coexist.
+ * The unified drawer binds the form directly to `SchedulingInput` (camelCase,
+ * screaming-snake enums), so this file only keeps the "prune empties" helper:
+ * collapse empty sub-objects/arrays to `null` so the GraphQL mutation accepts
+ * the partial input cleanly. The legacy `components/deployment/scheduling/`
+ * directory (which carried the snake_case → camelCase translation logic) was
+ * removed in feature 011, chunk 7.
  */
 import type {
   AffinityBlockInput,

@@ -243,10 +243,8 @@ interface Props {
 }
 
 /**
- * Scheduling section of the edit drawer. Ports the legacy
- * `SchedulingConfigDialog` sub-blocks but binds them to the drawer's single
- * TanStack Form instance via `form.Field` at sub-paths under
- * `scheduling.*`.
+ * Scheduling section of the edit drawer. Binds the form's `scheduling.*`
+ * sub-paths to the drawer's single TanStack Form instance via `form.Field`.
  *
  * Sub-blocks (top-to-bottom):
  *   - Resources (request/limit for CPU + memory)
