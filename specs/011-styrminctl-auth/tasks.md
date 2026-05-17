@@ -97,8 +97,8 @@ description: "Task list for 011-styrminctl-auth — CLI login/logout/whoami + pe
 
 ### Implementation for User Story 3
 
-- [ ] T019 [US3] Verify the top-level error boundary from T013 covers every failure path enumerated in the three contracts. Add any missing branches: `getpass` `EOFError` (`Cannot prompt for password: stdin is not a terminal. Use STYRMIN_USERNAME + STYRMIN_PASSWORD for non-interactive auth.`), network errors (`Could not reach <address>: <error class>.`), and `TokenStoreError` rendering with the file path.
-- [ ] T020 [P] [US3] CLI tests in `cli/tests/commands/test_auth_commands.py`: `test_no_credentials_prints_friendly_line_and_exits_non_zero`, `test_stale_token_does_not_delete_local_entry` (asserts the file's `tokens[<key>]` is unchanged after an `UNAUTHENTICATED` failure), `test_corrupt_token_store_prints_friendly_line` (writes invalid JSON, asserts the message names the file and the parse error class).
+- [X] T019 [US3] Verify the top-level error boundary from T013 covers every failure path enumerated in the three contracts. Add any missing branches: `getpass` `EOFError` (`Cannot prompt for password: stdin is not a terminal. Use STYRMIN_USERNAME + STYRMIN_PASSWORD for non-interactive auth.`), network errors (`Could not reach <address>: <error class>.`), and `TokenStoreError` rendering with the file path.
+- [X] T020 [P] [US3] CLI tests in `cli/tests/commands/test_auth_commands.py`: `test_no_credentials_prints_friendly_line_and_exits_non_zero`, `test_stale_token_does_not_delete_local_entry` (asserts the file's `tokens[<key>]` is unchanged after an `UNAUTHENTICATED` failure), `test_corrupt_token_store_prints_friendly_line` (writes invalid JSON, asserts the message names the file and the parse error class).
 
 **Checkpoint**: US3 functional. All three friendly-error paths are covered.
 

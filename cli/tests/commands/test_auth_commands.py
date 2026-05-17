@@ -367,3 +367,110 @@ def test_whoami_friendly_error_on_stale_token(
     # (contract: only ``logout`` removes entries).
     after = json.loads(token_path.read_text())
     assert after["tokens"][SERVER] == "tok-stale", "stale token must be preserved for debugging"
+
+
+# ---------------------------------------------------------------------------
+# T020 — US3: friendly failure modes
+# ---------------------------------------------------------------------------
+
+
+def test_no_credentials_prints_friendly_line_and_exits_non_zero(
+    mocker: MockerFixture, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """``whoami`` with no credentials: single friendly stderr line, non-zero exit, no traceback.
+
+    Exercises the rung-5 (``"none"``) path end-to-end through the real
+    :class:`CredentialResolver` so the test guards both the resolver wiring
+    AND the ``whoami`` early-exit branch.
+    """
+    # No mocking of get_auth_context — exercise the real resolver path. The
+    # _isolated_token_store fixture already stripped credential env vars and
+    # pointed XDG_DATA_HOME at a clean tmp directory, so rung 1/2/3 all miss.
+
+    with pytest.raises(SystemExit) as exc:
+        app(["whoami"])
+    assert exc.value.code == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.strip() == ("Not logged in. Run `styrminctl login` or set STYRMIN_TOKEN."), (
+        "expected the friendly single-line message from contracts/whoami.md"
+    )
+    assert "Traceback" not in captured.err
+    # Token file must not have been created as a side effect.
+    assert not _token_file_path(tmp_path).exists()
+
+
+def test_stale_token_does_not_delete_local_entry(
+    mocker: MockerFixture, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """An ``UNAUTHENTICATED`` failure must leave ``tokens[<key>]`` byte-identical.
+
+    Contract: only ``logout`` removes entries. ``whoami`` (and any other
+    authenticated command) MUST NOT auto-purge stale entries — the operator
+    needs the value preserved for debugging / manual rotation.
+    """
+    # Seed a token by running login first so the file is a real, valid store.
+    seed_client = _make_mock_client()
+    seed_client.auth.login = AsyncMock(return_value=MagicMock(token="tok-rotten"))
+    mocker.patch("styrminctl.client.get_unauthenticated_client", return_value=seed_client)
+    mocker.patch("getpass.getpass", return_value="pw")
+    with pytest.raises(SystemExit):
+        app(["login", "--username", "alice"])
+
+    token_path = _token_file_path(tmp_path)
+    before_bytes = token_path.read_bytes()
+    before_json = json.loads(before_bytes)
+    assert before_json["tokens"][SERVER] == "tok-rotten"
+
+    # Simulate the backend rejecting the token as UNAUTHENTICATED.
+    _patch_get_auth_context(
+        mocker,
+        source="file",
+        user=StyrminAuthenticationError("token revoked", "UNAUTHENTICATED"),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["whoami"])
+    assert exc.value.code == 1
+
+    err = capsys.readouterr().err
+    assert "Not logged in" in err
+    assert "Traceback" not in err
+
+    # The store must be byte-identical — not just "still contains the key",
+    # but never even rewritten. Any rewrite would be a contract violation
+    # because only ``logout`` is allowed to touch the file.
+    after_bytes = token_path.read_bytes()
+    assert after_bytes == before_bytes, "token store must not be rewritten after UNAUTHENTICATED"
+    after_json = json.loads(after_bytes)
+    assert after_json["tokens"][SERVER] == "tok-rotten"
+
+
+def test_corrupt_token_store_prints_friendly_line(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """Invalid JSON in the token store: single stderr line naming the file, non-zero exit.
+
+    Asserts the error boundary catches :class:`TokenStoreError` and renders
+    its ``__str__`` (which embeds the path) — never a Python traceback.
+    """
+    # Pre-create the parent dir at 0700 and write garbage to the token file.
+    token_path = _token_file_path(tmp_path)
+    token_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    token_path.write_text("{not valid json", encoding="utf-8")
+    token_path.chmod(0o600)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["whoami"])
+    assert exc.value.code == 1
+
+    captured = capsys.readouterr()
+    err_lines = [line for line in captured.err.splitlines() if line.strip()]
+    # Single human-readable line on stderr.
+    assert len(err_lines) == 1, f"expected a single-line stderr message, got: {err_lines!r}"
+    message = err_lines[0]
+    # The message must name the offending file so the user can `cat` / fix it.
+    assert str(token_path) in message, f"token path missing from message: {message!r}"
+    # And it must identify it as a parse failure (not a generic I/O error),
+    # so the operator can distinguish corruption from permissions.
+    assert "corrupt JSON" in message, f"expected 'corrupt JSON' in message: {message!r}"
+    # Never a Python traceback.
+    assert "Traceback" not in captured.err
