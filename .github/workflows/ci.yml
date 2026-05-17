@@ -163,6 +163,40 @@ jobs:
           --deselect=backend/tests/unit/test_styrmin_deployment_timer.py::test_timer_still_trips_timeout_for_non_restoring_phase
           backend/tests
 
+  cli-tests:
+    name: CLI Unit Tests
+    needs: ["pre-commit-hooks"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - run: uv sync
+      - name: Run CLI unit tests
+        run: uv run pytest -v cli/tests
+
+  sdk-tests:
+    name: Python SDK Unit Tests
+    needs: ["pre-commit-hooks"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - run: uv sync
+      - name: Run Python SDK unit tests
+        run: uv run pytest -v python_sdk/tests
+
   e2e-tests-api:
     name: E2E Tests (API entrypoint)
     needs: ["files-changed", "pre-commit-hooks"]
