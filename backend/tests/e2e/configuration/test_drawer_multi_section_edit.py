@@ -197,9 +197,9 @@ async def test_drawer_multi_section_edit(
     env_section = diff_dialog.locator("[data-testid=diff-section-envVars]")
     await expect(scheduling_section).to_be_visible()
     await expect(env_section).to_be_visible()
-    await expect(scheduling_section).to_contain_text(
-        "scheduling.resources.requests.cpu"
-    )
+    # Diff rows render the human-readable ``label`` (path goes into the
+    # title attribute, not visible textContent).
+    await expect(scheduling_section).to_contain_text("Request cpu")
     await expect(env_section).to_contain_text(new_env_name)
 
     # Impact list must mention BOTH consequences.

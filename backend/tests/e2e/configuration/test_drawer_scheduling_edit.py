@@ -218,11 +218,12 @@ async def test_drawer_scheduling_edit(
     await expect(diff_dialog).to_be_visible()
 
     # Diff must list the changed path under the scheduling section.
+    # The diff row renders ``label`` only — ``path`` lives in the
+    # ``title`` attribute (not visible textContent), so we assert on
+    # the human-readable label.
     scheduling_section = diff_dialog.locator("[data-testid=diff-section-scheduling]")
     await expect(scheduling_section).to_be_visible()
-    await expect(scheduling_section).to_contain_text(
-        "scheduling.resources.requests.cpu"
-    )
+    await expect(scheduling_section).to_contain_text("Request cpu")
 
     # Impact list must mention the canonical consequence text from
     # impact-rules.ts for ``scheduling.resources.**``.

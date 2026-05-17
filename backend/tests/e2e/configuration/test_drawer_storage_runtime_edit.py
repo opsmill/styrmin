@@ -119,7 +119,13 @@ async def test_drawer_storage_runtime_edit(
     environment_id = storage_edit_environment["environment_id"]
     deployment_id = storage_edit_deployment["deployment_id"]
 
-    new_db_size = "7Gi"
+    # ``dbSize`` is an enum (small / medium / large / xlarge) backed by a
+    # shadcn Select trigger — not a free-text input. We pick ``large`` as
+    # the target because the seeded deployment has no override (so any
+    # value other than the inherited default is a real change), and
+    # because ``large`` exercises a value the impact rule still treats
+    # as a database resize.
+    new_db_size = "large"
 
     detail = DeploymentDetailPage(page)
     await detail.goto(environment_id=environment_id, deployment_id=deployment_id)
@@ -133,10 +139,12 @@ async def test_drawer_storage_runtime_edit(
 
     await page.locator("[data-testid=section-nav-storageRuntime]").click()
 
-    db_size_input = page.locator("[data-testid=storage-db-size]")
-    await expect(db_size_input).to_be_visible()
-    await db_size_input.fill(new_db_size)
-    await db_size_input.press("Tab")
+    db_size_trigger = page.locator("[data-testid=storage-db-size]")
+    await expect(db_size_trigger).to_be_visible()
+    await db_size_trigger.click()
+    # The Radix-backed Select renders options in a portal; match the
+    # visible option by role + accessible name.
+    await page.get_by_role("option", name=new_db_size, exact=True).click()
 
     review_button = page.locator("[data-testid=drawer-review-apply-button]")
     await expect(review_button).to_be_enabled()
@@ -145,9 +153,10 @@ async def test_drawer_storage_runtime_edit(
     diff_dialog = page.locator("[data-testid=config-diff-dialog]")
     await expect(diff_dialog).to_be_visible()
 
+    # Diff rows render the human-readable ``label`` (not ``path``).
     storage_section = diff_dialog.locator("[data-testid=diff-section-storageRuntime]")
     await expect(storage_section).to_be_visible()
-    await expect(storage_section).to_contain_text("dbSize")
+    await expect(storage_section).to_contain_text("Database size")
 
     # The dbSize impact rule consequence text — see frontend/src/lib/
     # impact-rules.ts. We match on a substring rather than the full

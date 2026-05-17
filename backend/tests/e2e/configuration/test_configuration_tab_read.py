@@ -32,6 +32,13 @@ from typing import TYPE_CHECKING, AsyncGenerator
 import pytest
 from playwright.async_api import expect
 from styrmin_sdk import StyrminClient
+from styrmin_sdk.graphql._generated.input_types import (
+    EnvVarInput,
+    ResourceRequirementsInput,
+    ResourceSpecInput,
+    SchedulingInput,
+    UpdateDeploymentInput,
+)
 
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
@@ -85,7 +92,7 @@ async def config_tab_deployment(
     with the ``inherited`` badge — that's the negative half of the
     inheritance assertion the test relies on.
     """
-    driver, _ = session_scenario_driver
+    driver, client = session_scenario_driver
     deployment = await driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
@@ -96,24 +103,33 @@ async def config_tab_deployment(
         deployment_id=deployment.id, timeout=RECONCILE_TIMEOUT_SECONDS
     )
 
-    # Apply a mixed-shape config that overrides three sections in one
+    # Seed a mixed-shape config that overrides three sections in one
     # mutation. The exact values are not load-bearing — only the fact
     # that each section is overridden (so its card shows the blue
     # "overridden (N)" badge).
-    await driver.update_deployment(
-        deployment_id=str(deployment.id),
-        config={
-            "scheduling": {
-                "resources": {
-                    "requests": {"cpu": "150m", "memory": "128Mi"},
-                },
-            },
-            "env_vars": {
-                "LOG_LEVEL": "debug",
-                "FEATURE_FLAG": "on",
-            },
-            "db_size": "5Gi",
-        },
+    #
+    # Seeding goes through the SDK directly (not ``driver.update_deployment``)
+    # because:
+    #   - The fixture is preparing state, not exercising the UI write path
+    #     (the UI write path has its own dedicated drawer-edit tests).
+    #   - The UI scenario driver's ``update_deployment`` is restricted to
+    #     the scheduling sub-tree today; the SDK route lets us seed
+    #     scheduling + env vars + storage atomically without coupling this
+    #     read-tab assertion to drawer evolution.
+    await client.deployments.update(
+        str(deployment.id),
+        input=UpdateDeploymentInput(
+            scheduling=SchedulingInput(
+                resources=ResourceRequirementsInput(
+                    requests=ResourceSpecInput(cpu="150m", memory="128Mi"),
+                ),
+            ),
+            envVars=[
+                EnvVarInput(name="LOG_LEVEL", value="debug"),
+                EnvVarInput(name="FEATURE_FLAG", value="on"),
+            ],
+            dbSize="5Gi",
+        ),
     )
     await driver.wait_for_deployment_running(
         deployment_id=str(deployment.id), timeout=RECONCILE_TIMEOUT_SECONDS

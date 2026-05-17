@@ -197,9 +197,10 @@ async def test_drawer_networking_edit(
     diff_dialog = page.locator("[data-testid=config-diff-dialog]")
     await expect(diff_dialog).to_be_visible()
 
+    # Diff rows render the human-readable ``label`` (not ``path``).
     net_section = diff_dialog.locator("[data-testid=diff-section-networking]")
     await expect(net_section).to_be_visible()
-    await expect(net_section).to_contain_text("ipWhitelist")
+    await expect(net_section).to_contain_text("IP whitelist")
 
     impact_section = diff_dialog.locator("[data-testid=diff-dialog-impact-section]")
     await expect(impact_section).to_be_visible()

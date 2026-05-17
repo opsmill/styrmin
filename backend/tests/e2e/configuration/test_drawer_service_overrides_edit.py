@@ -165,9 +165,11 @@ async def test_drawer_service_overrides_edit(
     diff_dialog = page.locator("[data-testid=config-diff-dialog]")
     await expect(diff_dialog).to_be_visible()
 
+    # Diff rows render the human-readable ``label`` — the override entry
+    # appears as ``Service "<name>" override``.
     svc_section = diff_dialog.locator("[data-testid=diff-section-serviceOverrides]")
     await expect(svc_section).to_be_visible()
-    await expect(svc_section).to_contain_text("serviceNameOverrides")
+    await expect(svc_section).to_contain_text(f'Service "{driver_service_name}"')
 
     await page.locator("[data-testid=diff-dialog-apply-button]").click()
     await expect(diff_dialog).to_be_hidden(timeout=60_000)
