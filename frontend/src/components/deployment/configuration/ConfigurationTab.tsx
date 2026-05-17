@@ -107,13 +107,15 @@ export function ConfigurationTab({ deployment }: Props) {
       ) : null}
 
       <EnvVarsSummary
-        current={current}
-        environment={environment}
+        deploymentConfig={deployment.config}
+        environmentConfig={deployment.environment.config}
+        clusterConfig={deployment.environment.cluster.config}
+        environmentName={deployment.environment.name}
+        clusterName={deployment.environment.cluster.name}
         inheritance={getInheritance("envVars")}
       />
       <ServiceOverridesSummary
-        current={current}
-        environment={environment}
+        deployedServices={deployment.deployedServices}
         inheritance={getInheritance("serviceOverrides")}
       />
       <DriverParametersSummary

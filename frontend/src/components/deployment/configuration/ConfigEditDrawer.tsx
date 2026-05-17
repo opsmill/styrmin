@@ -126,6 +126,19 @@ export function ConfigEditDrawer({
     return deploymentConfigToInput(environment.config);
   }, [environment.config]);
 
+  // Driver-declared service names available for override. Sourced from the
+  // resolved `deployedServices` list (which is the driver's declaration
+  // post-reconcile); used to populate the Services section's driver-service
+  // picker so operators can only override valid choices.
+  const driverServiceNames = useMemo<readonly string[]>(() => {
+    const rows = deployment.deployedServices ?? [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (row?.driverServiceName) seen.add(row.driverServiceName);
+    }
+    return Array.from(seen).sort();
+  }, [deployment.deployedServices]);
+
   const form = useForm({
     defaultValues: initialValues,
     onSubmit: () => {
@@ -365,6 +378,7 @@ export function ConfigEditDrawer({
                         form={form}
                         initial={initialValues}
                         environment={environmentValues}
+                        driverServiceNames={driverServiceNames}
                         anchorId={sectionId}
                       />
                     );

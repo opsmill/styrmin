@@ -17,6 +17,13 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { diff } from "@/lib/config-diff";
 import type {
   DriverParameterSchema,
@@ -98,6 +105,16 @@ interface Props {
   initial: UpdateDeploymentInput;
   environment: UpdateDeploymentInput;
   driverSchema?: DriverParameterSchema;
+  /**
+   * Driver-declared service names available for override. Sourced from
+   * `deployment.deployedServices[].driverServiceName` so we constrain the
+   * "which driver service to rename" picker to only valid choices.
+   *
+   * Optional for backwards compat with sites that have not yet threaded
+   * the list through; when omitted, the picker falls back to a free-text
+   * input.
+   */
+  driverServiceNames?: readonly string[];
   anchorId: SectionId;
 }
 
@@ -116,6 +133,7 @@ export function ServiceOverridesSection({
   form,
   initial,
   environment,
+  driverServiceNames,
   anchorId,
 }: Props) {
   const initialRows = (initial.serviceNameOverrides ??
@@ -142,7 +160,7 @@ export function ServiceOverridesSection({
           id={`${anchorId}-heading`}
           className="text-sm font-semibold uppercase tracking-wide text-slate-700"
         >
-          Service Overrides
+          Services
         </h3>
         {changedCount > 0 && (
           <span
@@ -186,17 +204,43 @@ export function ServiceOverridesSection({
                             <Label htmlFor={`svc-driver-${index}`}>
                               Driver service
                             </Label>
-                            <Input
-                              id={`svc-driver-${index}`}
-                              data-testid={`svc-driver-${index}`}
-                              value={f.state.value ?? ""}
-                              onChange={(e: any) =>
-                                f.handleChange(e.target.value)
-                              }
-                              onBlur={f.handleBlur}
-                              placeholder="declared driver service name"
-                              autoComplete="off"
-                            />
+                            {driverServiceNames &&
+                            driverServiceNames.length > 0 ? (
+                              <Select
+                                value={
+                                  (f.state.value as string | undefined) ?? ""
+                                }
+                                onValueChange={(v: any) =>
+                                  f.handleChange(v === "" ? undefined : v)
+                                }
+                              >
+                                <SelectTrigger
+                                  id={`svc-driver-${index}`}
+                                  data-testid={`svc-driver-${index}`}
+                                >
+                                  <SelectValue placeholder="Pick a driver service" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {driverServiceNames.map((name) => (
+                                    <SelectItem key={name} value={name}>
+                                      {name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Input
+                                id={`svc-driver-${index}`}
+                                data-testid={`svc-driver-${index}`}
+                                value={f.state.value ?? ""}
+                                onChange={(e: any) =>
+                                  f.handleChange(e.target.value)
+                                }
+                                onBlur={f.handleBlur}
+                                placeholder="declared driver service name"
+                                autoComplete="off"
+                              />
+                            )}
                             {f.state.meta.errors.length > 0 && (
                               <p className="text-xs text-destructive">
                                 {String(f.state.meta.errors[0])}

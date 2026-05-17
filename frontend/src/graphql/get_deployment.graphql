@@ -28,6 +28,11 @@ query GetDeployment($deploymentId: UUID!) {
       id
       name
       config
+      cluster {
+        id
+        name
+        config
+      }
     }
     applicationInstance {
       id

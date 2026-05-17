@@ -16,7 +16,7 @@ const SECTION_LABELS: Record<SectionId, string> = {
   networking: "Networking",
   envVars: "Environment Vars",
   storageRuntime: "Storage & Runtime",
-  serviceOverrides: "Service Overrides",
+  serviceOverrides: "Services",
   componentOverrides: "Component Overrides",
 };
 
