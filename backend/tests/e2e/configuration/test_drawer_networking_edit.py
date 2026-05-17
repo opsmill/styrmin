@@ -151,6 +151,14 @@ async def _wait_for_allowlist_resource(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(
+    reason=(
+        "Networking section is not currently rendered in the edit drawer "
+        "(see frontend/src/lib/configuration-types.ts::DRAWER_SECTION_GROUPS). "
+        "The Settings tab read view still shows networking; re-enable this "
+        "test when the Networking section is re-introduced in the drawer."
+    ),
+)
 @pytest.mark.ci
 @pytest.mark.ui_only(
     reason=(

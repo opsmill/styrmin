@@ -191,7 +191,7 @@ export function ComponentOverridesSection({
           id={`${anchorId}-heading`}
           className="text-sm font-semibold uppercase tracking-wide text-foreground"
         >
-          Component Overrides
+          Components
         </h3>
         {changedCount > 0 && (
           <span

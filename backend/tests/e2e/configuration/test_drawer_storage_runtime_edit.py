@@ -101,6 +101,14 @@ async def _wait_for_persisted_db_size(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(
+    reason=(
+        "Storage & Runtime section is not currently rendered in the edit "
+        "drawer (see frontend/src/lib/configuration-types.ts::DRAWER_SECTION_GROUPS). "
+        "The Settings tab read view still shows storage & runtime; re-enable "
+        "this test when the section is re-introduced in the drawer."
+    ),
+)
 @pytest.mark.ci
 @pytest.mark.ui_only(
     reason=(

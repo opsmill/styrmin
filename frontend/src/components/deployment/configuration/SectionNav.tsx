@@ -3,7 +3,7 @@ import { useStore } from "@tanstack/react-form";
 import type { UpdateDeploymentInput } from "@/generated/graphql";
 import { diff } from "@/lib/config-diff";
 import {
-  SECTION_ORDER,
+  DRAWER_SECTION_GROUPS,
   type DriverParameterSchema,
   type SectionId,
 } from "@/lib/configuration-types";
@@ -17,7 +17,7 @@ const SECTION_LABELS: Record<SectionId, string> = {
   envVars: "Environment Vars",
   storageRuntime: "Storage & Runtime",
   serviceOverrides: "Services",
-  componentOverrides: "Component Overrides",
+  componentOverrides: "Components",
 };
 
 interface FormLike {
@@ -72,7 +72,9 @@ export function SectionNav({
   }, [initialValues, currentValues, driverSchema]);
 
   const [activeSection, setActiveSection] = useState<SectionId>(
-    SECTION_ORDER[0],
+    // First section of the first group — drawer always opens with the
+    // Identity group at the top, so this resolves to "identity".
+    DRAWER_SECTION_GROUPS[0].sectionIds[0],
   );
 
   useEffect(() => {
@@ -126,40 +128,56 @@ export function SectionNav({
     <nav
       aria-label="Configuration sections"
       data-testid="drawer-section-nav"
-      className="flex w-[200px] shrink-0 flex-col gap-1 border-r border-border bg-muted px-3 py-4"
+      className="flex w-[200px] shrink-0 flex-col gap-4 border-r border-border bg-muted px-3 py-4"
     >
-      {SECTION_ORDER.map((sectionId) => {
-        const isActive = sectionId === activeSection;
-        const isChanged = changedSections.has(sectionId);
-        return (
-          <button
-            key={sectionId}
-            type="button"
-            onClick={() => handleClick(sectionId)}
-            aria-current={isActive ? "true" : undefined}
-            data-testid={`section-nav-${sectionId}`}
-            data-changed={isChanged ? "true" : undefined}
-            className={cn(
-              "group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-              isActive
-                ? "bg-background text-foreground shadow-sm ring-1 ring-border"
-                : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
-            )}
-          >
-            <span
-              aria-hidden="true"
-              className={cn(
-                "h-1.5 w-1.5 shrink-0 rounded-full",
-                isChanged ? "bg-blue-500" : "bg-transparent",
-              )}
-              data-testid={
-                isChanged ? `section-changed-dot-${sectionId}` : undefined
-              }
-            />
-            <span className="truncate">{SECTION_LABELS[sectionId]}</span>
-          </button>
-        );
-      })}
+      {DRAWER_SECTION_GROUPS.map((group) => (
+        <div
+          key={group.id}
+          className="flex flex-col gap-1"
+          data-section-group={group.id}
+        >
+          {group.label ? (
+            <h3
+              data-testid={`section-nav-group-label-${group.id}`}
+              className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            >
+              {group.label}
+            </h3>
+          ) : null}
+          {group.sectionIds.map((sectionId) => {
+            const isActive = sectionId === activeSection;
+            const isChanged = changedSections.has(sectionId);
+            return (
+              <button
+                key={sectionId}
+                type="button"
+                onClick={() => handleClick(sectionId)}
+                aria-current={isActive ? "true" : undefined}
+                data-testid={`section-nav-${sectionId}`}
+                data-changed={isChanged ? "true" : undefined}
+                className={cn(
+                  "group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                  isActive
+                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                    : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+                )}
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "h-1.5 w-1.5 shrink-0 rounded-full",
+                    isChanged ? "bg-blue-500" : "bg-transparent",
+                  )}
+                  data-testid={
+                    isChanged ? `section-changed-dot-${sectionId}` : undefined
+                  }
+                />
+                <span className="truncate">{SECTION_LABELS[sectionId]}</span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 }

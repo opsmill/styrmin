@@ -37,6 +37,51 @@ export const SECTION_ORDER: readonly SectionId[] = [
 ] as const;
 
 /**
+ * Section groups rendered by the edit drawer (and its left nav rail). Unlike
+ * {@link SECTION_ORDER} — which is the data-model order used by the diff
+ * helper, the inheritance helper, and the read view — this constant is a
+ * UI-only structure that:
+ *
+ *  1. **Excludes Networking and Storage & Runtime.** Those sections remain in
+ *     the read view (Settings tab) so operators can still inspect inherited
+ *     values, but are not currently editable through the drawer. Re-introduce
+ *     them by adding their `SectionId` back into a group when the editing flow
+ *     is restored.
+ *  2. **Names two visible groupings** — "Global settings" and "Components" —
+ *     to distinguish deployment-wide knobs from component-scoped ones.
+ *  3. **Treats Identity as its own un-labelled group** so the deployment-name
+ *     anchor sits cleanly at the top of the drawer.
+ *
+ * The `label: null` convention means "no visible group header"; only the
+ * section(s) render. Otherwise the label is rendered as a small uppercase
+ * heading both in the nav rail and the form body.
+ */
+export interface DrawerSectionGroup {
+  id: "identity" | "global" | "components";
+  label: string | null;
+  sectionIds: readonly SectionId[];
+}
+
+export const DRAWER_SECTION_GROUPS: readonly DrawerSectionGroup[] = [
+  { id: "identity", label: null, sectionIds: ["identity"] },
+  {
+    id: "global",
+    label: "Global settings",
+    sectionIds: [
+      "envVars",
+      "serviceOverrides",
+      "driverParameters",
+      "scheduling",
+    ],
+  },
+  {
+    id: "components",
+    label: "Components",
+    sectionIds: ["componentOverrides"],
+  },
+] as const;
+
+/**
  * Inheritance status of a section relative to its parent environment.
  *
  * - `inherited`: every field in the section matches the environment-derived value.

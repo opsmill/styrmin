@@ -15,7 +15,7 @@ import {
 } from "@/lib/deployment-input";
 import { diff } from "@/lib/config-diff";
 import {
-  SECTION_ORDER,
+  DRAWER_SECTION_GROUPS,
   type DriverParameterSchema,
   type SectionId,
 } from "@/lib/configuration-types";
@@ -27,11 +27,13 @@ import { SectionNav } from "./SectionNav";
 import { DriverParametersSection } from "./sections/edit/DriverParametersSection";
 import { EnvVarsSection } from "./sections/edit/EnvVarsSection";
 import { IdentitySection } from "./sections/edit/IdentitySection";
-import { NetworkingSection } from "./sections/edit/NetworkingSection";
 import { SchedulingSection } from "./sections/edit/SchedulingSection";
 import { ServiceOverridesSection } from "./sections/edit/ServiceOverridesSection";
-import { StorageRuntimeSection } from "./sections/edit/StorageRuntimeSection";
 import { ComponentOverridesSection } from "./sections/edit/ComponentOverridesSection";
+// Networking and Storage & Runtime are intentionally not editable from the
+// drawer today — only the Settings page read view shows them. Re-introduce
+// the imports here (and add the sections back to DRAWER_SECTION_GROUPS) when
+// the editing flow is restored.
 
 type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
 
@@ -44,17 +46,6 @@ interface Props {
   environment: Environment;
   driverSchema: DriverParameterSchema;
 }
-
-const SECTION_LABELS: Record<SectionId, string> = {
-  identity: "Identity",
-  driverParameters: "Driver Parameters",
-  scheduling: "Scheduling",
-  networking: "Networking",
-  envVars: "Environment Vars",
-  storageRuntime: "Storage & Runtime",
-  serviceOverrides: "Service Overrides",
-  componentOverrides: "Component Overrides",
-};
 
 /**
  * Right-side slide-in drawer for editing the unified deployment
@@ -220,6 +211,99 @@ export function ConfigEditDrawer({
     setRebaselineDeployment(refreshed);
   }, []);
 
+  /**
+   * Dispatch a `SectionId` to the matching section component. Centralising
+   * the switch here keeps the DRAWER_SECTION_GROUPS iteration in the JSX
+   * focused on layout/grouping rather than per-section prop plumbing.
+   *
+   * Only sections currently present in `DRAWER_SECTION_GROUPS` are reachable
+   * — `networking` and `storageRuntime` deliberately fall through and render
+   * nothing in the drawer (their summaries still appear on the Settings tab
+   * read view).
+   */
+  const renderSection = (sectionId: SectionId) => {
+    switch (sectionId) {
+      case "identity": {
+        const driverVersion =
+          deployment.applicationDriverVersion?.version ?? "";
+        const driverName =
+          deployment.applicationDriverVersion?.applicationDriver?.name ?? "";
+        const driverLabel =
+          driverName && driverVersion
+            ? `${driverName}@${driverVersion}`
+            : driverName || driverVersion;
+        return (
+          <IdentitySection
+            key={sectionId}
+            form={form}
+            initial={initialValues}
+            environment={environmentValues}
+            anchorId={sectionId}
+            driverLabel={driverLabel}
+            appVersion={deployment.applicationVersion ?? ""}
+          />
+        );
+      }
+      case "envVars":
+        return (
+          <EnvVarsSection
+            key={sectionId}
+            form={form}
+            initial={initialValues}
+            environment={environmentValues}
+            anchorId={sectionId}
+          />
+        );
+      case "serviceOverrides":
+        return (
+          <ServiceOverridesSection
+            key={sectionId}
+            form={form}
+            initial={initialValues}
+            environment={environmentValues}
+            driverServiceNames={driverServiceNames}
+            anchorId={sectionId}
+          />
+        );
+      case "driverParameters":
+        return (
+          <DriverParametersSection
+            key={sectionId}
+            form={form}
+            initial={initialValues}
+            environment={environmentValues}
+            driverSchema={driverSchema}
+            anchorId={sectionId}
+          />
+        );
+      case "scheduling":
+        return (
+          <SchedulingSection
+            key={sectionId}
+            form={form}
+            initial={initialValues}
+            environment={environmentValues}
+            anchorId={sectionId}
+          />
+        );
+      case "componentOverrides":
+        return (
+          <ComponentOverridesSection
+            key={sectionId}
+            form={form}
+            initial={initialValues}
+            environment={environmentValues}
+            anchorId={sectionId}
+            components={deployment.components}
+          />
+        );
+      // Networking + Storage & Runtime intentionally fall through.
+      case "networking":
+      case "storageRuntime":
+        return null;
+    }
+  };
+
   const titleId = "config-edit-drawer-title";
 
   return (
@@ -286,137 +370,30 @@ export function ConfigEditDrawer({
               className="min-w-0 flex-1 overflow-y-auto px-6 py-6"
             >
               {/*
-                Placeholder anchors so SectionNav scroll-spy works while the
-                actual section components are still under construction (chunks
-                4b/4d). Each anchor carries `data-section` for the observer
-                and an `id` for direct linking.
+                Drawer body is grouped per DRAWER_SECTION_GROUPS so that the
+                "Global settings" vs "Components" separation is visible inline
+                — matching the labelled groups in SectionNav.
               */}
               <div className="flex flex-col gap-12">
-                {SECTION_ORDER.map((sectionId) => {
-                  if (sectionId === "identity") {
-                    const driverVersion =
-                      deployment.applicationDriverVersion?.version ?? "";
-                    const driverName =
-                      deployment.applicationDriverVersion?.applicationDriver
-                        ?.name ?? "";
-                    const driverLabel =
-                      driverName && driverVersion
-                        ? `${driverName}@${driverVersion}`
-                        : driverName || driverVersion;
-                    return (
-                      <IdentitySection
-                        key={sectionId}
-                        form={form}
-                        initial={initialValues}
-                        environment={environmentValues}
-                        anchorId={sectionId}
-                        driverLabel={driverLabel}
-                        appVersion={deployment.applicationVersion ?? ""}
-                      />
-                    );
-                  }
-                  if (sectionId === "scheduling") {
-                    return (
-                      <SchedulingSection
-                        key={sectionId}
-                        form={form}
-                        initial={initialValues}
-                        environment={environmentValues}
-                        anchorId={sectionId}
-                      />
-                    );
-                  }
-                  if (sectionId === "driverParameters") {
-                    return (
-                      <DriverParametersSection
-                        key={sectionId}
-                        form={form}
-                        initial={initialValues}
-                        environment={environmentValues}
-                        driverSchema={driverSchema}
-                        anchorId={sectionId}
-                      />
-                    );
-                  }
-                  if (sectionId === "networking") {
-                    return (
-                      <NetworkingSection
-                        key={sectionId}
-                        form={form}
-                        initial={initialValues}
-                        environment={environmentValues}
-                        anchorId={sectionId}
-                      />
-                    );
-                  }
-                  if (sectionId === "envVars") {
-                    return (
-                      <EnvVarsSection
-                        key={sectionId}
-                        form={form}
-                        initial={initialValues}
-                        environment={environmentValues}
-                        anchorId={sectionId}
-                      />
-                    );
-                  }
-                  if (sectionId === "storageRuntime") {
-                    return (
-                      <StorageRuntimeSection
-                        key={sectionId}
-                        form={form}
-                        initial={initialValues}
-                        environment={environmentValues}
-                        anchorId={sectionId}
-                      />
-                    );
-                  }
-                  if (sectionId === "serviceOverrides") {
-                    return (
-                      <ServiceOverridesSection
-                        key={sectionId}
-                        form={form}
-                        initial={initialValues}
-                        environment={environmentValues}
-                        driverServiceNames={driverServiceNames}
-                        anchorId={sectionId}
-                      />
-                    );
-                  }
-                  if (sectionId === "componentOverrides") {
-                    return (
-                      <ComponentOverridesSection
-                        key={sectionId}
-                        form={form}
-                        initial={initialValues}
-                        environment={environmentValues}
-                        anchorId={sectionId}
-                        components={deployment.components}
-                      />
-                    );
-                  }
-                  return (
-                    <section
-                      key={sectionId}
-                      data-section={sectionId}
-                      id={`${sectionId}-anchor`}
-                      className="scroll-mt-4"
-                    >
-                      <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">
-                        {SECTION_LABELS[sectionId]}
-                      </h2>
-                      <p
-                        className="mt-2 text-sm italic text-muted-foreground"
-                        data-testid={`section-placeholder-${sectionId}`}
+                {DRAWER_SECTION_GROUPS.map((group) => (
+                  <div
+                    key={group.id}
+                    className="flex flex-col gap-8"
+                    data-drawer-group={group.id}
+                  >
+                    {group.label ? (
+                      <h2
+                        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        data-testid={`drawer-group-label-${group.id}`}
                       >
-                        Section editor lands in a follow-up slice.
-                      </p>
-                      {/* Section content height padding so scroll-spy can resolve
-                          between adjacent placeholders without snap-back. */}
-                      <div className="h-32" />
-                    </section>
-                  );
-                })}
+                        {group.label}
+                      </h2>
+                    ) : null}
+                    {group.sectionIds.map((sectionId) =>
+                      renderSection(sectionId),
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
