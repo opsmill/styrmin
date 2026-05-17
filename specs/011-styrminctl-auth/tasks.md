@@ -31,9 +31,9 @@ description: "Task list for 011-styrminctl-auth — CLI login/logout/whoami + pe
 
 **Purpose**: Skeleton for the new `auth/` package and test directories.
 
-- [ ] T001 Create the new package directory `cli/src/styrminctl/auth/` and add an empty `__init__.py` so it is importable
-- [ ] T002 Create the new test directory `cli/tests/auth/` and add an empty `__init__.py`
-- [ ] T003 [P] Create the new test directory `cli/tests/commands/` if absent and add `__init__.py`
+- [X] T001 Create the new package directory `cli/src/styrminctl/auth/` and add an empty `__init__.py` so it is importable
+- [X] T002 Create the new test directory `cli/tests/auth/` and add an empty `__init__.py`
+- [X] T003 [P] Create the new test directory `cli/tests/commands/` if absent and add `__init__.py`
 
 ---
 
