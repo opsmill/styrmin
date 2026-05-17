@@ -14,6 +14,7 @@ import type {
   InheritanceState,
   SectionId,
 } from "@/lib/configuration-types";
+import { ConfigEditDrawer } from "./ConfigEditDrawer";
 import { HeroSummaryBar } from "./HeroSummaryBar";
 import { ViewJsonDialog } from "./ViewJsonDialog";
 import { DriverParametersSummary } from "./sections/read/DriverParametersSummary";
@@ -56,6 +57,7 @@ const DEFAULT_INHERITED: InheritanceState = { kind: "inherited" };
  */
 export function ConfigurationTab({ deployment }: Props) {
   const [viewJsonOpen, setViewJsonOpen] = useState(false);
+  const [editDrawerOpen, setEditDrawerOpen] = useState(false);
 
   // Project the deployment's persisted config + parent environment's persisted
   // config through the same read-side helper so every section sees the same
@@ -110,13 +112,7 @@ export function ConfigurationTab({ deployment }: Props) {
         inheritance={inheritanceMap}
         current={current}
         canEdit={canEdit}
-        onEditClick={() => {
-          // TODO(US2 / slice 2): open the ConfigEditDrawer once it lands.
-          // Intentionally a no-op for the read-only Configuration tab slice.
-          console.info(
-            "[ConfigurationTab] Edit configuration clicked — drawer arrives in US2",
-          );
-        }}
+        onEditClick={() => setEditDrawerOpen(true)}
         onViewJsonClick={() => setViewJsonOpen(true)}
       />
 
@@ -161,6 +157,16 @@ export function ConfigurationTab({ deployment }: Props) {
           config: deployment.config,
         }}
       />
+
+      {canEdit ? (
+        <ConfigEditDrawer
+          open={editDrawerOpen}
+          onOpenChange={setEditDrawerOpen}
+          deployment={deployment}
+          environment={deployment.environment}
+          driverSchema={driverSchema}
+        />
+      ) : null}
     </div>
   );
 }
