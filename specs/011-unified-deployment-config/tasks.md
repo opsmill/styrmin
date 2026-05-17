@@ -173,11 +173,11 @@ description: "Task list for 011-unified-deployment-config"
 
 **Independent Test**: Make a change classified `high` by the rule table (e.g., toleration effect → `NoExecute` or service-name override). Open the diff dialog and verify the disruptive amber banner is shown and the consequence text is present.
 
-- [ ] T060 [US3] Audit `frontend/src/lib/impact-rules.ts` against the table in `contracts/impact-rule-table.md`. Ensure every documented rule is present and severity matches.
-- [ ] T061 [US3] Implement the disruptive-banner treatment in `ImpactList`: when `topSeverity === 'high'`, the dialog header gets an amber background and a "disruptive" label; the "Apply & redeploy" button gets the amber primary style from the Paper mock.
-- [ ] T062 [US3] Add per-rule unit-test cases to `frontend/src/lib/config-impact.test.ts` ensuring every rule in `impact-rules.ts` has a positive case (rule fires on a matching diff) and a negative case (similar diff does not fire). The matcher-engine cases from T013 are reused; add per-rule cases here.
-- [ ] T063 [US3] Create `backend/tests/e2e/configuration/test_drawer_disruptive_change.py` (`@pytest.mark.ui_only`). Change a toleration effect from `PreferNoSchedule` to `NoExecute`; open the diff dialog; assert the amber disruptive banner is rendered, the "Existing pods on tainted nodes will be drained immediately" impact entry is listed, and Apply & redeploy still works without a type-to-confirm input.
-- [ ] T064 [US3] Run T063 to a pass.
+- [x] T060 [US3] Audit `frontend/src/lib/impact-rules.ts` against the table in `contracts/impact-rule-table.md`. Ensure every documented rule is present and severity matches.
+- [x] T061 [US3] Implement the disruptive-banner treatment in `ImpactList`: when `topSeverity === 'high'`, the dialog header gets an amber background and a "disruptive" label; the "Apply & redeploy" button gets the amber primary style from the Paper mock.
+- [x] T062 [US3] Add per-rule unit-test cases to `frontend/src/lib/config-impact.test.ts` ensuring every rule in `impact-rules.ts` has a positive case (rule fires on a matching diff) and a negative case (similar diff does not fire). The matcher-engine cases from T013 are reused; add per-rule cases here.
+- [x] T063 [US3] Create `backend/tests/e2e/configuration/test_drawer_disruptive_change.py` (`@pytest.mark.ui_only`). Change a toleration effect from `PreferNoSchedule` to `NoExecute`; open the diff dialog; assert the amber disruptive banner is rendered, the "Existing pods on tainted nodes will be drained immediately" impact entry is listed, and Apply & redeploy still works without a type-to-confirm input.
+- [⚠️] T064 [US3] Run T063 to a pass. Static review only — same harness limitation as chunk 4f (the agent shell can't keep the vcluster cold-start + pytest+pdb session alive). All selectors verified against existing testids in source; will execute in CI.
 
 **Checkpoint**: US3 fully functional. Disruptive changes get the right visual treatment and every rule in the table has positive + negative coverage.
 

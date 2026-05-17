@@ -226,15 +226,41 @@ export function ConfigDiffDialog({
             "rounded-xl border border-slate-200 bg-white shadow-2xl outline-none",
           )}
         >
-          <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+          <header
+            data-testid="diff-dialog-header"
+            data-disruptive={disruptive ? "true" : "false"}
+            className={cn(
+              "flex items-start justify-between gap-4 border-b px-6 py-4",
+              disruptive ? "border-amber-300 bg-amber-50" : "border-slate-200",
+            )}
+          >
             <div className="min-w-0">
-              <Dialog.Title
-                id={titleId}
-                className="text-base font-semibold text-slate-900"
+              <div className="flex items-center gap-2">
+                <Dialog.Title
+                  id={titleId}
+                  className={cn(
+                    "text-base font-semibold",
+                    disruptive ? "text-amber-900" : "text-slate-900",
+                  )}
+                >
+                  Review configuration changes
+                </Dialog.Title>
+                {disruptive && (
+                  <span
+                    data-testid="diff-dialog-disruptive-banner"
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-400 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900"
+                  >
+                    <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                    Disruptive
+                  </span>
+                )}
+              </div>
+              <p
+                className={cn(
+                  "mt-1 text-xs",
+                  disruptive ? "text-amber-900/80" : "text-slate-500",
+                )}
               >
-                Review configuration changes
-              </Dialog.Title>
-              <p className="mt-1 text-xs text-slate-500">
                 {deployment.name} ·{" "}
                 {diffResult.entries.length === 0
                   ? "No pending changes"
@@ -249,7 +275,12 @@ export function ConfigDiffDialog({
                   type="button"
                   aria-label="Close review dialog"
                   data-testid="diff-dialog-close-button"
-                  className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                  className={cn(
+                    "rounded-md p-1.5 transition-colors focus:outline-none focus-visible:ring-2",
+                    disruptive
+                      ? "text-amber-800 hover:bg-amber-100 hover:text-amber-950 focus-visible:ring-amber-400"
+                      : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-slate-400",
+                  )}
                 />
               }
             >
