@@ -134,12 +134,12 @@ description: "Task list for 011-unified-deployment-config"
 
 ### Remaining editable sections (slices 5–9)
 
-- [ ] T044 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/EnvVarsSection.tsx` — field array of `{name, value}` rows with add/remove. Validates names with the POSIX env-var regex; flags duplicates. Export `envVarsSchema`.
-- [ ] T045 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/StorageRuntimeSection.tsx` — db size enum select, standard storage class input, node selector input. Export `storageRuntimeSchema`.
-- [ ] T046 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/NetworkingSection.tsx` — FQDN suffix input, external URL scheme select, external URL port input, external DNS source select, ingress class input, dedicated ingress nested form, IP allowlist field array. Export `networkingSchema`.
-- [ ] T047 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/ServiceOverridesSection.tsx` — field array of `{driverServiceName, overrideName}`; `driverServiceName` is constrained to services declared by the driver schema. Export `serviceOverridesSchema`.
-- [ ] T048 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/DriverParametersSection.tsx` — renders the extracted `ParameterField` once per parameter in `driverSchema`. Each field wrapped in `ChangedFieldFrame`. Export `driverParametersSchema`.
-- [ ] T049 [US2] Wire all sections (Identity, Driver Parameters, Scheduling, Networking, Env Vars, Storage & Runtime, Service Overrides) into `ConfigEditDrawer`'s form body and `SectionNav`'s nav list in the order from FR-011.
+- [x] T044 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/EnvVarsSection.tsx` — field array of `{name, value}` rows with add/remove. Validates names with the POSIX env-var regex; flags duplicates. Export `envVarsSchema`.
+- [x] T045 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/StorageRuntimeSection.tsx` — db size enum select, standard storage class input, node selector input. Export `storageRuntimeSchema`.
+- [x] T046 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/NetworkingSection.tsx` — FQDN suffix input, external URL scheme select, external URL port input, external DNS source select, ingress class input, dedicated ingress nested form, IP allowlist field array. Export `networkingSchema`.
+- [x] T047 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/ServiceOverridesSection.tsx` — field array of `{driverServiceName, overrideName}`; `driverServiceName` is constrained to services declared by the driver schema. Export `serviceOverridesSchema`.
+- [x] T048 [P] [US2] Create `frontend/src/components/deployment/configuration/sections/edit/DriverParametersSection.tsx` — renders the extracted `ParameterField` once per parameter in `driverSchema`. Each field wrapped in `ChangedFieldFrame`. Export `driverParametersSchema`.
+- [x] T049 [US2] Wire all sections (Identity, Driver Parameters, Scheduling, Networking, Env Vars, Storage & Runtime, Service Overrides) into `ConfigEditDrawer`'s form body and `SectionNav`'s nav list in the order from FR-011.
 
 ### E2E per section
 

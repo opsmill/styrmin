@@ -24,8 +24,13 @@ import { cn } from "@/lib/utils";
 import { ConfigDiffDialog } from "./ConfigDiffDialog";
 import { DrawerFooter } from "./DrawerFooter";
 import { SectionNav } from "./SectionNav";
+import { DriverParametersSection } from "./sections/edit/DriverParametersSection";
+import { EnvVarsSection } from "./sections/edit/EnvVarsSection";
 import { IdentitySection } from "./sections/edit/IdentitySection";
+import { NetworkingSection } from "./sections/edit/NetworkingSection";
 import { SchedulingSection } from "./sections/edit/SchedulingSection";
+import { ServiceOverridesSection } from "./sections/edit/ServiceOverridesSection";
+import { StorageRuntimeSection } from "./sections/edit/StorageRuntimeSection";
 
 type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
 
@@ -299,6 +304,62 @@ export function ConfigEditDrawer({
                   if (sectionId === "scheduling") {
                     return (
                       <SchedulingSection
+                        key={sectionId}
+                        form={form}
+                        initial={initialValues}
+                        environment={environmentValues}
+                        anchorId={sectionId}
+                      />
+                    );
+                  }
+                  if (sectionId === "driverParameters") {
+                    return (
+                      <DriverParametersSection
+                        key={sectionId}
+                        form={form}
+                        initial={initialValues}
+                        environment={environmentValues}
+                        driverSchema={driverSchema}
+                        anchorId={sectionId}
+                      />
+                    );
+                  }
+                  if (sectionId === "networking") {
+                    return (
+                      <NetworkingSection
+                        key={sectionId}
+                        form={form}
+                        initial={initialValues}
+                        environment={environmentValues}
+                        anchorId={sectionId}
+                      />
+                    );
+                  }
+                  if (sectionId === "envVars") {
+                    return (
+                      <EnvVarsSection
+                        key={sectionId}
+                        form={form}
+                        initial={initialValues}
+                        environment={environmentValues}
+                        anchorId={sectionId}
+                      />
+                    );
+                  }
+                  if (sectionId === "storageRuntime") {
+                    return (
+                      <StorageRuntimeSection
+                        key={sectionId}
+                        form={form}
+                        initial={initialValues}
+                        environment={environmentValues}
+                        anchorId={sectionId}
+                      />
+                    );
+                  }
+                  if (sectionId === "serviceOverrides") {
+                    return (
+                      <ServiceOverridesSection
                         key={sectionId}
                         form={form}
                         initial={initialValues}
