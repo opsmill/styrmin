@@ -2,7 +2,7 @@
 
 **Feature Branch**: `011-styrminctl-auth`
 **Created**: 2026-05-17
-**Status**: Draft
+**Status**: Implemented
 **Input**: PRD published as a comment on [opsmill/styrmin#234](https://github.com/opsmill/styrmin/issues/234#issuecomment-4470324108). Seed idea brief at `.specify/idea-brief.md` (note: that file may also hold an unrelated brief; the PRD comment is authoritative for this feature).
 
 ## User Scenarios & Testing *(mandatory)*

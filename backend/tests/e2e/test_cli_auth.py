@@ -17,10 +17,11 @@ The test isolates the token store via a per-test ``XDG_DATA_HOME`` under
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
-import subprocess
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -46,20 +47,37 @@ pytestmark = [
 ]
 
 
-def _run_styrminctl(
+@dataclass(frozen=True)
+class _Completed:
+    """Outcome of a ``styrminctl`` subprocess invocation."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+async def _run_styrminctl(
     args: list[str],
     *,
     server_address: str,
     xdg_data_home: Path,
     stdin: str | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Run the ``styrminctl`` console script in a clean subprocess.
+) -> _Completed:
+    """Run the ``styrminctl`` console script asynchronously.
 
     Uses ``uv run styrminctl`` so the entry point resolves through the
     workspace install. Only the env vars the CLI actually needs are
     forwarded; ``STYRMIN_TOKEN`` / ``STYRMIN_USERNAME`` / ``STYRMIN_PASSWORD``
     are explicitly omitted so the credential resolver sees an empty
     environment for those rungs unless the test sets them explicitly.
+
+    Uses ``asyncio.create_subprocess_exec`` rather than ``subprocess.run``
+    so the event loop keeps running while the subprocess executes —
+    critical because the ``styrmin_deployment`` port-forward is a
+    userspace TCP proxy implemented in this same asyncio loop. A
+    blocking ``subprocess.run`` would freeze the proxy and the
+    subprocess would see ``StyrminTransportError`` against the
+    port-forwarded backend.
     """
     env = {
         # Preserve PATH so ``uv`` is discoverable.
@@ -68,14 +86,24 @@ def _run_styrminctl(
         "STYRMIN_ADDRESS": server_address,
         "XDG_DATA_HOME": str(xdg_data_home),
     }
-    return subprocess.run(
-        ["uv", "run", "styrminctl", *args],
+    proc = await asyncio.create_subprocess_exec(
+        "uv",
+        "run",
+        "styrminctl",
+        *args,
         cwd=str(_PROJECT_ROOT),
         env=env,
-        input=stdin,
-        capture_output=True,
-        text=True,
-        check=False,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdin_bytes = stdin.encode() if stdin is not None else None
+    stdout_bytes, stderr_bytes = await proc.communicate(input=stdin_bytes)
+    assert proc.returncode is not None
+    return _Completed(
+        returncode=proc.returncode,
+        stdout=stdout_bytes.decode(errors="replace"),
+        stderr=stderr_bytes.decode(errors="replace"),
     )
 
 
@@ -131,7 +159,7 @@ async def test_cli_login_persists_token_and_subsequent_command_succeeds(
         # --------------------------------------------------------------
         # Step 2: styrminctl login --username <u>, password on stdin.
         # --------------------------------------------------------------
-        login_result = _run_styrminctl(
+        login_result = await _run_styrminctl(
             ["login", "--username", username],
             server_address=styrmin_deployment,
             xdg_data_home=xdg_data_home,
@@ -179,7 +207,7 @@ async def test_cli_login_persists_token_and_subsequent_command_succeeds(
         # --------------------------------------------------------------
         # Step 4: fresh subprocess runs an authenticated command.
         # --------------------------------------------------------------
-        clusters_result = _run_styrminctl(
+        clusters_result = await _run_styrminctl(
             ["clusters", "list"],
             server_address=styrmin_deployment,
             xdg_data_home=xdg_data_home,
@@ -192,7 +220,7 @@ async def test_cli_login_persists_token_and_subsequent_command_succeeds(
         # --------------------------------------------------------------
         # Step 5: whoami shows the seeded user + token-file source line.
         # --------------------------------------------------------------
-        whoami_result = _run_styrminctl(
+        whoami_result = await _run_styrminctl(
             ["whoami"],
             server_address=styrmin_deployment,
             xdg_data_home=xdg_data_home,
@@ -215,7 +243,7 @@ async def test_cli_login_persists_token_and_subsequent_command_succeeds(
         # --------------------------------------------------------------
         # Step 6: logout — exits 0, prints the expected line.
         # --------------------------------------------------------------
-        logout_result = _run_styrminctl(
+        logout_result = await _run_styrminctl(
             ["logout"],
             server_address=styrmin_deployment,
             xdg_data_home=xdg_data_home,
@@ -242,7 +270,7 @@ async def test_cli_login_persists_token_and_subsequent_command_succeeds(
         # --------------------------------------------------------------
         # Step 8: whoami after logout fails with the friendly line.
         # --------------------------------------------------------------
-        whoami_again = _run_styrminctl(
+        whoami_again = await _run_styrminctl(
             ["whoami"],
             server_address=styrmin_deployment,
             xdg_data_home=xdg_data_home,

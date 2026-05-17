@@ -111,7 +111,7 @@ description: "Task list for 011-styrminctl-auth — CLI login/logout/whoami + pe
 ### E2E (NON-NEGOTIABLE per Constitution §V)
 
 - [X] T021 Author the E2E scenario in `backend/tests/e2e/test_cli_auth.py` per the blueprint in `quickstart.md`. Marked `@pytest.mark.ci` and `@pytest.mark.api_only(reason="Drives the styrminctl subprocess; no UI flow. The [ui-chromium] variant would re-execute the same subprocess and the same SDK login path with no incremental coverage.")`. Test name: `test_cli_login_persists_token_and_subsequent_command_succeeds`. Uses an isolated `XDG_DATA_HOME=<tmp_path>` per test. Steps 1–8 from `quickstart.md` (seed user; `login` subprocess with password on stdin; assert exit 0, stdout, file mode `0600`, parent dir `0700`, JSON schema_version, canonical-URL key; fresh-subprocess `clusters list` succeeds; `whoami` shows source line; `logout` removes entry; second `whoami` fails friendly).
-- [ ] T022 Run the E2E to a local PASS per Constitution §V "Local PASS evidence required". Record in this `tasks.md` (under "PASS evidence" below) for the test: (a) pytest node ID, (b) exact pytest command, (c) ISO 8601 timestamp of the PASS, (d) cluster identifier (vcluster fixture id + kubeconfig path under `/tmp/pytest-of-*/pytest-*/`), (e) the verbatim `PASSED …` line from pytest output. Do NOT mark this spec complete without this evidence.
+- [X] T022 Run the E2E to a local PASS per Constitution §V "Local PASS evidence required". Record in this `tasks.md` (under "PASS evidence" below) for the test: (a) pytest node ID, (b) exact pytest command, (c) ISO 8601 timestamp of the PASS, (d) cluster identifier (vcluster fixture id + kubeconfig path under `/tmp/pytest-of-*/pytest-*/`), (e) the verbatim `PASSED …` line from pytest output. Do NOT mark this spec complete without this evidence.
 
 ### Documentation
 
@@ -124,7 +124,7 @@ description: "Task list for 011-styrminctl-auth — CLI login/logout/whoami + pe
 
 ### Spec hygiene
 
-- [ ] T026 [P] After local PASS evidence is recorded in T022, update the spec's `Status:` from `Draft` to `Implemented` and update the `checklists/requirements.md` `[NEEDS CLARIFICATION]` row to `[x]` (3 retained markers resolved by R1/R2/R3 in research.md).
+- [X] T026 [P] After local PASS evidence is recorded in T022, update the spec's `Status:` from `Draft` to `Implemented` and update the `checklists/requirements.md` `[NEEDS CLARIFICATION]` row to `[x]` (3 retained markers resolved by R1/R2/R3 in research.md).
 
 ---
 
@@ -171,8 +171,13 @@ If schedule pressure forces a smaller v1 still:
 
 > Per Constitution §V — record the local PASS run for each new/modified E2E test before declaring this spec implemented. Until this section is filled in by a real run, the spec is NOT done.
 
-- **Test**: `backend/tests/e2e/test_cli_auth.py::test_cli_login_persists_token_and_subsequent_command_succeeds[api-chromium]`
-- **Command**: _(fill at T022)_
-- **Timestamp (ISO 8601)**: _(fill at T022)_
-- **Cluster**: _(vcluster fixture id + kubeconfig path)_
-- **PASSED line**: _(verbatim from pytest output)_
+- **Test (pytest node ID)**: `backend/tests/e2e/test_cli_auth.py::test_cli_login_persists_token_and_subsequent_command_succeeds`
+- **Command**: `uv run pytest backend/tests/e2e/test_cli_auth.py -v` (run from repo root, on branch `011-styrminctl-auth`)
+- **Run started (ISO 8601 UTC)**: `2026-05-17T11:42:59Z`
+- **PASS recorded (ISO 8601 UTC)**: `2026-05-17T11:44:44Z` (1m37s wall clock; pytest reported `97.31s`)
+- **Cluster**: vcluster session fixture `vcluster0`; kubeconfig at `/private/var/folders/jx/n90v5w6n15j834yyq8_j03nr0000gq/T/pytest-of-damien/pytest-54/vcluster0/kubeconfig` (also reachable via the `pytest-current` / `vclustercurrent` symlinks under `/private/var/folders/jx/n90v5w6n15j834yyq8_j03nr0000gq/T/pytest-of-damien/`).
+- **PASSED line (verbatim from pytest output)**: `backend/tests/e2e/test_cli_auth.py::test_cli_login_persists_token_and_subsequent_command_succeeds PASSED [100%]`
+- **Pytest summary line**: `=================== 1 passed, 1 warning in 97.31s (0:01:37) ====================`
+- **Full log**: captured to `/tmp/e2e-cli-auth.log` during the run (local-only; this evidence block is the canonical record).
+
+**Note on the first attempt**: an earlier run (started `2026-05-17T11:38:19Z`) failed with `Login failed: could not reach <addr> (StyrminTransportError)` because the test driver used a blocking `subprocess.run()` inside an async test, which froze the kr8s userspace TCP port-forward (the proxy runs inside the same asyncio loop). Fixed by switching to `asyncio.create_subprocess_exec()` + `await proc.communicate()` so the event loop keeps serving the port-forward while the CLI subprocess runs. The fix is part of commit `<fixup>` (see git log) and the test passed on the next run, recorded above.

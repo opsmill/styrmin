@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain  — 3 retained (intentional, at the allowed limit; all flagged in the PRD and idea brief)
+- [x] No [NEEDS CLARIFICATION] markers remain  — all 3 retained markers were resolved during planning (research.md §R1–R3): token-expiry not exposed by the GraphQL surface so `whoami` does not print it; token-store JSON ships v1 simple shape with `schema_version` field; CONTEXT.md vocabulary deferred to a separate follow-up.
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
