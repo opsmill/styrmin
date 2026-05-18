@@ -203,7 +203,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
     runs-on:
       group: huge-runners
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
@@ -241,7 +241,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
     runs-on:
       group: huge-runners
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
