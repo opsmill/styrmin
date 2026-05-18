@@ -1,4 +1,4 @@
-"""Per-resolver role permissions. See ADR-020.
+"""Per-resolver role permissions. See ADR-025.
 
 A field with no ``RequiresRole`` requires only the authenticated baseline
 from ``RequiresAuthentication``. Fields needing READ_WRITE or ADMIN

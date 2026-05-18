@@ -201,5 +201,4 @@ to lock in the contract.
 - Operator-facing reference: [`dev/knowledge/backend/deployment-env-vars.md`](../knowledge/backend/deployment-env-vars.md).
 - Canonical contract: [`specs/010-driver-env-var-consumption/spec.md`](../../specs/010-driver-env-var-consumption/spec.md).
 - Architecture record: [`dev/adr/adr-021-driver-env-var-consumption.md`](../adr/adr-021-driver-env-var-consumption.md).
-- 008's original ADR (superseded for the injection portion): [`dev/adr/adr-019-deployment-env-vars.md`](../adr/adr-019-deployment-env-vars.md).
 - Reference driver: `driver/examples/simple-app/values.j2.yml` and `driver/examples/simple-app/src/helm/templates/deployment.yaml`.

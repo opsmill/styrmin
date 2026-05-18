@@ -25,7 +25,7 @@ async def get_unit_of_work_dependency(
 
 
 def _extract_token(request: Request) -> str | None:
-    """Bearer header takes precedence over the session cookie. See ADR-019."""
+    """Bearer header takes precedence over the session cookie. See ADR-024."""
     auth_header = request.headers.get("authorization") or request.headers.get(
         "Authorization"
     )

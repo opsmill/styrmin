@@ -267,6 +267,25 @@ Generates deployment contexts.
 |----------|-------------|
 | `generate_context_from_deployment_id(deployment_id, uow)` | Generate GlobalContext for deployment |
 
+#### FQDN utility (`context/fqdn.py`)
+
+<!-- Extracted from specs/001-service-fqdn-context on 2026-05-17 -->
+
+Single source of truth for service-FQDN construction, used by both context generation and the GraphQL resolver path. Backs the `primary_fqdn` / `human_readable_fqdn` fields on `ServiceReference` and the matching `DeployedService` GraphQL fields. See [ADR-030](../adr/adr-030-compute-service-fqdns-at-runtime.md).
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `to_fqdn_label` | `(value: str) -> str` | RFC 1035 DNS-label sanitizer: lowercase → replace non-alphanumeric with `-` → collapse consecutive `-` → strip leading/trailing `-` → truncate to 63. Also registered as the `to_fqdn_label` Jinja2 filter for non-FQDN sanitization use cases. |
+| `compute_primary_fqdn` | `(app_name, deployment_id, fqdn_suffix) -> str \| None` | `{sanitized-app}-{deployment-id}.{suffix}`. Returns `None` when `fqdn_suffix` is empty. |
+| `compute_human_readable_fqdn` | `(service_host, environment_name, fqdn_suffix) -> str \| None` | `{sanitized-host}-{sanitized-env}.{suffix}`. Returns `None` when `fqdn_suffix` is empty. |
+
+**Call sites**:
+
+- **Context generation** (`services/context.py`) — populates `ServiceReference` fields while building the deployment context for driver templates.
+- **GraphQL resolution** (`Deployment.deployed_services()` resolver in `api/definitions/service/model.py`) — resolves environment + cluster + `ResolvedConfig.fqdn_suffix` once per deployment, computes FQDNs for all services in one pass, and injects them into `DeployedService` Strawberry instances. Avoids N+1 on the environment/cluster lookups.
+
+Driver templates that previously concatenated `{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}` inline have been migrated to reference these pre-computed fields. The Jinja2 `to_fqdn_label` filter remains registered for templates that still need sanitization for other purposes (labels, annotations).
+
 ## Driver Services (`services/driver/`)
 
 Handles loading and parsing of application driver specifications from Git repositories.

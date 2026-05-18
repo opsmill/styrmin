@@ -1,4 +1,4 @@
-"""Argon2id password hashing per ADR-019."""
+"""Argon2id password hashing per ADR-024."""
 
 from __future__ import annotations
 

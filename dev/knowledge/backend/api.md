@@ -381,6 +381,126 @@ type PodStatus {
 }
 ```
 
+### ResolvedComponentScheduling
+
+<!-- Extracted from specs/001-pod-scheduling-config on 2026-05-17 -->
+
+Per-component resolved scheduling exposed as `Deployment.resolvedScheduling: [ResolvedComponentScheduling!]!`. Carries the merged `SchedulingConfig` for each component **and** the per-field provenance map so the frontend can show "where did this value come from?" without re-running the merge.
+
+```graphql
+type ResolvedComponentScheduling {
+  component: String!
+  scheduling: JSON!     # serialised SchedulingConfig (affinity / tolerations / topology_spread / resources / node_selector / runtime_class / inject)
+  provenance: JSON!     # dotted-path → "environment" | "deployment" | "component"
+}
+```
+
+`scheduling` is a typed `SchedulingConfig` blob — see [`data-models.md`](data-models.md) → SchedulingConfig for the field set. Exposing it as `JSON` (rather than as strongly-typed GraphQL types per sub-object) preserves the same loose-typed JSON wire pattern the rest of `config` uses; clients introspect by dotted path. See [ADR-039](../adr/adr-039-config-additions-via-baseconfigsection-no-migration.md).
+
+`provenance` is a flat dict keyed by dotted paths into the resolved `scheduling` object — e.g.:
+
+```json
+{
+  "resources.limits.cpu": "deployment",
+  "resources.limits.memory": "component",
+  "affinity.pod.required[0]": "environment",
+  "tolerations[2]": "deployment",
+  "runtime_class": "component"
+}
+```
+
+For accumulated lists (affinity terms, tolerations, topology-spread constraints), provenance is recorded **per element** at the resolved list's index — drivers and the frontend index into the map by index. See [ADR-048](../adr/adr-048-scheduling-provenance-map.md) for the rationale.
+
+### DeploymentTimelineEntry
+
+<!-- Extracted from specs/001-deployment-history-timeline on 2026-05-17 -->
+
+Per-deployment history exposed through the `deploymentTimeline(deploymentId: UUID!): [DeploymentTimelineEntry!]!` query, ordered `created_on DESC` (newest first). The entry, version, and context diff are all **derived server-side** from the existing `Task` and `ApplicationInstance` rows — no schema additions back this query. See [ADR-038](../adr/adr-038-deployment-history-derived-from-existing-data.md).
+
+```graphql
+type DeploymentTimelineEntry {
+  task: Task!
+  applicationVersion: String         # correlated from ApplicationInstance.created_on
+  contextDiff: ContextDiff           # null on the first entry
+}
+
+type ContextDiff {
+  changes: [ContextChange!]!
+}
+
+type ContextChange {
+  path: String!                       # dot-notation path into GlobalContext, e.g. "deployment.version"
+  action: String!                     # "added" | "removed" | "modified"
+  oldValue: JSON
+  newValue: JSON
+}
+```
+
+**Version correlation**: for each task, the timeline picks the latest `ApplicationInstance.created_on <= task.created_on`; ties fall back to the earliest instance. This preserves historical accuracy — a task from before an upgrade shows the pre-upgrade version, not the deployment's current desired version.
+
+**Diff source**: each `ApplicationInstance.context` JSON column stores the full resolved `GlobalContext` at instance creation time. The diff between two adjacent entries is computed as a flat list of typed changes; the first entry's `contextDiff` is `null`.
+
+No pagination in v1; frontend virtual scrolling handles ≥100 entries.
+
+### DeployedService
+
+<!-- Extracted from specs/001-service-fqdn-context on 2026-05-17 -->
+
+```graphql
+type DeployedService {
+  id: UUID!
+  deploymentId: UUID!
+  driverServiceName: String!
+  resolvedName: String!
+  kind: String!
+  scope: String!
+  port: Int!
+  component: String!
+  primaryFqdn: String          # UUID-based FQDN; null when fqdn_suffix unresolved
+  humanReadableFqdn: String    # environment-name-based FQDN; null when fqdn_suffix unresolved
+}
+```
+
+Both FQDN fields are computed at runtime by the `Deployment.deployed_services()` resolver (single batched lookup of environment + cluster + resolved config, one pass over all services) and injected into the Strawberry instances. They are **not** persisted on `DeployedService` in the database — see [ADR-030](../adr/adr-030-compute-service-fqdns-at-runtime.md). The same `context/fqdn.py` helpers compute these values for driver-template context, guaranteeing UI ↔ driver consistency.
+
+### DeploymentStatusType
+
+<!-- Extracted from specs/001-crd-status-reporting on 2026-05-17 -->
+
+Latest StyrminDeployment CRD status snapshot, exposed as `Deployment.crdStatus`. The wire types reflect the post-rename surface (`DeploymentStatusType` / `reportDeploymentStatuses` / `DeploymentStatusReportInput`); the original spec authored these as `DeploymentCrdStatus` / `reportCrdStatuses`. See [ADR-028](../adr/adr-028-separate-crd-status-reporting-mutation.md) and [ADR-029](../adr/adr-029-deployment-crd-status-snapshot-table.md).
+
+```graphql
+type CrdCondition {
+  type: String!
+  status: String!
+  reason: String
+  message: String
+  lastTransitionTime: DateTime
+}
+
+type ManagedResourceCounts {
+  networkPolicies: Int!
+  secrets: Int!
+  helmReleases: Int!
+  services: Int!
+  middlewares: Int!
+}
+
+type DeploymentStatusType {
+  id: UUID!
+  deploymentId: UUID!
+  phase: String!                 # CRD phase: Pending/CreatingPrerequisites/CreatingHelmRelease/CreatingServices/Ready/Failed/Deleting/Deleted
+  message: String
+  conditions: [CrdCondition!]!
+  managedResourceCounts: ManagedResourceCounts
+  lastPolledAt: DateTime!
+  createdOn: DateTime!
+  updatedOn: DateTime!
+}
+```
+
+The agent-side wire payload additionally carries `displayState` and `instanceId` (see [`data-models.md`](data-models.md) → `DeploymentStatus`) — those drive the parent `Deployment.status` and the stale-instance guard, and are **not** exposed on this GraphQL type.
+
 ## Enums
 
 The schema exposes only a handful of GraphQL enums; most "enum-shaped" fields are `String!` carrying a value from one of the DB-level enums in [`data-models.md`](data-models.md).

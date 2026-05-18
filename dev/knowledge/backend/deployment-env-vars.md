@@ -6,11 +6,9 @@ dict at the API boundary and exposes it to the driver's `values.j2.yml`
 rendering context; the driver consumes it through its Helm chart.
 
 This page is the operator/contributor reference. The decisions behind the
-shape are in [ADR-019](../../adr/adr-019-deployment-env-vars.md) (operator
-contract: validation, scopes, queries) and
-[ADR-021](../../adr/adr-021-driver-env-var-consumption.md) (driver-side
-consumption — supersedes ADR-019's post-render injection design). The full
-contracts live in [`specs/008-deployment-env-vars/`](../../../specs/008-deployment-env-vars/)
+shape (free-form `dict[str, str]`, three-scope deepest-wins precedence,
+driver-side consumption) live in [ADR-021](../../adr/adr-021-driver-env-var-consumption.md).
+The full contracts are in [`specs/008-deployment-env-vars/`](../../../specs/008-deployment-env-vars/)
 and [`specs/010-driver-env-var-consumption/`](../../../specs/010-driver-env-var-consumption/).
 
 ## When to reach for env vars
@@ -209,8 +207,7 @@ foot setting them in the past.
 
 ## Related
 
-- [ADR-019: Deployment Env Vars](../../adr/adr-019-deployment-env-vars.md) — durable record of the operator-facing design decisions (validation, scopes, queries, orphan policy).
-- [ADR-021: Driver-Side Env Var Consumption](../../adr/adr-021-driver-env-var-consumption.md) — supersedes ADR-019 §3; records why the post-render injection layer was removed and replaced with driver-side template consumption.
+- [ADR-021: Driver-Side Env Var Consumption](../../adr/adr-021-driver-env-var-consumption.md) — durable record of the design (free-form `dict[str, str]`, three-scope deepest-wins, driver-side template consumption — no platform post-render injection).
 - [Driver-author guide](../../guides/driver-env-var-consumption.md) — template-side consumption patterns (single-component, multi-component, chart-default combinations) for driver authors.
 - [ADR-006: Embed GlobalContext in StyrminDeployment CRD](../../adr/adr-006-embed-context-in-deployment-crd.md) — the carrier mechanism that flows resolved env vars to the operator/agent.
 - [`services.md`](services.md) — surrounding service-layer architecture.

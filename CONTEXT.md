@@ -23,7 +23,7 @@ The single container that runs a **Prefect** worker, a **kopf** operator, and a 
 _Avoid_: "worker" (overloaded with **Prefect worker**), "operator" (that is one of its sub-functions), "K8s agent" (legacy README phrasing), "controller".
 
 **CLI / styrminctl**:
-The Cyclopts-based command-line client (`styrminctl`). A thin client over the GraphQL API — never talks to the **database** or the **agent** directly. See [ADR-001](dev/adr/adr-001-migrate-cli-typer-to-cyclopts.md).
+The Cyclopts-based command-line client (`styrminctl`). A thin client over the GraphQL API — never talks to the **database** or the **agent** directly.
 _Avoid_: "the CLI tool", "styrmin command" (ambiguous with the `styrmin` developer command for schema export).
 
 **SDK / styrmin-sdk**:
@@ -59,7 +59,7 @@ A specific version of an **application driver**, sourced from a git repository o
 _Avoid_: "version" alone (ambiguous with **application version**), "driver release".
 
 **Driver specification file**:
-The `driver.styrmin.yml` file at the root of a driver directory. Single source of truth for driver metadata, supported application versions, Helm chart, components, parameters, services, and action declarations. See [ADR-002](dev/adr/adr-002-consolidate-driver-single-yaml.md).
+The `driver.styrmin.yml` file at the root of a driver directory. Single source of truth for driver metadata, supported application versions, Helm chart, components, parameters, services, and action declarations.
 _Avoid_: "driver yaml", "driver manifest".
 
 **Application version**:

@@ -1,4 +1,4 @@
-"""Server-side session token minting and lookup. See ADR-019."""
+"""Server-side session token minting and lookup. See ADR-024."""
 
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ async def touch_session(db_session: AsyncSession, session_row: SessionModel) -> 
 
     Returns ``True`` when the row was updated. Skips the write when the previous
     update happened within :data:`SLIDING_REFRESH_DEBOUNCE` to avoid hot-row
-    contention on busy users — see ADR-019.
+    contention on busy users — see ADR-024.
     """
     now = datetime.now(UTC)
     last_used_at = _ensure_aware(session_row.last_used_at)

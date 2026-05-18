@@ -3,11 +3,11 @@
 **Status**: Accepted
 **Date**: 2026-05-08
 **Source**: specs/010-driver-env-var-consumption/ (spec, plan, research)
-**Supersedes**: the post-render env-vars injection portions of [ADR-019](adr-019-deployment-env-vars.md) (§3 conflict policy + the `EnvVarsPatch` / `envVarCollisions` surfaces); ADR-020's environment-config fanout is unaffected.
+**Supersedes**: the post-render env-vars injection design from 008-deployment-env-vars (`EnvVarsPatch` / `envVarCollisions` surfaces and the chart-vs-operator conflict policy); [ADR-020](adr-020-environment-config-fanout.md)'s environment-config fanout is unaffected.
 
 ## Context
 
-008-deployment-env-vars (ADR-019 §3) shipped operator-set environment variables through a **post-render JSON-patch**: `EnvVarsPatch` did `replace` on `/spec/template/spec/containers/0/env`. The "operator value wins on collision" promise was technically true but operationally meaningless — every chart-rendered env entry was clobbered, not just the colliding ones. A chart that set `LOG_LEVEL=warn` as a default would have that default disappear the moment any operator-set env var was applied to the deployment, even an unrelated one.
+008-deployment-env-vars shipped operator-set environment variables through a **post-render JSON-patch**: `EnvVarsPatch` did `replace` on `/spec/template/spec/containers/0/env`. The "operator value wins on collision" promise was technically true but operationally meaningless — every chart-rendered env entry was clobbered, not just the colliding ones. A chart that set `LOG_LEVEL=warn` as a default would have that default disappear the moment any operator-set env var was applied to the deployment, even an unrelated one.
 
 The pivot: stop injecting at the post-render layer entirely. The platform's job is to **resolve and expose** env vars to the driver's `values.j2.yml` Jinja context. The driver author **consumes** them however the chart expects. Inheritance/merging across env→dep→comp scopes still happens platform-side (the resolution pipeline from 008 is correct; only injection was broken). Drivers receive a ready-to-use merged dict.
 
@@ -55,11 +55,11 @@ Driver authors update their values templates to consume operator-set env vars. T
 
 This is a feature, not a bug: each driver decides whether to expose the surface. A driver that has good reasons to ignore env vars (security-locked appliance images, compliance-driven contracts) is unaffected by 010 and stays that way until its author opts in. This is the same opt-in shape as every other rendering-context field — typed parameters, scheduling, ip_whitelist, etc.
 
-### 6. Relationship to ADR-019 + ADR-020
+### 6. Relationship to 008 and ADR-020
 
-010 supersedes **ADR-019 §3** (the post-render injection design + the conflict-policy machinery: `EnvVarsPatch`, `EnvVarCollision`, `ChartEnvCollision`, `DeploymentTimelineEntry.envVarCollisions`, `PostRenderInjection.envVars`). The operator-facing config model (ADR-019 §1, §2, §4 — typed-vs-free-form boundary, doc-only driver-side declarations, upgrade-orphan policy) and the validation pipeline (name regex, size caps, error codes) are preserved.
+010 supersedes 008's post-render injection design + conflict-policy machinery (`EnvVarsPatch`, `EnvVarCollision`, `ChartEnvCollision`, `DeploymentTimelineEntry.envVarCollisions`, `PostRenderInjection.envVars`). The operator-facing config model from 008 — typed-vs-free-form boundary, doc-only driver-side declarations, upgrade-orphan policy — and the validation pipeline (name regex, size caps, error codes) are preserved.
 
-ADR-020 (009's env-config fanout) is unaffected. Environment-config edits still trigger per-deployment redeploys; the redeploy path now flows through the driver's values template (010) instead of a post-render patch (008). The fanout machinery itself is identical.
+[ADR-020](adr-020-environment-config-fanout.md) (009's env-config fanout) is unaffected. Environment-config edits still trigger per-deployment redeploys; the redeploy path now flows through the driver's values template (010) instead of a post-render patch (008). The fanout machinery itself is identical.
 
 ## Consequences
 

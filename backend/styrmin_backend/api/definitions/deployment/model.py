@@ -504,7 +504,7 @@ class Deployment:
         """The user who created this deployment.
 
         The returned ``User`` type role-gates its admin-only fields per
-        ADR-020: a non-admin caller selecting ``role`` / ``effectiveRole``
+        ADR-025: a non-admin caller selecting ``role`` / ``effectiveRole``
         / ``active`` / ``groups`` / ``createdOn`` / ``updatedOn`` receives
         a field-level ``FORBIDDEN`` error, while ``id`` / ``username`` /
         ``displayName`` always resolve.

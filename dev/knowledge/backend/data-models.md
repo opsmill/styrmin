@@ -483,19 +483,103 @@ GlobalContext
 
 ### Configuration Models
 
-```python
-class ClusterConfig(BaseModel):
-    # Cluster-level configuration
+<!-- Extracted from specs/001-external-dns-endpoints-type on 2026-05-17 -->
 
-class EnvironmentConfig(BaseModel):
-    # Environment-level configuration
+All four config classes inherit from `BaseConfigSection`, which holds the shared operator-tunable fields. The inheritance graph is:
 
-class DeploymentConfig(BaseModel):
-    # Deployment-level configuration
-
-class ResolvedConfig(BaseModel):
-    # Merged configuration from all levels
+```text
+BaseConfigSection                      # shared field set + ConfigDict(extra="forbid")
+├── ClusterConfig
+├── EnvironmentConfig
+└── DeploymentConfig                   # multi-inherits ClusterConfig + EnvironmentConfig
+    └── ResolvedConfig                 # output of the Cluster → Environment → Deployment merge
 ```
+
+`BaseConfigSection` carries the external-routing and platform-tunable knobs (representative subset):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `ingress_class` | `str \| None` | e.g. `"traefik"` |
+| `fqdn_suffix` | `str \| None` | DNS zone for FQDN construction; see [ADR-030](../adr/adr-030-compute-service-fqdns-at-runtime.md) |
+| `external_url_scheme` | `Literal["http", "https"] \| None` | |
+| `external_url_port` | `int \| None` | validated 1..65535 |
+| `external_dns_endpoints_type` | `Literal["NodeExternalIP", "ClusterIP"] \| None` | drives the `external-dns.alpha.kubernetes.io/endpoints-type` annotation; required for IPv6/dual-stack clusters with Cloudflare |
+| `db_size` | `str \| None` | |
+| `scheduling` | `SchedulingConfig \| None` | nested object with affinity / tolerations / resource requirements |
+
+The merge (`_resolve_instance_config` in `context/resolvers.py`) uses generic `**model_dump(exclude_none=True)` dict-spread with deepest-wins precedence: Cluster value → Environment value (if set) → Deployment value (if set). Any new field added to `BaseConfigSection` propagates through this merge automatically — see [ADR-039](../adr/adr-039-config-additions-via-baseconfigsection-no-migration.md) for the no-migration / no-GraphQL-change pattern that backs additive config work, and [`dev/guidelines/backend/python.md` → Rendering Kubernetes manifests](../../guidelines/backend/python.md#no-runtime-defaults-for-optional-emitted-annotations) for the "emit only when set" discipline that preserves byte-identical output for existing deployments.
+
+```python
+class ClusterConfig(BaseConfigSection):
+    # Cluster-level: standard_storage, plus the BaseConfigSection fields above
+
+class EnvironmentConfig(BaseConfigSection):
+    # Environment-level: ip_whitelist, dedicated_ingress, env_vars, plus BaseConfigSection
+
+class DeploymentConfig(ClusterConfig, EnvironmentConfig):
+    # Deployment-level: components, service_name_overrides, plus everything inherited
+
+class ResolvedConfig(DeploymentConfig):
+    # Merged configuration the renderer actually reads from
+```
+
+#### IngressServiceConfig
+
+<!-- Extracted from specs/001-ingress-ipfamily-nodeport on 2026-05-17 -->
+
+Nested under `EnvironmentConfig.dedicated_ingress.service` (and the equivalent path in cluster/deployment config when an operator overrides dedicated ingress at those layers). Travels through the same JSON-blob path as the rest of `dedicated_ingress` — no DB / GraphQL surface of its own.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `type` | `Literal["ClusterIP", "NodePort", "LoadBalancer"] \| None` | Kubernetes Service type |
+| `annotations` | `dict[str, str] \| None` | extra Service annotations |
+| `load_balancer_ip` | `str \| None` | pinned LB IP when `type == "LoadBalancer"` |
+| `external_traffic_policy` | `Literal["Local", "Cluster"] \| None` | source-IP preservation knob |
+| `ip_families` | `list[Literal["IPv4", "IPv6"]] \| None` | maps to `service.ipFamilies` in the Traefik chart |
+| `ip_family_policy` | `Literal["SingleStack", "PreferDualStack", "RequireDualStack"] \| None` | maps to `service.ipFamilyPolicy` |
+| `node_port` | `int \| None` | per-entrypoint pin (`ports.web.nodePort` + `ports.websecure.nodePort`); only valid when `type == "NodePort"` |
+
+Two cross-field invariants are enforced at Pydantic-parse time:
+
+- `@field_validator("ip_families")` — list must be non-empty and contain no duplicates.
+- `@model_validator(mode="after")` — `node_port` is only accepted when `type == "NodePort"`. The `ValidationError` names both fields so the operator can correct either side.
+
+Existing models in the same file follow the same idiom (`DeploymentReference._require_one_identifier`, `WeightedAffinityTerm._weight_range`, `ResourceSpec._validate_quantities`). All new fields are rendered with `{% if … %}` guards in the chart-values template — when unset, the chart sees the key as absent (not `null`), preserving byte-identical output for existing deployments per the [emit-only-when-set rule](../../guidelines/backend/python.md#no-runtime-defaults-for-optional-emitted-annotations).
+
+#### SchedulingConfig
+
+<!-- Extracted from specs/001-pod-scheduling-config on 2026-05-17 -->
+
+Top-level scheduling shape used at Environment, Deployment, and Component scopes (Cluster scope is intentionally unused — see [ADR-044](../adr/adr-044-scheduling-merge-semantics.md)). Lives on `BaseConfigSection.scheduling`.
+
+```python
+class SchedulingConfig(BaseModel):
+    affinity: AffinityConfig | None = None        # podAffinity / podAntiAffinity / nodeAffinity, each with required + preferred
+    tolerations: list[Toleration] | None = None
+    topology_spread: list[TopologySpreadConstraint] | None = None
+    resources: ResourceSpec | None = None          # requests + limits (see below)
+    node_selector: dict[str, str] | None = None
+    runtime_class: str | None = None               # DNS-1123 subdomain validated; no rollout-time check — unknown classes surface as Pending pods at scheduling time
+    inject: PostRenderInjection | None = None      # per-feature opt-out booleans
+```
+
+**Merge precedence**: Environment → Deployment → Component, walking levels in order. Most fields follow deepest-wins; affinity and topology-spread have richer merge semantics (see [ADR-044](../adr/adr-044-scheduling-merge-semantics.md)). The resolver records per-field source in a parallel `provenance: dict[str, "environment" | "deployment" | "component"]` map (see [ADR-048](../adr/adr-048-scheduling-provenance-map.md)).
+
+**ResourceSpec** has `requests` and `limits`, each shaped:
+
+```python
+class ResourceQuantitySet(BaseModel):
+    cpu: str | None = None                # first-class, autocompleted, quantity-validated
+    memory: str | None = None
+    ephemeral_storage: str | None = None
+    extended: dict[str, str] = {}         # hugepages, nvidia.com/gpu, vendor resources; quantity-validated keys
+```
+
+See [ADR-043](../adr/adr-043-resourcespec-first-class-plus-extended-map.md) for the first-class / extended split.
+
+**PostRenderInjection** carries six independent booleans defaulting to `True`: `pod_affinity`, `node_affinity`, `topology_spread`, `resources`, `tolerations`, `runtime_class`. A `False` value tells the post-renderer to leave that feature untouched. Opt-out is expressible at deployment and component scopes (not environment); component-level takes precedence over deployment-level. See [ADR-047](../adr/adr-047-post-render-injection-toggles-and-kind-list.md) for the toggle semantics and the static pod-template-bearing kind list the injection patches target (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob`, `ReplicaSet`).
+
+**Affinity-by-deployment-reference**: scheduling rules that reference another deployment by platform-id are expanded at resolve time into a `labelSelector` against the `styrmin/deployment_id` pod label that the `TemplateLabelPatch` pipeline stamps on every platform-managed pod-template-bearing resource. See [ADR-045](../adr/adr-045-affinity-by-deployment-reference-via-label.md).
 
 ### HelmInfo
 
@@ -529,6 +613,24 @@ class UtilityContext(BaseModel):
 ```
 
 `UtilityContext` carries only the kind. The corresponding utility row in the database (`Utility`) holds the `resource_template` used to render manifests; there is no `helm` field on `UtilityContext`.
+
+### ServiceReference
+
+<!-- Extracted from specs/001-service-fqdn-context on 2026-05-17 -->
+
+Template-facing model for a service in the deployment context. Accessed by driver templates as `{{ services['name'].primary_fqdn }}`.
+
+```python
+class ServiceReference(BaseModel):
+    host: str
+    port: int
+    kind: str                              # http / https / tcp / udp
+    url: str                               # computed from kind + host + port
+    primary_fqdn: str | None = None        # UUID-based: {sanitized-app}-{deployment-id}.{suffix}
+    human_readable_fqdn: str | None = None # env-based: {sanitized-host}-{sanitized-env}.{suffix}
+```
+
+Both FQDN fields default to `None` when `ResolvedConfig.fqdn_suffix` is unset. When set, every label component is RFC 1035–safe (lowercase, alphanumeric/hyphen, ≤63 chars). FQDNs are **computed**, not persisted — there is no DB column. See [ADR-030](../adr/adr-030-compute-service-fqdns-at-runtime.md).
 
 ## Key Files
 

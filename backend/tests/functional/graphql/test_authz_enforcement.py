@@ -1,4 +1,4 @@
-"""Functional enforcement tests for default-deny + RBAC. See ADR-020."""
+"""Functional enforcement tests for default-deny + RBAC. See ADR-025."""
 
 from __future__ import annotations
 
@@ -124,7 +124,7 @@ async def test_admin_caller_passes_admin_mutation(
 async def test_introspection_works_without_authentication(
     unauth_client: AsyncClient,
 ) -> None:
-    """ADR-020: schema discovery is intentionally public."""
+    """ADR-025: schema discovery is intentionally public."""
     response = await unauth_client.post(
         "/graphql",
         json={"query": "{ __schema { queryType { name } } }"},

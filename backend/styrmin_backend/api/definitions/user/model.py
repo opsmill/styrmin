@@ -16,7 +16,7 @@ from styrmin_backend.services.auth.roles import effective_role
 
 @strawberry.enum
 class Role(Enum):
-    """GraphQL representation of the authorization role. See ADR-020."""
+    """GraphQL representation of the authorization role. See ADR-025."""
 
     READ_ONLY = "READ_ONLY"
     READ_WRITE = "READ_WRITE"
@@ -29,7 +29,7 @@ class Role(Enum):
 
 @strawberry.type
 class Group:
-    """Authorization group. See ADR-020."""
+    """Authorization group. See ADR-025."""
 
     id: UUID
     name: str

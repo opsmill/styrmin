@@ -1,4 +1,4 @@
-"""Default-deny GraphQL schema extension. See ADR-020.
+"""Default-deny GraphQL schema extension. See ADR-025.
 
 Runs before any resolver and rejects unauthenticated requests with the
 structured ``UNAUTHENTICATED`` error code, except for the documented

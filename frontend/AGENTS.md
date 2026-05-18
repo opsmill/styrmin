@@ -22,8 +22,6 @@ Detailed conventions and architecture live under `dev/`:
 | Forms (TanStack Form) | [knowledge/frontend/forms.md](../dev/knowledge/frontend/forms.md) | [guidelines/frontend/forms.md](../dev/guidelines/frontend/forms.md) |
 | UI primitives (Base UI) | [knowledge/frontend/ui-primitives.md](../dev/knowledge/frontend/ui-primitives.md) | [guidelines/frontend/ui-primitives.md](../dev/guidelines/frontend/ui-primitives.md) |
 
-Migration rationale for each is captured as ADR-010 through ADR-013 in `dev/adr/`.
-
 ## File Structure
 
 ```text

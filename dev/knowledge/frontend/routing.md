@@ -6,8 +6,6 @@
 
 The frontend uses **TanStack Router** with a code-based route tree. Every route in the application is a direct child of a single root layout (the `AppShell`). Type safety is global: route paths, parameters, and navigation calls are all validated against the registered route tree at compile time.
 
-See [ADR-010](../../adr/adr-010-migrate-frontend-router-to-tanstack.md) for the migration rationale.
-
 ### File Layout
 
 ```text

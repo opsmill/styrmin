@@ -3,11 +3,11 @@
 **Status**: Accepted
 **Date**: 2026-05-08
 **Source**: specs/009-environment-update/ (spec, plan, research §7-§8, contracts/graphql.md)
-**Supersedes**: the JSON-blob `updateEnvironment(environmentId, config: JSON)` write surface introduced in 008-deployment-env-vars (see [ADR-019](adr-019-deployment-env-vars.md) §"Alternatives Considered" — "Strict-typed mutation arguments").
+**Supersedes**: the JSON-blob `updateEnvironment(environmentId, config: JSON)` write surface introduced in 008-deployment-env-vars.
 
 ## Context
 
-008-deployment-env-vars (ADR-019) shipped operator-set environment variables through a **JSON-blob** write surface (`updateEnvironment(environmentId, config: JSON)`) so the env vars feature could land alongside SchedulingConfig without forking validation. The JSON-blob shape was the right v1 trade-off but had two known gaps:
+008-deployment-env-vars shipped operator-set environment variables through a **JSON-blob** write surface (`updateEnvironment(environmentId, config: JSON)`) so the env vars feature could land alongside SchedulingConfig without forking validation. The JSON-blob shape was the right v1 trade-off but had two known gaps:
 
 1. **No fanout.** Updating `Environment.config` updated the row in storage but did not redeploy the deployments living in that environment. Operators editing an env-scope env var believed their change was live; in reality it was stranded until each deployment's next reconcile was triggered for some other reason. Concretely, an operator setting `OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.staging` on a `staging` environment with three deployments would see the env-config row update, but pods kept the old endpoint until a separate `updateDeployment` call (or a driver upgrade) re-rendered them.
 2. **Untyped write surface.** The `config: JSON` argument bypassed schema introspection — SDK/GraphiQL consumers could not discover the writable shape from the schema, and validation lived only in the Pydantic round-trip at the resolver. Invalid inputs sometimes collapsed to `INVALID_CONTEXT` instead of the typed error codes (`INVALID_ENV_VAR_NAME`, `ENV_VAR_SIZE_LIMIT_EXCEEDED`, `DUPLICATE_ENV_VAR_NAME`) that 008-deployment-env-vars had defined.

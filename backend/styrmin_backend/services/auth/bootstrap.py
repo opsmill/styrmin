@@ -1,4 +1,4 @@
-"""Default-admin bootstrap. See ADR-019.
+"""Default-admin bootstrap. See ADR-024.
 
 Seeds a default admin row on startup so a fresh install is immediately
 usable. Multi-replica safe via ``INSERT ... ON CONFLICT (username) DO

@@ -264,9 +264,7 @@ amend the constitution — and update this document accordingly.
   operator. Reconciles intent into Kubernetes resources. See
   [`agent/overview.md`](agent/overview.md).
 - **ApplicationDriver** — versioned spec defining how an application is
-  deployed (helm chart, components, hooks). See
-  [ADR-002](../adr/adr-002-consolidate-driver-single-yaml.md) and the
-  `driver/` directory.
+  deployed (helm chart, components, hooks). See the `driver/` directory.
 - **Comparator** — service that diffs two Instances and produces a
   `DiffReport`. See [`backend/reconciliation.md`](backend/reconciliation.md).
 - **Context / GlobalContext** — hierarchical Pydantic model holding the

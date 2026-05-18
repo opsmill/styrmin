@@ -14,7 +14,7 @@ from sqlmodel import Enum as SQLModelEnum
 
 
 class Role(IntEnum):
-    """Authorization role. See ADR-020.
+    """Authorization role. See ADR-025.
 
     Stored as an ordered integer (10/20/30, gapped for future inserts).
     Comparisons (``>=``) work natively. The GraphQL representation is the
@@ -42,7 +42,7 @@ class StyrminModel(SQLModel):
 
 
 class UserGroup(SQLModel, table=True):
-    """Many-to-many link between User and Group. See ADR-020."""
+    """Many-to-many link between User and Group. See ADR-025."""
 
     __tablename__ = "user_group"
 
@@ -63,7 +63,7 @@ class UserGroup(SQLModel, table=True):
 
 
 class User(StyrminModel, table=True):
-    """User account. See ADR-019, ADR-020."""
+    """User account. See ADR-024, ADR-025."""
 
     username: str = Field(unique=True)
     password_hash: str
@@ -86,7 +86,7 @@ class User(StyrminModel, table=True):
 
 
 class Group(StyrminModel, table=True):
-    """Authorization group. See ADR-020.
+    """Authorization group. See ADR-025.
 
     Membership monotonically elevates: a user's effective role is
     ``max(user.role, *(g.role for g in user.groups))``.
@@ -105,7 +105,7 @@ class Group(StyrminModel, table=True):
 
 
 class Session(StyrminModel, table=True):
-    """Server-side opaque session row. See ADR-019."""
+    """Server-side opaque session row. See ADR-024."""
 
     __table_args__ = (Index("ix_session_expires_at", "expires_at"),)
 

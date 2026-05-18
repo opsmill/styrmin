@@ -335,7 +335,7 @@ class PrefectCatalogue:
             ),
         )
 
-        # Daily sweep of expired session rows. See ADR-019.
+        # Daily sweep of expired session rows. See ADR-024.
         self.add_workflow_definition(
             action=PrefectAction.CLEANUP_EXPIRED_SESSIONS,
             workflow=LocalSourceWorkflowDefinition(

@@ -158,11 +158,11 @@ styrmin:
   # -- Log level (DEBUG, INFO, WARNING, ERROR)
   logLevel: INFO
 
-  # -- Bootstrap admin username seeded on first boot (see ADR-019).
+  # -- Bootstrap admin username seeded on first boot (see ADR-024).
   # The bootstrap is a no-op when a user with this username already exists.
   adminUsername: "admin"
 
-  # -- Bootstrap admin password (see ADR-019). Optional. When unset the
+  # -- Bootstrap admin password (see ADR-024). Optional. When unset the
   # backend generates a random password at first boot and logs it once at
   # WARN level — capture it from the boot logs. Set this for IaC / CI
   # environments that want a known credential baked into the install.

@@ -261,6 +261,21 @@ Worked example: `Deployment.name` (ADR-018). Rationale: ADR-015 (soft-delete tom
 - Provide `@classmethod create()` factory methods
 - Use `@property` for computed fields
 
+## Rendering Kubernetes manifests
+
+### No runtime defaults for optional emitted annotations
+
+For optional operator-config fields that drive an emitted Kubernetes annotation, label, or similar wire artifact, the rendering site MUST emit the key only when the resolved value is not `None`:
+
+```python
+if context.instance.config.<field> is not None:
+    annotations["<annotation-key>"] = context.instance.config.<field>
+```
+
+No defaulting at render time, no defaulting at Pydantic-model time, no defaulting in the builder. `None` propagates from the Pydantic field through `ResolvedConfig` to the renderer, and the renderer treats `None` as "skip this annotation". The downstream controller (external-dns, Traefik, …) applies its own default for absent annotations — the platform does not claim authority over defaults it has no business setting.
+
+**Why:** always-emit-with-a-default rewrites the rendered manifest for every existing deployment on upgrade — even ones that never touched the knob. Code review should flag any `annotations["..."] = ... or "default"` shape. Chart-values templates honour the same rule with `{% if … %}` guards.
+
 ## GraphQL (Strawberry)
 
 - Types use `@strawberry.type` decorator

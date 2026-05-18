@@ -2,7 +2,7 @@
 
 ## Frontend Data Fetching Guidelines
 
-Conventions for using TanStack Query in the frontend. See [knowledge/frontend/data-fetching.md](../../knowledge/frontend/data-fetching.md) for the architectural overview and [ADR-011](../../adr/adr-011-replace-urql-with-tanstack-query.md) for context.
+Conventions for using TanStack Query in the frontend. See [knowledge/frontend/data-fetching.md](../../knowledge/frontend/data-fetching.md) for the architectural overview.
 
 ### Operation Authoring
 

@@ -116,7 +116,7 @@ async def test_change_password_invalidates_other_sessions_keeps_caller(
     unauth_client: AsyncClient, session: AsyncSession
 ) -> None:
     """Two sessions for the same user — change password on one, the other
-    must be invalidated and the caller must remain valid. See ADR-019."""
+    must be invalidated and the caller must remain valid. See ADR-024."""
     user = await _seed_user(session)
     # First session: the one we'll *call* changePassword from.
     _row_a, token_a = await create_session(session, user.id)

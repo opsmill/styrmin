@@ -2,7 +2,7 @@
 
 ## Frontend Forms Guidelines
 
-Conventions for authoring forms with TanStack Form. See [knowledge/frontend/forms.md](../../knowledge/frontend/forms.md) for the architectural overview and [ADR-012](../../adr/adr-012-migrate-forms-to-tanstack-form.md) for context.
+Conventions for authoring forms with TanStack Form. See [knowledge/frontend/forms.md](../../knowledge/frontend/forms.md) for the architectural overview.
 
 ### Validation
 

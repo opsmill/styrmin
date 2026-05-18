@@ -52,7 +52,7 @@ async def session_fixture():
 async def graphql_fixture(session: AsyncSession):
     """Authenticated-as-admin ASGI client.
 
-    Default-deny is on (ADR-020); this seeds an admin user and a session
+    Default-deny is on (ADR-025); this seeds an admin user and a session
     token and pre-attaches the bearer header so existing tests keep
     exercising the production auth path without each having to log in.
     """

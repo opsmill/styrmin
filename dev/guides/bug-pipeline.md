@@ -169,6 +169,26 @@ For an end-to-end exercise of all four stages on a real issue (success paths, fa
 - **Tests don't pass in test stage** — the skill posts a failure comment and does not commit. Inspect the comment for the failure detail; either tighten the analyst's reproduction scenario (re-run `/bug-analyze`) or fix the test locally before re-running.
 - **Review keeps flipping the PR back to draft** — that's the gate working. Read the requested changes in the review comment, address them on the branch, and re-run `/bug-review`.
 
+## Design rationale
+
+### `SKILL.md` is the source of truth; workflow files are thin slash-command wrappers
+
+Every stage of the pipeline lives as `.agents/skills/bug-<stage>/SKILL.md`. Both invocation paths — the local Claude Code CLI and the GHAW workflow on GitHub — load the same skill. The GHAW `.md` source is a frontmatter block plus exactly one body line: the slash-command invocation. **No agent prompt, no branch-naming logic, no comment templates, no summary parsing.** Anything that is *agent logic* lives in the skill.
+
+This is the prescribed pattern for any future agentic workflow in this repo. The rejected alternatives — inlining prompt text in the workflow YAML, an umbrella `bug-pipeline/` skill with sub-commands, a shared instruction module across the four skills — all reintroduce the duplication or skill-coupling the pattern exists to prevent. A reviewer reads a workflow `.md` in under 30 seconds and confirms "the body is one slash-command line"; the invariant is mechanically verifiable.
+
+Concurrency uses `cancel-in-progress: false` deliberately — cancelling an in-flight fix mid-write could leave a half-pushed branch.
+
+### Inter-stage data contract — fenced YAML between HTML-comment markers
+
+Stages don't share process state; the only persistent channel between them is what they write into GitHub (issue comments, PR body, PR comments). For a downstream stage to act on upstream output, it needs to read structured data the upstream stage produced — without parsing prose and without hiding the payload from the human reviewer.
+
+The contract is: the analyst stage ends its issue comment with a fenced YAML block bracketed by `<!-- bug-pipeline:summary:start -->` / `<!-- bug-pipeline:summary:end -->`. The fix stage embeds the **verbatim** YAML inside a `<details>` block in the PR body so the test and review stages can re-derive context from the PR alone. The fenced block is the **only** inter-stage data channel — stages MUST NOT read each other's process state or prior comments other than the marker-framed YAML. That keeps each stage rerunnable in isolation.
+
+The marker pair is load-bearing: GitHub's renderer strips comment content but preserves the structural delimiters in the API source, so a `gh issue view … --json comments` flow can locate the block deterministically without fuzzy matching. `schema_version` is the first key in the YAML so future stages can branch on contract evolution; adding fields is non-breaking (older consumers ignore unknown keys), changing semantics bumps the version.
+
+Rejected alternatives (recorded so they don't get re-proposed): parsing the analyst's prose (brittle, forces constrained vocabulary), hidden HTML-comment-only payloads (loses human readability — the maintainer should be able to eyeball what the next stage will see), JSON in the fence (harder for humans to scan with multi-line strings), committing the summary to a separate file in the branch (forces the analyst stage to commit before the fix stage has chosen a branch), and locating the block by "last yaml fence in the comment" (fragile if future stages add their own YAML blocks).
+
 ## References
 
 - Skill files:

@@ -8,8 +8,6 @@ Headless UI primitives are provided by **Base UI** (`@base-ui/react`). All consu
 
 Consuming components (~23 files) import only from `components/ui/`. They never import from `@base-ui/react` directly.
 
-See [ADR-013](../../adr/adr-013-migrate-ui-primitives-to-base-ui.md) for the migration rationale.
-
 ### Wrapper Inventory
 
 | Wrapper | Base UI primitive | Notable shape |
