@@ -1,6 +1,9 @@
 ---
 description: Run the bug-analyze stage of the bug-fixing pipeline.
 on:
+  github-app:
+    client-id: ${{ secrets.GH_AW_APP_ID }}
+    private-key: ${{ secrets.GH_AW_APP_PRIVATE_KEY }}
   slash_command:
     name: bug-analyze
     events: [issue_comment]
@@ -19,6 +22,9 @@ concurrency:
 checkout:
   fetch-depth: 0
 safe-outputs:
+  github-app:
+    client-id: ${{ secrets.GH_AW_APP_ID }}
+    private-key: ${{ secrets.GH_AW_APP_PRIVATE_KEY }}
   add-comment:
     max: 5
 ---

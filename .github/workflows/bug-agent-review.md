@@ -1,6 +1,9 @@
 ---
 description: Run the bug-review stage of the bug-fixing pipeline.
 on:
+  github-app:
+    client-id: ${{ secrets.GH_AW_APP_ID }}
+    private-key: ${{ secrets.GH_AW_APP_PRIVATE_KEY }}
   slash_command:
     name: bug-review
     events: [issue_comment]
@@ -19,6 +22,9 @@ concurrency:
 checkout:
   fetch-depth: 0
 safe-outputs:
+  github-app:
+    client-id: ${{ secrets.GH_AW_APP_ID }}
+    private-key: ${{ secrets.GH_AW_APP_PRIVATE_KEY }}
   add-comment:
     max: 5
   mark-pull-request-as-ready-for-review:
