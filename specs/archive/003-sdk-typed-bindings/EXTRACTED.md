@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-049-sdk-typed-bindings-outer-wrapper-and-facade.md`](../../dev/adr/adr-049-sdk-typed-bindings-outer-wrapper-and-facade.md) (from Decisions 1 + 2 + 5 + 6)
+- [`dev/adr/adr-037-sdk-typed-bindings-outer-wrapper-and-facade.md`](../../dev/adr/adr-037-sdk-typed-bindings-outer-wrapper-and-facade.md) (from Decisions 1 + 2 + 5 + 6)
 
 ## Knowledge Updated
 

@@ -1,4 +1,4 @@
-"""Documented allow-list for unauthenticated GraphQL fields. See ADR-025.
+"""Documented allow-list for unauthenticated GraphQL fields. See ADR-017.
 
 Two layers consult this list: the ``RequiresAuthentication`` schema
 extension at request time, and the schema-walk completeness test in CI.
@@ -13,7 +13,7 @@ from __future__ import annotations
 #:
 #: ``login`` is the entry point; gating it would lock everyone out.
 #:
-#: ``logout`` is allow-listed per ADR-025 — a deactivated user must still
+#: ``logout`` is allow-listed per ADR-017 — a deactivated user must still
 #: be able to terminate their existing session. Gating logout behind
 #: ``RequiresAuthentication`` would defeat deactivation; idempotent for
 #: pre-auth callers (returns true and clears the cookie regardless).

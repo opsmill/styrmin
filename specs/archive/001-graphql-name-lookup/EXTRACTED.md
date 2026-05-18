@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-042-dual-identifier-resolution-service-layer.md`](../../dev/adr/adr-042-dual-identifier-resolution-service-layer.md) (from R2 + R3 + R4 + R7)
+- [`dev/adr/adr-031-dual-identifier-resolution-service-layer.md`](../../dev/adr/adr-031-dual-identifier-resolution-service-layer.md) (from R2 + R3 + R4 + R7)
 
 ## Knowledge Updated
 

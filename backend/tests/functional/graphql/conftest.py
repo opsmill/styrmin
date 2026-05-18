@@ -6,7 +6,7 @@ explicit unauth path, and ``prefect_manager_mock``. Plus the ``gql``
 helper that posts an operation file by name, asserts a clean 200, and
 returns the ``data`` payload.
 
-Default-deny is on (ADR-025). Tests that hit any non-allow-listed field
+Default-deny is on (ADR-017). Tests that hit any non-allow-listed field
 must use ``client`` (authenticated as admin); tests that exercise the
 unauth path use ``unauth_client``.
 

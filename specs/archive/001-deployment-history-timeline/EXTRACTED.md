@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-038-deployment-history-derived-from-existing-data.md`](../../dev/adr/adr-038-deployment-history-derived-from-existing-data.md) (from R3 + R4)
+- [`dev/adr/adr-028-deployment-history-derived-from-existing-data.md`](../../dev/adr/adr-028-deployment-history-derived-from-existing-data.md) (from R3 + R4)
 
 ## Knowledge Updated
 

@@ -1,4 +1,4 @@
-"""Loguru sensitive-field redaction patcher. See ADR-024 §"Password handling"."""
+"""Loguru sensitive-field redaction patcher. See ADR-016 §"Password handling"."""
 
 from __future__ import annotations
 

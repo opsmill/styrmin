@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-057-docs-site-and-documentation-lifecycle.md`](../../dev/adr/adr-057-docs-site-and-documentation-lifecycle.md) (from R-001 + R-005)
+- [`dev/adr/adr-043-docs-site-and-documentation-lifecycle.md`](../../dev/adr/adr-043-docs-site-and-documentation-lifecycle.md) (from R-001 + R-005)
 
 ## Knowledge Updated
 

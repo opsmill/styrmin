@@ -1,4 +1,4 @@
-"""Propagation tests for the new User/Group fields. See ADR-025.
+"""Propagation tests for the new User/Group fields. See ADR-017.
 
 Verifies that ``User.role``, ``User.effectiveRole``, ``User.groups``,
 and ``Group`` round-trip correctly from the DB through the GraphQL
@@ -88,7 +88,7 @@ async def test_user_role_propagates_for_admin_caller(
 async def test_effective_role_picks_highest_group_role(
     unauth_client: AsyncClient, session: AsyncSession
 ) -> None:
-    """ADR-025: groups grant capabilities, never revoke them.
+    """ADR-017: groups grant capabilities, never revoke them.
 
     A direct READ_ONLY user joined to ADMIN + READ_WRITE groups
     surfaces ``effectiveRole = ADMIN`` while ``role = READ_ONLY``.

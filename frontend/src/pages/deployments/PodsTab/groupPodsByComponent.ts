@@ -13,7 +13,7 @@ export type PodGroups<P> = {
 };
 
 /**
- * Implements ADR-014 in the UI: three buckets by observed `styrmin/component`
+ * Implements ADR-007 in the UI: three buckets by observed `styrmin/component`
  * label, never collapsing drift into a generic "Ungrouped" group.
  *
  * - declared: one entry per declared component, in declaration order,

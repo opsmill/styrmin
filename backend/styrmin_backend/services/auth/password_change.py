@@ -1,4 +1,4 @@
-"""Password rotation. See ADR-024, issue #189.
+"""Password rotation. See ADR-016, issue #189.
 
 The mutation flow:
 

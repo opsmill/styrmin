@@ -9,10 +9,10 @@
 - One runner everywhere means no `_resolve_runner` branching, no version-skew between two implementations, and one fewer dev dependency.
 - For this team the inclusion concern (contributors who can't install Rust binaries) is theoretical; the cost of dual-runner support is real.
 
-**Initial draft and reversal**: An earlier version of this research supported `pre-commit` (Python) as an interchangeable fallback. The reversal is documented in ADR-014; the spec's FR-006/FR-009 reflect the final decision.
+**Initial draft and reversal**: An earlier version of this research supported `pre-commit` (Python) as an interchangeable fallback. The reversal is documented in ADR-007; the spec's FR-006/FR-009 reflect the final decision.
 
 **Alternatives considered**:
-- *Dual-runner support (prek + pre-commit)*: rejected on simplicity grounds. Documented in ADR-014.
+- *Dual-runner support (prek + pre-commit)*: rejected on simplicity grounds. Documented in ADR-007.
 - *pre-commit only*: rejected — too slow per-commit; defeats the "fast feedback" motivation of the feature.
 - *Custom invoke script that wraps the same checks*: rejected — duplicates the declarative config that prek already provides; we'd lose the published-hook ecosystem (e.g., `pre-commit-hooks` for hygiene checks).
 
@@ -113,7 +113,7 @@
 
 **Decision**: Run both layers (per-tool jobs + hook job) for one CI cycle on this PR to validate parity, then remove the per-tool jobs that the hook job fully subsumes in the same PR. The single observed parity run is judged sufficient — the hook job invokes the same underlying tools (`ruff`, `ty`, `yamllint`, `rumdl`, `pnpm lint`, `helm lint`, `validate-graphql`, `ariadne-codegen`, `pnpm codegen`) that the per-tool jobs invoked, so any divergence would be a CLI-flag-level bug, not a semantic one.
 
-**Rationale**: A multi-week parity-validation period was initially planned (see ADR-014's "Alternatives Considered"). On reflection: the duplicate-CI cost (multiple Python+uv+pnpm setups, repeated lints) outweighs the marginal insurance, and reverting the dedupe is a single-revert operation if a regression surfaces.
+**Rationale**: A multi-week parity-validation period was initially planned (see ADR-007's "Alternatives Considered"). On reflection: the duplicate-CI cost (multiple Python+uv+pnpm setups, repeated lints) outweighs the marginal insurance, and reverting the dedupe is a single-revert operation if a regression surfaces.
 
 ## R10. Markdown linter
 

@@ -51,7 +51,7 @@ async def app_initialization(_: FastAPI) -> None:
     await wait_for_database()
     await init_db()
 
-    # Seed the default admin user (no-op if it already exists). See ADR-024.
+    # Seed the default admin user (no-op if it already exists). See ADR-016.
     await bootstrap_default_admin_from_settings()
 
     # Initialize the Prefect manager

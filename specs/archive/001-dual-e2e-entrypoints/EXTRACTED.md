@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-050-scenario-driver-protocol-and-parametrized-fixture.md`](../../dev/adr/adr-050-scenario-driver-protocol-and-parametrized-fixture.md) (from R1 + R4 + R7 supporting context)
+- [`dev/adr/adr-038-scenario-driver-protocol-and-parametrized-fixture.md`](../../dev/adr/adr-038-scenario-driver-protocol-and-parametrized-fixture.md) (from R1 + R4 + R7 supporting context)
 
 ## Knowledge Updated
 

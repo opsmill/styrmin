@@ -260,7 +260,7 @@ class PodStatus(StyrminModel, table=True):
 ```
 
 - One row per `(deployment_id, pod_name)`, refreshed every reporting cycle. Rows are upserted by the `reportPodStatuses` GraphQL mutation, which is invoked by the agent's status reporter (see [`../agent/overview.md`](../agent/overview.md) → Status Reporter). Stale rows (pods no longer present in the agent's snapshot for a deployment) are removed **server-side** by `services/pod_status.py::report_pod_statuses`, which calls `delete_stale` on the repository — the agent only sends the active set.
-- `component_name` is populated by the agent reading the `styrmin/component` label off pod metadata. It is recorded as-is — see [ADR-014](../../adr/adr-014-pod-status-records-observed-state-not-declared-state.md) for why the server does not validate it against declared `Component` rows.
+- `component_name` is populated by the agent reading the `styrmin/component` label off pod metadata. It is recorded as-is — see [ADR-007](../../adr/adr-007-pod-status-records-observed-state-not-declared-state.md) for why the server does not validate it against declared `Component` rows.
 - `last_polled_at` is rewritten on every upsert; downstream consumers can use it to detect stale data if the agent stops reporting.
 
 #### DeploymentStatus
@@ -332,7 +332,7 @@ class PodPhase(str, Enum):
 
 ## Auth & Authorization
 
-The `user`, `group`, `user_group`, and `session` tables ship in #179 (see [ADR-024](../../adr/adr-024-authentication-and-sessions.md) and [ADR-025](../../adr/adr-025-authorization-model.md) for column-level schema and rationale). Feature 011 introduces **no** schema changes; the notes below describe how the admin mutation surface consumes the existing tables.
+The `user`, `group`, `user_group`, and `session` tables ship in #179 (see [ADR-016](../../adr/adr-016-authentication-and-sessions.md) and [ADR-017](../../adr/adr-017-authorization-model.md) for column-level schema and rationale). Feature 011 introduces **no** schema changes; the notes below describe how the admin mutation surface consumes the existing tables.
 
 ### Effective role
 
@@ -500,14 +500,14 @@ BaseConfigSection                      # shared field set + ConfigDict(extra="fo
 | Field | Type | Notes |
 |-------|------|-------|
 | `ingress_class` | `str \| None` | e.g. `"traefik"` |
-| `fqdn_suffix` | `str \| None` | DNS zone for FQDN construction; see [ADR-030](../adr/adr-030-compute-service-fqdns-at-runtime.md) |
+| `fqdn_suffix` | `str \| None` | DNS zone for FQDN construction; see [ADR-022](../adr/adr-022-compute-service-fqdns-at-runtime.md) |
 | `external_url_scheme` | `Literal["http", "https"] \| None` | |
 | `external_url_port` | `int \| None` | validated 1..65535 |
 | `external_dns_endpoints_type` | `Literal["NodeExternalIP", "ClusterIP"] \| None` | drives the `external-dns.alpha.kubernetes.io/endpoints-type` annotation; required for IPv6/dual-stack clusters with Cloudflare |
 | `db_size` | `str \| None` | |
 | `scheduling` | `SchedulingConfig \| None` | nested object with affinity / tolerations / resource requirements |
 
-The merge (`_resolve_instance_config` in `context/resolvers.py`) uses generic `**model_dump(exclude_none=True)` dict-spread with deepest-wins precedence: Cluster value → Environment value (if set) → Deployment value (if set). Any new field added to `BaseConfigSection` propagates through this merge automatically — see [ADR-039](../adr/adr-039-config-additions-via-baseconfigsection-no-migration.md) for the no-migration / no-GraphQL-change pattern that backs additive config work, and [`dev/guidelines/backend/python.md` → Rendering Kubernetes manifests](../../guidelines/backend/python.md#no-runtime-defaults-for-optional-emitted-annotations) for the "emit only when set" discipline that preserves byte-identical output for existing deployments.
+The merge (`_resolve_instance_config` in `context/resolvers.py`) uses generic `**model_dump(exclude_none=True)` dict-spread with deepest-wins precedence: Cluster value → Environment value (if set) → Deployment value (if set). Any new field added to `BaseConfigSection` propagates through this merge automatically — see [ADR-029](../adr/adr-029-config-additions-via-baseconfigsection-no-migration.md) for the no-migration / no-GraphQL-change pattern that backs additive config work, and [`dev/guidelines/backend/python.md` → Rendering Kubernetes manifests](../../guidelines/backend/python.md#no-runtime-defaults-for-optional-emitted-annotations) for the "emit only when set" discipline that preserves byte-identical output for existing deployments.
 
 ```python
 class ClusterConfig(BaseConfigSection):
@@ -550,7 +550,7 @@ Existing models in the same file follow the same idiom (`DeploymentReference._re
 
 <!-- Extracted from specs/001-pod-scheduling-config on 2026-05-17 -->
 
-Top-level scheduling shape used at Environment, Deployment, and Component scopes (Cluster scope is intentionally unused — see [ADR-044](../adr/adr-044-scheduling-merge-semantics.md)). Lives on `BaseConfigSection.scheduling`.
+Top-level scheduling shape used at Environment, Deployment, and Component scopes (Cluster scope is intentionally unused — see [ADR-033](../adr/adr-033-scheduling-merge-semantics.md)). Lives on `BaseConfigSection.scheduling`.
 
 ```python
 class SchedulingConfig(BaseModel):
@@ -563,7 +563,7 @@ class SchedulingConfig(BaseModel):
     inject: PostRenderInjection | None = None      # per-feature opt-out booleans
 ```
 
-**Merge precedence**: Environment → Deployment → Component, walking levels in order. Most fields follow deepest-wins; affinity and topology-spread have richer merge semantics (see [ADR-044](../adr/adr-044-scheduling-merge-semantics.md)). The resolver records per-field source in a parallel `provenance: dict[str, "environment" | "deployment" | "component"]` map (see [ADR-048](../adr/adr-048-scheduling-provenance-map.md)).
+**Merge precedence**: Environment → Deployment → Component, walking levels in order. Most fields follow deepest-wins; affinity and topology-spread have richer merge semantics (see [ADR-033](../adr/adr-033-scheduling-merge-semantics.md)). The resolver records per-field source in a parallel `provenance: dict[str, "environment" | "deployment" | "component"]` map (see [ADR-036](../adr/adr-036-scheduling-provenance-map.md)).
 
 **ResourceSpec** has `requests` and `limits`, each shaped:
 
@@ -575,11 +575,11 @@ class ResourceQuantitySet(BaseModel):
     extended: dict[str, str] = {}         # hugepages, nvidia.com/gpu, vendor resources; quantity-validated keys
 ```
 
-See [ADR-043](../adr/adr-043-resourcespec-first-class-plus-extended-map.md) for the first-class / extended split.
+See [ADR-032](../adr/adr-032-resourcespec-first-class-plus-extended-map.md) for the first-class / extended split.
 
-**PostRenderInjection** carries six independent booleans defaulting to `True`: `pod_affinity`, `node_affinity`, `topology_spread`, `resources`, `tolerations`, `runtime_class`. A `False` value tells the post-renderer to leave that feature untouched. Opt-out is expressible at deployment and component scopes (not environment); component-level takes precedence over deployment-level. See [ADR-047](../adr/adr-047-post-render-injection-toggles-and-kind-list.md) for the toggle semantics and the static pod-template-bearing kind list the injection patches target (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob`, `ReplicaSet`).
+**PostRenderInjection** carries six independent booleans defaulting to `True`: `pod_affinity`, `node_affinity`, `topology_spread`, `resources`, `tolerations`, `runtime_class`. A `False` value tells the post-renderer to leave that feature untouched. Opt-out is expressible at deployment and component scopes (not environment); component-level takes precedence over deployment-level. See [ADR-035](../adr/adr-035-post-render-injection-toggles-and-kind-list.md) for the toggle semantics and the static pod-template-bearing kind list the injection patches target (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob`, `ReplicaSet`).
 
-**Affinity-by-deployment-reference**: scheduling rules that reference another deployment by platform-id are expanded at resolve time into a `labelSelector` against the `styrmin/deployment_id` pod label that the `TemplateLabelPatch` pipeline stamps on every platform-managed pod-template-bearing resource. See [ADR-045](../adr/adr-045-affinity-by-deployment-reference-via-label.md).
+**Affinity-by-deployment-reference**: scheduling rules that reference another deployment by platform-id are expanded at resolve time into a `labelSelector` against the `styrmin/deployment_id` pod label that the `TemplateLabelPatch` pipeline stamps on every platform-managed pod-template-bearing resource. See [ADR-034](../adr/adr-034-affinity-by-deployment-reference-via-label.md).
 
 ### HelmInfo
 
@@ -630,7 +630,7 @@ class ServiceReference(BaseModel):
     human_readable_fqdn: str | None = None # env-based: {sanitized-host}-{sanitized-env}.{suffix}
 ```
 
-Both FQDN fields default to `None` when `ResolvedConfig.fqdn_suffix` is unset. When set, every label component is RFC 1035–safe (lowercase, alphanumeric/hyphen, ≤63 chars). FQDNs are **computed**, not persisted — there is no DB column. See [ADR-030](../adr/adr-030-compute-service-fqdns-at-runtime.md).
+Both FQDN fields default to `None` when `ResolvedConfig.fqdn_suffix` is unset. When set, every label component is RFC 1035–safe (lowercase, alphanumeric/hyphen, ≤63 chars). FQDNs are **computed**, not persisted — there is no DB column. See [ADR-022](../adr/adr-022-compute-service-fqdns-at-runtime.md).
 
 ## Key Files
 

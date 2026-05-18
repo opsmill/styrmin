@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-051-single-cluster-platform-scope.md`](../../dev/adr/adr-051-single-cluster-platform-scope.md) (from R1 + spec scope decisions)
+- [`dev/adr/adr-039-single-cluster-platform-scope.md`](../../dev/adr/adr-039-single-cluster-platform-scope.md) (from R1 + spec scope decisions)
 
 ## Knowledge Updated
 

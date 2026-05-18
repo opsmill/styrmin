@@ -5,9 +5,9 @@
 
 ## ADRs Created
 
-- dev/adr/adr-006-embed-context-in-deployment-crd.md (from R2)
-- dev/adr/adr-007-ordered-phase-deployment-sub-handlers.md (from R3, R4)
-- dev/adr/adr-008-prefect-crd-intent-declaration.md (from R5)
+- dev/adr/adr-004-embed-context-in-deployment-crd.md (from R2)
+- dev/adr/adr-005-ordered-phase-deployment-sub-handlers.md (from R3, R4)
+- dev/adr/adr-006-prefect-crd-intent-declaration.md (from R5)
 
 ## Knowledge Updated
 

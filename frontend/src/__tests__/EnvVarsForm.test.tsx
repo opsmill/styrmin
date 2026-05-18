@@ -163,7 +163,7 @@ describe("EnvVarsForm", () => {
   // ``UpdateEnvironmentInput``, so submitting under full-replacement
   // semantics would silently clear them. The form receives a
   // ``blockedReason`` from its parent and MUST render a warning Alert
-  // + disable Save when present. See ADR-020 §"Decision 2".
+  // + disable Save when present. See ADR-012 §"Decision 2".
   it("renders the blocked-warning Alert and disables Save when blockedReason is set", async () => {
     const onSubmit = vi.fn();
     await render(

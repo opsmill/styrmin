@@ -63,7 +63,7 @@ export interface EnvVarsFormProps {
    * form under full-replacement semantics (FR-003 / FR-020) would
    * silently clear those overrides, so the form blocks submission
    * outright until a future iteration adds nested-field mapping. See
-   * ADR-020 §"Decision 2 — Full-replacement input" for the durable
+   * ADR-012 §"Decision 2 — Full-replacement input" for the durable
    * write-up. Operators who hit this gate use the SDK or GraphiQL.
    */
   blockedReason?: string | null;

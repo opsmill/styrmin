@@ -5,9 +5,9 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-027-crd-phase-and-task-callback-coexist.md`](../../dev/adr/adr-027-crd-phase-and-task-callback-coexist.md) (from R3)
-- [`dev/adr/adr-028-separate-crd-status-reporting-mutation.md`](../../dev/adr/adr-028-separate-crd-status-reporting-mutation.md) (from R4)
-- [`dev/adr/adr-029-deployment-crd-status-snapshot-table.md`](../../dev/adr/adr-029-deployment-crd-status-snapshot-table.md) (from R5)
+- [`dev/adr/adr-019-crd-phase-and-task-callback-coexist.md`](../../dev/adr/adr-019-crd-phase-and-task-callback-coexist.md) (from R3)
+- [`dev/adr/adr-020-separate-crd-status-reporting-mutation.md`](../../dev/adr/adr-020-separate-crd-status-reporting-mutation.md) (from R4)
+- [`dev/adr/adr-021-deployment-crd-status-snapshot-table.md`](../../dev/adr/adr-021-deployment-crd-status-snapshot-table.md) (from R5)
 
 ## Knowledge Updated
 

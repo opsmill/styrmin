@@ -1,4 +1,4 @@
-"""Effective-role computation. See ADR-025.
+"""Effective-role computation. See ADR-017.
 
 A user's authorization-relevant role is the max of their direct role
 and every group's role. Group membership monotonically elevates —

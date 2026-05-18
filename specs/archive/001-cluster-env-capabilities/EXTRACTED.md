@@ -5,9 +5,9 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-035-capabilities-as-extensible-json-column.md`](../../dev/adr/adr-035-capabilities-as-extensible-json-column.md) (from R1 + R3)
-- [`dev/adr/adr-036-capabilities-recalculation-in-service-layer.md`](../../dev/adr/adr-036-capabilities-recalculation-in-service-layer.md) (from R2)
-- [`dev/adr/adr-037-environment-capabilities-computed-independently.md`](../../dev/adr/adr-037-environment-capabilities-computed-independently.md) (from R5)
+- [`dev/adr/adr-025-capabilities-as-extensible-json-column.md`](../../dev/adr/adr-025-capabilities-as-extensible-json-column.md) (from R1 + R3)
+- [`dev/adr/adr-026-capabilities-recalculation-in-service-layer.md`](../../dev/adr/adr-026-capabilities-recalculation-in-service-layer.md) (from R2)
+- [`dev/adr/adr-027-environment-capabilities-computed-independently.md`](../../dev/adr/adr-027-environment-capabilities-computed-independently.md) (from R5)
 
 ## Knowledge Updated
 

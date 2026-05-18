@@ -1,4 +1,4 @@
-"""Bulk deletion of expired session rows. See ADR-024.
+"""Bulk deletion of expired session rows. See ADR-016.
 
 Lazy invalidation in :func:`styrmin_backend.services.auth.session.lookup_session`
 is the source of truth for "is this token still valid?" — but a row whose token

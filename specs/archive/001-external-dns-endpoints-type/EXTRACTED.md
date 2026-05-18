@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-039-config-additions-via-baseconfigsection-no-migration.md`](../../dev/adr/adr-039-config-additions-via-baseconfigsection-no-migration.md) (from D1 + D3)
+- [`dev/adr/adr-029-config-additions-via-baseconfigsection-no-migration.md`](../../dev/adr/adr-029-config-additions-via-baseconfigsection-no-migration.md) (from D1 + D3)
 - [`dev/adr/adr-040-no-runtime-defaults-for-optional-annotations.md`](../../dev/adr/adr-040-no-runtime-defaults-for-optional-annotations.md) (from D2)
 
 ## Knowledge Updated

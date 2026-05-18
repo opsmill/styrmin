@@ -85,7 +85,7 @@ from styrmin_backend.services.tasks import get_task, get_tasks
 
 
 def _requires_admin() -> PermissionExtension:
-    """Sugar for admin-only query fields. See ADR-025."""
+    """Sugar for admin-only query fields. See ADR-017."""
     return PermissionExtension([RequiresRole(RoleModel.ADMIN)])
 
 

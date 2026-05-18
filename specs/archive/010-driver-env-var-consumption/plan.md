@@ -114,7 +114,7 @@ dev/knowledge/backend/
                                                               # with consumption paragraph (FR-023)
 
 dev/adr/
-└── adr-021-driver-env-var-consumption.md                    # NEW: durable record of the pivot
+└── adr-013-driver-env-var-consumption.md                    # NEW: durable record of the pivot
 ```
 
 **Codegen regeneration** (automatic via `uv run invoke generate` after the schema change):

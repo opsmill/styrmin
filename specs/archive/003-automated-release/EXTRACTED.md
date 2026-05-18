@@ -5,9 +5,9 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-054-cosign-keyless-image-signing.md`](../../dev/adr/adr-054-cosign-keyless-image-signing.md) (from R5)
-- [`dev/adr/adr-055-release-workflow-orchestration.md`](../../dev/adr/adr-055-release-workflow-orchestration.md) (from R8 + R9)
-- [`dev/adr/adr-056-multiarch-via-native-runner-matrix.md`](../../dev/adr/adr-056-multiarch-via-native-runner-matrix.md) (from R10)
+- [`dev/adr/adr-040-cosign-keyless-image-signing.md`](../../dev/adr/adr-040-cosign-keyless-image-signing.md) (from R5)
+- [`dev/adr/adr-041-release-workflow-orchestration.md`](../../dev/adr/adr-041-release-workflow-orchestration.md) (from R8 + R9)
+- [`dev/adr/adr-042-multiarch-via-native-runner-matrix.md`](../../dev/adr/adr-042-multiarch-via-native-runner-matrix.md) (from R10)
 
 ## Knowledge Updated
 

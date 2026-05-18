@@ -607,7 +607,7 @@ def driver_mode(request: pytest.FixtureRequest) -> str:
 # Auth fixtures — admin_credentials, admin_token, authenticated_styrmin_client
 # ---------------------------------------------------------------------------
 #
-# Default-deny is on (ADR-025). Every E2E flow logs in as the seeded admin
+# Default-deny is on (ADR-017). Every E2E flow logs in as the seeded admin
 # (helm value: styrmin.adminPassword) and routes its calls through the
 # production auth path — there is no STYRMIN_DISABLE_AUTH bypass.
 

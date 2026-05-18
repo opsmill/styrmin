@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-None — all R-section decisions are either implementation detail (chart key paths, Jinja conditional, E2E test shape) or already covered by existing ADRs ([ADR-039](../../dev/adr/adr-039-config-additions-via-baseconfigsection-no-migration.md) for the "no GraphQL/SDK change" pattern; established Pydantic validator conventions in the same file).
+None — all R-section decisions are either implementation detail (chart key paths, Jinja conditional, E2E test shape) or already covered by existing ADRs ([ADR-029](../../dev/adr/adr-029-config-additions-via-baseconfigsection-no-migration.md) for the "no GraphQL/SDK change" pattern; established Pydantic validator conventions in the same file).
 
 ## Knowledge Updated
 

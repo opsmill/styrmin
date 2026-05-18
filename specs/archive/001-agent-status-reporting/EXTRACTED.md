@@ -6,8 +6,8 @@
 ## ADRs Created
 
 - [`dev/adr/adr-032-agent-status-reporter-async-task.md`](../../dev/adr/adr-032-agent-status-reporter-async-task.md) (from R1)
-- [`dev/adr/adr-033-dedicated-mutation-per-observed-state-channel.md`](../../dev/adr/adr-033-dedicated-mutation-per-observed-state-channel.md) (from R4)
-- [`dev/adr/adr-034-two-pronged-stale-data-cleanup.md`](../../dev/adr/adr-034-two-pronged-stale-data-cleanup.md) (from R6)
+- [`dev/adr/adr-023-dedicated-mutation-per-observed-state-channel.md`](../../dev/adr/adr-023-dedicated-mutation-per-observed-state-channel.md) (from R4)
+- [`dev/adr/adr-024-two-pronged-stale-data-cleanup.md`](../../dev/adr/adr-024-two-pronged-stale-data-cleanup.md) (from R6)
 
 ## Knowledge Updated
 

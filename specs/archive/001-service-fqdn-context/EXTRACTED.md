@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-030-compute-service-fqdns-at-runtime.md`](../../dev/adr/adr-030-compute-service-fqdns-at-runtime.md) (from R3)
+- [`dev/adr/adr-022-compute-service-fqdns-at-runtime.md`](../../dev/adr/adr-022-compute-service-fqdns-at-runtime.md) (from R3)
 - [`dev/adr/adr-031-shared-fqdn-utility-two-call-sites.md`](../../dev/adr/adr-031-shared-fqdn-utility-two-call-sites.md) (from R4, R5)
 
 ## Knowledge Updated

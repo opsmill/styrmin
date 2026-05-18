@@ -131,7 +131,7 @@ This isn't a NEW field — both already exist on `GlobalContext` post-008. This 
 | File | Purpose |
 |---|---|
 | `dev/guides/driver-env-var-consumption.md` | Driver-author guide (FR-021/FR-022) |
-| `dev/adr/adr-021-driver-env-var-consumption.md` | Durable record of the pivot |
+| `dev/adr/adr-013-driver-env-var-consumption.md` | Durable record of the pivot |
 
 `dev/knowledge/backend/deployment-env-vars.md` (created in 008's polish phase) gets a paragraph rewrite — the "post-render injection" section becomes a "driver-side consumption" section.
 

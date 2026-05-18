@@ -1,4 +1,4 @@
-"""Daily Prefect flow that drops expired session rows. See ADR-024."""
+"""Daily Prefect flow that drops expired session rows. See ADR-016."""
 
 from __future__ import annotations
 

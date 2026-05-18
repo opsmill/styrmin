@@ -5,10 +5,10 @@
 
 ## ADRs Created
 
-- `dev/adr/adr-015-deployment-soft-delete-tombstoning.md` (from research.md R3 + namespace co-location finding)
-- `dev/adr/adr-016-forensic-cr-retention-janitor.md` (from research.md R4)
-- `dev/adr/adr-017-tombstone-visibility-conflation.md` (from research.md R5 + R6)
-- `dev/adr/adr-018-scoped-tombstone-aware-name-uniqueness.md` (from spec.md FR-034/FR-035 + follow-on commit f14dcaa)
+- `dev/adr/adr-008-deployment-soft-delete-tombstoning.md` (from research.md R3 + namespace co-location finding)
+- `dev/adr/adr-009-forensic-cr-retention-janitor.md` (from research.md R4)
+- `dev/adr/adr-010-tombstone-visibility-conflation.md` (from research.md R5 + R6)
+- `dev/adr/adr-011-scoped-tombstone-aware-name-uniqueness.md` (from spec.md FR-034/FR-035 + follow-on commit f14dcaa)
 
 ## Knowledge Updated
 

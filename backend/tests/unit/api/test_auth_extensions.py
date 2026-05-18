@@ -1,4 +1,4 @@
-"""Unit tests for ``RequiresAuthentication`` and ``RequiresRole``. See ADR-025."""
+"""Unit tests for ``RequiresAuthentication`` and ``RequiresRole``. See ADR-017."""
 
 from __future__ import annotations
 

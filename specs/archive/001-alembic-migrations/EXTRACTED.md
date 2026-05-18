@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- dev/adr/adr-003-alembic-database-migrations.md (from R1, R5, R6, R7)
+- dev/adr/adr-001-alembic-database-migrations.md (from R1, R5, R6, R7)
 
 ## Knowledge Updated
 

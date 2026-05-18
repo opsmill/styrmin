@@ -21,7 +21,7 @@ The operator is a kopf-based Kubernetes controller that runs alongside the Prefe
 └──────────────────────────────────────────────────────────┘
 ```
 
-The entrypoint uses `asyncio.gather(kopf.operator(...), run_prefect_worker())` to run both components concurrently. See ADR-004 for the rationale.
+The entrypoint uses `asyncio.gather(kopf.operator(...), run_prefect_worker())` to run both components concurrently. See ADR-002 for the rationale.
 
 ## StyrminDeployment CRD
 
@@ -43,7 +43,7 @@ The operator watches `StyrminDeployment` custom resources (`styrmin.io/v1alpha1`
 | `parameters` | object | No | User-provided parameters |
 | `deletionRequested` | boolean | No (default `false`) | Set to `true` by the backend's `deleteDeployment` mutation to request operator-driven teardown. Immutable once `true` (CEL transition rule `oldSelf == false \|\| self == true` enforced by the API server). |
 
-The context is embedded directly in the CRD (see ADR-006), making the operator autonomous — no backend API calls needed during reconciliation.
+The context is embedded directly in the CRD (see ADR-004), making the operator autonomous — no backend API calls needed during reconciliation.
 
 ### Namespace co-location (load-bearing constraint)
 
@@ -62,7 +62,7 @@ Printer columns for `kubectl get styrmindeployments`: Phase, App, Version, Age.
 
 ## Phase-Based Deployment
 
-Resources are deployed in a guaranteed order using kopf sub-handlers (see ADR-007):
+Resources are deployed in a guaranteed order using kopf sub-handlers (see ADR-005):
 
 ```text
 StyrminDeployment Created
@@ -144,11 +144,11 @@ Events are visible via `kubectl describe styrmindeployment <name>`.
 
 ## Leader Election
 
-Uses kopf's built-in peering with `ClusterKopfPeering` CRD (see ADR-005). Priority-based: the highest-priority operator instance runs while others pause. Peer records expire after a configurable lifetime (default 60s).
+Uses kopf's built-in peering with `ClusterKopfPeering` CRD (see ADR-003). Priority-based: the highest-priority operator instance runs while others pause. Peer records expire after a configurable lifetime (default 60s).
 
 ## Relationship to Prefect Flows
 
-Prefect flows create/update/delete StyrminDeployment CRDs as a declaration of intent (see ADR-008). The operator then manages all Kubernetes resources. Driver pre/post hooks still execute via Prefect.
+Prefect flows create/update/delete StyrminDeployment CRDs as a declaration of intent (see ADR-006). The operator then manages all Kubernetes resources. Driver pre/post hooks still execute via Prefect.
 
 ```text
 Prefect Flow                          Operator

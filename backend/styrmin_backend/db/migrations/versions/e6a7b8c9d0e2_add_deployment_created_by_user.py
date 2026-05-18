@@ -4,7 +4,7 @@ Revision ID: e6a7b8c9d0e2
 Revises: c0d1e2f3a4b5
 Create Date: 2026-05-06 00:00:00.000000
 
-Background: see issue #190 (parent #179) and ADR-025. Every deployment
+Background: see issue #190 (parent #179) and ADR-017. Every deployment
 must be attributed to the user who created it so the GraphQL schema can
 expose ``Deployment.createdBy: User!`` for audit/operational lookup.
 

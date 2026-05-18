@@ -195,7 +195,7 @@ def bootstrap(  # noqa: PLR0917
 ) -> None:
     """Bootstrap Styrmin entities: cluster, environment, BSL, and local driver version.
 
-    Default-deny is on (ADR-024/025): every mutation in the bootstrap
+    Default-deny is on (ADR-016/025): every mutation in the bootstrap
     sequence requires an authenticated admin session, so this task first
     logs in as the seeded bootstrap admin (default ``admin/styrmin``,
     matching ``docker-compose.yml`` and ``dev/local/demo-values.yaml``)

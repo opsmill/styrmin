@@ -97,11 +97,11 @@ _Avoid_: "system service", "platform service", "infra resource".
 ### Deployments — declared (desired) state
 
 **Deployment**:
-A long-lived database record (`Deployment`) carrying the **desired state**: which **application driver version**, which **application version**, which **environment**, and the user's **config** and **parameters**. Editing a deployment expresses a new intent and triggers **reconciliation**. Identified by `(environment_id, name)` among non-tombstoned rows. See [ADR-006](dev/adr/adr-006-embed-context-in-deployment-crd.md).
+A long-lived database record (`Deployment`) carrying the **desired state**: which **application driver version**, which **application version**, which **environment**, and the user's **config** and **parameters**. Editing a deployment expresses a new intent and triggers **reconciliation**. Identified by `(environment_id, name)` among non-tombstoned rows. See [ADR-004](dev/adr/adr-004-embed-context-in-deployment-crd.md).
 _Avoid_: "deploy" (verb form is fine), "release" (Helm-specific), "application", "stack".
 
 **Tombstone / tombstoned deployment**:
-A `Deployment` row whose cluster-side workload has been torn down by the **operator** but whose record is retained for timeline, backups, and audit (`deleted_at IS NOT NULL`, `status = DELETED`). The name becomes available for reuse in the same **environment**. See [ADR-015](dev/adr/adr-015-deployment-soft-delete-tombstoning.md) and [ADR-018](dev/adr/adr-018-scoped-tombstone-aware-name-uniqueness.md).
+A `Deployment` row whose cluster-side workload has been torn down by the **operator** but whose record is retained for timeline, backups, and audit (`deleted_at IS NOT NULL`, `status = DELETED`). The name becomes available for reuse in the same **environment**. See [ADR-008](dev/adr/adr-008-deployment-soft-delete-tombstoning.md) and [ADR-011](dev/adr/adr-011-scoped-tombstone-aware-name-uniqueness.md).
 _Avoid_: "soft-deleted row" (correct mechanism, wrong vocabulary in user-facing text), "archived deployment", "removed deployment".
 
 **Deployment state**:
@@ -157,7 +157,7 @@ Styrmin's primary Custom Resource Definition. Carries the embedded **GlobalConte
 _Avoid_: "deployment CRD" (ambiguous with the database `Deployment`), "the CR".
 
 **Operator**:
-The kopf-based controller running inside the **agent** that watches **StyrminDeployment** CRDs and reconciles them into Kubernetes resources. See [ADR-007](dev/adr/adr-007-ordered-phase-deployment-sub-handlers.md).
+The kopf-based controller running inside the **agent** that watches **StyrminDeployment** CRDs and reconciles them into Kubernetes resources. See [ADR-005](dev/adr/adr-005-ordered-phase-deployment-sub-handlers.md).
 _Avoid_: "kopf" (that is the library), "kubernetes operator" (redundant), "the controller" (overloaded with K8s controllers).
 
 **HelmRelease**:
@@ -193,7 +193,7 @@ _Avoid_: "status poller", "watcher" (kopf is the watcher), "reporter" alone.
 ### Observed state
 
 **Observed state**:
-What the **agent** actually sees in the cluster, as opposed to **declared state** (`Deployment` / `Component` config). Captured in `PodStatus` and `DeploymentStatus` rows on each poll cycle. Drift between observed and declared is expected and not an error. See [ADR-014](dev/adr/adr-014-pod-status-records-observed-state-not-declared-state.md).
+What the **agent** actually sees in the cluster, as opposed to **declared state** (`Deployment` / `Component` config). Captured in `PodStatus` and `DeploymentStatus` rows on each poll cycle. Drift between observed and declared is expected and not an error. See [ADR-007](dev/adr/adr-007-pod-status-records-observed-state-not-declared-state.md).
 _Avoid_: "actual state" (fine in conversation, but **observed** is what the code uses), "runtime state".
 
 **PodStatus**:
@@ -211,7 +211,7 @@ A query or mutation defined in a `.graphql` file. Inline GraphQL strings in Pyth
 _Avoid_: "GraphQL query" (use **operation** when it could be either), inline GraphQL in Python.
 
 **GraphQL propagation test**:
-A unit test required for every new/modified GraphQL field, argument, input type, or mutation under `backend/styrmin_backend/api/schema/`. Asserts full-stack propagation through the real service and repository layers — value reaches the database for writes, database state is projected to the resolver for reads. Non-negotiable per Constitution §V. See [`dev/guides/graphql-propagation-tests.md`](dev/guides/graphql-propagation-tests.md) and [ADR-022](dev/adr/adr-022-schema-walking-input-propagation-tests.md).
+A unit test required for every new/modified GraphQL field, argument, input type, or mutation under `backend/styrmin_backend/api/schema/`. Asserts full-stack propagation through the real service and repository layers — value reaches the database for writes, database state is projected to the resolver for reads. Non-negotiable per Constitution §V. See [`dev/guides/graphql-propagation-tests.md`](dev/guides/graphql-propagation-tests.md) and [ADR-014](dev/adr/adr-014-schema-walking-input-propagation-tests.md).
 _Avoid_: "integration test" (those are a separate tier), "schema test".
 
 ### Testing

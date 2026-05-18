@@ -5,12 +5,12 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-043-resourcespec-first-class-plus-extended-map.md`](../../dev/adr/adr-043-resourcespec-first-class-plus-extended-map.md) (from Decision 3)
-- [`dev/adr/adr-044-scheduling-merge-semantics.md`](../../dev/adr/adr-044-scheduling-merge-semantics.md) (from Decisions 2 + 4 + 5)
-- [`dev/adr/adr-045-affinity-by-deployment-reference-via-label.md`](../../dev/adr/adr-045-affinity-by-deployment-reference-via-label.md) (from Decision 6)
+- [`dev/adr/adr-032-resourcespec-first-class-plus-extended-map.md`](../../dev/adr/adr-032-resourcespec-first-class-plus-extended-map.md) (from Decision 3)
+- [`dev/adr/adr-033-scheduling-merge-semantics.md`](../../dev/adr/adr-033-scheduling-merge-semantics.md) (from Decisions 2 + 4 + 5)
+- [`dev/adr/adr-034-affinity-by-deployment-reference-via-label.md`](../../dev/adr/adr-034-affinity-by-deployment-reference-via-label.md) (from Decision 6)
 - [`dev/adr/adr-046-runtime-class-validation-syntactic-only.md`](../../dev/adr/adr-046-runtime-class-validation-syntactic-only.md) (from Decision 7, reverted after shipping)
-- [`dev/adr/adr-047-post-render-injection-toggles-and-kind-list.md`](../../dev/adr/adr-047-post-render-injection-toggles-and-kind-list.md) (from Decisions 8 + 9)
-- [`dev/adr/adr-048-scheduling-provenance-map.md`](../../dev/adr/adr-048-scheduling-provenance-map.md) (from Decision 10)
+- [`dev/adr/adr-035-post-render-injection-toggles-and-kind-list.md`](../../dev/adr/adr-035-post-render-injection-toggles-and-kind-list.md) (from Decisions 8 + 9)
+- [`dev/adr/adr-036-scheduling-provenance-map.md`](../../dev/adr/adr-036-scheduling-provenance-map.md) (from Decision 10)
 
 ## Knowledge Updated
 

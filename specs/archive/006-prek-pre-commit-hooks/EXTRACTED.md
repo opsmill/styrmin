@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-None — all decisions already captured by [`adr-014-pre-commit-hooks-via-prek.md`](../../dev/adr/adr-014-pre-commit-hooks-via-prek.md), including:
+None — all decisions already captured by [`adr-007-pre-commit-hooks-via-prek.md`](../../dev/adr/adr-007-pre-commit-hooks-via-prek.md), including:
 
 - prek as the sole supported runner (the dual-runner reversal narrative under "Why prek-only")
 - Hook-stage split (`pre-commit` vs `pre-push`) for sub-10-second per-commit latency

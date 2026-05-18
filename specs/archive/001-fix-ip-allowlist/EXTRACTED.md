@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-041-lockstep-gating-middleware-annotation-and-resource.md`](../../dev/adr/adr-041-lockstep-gating-middleware-annotation-and-resource.md) (from Decision 2)
+- [`dev/adr/adr-030-lockstep-gating-middleware-annotation-and-resource.md`](../../dev/adr/adr-030-lockstep-gating-middleware-annotation-and-resource.md) (from Decision 2)
 
 ## Knowledge Updated
 

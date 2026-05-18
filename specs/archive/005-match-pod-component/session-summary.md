@@ -27,7 +27,7 @@ This pattern is the headline lesson — and a clear candidate for codebase-wide 
 | 14:43 | **Phase 4 — Implement** | Agent + DB + API + service plumbing, schema regen, SDK regen, 7 unit tests, 894 unit tests pass |
 | 14:46 | E2E test added | Multi-component scenario against db-test driver |
 | 14:51 | **Phase 5 — Review** | 3 high-severity findings caught and fixed pre-PR |
-| 14:52 | **Phase 6 — Extract** | ADR-014 captures the "store observed state, don't gatekeep" decision |
+| 14:52 | **Phase 6 — Extract** | ADR-007 captures the "store observed state, don't gatekeep" decision |
 | ~15:47 | PR #149 opened, **CI run #1** starts | Linters + unit tests green; **E2E fails** (first bug surfaces) |
 | 16:18 | Fix #1 pushed → **CI run #2** starts | E2E fails differently |
 | 16:47 | E2E test rewritten + diagnostics → **CI run #3** | E2E fails again, but with useful diagnostic output |
@@ -75,7 +75,7 @@ A code-review agent read every changed file. Three findings — **all of them re
 Fixed all three: copied the field in the SQL upsert, rebased the migration, made the fake repo mirror the SQL upsert pattern (mutate-in-place), added an FR-006 test. 894 tests still passing.
 
 ### 14:52 — Extract
-ADR-014 written into `dev/adr/`: "Pod-Status Records Observed Runtime State, Not Declared Component Intent." This captures the boundary decision (records observation, not intent) for future maintainers.
+ADR-007 written into `dev/adr/`: "Pod-Status Records Observed Runtime State, Not Declared Component Intent." This captures the boundary decision (records observation, not intent) for future maintainers.
 
 ---
 
@@ -166,7 +166,7 @@ All three are **hand-written translations** between layers. Pydantic / SQLModel 
 - **Pre-PR code review by a separate agent** caught two real bugs (SQL upsert, migration head collision) and one test-coverage gap. Each of those would have surfaced in CI as a degraded-functionality bug or a `develop`-merge break — pre-PR review saved at least one extra CI cycle.
 - **Diagnostics-first debugging on CI failures.** Instead of guessing what was wrong from the test failure message, each iteration added a targeted instrumentation step (kr8s pod-label snapshot, agent-side `INFO` log) that turned the next run into a fact-finding mission rather than another guess. The third → fourth → fifth CI cycle path was straight-line because each diagnostic narrowed the search.
 - **Constitutional discipline.** The pipeline didn't ship without an E2E test even though E2E was painful. The constitution's "E2E is part of done" rule is what kept us iterating until the bug was actually found instead of accepting "unit tests pass."
-- **Spec-driven planning paid off in the review phase.** When ADR-014 was extracted, the rationale was already written — we'd captured *why* the server doesn't validate during the planning phase, before writing any code, so the architectural decision didn't have to be reconstructed from commit messages later.
+- **Spec-driven planning paid off in the review phase.** When ADR-007 was extracted, the rationale was already written — we'd captured *why* the server doesn't validate during the planning phase, before writing any code, so the architectural decision didn't have to be reconstructed from commit messages later.
 
 ## What was painful
 

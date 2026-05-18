@@ -88,7 +88,7 @@ async def test_current_user_returns_none_when_unauthenticated(client: StyrminCli
 
 async def test_forbidden_raises_authorization_error(client: StyrminClient, mock_transport: AsyncMock) -> None:
     """A FORBIDDEN response (insufficient role) maps to a typed exception
-    distinct from authentication errors. See ADR-020.
+    distinct from authentication errors. See ADR-012.
     """
     mock_transport.execute.return_value = {
         "data": {"currentUser": None},

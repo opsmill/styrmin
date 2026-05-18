@@ -150,7 +150,7 @@ When the chart's rendered manifest already contains an `env:` entry with the sam
 - **FR-006**: Env var **names** MUST be validated against the regex `^[A-Za-z_][A-Za-z0-9_]*$`. Names that fail this check MUST be rejected at the GraphQL mutation boundary.
 - **FR-007**: Env var **values** MUST allow any string, including the empty string. Each value MUST be capped at 64 KiB; values exceeding the cap MUST be rejected with a precise error.
 - **FR-008**: Each scope's env var dict MUST be capped at 100 entries, and the dict's total serialized size MUST be capped at 256 KiB. Submissions exceeding either cap MUST be rejected with a precise error.
-- **FR-008a**: The **resolved** (post-merge) env var dict per component MUST be capped at 256 KiB total. The sum of resolved per-component env var bytes across all components of a deployment MUST be capped at 1 MiB to leave headroom under the Kubernetes 1.5 MiB resource size limit (the deployment CRD context-embedding mechanism, ADR-006, carries the resolved config alongside other context). Resolution MUST fail with a precise error when either cap is exceeded; the failure MUST surface to the operator via the same error path as a mutation rejection so the operator can identify and trim the offending scope.
+- **FR-008a**: The **resolved** (post-merge) env var dict per component MUST be capped at 256 KiB total. The sum of resolved per-component env var bytes across all components of a deployment MUST be capped at 1 MiB to leave headroom under the Kubernetes 1.5 MiB resource size limit (the deployment CRD context-embedding mechanism, ADR-004, carries the resolved config alongside other context). Resolution MUST fail with a precise error when either cap is exceeded; the failure MUST surface to the operator via the same error path as a mutation rejection so the operator can identify and trim the offending scope.
 - **FR-009**: Within a single scope's input, duplicate names MUST be rejected with a precise error before the dict is constructed.
 - **FR-010**: Component-level env vars whose target component is not declared by the deployment's current driver MUST be rejected at the GraphQL mutation boundary, and the error MUST list the driver's known component names.
 - **FR-011**: The platform MUST NOT maintain a reserved-name blocklist for env var names in v1; documentation MUST call out the `PATH` / `LD_*` family as risky.
@@ -174,7 +174,7 @@ When the chart's rendered manifest already contains an `env:` entry with the sam
 #### Storage
 
 - **FR-022**: Env vars MUST merge into the existing environment-config and deployment-config Pydantic models (and the per-component config block within the deployment config) such that the resolved configuration flows through the existing pipeline without a parallel persistence path.
-- **FR-023**: The storage shape MUST flow into the deployment CRD via the existing context-embedding mechanism (ADR-006); no env-var-specific operator/agent code path is required.
+- **FR-023**: The storage shape MUST flow into the deployment CRD via the existing context-embedding mechanism (ADR-004); no env-var-specific operator/agent code path is required.
 
 #### Post-Render Injection
 
@@ -227,7 +227,7 @@ When the chart's rendered manifest already contains an `env:` entry with the sam
 ## Assumptions
 
 - The existing `ResolvedConfig` pipeline is the right substrate for env var resolution; no parallel resolution system is introduced (per Implementation Decision §"Boundary against parameters" and Further Notes in the PRD).
-- The deployment CRD context-embedding mechanism (ADR-006) carries the resolved env vars to the operator/agent layer; no env-var-specific reconcile-loop wiring is required.
+- The deployment CRD context-embedding mechanism (ADR-004) carries the resolved env vars to the operator/agent layer; no env-var-specific reconcile-loop wiring is required.
 - The post-render injection mechanism's existing patterns (`affinity`, `resources`, `tolerations`, `runtime_class`) are the right shape for the new flag and patch builder; the feature uses the same three-valued `PostRenderInjection` semantics.
 - Component identification at the patch layer relies on the existing component identifier label selector; no new label scheme is introduced.
 - Conflict detection runs at render time (after Helm rendering, before the agent applies the manifest); a render-time path is sufficient because the operator-set value wins regardless of detection success.

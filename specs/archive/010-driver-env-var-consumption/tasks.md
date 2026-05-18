@@ -25,7 +25,7 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
 
 - [X] T001 [P] Create new test file `backend/tests/unit/agent/test_render_value_template_env_vars.py` with one passing placeholder test, so the file is wired into pytest collection.
 - [X] T002 [P] Create new doc file `dev/guides/driver-env-var-consumption.md` with a stub heading + one-line summary, so the file exists for content fill-in.
-- [X] T003 [P] Create new ADR file `dev/adr/adr-021-driver-env-var-consumption.md` with Status / Context / Decision / Consequences scaffolding (reference adr-019 + adr-020 for shape).
+- [X] T003 [P] Create new ADR file `dev/adr/adr-013-driver-env-var-consumption.md` with Status / Context / Decision / Consequences scaffolding (reference adr-019 + adr-012 for shape).
 
 **Checkpoint**: `uv run pytest --collect-only -q backend/tests/unit/agent/test_render_value_template_env_vars.py` collects cleanly. The two doc files exist as stubs.
 
@@ -113,13 +113,13 @@ This is a **web service** project. Backend lives under `backend/styrmin_backend/
      **All examples MUST use safe value escaping** (Jinja `tojson` filter or equivalent quoting) per FR-022 + critique E2.
   3. **What the platform doesn't do** — explicit non-policy: no enforcement, no validation that env vars are consumed, no automatic chart-default merging. Drivers own consumption shape.
   Cross-link to `dev/knowledge/backend/deployment-env-vars.md` (operator-facing) and `specs/010-driver-env-var-consumption/spec.md` (canonical contract).
-- [X] T030 [US4] [P] Fill in `dev/adr/adr-021-driver-env-var-consumption.md` per research §5. Six topics:
+- [X] T030 [US4] [P] Fill in `dev/adr/adr-013-driver-env-var-consumption.md` per research §5. Six topics:
   1. Why post-render injection failed (k8s strategic-merge has no container wildcard; per-container patches require chart-internal container names the platform doesn't have without an invasive new contract — see research §2's third rejected alternative).
   2. Why driver-side consumption is the right boundary (drivers know their charts).
   3. Why merged dicts (not layered) — simpler API; layered is future work.
   4. Why no helper macros — drivers know their charts; v1 minimum surface; helpers land when patterns emerge.
   5. Migration responsibility — driver authors update templates as needed.
-  6. Relationship to ADR-019 + ADR-020 — 010 supersedes ADR-019's post-render-injection portions; ADR-020 (env-config fanout) is unaffected.
+  6. Relationship to ADR-019 + ADR-012 — 010 supersedes ADR-019's post-render-injection portions; ADR-012 (env-config fanout) is unaffected.
   Status: Accepted. Date: 2026-05-08.
 - [X] T031 [US4] [P] Update `dev/knowledge/backend/deployment-env-vars.md` per FR-023: replace the "post-render injection" paragraph with a "driver-side consumption" paragraph pointing at the new guide. Note that the consumption contract belongs to the driver author; the platform's role is to expose the resolved dict via the rendering context.
 

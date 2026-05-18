@@ -587,7 +587,7 @@ async def test_us5_orphan_visible_across_driver_upgrade(
     2. The renamed component's pods do NOT carry the orphaned env vars
        (post-010, the resolver does not produce a per-component dict for
        components the current driver no longer declares, so the driver's
-       values template has nothing to render — see ADR-021).
+       values template has nothing to render — see ADR-013).
     3. ``Deployment.timeline.contextDiff`` records the orphan transition
        once on the upgrade Task entry.
     """

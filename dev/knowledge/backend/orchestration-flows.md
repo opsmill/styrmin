@@ -31,7 +31,7 @@ Orchestration flows are Prefect `@flow` functions that execute multi-step deploy
             └──────────────┘
 ```
 
-The non-CRD variants (`create_instance`, `update_instance`, `upgrade_instance`) still exist in `agent/tasks/orchestration.py` for now but are not registered in the catalogue and are not on the live execution path. The CRD variants are what the operator actually drives — see [ADR-008](../adr/adr-008-prefect-crd-intent-declaration.md).
+The non-CRD variants (`create_instance`, `update_instance`, `upgrade_instance`) still exist in `agent/tasks/orchestration.py` for now but are not registered in the catalogue and are not on the live execution path. The CRD variants are what the operator actually drives — see [ADR-006](../adr/adr-006-prefect-crd-intent-declaration.md).
 
 ## Lifecycles without Prefect
 
@@ -369,7 +369,7 @@ For new deployments, Prefect flows create/update/delete `StyrminDeployment` CRDs
 - Namespace label management
 - HelmRelease polling
 
-See ADR-008 for the rationale behind this responsibility shift.
+See ADR-006 for the rationale behind this responsibility shift.
 
 ## Key Files
 
