@@ -31,6 +31,11 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator
 import pytest
 from playwright.async_api import expect
 from styrmin_sdk import StyrminClient
+from styrmin_sdk.graphql._generated.input_types import (
+    SchedulingInput,
+    TolerationInput,
+    UpdateDeploymentInput,
+)
 
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
@@ -68,7 +73,7 @@ async def disruptive_deployment(
     simple_app_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> dict:
-    driver, _ = session_scenario_driver
+    driver, client = session_scenario_driver
     deployment = await driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
@@ -78,24 +83,25 @@ async def disruptive_deployment(
     deployment = await driver.wait_for_deployment_running(
         deployment_id=deployment.id, timeout=RECONCILE_TIMEOUT_SECONDS
     )
-    # Seed the baseline toleration via the SDK / api_driver so the
-    # drawer opens with one PreferNoSchedule entry already present.
-    # The api_driver translates ``PreferNoSchedule`` → ``PREFER_NO_SCHEDULE``
-    # before model_validate, so we can author the literal in K8s-doc form.
-    await driver.update_deployment(
-        deployment_id=str(deployment.id),
-        config={
-            "scheduling": {
-                "tolerations": [
-                    {
-                        "key": "dedicated",
-                        "operator": "Equal",
-                        "value": "batch",
-                        "effect": "PreferNoSchedule",
-                    }
+    # Seed the baseline toleration directly via the SDK rather than going
+    # through ``driver.update_deployment``: the UI scenario driver's
+    # update path drives the legacy Scheduling header button, which was
+    # removed in feature 011's drawer cleanup. The SDK path is the
+    # mutation path the drawer ultimately uses anyway.
+    await client.deployments.update(
+        str(deployment.id),
+        input=UpdateDeploymentInput(
+            scheduling=SchedulingInput(
+                tolerations=[
+                    TolerationInput(
+                        key="dedicated",
+                        operator="EQUAL",
+                        value="batch",
+                        effect="PREFER_NO_SCHEDULE",
+                    )
                 ],
-            },
-        },
+            ),
+        ),
     )
     # Wait for the seed update to converge so the drawer reads the new
     # baseline rather than the empty pre-seed config.

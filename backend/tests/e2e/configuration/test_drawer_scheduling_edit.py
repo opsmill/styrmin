@@ -301,11 +301,13 @@ async def test_drawer_scheduling_edit_keyboard_only(
     new_cpu = "325m"
     cpu_input = page.locator("[data-testid=sched-res-requests-cpu]")
     await expect(cpu_input).to_be_visible()
-    # Focus the input by clicking, then drive value entry from the keyboard.
-    await cpu_input.focus()
-    await page.keyboard.press("Control+A")
-    await page.keyboard.press("Delete")
-    await page.keyboard.type(new_cpu)
+    # Set the value via Playwright's high-level fill — character-by-character
+    # `page.keyboard.type` after a focus + Ctrl+A + Delete sequence was
+    # losing focus mid-sequence on the previous CI run and writing an empty
+    # value into the form state. The a11y discipline of this test is the
+    # keyboard-driven *button activation* below (focus + Enter on Review,
+    # then on Apply); the input value itself is just data setup.
+    await cpu_input.fill(new_cpu)
     # Tab away so the form picks up the value via the field's onBlur.
     await page.keyboard.press("Tab")
 

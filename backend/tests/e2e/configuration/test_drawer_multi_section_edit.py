@@ -287,13 +287,21 @@ async def test_drawer_concurrent_edit_surfaces_conflict_panel(
         ),
     )
 
-    # 3) Click Review & apply.
+    # 3) Click Review & apply, then click the dialog's Apply button —
+    #    the fingerprint re-fetch fires inside the Apply handler (Strategy B,
+    #    ConfigDiffDialog.tsx::handleApply), not on dialog open. Without
+    #    clicking Apply the dialog would just show the diff with no
+    #    conflict-detection signal.
     review_button = page.locator("[data-testid=drawer-review-apply-button]")
     await expect(review_button).to_be_enabled()
     await review_button.click()
 
     diff_dialog = page.locator("[data-testid=config-diff-dialog]")
     await expect(diff_dialog).to_be_visible()
+
+    apply_button = page.locator("[data-testid=diff-dialog-apply-button]")
+    await expect(apply_button).to_be_enabled()
+    await apply_button.click()
 
     # Conflict panel must surface, NOT the regular diff/apply flow.
     conflict_panel = diff_dialog.locator("[data-testid=diff-dialog-conflict-panel]")
