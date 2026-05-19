@@ -5,8 +5,8 @@
 
 ## ADRs Created
 
-- dev/adr/adr-004-shared-async-event-loop-kopf-prefect.md (from R1, R2)
-- dev/adr/adr-005-leader-election-kopf-peering.md (from R3)
+- dev/adr/adr-002-shared-async-event-loop-kopf-prefect.md (from R1, R2)
+- dev/adr/adr-003-leader-election-kopf-peering.md (from R3)
 
 ## Knowledge Updated
 

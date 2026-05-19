@@ -4,7 +4,7 @@
 **PRD:** https://github.com/opsmill/styrmin/issues/204#issuecomment-4412816851
 **Design:** Paper artboard "Pods Tab — Option A (Grouped Sections)" in `Styrmin Design Apr 6th`
 **Direction:** Option A — grouped sections with inline expand (chosen over Option B single-table and Option C master-detail; see PRD User Stories 4–5 for why drift-as-its-own-section makes A the natural fit)
-**Constraint:** ADR-014 ("Pod-status records reflect observed state, not declared state") — `dev/adr/adr-014-pod-status-records-observed-state-not-declared-state.md`
+**Constraint:** ADR-007 ("Pod-status records reflect observed state, not declared state") — `dev/adr/adr-007-pod-status-records-observed-state-not-declared-state.md`
 
 ---
 
@@ -94,7 +94,7 @@ query GetDeploymentPods($deploymentId: UUID!) {
       image
       ready
       restartCount
-      state         # flattened string per ADR-014
+      state         # flattened string per ADR-007
     }
   }
 }

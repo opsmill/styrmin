@@ -56,7 +56,7 @@ The first option is the strongest — eliminates the bug class. The third is the
 
 `dev/knowledge/backend/data-models.md` covers most platform models but `PodStatus` is missing — has been since it was added in spec 001-agent-status-reporting. This isn't fatal, but it means anyone touching pod-status reporting has no reference doc and ends up reading code.
 
-**Recommendation:** add a `#### PodStatus` subsection under "Deployment Models" in `data-models.md`. Cover: what it represents (observed runtime state, not declared intent — link ADR-014), what fields it has, how it's populated (agent's reporter loop), and what nullable means at this layer.
+**Recommendation:** add a `#### PodStatus` subsection under "Deployment Models" in `data-models.md`. Cover: what it represents (observed runtime state, not declared intent — link ADR-007), what fields it has, how it's populated (agent's reporter loop), and what nullable means at this layer.
 
 ### 5. `uv run invoke generate` silently requires `pnpm install` first
 
@@ -130,7 +130,7 @@ These are the positive side of the session. Worth preserving:
 1. **The pre-PR code review by an independent agent caught two real bugs** (SQL upsert, migration heads). It's worth its weight; the SQL upsert in particular would have been a confusing post-merge bug since unit tests would have stayed green.
 2. **The constitution's "E2E is part of done" rule is what kept the resolver bug from shipping.** Without it, I would have merged with green unit tests and the bug would have surfaced in production.
 3. **Diagnostics-first debugging** — every CI iteration added a targeted instrumentation step that turned the next run into fact-finding. Three of the five CI runs were specifically to gather data, not to ship a fix. That's the right tradeoff at 20 min per run.
-4. **Capturing architectural decisions in ADRs alongside the spec** (ADR-014 in this case) means the *why* is stored next to the *what*. Future maintainers won't have to reconstruct it from commit messages.
+4. **Capturing architectural decisions in ADRs alongside the spec** (ADR-007 in this case) means the *why* is stored next to the *what*. Future maintainers won't have to reconstruct it from commit messages.
 
 ---
 

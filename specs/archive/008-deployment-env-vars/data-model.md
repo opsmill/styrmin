@@ -222,7 +222,7 @@ Operator
   → repository persists ApplicationInstance.context (existing JSON column)
   → Prefect reconcile flow runs
   → resolver computes ResolvedConfig + per-component ResolvedComponentEnvVars
-  → context-embedding (ADR-006) carries resolved env vars into the deployment CRD
+  → context-embedding (ADR-004) carries resolved env vars into the deployment CRD
   → agent/ApplicationBuilder reads context, calls build_env_vars_post_rendering_patches
   → FluxCD HelmRelease.spec.postRenderers gains the env-injection patch
   → next reconcile renders pods with env entries

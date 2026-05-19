@@ -72,7 +72,7 @@ class AdminSnapshot:
 
 
 def _effective_admin_ids(snapshot: AdminSnapshot) -> frozenset[UUID]:
-    """Union of direct-admins and group-admins. See ADR-020 §"Effective role"."""
+    """Union of direct-admins and group-admins. See ADR-017 §"Effective role"."""
     return snapshot.direct_admin_user_ids | snapshot.group_admin_user_ids
 
 

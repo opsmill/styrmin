@@ -164,13 +164,13 @@ class Settings(BaseSettings):
     )
     admin_username: str = Field(
         default="admin",
-        description="Username seeded by the bootstrap routine on first boot. See ADR-019.",
+        description="Username seeded by the bootstrap routine on first boot. See ADR-016.",
     )
     admin_password: Optional[str] = Field(
         default=None,
         description=(
             "Password seeded by the bootstrap routine on first boot. When unset, "
-            "a random password is generated and logged once at WARN level. See ADR-019."
+            "a random password is generated and logged once at WARN level. See ADR-016."
         ),
     )
     session_cookie_secure: bool = Field(

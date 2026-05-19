@@ -1,4 +1,4 @@
-"""Unit tests for the effective-role pure function. See ADR-020."""
+"""Unit tests for the effective-role pure function. See ADR-017."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def test_effective_role_table_driven(
 
 
 def test_effective_role_admin_via_group_on_read_only_user() -> None:
-    """ADR-020: groups grant capabilities, never revoke them.
+    """ADR-017: groups grant capabilities, never revoke them.
 
     A READ_ONLY user added to an ADMIN group is effectively an admin.
     This is the load-bearing test that locks in the asymmetry.

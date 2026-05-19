@@ -6,7 +6,7 @@
 ## ADRs Created
 
 - dev/adr/adr-002-consolidate-driver-single-yaml.md (from R1, R2, R4, R5, R6)
-- dev/adr/adr-003-no-backward-compat-driver-format.md (from R3, R7)
+- dev/adr/adr-001-no-backward-compat-driver-format.md (from R3, R7)
 
 ## Knowledge Updated
 

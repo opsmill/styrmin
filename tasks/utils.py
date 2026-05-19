@@ -40,7 +40,7 @@ def graphql(
 
     When ``token`` is provided it is sent as ``Authorization: Bearer
     <token>``; the server's auth middleware accepts this transport for
-    SDK / script callers (see ADR-024).
+    SDK / script callers (see ADR-016).
     """
     payload = json.dumps({"query": query, "variables": variables}).encode()
     headers = {"Content-Type": "application/json"}

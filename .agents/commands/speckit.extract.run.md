@@ -182,7 +182,7 @@ Wait for user response before proceeding. Do NOT write any files until the user 
 
 ## Phase 3: Write Extractions
 
-For each approved item across all specs, write the content. ADR numbering is sequential across all specs (i.e., if spec 1 creates ADR-005 and ADR-006, spec 2 starts at ADR-007).
+For each approved item across all specs, write the content. ADR numbering is sequential across all specs (i.e., if spec 1 creates ADR-003 and ADR-004, spec 2 starts at ADR-005).
 
 ### ADRs
 

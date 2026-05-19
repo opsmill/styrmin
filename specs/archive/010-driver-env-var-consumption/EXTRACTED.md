@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- (none — already captured in [`dev/adr/adr-021-driver-env-var-consumption.md`](../../dev/adr/adr-021-driver-env-var-consumption.md) during implementation)
+- (none — already captured in [`dev/adr/adr-013-driver-env-var-consumption.md`](../../dev/adr/adr-013-driver-env-var-consumption.md) during implementation)
 
 ## Knowledge Updated
 

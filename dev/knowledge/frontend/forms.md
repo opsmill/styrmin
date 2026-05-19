@@ -8,8 +8,6 @@ The frontend uses **TanStack Form** (`@tanstack/react-form`) for all six form co
 
 TanStack Form 1.28+ accepts Zod schemas directly via Standard Schema. There is **no `@tanstack/zod-form-adapter`** dependency — it isn't needed at this version.
 
-See [ADR-012](../../adr/adr-012-migrate-forms-to-tanstack-form.md) for the migration rationale.
-
 ### Hook Setup
 
 ```tsx

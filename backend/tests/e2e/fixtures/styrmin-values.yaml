@@ -6,7 +6,7 @@ taskWorkerQuerySeconds: 1
 
 styrmin:
   # Known credentials for the E2E suite — every test logs in as this user
-  # and drives the SDK / Playwright session against the same row. ADR-020
+  # and drives the SDK / Playwright session against the same row. ADR-017
   # forbids a STYRMIN_DISABLE_AUTH toggle, so the suite must traverse the
   # production auth path.
   adminUsername: "admin"

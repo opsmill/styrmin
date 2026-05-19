@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- `dev/adr/adr-026-typed-update-deployment-input.md` (from research §1, §3, §4, §5; data-model.md §1, §3, §4)
+- `dev/adr/adr-018-typed-update-deployment-input.md` (from research §1, §3, §4, §5; data-model.md §1, §3, §4)
 
 ## Knowledge Updated
 
@@ -13,7 +13,7 @@
 
 ## Guidelines Updated
 
-None. The list-of-`{name, value}` convention for named-dict GraphQL inputs is prescriptive but folded into ADR-026 as the canonical source of truth; duplicating it under `dev/guidelines/backend/` would create two sources to keep in sync.
+None. The list-of-`{name, value}` convention for named-dict GraphQL inputs is prescriptive but folded into ADR-018 as the canonical source of truth; duplicating it under `dev/guidelines/backend/` would create two sources to keep in sync.
 
 ## Already Updated In-Line (not re-extracted)
 
@@ -24,13 +24,13 @@ The following in-line documentation updates landed during the feature's implemen
 
 ## Decisions Already Covered by Existing ADRs (not re-extracted)
 
-- Hand-rolled Strawberry input pattern → [ADR-020](../../dev/adr/adr-020-environment-config-fanout.md) "Convention to replicate"
-- Full-replacement typed input convention → [ADR-020](../../dev/adr/adr-020-environment-config-fanout.md) §2
-- Clean-replace cutover (no deprecation window) → [ADR-020](../../dev/adr/adr-020-environment-config-fanout.md) §3
-- Schema-walking propagation tests → [ADR-022](../../dev/adr/adr-022-schema-walking-input-propagation-tests.md)
-- Frontend value-transform submit boundary → [ADR-023](../../dev/adr/adr-023-frontend-value-transform-boundary.md)
+- Hand-rolled Strawberry input pattern → [ADR-012](../../dev/adr/adr-012-environment-config-fanout.md) "Convention to replicate"
+- Full-replacement typed input convention → [ADR-012](../../dev/adr/adr-012-environment-config-fanout.md) §2
+- Clean-replace cutover (no deprecation window) → [ADR-012](../../dev/adr/adr-012-environment-config-fanout.md) §3
+- Schema-walking propagation tests → [ADR-014](../../dev/adr/adr-014-schema-walking-input-propagation-tests.md)
+- Frontend value-transform submit boundary → [ADR-015](../../dev/adr/adr-015-frontend-value-transform-boundary.md)
 
-ADR-026 builds on all five and adds the spec's new content: list-shaped named-dict fields, `parameters`-merge asymmetry, two new typed errors, and the `config/inputs.py` shared-leaves extraction.
+ADR-018 builds on all five and adds the spec's new content: list-shaped named-dict fields, `parameters`-merge asymmetry, two new typed errors, and the `config/inputs.py` shared-leaves extraction.
 
 ## Archive
 

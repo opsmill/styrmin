@@ -135,7 +135,7 @@ from styrmin_backend.workflows.models import PrefectAction
 
 
 def _requires(role: Role) -> PermissionExtension:
-    """Sugar for the per-mutation permission extension. See ADR-020."""
+    """Sugar for the per-mutation permission extension. See ADR-017."""
     return PermissionExtension([RequiresRole(role)])
 
 
@@ -175,7 +175,7 @@ class Mutation:
         return LoginResult(token=raw_token, user=UserType.from_instance(user))
 
     # logout is on the documented allow-list (api/auth/allowlist.py).
-    # ADR-020: a deactivated user must still be able to log out of their
+    # ADR-017: a deactivated user must still be able to log out of their
     # existing session — gating logout behind RequiresAuthentication or
     # RequiresRole would defeat deactivation. Idempotent: with no session
     # the call still clears the cookie and returns True.

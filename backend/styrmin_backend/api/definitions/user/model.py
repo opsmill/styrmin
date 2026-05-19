@@ -16,7 +16,7 @@ from styrmin_backend.services.auth.roles import effective_role
 
 @strawberry.enum
 class Role(Enum):
-    """GraphQL representation of the authorization role. See ADR-020."""
+    """GraphQL representation of the authorization role. See ADR-017."""
 
     READ_ONLY = "READ_ONLY"
     READ_WRITE = "READ_WRITE"
@@ -29,7 +29,7 @@ class Role(Enum):
 
 @strawberry.type
 class Group:
-    """Authorization group. See ADR-020."""
+    """Authorization group. See ADR-017."""
 
     id: UUID
     name: str
@@ -46,7 +46,7 @@ class Group:
 
 def _self_or_admin() -> PermissionExtension:
     """Sugar — User fields visible to admins or the user reading their own
-    record. See ADR-025: the "self" carve-out is required because the
+    record. See ADR-017: the "self" carve-out is required because the
     frontend's role-gated UI needs ``currentUser.effectiveRole``, and
     non-null GraphQL error propagation would otherwise null the whole
     ``currentUser`` and bounce non-admins back to /login.
@@ -58,7 +58,7 @@ def _self_or_admin() -> PermissionExtension:
 class User:
     """User account. Public subset = id/username/displayName; the
     administrative subset is gated by ``IsSelfOrRole(ADMIN)`` — admins see
-    every user's admin fields, every user sees their own. See ADR-025.
+    every user's admin fields, every user sees their own. See ADR-017.
     """
 
     id: UUID

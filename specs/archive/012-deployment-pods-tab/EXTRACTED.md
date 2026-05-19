@@ -6,7 +6,7 @@
 ## ADRs Created
 
 None — the architectural decisions in this feature are direct applications of the existing
-[ADR-014: Pod-status records reflect observed state, not declared state](../../dev/adr/adr-014-pod-status-records-observed-state-not-declared-state.md).
+[ADR-007: Pod-status records reflect observed state, not declared state](../../dev/adr/adr-007-pod-status-records-observed-state-not-declared-state.md).
 The three-bucket grouping (declared / drifting / unlabeled) is that ADR applied at the UI
 boundary; staleness thresholds and the `ui_only` E2E marking are reversible UX defaults.
 `plan.md` §6 explicitly recorded that "none of the choices warrant a new ADR."

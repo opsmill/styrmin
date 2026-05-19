@@ -6,8 +6,6 @@
 
 The frontend uses **TanStack Router** with a code-based route tree. Every route in the application is a direct child of a single root layout (the `AppShell`). Type safety is global: route paths, parameters, and navigation calls are all validated against the registered route tree at compile time.
 
-See [ADR-010](../../adr/adr-010-migrate-frontend-router-to-tanstack.md) for the migration rationale.
-
 ### File Layout
 
 ```text
@@ -127,7 +125,7 @@ For component tests that just need router context (e.g. anything rendering a `<L
 
 ### Auth and role-gated routes
 
-Feature 011 adds an authenticated-user surface and role-gated admin routes on top of the auth foundation from #179 (see [ADR-024](../../adr/adr-024-authentication-and-sessions.md) / [ADR-025](../../adr/adr-025-authorization-model.md)).
+Feature 011 adds an authenticated-user surface and role-gated admin routes on top of the auth foundation from #179 (see [ADR-016](../../adr/adr-016-authentication-and-sessions.md) / [ADR-017](../../adr/adr-017-authorization-model.md)).
 
 #### Routes
 

@@ -1,4 +1,4 @@
-"""Functional enforcement tests for default-deny + RBAC. See ADR-020."""
+"""Functional enforcement tests for default-deny + RBAC. See ADR-017."""
 
 from __future__ import annotations
 
@@ -124,7 +124,7 @@ async def test_admin_caller_passes_admin_mutation(
 async def test_introspection_works_without_authentication(
     unauth_client: AsyncClient,
 ) -> None:
-    """ADR-020: schema discovery is intentionally public."""
+    """ADR-017: schema discovery is intentionally public."""
     response = await unauth_client.post(
         "/graphql",
         json={"query": "{ __schema { queryType { name } } }"},
@@ -147,7 +147,7 @@ async def test_non_admin_can_query_own_admin_fields_via_current_user(
     """A non-admin reading their OWN ``currentUser.role`` / ``effectiveRole``
     must succeed (IsSelfOrRole carve-out). Without this the frontend's role
     gating can't initialise and the user is bounced back to /login. See
-    ADR-025.
+    ADR-017.
     """
     _user, token = await _seed_user_with_role(session, Role.READ_WRITE)
     response = await unauth_client.post(

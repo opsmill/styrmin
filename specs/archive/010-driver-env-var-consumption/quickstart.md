@@ -95,7 +95,7 @@ Open `dev/guides/driver-env-var-consumption.md`. Confirm:
 
 - A "How env vars reach your template" section names `instance.config.env_vars` and `components[<name>].env_vars.config`.
 - Three worked examples cover: single-component consumption, multi-component consumption, combining chart-default env with operator-set env.
-- The guide cross-links to `dev/knowledge/backend/deployment-env-vars.md` (operator-facing) and `dev/adr/adr-021-driver-env-var-consumption.md` (durable record).
+- The guide cross-links to `dev/knowledge/backend/deployment-env-vars.md` (operator-facing) and `dev/adr/adr-013-driver-env-var-consumption.md` (durable record).
 
 ## Failure-mode checklist
 

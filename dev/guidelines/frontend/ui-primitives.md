@@ -2,7 +2,7 @@
 
 ## Frontend UI Primitives Guidelines
 
-Conventions for adding and consuming headless UI components built on Base UI. See [knowledge/frontend/ui-primitives.md](../../knowledge/frontend/ui-primitives.md) for the architectural overview and [ADR-013](../../adr/adr-013-migrate-ui-primitives-to-base-ui.md) for context.
+Conventions for adding and consuming headless UI components built on Base UI. See [knowledge/frontend/ui-primitives.md](../../knowledge/frontend/ui-primitives.md) for the architectural overview.
 
 ### Wrapper Layer is the Boundary
 

@@ -1,4 +1,4 @@
-"""Login service. See ADR-019."""
+"""Login service. See ADR-016."""
 
 from __future__ import annotations
 

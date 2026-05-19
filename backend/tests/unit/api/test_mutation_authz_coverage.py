@@ -1,4 +1,4 @@
-"""Schema-walk completeness tests. See ADR-020.
+"""Schema-walk completeness tests. See ADR-017.
 
 Walks the ``Mutation`` and ``Query`` types and asserts every root field
 is either:

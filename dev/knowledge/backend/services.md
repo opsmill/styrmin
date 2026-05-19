@@ -150,7 +150,7 @@ Manages environments within clusters.
 | `create_environment(name, cluster_id, uow, config=None)` | Create environment in cluster (name unique per cluster). Computes and persists capabilities. |
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
-| `update_environment(environment_id, uow, config)` | Validate + persist env-config row, then fan out a redeploy Task to every non-tombstoned, non-internal deployment in the environment whose active instance is not already at the new config. See "Environment-config fanout" below + [ADR-020](../adr/adr-020-environment-config-fanout.md). |
+| `update_environment(environment_id, uow, config)` | Validate + persist env-config row, then fan out a redeploy Task to every non-tombstoned, non-internal deployment in the environment whose active instance is not already at the new config. See "Environment-config fanout" below + [ADR-012](../adr/adr-012-environment-config-fanout.md). |
 | `delete_environment(environment_id, uow)` | Delete an environment |
 
 #### Environment-config fanout
@@ -159,7 +159,7 @@ Manages environments within clusters.
 
 `update_environment` is the load-bearing write path for environment configuration. The mutation is thin: validate the input through the Pydantic pipeline, commit the env-config row **before** any Task dispatch (FR-009a), then iterate every non-tombstoned, non-internal deployment in the environment, calling `redeploy_for_environment_update(deployment, uow)` for each one whose active instance is not already at the new config.
 
-Per-deployment no-op detection is in `_deployment_already_at_config(deployment, new_config) -> bool` — it compares the canonical Pydantic round-trip of the deployment's active-instance environment-config slice against the canonical round-trip of the new config. This shape handles two cases with one code path: a true environment-wide no-op (every deployment skips, zero Tasks dispatched, zero spurious timeline entries) and partial-fanout recovery (a re-submission of the same input dispatches Tasks only for laggards that didn't reach the new config on a prior attempt). See [ADR-020](../adr/adr-020-environment-config-fanout.md) §1 for the design rationale.
+Per-deployment no-op detection is in `_deployment_already_at_config(deployment, new_config) -> bool` — it compares the canonical Pydantic round-trip of the deployment's active-instance environment-config slice against the canonical round-trip of the new config. This shape handles two cases with one code path: a true environment-wide no-op (every deployment skips, zero Tasks dispatched, zero spurious timeline entries) and partial-fanout recovery (a re-submission of the same input dispatches Tasks only for laggards that didn't reach the new config on a prior attempt). See [ADR-012](../adr/adr-012-environment-config-fanout.md) §1 for the design rationale.
 
 The fanout helper `redeploy_for_environment_update(deployment, uow) -> Task` lives in `services/deployment.py`. It mirrors the post-version-decision portion of `update_deployment_version` — does NOT change the deployment's `application_version`, `parameters`, or `service_name_overrides`; only regenerates the active instance against the deployment's currently-bound driver and dispatches the resulting Task.
 
@@ -208,7 +208,7 @@ The platform-driven delete flow is intentionally **state-driven, not orchestrati
 1. **Resolver** — `deleteDeployment(id)` calls `services.deployment.delete_deployment(uow)`, which:
    - Guards against `RESTORING` (raises `DeploymentRestoringError` → `DEPLOYMENT_RESTORING`).
    - Returns the existing in-flight `DELETE_DEPLOYMENT` task if the row is already `DELETING` (idempotent).
-   - Raises `DeploymentNotFoundError` if the row is unknown OR `deleted_at IS NOT NULL` (intentional conflation, see ADR-017).
+   - Raises `DeploymentNotFoundError` if the row is unknown OR `deleted_at IS NOT NULL` (intentional conflation, see ADR-010).
    - Otherwise patches `spec.deletionRequested = true` on the cluster-side `StyrminDeployment` CR via `kr8s` and creates a born-complete `DELETE_DEPLOYMENT` task (`status=success`, no `prefect_flow_run_id`) in the same UnitOfWork.
 2. **Operator** — a `@kopf.on.update(field="spec.deletionRequested", new=True)` handler observes the flip and runs `_teardown_owned_resources` in reverse order (Services → HelmRelease → NetworkPolicies/Secrets), then issues a namespace delete.
 3. **Reporter (active CR path)** — while teardown is in progress, the operator reports `displayState: Deleting`; the agent's status reporter (`agent/status/reporter.py`) maps it to `DeploymentState.DELETING`. The DB row's `deleted_at` is still NULL — `DELETING` rows remain visible in the default deployment list.
@@ -217,7 +217,7 @@ The platform-driven delete flow is intentionally **state-driven, not orchestrati
 
 A row with `deleted_at IS NOT NULL` is **tombstoned**: the cluster-side workload is gone, but the row, its timeline (Tasks), and any associated backups remain queryable. `Environment.deployments(includeDeleted: false)` excludes tombstoned rows by default; `deployment(id)` is unfiltered so direct-id lookups always succeed (forensic interface).
 
-Name uniqueness is per `(environment_id, name)` and ignores tombstoned rows — see ADR-018 / `dev/knowledge/backend/data-models.md`.
+Name uniqueness is per `(environment_id, name)` and ignores tombstoned rows — see ADR-011 / `dev/knowledge/backend/data-models.md`.
 
 ### Application Drivers Service (`application_drivers.py`)
 
@@ -266,6 +266,25 @@ Generates deployment contexts.
 | Function | Description |
 |----------|-------------|
 | `generate_context_from_deployment_id(deployment_id, uow)` | Generate GlobalContext for deployment |
+
+#### FQDN utility (`context/fqdn.py`)
+
+<!-- Extracted from specs/001-service-fqdn-context on 2026-05-17 -->
+
+Single source of truth for service-FQDN construction, used by both context generation and the GraphQL resolver path. Backs the `primary_fqdn` / `human_readable_fqdn` fields on `ServiceReference` and the matching `DeployedService` GraphQL fields. See [ADR-022](../adr/adr-022-compute-service-fqdns-at-runtime.md).
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `to_fqdn_label` | `(value: str) -> str` | RFC 1035 DNS-label sanitizer: lowercase → replace non-alphanumeric with `-` → collapse consecutive `-` → strip leading/trailing `-` → truncate to 63. Also registered as the `to_fqdn_label` Jinja2 filter for non-FQDN sanitization use cases. |
+| `compute_primary_fqdn` | `(app_name, deployment_id, fqdn_suffix) -> str \| None` | `{sanitized-app}-{deployment-id}.{suffix}`. Returns `None` when `fqdn_suffix` is empty. |
+| `compute_human_readable_fqdn` | `(service_host, environment_name, fqdn_suffix) -> str \| None` | `{sanitized-host}-{sanitized-env}.{suffix}`. Returns `None` when `fqdn_suffix` is empty. |
+
+**Call sites**:
+
+- **Context generation** (`services/context.py`) — populates `ServiceReference` fields while building the deployment context for driver templates.
+- **GraphQL resolution** (`Deployment.deployed_services()` resolver in `api/definitions/service/model.py`) — resolves environment + cluster + `ResolvedConfig.fqdn_suffix` once per deployment, computes FQDNs for all services in one pass, and injects them into `DeployedService` Strawberry instances. Avoids N+1 on the environment/cluster lookups.
+
+Driver templates that previously concatenated `{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}` inline have been migrated to reference these pre-computed fields. The Jinja2 `to_fqdn_label` filter remains registered for templates that still need sanitization for other purposes (labels, annotations).
 
 ## Driver Services (`services/driver/`)
 

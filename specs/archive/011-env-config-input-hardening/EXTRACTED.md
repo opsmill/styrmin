@@ -5,8 +5,8 @@
 
 ## ADRs Created
 
-- [`dev/adr/adr-022-schema-walking-input-propagation-tests.md`](../../dev/adr/adr-022-schema-walking-input-propagation-tests.md) (from research §1)
-- [`dev/adr/adr-023-frontend-value-transform-boundary.md`](../../dev/adr/adr-023-frontend-value-transform-boundary.md) (from research §5)
+- [`dev/adr/adr-014-schema-walking-input-propagation-tests.md`](../../dev/adr/adr-014-schema-walking-input-propagation-tests.md) (from research §1)
+- [`dev/adr/adr-015-frontend-value-transform-boundary.md`](../../dev/adr/adr-015-frontend-value-transform-boundary.md) (from research §5)
 
 ## Knowledge Updated
 
@@ -16,8 +16,8 @@
 ## Guidelines Updated
 
 - [`dev/guidelines/backend/python.md`](../../dev/guidelines/backend/python.md) — added "Validator entry-point type guards" subsection (research §4).
-- [`dev/guidelines/backend/python.md`](../../dev/guidelines/backend/python.md) — added "Schema-walking propagation tests" subsection (research §1, paired with ADR-022).
-- [`dev/guidelines/frontend/forms.md`](../../dev/guidelines/frontend/forms.md) — added "Value-transform boundary for full-replacement inputs" subsection (research §5, paired with ADR-023).
+- [`dev/guidelines/backend/python.md`](../../dev/guidelines/backend/python.md) — added "Schema-walking propagation tests" subsection (research §1, paired with ADR-014).
+- [`dev/guidelines/frontend/forms.md`](../../dev/guidelines/frontend/forms.md) — added "Value-transform boundary for full-replacement inputs" subsection (research §5, paired with ADR-015).
 
 ## Archive
 

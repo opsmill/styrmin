@@ -132,16 +132,16 @@ env:
 
 The guide cross-links to `dev/knowledge/backend/deployment-env-vars.md` (operator-facing) and `specs/010-driver-env-var-consumption/spec.md` (canonical contract).
 
-## 5. ADR-021 — durable record
+## 5. ADR-013 — durable record
 
-**Decision**: New ADR at `dev/adr/adr-021-driver-env-var-consumption.md` records:
+**Decision**: New ADR at `dev/adr/adr-013-driver-env-var-consumption.md` records:
 
 1. **Why post-render injection failed** — Kubernetes strategic-merge has no container-wildcard; JSON-patch `replace` wipes the chart's env list. Documented in 008's review history; the ADR captures the root cause concisely.
 2. **Why driver-side consumption is the right boundary** — drivers know their charts; the platform shouldn't fight the chart-rendering contract. Closer to how typed parameters already work.
 3. **Why we ship merged dicts (not layered)** — simpler API; layered access is a future addition.
 4. **Why we ship without helper macros** — drivers know their charts' env-list shape; v1 minimum surface area, helpers can land when patterns emerge.
 5. **Migration responsibility** — driver authors must update templates to consume operator-set env vars. The platform doesn't do automatic migration.
-6. **Relationship to ADR-019 (008's env-vars ADR) and ADR-020 (009's env-config-fanout ADR)** — 010 supersedes the post-render-injection portions of ADR-019; ADR-020 is unaffected (env-config fanout is orthogonal).
+6. **Relationship to ADR-019 (008's env-vars ADR) and ADR-012 (009's env-config-fanout ADR)** — 010 supersedes the post-render-injection portions of ADR-019; ADR-012 is unaffected (env-config fanout is orthogonal).
 
 ## 6. Testing strategy
 

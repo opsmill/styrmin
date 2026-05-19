@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-(none — user opted to skip; load-bearing decisions already in adr-024 / adr-025)
+(none — user opted to skip; load-bearing decisions already in adr-016 / adr-017)
 
 ## Knowledge Updated
 

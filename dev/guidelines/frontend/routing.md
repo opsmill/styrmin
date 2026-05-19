@@ -2,7 +2,7 @@
 
 ## Frontend Routing Guidelines
 
-Conventions for adding and modifying routes with TanStack Router. See [knowledge/frontend/routing.md](../../knowledge/frontend/routing.md) for the architectural overview and [ADR-010](../../adr/adr-010-migrate-frontend-router-to-tanstack.md) for context.
+Conventions for adding and modifying routes with TanStack Router. See [knowledge/frontend/routing.md](../../knowledge/frontend/routing.md) for the architectural overview.
 
 ### Route Definitions
 

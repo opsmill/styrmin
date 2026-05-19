@@ -87,7 +87,7 @@ async def test_logout_clears_cookie(
 async def test_old_token_after_logout_returns_unauthenticated(
     unauth_client: AsyncClient, session: AsyncSession
 ) -> None:
-    """ADR-019 instant-revocation: the same token that logged out must not
+    """ADR-016 instant-revocation: the same token that logged out must not
     let any subsequent caller through the auth path."""
     _user, token = await _seed_user_with_token(session)
 
@@ -116,7 +116,7 @@ async def test_old_token_after_logout_returns_unauthenticated(
 async def test_logout_idempotent_when_unauthenticated(
     unauth_client: AsyncClient,
 ) -> None:
-    """ADR-020 documents logout as allow-listed — pre-auth callers
+    """ADR-017 documents logout as allow-listed — pre-auth callers
     receive ``true`` and a cookie clear, not ``UNAUTHENTICATED``."""
     data = await gql(unauth_client, "logout")
     assert data["logout"] is True

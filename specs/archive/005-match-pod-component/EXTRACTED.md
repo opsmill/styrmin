@@ -7,7 +7,7 @@
 
 None — durable content from `research.md` §2 was already captured during
 implementation as
-[ADR-014](../../dev/adr/adr-014-pod-status-records-observed-state-not-declared-state.md).
+[ADR-007](../../dev/adr/adr-007-pod-status-records-observed-state-not-declared-state.md).
 
 The remaining `research.md` entries (§1, §3, §4, §5) were judged not durable
 enough to warrant their own ADR or guideline:
@@ -24,7 +24,7 @@ enough to warrant their own ADR or guideline:
 
 None — `PodStatus.component_name` was already documented in
 [`dev/knowledge/backend/data-models.md`](../../dev/knowledge/backend/data-models.md)
-during implementation, with a cross-reference to ADR-014.
+during implementation, with a cross-reference to ADR-007.
 
 ## Guidelines Updated
 

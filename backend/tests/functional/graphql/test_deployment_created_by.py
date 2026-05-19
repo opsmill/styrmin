@@ -7,7 +7,7 @@ Verifies:
    the right ``User``.
 2. Role-gating — non-admin callers see only the public subset of the
    ``User`` type (``id`` / ``username`` / ``displayName``); admin callers
-   see the full record. The gate itself is owned by ADR-020 and exercised
+   see the full record. The gate itself is owned by ADR-017 and exercised
    in ``test_authz_enforcement.py`` for ``currentUser``; this module
    pins the same contract on the ``Deployment.createdBy`` traversal.
 """
@@ -134,7 +134,7 @@ async def test_non_admin_querying_admin_only_field_on_created_by_is_forbidden(
 ) -> None:
     """A READ_WRITE caller selecting ``createdBy.role`` must hit FORBIDDEN
     while ``createdBy.username`` still resolves — same field-level gate
-    as ``currentUser`` per ADR-020.
+    as ``currentUser`` per ADR-017.
     """
     # Seed a non-admin caller and a deployment they did NOT create.
     caller = User(

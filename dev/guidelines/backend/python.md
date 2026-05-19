@@ -150,7 +150,7 @@ Every Strawberry input that mirrors a Pydantic config model MUST have a
 runtime test that introspects both sides and asserts every Pydantic field
 has a corresponding Strawberry input field. The test fails fast with the
 missing field name when schema drift introduces a Pydantic field without
-its input mirror. See [ADR-022](../../adr/adr-022-schema-walking-input-propagation-tests.md)
+its input mirror. See [ADR-014](../../adr/adr-014-schema-walking-input-propagation-tests.md)
 for the full pattern and the `EnvironmentConfig` ↔ `UpdateEnvironmentInput`
 exemplar at `backend/tests/functional/graphql/test_environment_update_propagation.py`.
 
@@ -185,8 +185,8 @@ for deployment in deployments:
 This pattern is what makes a fanout write resilient to per-deployment
 chart-render failures, missing drivers, or transient cluster errors —
 one bad deployment does not block the rest. The failure surface is
-queryable via `Deployment.timeline` after the fact; see [ADR-020 §commit
-ordering](../../adr/adr-020-environment-config-fanout.md) for the
+queryable via `Deployment.timeline` after the fact; see [ADR-012 §commit
+ordering](../../adr/adr-012-environment-config-fanout.md) for the
 durability contract.
 
 <!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
@@ -252,7 +252,7 @@ Companion conventions for the surrounding code:
 - Repository helpers that resolve names (`get_by_name`, `find_names_with_prefix`) MUST take the relevant scope key (e.g., `environment_id`) as a required parameter and accept an optional `include_deleted: bool = False`. Default behaviour is "active rows in this scope only".
 - The migration that introduces the partial index SHOULD include a defensive pre-flight: refuse to apply if any pair of currently-active rows already collide on the index columns. This catches corrupt input before the index is created. See migration `c9d0e1f2a3b4_deployment_name_scoped_uniqueness` for the worked pattern.
 
-Worked example: `Deployment.name` (ADR-018). Rationale: ADR-015 (soft-delete tombstoning).
+Worked example: `Deployment.name` (ADR-011). Rationale: ADR-008 (soft-delete tombstoning).
 
 ## Domain Models (Pydantic)
 
@@ -260,6 +260,21 @@ Worked example: `Deployment.name` (ADR-018). Rationale: ADR-015 (soft-delete tom
 - Use `PrivateAttr` for internal state
 - Provide `@classmethod create()` factory methods
 - Use `@property` for computed fields
+
+## Rendering Kubernetes manifests
+
+### No runtime defaults for optional emitted annotations
+
+For optional operator-config fields that drive an emitted Kubernetes annotation, label, or similar wire artifact, the rendering site MUST emit the key only when the resolved value is not `None`:
+
+```python
+if context.instance.config.<field> is not None:
+    annotations["<annotation-key>"] = context.instance.config.<field>
+```
+
+No defaulting at render time, no defaulting at Pydantic-model time, no defaulting in the builder. `None` propagates from the Pydantic field through `ResolvedConfig` to the renderer, and the renderer treats `None` as "skip this annotation". The downstream controller (external-dns, Traefik, …) applies its own default for absent annotations — the platform does not claim authority over defaults it has no business setting.
+
+**Why:** always-emit-with-a-default rewrites the rendered manifest for every existing deployment on upgrade — even ones that never touched the knob. Code review should flag any `annotations["..."] = ... or "default"` shape. Chart-values templates honour the same rule with `{% if … %}` guards.
 
 ## GraphQL (Strawberry)
 

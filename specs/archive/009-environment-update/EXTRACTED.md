@@ -5,7 +5,7 @@
 
 ## ADRs Created
 
-- (none — already captured in [`dev/adr/adr-020-environment-config-fanout.md`](../../dev/adr/adr-020-environment-config-fanout.md) during implementation)
+- (none — already captured in [`dev/adr/adr-012-environment-config-fanout.md`](../../dev/adr/adr-012-environment-config-fanout.md) during implementation)
 
 ## Knowledge Updated
 
