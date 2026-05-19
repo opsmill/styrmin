@@ -151,10 +151,16 @@ async def test_drawer_service_overrides_edit(
     await page.locator("[data-testid=section-nav-serviceOverrides]").click()
 
     await page.locator("[data-testid=add-service-override]").click()
-    driver_input = page.locator("[data-testid=svc-driver-0]")
+    # The driver-service field is a Base UI Select when the deployment has
+    # any declared services (the common case): click the trigger, then pick
+    # the matching option from the popover. If no services are surfaced the
+    # component falls back to a plain <Input>, in which case `.fill()` works
+    # — that path isn't expected to fire on a seeded simple-app deployment.
+    driver_trigger = page.locator("[data-testid=svc-driver-0]")
     override_input = page.locator("[data-testid=svc-override-0]")
-    await expect(driver_input).to_be_visible()
-    await driver_input.fill(driver_service_name)
+    await expect(driver_trigger).to_be_visible()
+    await driver_trigger.click()
+    await page.get_by_role("option", name=driver_service_name).click()
     await override_input.fill(override_name)
     await override_input.press("Tab")
 

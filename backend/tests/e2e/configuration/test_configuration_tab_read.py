@@ -7,12 +7,13 @@ drives Playwright to:
 1. Navigate to the deployment detail page.
 2. Switch to the new "Settings" tab.
 3. Assert the "Update Settings" CTA is present (read-side permission gate).
-4. Assert each summary card carries the correct
-   ``inheritance-badge-overridden`` / ``inheritance-badge-inherited``
-   treatment for the seeded shape (Scheduling, Env Vars, Storage &
-   Runtime overridden; Networking inherited).
-5. Assert the Driver Parameters card renders one chip per parameter
-   declared by the driver schema.
+4. Assert every expected summary card (Scheduling, Env Vars, Storage &
+   Runtime, Networking) renders. Section-level inheritance badges were
+   removed; the per-row "deployment-defined" dot is the new signal and
+   is verified by dedicated section tests.
+5. Assert the Driver Parameters card is present (parameter-chip
+   rendering is exercised by dedicated tests that seed a driver with a
+   non-empty parameter schema).
 
 Marked ``@pytest.mark.ui_only`` per AGENTS.md: this exercises the
 deployment-detail UI rendering of the Settings tab. The SDK has no
@@ -187,36 +188,32 @@ async def test_configuration_tab_renders_inheritance_and_overrides(
     await expect(update_button).to_be_visible()
 
     # ------------------------------------------------------------------
-    # 3) Per-section inheritance badges. Each summary card scopes its
-    #    badge by `aria-labelledby=config-summary-<slug>`, so we locate
-    #    the badge through its parent <section>.
+    # 3) Each summary card we expect to render is present, addressed via
+    #    the `aria-labelledby=config-summary-<slug>` anchor on its
+    #    wrapping <section>. The section-level "inherited" / "overridden"
+    #    badges were intentionally removed (see commit removing
+    #    InheritanceBadge from ConfigSummaryCard); the per-row
+    #    "deployment-defined" dot inside the body is now the signal.
     # ------------------------------------------------------------------
-    for title in ("Scheduling", "Environment Variables", "Storage & Runtime"):
+    for title in (
+        "Scheduling",
+        "Environment Variables",
+        "Storage & Runtime",
+        "Networking",
+    ):
         section = _section_by_title(page, title)
-        badge = section.locator("[data-testid=inheritance-badge-overridden]")
-        await expect(badge).to_be_visible()
-        # Sanity-check the visible text mentions "overridden"
-        await expect(badge).to_contain_text("overridden")
-
-    networking = _section_by_title(page, "Networking")
-    networking_badge = networking.locator("[data-testid=inheritance-badge-inherited]")
-    await expect(networking_badge).to_be_visible()
-    await expect(networking_badge).to_contain_text("inherited")
+        await expect(section).to_be_visible()
 
     # ------------------------------------------------------------------
-    # 4) Driver Parameters card — assert at least one chip rendered (the
-    #    simple-app driver declares a non-empty parameter schema). If
-    #    the chip row is empty, the card falls back to
-    #    "no parameters declared", which would fail this expectation.
+    # 4) Driver Parameters card is present. The seeded `simple-app`
+    #    driver declares zero `parameters:` in its driver.styrmin.yml,
+    #    so the card legitimately renders the "no parameters declared"
+    #    empty state — that's not a failure of the read view. Tests that
+    #    care about chip rendering should seed a driver with a non-empty
+    #    parameter schema.
     # ------------------------------------------------------------------
     driver_params_card = _section_by_title(page, "Driver Parameters")
-    chips = driver_params_card.locator("[data-testid=driver-parameter-chip]")
-    chip_count = await chips.count()
-    assert chip_count >= 1, (
-        "Driver Parameters card should list at least one parameter chip "
-        "for the simple-app driver; got 0 chips (card may be rendering "
-        "the empty placeholder)."
-    )
+    await expect(driver_params_card).to_be_visible()
 
 
 # ---------------------------------------------------------------------------
