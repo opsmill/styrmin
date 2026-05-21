@@ -2,6 +2,8 @@ import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { VersionHeader } from "./VersionHeader";
 import { OverviewTab } from "./tabs/OverviewTab";
 import { ParametersTab } from "./tabs/ParametersTab";
+import { ComponentsTab } from "./tabs/ComponentsTab";
+import { ActionsTab } from "./tabs/ActionsTab";
 import type { DriverVersionDetail, TabId } from "./types";
 
 interface VersionDetailProps {
@@ -23,9 +25,8 @@ const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
  * header, the five-tab strip (all five from day one, per the spec), and the
  * matching tab panels.
  *
- * Only the Overview and Parameters panels have content in this chunk. The
- * Components, Actions, and Source panels render a placeholder; they will gain
- * content in later chunks (US2 / US3).
+ * Only the Source panel still renders a placeholder; it will gain content in
+ * a later chunk (US3).
  */
 export function VersionDetail({
   version,
@@ -51,10 +52,10 @@ export function VersionDetail({
         <ParametersTab version={version} />
       </TabPanel>
       <TabPanel active={activeTab === "components"}>
-        <PlaceholderPanel label="Components" />
+        <ComponentsTab components={version.components} />
       </TabPanel>
       <TabPanel active={activeTab === "actions"}>
-        <PlaceholderPanel label="Actions" />
+        <ActionsTab actions={version.actions} />
       </TabPanel>
       <TabPanel active={activeTab === "source"}>
         <PlaceholderPanel label="Source" />
