@@ -43,7 +43,7 @@ class KubernetesSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STYRMIN_K8S_")
     default_resource_prefix: str = "styrmin"
     service_account: str = "styrmin-service-account"
-    worker_image: str = "styrmin"
+    worker_image: str = "registry.opsmill.io/opsmill/styrmin"
     cluster_domain: str = "cluster.local"
 
     config_mode: KubernetesConfigMode = Field(
