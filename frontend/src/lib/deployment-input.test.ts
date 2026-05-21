@@ -122,4 +122,36 @@ describe("deploymentConfigToInput", () => {
     expect(input).not.toHaveProperty("another_extra");
     expect(input.envVars).toEqual([{ name: "A", value: "1" }]);
   });
+
+  it("translates scheduling enum values from K8s casing to GraphQL identifiers", () => {
+    // The persisted config stores enum *values* (K8s-native casing — e.g.
+    // ``operator: "Equal"``) but ``UpdateDeploymentInput`` requires the
+    // GraphQL enum *identifier* (``"EQUAL"``). Without this translation,
+    // re-submitting an unchanged toleration sends ``"Equal"`` and the
+    // ``updateDeployment`` mutation fails with a Strawberry enum validation
+    // error. Regression coverage for the bug that surfaced in
+    // ``test_drawer_disruptive_toleration_effect_change``.
+    const input = deploymentConfigToInput({
+      scheduling: {
+        tolerations: [
+          {
+            key: "dedicated",
+            operator: "Equal",
+            value: "batch",
+            effect: "PreferNoSchedule",
+          },
+        ],
+      },
+      external_url_scheme: "https",
+      external_dns_endpoints_type: "NodeExternalIP",
+    });
+    expect(input.scheduling?.tolerations?.[0]).toMatchObject({
+      key: "dedicated",
+      operator: "EQUAL",
+      value: "batch",
+      effect: "PREFER_NO_SCHEDULE",
+    });
+    expect(input.externalUrlScheme).toBe("HTTPS");
+    expect(input.externalDnsEndpointsType).toBe("NODE_EXTERNAL_IP");
+  });
 });

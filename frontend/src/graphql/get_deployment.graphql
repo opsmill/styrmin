@@ -15,8 +15,25 @@ query GetDeployment($deploymentId: UUID!) {
         id
         name
       }
+      parameters {
+        name
+        label
+        kind
+        default
+        values
+      }
     }
     environmentId
+    environment {
+      id
+      name
+      config
+      cluster {
+        id
+        name
+        config
+      }
+    }
     applicationInstance {
       id
       name

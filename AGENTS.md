@@ -105,6 +105,21 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 
 ## Debugging E2E Tests
 
+### Prerequisites (read this before claiming an E2E is blocked)
+
+E2E tests in `backend/tests/e2e/` are **self-bootstrapping**. The session-scoped `vcluster` fixture in `conftest.py` creates a disposable virtual Kubernetes cluster per pytest session (via vCluster on Docker) and tears it down on exit. There is **no host cluster, no kind, no k3d, no minikube** involved.
+
+Concretely:
+
+- **Required on PATH**: `vcluster` and `docker` (or any OCI-compatible runtime accessible to `vcluster create --driver=docker`). That's it.
+- **You do NOT need to pre-run `uv run invoke dev`.** That command brings up a long-running dev stack for *interactive* development and manual testing. It is not a test prerequisite, and starting it before running E2E tests will not help — the fixtures ignore it and create their own ephemeral cluster.
+- **A failing E2E is almost never "blocked by missing infrastructure".** The fixture handles cluster lifecycle. If you find yourself about to record an E2E as `❌ blocked` because of a tooling gap, **first verify the alleged missing dependency by reading `backend/tests/e2e/conftest.py`** — most claimed blockers (k3d, kind, port not listening, no running backend) are imaginary. Genuine blockers reduce to: docker daemon down, `vcluster` binary missing from PATH, lockfile out of sync, host disk full. Confirm one of those before deferring the task.
+- **For the long-running stack** (frontend hot-reload against a real backend, manual exploration): use `uv run invoke dev` or the `dev-validate` skill. That stack is separate from the test stack.
+
+See `dev/knowledge/backend/e2e-testing.md` for the full fixture graph, scope rules, and debugging workflow.
+
+### Running with `--pdb`
+
 **Always run E2E tests in `backend/tests/e2e/` with `--pdb`.** Re-running the suite just to attach a debugger after a failure wastes minutes per iteration; every E2E run should start paused-ready so that if something fails the session is already frozen at the failure line with the vcluster, port-forwards, SDK clients, and test fixtures still alive. If the test passes, `--pdb` costs nothing.
 
 ```bash
@@ -227,7 +242,7 @@ Use `git commit --no-verify` only for genuine emergencies — e.g., a hook that 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/011-styrminctl-auth/plan.md`.
+at `specs/011-unified-deployment-config/plan.md`.
 <!-- SPECKIT END -->
 
 ## Active Technologies

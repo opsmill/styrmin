@@ -640,12 +640,16 @@ class DeploymentDetailPage:
 
         Spec 008 US12 / FR-033: a tombstoned deployment's detail page MUST
         disable every lifecycle action button (Delete, Upgrade, Redeploy,
-        Scheduling, Create Backup, etc.). The dialog's per-backup
-        Restore / Delete buttons are also expected to be disabled, but are
-        only present once the Backups tab is opened — covered by a separate
-        helper so callers can scope the assertion.
+        Create Backup, etc.). The dialog's per-backup Restore / Delete
+        buttons are also expected to be disabled, but are only present
+        once the Backups tab is opened — covered by a separate helper so
+        callers can scope the assertion.
+
+        Note: the standalone "Scheduling" header button was removed in
+        feature 011's unified-Settings cleanup (scheduling now lives
+        inside the Settings drawer). It is no longer in this list.
         """
-        for button_name in ("Delete", "Upgrade", "Redeploy", "Scheduling"):
+        for button_name in ("Delete", "Upgrade", "Redeploy"):
             btn = self._page.get_by_role("button", name=button_name, exact=True).first
             assert await btn.is_disabled(), (
                 f"{button_name} button should be disabled on tombstoned "

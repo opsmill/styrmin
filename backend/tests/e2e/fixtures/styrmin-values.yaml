@@ -1,4 +1,12 @@
 image:
+  # The chart default registry points at registry.opsmill.io/opsmill which
+  # is the published image — for the self-bootstrapping E2E vcluster we
+  # need to use the locally-built `styrmin:latest` instead so the suite
+  # exercises the current working tree, not whatever was last published.
+  # See `backend/tests/e2e/conftest.py::styrmin_deployment` for the
+  # `docker compose build` step that produces this tag.
+  registry: ""
+  repository: styrmin
   tag: latest
   pullPolicy: IfNotPresent
 
@@ -16,6 +24,12 @@ styrmin:
     interval: 1
 
 styrmin-agent:
+  # Same rationale as the top-level `image.registry` override above —
+  # the agent subchart defaults to `registry.opsmill.io/opsmill/styrmin`
+  # which the self-bootstrapping vcluster cannot resolve to the local
+  # working-tree build. Point it at the locally-built `styrmin:latest`.
+  image:
+    repository: styrmin
   # The e2e suite runs multiple deployments and Prefect subprocesses inside
   # the agent pod. The default 1Gi limit OOMs under that load, which leaves
   # tasks stuck in RUNNING and blocks downstream status transitions.

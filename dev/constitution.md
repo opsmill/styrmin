@@ -20,7 +20,7 @@ Python type hints are mandatory (enforced by ty, Astral's type checker). GraphQL
 
 ### V. Test-First Development
 
-Tests are required for all new functionality. The project uses three test tiers: unit tests (service/repository logic), integration tests (contract testing), and end-to-end tests (real vcluster with FluxCD, Prefect, and supporting services). E2E tests MUST run against real infrastructure, not mocks.
+Tests are required for all new functionality. The project uses three test tiers: unit tests (service/repository logic), integration tests (contract testing), and end-to-end tests (disposable per-session vCluster on Docker with FluxCD, Prefect, and supporting services — see `dev/knowledge/backend/e2e-testing.md` for the fixture graph). E2E tests MUST run against real infrastructure, not mocks.
 
 **New features MUST ship with an E2E test that covers the user-visible flow end-to-end, and that E2E test MUST be executed and observed to pass before the feature is considered complete.** Deferring E2E coverage to a follow-up, gating it behind "we'll add it later", or relying on unit/integration tests alone is not acceptable for net-new functionality. The test — or an existing one extended to cover the new behaviour — is part of the feature's definition of done.
 
@@ -58,4 +58,4 @@ Changes to these areas require explicit discussion before implementation:
 
 This constitution defines the non-negotiable principles for the Styrmin project. All specifications, plans, and implementations MUST be validated against these principles. Amendments require updating this file, incrementing the version, and propagating changes to dependent templates.
 
-**Version**: 1.3.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-05-16
+**Version**: 1.3.1 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-05-17

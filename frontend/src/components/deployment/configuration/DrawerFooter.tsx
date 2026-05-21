@@ -1,0 +1,62 @@
+import { Button } from "@/components/ui/button";
+
+import { useDrawerDiff } from "./DrawerDiffContext";
+
+interface Props {
+  onDiscard: () => void;
+  onReviewApply: () => void;
+}
+
+/**
+ * Sticky footer rendered at the bottom of `ConfigEditDrawer`.
+ *
+ * Reads the shared drawer diff (computed once in {@link DrawerDiffProvider})
+ * to count pending changes. The footer count, the section-nav dots, and the
+ * Review & apply dialog all draw from the same diff result so they cannot
+ * disagree on what "changed" means.
+ *
+ * Both action buttons are disabled when there are no pending changes
+ * (FR-013).
+ */
+export function DrawerFooter({ onDiscard, onReviewApply }: Props) {
+  const pendingCount = useDrawerDiff().entries.length;
+  const noChanges = pendingCount === 0;
+
+  return (
+    <footer
+      data-testid="drawer-footer"
+      className="sticky bottom-0 z-10 flex items-center justify-between gap-3 border-t border-border bg-background px-6 py-4 shadow-[0_-1px_2px_rgba(15,23,42,0.04)]"
+    >
+      <p
+        className="text-sm text-muted-foreground"
+        data-testid="drawer-pending-count"
+        aria-live="polite"
+      >
+        {pendingCount === 0
+          ? "No pending changes"
+          : `${pendingCount} pending change${pendingCount === 1 ? "" : "s"}`}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onDiscard}
+          disabled={noChanges}
+          data-testid="drawer-discard-button"
+        >
+          Discard
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          onClick={onReviewApply}
+          disabled={noChanges}
+          data-testid="drawer-review-apply-button"
+        >
+          Review &amp; apply
+        </Button>
+      </div>
+    </footer>
+  );
+}

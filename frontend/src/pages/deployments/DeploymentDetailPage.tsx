@@ -16,7 +16,7 @@ import {
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
-import { ParameterCards } from "@/components/ParameterCards";
+import { ConfigurationTab } from "@/components/deployment/configuration";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,13 +44,12 @@ import {
 } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
-import { SchedulingConfigDialog } from "@/components/deployment/scheduling/SchedulingConfigDialog";
 import { IfRole } from "@/auth/IfRole";
 import { PodsTab } from "./PodsTab";
 
 const DEPLOYMENT_TABS = [
   { id: "overview", label: "Overview" },
-  { id: "parameters", label: "Parameters" },
+  { id: "settings", label: "Settings" },
   { id: "backups", label: "Backups" },
   { id: "pods", label: "Pods" },
   { id: "timeline", label: "Timeline" },
@@ -96,7 +95,6 @@ export default function DeploymentDetailPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
-  const [schedulingOpen, setSchedulingOpen] = useState(false);
 
   // Deployment-deletion state (spec 008).
   const deleteDeploymentMutation = useDeleteDeploymentMutation();
@@ -213,13 +211,6 @@ export default function DeploymentDetailPage() {
     return <ErrorState message={error.message} onRetry={() => refetch()} />;
   if (!deployment) return <ErrorState message="Deployment not found" />;
 
-  const deploymentParams = deployment.parameters
-    ? Object.entries(deployment.parameters).map(([key, value]) => ({
-        key,
-        value,
-      }))
-    : [];
-
   const deployColors = getStatusColor(deployment.status);
   // While the styrmin restore flow is in flight, the deployment status is
   // 'restoring'. Block conflicting actions client-side; the API also rejects
@@ -292,17 +283,6 @@ export default function DeploymentDetailPage() {
             lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
             onRefreshNow={() => refetch()}
           />
-          <IfRole minimum="READ_WRITE">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isTerminal}
-              onClick={() => setSchedulingOpen(true)}
-              title={isTerminal ? "This deployment is retired" : undefined}
-            >
-              Scheduling
-            </Button>
-          </IfRole>
           <IfRole minimum="READ_WRITE">
             <Button
               variant="outline"
@@ -547,19 +527,9 @@ export default function DeploymentDetailPage() {
         </div>
       </TabPanel>
 
-      {/* Parameters Tab */}
-      <TabPanel active={activeTab === "parameters"}>
-        {deploymentParams.length > 0 ? (
-          <ParameterCards
-            parameters={deploymentParams}
-            title="Deployment Parameters"
-            description="Configuration values passed to the driver at deploy time"
-          />
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            No parameters configured for this deployment.
-          </p>
-        )}
+      {/* Configuration Tab (spec 011-unified-deployment-config — US1) */}
+      <TabPanel active={activeTab === "settings"}>
+        <ConfigurationTab deployment={deployment} />
       </TabPanel>
 
       {/* Backups Tab */}
@@ -799,13 +769,6 @@ export default function DeploymentDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <SchedulingConfigDialog
-        open={schedulingOpen}
-        onOpenChange={setSchedulingOpen}
-        deploymentId={deploymentId}
-        currentConfig={deployment.config}
-      />
 
       {/* Delete deployment dialog (spec 008) — type-to-confirm. */}
       <Dialog
