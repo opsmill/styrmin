@@ -22,18 +22,15 @@ import {
 import { cn } from "@/lib/utils";
 
 import { ConfigDiffDialog } from "./ConfigDiffDialog";
+import { DrawerDiffProvider } from "./DrawerDiffContext";
 import { DrawerFooter } from "./DrawerFooter";
 import { SectionNav } from "./SectionNav";
 import { DriverParametersSection } from "./sections/edit/DriverParametersSection";
 import { EnvVarsSection } from "./sections/edit/EnvVarsSection";
 import { IdentitySection } from "./sections/edit/IdentitySection";
-import { SchedulingSection } from "./sections/edit/SchedulingSection";
+import { SchedulingSection } from "./sections/edit/scheduling";
 import { ServiceOverridesSection } from "./sections/edit/ServiceOverridesSection";
 import { ComponentOverridesSection } from "./sections/edit/ComponentOverridesSection";
-// Networking and Storage & Runtime are intentionally not editable from the
-// drawer today — only the Settings page read view shows them. Re-introduce
-// the imports here (and add the sections back to DRAWER_SECTION_GROUPS) when
-// the editing flow is restored.
 
 type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
 
@@ -338,151 +335,149 @@ export function ConfigEditDrawer({
             "data-[open]:translate-x-0 data-[closed]:translate-x-full",
           )}
         >
-          {/* Header */}
-          <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-4">
-            <div className="flex min-w-0 flex-col gap-1">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                Edit configuration
-              </span>
-              <Dialog.Title
-                id={titleId}
-                className="truncate text-base font-semibold text-foreground"
-              >
-                {deployment.name}{" "}
-                <span className="font-normal text-muted-foreground">
-                  · {environment.name}
+          <DrawerDiffProvider
+            form={form}
+            initialValues={initialValues}
+            driverSchema={driverSchema}
+          >
+            {/* Header */}
+            <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-4">
+              <div className="flex min-w-0 flex-col gap-1">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Edit configuration
                 </span>
-              </Dialog.Title>
-            </div>
-            <Dialog.Close
-              render={
-                <button
-                  type="button"
-                  data-testid="drawer-close-button"
-                  aria-label="Close edit configuration"
-                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              }
-            >
-              <X className="h-4 w-4" />
-            </Dialog.Close>
-          </header>
+                <Dialog.Title
+                  id={titleId}
+                  className="truncate text-base font-semibold text-foreground"
+                >
+                  {deployment.name}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    · {environment.name}
+                  </span>
+                </Dialog.Title>
+              </div>
+              <Dialog.Close
+                render={
+                  <button
+                    type="button"
+                    data-testid="drawer-close-button"
+                    aria-label="Close edit configuration"
+                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                }
+              >
+                <X className="h-4 w-4" />
+              </Dialog.Close>
+            </header>
 
-          {/* Body: 2-column layout */}
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-            <SectionNav
-              form={form}
-              initialValues={initialValues}
-              driverSchema={driverSchema}
-              scrollContainerRef={scrollContainerRef}
-            />
-            <div
-              ref={scrollContainerRef}
-              data-testid="drawer-scroll-container"
-              className="min-w-0 flex-1 overflow-y-auto px-6 py-6"
-            >
-              {/*
+            {/* Body: 2-column layout */}
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              <SectionNav scrollContainerRef={scrollContainerRef} />
+              <div
+                ref={scrollContainerRef}
+                data-testid="drawer-scroll-container"
+                className="min-w-0 flex-1 overflow-y-auto px-6 py-6"
+              >
+                {/*
                 Drawer body is grouped per DRAWER_SECTION_GROUPS so that the
                 "Global settings" vs "Components" separation is visible inline
                 — matching the labelled groups in SectionNav.
               */}
-              <div className="flex flex-col gap-12">
-                {DRAWER_SECTION_GROUPS.map((group) => (
-                  <div
-                    key={group.id}
-                    className="flex flex-col gap-8"
-                    data-drawer-group={group.id}
-                  >
-                    {group.label ? (
-                      <h2
-                        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                        data-testid={`drawer-group-label-${group.id}`}
-                      >
-                        {group.label}
-                      </h2>
-                    ) : null}
-                    {group.sectionIds.map((sectionId) =>
-                      renderSection(sectionId),
-                    )}
-                  </div>
-                ))}
+                <div className="flex flex-col gap-12">
+                  {DRAWER_SECTION_GROUPS.map((group) => (
+                    <div
+                      key={group.id}
+                      className="flex flex-col gap-8"
+                      data-drawer-group={group.id}
+                    >
+                      {group.label ? (
+                        <h2
+                          className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                          data-testid={`drawer-group-label-${group.id}`}
+                        >
+                          {group.label}
+                        </h2>
+                      ) : null}
+                      {group.sectionIds.map((sectionId) =>
+                        renderSection(sectionId),
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
 
-          <DrawerFooter
-            form={form}
-            initialValues={initialValues}
-            driverSchema={driverSchema}
-            onDiscard={() => setConfirmDiscardOpen(true)}
-            onReviewApply={handleReviewApply}
-          />
+            <DrawerFooter
+              onDiscard={() => setConfirmDiscardOpen(true)}
+              onReviewApply={handleReviewApply}
+            />
 
-          {/* T035: nested Base UI AlertDialog — close-with-dirty confirmation. */}
-          <AlertDialog.Root
-            open={confirmDiscardOpen}
-            onOpenChange={setConfirmDiscardOpen}
-          >
-            <AlertDialog.Portal>
-              <AlertDialog.Backdrop className="fixed inset-0 z-[60] bg-black/40" />
-              <AlertDialog.Popup
-                data-testid="discard-confirm-dialog"
-                className={cn(
-                  "fixed left-1/2 top-1/2 z-[70] w-[420px] -translate-x-1/2 -translate-y-1/2",
-                  "rounded-lg border border-border bg-card p-6 shadow-xl outline-none",
-                )}
-              >
-                <AlertDialog.Title className="text-base font-semibold text-foreground">
-                  Discard pending changes?
-                </AlertDialog.Title>
-                <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">
-                  You have unsaved edits in this drawer. Discarding will revert
-                  every pending change to its persisted value.
-                </AlertDialog.Description>
-                <div className="mt-5 flex justify-end gap-2">
-                  <AlertDialog.Close
-                    render={
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        autoFocus
-                        data-testid="discard-keep-editing-button"
-                      >
-                        Keep editing
-                      </Button>
-                    }
-                  />
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleDiscard}
-                    data-testid="discard-confirm-button"
-                  >
-                    Discard
-                  </Button>
-                </div>
-              </AlertDialog.Popup>
-            </AlertDialog.Portal>
-          </AlertDialog.Root>
+            {/* T035: nested Base UI AlertDialog — close-with-dirty confirmation. */}
+            <AlertDialog.Root
+              open={confirmDiscardOpen}
+              onOpenChange={setConfirmDiscardOpen}
+            >
+              <AlertDialog.Portal>
+                <AlertDialog.Backdrop className="fixed inset-0 z-[60] bg-black/40" />
+                <AlertDialog.Popup
+                  data-testid="discard-confirm-dialog"
+                  className={cn(
+                    "fixed left-1/2 top-1/2 z-[70] w-[420px] -translate-x-1/2 -translate-y-1/2",
+                    "rounded-lg border border-border bg-card p-6 shadow-xl outline-none",
+                  )}
+                >
+                  <AlertDialog.Title className="text-base font-semibold text-foreground">
+                    Discard pending changes?
+                  </AlertDialog.Title>
+                  <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">
+                    You have unsaved edits in this drawer. Discarding will
+                    revert every pending change to its persisted value.
+                  </AlertDialog.Description>
+                  <div className="mt-5 flex justify-end gap-2">
+                    <AlertDialog.Close
+                      render={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          autoFocus
+                          data-testid="discard-keep-editing-button"
+                        >
+                          Keep editing
+                        </Button>
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleDiscard}
+                      data-testid="discard-confirm-button"
+                    >
+                      Discard
+                    </Button>
+                  </div>
+                </AlertDialog.Popup>
+              </AlertDialog.Portal>
+            </AlertDialog.Root>
 
-          {/* T042/T043: Review & apply confirmation dialog. Rendered inside
+            {/* T042/T043: Review & apply confirmation dialog. Rendered inside
               the drawer Popup so the Base UI focus-trap stack nests correctly
               (the dialog gets focus while open; on close, focus returns to
               the drawer's Review & apply button). */}
-          <ConfigDiffDialog
-            open={diffDialogOpen}
-            onOpenChange={setDiffDialogOpen}
-            deployment={baselineDeployment}
-            initialValues={initialValues}
-            frozenInitialValues={frozenInitialValues}
-            currentValues={currentValues}
-            driverSchema={driverSchema}
-            onApplySuccess={forceClose}
-            onBackToEdit={() => setDiffDialogOpen(false)}
-            onReloadBaseline={handleReloadBaseline}
-          />
+            <ConfigDiffDialog
+              open={diffDialogOpen}
+              onOpenChange={setDiffDialogOpen}
+              deployment={baselineDeployment}
+              initialValues={initialValues}
+              frozenInitialValues={frozenInitialValues}
+              currentValues={currentValues}
+              driverSchema={driverSchema}
+              onApplySuccess={forceClose}
+              onBackToEdit={() => setDiffDialogOpen(false)}
+              onReloadBaseline={handleReloadBaseline}
+            />
+          </DrawerDiffProvider>
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>

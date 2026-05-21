@@ -19,7 +19,6 @@ import type {
 // scalar parameter value (string/number/boolean) into a wrapper dict; we
 // model it as `unknown` here and cast at the GraphQL boundary.
 type ParameterRow = { name: string; value: unknown };
-import { diff } from "@/lib/config-diff";
 import type {
   DriverParameterSchema,
   SectionId,
@@ -27,6 +26,7 @@ import type {
 
 import { cn } from "@/lib/utils";
 import { ParameterField } from "../../ParameterField";
+import { useDrawerDiff } from "../../DrawerDiffContext";
 
 /**
  * Zod schema for the driver parameters list. Two layers of validation:
@@ -160,13 +160,9 @@ export function DriverParametersSection({
 }: Props) {
   const schema = driverSchema ?? [];
 
-  const changedCount = useStore(
-    form.store,
-    (state: any) =>
-      diff(initial, state.values, schema).entries.filter(
-        (e: any) => e.section === anchorId,
-      ).length,
-  );
+  const changedCount = useDrawerDiff().entries.filter(
+    (e) => e.section === anchorId,
+  ).length;
 
   return (
     <section

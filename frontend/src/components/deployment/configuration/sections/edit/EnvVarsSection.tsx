@@ -4,7 +4,6 @@
 // `any` and validated through the section's Zod schema and runtime guards
 // inside each input.
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useStore } from "@tanstack/react-form";
 import { X } from "lucide-react";
 import { z } from "zod";
 
@@ -14,13 +13,10 @@ import type { EnvVarInput, UpdateDeploymentInput } from "@/generated/graphql";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { diff } from "@/lib/config-diff";
-import type {
-  DriverParameterSchema,
-  SectionId,
-} from "@/lib/configuration-types";
+import type { SectionId } from "@/lib/configuration-types";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
+import { useDrawerDiff } from "../../DrawerDiffContext";
 
 // POSIX env-var name regex per data-model.md: must start with a letter or
 // underscore and continue with letters, digits, or underscores.
@@ -69,7 +65,6 @@ interface Props {
   form: ReactFormLike;
   initial: UpdateDeploymentInput;
   environment: UpdateDeploymentInput;
-  driverSchema?: DriverParameterSchema;
   anchorId: SectionId;
 }
 
@@ -94,13 +89,9 @@ export function EnvVarsSection({
   const envRows = (environment.envVars ?? []) as EnvVarInput[];
   const envCount = envRows.length;
 
-  const changedCount = useStore(
-    form.store,
-    (state: any) =>
-      diff(initial, state.values, [] as DriverParameterSchema).entries.filter(
-        (e: any) => e.section === anchorId,
-      ).length,
-  );
+  const changedCount = useDrawerDiff().entries.filter(
+    (e) => e.section === anchorId,
+  ).length;
 
   return (
     <section

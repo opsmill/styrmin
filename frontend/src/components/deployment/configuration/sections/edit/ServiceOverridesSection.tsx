@@ -4,7 +4,6 @@
 // `any` and validated through the section's Zod schema and runtime guards
 // inside each input.
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useStore } from "@tanstack/react-form";
 import { X } from "lucide-react";
 import { z } from "zod";
 
@@ -24,13 +23,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { diff } from "@/lib/config-diff";
-import type {
-  DriverParameterSchema,
-  SectionId,
-} from "@/lib/configuration-types";
+import type { SectionId } from "@/lib/configuration-types";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
+import { useDrawerDiff } from "../../DrawerDiffContext";
 
 // RFC 1035 service name regex: starts with letter, ends with alphanumeric,
 // up to 63 chars. We keep the simpler form here; the backend re-validates.
@@ -104,7 +100,6 @@ interface Props {
   form: ReactFormLike;
   initial: UpdateDeploymentInput;
   environment: UpdateDeploymentInput;
-  driverSchema?: DriverParameterSchema;
   /**
    * Driver-declared service names available for override. Sourced from
    * `deployment.deployedServices[].driverServiceName` so we constrain the
@@ -141,13 +136,9 @@ export function ServiceOverridesSection({
   const envRows = (environment.serviceNameOverrides ??
     []) as ServiceNameOverride[];
 
-  const changedCount = useStore(
-    form.store,
-    (state: any) =>
-      diff(initial, state.values, [] as DriverParameterSchema).entries.filter(
-        (e: any) => e.section === anchorId,
-      ).length,
-  );
+  const changedCount = useDrawerDiff().entries.filter(
+    (e) => e.section === anchorId,
+  ).length;
 
   return (
     <section

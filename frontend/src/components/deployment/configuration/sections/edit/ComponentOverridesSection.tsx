@@ -4,7 +4,6 @@
 // `any` and validated through the section's Zod schema and runtime guards
 // inside each input.
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useStore } from "@tanstack/react-form";
 import { ChevronDown, X } from "lucide-react";
 import { z } from "zod";
 
@@ -24,14 +23,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { diff } from "@/lib/config-diff";
-import type {
-  DriverParameterSchema,
-  SectionId,
-} from "@/lib/configuration-types";
+import type { SectionId } from "@/lib/configuration-types";
 import { cn } from "@/lib/utils";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
+import { useDrawerDiff } from "../../DrawerDiffContext";
 
 type DeploymentComponent = NonNullable<
   GetDeploymentQuery["deployment"]
@@ -115,7 +111,6 @@ interface Props {
   form: ReactFormLike;
   initial: UpdateDeploymentInput;
   environment: UpdateDeploymentInput;
-  driverSchema?: DriverParameterSchema;
   anchorId: SectionId;
   /** All components declared by the deployment's currently-pinned driver. */
   components: readonly DeploymentComponent[];
@@ -172,13 +167,9 @@ export function ComponentOverridesSection({
   const initialByName = new Map(initialBlocks.map((b) => [b.name, b] as const));
   const envByName = new Map(envBlocks.map((b) => [b.name, b] as const));
 
-  const changedCount = useStore(
-    form.store,
-    (state: any) =>
-      diff(initial, state.values, [] as DriverParameterSchema).entries.filter(
-        (e: any) => e.section === anchorId,
-      ).length,
-  );
+  const changedCount = useDrawerDiff().entries.filter(
+    (e) => e.section === anchorId,
+  ).length;
 
   return (
     <section

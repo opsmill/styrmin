@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useStore } from "@tanstack/react-form";
-import type { UpdateDeploymentInput } from "@/generated/graphql";
-import { diff } from "@/lib/config-diff";
 import {
   DRAWER_SECTION_GROUPS,
-  type DriverParameterSchema,
   type SectionId,
 } from "@/lib/configuration-types";
 import { cn } from "@/lib/utils";
+
+import { useDrawerDiff } from "./DrawerDiffContext";
 
 const SECTION_LABELS: Record<SectionId, string> = {
   identity: "Identity",
@@ -20,14 +18,7 @@ const SECTION_LABELS: Record<SectionId, string> = {
   componentOverrides: "Components",
 };
 
-interface FormLike {
-  store: Parameters<typeof useStore>[0];
-}
-
 interface Props {
-  form: FormLike;
-  initialValues: UpdateDeploymentInput;
-  driverSchema: DriverParameterSchema;
   /**
    * Scroll container the section anchors live inside. `IntersectionObserver`
    * uses this as its `root` so scroll-spy semantics match the visible viewport
@@ -46,30 +37,21 @@ interface Props {
  *      highlight the matching nav row. Native API, no third-party scroll-spy
  *      library (R-006).
  *
- *   2. "Changed" dots — subscribes to the form store, runs `diff()` against
- *      the captured `initialValues`, and renders a blue dot next to any
- *      section whose `sectionsChanged` set contains it. This matches the
- *      footer's pending-change count via the same diff helper.
+ *   2. "Changed" dots — reads the shared drawer diff result and renders a
+ *      blue dot next to any section whose `sectionsChanged` set contains it.
+ *      The diff is computed once per keystroke in {@link DrawerDiffProvider};
+ *      this matches the footer's pending-change count and the Review & apply
+ *      dialog via the same helper.
  *
  * Clicking a row calls `scrollIntoView({behavior: 'smooth', block: 'start'})`
  * on the matching anchor element.
  */
-export function SectionNav({
-  form,
-  initialValues,
-  driverSchema,
-  scrollContainerRef,
-}: Props) {
-  const currentValues = useStore(
-    form.store,
-    (s) => (s as { values: UpdateDeploymentInput }).values,
+export function SectionNav({ scrollContainerRef }: Props) {
+  const diffResult = useDrawerDiff();
+  const changedSections = useMemo(
+    () => new Set(diffResult.sectionsChanged),
+    [diffResult.sectionsChanged],
   );
-
-  const changedSections = useMemo(() => {
-    return new Set(
-      diff(initialValues, currentValues, driverSchema).sectionsChanged,
-    );
-  }, [initialValues, currentValues, driverSchema]);
 
   const [activeSection, setActiveSection] = useState<SectionId>(
     // First section of the first group — drawer always opens with the

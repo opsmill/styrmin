@@ -4,7 +4,6 @@
 // `any` and validated through the section's Zod schema and runtime guards
 // inside each input.
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useStore } from "@tanstack/react-form";
 import { z } from "zod";
 
 import type { ReactFormLike } from "./types";
@@ -12,13 +11,10 @@ import type { ReactFormLike } from "./types";
 import type { UpdateDeploymentInput } from "@/generated/graphql";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { diff } from "@/lib/config-diff";
-import type {
-  DriverParameterSchema,
-  SectionId,
-} from "@/lib/configuration-types";
+import type { SectionId } from "@/lib/configuration-types";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
+import { useDrawerDiff } from "../../DrawerDiffContext";
 
 /**
  * Zod schema for the `Identity` slice (currently only `name`). The drawer's
@@ -43,7 +39,6 @@ interface Props {
   form: ReactFormLike;
   initial: UpdateDeploymentInput;
   environment: UpdateDeploymentInput;
-  driverSchema?: DriverParameterSchema;
   anchorId: SectionId;
   /** Read-only — driver "driverName@version" rendered under the name input. */
   driverLabel: string;
@@ -74,12 +69,9 @@ export function IdentitySection({
   driverLabel,
   appVersion,
 }: Props) {
-  const changedCount = useStore(form.store, (state) => {
-    const values = (state as { values: UpdateDeploymentInput }).values;
-    return diff(initial, values, [] as DriverParameterSchema).entries.filter(
-      (e) => e.section === anchorId,
-    ).length;
-  });
+  const changedCount = useDrawerDiff().entries.filter(
+    (e) => e.section === anchorId,
+  ).length;
 
   return (
     <section
