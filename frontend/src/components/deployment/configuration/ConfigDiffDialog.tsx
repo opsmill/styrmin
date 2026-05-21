@@ -24,10 +24,10 @@ import { impactRules } from "@/lib/impact-rules";
 import {
   deploymentConfigToInput,
   deploymentParametersToInput,
-  fieldEqualWithEmpty,
 } from "@/lib/deployment-input";
 import { cn } from "@/lib/utils";
 
+import { formArrayEmptyEqual } from "./conflictMerge";
 import { DiffEntryRow } from "./DiffEntryRow";
 import { ImpactList } from "./ImpactList";
 
@@ -213,7 +213,7 @@ export function ConfigDiffDialog({
         ...Object.keys(cur),
         ...Object.keys(refreshed),
       ])) {
-        const operatorEdited = !fieldEqualWithEmpty(cur[key], frozen[key]);
+        const operatorEdited = !formArrayEmptyEqual(cur[key], frozen[key]);
         mergedInput[key] = operatorEdited ? cur[key] : refreshed[key];
       }
       await updateMutation.mutateAsync({
@@ -337,159 +337,153 @@ export function ConfigDiffDialog({
             </Dialog.Close>
           </header>
 
-          {conflictDeployment ? (
-            <ConflictPanel onReload={handleReload} onBack={onBackToEdit} />
-          ) : (
-            <>
-              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-                {error && (
-                  <Alert
-                    variant="destructive"
-                    data-testid="diff-dialog-error"
-                    className="mb-4"
-                  >
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {conflictDeployment && (
+              <ConflictBanner pendingCount={diffResult.entries.length} />
+            )}
+            {error && (
+              <Alert
+                variant="destructive"
+                data-testid="diff-dialog-error"
+                className="mb-4"
+              >
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
 
-                {noChanges ? (
-                  <p
-                    data-testid="diff-dialog-empty"
-                    className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground"
-                  >
-                    No pending changes. Close this dialog and edit a field to
-                    enable Apply.
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-6">
-                    <section
-                      aria-label="Diff"
-                      data-testid="diff-dialog-diff-section"
-                    >
-                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Diff
-                      </h3>
-                      <div className="flex flex-col gap-4">
-                        {SECTION_ORDER.filter(
-                          (id) => grouped[id] && grouped[id].length > 0,
-                        ).map((id) => (
-                          <div
-                            key={id}
-                            data-testid={`diff-section-${id}`}
-                            className="flex flex-col gap-2"
-                          >
-                            <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                              {SECTION_LABELS[id]}
-                            </h4>
-                            <div className="flex flex-col gap-1.5">
-                              {grouped[id]?.map((entry) => (
-                                <DiffEntryRow
-                                  key={`${entry.path}-${entry.kind}`}
-                                  entry={entry}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-
-                    {impactSummary.entries.length > 0 && (
-                      <section
-                        aria-label="Impact"
-                        data-testid="diff-dialog-impact-section"
+            {noChanges ? (
+              <p
+                data-testid="diff-dialog-empty"
+                className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground"
+              >
+                No pending changes. Close this dialog and edit a field to enable
+                Apply.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-6">
+                <section
+                  aria-label="Diff"
+                  data-testid="diff-dialog-diff-section"
+                >
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Diff
+                  </h3>
+                  <div className="flex flex-col gap-4">
+                    {SECTION_ORDER.filter(
+                      (id) => grouped[id] && grouped[id].length > 0,
+                    ).map((id) => (
+                      <div
+                        key={id}
+                        data-testid={`diff-section-${id}`}
+                        className="flex flex-col gap-2"
                       >
-                        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Impact
-                        </h3>
-                        <ImpactList summary={impactSummary} />
-                      </section>
-                    )}
+                        <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          {SECTION_LABELS[id]}
+                        </h4>
+                        <div className="flex flex-col gap-1.5">
+                          {grouped[id]?.map((entry) => (
+                            <DiffEntryRow
+                              key={`${entry.path}-${entry.kind}`}
+                              entry={entry}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                </section>
+
+                {impactSummary.entries.length > 0 && (
+                  <section
+                    aria-label="Impact"
+                    data-testid="diff-dialog-impact-section"
+                  >
+                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Impact
+                    </h3>
+                    <ImpactList summary={impactSummary} />
+                  </section>
                 )}
               </div>
+            )}
+          </div>
 
-              <footer className="flex items-center justify-end gap-2 border-t border-border px-6 py-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={onBackToEdit}
-                  disabled={isApplying}
-                  data-testid="diff-dialog-back-button"
-                >
-                  ← Back to edit
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => {
-                    void handleApply();
-                  }}
-                  disabled={noChanges || isApplying}
-                  data-testid="diff-dialog-apply-button"
-                  className={cn(
-                    disruptive &&
-                      "bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-400",
-                  )}
-                >
-                  {isApplying ? "Applying…" : "Apply & redeploy"}
-                </Button>
-              </footer>
-            </>
-          )}
+          <footer className="flex items-center justify-end gap-2 border-t border-border px-6 py-4">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onBackToEdit}
+              disabled={isApplying}
+              data-testid="diff-dialog-back-button"
+            >
+              ← Back to edit
+            </Button>
+            {conflictDeployment ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleReload}
+                data-testid="diff-dialog-reload-button"
+              >
+                Reload
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  void handleApply();
+                }}
+                disabled={noChanges || isApplying}
+                data-testid="diff-dialog-apply-button"
+                className={cn(
+                  disruptive &&
+                    "bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-400",
+                )}
+              >
+                {isApplying ? "Applying…" : "Apply"}
+              </Button>
+            )}
+          </footer>
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
   );
 }
 
-function ConflictPanel({
-  onReload,
-  onBack,
-}: {
-  onReload: () => void;
-  onBack: () => void;
-}) {
+/**
+ * Inline banner shown above the diff when a concurrent-edit conflict has
+ * been detected. The diff and impact list stay visible underneath so the
+ * operator retains visual context of the pending edits while they decide
+ * whether to reload — the standing UX rule is "never hide what the
+ * operator was about to apply" (US2 review feedback).
+ *
+ * Actions (Reload / Back to edit) live in the dialog footer alongside
+ * the regular Apply path so focus management and button placement stay
+ * consistent across both states.
+ */
+function ConflictBanner({ pendingCount }: { pendingCount: number }) {
   return (
     <div
       data-testid="diff-dialog-conflict-panel"
-      className="flex flex-1 flex-col gap-4 px-6 py-6"
+      className="mb-4 flex items-start gap-3 rounded-md border border-amber-400 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-200"
     >
-      <div className="flex items-start gap-3 rounded-md border border-amber-400 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-200">
-        <AlertTriangle
-          className="mt-0.5 h-5 w-5 shrink-0 text-amber-700 dark:text-amber-300"
-          aria-hidden="true"
-        />
-        <div className="min-w-0">
-          <p className="text-sm font-semibold">
-            This deployment was modified while you were editing
-          </p>
-          <p className="mt-1 text-xs text-amber-900/80 dark:text-amber-200/80">
-            Another client saved changes since you opened the drawer. Reload to
-            merge against the latest persisted state. Your pending edits will be
-            preserved on top of the new baseline.
-          </p>
-        </div>
-      </div>
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onBack}
-          data-testid="diff-dialog-conflict-back-button"
-        >
-          ← Back to edit
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          onClick={onReload}
-          data-testid="diff-dialog-reload-button"
-        >
-          Reload
-        </Button>
+      <AlertTriangle
+        className="mt-0.5 h-5 w-5 shrink-0 text-amber-700 dark:text-amber-300"
+        aria-hidden="true"
+      />
+      <div className="min-w-0">
+        <p className="text-sm font-semibold">
+          This deployment was modified while you were editing
+        </p>
+        <p className="mt-1 text-xs text-amber-900/80 dark:text-amber-200/80">
+          Another client saved changes since you opened the drawer. We&apos;ve
+          held your {pendingCount} pending{" "}
+          {pendingCount === 1 ? "edit" : "edits"} below — click{" "}
+          <span className="font-semibold">Reload</span> to merge them against
+          the latest persisted state.
+        </p>
       </div>
     </div>
   );
@@ -508,17 +502,34 @@ function ConflictPanel({
  * have moved on the server between drawer-open time and Apply time, the
  * fingerprint changes and we surface the conflict panel.
  *
- * `JSON.stringify` ordering depends on insertion order, but the GraphQL
- * resolver returns these fields with stable shapes, so the order is
- * deterministic across consecutive fetches of the same row.
+ * Keys are sorted before serialisation via {@link canonicalStringify}: a
+ * resolver field reorder or a different fetch path must not produce a
+ * spurious fingerprint mismatch.
  */
 function fingerprintDeployment(deployment: Deployment): string {
-  const input = deploymentConfigToInput(deployment.config);
-  const parameters = deploymentParametersToInput(deployment.parameters);
-  return JSON.stringify({
+  return canonicalStringify({
     name: deployment.name,
-    parameters,
-    config: input,
+    parameters: deploymentParametersToInput(deployment.parameters),
+    config: deploymentConfigToInput(deployment.config),
+  });
+}
+
+/**
+ * `JSON.stringify` with object keys sorted at every depth so two structurally
+ * equal values always produce the same string regardless of insertion order.
+ * Arrays keep their order — list semantics matter to the operator.
+ */
+function canonicalStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, val) => {
+    if (val === null || typeof val !== "object" || Array.isArray(val)) {
+      return val;
+    }
+    const obj = val as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const k of Object.keys(obj).sort()) {
+      sorted[k] = obj[k];
+    }
+    return sorted;
   });
 }
 

@@ -11,7 +11,7 @@ Drives Playwright through the full operator flow:
 5. Click "Review & apply"; assert the diff dialog lists the changed
    path under ``scheduling.resources.requests.cpu`` and the impact
    list mentions "Pods will be recreated with new resource limits".
-6. Click "Apply & redeploy"; wait for the deployment task to converge.
+6. Click "Apply"; wait for the deployment task to converge.
 7. Assert the persisted ``deployment.config`` reflects the new CPU
    value (via the SDK) and the underlying pods restarted (the chart
    re-rendered the pod template with the new request, replacing the
@@ -233,7 +233,7 @@ async def test_drawer_scheduling_edit(
         "Pods will be recreated with new resource limits"
     )
 
-    # Apply & redeploy.
+    # Apply.
     await page.locator("[data-testid=diff-dialog-apply-button]").click()
     # The drawer closes on successful apply (forceClose).
     await expect(diff_dialog).to_be_hidden(timeout=60_000)

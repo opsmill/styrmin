@@ -13,7 +13,7 @@ to ``NoExecute``, and asserts that the diff dialog renders:
 3. **No type-to-confirm input** — the Apply button is the only confirm
    surface (FR-022).
 
-Apply & redeploy is exercised against the live backend to prove the
+Apply is exercised against the live backend to prove the
 flow still works through the amber treatment.
 
 ``@pytest.mark.ui_only`` per AGENTS.md / research R-010: the SDK has no
@@ -236,7 +236,7 @@ async def test_drawer_disruptive_toleration_effect_change(
         f"found {await type_to_confirm.count()} candidate input(s)."
     )
 
-    # Apply & redeploy works through the amber treatment.
+    # Apply works through the amber treatment.
     apply_button = page.locator("[data-testid=diff-dialog-apply-button]")
     await expect(apply_button).to_be_enabled()
     await apply_button.click()
