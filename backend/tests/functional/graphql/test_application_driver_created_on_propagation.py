@@ -123,9 +123,18 @@ async def test_application_driver_created_on_distinct_versions(
 
     older_ts = datetime(2025, 1, 1, tzinfo=timezone.utc)
     newer_ts = older_ts + timedelta(days=30)
+    # NOTE: commit each row separately. Mutating ``updated_on`` (which has
+    # ``onupdate=func.now()`` rendered as a postcompile ``strftime(...)`` on
+    # SQLite) on two dirty rows in the same flush triggers SQLAlchemy's bulk
+    # UPDATE path, which raises ``InvalidRequestError`` because postcompile
+    # / ``literal_execute`` params cannot be used with ``executemany()``.
+    # Splitting the flush forces single-row UPDATEs and side-steps the
+    # bulk path while still exercising the resolver under two distinct
+    # ``createdOn`` values.
     adv_old.created_on = older_ts
-    adv_new.created_on = newer_ts
     session.add(adv_old)
+    await session.commit()
+    adv_new.created_on = newer_ts
     session.add(adv_new)
     await session.commit()
 
