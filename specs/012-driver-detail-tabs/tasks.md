@@ -57,21 +57,21 @@ description: "Task list for Driver Detail Page Redesign (Tabbed Layout)"
 
 ### Scaffolding (shared with US2 / US3)
 
-- [ ] T009 [US1] Create the sub-directory `frontend/src/pages/drivers/driver-detail/` for the new component tree.
-- [ ] T010 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/types.ts` exporting the `TabId` union (`"overview" | "parameters" | "components" | "actions" | "source"`) and any shared narrowed types lifted from the regenerated GraphQL TypeScript.
-- [ ] T011 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/relative-time.ts` exporting a `formatRelativeTime(date: Date | string): string` helper (no new dependency; coarse-grained seconds/minutes/hours/days/weeks/months/years per `research.md §7`).
+- [x] T009 [US1] Create the sub-directory `frontend/src/pages/drivers/driver-detail/` for the new component tree.
+- [x] T010 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/types.ts` exporting the `TabId` union (`"overview" | "parameters" | "components" | "actions" | "source"`) and any shared narrowed types lifted from the regenerated GraphQL TypeScript.
+- [x] T011 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/relative-time.ts` exporting a `formatRelativeTime(date: Date | string): string` helper (no new dependency; coarse-grained seconds/minutes/hours/days/weeks/months/years per `research.md §7`).
 
 ### Left rail
 
-- [ ] T012 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/VersionListItem.tsx`. Renders one driver-version row as a `<button>` (per FR-016a — focusable, Enter/Space activates, `aria-pressed` when selected). Shows version label, source-type badge (`git` / `local`), relative-time label. Truncates long version strings with ellipsis and exposes the full string via `title`.
-- [ ] T013 [US1] Create `frontend/src/pages/drivers/driver-detail/VersionList.tsx`. Renders the "VERSIONS" header + a vertical-stack list of `VersionListItem`s, sorted newest-first by `createdOn`. Right-border divider per spec design.
-- [ ] T014 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/VersionHeader.tsx`. Renders the selected version's label, source-type pill, supported-versions text, and a source line (`repo @ branch · commit` for git, `local path` for local — `commit` left blank in v1 since not exposed).
+- [x] T012 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/VersionListItem.tsx`. Renders one driver-version row as a `<button>` (per FR-016a — focusable, Enter/Space activates, `aria-pressed` when selected). Shows version label, source-type badge (`git` / `local`), relative-time label. Truncates long version strings with ellipsis and exposes the full string via `title`.
+- [x] T013 [US1] Create `frontend/src/pages/drivers/driver-detail/VersionList.tsx`. Renders the "VERSIONS" header + a vertical-stack list of `VersionListItem`s, sorted newest-first by `createdOn`. Right-border divider per spec design.
+- [x] T014 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/VersionHeader.tsx`. Renders the selected version's label, source-type pill, supported-versions text, and a source line (`repo @ branch · commit` for git, `local path` for local — `commit` left blank in v1 since not exposed).
 
 ### Right pane scaffold
 
-- [ ] T015 [US1] Create `frontend/src/pages/drivers/driver-detail/VersionDetail.tsx`. Renders `VersionHeader` + a `<Tabs>` strip (Overview / Parameters / Components / Actions / Source) + the matching `<TabPanel>`. Accepts `version` + `activeTab` + `onTabChange` props.
-- [ ] T016 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/tabs/OverviewTab.tsx`. Renders three summary tiles: Helm chart (`{chart.name} {chart.version}` + repository), Components (count + names; empty-state label "No components declared" when absent), Parameters (count + required-count; empty-state label when zero).
-- [ ] T017 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/tabs/ParametersTab.tsx`. Renders the structured table per FR-002 / FR-008 / FR-011 (columns: NAME, LABEL, KIND, REQUIRED, DEFAULT). REQUIRED computed as `default === null || default === undefined`. Empty-state message ("No parameters declared") when the array is empty — no empty table header.
+- [x] T015 [US1] Create `frontend/src/pages/drivers/driver-detail/VersionDetail.tsx`. Renders `VersionHeader` + a `<Tabs>` strip (Overview / Parameters / Components / Actions / Source) + the matching `<TabPanel>`. Accepts `version` + `activeTab` + `onTabChange` props.
+- [x] T016 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/tabs/OverviewTab.tsx`. Renders three summary tiles: Helm chart (`{chart.name} {chart.version}` + repository), Components (count + names; empty-state label "No components declared" when absent), Parameters (count + required-count; empty-state label when zero).
+- [x] T017 [P] [US1] Create `frontend/src/pages/drivers/driver-detail/tabs/ParametersTab.tsx`. Renders the structured table per FR-002 / FR-008 / FR-011 (columns: NAME, LABEL, KIND, REQUIRED, DEFAULT). REQUIRED computed as `default === null || default === undefined`. Empty-state message ("No parameters declared") when the array is empty — no empty table header.
 
 ### Page-level orchestration
 
