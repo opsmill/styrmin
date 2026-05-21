@@ -103,9 +103,9 @@ An operator wants to set per-component resource caps (e.g., raise the `rate-limi
 #### Edit drawer
 
 - **FR-010**: Clicking "Edit configuration" MUST open a right-side drawer over the deployment detail page; the page behind the drawer MUST be visually dimmed to indicate context preserved but not interactive.
-- **FR-011**: The drawer MUST contain a section navigation rail listing every editable section: Identity, Driver Parameters, Scheduling & Resources, Networking & Ingress, Environment Variables, Storage & Runtime, Service Name Overrides, Component Overrides.
-- **FR-012**: Every section listed in FR-011 MUST be editable; no section may be read-only inside the drawer.
-- **FR-013**: Component Overrides MUST be a first-class editable section in the initial release, with collapsible per-component blocks and visual room to accommodate additional override fields in future iterations.
+- **FR-011**: The drawer MUST contain a section navigation rail listing every section the Settings tab read view exposes: Identity, Driver Parameters, Scheduling & Resources, Networking & Ingress, Environment Variables, Storage & Runtime, Service Name Overrides, Component Overrides.
+- **FR-012** *(v1)*: The drawer MUST be editable for the following sections in the initial release: **Identity, Driver Parameters, Environment Variables, Service Name Overrides, Scheduling & Resources, and Component Overrides** (env-vars sub-shape only — see FR-013). **Networking & Ingress** and **Storage & Runtime** ship visible on the Settings read view but are deferred from the drawer; their re-introduction is tracked under FR-031 below. No section may be presented inside the drawer as a stubbed editor that silently drops input — deferred sections MUST be absent from the drawer entirely.
+- **FR-013** *(v1)*: Component Overrides MUST be a first-class editable section in the initial release, with collapsible per-component blocks and visual room to accommodate additional override fields in future iterations. v1 scope: **environment variables per component** are editable; per-component **resource limits** and **replica counts** are deferred to FR-032 because the GraphQL `ComponentConfigInput` type does not yet expose them.
 - **FR-014**: When a field's value differs from its persisted state, the field MUST be visually marked (border treatment) and labelled as "changed", and the original persisted value MUST be visible alongside the input (e.g., "from 500m").
 - **FR-015**: When any field in a section is changed, the section's heading in the form MUST show a "N changed" chip, and the section nav rail MUST display a change indicator next to that section's entry.
 - **FR-016**: The drawer MUST display a sticky footer that shows the total count of pending changes across all sections, a "Discard" action, and a "Review & apply" action.
@@ -117,9 +117,9 @@ An operator wants to set per-component resource caps (e.g., raise the `rate-limi
 
 - **FR-020**: Clicking "Review & apply" MUST open a confirmation dialog showing a path-level diff of every changed field across every section. Each diff entry MUST show both the previous value (marked `−`) and the new value (marked `+`).
 - **FR-021**: The dialog MUST include an Impact section listing concrete consequences derived from a frontend rule table that maps changed-field paths to predicted effects (e.g., "pods will be recreated", "ingress controller will be reconfigured", "no restart required").
-- **FR-022**: The dialog MUST provide a single primary action labelled "Apply & redeploy" and a secondary "Back to edit" action. There MUST NOT be a type-to-confirm input or any additional friction step.
+- **FR-022**: The dialog MUST provide a single primary action labelled **"Apply"** and a secondary "Back to edit" action. There MUST NOT be a type-to-confirm input or any additional friction step. (Updated from v1 draft "Apply & redeploy" — the consequence belongs in the impact list, not the button verb, so routine edits don't read as manual redeploys.)
 - **FR-023**: "Back to edit" MUST close the dialog and return the operator to the drawer with every pending change preserved.
-- **FR-024**: "Apply & redeploy" MUST submit the deployment update with the full set of changes such that fields not edited remain unchanged and edited fields are applied. After a successful response, the dialog and drawer MUST close, the Configuration tab MUST refresh to reflect the new values, and any task spawned by the update MUST appear on the Timeline tab.
+- **FR-024**: "Apply" MUST submit the deployment update with the full set of changes such that fields not edited remain unchanged and edited fields are applied. After a successful response, the dialog and drawer MUST close, the Configuration tab MUST refresh to reflect the new values, and any task spawned by the update MUST appear on the Timeline tab.
 - **FR-025**: If the apply fails for any reason, the dialog MUST stay open, surface the server error, and preserve the pending changes for retry.
 
 #### Cleanup
@@ -141,11 +141,19 @@ An operator wants to set per-component resource caps (e.g., raise the `rate-limi
 
 #### Concurrency
 
-- **FR-029**: When the operator clicks "Apply & redeploy", the mutation MUST detect whether the underlying deployment has been modified since the drawer was opened. On detection of a concurrent modification, the confirmation dialog MUST surface a clear "this deployment was modified by another actor since you started editing" message with a "Reload" action that refetches the deployment, recomputes the diff baseline against the new persisted state, and keeps the operator's pending edits visible against the new baseline. The mutation MUST NOT proceed until the operator reloads or explicitly chooses to overwrite (overwrite is a follow-up; v1 only supports reload).
+- **FR-029**: When the operator clicks "Apply", the mutation MUST detect whether the underlying deployment has been modified since the drawer was opened. On detection of a concurrent modification, the confirmation dialog MUST surface a clear "this deployment was modified by another actor since you started editing" message with a "Reload" action that refetches the deployment, recomputes the diff baseline against the new persisted state, and keeps the operator's pending edits visible against the new baseline. The mutation MUST NOT proceed until the operator reloads or explicitly chooses to overwrite (overwrite is a follow-up; v1 only supports reload).
 
 #### Permissions
 
 - **FR-030**: The "Edit configuration" button in the hero summary bar MUST be visible only to users with edit permission on the deployment, per the same authorization check the `updateDeployment` mutation enforces server-side. Users without edit permission see the read-only Configuration tab without an Edit affordance, no misleading disabled-button tooltip, and no route by which to open the drawer.
+
+#### Deferred follow-ups (v1 scope carve-outs)
+
+These requirements are deliberately deferred from v1 and tracked so a future iteration can pick them up without re-discovering the gap. Each MUST land in a follow-up before v2 is declared complete.
+
+- **FR-031** *(deferred from FR-012)*: The drawer MUST gain editable sections for **Networking & Ingress** and **Storage & Runtime**. The Zod schemas and nested-form UX for these surfaces are non-trivial (dedicated ingress block, IP whitelist set, standard-storage block, runtime/db sizing); shipping them required UX work that did not fit the v1 envelope. The Settings tab already renders both sections read-only so operators can inspect inheritance; only the edit surface is missing.
+- **FR-032** *(deferred from FR-013)*: Component Overrides MUST expose per-component **resource limits** (CPU/memory requests + limits) and **replica counts** in the drawer. v1 ships env-vars only because the backend GraphQL `ComponentConfigInput` type does not carry those fields; this follow-up depends on extending the backend input type and is therefore "Ask First" per the project conventions.
+- **FR-033** *(deferred concurrency hardening, originally noted in FR-029)*: Strategy A (server-issued `updatedOn` stamp + typed `STALE_DEPLOYMENT_WRITE` error) MUST replace v1's client-side fingerprint compare. v1 ships Strategy B because it requires no backend change; the typed-error path lands when the backend exposes the stamp.
 
 ### Key Entities
 
