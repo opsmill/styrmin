@@ -318,7 +318,13 @@ async def test_drawer_scheduling_edit_keyboard_only(
     await page.keyboard.press("Enter")
 
     diff_dialog = page.locator("[data-testid=config-diff-dialog]")
-    await expect(diff_dialog).to_be_visible()
+    # Keyboard activation (focus + Enter) on the Review & apply button is
+    # measurably slower than a real click — under CI load the dialog mount
+    # can exceed Playwright's default 5s ``to_be_visible`` timeout. Local
+    # runs land well under a second; CI saw a 5s timeout on this exact line
+    # at commit b19c914. Bump to 30s to match the pattern of the
+    # ``to_be_hidden`` assertion below.
+    await expect(diff_dialog).to_be_visible(timeout=30_000)
 
     apply_button = page.locator("[data-testid=diff-dialog-apply-button]")
     await expect(apply_button).to_be_enabled()
