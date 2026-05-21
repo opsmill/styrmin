@@ -151,8 +151,12 @@ Persisted as `ApplicationDriverVersion.components: dict | None` (JSON column on 
 
 **Coverage targets**:
 
-- `DriverDetailPage.test.tsx`: tab switching preserves selected version; version switching preserves active tab; empty-versions branch renders the role-gated empty state; auto-refresh-version-removed silent fallback.
-- `VersionList.test.tsx`: newest-first ordering by `createdOn`; active-state class on the selected row; source-type indicator for git vs local.
+- `DriverDetailPage.test.tsx`:
+  - Tab switching preserves the selected version.
+  - Version switching preserves the active tab.
+  - Empty-versions branch renders the role-gated empty state (Add Version hidden for READ users).
+  - Auto-refresh silent-fallback (EC-002): after a refresh removes the previously-selected version, the page silently falls back to the newest version in the refreshed list — explicitly enumerated as a named test case.
+- `VersionList.test.tsx`: newest-first ordering by `createdOn`; active-state class on the selected row; source-type indicator for git vs local; long-version-string truncates with full value exposed via `title`.
 
 Both files mock `useGetDriverQuery` with a fixed driver fixture (3 versions, distinct timestamps, mixed source types).
 
@@ -170,6 +174,26 @@ Both files mock `useGetDriverQuery` with a fixed driver fixture (3 versions, dis
 **Implementation**: a `useEffect` keyed on `data?.applicationDriver?.versions` that runs the reconciliation. Avoids stale-closure UI showing version content that no longer exists in the data.
 
 **Rationale**: matches `EC-002` from the spec. Silent fallback because the auto-refresh is a background poll and a toast would erode trust.
+
+## 11. Auto-refresh error behaviour (known limitation, preserved)
+
+**Decision**: keep the current behaviour — any `error` returned by `useGetDriverQuery` (including a transient failure during the 10 s auto-refresh poll) replaces the page with `<ErrorState>`.
+
+**Rationale**: this matches the existing `DriverDetailPage` behaviour exactly and matches sibling pages. Changing it (e.g. retaining the last-good snapshot and showing a non-blocking banner) is a project-wide UX improvement, not feature-specific work. Documented as a known limitation here so reviewers do not flag it as a regression.
+
+**Follow-up flag**: a future spec could change `useGetDriverQuery` callers to swallow refresh failures and surface them inline; out of scope for this feature.
+
+## 12. SDK additivity of `createdOn`
+
+**Decision**: the GraphQL schema change is purely additive on existing types and is therefore non-breaking for existing SDK consumers.
+
+**Rationale**: ariadne-codegen generates per-operation TypedDict / Pydantic types from the `.graphql` query files. Callers that do **not** add `createdOn` to their selection set will not see the field in their generated types and are unaffected by the schema change. The only consumers that will see the new field are the two GraphQL operations updated in this feature (`get_driver.graphql` in the frontend; any SDK operation we also update). No callers need to be migrated in lock-step.
+
+## 13. Deploy / rollback strategy
+
+**Decision**: no feature flag.
+
+**Rationale**: this is a UI-only redesign of a single page. Rollback in the unlikely event of a regression is `git revert` of the merge commit plus a redeploy. A feature flag would add code surface for one release and then be removed; the cost outweighs the benefit. The backend GraphQL change (`createdOn` field) is additive and safe to leave in place even if the frontend is rolled back.
 
 ## Open Questions
 

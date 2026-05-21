@@ -61,6 +61,8 @@ A **platform engineer** wants to know which repository, branch, and subpath a **
 - **New version appears during auto-refresh.** The version list updates to include the new entry; the currently-selected version remains selected — the page does not auto-jump to the new latest.
 - **Empty declarations.** When a **driver version** has zero parameters, zero components, or zero actions, the corresponding tab shows a tab-specific empty-state message and does not render an empty table header.
 - **Long parameter list.** When a **driver version** declares many parameters, the page scrolls naturally — no internal scrolling region is introduced inside the tab.
+- **Overview tab with empty underlying data.** When the selected **driver version** has no parameters, no components, and no actions, the Overview tab's summary tiles MUST show empty-state labels for each affected tile (e.g. "No components declared") rather than a bare "0" or "—" value.
+- **Long version labels.** A **driver version** uses a free-form `version` string; when this string is long enough to overflow the left-rail row, the row MUST truncate with an ellipsis while exposing the full string via tooltip / `title` / `aria-label` so the value remains discoverable.
 
 ## Requirements *(mandatory)*
 
@@ -96,6 +98,10 @@ A **platform engineer** wants to know which repository, branch, and subpath a **
 - **FR-014**: System MUST preserve the existing periodic auto-refresh of driver data and the user-facing auto-refresh indicator.
 - **FR-015**: System MUST gate the "Add Version" action so it is only visible to users with at least read-write permission on the **application driver**.
 - **FR-016**: System MUST allow users to navigate back to the Drivers list via the page breadcrumb.
+
+**Accessibility**
+
+- **FR-016a**: Driver-version rows in the left rail MUST be focusable interactive elements (e.g. buttons) that respond to keyboard activation (Enter / Space); the currently-selected row MUST advertise its selected state to assistive technology (e.g. `aria-pressed="true"` or equivalent).
 
 **Empty states**
 
