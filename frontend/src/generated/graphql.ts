@@ -403,6 +403,12 @@ export type ExternalUrlScheme =
   | 'HTTP'
   | 'HTTPS';
 
+/** Fast storage configuration for the cluster, naming the Kubernetes ``StorageClass`` used as the fast (typically NVMe / local SSD) storage option for deployments. */
+export type FastStorageInput = {
+  /** The Kubernetes storage class name used as the fast storage option for this cluster. */
+  storageClass: Scalars['String']['input'];
+};
+
 export type Group = {
   __typename?: 'Group';
   id: Scalars['UUID']['output'];
@@ -1118,6 +1124,8 @@ export type UpdateDeploymentInput = {
   externalUrlPort?: InputMaybe<Scalars['Int']['input']>;
   /** URL scheme (``http`` or ``https``) used when constructing external URLs for services in this deployment. */
   externalUrlScheme?: InputMaybe<ExternalUrlScheme>;
+  /** Fast storage configuration (Kubernetes ``StorageClass`` for the fast / NVMe tier) used by this deployment. */
+  fastStorage?: InputMaybe<FastStorageInput>;
   /** Suffix appended to the auto-derived FQDN for every service in this deployment. */
   fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
   /** Name of the IngressClass used by services in this deployment. */

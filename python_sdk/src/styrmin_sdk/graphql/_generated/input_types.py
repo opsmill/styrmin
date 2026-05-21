@@ -121,6 +121,13 @@ class EnvVarInput(BaseModel):
     value: str
 
 
+class FastStorageInput(BaseModel):
+    """Fast storage configuration for the cluster, naming the Kubernetes ``StorageClass`` used as the fast (typically NVMe / local SSD) storage option for deployments."""
+
+    storage_class: str = Field(alias="storageClass")
+    "The Kubernetes storage class name used as the fast storage option for this cluster."
+
+
 class IngressServiceConfigInput(BaseModel):
     """Configuration for the dedicated ingress Kubernetes Service."""
 
@@ -315,6 +322,10 @@ class UpdateDeploymentInput(BaseModel):
         alias="standardStorage", default=None
     )
     "Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment."
+    fast_storage: Optional["FastStorageInput"] = Field(
+        alias="fastStorage", default=None
+    )
+    "Fast storage configuration (Kubernetes ``StorageClass`` for the fast / NVMe tier) used by this deployment."
 
 
 class UpdateEnvironmentInput(BaseModel):

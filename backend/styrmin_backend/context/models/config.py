@@ -99,6 +99,21 @@ class StandardStorage(BaseModel):
     storage_class: str
 
 
+class FastStorage(BaseModel):
+    """Fast storage configuration.
+
+    Holds the configuration for the fast (typically NVMe / local SSD)
+    storage class in the kubernetes cluster.
+
+    Attributes:
+        storage_class (str): The storage class name.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    storage_class: str
+
+
 _K8S_QUANTITY_RE = re.compile(
     r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)"
     r"(?:[eE][+-]?[0-9]+|[numkKMGTPE]|[KMGTPE]i)?$"
@@ -411,6 +426,7 @@ class ClusterConfig(BaseConfigSection):
         node_selector (str | None): The node selector.
         dedicated_ingress (DedicatedIngressConfig | None): The dedicated ingress controller config.
         standard_storage (StandardStorage | None): The standard storage.
+        fast_storage (FastStorage | None): The fast storage.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -419,6 +435,7 @@ class ClusterConfig(BaseConfigSection):
     node_selector: str | None = None
     dedicated_ingress: DedicatedIngressConfig | None = None
     standard_storage: StandardStorage | None = None
+    fast_storage: FastStorage | None = None
 
 
 class EnvironmentConfig(BaseConfigSection):

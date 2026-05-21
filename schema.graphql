@@ -395,6 +395,16 @@ enum ExternalUrlScheme {
   HTTPS
 }
 
+"""
+Fast storage configuration for the cluster, naming the Kubernetes ``StorageClass`` used as the fast (typically NVMe / local SSD) storage option for deployments.
+"""
+input FastStorageInput {
+  """
+  The Kubernetes storage class name used as the fast storage option for this cluster.
+  """
+  storageClass: String!
+}
+
 type Group {
   id: UUID!
   name: String!
@@ -830,6 +840,11 @@ input UpdateDeploymentInput {
   Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment.
   """
   standardStorage: StandardStorageInput = null
+
+  """
+  Fast storage configuration (Kubernetes ``StorageClass`` for the fast / NVMe tier) used by this deployment.
+  """
+  fastStorage: FastStorageInput = null
 }
 
 """
