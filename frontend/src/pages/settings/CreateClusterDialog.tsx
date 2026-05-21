@@ -39,6 +39,8 @@ const createClusterSchema = z
     dedicated_ingress_type: z.string(),
     standard_storage_enabled: z.boolean(),
     standard_storage_class: z.string().optional(),
+    fast_storage_enabled: z.boolean(),
+    fast_storage_class: z.string().optional(),
   })
   .refine(
     (data) =>
@@ -47,6 +49,15 @@ const createClusterSchema = z
     {
       message: "Storage class is required when standard storage is enabled",
       path: ["standard_storage_class"],
+    },
+  )
+  .refine(
+    (data) =>
+      !data.fast_storage_enabled ||
+      (data.fast_storage_class && data.fast_storage_class.length > 0),
+    {
+      message: "Storage class is required when fast storage is enabled",
+      path: ["fast_storage_class"],
     },
   )
   .refine(
@@ -88,6 +99,11 @@ function buildClusterConfig(
       storage_class: values.standard_storage_class,
     };
   }
+  if (values.fast_storage_enabled && values.fast_storage_class) {
+    config.fast_storage = {
+      storage_class: values.fast_storage_class,
+    };
+  }
   return Object.keys(config).length > 0 ? config : undefined;
 }
 
@@ -112,6 +128,8 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
       dedicated_ingress_type: "",
       standard_storage_enabled: false,
       standard_storage_class: "",
+      fast_storage_enabled: false,
+      fast_storage_class: "",
     },
     validators: {
       onSubmit: ({ value }) => {
@@ -155,6 +173,10 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
   const standardStorageEnabled = useStore(
     form.store,
     (s) => s.values.standard_storage_enabled,
+  );
+  const fastStorageEnabled = useStore(
+    form.store,
+    (s) => s.values.fast_storage_enabled,
   );
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -432,6 +454,48 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                           <Input
                             id="cluster-sc"
                             placeholder="e.g. ebs-gp3"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                          />
+                          {field.state.meta.errors.length > 0 && (
+                            <p className="text-sm text-destructive">
+                              {field.state.meta.errors[0]?.toString()}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </form.Field>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3 rounded-md border p-3">
+                <div className="flex items-center gap-2">
+                  <form.Field name="fast_storage_enabled">
+                    {(field) => (
+                      <Checkbox
+                        id="cluster-fast-storage"
+                        checked={field.state.value}
+                        onCheckedChange={(checked) =>
+                          field.handleChange(checked === true)
+                        }
+                      />
+                    )}
+                  </form.Field>
+                  <Label htmlFor="cluster-fast-storage" className="font-medium">
+                    Fast Storage
+                  </Label>
+                </div>
+                {fastStorageEnabled && (
+                  <div className="space-y-3 ml-6">
+                    <form.Field name="fast_storage_class">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <Label htmlFor="cluster-fast-sc">Storage Class</Label>
+                          <Input
+                            id="cluster-fast-sc"
+                            placeholder="e.g. nvme-local"
                             value={field.state.value}
                             onChange={(e) => field.handleChange(e.target.value)}
                             onBlur={field.handleBlur}

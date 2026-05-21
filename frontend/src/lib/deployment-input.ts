@@ -4,6 +4,7 @@ import type {
   EnvVarInput,
   ExternalDnsEndpointsType,
   ExternalUrlScheme,
+  FastStorageInput,
   SchedulingInput,
   StandardStorageInput,
   UpdateDeploymentInput,
@@ -103,5 +104,6 @@ export function deploymentConfigToInput(
     standardStorage: config.standard_storage as
       | StandardStorageInput
       | undefined,
+    fastStorage: config.fast_storage as FastStorageInput | undefined,
   };
 }

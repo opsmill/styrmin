@@ -33,6 +33,7 @@ from styrmin_backend.api.definitions.config.inputs import (
     EnvVarInput,
     ExternalDnsEndpointsType,
     ExternalUrlScheme,
+    FastStorageInput,
     SchedulingInput,
     StandardStorageInput,
     _convert_value,
@@ -227,6 +228,13 @@ class UpdateDeploymentInput:
         description=(
             "Standard storage configuration (default Kubernetes "
             "``StorageClass``) used by this deployment."
+        ),
+    )
+    fast_storage: FastStorageInput | None = strawberry.field(
+        default=None,
+        description=(
+            "Fast storage configuration (Kubernetes ``StorageClass`` for "
+            "the fast / NVMe tier) used by this deployment."
         ),
     )
 

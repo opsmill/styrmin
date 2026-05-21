@@ -164,6 +164,7 @@ _NODE_SELECTOR_ROW: dict[str, Any] = {"nodeSelector": "tier=batch"}
 _STANDARD_STORAGE_ROW: dict[str, Any] = {
     "standardStorage": {"storageClass": "fast-ssd"}
 }
+_FAST_STORAGE_ROW: dict[str, Any] = {"fastStorage": {"storageClass": "nvme-local"}}
 
 
 # Each row: (id, input_var, kind, expected)
@@ -322,6 +323,13 @@ _PROPAGATION_ROWS: list[tuple[str, dict[str, Any], str, Any]] = [
         _STANDARD_STORAGE_ROW,
         "config",
         {"standard_storage": {"storage_class": "fast-ssd"}},
+    ),
+    # Row 23 — fast_storage peer of standard_storage
+    (
+        "fast_storage",
+        _FAST_STORAGE_ROW,
+        "config",
+        {"fast_storage": {"storage_class": "nvme-local"}},
     ),
 ]
 

@@ -234,6 +234,22 @@ class StandardStorageInput:
     )
 
 
+@strawberry.input(
+    description=(
+        "Fast storage configuration for the cluster, naming the "
+        "Kubernetes ``StorageClass`` used as the fast (typically NVMe / "
+        "local SSD) storage option for deployments."
+    )
+)
+class FastStorageInput:
+    storage_class: str = strawberry.field(
+        description=(
+            "The Kubernetes storage class name used as the fast storage "
+            "option for this cluster."
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Generic conversion helpers (consumed by both top-level *_to_dict converters)
 # ---------------------------------------------------------------------------
@@ -295,6 +311,7 @@ __all__ = [
     "PostRenderInjectionInput",
     "ResourceRequirementsInput",
     "ResourceSpecInput",
+    "FastStorageInput",
     "SchedulingInput",
     "StandardStorageInput",
     "TolerationEffect",

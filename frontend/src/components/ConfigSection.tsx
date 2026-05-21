@@ -18,6 +18,10 @@ const STANDARD_STORAGE_LABELS: Record<string, string> = {
   storage_class: "Storage Class",
 };
 
+const FAST_STORAGE_LABELS: Record<string, string> = {
+  storage_class: "Storage Class",
+};
+
 function ConfigField({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-2">
@@ -67,12 +71,14 @@ export function ConfigSection({ config }: { config: Record<string, unknown> }) {
     string,
     unknown
   > | null;
+  const fastStorage = config.fast_storage as Record<string, unknown> | null;
 
   const hasContent =
     simpleFields.filter(([key]) => key !== "ip_whitelist").length > 0 ||
     (ipWhitelist && ipWhitelist.length > 0) ||
     dedicatedIngress != null ||
-    standardStorage != null;
+    standardStorage != null ||
+    fastStorage != null;
 
   if (!hasContent) {
     return (
@@ -114,6 +120,14 @@ export function ConfigSection({ config }: { config: Record<string, unknown> }) {
           title="Standard Storage"
           obj={standardStorage}
           labels={STANDARD_STORAGE_LABELS}
+        />
+      )}
+
+      {fastStorage && (
+        <NestedSection
+          title="Fast Storage"
+          obj={fastStorage}
+          labels={FAST_STORAGE_LABELS}
         />
       )}
     </div>

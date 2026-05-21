@@ -64,12 +64,17 @@ def compute_cluster_capabilities(cluster: Cluster) -> dict[str, Any] | None:
 
     capabilities = Capabilities()
 
+    storage: dict[str, StorageCapabilityDetail] = {}
     if config.standard_storage is not None:
-        capabilities.storage = {
-            "standard": StorageCapabilityDetail(
-                storage_class=config.standard_storage.storage_class,
-            ),
-        }
+        storage["standard"] = StorageCapabilityDetail(
+            storage_class=config.standard_storage.storage_class,
+        )
+    if config.fast_storage is not None:
+        storage["fast"] = StorageCapabilityDetail(
+            storage_class=config.fast_storage.storage_class,
+        )
+    if storage:
+        capabilities.storage = storage
 
     capabilities.ingress = _derive_ingress(config)
 
