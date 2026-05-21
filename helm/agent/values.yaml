@@ -2,7 +2,7 @@
 replicaCount: 1
 
 image:
-  repository: styrmin
+  repository: registry.opsmill.io/opsmill/styrmin
   tag: latest
   pullPolicy: IfNotPresent
 

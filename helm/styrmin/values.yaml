@@ -25,7 +25,7 @@ global:
 # Styrmin server image configuration
 image:
   # -- Image registry
-  registry: ""
+  registry: "registry.opsmill.io/opsmill"
   # -- Image repository
   repository: styrmin
   # -- Image pull policy
