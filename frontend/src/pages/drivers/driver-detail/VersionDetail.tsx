@@ -4,6 +4,7 @@ import { OverviewTab } from "./tabs/OverviewTab";
 import { ParametersTab } from "./tabs/ParametersTab";
 import { ComponentsTab } from "./tabs/ComponentsTab";
 import { ActionsTab } from "./tabs/ActionsTab";
+import { SourceTab } from "./tabs/SourceTab";
 import type { DriverVersionDetail, TabId } from "./types";
 
 interface VersionDetailProps {
@@ -24,9 +25,6 @@ const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
  * Right-pane scaffold for the selected driver version. Wires the version
  * header, the five-tab strip (all five from day one, per the spec), and the
  * matching tab panels.
- *
- * Only the Source panel still renders a placeholder; it will gain content in
- * a later chunk (US3).
  */
 export function VersionDetail({
   version,
@@ -58,19 +56,8 @@ export function VersionDetail({
         <ActionsTab actions={version.actions} />
       </TabPanel>
       <TabPanel active={activeTab === "source"}>
-        <PlaceholderPanel label="Source" />
+        <SourceTab version={version} />
       </TabPanel>
     </div>
-  );
-}
-
-function PlaceholderPanel({ label }: { label: string }) {
-  return (
-    <p
-      className="text-sm italic text-muted-foreground"
-      data-testid="driver-tab-placeholder"
-    >
-      {label} content coming in a later chunk
-    </p>
   );
 }

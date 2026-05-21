@@ -107,8 +107,8 @@ description: "Task list for Driver Detail Page Redesign (Tabbed Layout)"
 
 **Independent test**: switch to the Source tab on a git-sourced version (assert repo URL + branch + subpath if set); switch to the Source tab on a local-source version (assert local path; assert branch is **not** rendered).
 
-- [ ] T025 [US3] Create `frontend/src/pages/drivers/driver-detail/tabs/SourceTab.tsx`. Branches on `version.sourceType`: for `"git"` render the repository URL + branch (when set) + subpath (`sourcePath` when set); for `"local"` render the local source path and omit branch. Per FR-012 / FR-013.
-- [ ] T026 [P] [US3] Add a unit test asserting both branches: `frontend/src/__tests__/driver-detail/SourceTab.test.tsx`. Cover the git path (repo URL rendered, branch rendered) and the local path (sourcePath rendered, branch NOT rendered).
+- [x] T025 [US3] Create `frontend/src/pages/drivers/driver-detail/tabs/SourceTab.tsx`. Branches on `version.sourceType`: for `"git"` render the repository URL + branch (when set) + subpath (`sourcePath` when set); for `"local"` render the local source path and omit branch. Per FR-012 / FR-013.
+- [x] T026 [P] [US3] Add a unit test asserting both branches: `frontend/src/__tests__/driver-detail/SourceTab.test.tsx`. Cover the git path (repo URL rendered, branch rendered) and the local path (sourcePath rendered, branch NOT rendered).
 
 **US3 checkpoint**: SourceTab renders both source-type branches correctly; tests green.
 
