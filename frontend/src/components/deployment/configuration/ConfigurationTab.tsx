@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Info, X } from "lucide-react";
 import type {
   GetDeploymentQuery,
   UpdateDeploymentInput,
@@ -102,6 +103,8 @@ export function ConfigurationTab({ deployment }: Props) {
         ) : null}
       </div>
 
+      <SettingsMigrationHint />
+
       <EnvVarsSummary
         deploymentConfig={deployment.config}
         environmentConfig={deployment.environment.config}
@@ -109,11 +112,22 @@ export function ConfigurationTab({ deployment }: Props) {
         environmentName={deployment.environment.name}
         clusterName={deployment.environment.cluster.name}
       />
+      <SchedulingSummary
+        deploymentConfig={deployment.config}
+        environmentConfig={deployment.environment.config}
+        clusterConfig={deployment.environment.cluster.config}
+      />
       <ServiceOverridesSummary deployedServices={deployment.deployedServices} />
       <DriverParametersSummary
         current={current}
         environment={environment}
         driverSchema={driverSchema}
+      />
+      <ComponentOverridesSummary
+        deploymentConfig={deployment.config}
+        environmentConfig={deployment.environment.config}
+        clusterConfig={deployment.environment.cluster.config}
+        components={deployment.components}
       />
       <NetworkingSummary
         deploymentConfig={deployment.config}
@@ -121,17 +135,6 @@ export function ConfigurationTab({ deployment }: Props) {
         clusterConfig={deployment.environment.cluster.config}
       />
       <StorageRuntimeSummary current={current} environment={environment} />
-      <ComponentOverridesSummary
-        deploymentConfig={deployment.config}
-        environmentConfig={deployment.environment.config}
-        clusterConfig={deployment.environment.cluster.config}
-        components={deployment.components}
-      />
-      <SchedulingSummary
-        deploymentConfig={deployment.config}
-        environmentConfig={deployment.environment.config}
-        clusterConfig={deployment.environment.cluster.config}
-      />
 
       {canEdit ? (
         <ConfigEditDrawer
@@ -148,6 +151,70 @@ export function ConfigurationTab({ deployment }: Props) {
         open={contextDialogOpen}
         onOpenChange={setContextDialogOpen}
       />
+    </div>
+  );
+}
+
+const MIGRATION_HINT_DISMISS_KEY = "settings-tab-migration-hint-dismissed";
+
+/**
+ * One-time migration banner that explains where the Scheduling button and
+ * the Parameters tab went, since both surfaces were folded into this
+ * unified Settings tab. Persists dismissal in localStorage so the operator
+ * sees it at most once per browser; older sessions that pre-date the
+ * unification show it on first landing.
+ */
+function SettingsMigrationHint() {
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return window.localStorage.getItem(MIGRATION_HINT_DISMISS_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (!dismissed) return;
+    try {
+      window.localStorage.setItem(MIGRATION_HINT_DISMISS_KEY, "1");
+    } catch {
+      // localStorage may be blocked (private mode, sandboxed iframe); silently
+      // skip persistence — the banner just re-appears next session.
+    }
+  }, [dismissed]);
+
+  if (dismissed) return null;
+
+  return (
+    <div
+      role="note"
+      data-testid="settings-migration-hint"
+      className="flex items-start gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
+    >
+      <Info
+        className="mt-0.5 h-4 w-4 shrink-0 text-sky-700 dark:text-sky-300"
+        aria-hidden="true"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold">Welcome to the Settings tab</p>
+        <p className="mt-1 text-xs text-sky-900/80 dark:text-sky-200/80">
+          Scheduling, environment variables, driver parameters, and
+          per-component overrides now live here. The standalone Scheduling
+          button has been removed — click <strong>Update Settings</strong> to
+          edit any of them in one place, with a diff and impact review before
+          you apply.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => setDismissed(true)}
+        aria-label="Dismiss this hint"
+        data-testid="settings-migration-hint-dismiss"
+        className="rounded-md p-1 text-sky-800 transition-colors hover:bg-sky-100 hover:text-sky-950 dark:text-sky-300 dark:hover:bg-sky-900/40 dark:hover:text-sky-100"
+      >
+        <X className="h-4 w-4" />
+      </button>
     </div>
   );
 }
