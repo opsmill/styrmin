@@ -2,9 +2,14 @@
 
 ## Constitution §V NON-NEGOTIABLE evidence
 
-**Status**: ⏳ pending background run — see "Run Outcome" section below for the
-final result. This file is the canonical record of the T028 local-PASS
-attempt.
+**Status**: ⚠️ **environment-blocked — manual run required before merge**.
+The orchestrating session attempted the run but the subagent shell
+terminated mid-setup (during the styrmin Helm install — see "Run Outcome"
+below). The test code itself is complete and lint/build/typecheck clean;
+the failure is purely infrastructure-runtime, not implementation. A
+maintainer with a long-lived shell must execute the command and complete
+the §V evidence capture before this feature can be declared "done" per the
+constitution's NON-NEGOTIABLE clause.
 
 ### Command
 
@@ -101,3 +106,64 @@ Items genuinely deferred to a maintainer with a running dev env:
 ---
 
 ## Run Outcome
+
+**Verdict**: ⚠️ environment-blocked — orchestrating-session shell terminated
+mid-setup. The pytest process never reached the test assertions.
+
+### What happened
+
+The auto-implement run launched the E2E with the recommended command and
+the setup phase progressed normally:
+
+- Backend container images built (`#28 [server]`, `#27 [task-worker]`,
+  `#29 [agent-operator]`): all `DONE 8.8s`.
+- styrmin Helm chart began installing (`Release "styrmin" does not exist.
+  Installing it now.`).
+- Helm dependencies downloaded: postgresql, prefect-server, velero.
+
+The shell session ended while the chart was still downloading velero —
+before `pytest` returned, before any test code executed, before any
+`PASSED`/`FAILED` line was emitted. Last 5 lines of
+`/tmp/driver-detail-e2e.log`:
+
+```
+Saving 4 charts
+Downloading postgresql from repo https://charts.bitnami.com/bitnami
+Pulled: registry-1.docker.io/bitnamicharts/postgresql:16.7.27
+Downloading prefect-server from repo https://prefecthq.github.io/prefect-helm
+Downloading velero from repo https://vmware-tanzu.github.io/helm-charts
+```
+
+No process matching `pytest` or `test_driver_detail` remained alive after
+the shell session ended.
+
+### Action required before merge
+
+A maintainer with a long-lived local shell **must** run:
+
+```bash
+sleep infinity | uv run pytest backend/tests/e2e/test_driver_detail.py -v -s --pdb -k "ui-chromium" 2>&1 | tee /tmp/driver-detail-e2e.log
+```
+
+then capture into a follow-up commit on this branch (or this file):
+
+1. pytest node ID: `backend/tests/e2e/test_driver_detail.py::test_driver_detail_inspects_versions_via_tabs[ui-chromium]`
+2. Exact command (copy-paste from above).
+3. ISO 8601 UTC timestamp of the passing run (`date -u +"%Y-%m-%dT%H:%M:%SZ"`).
+4. vcluster id from `/tmp/pytest-of-*/pytest-*/vcluster0/kubeconfig`.
+5. Verbatim `PASSED ...` line copied from pytest output.
+
+Per Constitution §V NON-NEGOTIABLE, the feature is **not done** until that
+evidence is captured and the test is observed PASSING. Marker-clean is not
+green.
+
+### Risk assessment
+
+Low. The test was written with explicit, stable selectors
+(`data-testid`, `data-version-id`, `data-tab-id` attributes that already
+ship in the new components from earlier chunks) and asserts only the
+behavioural contract laid down in `research.md §8`. The setup-phase
+failure was infrastructural (helm/docker download), not test-code-related.
+The likely outcome of a maintainer-driven run is PASS on the first
+attempt.
+
