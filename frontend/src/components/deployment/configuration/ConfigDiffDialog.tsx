@@ -24,6 +24,7 @@ import { impactRules } from "@/lib/impact-rules";
 import {
   deploymentConfigToInput,
   deploymentParametersToInput,
+  fieldEqualWithEmpty,
 } from "@/lib/deployment-input";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +39,14 @@ interface Props {
   deployment: Deployment;
   /** Snapshot of `UpdateDeploymentInput` captured when the drawer opened. */
   initialValues: UpdateDeploymentInput;
+  /**
+   * Frozen drawer-open snapshot that never refreshes on concurrent-edit
+   * reload. Used together with {@link Props.deployment} (the rebaselined
+   * baseline) to decide, at submit time, which top-level fields the
+   * operator actually edited vs. which ones changed underneath via an
+   * out-of-band write.
+   */
+  frozenInitialValues: UpdateDeploymentInput;
   /** Current edited form values from the drawer. */
   currentValues: UpdateDeploymentInput;
   driverSchema: DriverParameterSchema;
@@ -104,6 +113,7 @@ export function ConfigDiffDialog({
   onOpenChange,
   deployment,
   initialValues,
+  frozenInitialValues,
   currentValues,
   driverSchema,
   onApplySuccess,
@@ -177,9 +187,38 @@ export function ConfigDiffDialog({
     }
 
     try {
+      // The backend uses full-replacement semantics
+      // (services/deployment.py:302). To preserve out-of-band writes that
+      // surfaced via the conflict panel, build the mutation input by
+      // merging on each top-level field:
+      //
+      // * Operator edited (current != frozen baseline) → use ``current``.
+      // * Operator untouched (current == frozen baseline) → use the value
+      //   from the refreshed ``deployment`` prop, so the out-of-band write
+      //   carries through the mutation instead of being clobbered.
+      //
+      // Doing the merge here (instead of mutating form state in the
+      // drawer's reload handler) avoids any dependency on TanStack Form's
+      // ``setFieldValue`` reactivity for ``mode="array"`` fields.
+      const refreshedBaseline: UpdateDeploymentInput = {
+        ...deploymentConfigToInput(deployment.config),
+        name: deployment.name,
+        parameters: deploymentParametersToInput(deployment.parameters),
+      };
+      const cur = currentValues as Record<string, unknown>;
+      const frozen = frozenInitialValues as Record<string, unknown>;
+      const refreshed = refreshedBaseline as Record<string, unknown>;
+      const mergedInput: Record<string, unknown> = {};
+      for (const key of new Set([
+        ...Object.keys(cur),
+        ...Object.keys(refreshed),
+      ])) {
+        const operatorEdited = !fieldEqualWithEmpty(cur[key], frozen[key]);
+        mergedInput[key] = operatorEdited ? cur[key] : refreshed[key];
+      }
       await updateMutation.mutateAsync({
         deploymentId: deployment.id,
-        input: currentValues,
+        input: mergedInput as UpdateDeploymentInput,
       });
       queryClient.invalidateQueries({ queryKey: ["GetDeployment"] });
       onApplySuccess();
@@ -190,7 +229,11 @@ export function ConfigDiffDialog({
     baselineFingerprint,
     conflictQuery,
     currentValues,
+    deployment.config,
     deployment.id,
+    deployment.name,
+    deployment.parameters,
+    frozenInitialValues,
     onApplySuccess,
     queryClient,
     updateMutation,

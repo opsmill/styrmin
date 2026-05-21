@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { deploymentConfigToInput } from "./deployment-input";
+import {
+  deploymentConfigToInput,
+  fieldEqualWithEmpty,
+} from "./deployment-input";
 
 describe("deploymentConfigToInput", () => {
   it("converts an empty config into an input with every field undefined", () => {
@@ -153,5 +156,26 @@ describe("deploymentConfigToInput", () => {
     });
     expect(input.externalUrlScheme).toBe("HTTPS");
     expect(input.externalDnsEndpointsType).toBe("NODE_EXTERNAL_IP");
+  });
+});
+
+describe("fieldEqualWithEmpty", () => {
+  it("treats undefined / null / [] / {} as the same empty sentinel", () => {
+    expect(fieldEqualWithEmpty(undefined, null)).toBe(true);
+    expect(fieldEqualWithEmpty([], undefined)).toBe(true);
+    expect(fieldEqualWithEmpty({}, undefined)).toBe(true);
+    expect(fieldEqualWithEmpty([], {})).toBe(true);
+  });
+
+  it("treats populated values as different from the empty sentinel", () => {
+    expect(fieldEqualWithEmpty([{ name: "X", value: "1" }], undefined)).toBe(
+      false,
+    );
+    expect(fieldEqualWithEmpty({ cpu: "100m" }, undefined)).toBe(false);
+  });
+
+  it("compares populated values by deep structural equality", () => {
+    expect(fieldEqualWithEmpty({ cpu: "100m" }, { cpu: "100m" })).toBe(true);
+    expect(fieldEqualWithEmpty({ cpu: "100m" }, { cpu: "200m" })).toBe(false);
   });
 });

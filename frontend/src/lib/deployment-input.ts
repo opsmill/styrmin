@@ -325,3 +325,37 @@ export function deploymentConfigToInput(
     fastStorage: config.fast_storage as FastStorageInput | undefined,
   };
 }
+
+/**
+ * Treat ``undefined`` / ``null`` / empty array / empty object as the same
+ * "no value" sentinel when comparing top-level ``UpdateDeploymentInput``
+ * fields.
+ *
+ * TanStack Form's ``<form.Field mode="array">`` normalises an unset
+ * ``defaultValues.envVars = undefined`` into ``state.values.envVars =
+ * []``. Without this tolerance, the conflict-reload merge would see the
+ * form's ``[]`` as different from the baseline's ``undefined`` and treat
+ * the field as edited — skipping the adoption of the refreshed baseline
+ * value. The backend uses full-replacement semantics for
+ * ``deployment.config``, so the form must carry the refreshed value for
+ * every field the operator did not actually touch.
+ */
+function canonicalEmpty(v: unknown): unknown {
+  if (v === undefined || v === null) return null;
+  if (Array.isArray(v) && v.length === 0) return null;
+  if (
+    typeof v === "object" &&
+    v !== null &&
+    !Array.isArray(v) &&
+    Object.keys(v as Record<string, unknown>).length === 0
+  ) {
+    return null;
+  }
+  return v;
+}
+
+export function fieldEqualWithEmpty(a: unknown, b: unknown): boolean {
+  return (
+    JSON.stringify(canonicalEmpty(a)) === JSON.stringify(canonicalEmpty(b))
+  );
+}

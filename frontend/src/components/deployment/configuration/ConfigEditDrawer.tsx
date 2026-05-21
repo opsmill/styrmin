@@ -109,6 +109,19 @@ export function ConfigEditDrawer({
     baselineDeployment.parameters,
   ]);
 
+  // Frozen snapshot of the persisted state at drawer-open. Unlike
+  // ``initialValues``, this does NOT update on concurrent-edit reload. The
+  // submit-time merge in ConfigDiffDialog uses this to decide which
+  // top-level fields the operator actually edited (current != frozen)
+  // vs. which ones simply changed underneath via an out-of-band write
+  // (current == frozen but refreshed baseline differs). The lazy
+  // ``useState`` initialiser runs once on first render and the setter is
+  // intentionally discarded — the value never changes for the lifetime
+  // of the open drawer.
+  const [frozenInitialValues] = useState<UpdateDeploymentInput>(
+    () => initialValues,
+  );
+
   // Parent environment configuration projected through the same helper, so
   // section components can decide whether a field's `initial` value came
   // from the environment (drives the "from X (env)" annotation in
@@ -200,50 +213,15 @@ export function ConfigEditDrawer({
   }, []);
 
   /**
-   * Concurrent-edit reload handler (FR-029). The dialog hands us a
-   * freshly-refetched deployment whose persisted state differs from what
-   * we saw at drawer-open time. We swap the baseline AND re-seed the form
-   * so each top-level ``UpdateDeploymentInput`` field is:
-   *
-   * - the operator's pending value if they edited it vs the old baseline
-   *   (their edit survives the reload), or
-   * - the refreshed-baseline value otherwise (the out-of-band write is
-   *   carried through the next mutation instead of being clobbered by the
-   *   form's stale pre-reload values).
-   *
-   * Without this merge the next Apply would submit ``currentValues`` whose
-   * unchanged-by-operator fields still reflect the old baseline — e.g.
-   * ``envVars: []`` would silently overwrite the out-of-band ``envVars``
-   * write the conflict panel just surfaced.
+   * Concurrent-edit reload handler (FR-029). Swap the display baseline so
+   * the diff dialog re-renders against the freshly-refetched deployment;
+   * form values stay intact so the operator's inputs keep showing their
+   * edits. The submit path (in ConfigDiffDialog) does the merge — see
+   * its ``handleApply``.
    */
-  const handleReloadBaseline = useCallback(
-    (refreshed: Deployment) => {
-      const oldBaseline = initialValues;
-      const currentForm = form.state.values as UpdateDeploymentInput;
-      const newBaselineBase = deploymentConfigToInput(refreshed.config);
-      const newBaseline: UpdateDeploymentInput = {
-        ...newBaselineBase,
-        name: refreshed.name,
-        parameters: deploymentParametersToInput(refreshed.parameters),
-      };
-      const merged = { ...newBaseline } as Record<string, unknown>;
-      const oldB = oldBaseline as Record<string, unknown>;
-      const cur = currentForm as Record<string, unknown>;
-      for (const key of new Set([
-        ...Object.keys(cur),
-        ...Object.keys(newBaseline as Record<string, unknown>),
-      ])) {
-        const operatorEdited =
-          JSON.stringify(cur[key]) !== JSON.stringify(oldB[key]);
-        if (operatorEdited) {
-          merged[key] = cur[key];
-        }
-      }
-      setRebaselineDeployment(refreshed);
-      form.reset(merged as UpdateDeploymentInput);
-    },
-    [form, initialValues],
-  );
+  const handleReloadBaseline = useCallback((refreshed: Deployment) => {
+    setRebaselineDeployment(refreshed);
+  }, []);
 
   /**
    * Dispatch a `SectionId` to the matching section component. Centralising
@@ -498,6 +476,7 @@ export function ConfigEditDrawer({
             onOpenChange={setDiffDialogOpen}
             deployment={baselineDeployment}
             initialValues={initialValues}
+            frozenInitialValues={frozenInitialValues}
             currentValues={currentValues}
             driverSchema={driverSchema}
             onApplySuccess={forceClose}
