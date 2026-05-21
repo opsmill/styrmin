@@ -142,4 +142,4 @@
 
 ## Open Questions
 
-_None remaining. All decisions resolved during grilling on 2026-05-21._
+*None remaining. All decisions resolved during grilling on 2026-05-21.*

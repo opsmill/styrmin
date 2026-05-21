@@ -1,0 +1,60 @@
+# Contract: GetDriver query — updated to expose createdOn
+#
+# Lives in the codebase at: frontend/src/graphql/get_driver.graphql
+# Changes from current state:
+#   - Add `createdOn` selection on `applicationDriver` (root).
+#   - Add `createdOn` selection on each `versions[]` entry.
+#
+# Backend GraphQL surface changes:
+#   - Strawberry type `ApplicationDriver` gains `createdOn: DateTime!`.
+#   - Strawberry type `ApplicationDriverVersion` gains `createdOn: DateTime!`.
+#   Both are projected from the `created_on` column on the corresponding
+#   `StyrminModel`-derived ORM rows (non-null, server_default = func.now()).
+#
+# Propagation test obligation (Constitution §V NON-NEGOTIABLE):
+#   - backend/tests/functional/graphql/test_application_driver_created_on_propagation.py
+#     asserts the field round-trips through the real service + repository layers
+#     for both types.
+
+query GetDriver($applicationDriverId: UUID!) {
+  applicationDriver(applicationDriverId: $applicationDriverId) {
+    id
+    name
+    createdOn
+    versions {
+      id
+      version
+      supportedVersions
+      sourceType
+      sourceRepository
+      sourceBranch
+      sourcePath
+      components
+      createdOn
+      parameters {
+        name
+        label
+        kind
+        default
+        values
+      }
+      componentConfigs {
+        id
+        name
+        config
+      }
+      helmChart {
+        id
+        name
+        version
+        repository
+      }
+      actions {
+        id
+        name
+        description
+        location
+      }
+    }
+  }
+}
