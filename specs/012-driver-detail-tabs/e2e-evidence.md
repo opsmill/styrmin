@@ -2,14 +2,29 @@
 
 ## Constitution §V NON-NEGOTIABLE evidence
 
-**Status**: ⚠️ **environment-blocked — manual run required before merge**.
-The orchestrating session attempted the run but the subagent shell
-terminated mid-setup (during the styrmin Helm install — see "Run Outcome"
-below). The test code itself is complete and lint/build/typecheck clean;
-the failure is purely infrastructure-runtime, not implementation. A
-maintainer with a long-lived shell must execute the command and complete
-the §V evidence capture before this feature can be declared "done" per the
-constitution's NON-NEGOTIABLE clause.
+**Status**: ✅ **PASS captured on 2026-05-21 via the `e2e-troubleshoot` skill.**
+
+The first run errored in `styrmin_resources` fixture setup — a regression
+introduced in chunk 2 of the implementation: the new `VersionListItem`
+component uses `data-testid="driver-version-row"` (renamed from the old
+`driver-version-card`), but the `DriversListPage` page object at
+`backend/tests/e2e/pages/drivers_list.py:58` was not updated. The
+`UiScenarioDriver.load_driver_version()` flow timed out waiting for the
+old selector. Fixed by updating the page object to use the new test-id
++ matching error-message wording. **Iteration 2 PASSED end-to-end** in
+139.70 s with no further code changes.
+
+### §V Evidence (NON-NEGOTIABLE)
+
+| Item | Value |
+|---|---|
+| **pytest node ID** | `backend/tests/e2e/test_driver_detail.py::test_driver_detail_inspects_versions_via_tabs[ui-chromium]` |
+| **Exact pytest command** | `sleep infinity \| uv run pytest "backend/tests/e2e/test_driver_detail.py::test_driver_detail_inspects_versions_via_tabs[ui-chromium]" -v -s --tb=long --pdb 2>&1 \| tee /tmp/e2e-pdb.log` |
+| **ISO 8601 UTC timestamp** | `2026-05-21T07:44:05Z` (passing-run completion, captured immediately before vcluster teardown) |
+| **vcluster id** | `pytest-5f6e0bda-ce14-4cf2-9512-a433a3acdfe3` (cleaned up by pytest teardown immediately after PASS) |
+| **Kubeconfig path (during run)** | `/tmp/pytest-of-damien/pytest-<run-id>/vcluster0/kubeconfig` (auto-deleted by teardown) |
+| **Verbatim PASSED line** | `PASSED ... Removing vCluster container vcluster.cp.pytest-5f6e0bda-ce14-4cf2-9512-a433a3acdfe3` — and final summary line `=================== 1 passed, 1 warning in 139.70s (0:02:19) ===================` |
+| **Iterations to green** | 2 (one regression-fix iteration on the page object) |
 
 ### Command
 

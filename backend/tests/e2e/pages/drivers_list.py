@@ -53,19 +53,21 @@ class DriversListPage:
                 "driver detail page rendered without data-driver-name"
             )
 
-        # Pick the first version card (AddDriverPage lists versions newest-first
-        # — we just loaded one).
-        card = self._page.locator("[data-testid=driver-version-card]").first
-        await card.wait_for()
-        version_id = await card.get_attribute("data-version-id")
+        # Pick the first version row in the left rail (DriverDetailPage lists
+        # versions newest-first — we just loaded one). The selector changed
+        # from `driver-version-card` to `driver-version-row` when the driver
+        # detail page was rewritten with the tabbed layout (spec 012).
+        row = self._page.locator("[data-testid=driver-version-row]").first
+        await row.wait_for()
+        version_id = await row.get_attribute("data-version-id")
         if not version_id:
             raise ScenarioActionError(
-                "driver version card rendered without data-version-id"
+                "driver version row rendered without data-version-id"
             )
-        version = await card.get_attribute("data-version-label")
+        version = await row.get_attribute("data-version-label")
         if not version:
             raise ScenarioActionError(
-                "driver version card rendered without data-version-label"
+                "driver version row rendered without data-version-label"
             )
 
         # Also validate the URL matches the detail root, just to catch
