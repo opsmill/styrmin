@@ -29,7 +29,7 @@ description: "Task list for Driver Detail Page Redesign (Tabbed Layout)"
 
 **Purpose**: ensure prerequisites for both backend and frontend work are in place.
 
-- [ ] T001 Confirm prerequisites are in place: `uv sync`, `cd frontend && pnpm install`, `uv run invoke pre-commit-install`. Document any environment fixes in the PR body. No files produced; this is an environment check task.
+- [x] T001 Confirm prerequisites are in place: `uv sync`, `cd frontend && pnpm install`, `uv run invoke pre-commit-install`. Document any environment fixes in the PR body. No files produced; this is an environment check task.
 
 ---
 
@@ -37,13 +37,13 @@ description: "Task list for Driver Detail Page Redesign (Tabbed Layout)"
 
 **Purpose**: the GraphQL schema change and its propagation test gate every frontend tab — the typed `useGetDriverQuery` hook must expose `createdOn` before US1's left rail can sort by it. Per Constitution §V the propagation test is NON-NEGOTIABLE and must PASS before the feature is "done".
 
-- [ ] T002 Add `created_on: datetime` to the `ApplicationDriver` Strawberry type in `backend/styrmin_backend/api/definitions/application_driver/model.py` and populate it from `instance.created_on` in `ApplicationDriver.from_instance`.
-- [ ] T003 Add `created_on: datetime` to the `ApplicationDriverVersion` Strawberry type in `backend/styrmin_backend/api/definitions/application_driver/model.py` and populate it from `instance.created_on` in `ApplicationDriverVersion.from_instance`.
-- [ ] T004 Regenerate `schema.graphql` at the repo root by running `uv run styrmin export graphql-schema schema.graphql`. Verify both types now declare `createdOn: DateTime!`.
-- [ ] T005 Add GraphQL propagation test at `backend/tests/functional/graphql/test_application_driver_created_on_propagation.py` covering both `ApplicationDriver.createdOn` and `ApplicationDriverVersion.createdOn` (pattern: existing `test_env_vars_propagation.py`). Seed real rows with known `created_on` values, run the GraphQL query through the real service+repository stack, assert round-trip equality. Run it: `uv run pytest backend/tests/functional/graphql/test_application_driver_created_on_propagation.py -v` and confirm green.
-- [ ] T006 Update the frontend GraphQL operation at `frontend/src/graphql/get_driver.graphql` to add `createdOn` on `applicationDriver` and on each `versions[]` entry. Match the contract under `specs/012-driver-detail-tabs/contracts/get_driver.graphql`.
-- [ ] T007 Regenerate SDK and frontend types by running `uv run invoke generate`. Verify `frontend/src/generated/graphql.ts` exposes `createdOn` on the relevant typed shapes.
-- [ ] T008 Run `uv run invoke validate-graphql` to confirm the updated operation validates against the new schema.
+- [x] T002 Add `created_on: datetime` to the `ApplicationDriver` Strawberry type in `backend/styrmin_backend/api/definitions/application_driver/model.py` and populate it from `instance.created_on` in `ApplicationDriver.from_instance`.
+- [x] T003 Add `created_on: datetime` to the `ApplicationDriverVersion` Strawberry type in `backend/styrmin_backend/api/definitions/application_driver/model.py` and populate it from `instance.created_on` in `ApplicationDriverVersion.from_instance`.
+- [x] T004 Regenerate `schema.graphql` at the repo root by running `uv run styrmin export graphql-schema schema.graphql`. Verify both types now declare `createdOn: DateTime!`.
+- [x] T005 Add GraphQL propagation test at `backend/tests/functional/graphql/test_application_driver_created_on_propagation.py` covering both `ApplicationDriver.createdOn` and `ApplicationDriverVersion.createdOn` (pattern: existing `test_env_vars_propagation.py`). Seed real rows with known `created_on` values, run the GraphQL query through the real service+repository stack, assert round-trip equality. Run it: `uv run pytest backend/tests/functional/graphql/test_application_driver_created_on_propagation.py -v` and confirm green.
+- [x] T006 Update the frontend GraphQL operation at `frontend/src/graphql/get_driver.graphql` to add `createdOn` on `applicationDriver` and on each `versions[]` entry. Match the contract under `specs/012-driver-detail-tabs/contracts/get_driver.graphql`.
+- [x] T007 Regenerate SDK and frontend types by running `uv run invoke generate`. Verify `frontend/src/generated/graphql.ts` exposes `createdOn` on the relevant typed shapes.
+- [x] T008 Run `uv run invoke validate-graphql` to confirm the updated operation validates against the new schema.
 
 **Checkpoint**: Phase 2 complete when T005 passes locally and the regenerated frontend types compile (`pnpm typecheck` clean if available, else `pnpm build` clean).
 

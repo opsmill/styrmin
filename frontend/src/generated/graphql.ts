@@ -50,6 +50,7 @@ export type AffinityTermInput = {
 
 export type ApplicationDriver = {
   __typename?: 'ApplicationDriver';
+  createdOn: Scalars['DateTime']['output'];
   id: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
   versions: Array<ApplicationDriverVersion>;
@@ -62,6 +63,7 @@ export type ApplicationDriverVersion = {
   applicationDriverId: Scalars['UUID']['output'];
   componentConfigs: Array<ComponentConfig>;
   components?: Maybe<Scalars['JSON']['output']>;
+  createdOn: Scalars['DateTime']['output'];
   defaultVersion?: Maybe<Scalars['String']['output']>;
   /** Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block. */
   envVars: Array<DriverEnvVarDoc>;
@@ -1374,7 +1376,7 @@ export type GetDriverQueryVariables = Exact<{
 }>;
 
 
-export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, components?: Record<string, unknown> | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
+export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, createdOn: any, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, components?: Record<string, unknown> | null, createdOn: any, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
 
 export type GetEnvironmentQueryVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -2235,6 +2237,7 @@ export const GetDriverDocument = `
   applicationDriver(applicationDriverId: $applicationDriverId) {
     id
     name
+    createdOn
     versions {
       id
       version
@@ -2244,6 +2247,7 @@ export const GetDriverDocument = `
       sourceBranch
       sourcePath
       components
+      createdOn
       parameters {
         name
         label

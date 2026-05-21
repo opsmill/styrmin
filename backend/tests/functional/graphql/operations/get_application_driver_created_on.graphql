@@ -1,0 +1,12 @@
+query GetApplicationDriverCreatedOn($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        id
+        name
+        createdOn
+        versions {
+            id
+            version
+            createdOn
+        }
+    }
+}
