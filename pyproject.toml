@@ -50,6 +50,7 @@ dev = [
     "rumdl>=0.1.50",
     "ariadne-codegen>=0.14",
     "ty>=0.0.24",
+    "pyright>=1.1.409",
 ]
 
 [tool.ty]
