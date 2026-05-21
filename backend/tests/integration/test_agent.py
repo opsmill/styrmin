@@ -109,8 +109,12 @@ spec:
           to:
           - namespaceSelector: {}
             podSelector:
-              matchLabels:
-                k8s-app: kube-dns
+              matchExpressions:
+              - key: k8s-app
+                operator: In
+                values:
+                - kube-dns
+                - coredns
         - to:
           - ipBlock:
               cidr: 0.0.0.0/0
