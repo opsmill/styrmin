@@ -95,7 +95,8 @@ describe("SourceTab (T026)", () => {
 
   it("local branch renders the local path and never the branch value", () => {
     // The mock deliberately sets `sourceBranch` so the test proves the
-    // local renderer does NOT leak branch information (FR-013 / EC-006).
+    // local renderer does NOT leak branch information (FR-013 — branch
+    // is intentionally omitted for local sources).
     const version = makeVersion({
       id: "v-local",
       version: "0.2.0",

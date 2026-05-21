@@ -1,4 +1,5 @@
 import type { DriverVersionDetail } from "../types";
+import { isPlainObject } from "../json-guards";
 
 interface OverviewTabProps {
   version: DriverVersionDetail;
@@ -106,18 +107,18 @@ interface ComponentsSummary {
  * Defensive shape-check of the JSON `components` declaration per
  * `data-model.md`. The declaration must be a plain object (not an array, not
  * null). Anything else degrades to the empty summary.
+ *
+ * Entries whose VALUE is not itself a plain object are skipped, matching the
+ * filter applied by `ComponentsTab` — the two tabs MUST agree on the count.
  */
 function summarizeComponents(
   components: DriverVersionDetail["components"],
 ): ComponentsSummary {
-  if (
-    components === null ||
-    components === undefined ||
-    typeof components !== "object" ||
-    Array.isArray(components)
-  ) {
+  if (!isPlainObject(components)) {
     return { count: 0, names: [] };
   }
-  const names = Object.keys(components as Record<string, unknown>);
+  const names = Object.entries(components)
+    .filter(([, value]) => isPlainObject(value))
+    .map(([key]) => key);
   return { count: names.length, names };
 }

@@ -1,4 +1,5 @@
 import type { DriverVersionDetail } from "../types";
+import { isPlainObject } from "../json-guards";
 
 interface ComponentsTabProps {
   components: DriverVersionDetail["components"];
@@ -175,15 +176,6 @@ function renderValue(value: unknown): string {
     return keys.length === 0 ? "{}" : `{ ${keys.join(", ")} }`;
   }
   return "—";
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return (
-    value !== null &&
-    value !== undefined &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
 }
 
 function isScalar(value: unknown): value is string | number | boolean {

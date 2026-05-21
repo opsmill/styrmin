@@ -176,12 +176,15 @@ function makeQueryClient(): QueryClient {
   });
 }
 
-async function renderPage(role: Role = "READ_WRITE"): Promise<void> {
+async function renderPage(
+  role: Role = "READ_WRITE",
+): Promise<{ container: HTMLElement }> {
   const router = makeTestRouter();
   await router.load();
   const qc = makeQueryClient();
+  let result: { container: HTMLElement } | undefined;
   await act(async () => {
-    render(
+    result = render(
       <ThemeProvider>
         <QueryClientProvider client={qc}>
           <AuthContext.Provider value={makeAuthValue(role)}>
@@ -191,6 +194,7 @@ async function renderPage(role: Role = "READ_WRITE"): Promise<void> {
       </ThemeProvider>,
     );
   });
+  return result!;
 }
 
 describe("DriverDetailPage (T021)", () => {
@@ -374,5 +378,75 @@ describe("DriverDetailPage (T021)", () => {
     // No error UI must be present.
     expect(screen.queryByText(/Driver not found/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("renders zero <pre> blocks across all five tabs for a fully-populated driver version (SC-002)", async () => {
+    const driver = makeDriver([
+      makeVersion({
+        id: "fully-populated",
+        version: "1.0.0",
+        createdOn: "2026-03-01T00:00:00Z",
+        sourceType: "git",
+        sourceRepository: "https://github.com/acme/repo.git",
+        sourceBranch: "main",
+        sourcePath: "/charts/web",
+        components: {
+          server: {
+            identifier: { label: { "app.kubernetes.io/name": "server" } },
+            cpu: "500m",
+          },
+          worker: {
+            identifier: { label: { role: "primary" } },
+          },
+        } as unknown as VersionShape["components"],
+        parameters: [
+          { name: "host", label: "Host", kind: "string", default: null },
+          {
+            name: "port",
+            label: "Port",
+            kind: "string",
+            default: "8080" as unknown as Record<string, unknown>,
+          },
+          {
+            name: "config",
+            label: "Config",
+            kind: "object",
+            default: { nested: 1 },
+          },
+        ],
+        actions: [
+          {
+            id: "act-1",
+            name: "flush-cache",
+            description: "Flush",
+            location: "cache/flush",
+          },
+        ],
+      }),
+    ]);
+    useGetDriverQueryMock.mockReturnValue(makeQueryResult(driver));
+
+    const { container } = await renderPage();
+
+    // Tabs are clicked in declaration order so that every panel renders
+    // at least once. After each click we assert SC-002 globally: no
+    // <pre> JSON-dump fallback anywhere in the page.
+    const user = userEvent.setup();
+    const tabSentinels: Array<[string, string]> = [
+      ["Overview", "driver-overview-tiles"],
+      ["Parameters", "driver-parameters-table"],
+      ["Components", "driver-components-list"],
+      ["Actions", "driver-actions-list"],
+      ["Source", "driver-source-git"],
+    ];
+    for (const [tabName, sentinelTestId] of tabSentinels) {
+      await user.click(screen.getByRole("button", { name: tabName }));
+      await waitFor(() => {
+        // Sanity-check: each click must actually mount the corresponding
+        // panel (otherwise the no-<pre> assertion is vacuous).
+        expect(screen.getByTestId(sentinelTestId)).toBeInTheDocument();
+      });
+      expect(container.querySelector("pre")).toBeNull();
+    }
   });
 });

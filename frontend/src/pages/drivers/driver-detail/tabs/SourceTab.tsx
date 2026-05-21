@@ -10,8 +10,8 @@ interface SourceTabProps {
  * Branches on `version.sourceType`:
  *   - "git":   repository URL, branch (when set), subpath (`sourcePath` when
  *              set). Per FR-012.
- *   - "local": local source path. Branch is intentionally NOT rendered
- *              per FR-013 / EC-006.
+ *   - "local": local source path. Branch is intentionally omitted for
+ *              local sources per FR-013.
  *
  * Any unrecognised `sourceType` falls through to the git layout (treated as
  * a remote source) — this is the least surprising behaviour because a local
