@@ -202,14 +202,48 @@ export function ConfigEditDrawer({
   /**
    * Concurrent-edit reload handler (FR-029). The dialog hands us a
    * freshly-refetched deployment whose persisted state differs from what
-   * we saw at drawer-open time. We swap the baseline to the new
-   * deployment — the form values stay untouched, so the operator's
-   * pending edits now sit on top of the refreshed persisted state and
-   * the diff recomputes accordingly.
+   * we saw at drawer-open time. We swap the baseline AND re-seed the form
+   * so each top-level ``UpdateDeploymentInput`` field is:
+   *
+   * - the operator's pending value if they edited it vs the old baseline
+   *   (their edit survives the reload), or
+   * - the refreshed-baseline value otherwise (the out-of-band write is
+   *   carried through the next mutation instead of being clobbered by the
+   *   form's stale pre-reload values).
+   *
+   * Without this merge the next Apply would submit ``currentValues`` whose
+   * unchanged-by-operator fields still reflect the old baseline — e.g.
+   * ``envVars: []`` would silently overwrite the out-of-band ``envVars``
+   * write the conflict panel just surfaced.
    */
-  const handleReloadBaseline = useCallback((refreshed: Deployment) => {
-    setRebaselineDeployment(refreshed);
-  }, []);
+  const handleReloadBaseline = useCallback(
+    (refreshed: Deployment) => {
+      const oldBaseline = initialValues;
+      const currentForm = form.state.values as UpdateDeploymentInput;
+      const newBaselineBase = deploymentConfigToInput(refreshed.config);
+      const newBaseline: UpdateDeploymentInput = {
+        ...newBaselineBase,
+        name: refreshed.name,
+        parameters: deploymentParametersToInput(refreshed.parameters),
+      };
+      const merged = { ...newBaseline } as Record<string, unknown>;
+      const oldB = oldBaseline as Record<string, unknown>;
+      const cur = currentForm as Record<string, unknown>;
+      for (const key of new Set([
+        ...Object.keys(cur),
+        ...Object.keys(newBaseline as Record<string, unknown>),
+      ])) {
+        const operatorEdited =
+          JSON.stringify(cur[key]) !== JSON.stringify(oldB[key]);
+        if (operatorEdited) {
+          merged[key] = cur[key];
+        }
+      }
+      setRebaselineDeployment(refreshed);
+      form.reset(merged as UpdateDeploymentInput);
+    },
+    [form, initialValues],
+  );
 
   /**
    * Dispatch a `SectionId` to the matching section component. Centralising
