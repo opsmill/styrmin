@@ -16,6 +16,14 @@ nameOverride: ""
 fullnameOverride: ""
 
 global:
+  # -- Override image registry for both the styrmin chart and the
+  # `styrmin-agent` subchart. When non-empty, this wins over the per-chart
+  # `image.registry`. Leave empty (default) to fall back to each chart's
+  # own `image.registry`. To consume a locally-built image, override
+  # `image.registry` (and `styrmin-agent.image.registry`) directly — see
+  # the "Running against a locally-built image" recipe in the chart README.
+  imageRegistry: ""
+
   postgresql:
     auth:
       username: "styrmin"
@@ -24,7 +32,9 @@ global:
 
 # Styrmin server image configuration
 image:
-  # -- Image registry
+  # -- Image registry (overridden by `global.imageRegistry` when set).
+  # Set to `""` to consume a locally-built `styrmin:<tag>` from the
+  # cluster's image store (use with `pullPolicy: IfNotPresent` or `Never`).
   registry: "registry.opsmill.io/opsmill"
   # -- Image repository
   repository: styrmin

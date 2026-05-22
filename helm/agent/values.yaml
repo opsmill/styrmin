@@ -2,7 +2,11 @@
 replicaCount: 1
 
 image:
-  repository: registry.opsmill.io/opsmill/styrmin
+  # Image registry (overridden by `global.imageRegistry` when set in the
+  # parent chart). Set to `""` to consume a locally-built `styrmin:<tag>`
+  # from the cluster's image store.
+  registry: registry.opsmill.io/opsmill
+  repository: styrmin
   tag: latest
   pullPolicy: IfNotPresent
 

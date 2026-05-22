@@ -124,11 +124,48 @@ helm install styrmin ./helm/styrmin -n styrmin --create-namespace -f values-prod
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `image.registry` | Image registry | `""` |
+| `global.imageRegistry` | Override registry for the styrmin chart **and** the `styrmin-agent` subchart. Wins over the per-chart `image.registry` when non-empty. | `""` |
+| `image.registry` | Image registry. Set to `""` to consume a locally-built image. | `registry.opsmill.io/opsmill` |
 | `image.repository` | Image repository | `styrmin` |
 | `image.tag` | Image tag | `appVersion` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `imagePullSecrets` | Image pull secrets | `[]` |
+
+The agent subchart exposes the same `image.registry` / `image.repository` /
+`image.tag` / `image.pullPolicy` surface under the `styrmin-agent` key.
+Setting `global.imageRegistry` overrides the registry for both charts at
+once; per-chart overrides remain available for asymmetric setups.
+
+### Running against a locally-built image
+
+For local dev (kind, k3d, minikube, vcluster) or air-gapped clusters that
+do not have a pull-through cache for `registry.opsmill.io`, point the
+chart at a locally-built `styrmin:<tag>` sitting in the cluster's image
+store. Build the image (e.g. `docker compose build`, then `kind load
+docker-image styrmin:dev` / `minikube image load styrmin:dev` / a
+vcluster-equivalent) and install with an overrides file:
+
+```yaml
+# local-image-values.yaml
+image:
+  registry: ""
+  repository: styrmin
+  tag: dev          # whatever tag you built
+  pullPolicy: IfNotPresent
+styrmin-agent:
+  image:
+    registry: ""
+    repository: styrmin
+    tag: dev
+    pullPolicy: IfNotPresent
+```
+
+```bash
+helm install styrmin ./helm/styrmin -f local-image-values.yaml
+```
+
+The E2E suite uses this exact pattern — see
+`backend/tests/e2e/fixtures/styrmin-values.yaml`.
 
 ### Styrmin Configuration
 
