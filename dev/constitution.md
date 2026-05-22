@@ -34,6 +34,24 @@ For bug fixes and small changes (refactors, doc updates, config tweaks, internal
 
 `uv run invoke format lint` MUST pass before any commit. Line length is 120 characters. Ruff handles formatting and linting. This is non-negotiable and applies to all contributions.
 
+### VII. Documentation Accuracy (NON-NEGOTIABLE)
+
+The Styrmin documentation is a load-bearing artefact, not a side-effect of shipping code. Two surfaces MUST stay accurate with every change that touches them:
+
+1. **The public documentation site (`docs/`).** User-visible behaviour — CLI commands, GraphQL surface, driver format, install / quickstart / how-it-works content, architecture diagrams, default values, screenshots — MUST match the implementation. If a change renames a field, alters a command, changes a default, removes a feature, or shifts an architectural fact described in `docs/`, the corresponding page MUST be updated in the same change. Adding new user-visible behaviour MUST include new or extended `docs/` content covering it.
+
+2. **The internal developer documentation.** Architecture changes get reflected in [`dev/knowledge/`](knowledge/); new operational procedures get a [`dev/guides/`](guides/) entry; non-trivial decisions get an ADR in [`dev/adr/`](adr/); new, renamed, or retired domain concepts update [`CONTEXT.md`](../CONTEXT.md) in the same change.
+
+A spec, feature, bug fix, or refactor is not "done" until the documentation describing it has been brought into alignment with the new state. Doc drift discovered after the fact is treated as a bug against the change that caused it.
+
+**Guardrails:**
+
+- "I'll update the docs later" is not acceptable. Either update them in the same change, or scope the change so it does not touch documented surface area.
+- Speckit workflows (`/speckit.implement`, `/speckit.auto.implement`, `/speckit.tasks`, etc.) MUST include documentation tasks where applicable; reviewers MUST treat a missing doc update as a blocking issue, not a nit.
+- If you remove a feature, remove the docs describing it in the same change.
+- If a page is stale because it was never accurate to begin with, file a separate doc-bug; don't propagate the inaccuracy.
+- An ADR-level architecture change (e.g. a new core principle, a new component, a topology change) MUST update [`dev/knowledge/architecture.md`](knowledge/architecture.md) and any affected `docs/how-it-works/` page in the same change.
+
 ## Governance Gates
 
 Changes to these areas require explicit discussion before implementation:
@@ -58,4 +76,4 @@ Changes to these areas require explicit discussion before implementation:
 
 This constitution defines the non-negotiable principles for the Styrmin project. All specifications, plans, and implementations MUST be validated against these principles. Amendments require updating this file, incrementing the version, and propagating changes to dependent templates.
 
-**Version**: 1.3.1 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-05-17
+**Version**: 1.4.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-05-22

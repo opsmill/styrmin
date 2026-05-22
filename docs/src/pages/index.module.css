@@ -10,9 +10,21 @@
   overflow: hidden;
 }
 
+.heroLede {
+  max-width: 720px;
+  margin: 1rem auto 2rem;
+  font-size: 1.1rem;
+  line-height: 1.5;
+  opacity: 0.92;
+}
+
 @media screen and (max-width: 996px) {
   .heroBanner {
     padding: 2rem;
+  }
+
+  .heroLede {
+    font-size: 1rem;
   }
 }
 
@@ -21,4 +33,19 @@
   align-items: center;
   justify-content: center;
   gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.featuresSection {
+  padding: 3rem 0;
+}
+
+.sectionHeading {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.featureCard {
+  text-align: center;
+  padding: 1.5rem 1rem;
 }
