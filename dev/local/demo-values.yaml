@@ -6,7 +6,11 @@
 # so no /etc/hosts edit is needed.
 
 image:
-  repository: styrmin
+  # `invoke build` produces `registry.opsmill.io/opsmill/styrmin:latest`
+  # locally; pinning the tag to `latest` makes the chart resolve to that
+  # exact reference, which `pullPolicy: IfNotPresent` finds in the
+  # vCluster's image store without contacting the registry. See
+  # `helm/styrmin/README.md` "Running against a locally-built image".
   tag: latest
   pullPolicy: IfNotPresent
 

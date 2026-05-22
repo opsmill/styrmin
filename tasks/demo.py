@@ -31,7 +31,7 @@ from .utils import KUBERNETES_ROOT_NAMESPACE, MAIN_DIRECTORY_PATH, VCLUSTER_NAME
 DEMO_HOSTNAME = "styrmin.local.styrmin.io"
 DEMO_FQDN_SUFFIX = "local.styrmin.io"
 DEMO_RELEASE = "styrmin"
-DEMO_IMAGE = "styrmin:latest"
+DEMO_IMAGE = "registry.opsmill.io/opsmill/styrmin:latest"
 DEMO_PORT = 8080
 DEMO_VALUES = MAIN_DIRECTORY_PATH / "dev" / "local" / "demo-values.yaml"
 HELM_STYRMIN_DIR = MAIN_DIRECTORY_PATH / "helm" / "styrmin"
@@ -110,7 +110,7 @@ def start(context: Context, build_image: bool = False) -> None:
     console = Console()
 
     if build_image or not _image_exists(context):
-        print_header("styrmin:latest not found — building...")
+        print_header(f"{DEMO_IMAGE} not found — building...")
         build(context)
     else:
         console.print(f"[green]✓[/green] Reusing existing image {DEMO_IMAGE} (pass --build-image to rebuild)")

@@ -139,33 +139,32 @@ once; per-chart overrides remain available for asymmetric setups.
 ### Running against a locally-built image
 
 For local dev (kind, k3d, minikube, vcluster) or air-gapped clusters that
-do not have a pull-through cache for `registry.opsmill.io`, point the
-chart at a locally-built `styrmin:<tag>` sitting in the cluster's image
-store. Build the image (e.g. `docker compose build`, then `kind load
-docker-image styrmin:dev` / `minikube image load styrmin:dev` / a
-vcluster-equivalent) and install with an overrides file:
+do not have a pull-through cache for `registry.opsmill.io`, build the
+image with the chart's exact reference and let `pullPolicy: IfNotPresent`
+short-circuit the registry pull — kubelet name-matches the locally-stored
+image and never contacts the registry. The repo's `invoke build` and
+`docker compose build` already tag the image as
+`registry.opsmill.io/opsmill/styrmin:latest`, so no chart override is
+needed beyond pinning the tag to `latest`:
 
 ```yaml
 # local-image-values.yaml
 image:
-  registry: ""
-  repository: styrmin
-  tag: dev          # whatever tag you built
-  pullPolicy: IfNotPresent
-styrmin-agent:
-  image:
-    registry: ""
-    repository: styrmin
-    tag: dev
-    pullPolicy: IfNotPresent
+  tag: latest       # match the locally-built tag
 ```
 
 ```bash
 helm install styrmin ./helm/styrmin -f local-image-values.yaml
 ```
 
-The E2E suite uses this exact pattern — see
-`backend/tests/e2e/fixtures/styrmin-values.yaml`.
+If you build with a different tag, set `image.tag` (and
+`styrmin-agent.image.tag`) to match. If you build under a different
+registry path entirely, override `image.registry` / `image.repository`
+on both charts (or use `global.imageRegistry` for the registry portion
+only).
+
+The local demo (`dev/local/demo-values.yaml`) and the E2E suite
+(`backend/tests/e2e/fixtures/styrmin-values.yaml`) follow this pattern.
 
 ### Styrmin Configuration
 
