@@ -27,19 +27,16 @@ deployment:
   replicas: 1
   podLabels:
     styrmin/role: ingress-controller
-#hostNetwork: true
 updateStrategy:
   rollingUpdate:
     maxUnavailable: 1
-#securityContext:
-#  allowPrivilegeEscalation: true
-#   capabilities:
-#     add:
-#       - NET_BIND_SERVICE
-#podSecurityContext:
-#  runAsUser: 0
-#  runAsGroup: 0
-#  runAsNonRoot: false
+{% if instance.config.dedicated_ingress.service.host_network %}
+hostNetwork: true
+securityContext:
+  capabilities:
+    add:
+      - NET_BIND_SERVICE
+{% endif %}
 service:
 {% if instance.config.dedicated_ingress.service.annotations is mapping %}
   annotations:
@@ -63,7 +60,13 @@ service:
 {% if instance.config.dedicated_ingress.service.ip_family_policy %}
   ipFamilyPolicy: {{ instance.config.dedicated_ingress.service.ip_family_policy }}
 {% endif %}
-{% if instance.config.dedicated_ingress.service.node_port %}
+{% if instance.config.dedicated_ingress.service.host_network %}
+ports:
+  web:
+    port: 80
+  websecure:
+    port: 443
+{% elif instance.config.dedicated_ingress.service.node_port %}
 ports:
   websecure:
     nodePort: {{ instance.config.dedicated_ingress.service.node_port }}

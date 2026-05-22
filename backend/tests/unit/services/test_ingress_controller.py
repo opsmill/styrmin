@@ -341,6 +341,46 @@ class TestIngressServiceConfigModel:
         assert "ports" not in rendered or rendered.get("ports") is None
 
     # ------------------------------------------------------------------
+    # host_network — model validation + rendering
+    # ------------------------------------------------------------------
+
+    def test_host_network_defaults_to_false(self):
+        config = IngressServiceConfig()
+        assert config.host_network is False
+
+    def test_host_network_accepted_with_any_service_type(self):
+        for service_type in ("ClusterIP", "LoadBalancer", "NodePort"):
+            config = IngressServiceConfig(type=service_type, host_network=True)
+            assert config.host_network is True
+            assert config.type == service_type
+
+    def test_host_network_with_node_port_rejected(self):
+        with pytest.raises(ValidationError) as exc_info:
+            IngressServiceConfig(type="NodePort", host_network=True, node_port=443)
+        message = str(exc_info.value)
+        assert "host_network" in message
+        assert "node_port" in message
+
+    def test_render_host_network_emits_full_package(self):
+        """host_network=True emits hostNetwork, capability, and 80/443 ports."""
+        config = IngressServiceConfig(type="ClusterIP", host_network=True)
+        rendered = _render_chart_values(config)
+        assert rendered["hostNetwork"] is True
+        assert rendered["securityContext"]["capabilities"]["add"] == [
+            "NET_BIND_SERVICE"
+        ]
+        assert rendered["ports"]["web"]["port"] == 80
+        assert rendered["ports"]["websecure"]["port"] == 443
+        # No NodePort is emitted in host-network mode.
+        assert "nodePort" not in rendered["ports"]["websecure"]
+
+    def test_render_omits_host_network_blocks_when_disabled(self):
+        config = IngressServiceConfig(type="LoadBalancer", host_network=False)
+        rendered = _render_chart_values(config)
+        assert "hostNetwork" not in rendered
+        assert "securityContext" not in rendered
+
+    # ------------------------------------------------------------------
     # T017 [US3] — backward-compat: all three new fields unset
     # ------------------------------------------------------------------
 
@@ -353,7 +393,7 @@ class TestIngressServiceConfigModel:
         text matches the rendering of the same config built without ever
         passing the new field names.
         """
-        # Config that explicitly sets the new fields to None.
+        # Config that explicitly sets the new fields to None / default.
         config_explicit_none = IngressServiceConfig(
             type="LoadBalancer",
             annotations=None,
@@ -362,6 +402,7 @@ class TestIngressServiceConfigModel:
             ip_families=None,
             ip_family_policy=None,
             node_port=None,
+            host_network=False,
         )
         # Config that doesn't even mention the new fields.
         config_pre_feature = IngressServiceConfig(

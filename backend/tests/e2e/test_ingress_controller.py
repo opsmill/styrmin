@@ -17,6 +17,7 @@ import httpx
 import kr8s
 import kr8s.asyncio
 import pytest
+from kr8s.asyncio.objects import Deployment as AsyncDeployment
 from kr8s.asyncio.objects import Ingress as AsyncIngress
 from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
@@ -460,6 +461,129 @@ async def test_dedicated_ingress_service_overrides(
     assert ports_by_name["web"] != chosen_node_port
     assert spec["ipFamilies"] == ["IPv4"]
     assert spec["ipFamilyPolicy"] == "SingleStack"
+
+
+@pytest.mark.api_only(
+    reason="Asserts the rendered Traefik Deployment spec for host-network mode. "
+    "The check is on the rendered K8s resource, not a UI flow — the "
+    "[ui-chromium] variant would re-run the same SDK call path."
+)
+async def test_dedicated_ingress_host_network(
+    scenario_driver: ScenarioDriver,
+    styrmin_resources: dict,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    vcluster: dict,
+):
+    """host_network=True propagates through to the Traefik Deployment + Service.
+
+    Asserts:
+    - ``spec.template.spec.hostNetwork == True`` on the rendered Traefik
+      Deployment.
+    - Container ``securityContext.capabilities.add`` includes
+      ``NET_BIND_SERVICE`` so the non-root traefik process can bind <1024.
+    - Service ports for ``web`` and ``websecure`` are 80 and 443 (entrypoint
+      port override that lets Traefik claim the standard host ports).
+
+    Mirrors ``test_dedicated_ingress_service_overrides``: reuses the
+    ``styrmin_resources`` cluster (one-cluster limit) and overrides
+    ``dedicated_ingress`` at the environment level so this env gets its own
+    per-env Traefik with the host-network configuration.
+    """
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    cluster_id = styrmin_resources["cluster_id"]
+
+    environment = await scenario_driver.create_environment(
+        name=f"hostnet-env-{uuid.uuid4().hex[:8]}",
+        cluster_id=cluster_id,
+        config={
+            "dedicated_ingress": {
+                "implementation": "traefik",
+                "type": "ingress",
+                "service": {
+                    "type": "ClusterIP",
+                    "host_network": True,
+                },
+            },
+        },
+    )
+
+    deployment = await scenario_driver.create_deployment(
+        driver="simple-app",
+        name="simple-app",
+        version="0.1.0",
+        environment_id=environment.id,
+    )
+    await scenario_driver.wait_for_deployment_running(deployment_id=deployment.id)
+
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+
+    async def _find_traefik_deployment() -> AsyncDeployment | None:
+        deployments: list[AsyncDeployment] = [
+            d
+            async for d in AsyncDeployment.list(
+                namespace=kr8s.ALL,
+                label_selector={
+                    "app.kubernetes.io/name": "traefik",
+                    "styrmin/environment_id": environment.id,
+                },
+                api=kr8s_api,
+            )
+            if isinstance(d, AsyncDeployment)
+        ]
+        return deployments[0] if deployments else None
+
+    deadline = time.time() + 180.0
+    traefik_dep: AsyncDeployment | None = None
+    while time.time() < deadline:
+        traefik_dep = await _find_traefik_deployment()
+        if traefik_dep is not None:
+            pod_spec = (
+                traefik_dep.raw.get("spec", {}).get("template", {}).get("spec", {})
+            )
+            if pod_spec.get("hostNetwork") is True:
+                break
+        await asyncio.sleep(3)
+    assert traefik_dep is not None, (
+        f"Traefik Deployment not found for environment {environment.id}"
+    )
+
+    pod_spec = traefik_dep.raw["spec"]["template"]["spec"]
+    assert pod_spec.get("hostNetwork") is True, (
+        f"Expected hostNetwork=True on Traefik Deployment, got {pod_spec.get('hostNetwork')!r}"
+    )
+
+    containers = pod_spec.get("containers", [])
+    assert containers, "Traefik Deployment has no containers"
+    traefik_container = next(
+        (c for c in containers if c.get("name") == "traefik"), containers[0]
+    )
+    capabilities = traefik_container.get("securityContext", {}).get("capabilities", {})
+    assert "NET_BIND_SERVICE" in capabilities.get("add", []), (
+        f"Expected NET_BIND_SERVICE capability on traefik container, got {capabilities!r}"
+    )
+
+    traefik_services: list[AsyncService] = [
+        svc
+        async for svc in AsyncService.list(
+            namespace=kr8s.ALL,
+            label_selector={
+                "app.kubernetes.io/name": "traefik",
+                "styrmin/environment_id": environment.id,
+            },
+            api=kr8s_api,
+        )
+        if isinstance(svc, AsyncService)
+    ]
+    assert traefik_services, (
+        f"Traefik Service not found for environment {environment.id}"
+    )
+    svc_ports = {p.get("name"): p for p in traefik_services[0].raw["spec"]["ports"]}
+    assert svc_ports["web"]["targetPort"] in (80, "web"), (
+        f"Expected web entrypoint to target port 80, got {svc_ports['web']!r}"
+    )
+    assert svc_ports["websecure"]["targetPort"] in (443, "websecure"), (
+        f"Expected websecure entrypoint to target port 443, got {svc_ports['websecure']!r}"
+    )
 
 
 async def test_toggle_dedicated_ingress_on_off(

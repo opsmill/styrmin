@@ -29,6 +29,13 @@ class IngressServiceConfig(BaseModel):
             ``websecure`` is the entrypoint the external origin actually
             targets. Pinning ``web`` (or both entrypoints independently)
             is a future extension.
+        host_network: Run the Traefik pod with ``hostNetwork: true`` and
+            bind its entrypoints directly to host ports 80/443. Adds the
+            ``NET_BIND_SERVICE`` capability so the non-root traefik
+            process can bind privileged ports. Mutually exclusive with
+            ``node_port`` (access is via the host port, not a Service
+            NodePort). The Service itself is still created (for in-cluster
+            routing) but its ``type`` becomes largely cosmetic.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -42,6 +49,7 @@ class IngressServiceConfig(BaseModel):
         Literal["SingleStack", "PreferDualStack", "RequireDualStack"] | None
     ) = None
     node_port: int | None = Field(default=None, ge=1, le=65535)
+    host_network: bool = False
 
     @field_validator("ip_families", mode="after")
     @classmethod
@@ -65,6 +73,17 @@ class IngressServiceConfig(BaseModel):
             raise ValueError(
                 f"node_port is only valid when type == 'NodePort'; "
                 f"got type={self.type!r} with node_port={self.node_port}."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_host_network_excludes_node_port(self) -> "IngressServiceConfig":
+        if self.host_network and self.node_port is not None:
+            raise ValueError(
+                f"host_network and node_port are mutually exclusive; "
+                f"got host_network=True with node_port={self.node_port}. "
+                "In host-network mode Traefik binds to host ports 80/443 "
+                "directly and the Service NodePort is unused."
             )
         return self
 

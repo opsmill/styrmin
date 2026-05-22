@@ -51,6 +51,7 @@ const createEnvironmentSchema = z
       z.literal(""),
     ]),
     dedicated_ingress_service_node_port: z.string().optional(),
+    dedicated_ingress_service_host_network: z.boolean(),
   })
   .refine(
     (data) => {
@@ -73,6 +74,17 @@ const createEnvironmentSchema = z
     {
       message: "NodePort is only valid when Service Type is NodePort",
       path: ["dedicated_ingress_service_node_port"],
+    },
+  )
+  .refine(
+    (data) => {
+      if (!data.dedicated_ingress_enabled) return true;
+      if (!data.dedicated_ingress_service_host_network) return true;
+      return !data.dedicated_ingress_service_node_port;
+    },
+    {
+      message: "Host network mode cannot be combined with a fixed NodePort",
+      path: ["dedicated_ingress_service_host_network"],
     },
   );
 
@@ -97,15 +109,23 @@ function buildEnvironmentConfig(
     if (values.dedicated_ingress_implementation)
       di.implementation = values.dedicated_ingress_implementation;
     if (values.dedicated_ingress_type) di.type = values.dedicated_ingress_type;
-    if (values.dedicated_ingress_service_type) {
-      const service: Record<string, unknown> = {
-        type: values.dedicated_ingress_service_type,
-      };
+    if (
+      values.dedicated_ingress_service_type ||
+      values.dedicated_ingress_service_host_network
+    ) {
+      const service: Record<string, unknown> = {};
+      if (values.dedicated_ingress_service_type) {
+        service.type = values.dedicated_ingress_service_type;
+      }
       if (
         values.dedicated_ingress_service_type === "NodePort" &&
-        values.dedicated_ingress_service_node_port
+        values.dedicated_ingress_service_node_port &&
+        !values.dedicated_ingress_service_host_network
       ) {
         service.node_port = Number(values.dedicated_ingress_service_node_port);
+      }
+      if (values.dedicated_ingress_service_host_network) {
+        service.host_network = true;
       }
       di.service = service;
     }
@@ -144,6 +164,7 @@ export function CreateEnvironmentDialog({
         | "ClusterIP"
         | "NodePort",
       dedicated_ingress_service_node_port: "",
+      dedicated_ingress_service_host_network: false,
     },
     validators: {
       onSubmit: ({ value }) => {
@@ -188,6 +209,10 @@ export function CreateEnvironmentDialog({
   const dedicatedIngressServiceType = useStore(
     form.store,
     (s) => s.values.dedicated_ingress_service_type,
+  );
+  const dedicatedIngressServiceHostNetwork = useStore(
+    form.store,
+    (s) => s.values.dedicated_ingress_service_host_network,
   );
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -450,34 +475,74 @@ export function CreateEnvironmentDialog({
                         </div>
                       )}
                     </form.Field>
-                    {dedicatedIngressServiceType === "NodePort" && (
-                      <form.Field name="dedicated_ingress_service_node_port">
-                        {(field) => (
-                          <div className="space-y-2">
-                            <Label htmlFor="env-di-service-node-port">
-                              NodePort
-                            </Label>
-                            <Input
-                              id="env-di-service-node-port"
-                              type="number"
-                              min={1}
-                              max={65535}
-                              placeholder="e.g. 32443"
-                              value={field.state.value ?? ""}
-                              onChange={(e) =>
-                                field.handleChange(e.target.value)
-                              }
-                              onBlur={field.handleBlur}
+                    {dedicatedIngressServiceType === "NodePort" &&
+                      !dedicatedIngressServiceHostNetwork && (
+                        <form.Field name="dedicated_ingress_service_node_port">
+                          {(field) => (
+                            <div className="space-y-2">
+                              <Label htmlFor="env-di-service-node-port">
+                                NodePort
+                              </Label>
+                              <Input
+                                id="env-di-service-node-port"
+                                type="number"
+                                min={1}
+                                max={65535}
+                                placeholder="e.g. 32443"
+                                value={field.state.value ?? ""}
+                                onChange={(e) =>
+                                  field.handleChange(e.target.value)
+                                }
+                                onBlur={field.handleBlur}
+                              />
+                              {field.state.meta.errors.length > 0 && (
+                                <p className="text-sm text-destructive">
+                                  {field.state.meta.errors[0]?.toString()}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </form.Field>
+                      )}
+                    <form.Field name="dedicated_ingress_service_host_network">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <div className="flex items-start gap-2">
+                            <Checkbox
+                              id="env-di-service-host-network"
+                              checked={field.state.value}
+                              onCheckedChange={(checked) => {
+                                const next = checked === true;
+                                field.handleChange(next);
+                                if (next) {
+                                  form.setFieldValue(
+                                    "dedicated_ingress_service_node_port",
+                                    "",
+                                  );
+                                }
+                              }}
                             />
-                            {field.state.meta.errors.length > 0 && (
-                              <p className="text-sm text-destructive">
-                                {field.state.meta.errors[0]?.toString()}
+                            <div className="space-y-1 leading-none">
+                              <Label
+                                htmlFor="env-di-service-host-network"
+                                className="font-medium"
+                              >
+                                Host network mode
+                              </Label>
+                              <p className="text-xs text-muted-foreground">
+                                Bind Traefik directly to host ports 80/443 (pod
+                                runs with hostNetwork=true).
                               </p>
-                            )}
+                            </div>
                           </div>
-                        )}
-                      </form.Field>
-                    )}
+                          {field.state.meta.errors.length > 0 && (
+                            <p className="text-sm text-destructive">
+                              {field.state.meta.errors[0]?.toString()}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </form.Field>
                   </div>
                 )}
               </div>
