@@ -85,7 +85,7 @@ class SettingsPage:
                 if di.get("implementation"):
                     await dialog.locator("#cluster-di-impl").fill(di["implementation"])
                 if di.get("type"):
-                    await dialog.locator("#cluster-di-type").fill(di["type"])
+                    await dialog.locator("#cluster-di-type").select_option(di["type"])
             ss = config.get("standard_storage")
             if ss:
                 await dialog.locator("label[for='cluster-standard-storage']").click()
