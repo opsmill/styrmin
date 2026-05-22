@@ -31,6 +31,7 @@ input AffinityTermInput {
 type ApplicationDriver {
   id: UUID!
   name: String!
+  createdOn: DateTime!
   versions: [ApplicationDriverVersion!]!
 }
 
@@ -44,6 +45,7 @@ type ApplicationDriverVersion {
   sourceRepository: String!
   sourceBranch: String
   sourcePath: String
+  createdOn: DateTime!
   components: JSON
   applicationDriver: ApplicationDriver!
   services: [ServiceDefinition!]!

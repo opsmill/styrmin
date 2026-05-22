@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 import strawberry
@@ -79,6 +80,7 @@ class ComponentConfig:
 class ApplicationDriver:
     id: UUID
     name: str
+    created_on: datetime
 
     instance: strawberry.Private[ApplicationDriverModel]
 
@@ -94,6 +96,7 @@ class ApplicationDriver:
         return cls(
             id=instance.id,
             name=instance.name,
+            created_on=instance.created_on,
             instance=instance,
         )
 
@@ -110,6 +113,8 @@ class ApplicationDriverVersion:
     source_repository: str
     source_branch: str | None
     source_path: str | None
+
+    created_on: datetime
 
     components: JSON | None = None
 
@@ -183,5 +188,6 @@ class ApplicationDriverVersion:
             source_repository=instance.source_repository,
             source_branch=instance.source_branch,
             source_path=instance.source_path,
+            created_on=instance.created_on,
             instance=instance,
         )
