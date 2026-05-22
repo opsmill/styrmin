@@ -222,6 +222,7 @@ jobs:
         run: |
           RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
           echo "VCLUSTER_DIR=/var/lib/github/${RUNNER_NAME}/_temp/.vcluster/config.json" >> $GITHUB_ENV
+          echo "STYRMIN_IMAGE_VER=local-${{ runner.name }}-${{ github.sha }}" >> $GITHUB_ENV
       - name: Enable E2E tracing
         if: inputs.enable-e2e-tracing == true
         run: |
@@ -275,6 +276,7 @@ jobs:
         run: |
           RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
           echo "VCLUSTER_DIR=/var/lib/github/${RUNNER_NAME}/_temp/.vcluster/config.json" >> $GITHUB_ENV
+          echo "STYRMIN_IMAGE_VER=local-${{ runner.name }}-${{ github.sha }}" >> $GITHUB_ENV
       - name: Enable E2E tracing
         if: inputs.enable-e2e-tracing == true
         run: |

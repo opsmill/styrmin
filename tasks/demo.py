@@ -31,7 +31,7 @@ from .utils import KUBERNETES_ROOT_NAMESPACE, MAIN_DIRECTORY_PATH, VCLUSTER_NAME
 DEMO_HOSTNAME = "styrmin.local.styrmin.io"
 DEMO_FQDN_SUFFIX = "local.styrmin.io"
 DEMO_RELEASE = "styrmin"
-DEMO_IMAGE = "registry.opsmill.io/opsmill/styrmin:latest"
+DEMO_IMAGE = agent.IMAGE_REF
 DEMO_PORT = 8080
 DEMO_VALUES = MAIN_DIRECTORY_PATH / "dev" / "local" / "demo-values.yaml"
 HELM_STYRMIN_DIR = MAIN_DIRECTORY_PATH / "helm" / "styrmin"
