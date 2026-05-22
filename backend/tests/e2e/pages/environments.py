@@ -82,7 +82,7 @@ class EnvironmentsListPage:
                 if di.get("implementation"):
                     await dialog.locator("#env-di-impl").fill(di["implementation"])
                 if di.get("type"):
-                    await dialog.locator("#env-di-type").fill(di["type"])
+                    await dialog.locator("#env-di-type").select_option(di["type"])
 
         await dialog.get_by_role("button", name="Create", exact=True).click()
         await dialog.wait_for(state="hidden")
