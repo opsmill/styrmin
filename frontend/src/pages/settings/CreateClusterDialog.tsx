@@ -45,6 +45,16 @@ const createClusterSchema = z
       z.literal(""),
     ]),
     dedicated_ingress_service_node_port: z.string().optional(),
+    dedicated_ingress_service_external_traffic_policy: z.union([
+      z.enum(["Cluster", "Local"]),
+      z.literal(""),
+    ]),
+    dedicated_ingress_service_ip_family_policy: z.union([
+      z.enum(["SingleStack", "PreferDualStack", "RequireDualStack"]),
+      z.literal(""),
+    ]),
+    dedicated_ingress_service_ip_family_ipv4: z.boolean(),
+    dedicated_ingress_service_ip_family_ipv6: z.boolean(),
     standard_storage_enabled: z.boolean(),
     standard_storage_class: z.string().optional(),
     fast_storage_enabled: z.boolean(),
@@ -123,18 +133,31 @@ function buildClusterConfig(
     if (values.dedicated_ingress_implementation)
       di.implementation = values.dedicated_ingress_implementation;
     if (values.dedicated_ingress_type) di.type = values.dedicated_ingress_type;
+    const service: Record<string, unknown> = {};
     if (values.dedicated_ingress_service_type) {
-      const service: Record<string, unknown> = {
-        type: values.dedicated_ingress_service_type,
-      };
-      if (
-        values.dedicated_ingress_service_type === "NodePort" &&
-        values.dedicated_ingress_service_node_port
-      ) {
-        service.node_port = Number(values.dedicated_ingress_service_node_port);
-      }
-      di.service = service;
+      service.type = values.dedicated_ingress_service_type;
     }
+    if (
+      values.dedicated_ingress_service_type === "NodePort" &&
+      values.dedicated_ingress_service_node_port
+    ) {
+      service.node_port = Number(values.dedicated_ingress_service_node_port);
+    }
+    if (values.dedicated_ingress_service_external_traffic_policy) {
+      service.external_traffic_policy =
+        values.dedicated_ingress_service_external_traffic_policy;
+    }
+    if (values.dedicated_ingress_service_ip_family_policy) {
+      service.ip_family_policy =
+        values.dedicated_ingress_service_ip_family_policy;
+    }
+    const ipFamilies: string[] = [];
+    if (values.dedicated_ingress_service_ip_family_ipv4)
+      ipFamilies.push("IPv4");
+    if (values.dedicated_ingress_service_ip_family_ipv6)
+      ipFamilies.push("IPv6");
+    if (ipFamilies.length > 0) service.ip_families = ipFamilies;
+    if (Object.keys(service).length > 0) di.service = service;
     config.dedicated_ingress = di;
   }
   if (values.standard_storage_enabled && values.standard_storage_class) {
@@ -175,6 +198,17 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
         | "ClusterIP"
         | "NodePort",
       dedicated_ingress_service_node_port: "",
+      dedicated_ingress_service_external_traffic_policy: "" as
+        | ""
+        | "Cluster"
+        | "Local",
+      dedicated_ingress_service_ip_family_policy: "" as
+        | ""
+        | "SingleStack"
+        | "PreferDualStack"
+        | "RequireDualStack",
+      dedicated_ingress_service_ip_family_ipv4: false,
+      dedicated_ingress_service_ip_family_ipv6: false,
       standard_storage_enabled: false,
       standard_storage_class: "",
       fast_storage_enabled: false,
@@ -544,6 +578,100 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                         )}
                       </form.Field>
                     )}
+                    <form.Field name="dedicated_ingress_service_external_traffic_policy">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <Label htmlFor="cluster-di-service-etp">
+                            External Traffic Policy
+                          </Label>
+                          <select
+                            id="cluster-di-service-etp"
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            value={field.state.value}
+                            onChange={(e) =>
+                              field.handleChange(
+                                e.target.value as "" | "Cluster" | "Local",
+                              )
+                            }
+                            onBlur={field.handleBlur}
+                          >
+                            <option value="">(default)</option>
+                            <option value="Cluster">Cluster</option>
+                            <option value="Local">Local</option>
+                          </select>
+                        </div>
+                      )}
+                    </form.Field>
+                    <div className="space-y-2">
+                      <Label>IP Families</Label>
+                      <div className="flex items-center gap-4">
+                        <form.Field name="dedicated_ingress_service_ip_family_ipv4">
+                          {(field) => (
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                id="cluster-di-service-ipv4"
+                                checked={field.state.value}
+                                onCheckedChange={(checked) =>
+                                  field.handleChange(checked === true)
+                                }
+                              />
+                              <Label htmlFor="cluster-di-service-ipv4">
+                                IPv4
+                              </Label>
+                            </div>
+                          )}
+                        </form.Field>
+                        <form.Field name="dedicated_ingress_service_ip_family_ipv6">
+                          {(field) => (
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                id="cluster-di-service-ipv6"
+                                checked={field.state.value}
+                                onCheckedChange={(checked) =>
+                                  field.handleChange(checked === true)
+                                }
+                              />
+                              <Label htmlFor="cluster-di-service-ipv6">
+                                IPv6
+                              </Label>
+                            </div>
+                          )}
+                        </form.Field>
+                      </div>
+                    </div>
+                    <form.Field name="dedicated_ingress_service_ip_family_policy">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <Label htmlFor="cluster-di-service-ip-family-policy">
+                            IP Family Policy
+                          </Label>
+                          <select
+                            id="cluster-di-service-ip-family-policy"
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            value={field.state.value}
+                            onChange={(e) =>
+                              field.handleChange(
+                                e.target.value as
+                                  | ""
+                                  | "SingleStack"
+                                  | "PreferDualStack"
+                                  | "RequireDualStack",
+                              )
+                            }
+                            onBlur={field.handleBlur}
+                          >
+                            <option value="">(default)</option>
+                            <option value="SingleStack">SingleStack</option>
+                            <option value="PreferDualStack">
+                              PreferDualStack
+                            </option>
+                            <option value="RequireDualStack">
+                              RequireDualStack
+                            </option>
+                          </select>
+                        </div>
+                      )}
+                    </form.Field>
                   </div>
                 )}
               </div>
