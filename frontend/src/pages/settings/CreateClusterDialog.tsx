@@ -492,15 +492,20 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                             id="cluster-di-service-type"
                             className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={field.state.value}
-                            onChange={(e) =>
-                              field.handleChange(
-                                e.target.value as
-                                  | ""
-                                  | "LoadBalancer"
-                                  | "ClusterIP"
-                                  | "NodePort",
-                              )
-                            }
+                            onChange={(e) => {
+                              const next = e.target.value as
+                                | ""
+                                | "LoadBalancer"
+                                | "ClusterIP"
+                                | "NodePort";
+                              field.handleChange(next);
+                              if (next !== "NodePort") {
+                                form.setFieldValue(
+                                  "dedicated_ingress_service_node_port",
+                                  "",
+                                );
+                              }
+                            }}
                             onBlur={field.handleBlur}
                           >
                             <option value="">(default)</option>
