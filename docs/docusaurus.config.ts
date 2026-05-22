@@ -4,7 +4,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Styrmin',
-  tagline: 'Deployment Orchestration for Kubernetes',
+  tagline: 'Lifecycle management for your infrastructure automation stack',
   favicon: 'img/favicon.ico',
 
   future: {

@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-sidebar_position: 2
+sidebar_position: 3
 description: Bring up the built-in Styrmin demo cluster end-to-end in two commands.
 ---
 
@@ -28,8 +28,6 @@ You need the following on your `PATH`:
 - **`helm`** ≥ 3.x
 - **`vcluster`** CLI ([install instructions](https://www.vcluster.com/docs/getting-started/setup))
 - **`uv`** ([install instructions](https://docs.astral.sh/uv/getting-started/installation/))
-- **Node.js 22+** and **`pnpm`** (only needed if you also want to run the
-  frontend dev server or regenerate code)
 
 You also need a free TCP port `8080` on your host — the demo port-forwards
 Traefik there.
@@ -169,10 +167,6 @@ demo always uses `8080` because `80` is privileged.
 **Bootstrap step says "Cluster already exists".** That means a previous
 demo run left state behind. `uv run invoke reset` is the simplest way to
 start over; alternatively `uv run invoke destroy` and then `start`.
-
-**`graphql-codegen: command not found`** when running `uv run invoke
-generate`. Install the frontend dependencies once with
-`cd frontend && pnpm install`.
 
 ### Next steps
 

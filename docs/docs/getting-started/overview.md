@@ -1,31 +1,43 @@
 ---
 title: Platform Overview
-sidebar_position: 1
-description: Learn what Styrmin is, the problems it solves, and its core concepts.
+sidebar_position: 2
+description: How Styrmin works — server, agent, drivers, clusters, environments, and deployments.
 ---
 
 ## Platform Overview
 
-Styrmin is a **deployment orchestration platform** for Kubernetes. It deploys
-applications declaratively, reconciles them against a desired state, and gives
-you a single place to manage their lifecycle across one or more clusters.
+Styrmin is an **application platform that manages the full lifecycle of your
+infrastructure automation stack** — Infrahub, Ansible, Grafana, Prometheus,
+and the tooling around them — as one system, not one application at a time.
 
-Where a Helm chart describes _how_ to render Kubernetes objects, Styrmin
-describes _which application_ should be running, _where_, _at which version_,
-and _with which configuration_ — and then drives the cluster toward that state.
+For the framing of _why_ that matters and _how_ it compares to ArgoCD, Flux,
+and manual Helm, see [Why Styrmin?](./why-styrmin.md). This page focuses on
+_how the platform works_ and the vocabulary you'll see across the docs, the
+GraphQL API, the SDK, and the CLI.
 
-### Why Styrmin
+### What the platform does
 
-- **Declarative deployments.** You describe the intent (driver, version,
-  environment, config); Styrmin renders, applies, and reconciles.
-- **Versioned, reusable application packaging.** Application Drivers are
-  versioned specifications that wrap a Helm chart with components, parameters,
-  services, and lifecycle actions.
-- **Operational visibility.** The agent continuously reports pod and
-  deployment state back to the server, so the API and UI always reflect
-  what is actually running.
-- **API-first.** The server exposes a GraphQL API; the CLI (`styrminctl`),
-  the SDK (`styrmin-sdk`), and the frontend are all clients of that API.
+Once Styrmin is running on a Kubernetes cluster and you've loaded a driver
+for an application, three things fundamentally change:
+
+1. **Deploying applications becomes simple.** Pick a driver, an environment,
+   and a version — Styrmin handles the Kubernetes-specific configuration
+   (storage classes, ingress, version mapping). No need to learn each
+   chart's value schema.
+2. **Operating them becomes safe and repeatable.** Day-2 operations
+   (backups, upgrades, restores) run through driver-defined procedures.
+   The "right way" to back up Neo4j or to upgrade Infrahub is encoded in
+   the driver, not in a tribal-knowledge runbook.
+3. **The full stack can be managed as one system.** Group applications
+   into environments. Back up an environment in a single operation. Clone
+   an environment — production data and all — to test upgrades safely.
+   Connectivity between applications is environment-aware, so a cloned
+   environment is self-contained.
+
+Kubernetes is the underlying infrastructure layer. You will not interact
+with `kubectl` to run day-to-day operations — though you can, and Styrmin
+does not change how applications expose their APIs or accept traffic from
+external systems.
 
 ### How the pieces fit together
 
@@ -42,104 +54,49 @@ and _with which configuration_ — and then drives the cluster toward that state
                                                                 resources
 ```
 
-- The **server** owns the database and the public GraphQL API.
-- The **agent** runs inside the target cluster, picks up _recorded intent_
-  (Prefect flows and `StyrminDeployment` CRDs), and reconciles the cluster.
-- The **agent** also runs a _status reporter_ that posts observed pod and
-  deployment state back to the server.
+- The **server** owns the database and the public GraphQL API. It is the
+  source of truth for what _should_ be running.
+- The **agent** runs inside the target cluster. It picks up _recorded
+  intent_ (Prefect flows and `StyrminDeployment` CRDs) and reconciles the
+  cluster to match. There is one agent per cluster.
+- A **status reporter** inside the agent continuously posts observed pod
+  and deployment state back to the server, so the API and UI always
+  reflect what is actually running.
+- The **CLI** (`styrminctl`), the **SDK** (`styrmin-sdk`), and the
+  **frontend** are all clients of the same GraphQL API.
 
 For the prescriptive principles behind this design, see the
 [Styrmin Constitution](https://github.com/opsmill/styrmin/blob/develop/dev/constitution.md).
 
-### Key concepts
+### Core concepts
 
-The terms below are the canonical vocabulary. They show up unchanged in the
-GraphQL schema, the SDK, the CLI, and the rest of this documentation.
+The vocabulary below is canonical: these terms show up unchanged in the
+GraphQL schema, the SDK, the CLI, the UI, and the rest of these docs.
 
 #### Application Driver
 
-An **Application Driver** is a versioned, self-contained deployment
-specification. A driver wraps a Helm chart with everything Styrmin needs to
-deploy it: component definitions, user-facing parameters, network services,
-and lifecycle actions.
-
-Each driver lives in a directory containing at least a
-`driver.styrmin.yml` file:
-
-```yaml
-apiVersion: "styrmin.io/v1"
-kind: ApplicationDriver
-metadata:
-  name: infrahub
-spec:
-  version: "0.4.0"
-  supported_versions: ">=1.6.0,<2.0.0"
-  helm:
-    main:
-      location: oci://registry.opsmill.io/charts/infrahub
-      version: "1.6.0"
-  components:
-    server:
-      identifier:
-        label:
-          styrmin/component: server
-  parameters:
-    - name: storage_size
-      label: "Storage size (Gi)"
-      kind: integer
-      default: 10
-```
+An **Application Driver** is a versioned specification that tells Styrmin
+how to deploy, configure, back up, and upgrade a given application. One
+driver per application; without one, Styrmin doesn't know how to handle
+the app.
 
 Read more in [What is an Application Driver?](../drivers/what-is-a-driver.md).
 
-##### Where to find drivers
-
-Styrmin ships a set of reference drivers in the
-[`driver/examples/`](https://github.com/opsmill/styrmin/tree/develop/driver/examples)
-directory of the main repository, including `infrahub`, `semaphore`,
-`slurpit`, and `simple-app`. These are loaded as
-**Application Driver Versions** during the demo bootstrap (see the
-[Quickstart](./quickstart.md)) and are a good starting point for writing
-your own.
-
-You can also point Styrmin at any directory or git repository that follows
-the driver layout.
-
-#### Application Driver Version
-
-A driver is identified by its `name` (e.g. `infrahub`). Each release of that
-driver is an **Application Driver Version** — a specific revision of the
-spec, with its own Helm chart reference, components, parameters, services
-and actions. Deployments always pin to a specific driver version, so
-upgrading the driver is an explicit, reviewable action.
-
 #### Cluster
 
-A **Cluster** is a Kubernetes cluster that Styrmin manages. It is
-represented by a row in the database and carries:
+A **Cluster** is a Kubernetes cluster that Styrmin manages. Cluster-level
+settings (storage classes, ingress, …) are configured once and inherited
+by every application deployed on it.
 
-- a **config** dict (URLs, FQDN suffix, scheme, …);
-- a computed **capabilities** dict (what the cluster can do — ingress,
-  backups, …);
-- exactly one running **agent**.
-
-Currently Styrmin supports exactly **one cluster at a time**. Multi-cluster
-support is planned.
+Styrmin currently supports one cluster at a time; multi-cluster is on the
+roadmap.
 
 #### Environment
 
-An **Environment** is a logical deployment target bound to exactly one
-cluster. Think `dev`, `staging`, `prod`, or `team-a` — environments are how
-you slice a cluster into named, configurable buckets.
-
-- Names are unique per cluster, not globally.
-- Environments carry their own **config** and **capabilities**, which
-  override the cluster's values when they overlap.
-- A backup storage location (S3-compatible) is assigned per environment;
-  every deployment in that environment backs up there.
-
-In short: **a cluster contains environments, and every deployment lives in
-exactly one environment**.
+An **Environment** is a named slice of a cluster — `dev`, `staging`,
+`prod`, `team-a`. Environments group applications that share a lifecycle
+and a backup storage location. Backup, upgrade, and clone operations can
+target an entire environment at once.
 
 ```text
 Cluster ─┬─ Environment "dev"      ─── Deployment "infrahub-dev"
@@ -149,20 +106,26 @@ Cluster ─┬─ Environment "dev"      ─── Deployment "infrahub-dev"
 
 #### Deployment
 
-A **Deployment** is the long-lived record of intent: _"run this driver
-version, of this application version, in this environment, with this
-configuration."_ Editing a deployment expresses new intent and triggers
-reconciliation. The agent then drives the cluster to match.
+A **Deployment** is an application deployed in a specific environment.
 
-A deployment owns at most one **active Application Instance** — a frozen
-snapshot of what was actually deployed at a point in time, including the
-full resolved configuration context.
+#### User actions and hooks
 
-### Next steps
+Drivers attach Python **actions** to lifecycle **hooks** —
+`pre`/`core`/`post` slots for `setup`, `upgrade`, `backup`, etc. Actions
+run inside Prefect flows on the agent, and have access to a set of
+built-in primitives (`stop_component`, `start_component`,
+`execute_commands`, `upgrade_deployment_version`, …). This is how Styrmin
+encodes a real-world upgrade procedure — stop workers, run migrations,
+restart, verify — as a repeatable, driver-defined sequence rather than a
+human-executed runbook.
 
-- [**Quickstart**](./quickstart.md) — bring up the built-in demo cluster
-  end-to-end with two commands.
+### What you'll do next
+
+- [**Quickstart**](./quickstart.md) — bring up the bundled vCluster demo
+  end-to-end in two commands.
 - [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
-  learn the driver model in depth.
-- [**Specification Reference**](../drivers/specification.md) — full reference
-  for every field in `driver.styrmin.yml`.
+  the unit of deployment, in depth.
+- [**Local laptop (vcluster)**](../installation/vcluster-local.md) — the
+  manual version of the quickstart, with every step unpacked.
+- [**DigitalOcean**](../installation/digitalocean.md) — production-style
+  install on DOKS with Spaces-backed backups.

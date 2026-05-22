@@ -109,10 +109,8 @@ spec:
       component: server
 ```
 
-The [Specification Reference](./specification.md) covers every field;
-[Creating a Driver](./creating-a-driver.md) walks through writing one from
-scratch; [Example Walkthrough](./example-walkthrough.md) annotates a
-complete real-world driver end-to-end.
+[Creating a Driver](./creating-a-driver.md) walks through writing one
+from scratch.
 
 ### How a driver becomes a deployment
 
@@ -158,25 +156,21 @@ something to deploy out of the box.
 #### Loading your own
 
 Anywhere you can put a directory that follows the layout above, you can
-load it as a driver. There are two common paths:
+register it with Styrmin — either as a path mounted into the server
+container or as a git repository (public or private). See
+[Loading a Driver](./loading-drivers.md) for the full walkthrough,
+including the GraphQL mutations, the `styrminctl` commands, and how to
+configure the private-repo token.
 
-- **Local directory.** Mount your driver folder into the server container
-  (the demo mounts everything under `driver/examples/` at `/styrmin/drivers/`)
-  and call the `loadLocalApplicationDriverVersion` GraphQL mutation with
-  the in-container path. This is what `uv run invoke dev.bootstrap` does.
-- **Git repository.** Point Styrmin at any git repository and revision that
-  contains a `driver.styrmin.yml` at its root. Each load creates a new
-  Application Driver Version pinned to that commit.
-
-See the [Driver overview in the main repository](https://github.com/opsmill/styrmin/blob/develop/driver/DRIVERS.md)
-for the authoritative, version-controlled description of the driver
+The [Driver overview in the main repository](https://github.com/opsmill/styrmin/blob/develop/driver/DRIVERS.md)
+is the authoritative, version-controlled description of the driver
 format.
 
 ### Next steps
 
-- [**Specification Reference**](./specification.md) — every field of
-  `driver.styrmin.yml`, in detail.
+- [**Loading a Driver**](./loading-drivers.md) — register a driver with
+  Styrmin from a local directory or a git repository.
+- [**The Context**](./context.md) — the data structure every driver
+  template and action receives at runtime.
 - [**Creating a Driver**](./creating-a-driver.md) — write your first
   driver, step by step.
-- [**Example Walkthrough**](./example-walkthrough.md) — read a complete
-  real-world driver with annotations.

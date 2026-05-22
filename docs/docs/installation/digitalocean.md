@@ -299,9 +299,8 @@ uv run styrminctl drivers load-local-version /styrmin/drivers/infrahub
 uv run styrminctl drivers load-local-version /styrmin/drivers/semaphore
 ```
 
-To load a driver from a git repository instead, see
-[Local Drivers and private repos](#loading-drivers-from-a-private-github-repository)
-below.
+To load a driver from a git repository (public or private) instead, see
+[Loading a Driver](../drivers/loading-drivers.md).
 
 ### 14. Deploy Infrahub
 
@@ -365,23 +364,6 @@ To fully clean up, also delete:
 - the front and apps load balancers (`doctl compute load-balancer delete <id>`),
 - the Spaces bucket and access keys,
 - the DNS records.
-
-### Loading drivers from a private GitHub repository
-
-To import drivers from a private repository instead of using the baked-in
-examples, set the following before installing Styrmin (e.g. as values in
-`demo/do-values.yaml` or as Kubernetes Secrets the chart references):
-
-```shell
-STYRMIN_DRIVER_TOKEN=<github-token>           # token for the driver repo
-STYRMIN_AGENT_SOURCE_TOKEN=<github-token>     # token for the agent code repo
-STYRMIN_AGENT_SOURCE_BRANCH=develop
-STYRMIN_AGENT_SOURCE_REPOSITORY=https://github.com/your-org/styrmin-mvp.git
-```
-
-Then use the `loadApplicationDriverVersionFromGithub` mutation (or the
-`drivers load-github-version` `styrminctl` command) in place of
-`load-local-version`.
 
 ### Troubleshooting
 
