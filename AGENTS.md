@@ -5,7 +5,7 @@ Styrmin is a **deployment orchestration platform** that manages application depl
 ## Read before exploring
 
 - **[`CONTEXT.md`](CONTEXT.md)** at the repo root — the project glossary. Defines the canonical name for every domain concept (cluster, environment, deployment, instance, driver, context, agent, operator, …) and the synonyms to avoid. Use these terms verbatim in code, schema, specs, ADRs, commit messages, and conversation. If a concept is missing or drifts from how the code actually uses it, update CONTEXT.md in the same change.
-- **[`dev/constitution.md`](dev/constitution.md)** — the prescriptive non-negotiable principles (declarative reconciliation, driver-based deployment, layered architecture, typed errors, E2E definition-of-done, propagation tests).
+- **[`dev/constitution.md`](dev/constitution.md)** — the prescriptive non-negotiable principles (declarative reconciliation, driver-based deployment, layered architecture, typed errors, E2E definition-of-done, propagation tests, documentation accuracy).
 - **[`dev/knowledge/architecture.md`](dev/knowledge/architecture.md)** — the descriptive companion explaining how the principles are realised today.
 - **[`dev/adr/`](dev/adr/)** — read ADRs that touch the area you're about to work in.
 
@@ -196,6 +196,7 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 - Use type hints for Python (backend)
 - **For every new feature, ship an E2E test covering the user-visible flow and run it to a pass before declaring the work done.** This applies equally when executing a speckit workflow (``/speckit.implement``, ``/speckit.tasks``, etc.) — the tasks list MUST include E2E coverage and the agent MUST execute it, not defer to a later iteration. E2E is part of the definition of done, not an optional follow-up. See Constitution §V.
 - **For every GraphQL schema change (new/modified field, argument, input type, or mutation under `backend/styrmin_backend/api/schema/`), ship a propagation test.** See [`dev/guides/graphql-propagation-tests.md`](dev/guides/graphql-propagation-tests.md) for the full recipe; see Constitution §V for the rule.
+- **Keep the documentation accurate in the same change.** Any update that touches user-visible behaviour (CLI/SDK/GraphQL surface, driver format, install or quickstart steps, architecture facts described in `docs/how-it-works/`, default values, screenshots) MUST update the corresponding pages under `docs/`. Architecture, operations, decisions, and vocabulary changes update [`dev/knowledge/`](dev/knowledge/), [`dev/guides/`](dev/guides/), [`dev/adr/`](dev/adr/), and [`CONTEXT.md`](CONTEXT.md) respectively. Speckit workflows MUST include documentation tasks where applicable. Constitution §VII is non-negotiable — "I'll update the docs later" is not acceptable.
 
 ### Ask First
 
@@ -206,6 +207,7 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 - Authentication/authorization changes
 - **Skipping E2E coverage for a bug fix, refactor, or small change.** If you believe the existing E2E suite already exercises the affected path (or the change is genuinely too narrow to warrant a new scenario), state which tests cover it and request confirmation before omitting new coverage — don't unilaterally decide the work is "too small".
 - **Skipping a GraphQL propagation unit test for a schema change.** If you believe an existing propagation test already covers the new/modified field, name the test and request confirmation; don't decide unilaterally.
+- **Shipping a change without the matching documentation update.** If you believe an existing page in `docs/`, `dev/knowledge/`, `dev/guides/`, or `CONTEXT.md` already covers the new state, name the page and request confirmation. Don't ship and "do docs later" — Constitution §VII forbids it.
 
 ### Never Do
 
