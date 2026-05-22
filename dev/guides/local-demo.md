@@ -21,7 +21,7 @@ Cloudflare-hosted wildcard `*.local.styrmin.io` → `127.0.0.1`; no
 
 | Command | Description |
 |---------|-------------|
-| `uv run invoke build` | Build the `styrmin:latest` image and update Helm dependencies |
+| `uv run invoke build` | Build the `registry.opsmill.io/opsmill/styrmin:latest` image and update Helm dependencies |
 | `uv run invoke start` | Create the vCluster and deploy everything end-to-end |
 | `uv run invoke stop` | Pause the environment (`vcluster pause`), preserving state |
 | `uv run invoke destroy` | Delete the vCluster and all associated resources |

@@ -7,7 +7,15 @@ from .utils import KUBERNETES_ROOT_NAMESPACE, print_header
 def build_image(context: Context) -> None:
     """Build the agent Docker image."""
     print_header("Building the agent Docker image...")
-    context.run("docker build -t styrmin -f docker/Dockerfile .", pty=True)
+    # Tag with the chart's default registry path so the locally-built
+    # image is name-matched by kubelet when the chart is installed with
+    # default values. `pullPolicy: IfNotPresent` then short-circuits the
+    # registry pull. See `helm/styrmin/README.md` "Running against a
+    # locally-built image".
+    context.run(
+        "docker build -t registry.opsmill.io/opsmill/styrmin:latest -f docker/Dockerfile .",
+        pty=True,
+    )
 
 
 @task
