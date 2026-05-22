@@ -36,7 +36,15 @@ const createClusterSchema = z
     ]),
     dedicated_ingress_enabled: z.boolean(),
     dedicated_ingress_implementation: z.string(),
-    dedicated_ingress_type: z.string(),
+    dedicated_ingress_type: z.union([
+      z.enum(["ingress", "gateway"]),
+      z.literal(""),
+    ]),
+    dedicated_ingress_service_type: z.union([
+      z.enum(["LoadBalancer", "ClusterIP", "NodePort"]),
+      z.literal(""),
+    ]),
+    dedicated_ingress_service_node_port: z.string().optional(),
     standard_storage_enabled: z.boolean(),
     standard_storage_class: z.string().optional(),
     fast_storage_enabled: z.boolean(),
@@ -70,6 +78,29 @@ const createClusterSchema = z
       message: "External URL port must be an integer between 1 and 65535",
       path: ["external_url_port"],
     },
+  )
+  .refine(
+    (data) => {
+      if (!data.dedicated_ingress_enabled) return true;
+      if (!data.dedicated_ingress_service_node_port) return true;
+      const n = Number(data.dedicated_ingress_service_node_port);
+      return Number.isInteger(n) && n >= 1 && n <= 65535;
+    },
+    {
+      message: "NodePort must be an integer between 1 and 65535",
+      path: ["dedicated_ingress_service_node_port"],
+    },
+  )
+  .refine(
+    (data) => {
+      if (!data.dedicated_ingress_enabled) return true;
+      if (!data.dedicated_ingress_service_node_port) return true;
+      return data.dedicated_ingress_service_type === "NodePort";
+    },
+    {
+      message: "NodePort is only valid when Service Type is NodePort",
+      path: ["dedicated_ingress_service_node_port"],
+    },
   );
 
 type CreateClusterValues = z.infer<typeof createClusterSchema>;
@@ -88,10 +119,22 @@ function buildClusterConfig(
   if (values.external_dns_endpoints_type)
     config.external_dns_endpoints_type = values.external_dns_endpoints_type;
   if (values.dedicated_ingress_enabled) {
-    const di: Record<string, string> = {};
+    const di: Record<string, unknown> = {};
     if (values.dedicated_ingress_implementation)
       di.implementation = values.dedicated_ingress_implementation;
     if (values.dedicated_ingress_type) di.type = values.dedicated_ingress_type;
+    if (values.dedicated_ingress_service_type) {
+      const service: Record<string, unknown> = {
+        type: values.dedicated_ingress_service_type,
+      };
+      if (
+        values.dedicated_ingress_service_type === "NodePort" &&
+        values.dedicated_ingress_service_node_port
+      ) {
+        service.node_port = Number(values.dedicated_ingress_service_node_port);
+      }
+      di.service = service;
+    }
     config.dedicated_ingress = di;
   }
   if (values.standard_storage_enabled && values.standard_storage_class) {
@@ -125,7 +168,13 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
       external_dns_endpoints_type: "" as "" | "NodeExternalIP" | "ClusterIP",
       dedicated_ingress_enabled: false,
       dedicated_ingress_implementation: "",
-      dedicated_ingress_type: "",
+      dedicated_ingress_type: "" as "" | "ingress" | "gateway",
+      dedicated_ingress_service_type: "" as
+        | ""
+        | "LoadBalancer"
+        | "ClusterIP"
+        | "NodePort",
+      dedicated_ingress_service_node_port: "",
       standard_storage_enabled: false,
       standard_storage_class: "",
       fast_storage_enabled: false,
@@ -169,6 +218,10 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
   const dedicatedIngressEnabled = useStore(
     form.store,
     (s) => s.values.dedicated_ingress_enabled,
+  );
+  const dedicatedIngressServiceType = useStore(
+    form.store,
+    (s) => s.values.dedicated_ingress_service_type,
   );
   const standardStorageEnabled = useStore(
     form.store,
@@ -411,16 +464,81 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                       {(field) => (
                         <div className="space-y-2">
                           <Label htmlFor="cluster-di-type">Type</Label>
-                          <Input
+                          <select
                             id="cluster-di-type"
-                            placeholder="e.g. ingress"
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                             value={field.state.value}
-                            onChange={(e) => field.handleChange(e.target.value)}
+                            onChange={(e) =>
+                              field.handleChange(
+                                e.target.value as "" | "ingress" | "gateway",
+                              )
+                            }
                             onBlur={field.handleBlur}
-                          />
+                          >
+                            <option value="">(default)</option>
+                            <option value="ingress">ingress</option>
+                            <option value="gateway">gateway</option>
+                          </select>
                         </div>
                       )}
                     </form.Field>
+                    <form.Field name="dedicated_ingress_service_type">
+                      {(field) => (
+                        <div className="space-y-2">
+                          <Label htmlFor="cluster-di-service-type">
+                            Service Type
+                          </Label>
+                          <select
+                            id="cluster-di-service-type"
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            value={field.state.value}
+                            onChange={(e) =>
+                              field.handleChange(
+                                e.target.value as
+                                  | ""
+                                  | "LoadBalancer"
+                                  | "ClusterIP"
+                                  | "NodePort",
+                              )
+                            }
+                            onBlur={field.handleBlur}
+                          >
+                            <option value="">(default)</option>
+                            <option value="LoadBalancer">LoadBalancer</option>
+                            <option value="ClusterIP">ClusterIP</option>
+                            <option value="NodePort">NodePort</option>
+                          </select>
+                        </div>
+                      )}
+                    </form.Field>
+                    {dedicatedIngressServiceType === "NodePort" && (
+                      <form.Field name="dedicated_ingress_service_node_port">
+                        {(field) => (
+                          <div className="space-y-2">
+                            <Label htmlFor="cluster-di-service-node-port">
+                              NodePort
+                            </Label>
+                            <Input
+                              id="cluster-di-service-node-port"
+                              type="number"
+                              min={1}
+                              max={65535}
+                              placeholder="e.g. 32443"
+                              value={field.state.value ?? ""}
+                              onChange={(e) =>
+                                field.handleChange(e.target.value)
+                              }
+                              onBlur={field.handleBlur}
+                            />
+                            {field.state.meta.errors.length > 0 && (
+                              <p className="text-sm text-destructive">
+                                {field.state.meta.errors[0]?.toString()}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </form.Field>
+                    )}
                   </div>
                 )}
               </div>
