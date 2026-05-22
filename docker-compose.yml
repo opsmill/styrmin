@@ -10,7 +10,7 @@ services:
     depends_on:
       server:
         condition: service_healthy
-    image: registry.opsmill.io/opsmill/styrmin:latest
+    image: "${STYRMIN_IMAGE_NAME:-registry.opsmill.io/opsmill/styrmin}:${STYRMIN_IMAGE_VER:-latest}"
     build:
       dockerfile: docker/Dockerfile
     command: ["prefect", "worker", "start", "--pool", "styrmin-work-pool"]
@@ -26,7 +26,7 @@ services:
       - styrmin_db:/source/data
 
   agent-operator:
-    image: registry.opsmill.io/opsmill/styrmin:latest
+    image: "${STYRMIN_IMAGE_NAME:-registry.opsmill.io/opsmill/styrmin}:${STYRMIN_IMAGE_VER:-latest}"
     build:
       dockerfile: docker/Dockerfile
     command: ["styrmin", "agent", "start", "--work-pool", "user-work-pool"]
@@ -45,7 +45,7 @@ services:
       - ./driver/examples:/styrmin/drivers:ro
 
   server:
-    image: registry.opsmill.io/opsmill/styrmin:latest
+    image: "${STYRMIN_IMAGE_NAME:-registry.opsmill.io/opsmill/styrmin}:${STYRMIN_IMAGE_VER:-latest}"
     build:
       dockerfile: docker/Dockerfile
     command: ["fastapi", "dev", "--host", "0.0.0.0", "backend/styrmin_backend/server/app.py"]

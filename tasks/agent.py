@@ -1,19 +1,27 @@
+import os
+
 from invoke import Context, task
 
 from .utils import KUBERNETES_ROOT_NAMESPACE, print_header
+
+# Image reference used to tag the locally-built styrmin image. Defaults
+# to the chart's default registry path so kubelet name-matches the
+# locally-built image under `pullPolicy: IfNotPresent` (no registry
+# pull). CI overrides STYRMIN_IMAGE_VER to a per-runner, per-commit tag
+# so concurrent jobs on shared self-hosted runners don't stomp the same
+# `:latest` reference. See `helm/styrmin/README.md` "Running against a
+# locally-built image".
+IMAGE_NAME = os.getenv("STYRMIN_IMAGE_NAME", "registry.opsmill.io/opsmill/styrmin")
+IMAGE_VER = os.getenv("STYRMIN_IMAGE_VER", "latest")
+IMAGE_REF = f"{IMAGE_NAME}:{IMAGE_VER}"
 
 
 @task
 def build_image(context: Context) -> None:
     """Build the agent Docker image."""
-    print_header("Building the agent Docker image...")
-    # Tag with the chart's default registry path so the locally-built
-    # image is name-matched by kubelet when the chart is installed with
-    # default values. `pullPolicy: IfNotPresent` then short-circuits the
-    # registry pull. See `helm/styrmin/README.md` "Running against a
-    # locally-built image".
+    print_header(f"Building the agent Docker image ({IMAGE_REF})...")
     context.run(
-        "docker build -t registry.opsmill.io/opsmill/styrmin:latest -f docker/Dockerfile .",
+        f"docker build -t {IMAGE_REF} -f docker/Dockerfile .",
         pty=True,
     )
 

@@ -543,31 +543,44 @@ async def styrmin_deployment(
             await core_api.create_namespaced_service(namespace="styrmin", body=doc)
 
     # Install styrmin via helm
-    subprocess.run(
-        [
-            "helm",
-            "upgrade",
-            "--install",
-            "styrmin",
-            "--dependency-update",
-            "--create-namespace",
-            "-n",
-            "styrmin",
-            str(PROJECT_ROOT / "helm" / "styrmin"),
-            "-f",
-            str(FIXTURES_DIR / "styrmin-values.yaml"),
+    helm_args = [
+        "helm",
+        "upgrade",
+        "--install",
+        "styrmin",
+        "--dependency-update",
+        "--create-namespace",
+        "-n",
+        "styrmin",
+        str(PROJECT_ROOT / "helm" / "styrmin"),
+        "-f",
+        str(FIXTURES_DIR / "styrmin-values.yaml"),
+        "--set",
+        f"styrmin.driver.token={github_pat}",
+        "--set",
+        f"styrmin.agentSource.token={github_pat}",
+    ]
+    # In CI we tag the built image with a per-runner, per-commit value to
+    # avoid `:latest` collisions on shared self-hosted runners (see
+    # `.github/workflows/ci.yml` and `tasks/agent.py`). Propagate that
+    # tag to the chart and the agent subchart so the helm install
+    # references the same image `docker compose build` just produced.
+    image_ver = os.environ.get("STYRMIN_IMAGE_VER")
+    if image_ver:
+        helm_args += [
             "--set",
-            f"styrmin.driver.token={github_pat}",
+            f"image.tag={image_ver}",
             "--set",
-            f"styrmin.agentSource.token={github_pat}",
-            "--kubeconfig",
-            kubeconfig_path,
-            "--wait",
-            "--timeout",
-            "5m",
-        ],
-        check=True,
-    )
+            f"styrmin-agent.image.tag={image_ver}",
+        ]
+    helm_args += [
+        "--kubeconfig",
+        kubeconfig_path,
+        "--wait",
+        "--timeout",
+        "5m",
+    ]
+    subprocess.run(helm_args, check=True)
 
     # Port-forward styrmin server (must stay alive for tests)
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)

@@ -1,11 +1,14 @@
 image:
-  # `docker compose build` (run by the styrmin_deployment fixture) tags the
-  # local working-tree image as `registry.opsmill.io/opsmill/styrmin:latest`,
-  # which matches the chart default once we pin `tag: latest`. kubelet
-  # name-matches the local image under `pullPolicy: IfNotPresent` and
-  # never contacts the registry. See `helm/styrmin/README.md` "Running
-  # against a locally-built image" and
-  # `backend/tests/e2e/conftest.py::styrmin_deployment`.
+  # Local-dev default. `docker compose build` (run by the
+  # styrmin_deployment fixture) tags the working-tree image as
+  # `registry.opsmill.io/opsmill/styrmin:latest`; kubelet name-matches
+  # the local image under `pullPolicy: IfNotPresent` and never contacts
+  # the registry.
+  #
+  # CI overrides this via `--set image.tag=$STYRMIN_IMAGE_VER` so each
+  # job on shared self-hosted runners builds and installs a tag scoped
+  # to `local-<runner>-<sha>` (see `.github/workflows/ci.yml` and
+  # `backend/tests/e2e/conftest.py::styrmin_deployment`).
   tag: latest
 
 taskWorkerQuerySeconds: 1
@@ -22,9 +25,10 @@ styrmin:
     interval: 1
 
 styrmin-agent:
-  # The agent subchart already defaults to `tag: latest`, and the
-  # locally-built image is tagged `registry.opsmill.io/opsmill/styrmin:latest`
-  # so no image override is needed here.
+  # The agent subchart defaults to `tag: latest`, matching the local
+  # `docker compose build` output. CI overrides this via
+  # `--set styrmin-agent.image.tag=$STYRMIN_IMAGE_VER` (see
+  # `backend/tests/e2e/conftest.py::styrmin_deployment`).
   #
   # The e2e suite runs multiple deployments and Prefect subprocesses inside
   # the agent pod. The default 1Gi limit OOMs under that load, which leaves
