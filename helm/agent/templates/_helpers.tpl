@@ -62,8 +62,21 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
-Agent container image
+Agent container image. Honors `global.imageRegistry` (set by the parent
+`styrmin` chart) over the subchart's own `image.registry`. An empty
+registry produces a registry-less reference, allowing consumption of a
+locally-built image from the cluster's image store.
 */}}
 {{- define "opsmill-operator.image" -}}
-{{- printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) }}
+{{- $registry := .Values.image.registry | default "" -}}
+{{- if and .Values.global .Values.global.imageRegistry -}}
+{{- $registry = .Values.global.imageRegistry -}}
+{{- end -}}
+{{- $repository := .Values.image.repository -}}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
+{{- if $registry }}
+{{- printf "%s/%s:%s" $registry $repository $tag }}
+{{- else }}
+{{- printf "%s:%s" $repository $tag }}
+{{- end }}
 {{- end }}

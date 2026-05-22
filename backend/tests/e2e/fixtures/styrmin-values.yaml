@@ -4,11 +4,11 @@ image:
   # need to use the locally-built `styrmin:latest` instead so the suite
   # exercises the current working tree, not whatever was last published.
   # See `backend/tests/e2e/conftest.py::styrmin_deployment` for the
-  # `docker compose build` step that produces this tag.
+  # `docker compose build` step that produces this tag, and the
+  # "Running against a locally-built image" recipe in
+  # `helm/styrmin/README.md` for the production-equivalent pattern.
   registry: ""
-  repository: styrmin
   tag: latest
-  pullPolicy: IfNotPresent
 
 taskWorkerQuerySeconds: 1
 
@@ -25,11 +25,12 @@ styrmin:
 
 styrmin-agent:
   # Same rationale as the top-level `image.registry` override above —
-  # the agent subchart defaults to `registry.opsmill.io/opsmill/styrmin`
-  # which the self-bootstrapping vcluster cannot resolve to the local
-  # working-tree build. Point it at the locally-built `styrmin:latest`.
+  # the agent subchart defaults to the OpsMill registry which the
+  # self-bootstrapping vcluster cannot resolve to the local working-tree
+  # build. Point it at the locally-built `styrmin:latest`.
   image:
-    repository: styrmin
+    registry: ""
+    tag: latest
   # The e2e suite runs multiple deployments and Prefect subprocesses inside
   # the agent pod. The default 1Gi limit OOMs under that load, which leaves
   # tasks stuck in RUNNING and blocks downstream status transitions.
