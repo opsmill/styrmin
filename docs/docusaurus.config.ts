@@ -63,7 +63,7 @@ const config: Config = {
           label: 'Getting Started',
         },
         {
-          to: '/docs/category/installation',
+          to: '/docs/installation',
           label: 'Installation',
           position: 'left',
         },
@@ -91,7 +91,7 @@ const config: Config = {
             },
             {
               label: 'Installation',
-              to: '/docs/category/installation',
+              to: '/docs/installation',
             },
             {
               label: 'Application Drivers',

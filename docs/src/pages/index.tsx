@@ -41,7 +41,7 @@ function HomepageHeader() {
           </Link>
           <Link
             className="button button--secondary button--lg"
-            to="/docs/category/installation">
+            to="/docs/installation">
             Install Styrmin
           </Link>
         </div>
