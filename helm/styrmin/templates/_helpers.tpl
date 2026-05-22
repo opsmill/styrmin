@@ -180,6 +180,9 @@ Create the image name
 */}}
 {{- define "styrmin.image" -}}
 {{- $registry := .Values.image.registry -}}
+{{- if and .Values.global .Values.global.imageRegistry -}}
+{{- $registry = .Values.global.imageRegistry -}}
+{{- end -}}
 {{- $repository := .Values.image.repository -}}
 {{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
 {{- if $registry }}
