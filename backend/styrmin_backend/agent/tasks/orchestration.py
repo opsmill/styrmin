@@ -31,10 +31,13 @@ from styrmin_backend.agent.tasks.shared import (
     render_helm_repository_specifications,
 )
 from styrmin_backend.context.models.contexts import GlobalContext
+from styrmin_backend.db.models import ApplicationInstance as ApplicationInstanceModel
 from styrmin_backend.domain.models import Instance
-from styrmin_backend.services.reconciliation.remediation import (
-    Remediation,
-)
+from styrmin_backend.domain.models import Instance as InstanceEntity
+from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
+from styrmin_backend.services.reconciliation.diffs.comparison import Comparator
+from styrmin_backend.services.reconciliation.remediation import Remediator
+from styrmin_backend.services.unit_of_work import get_unit_of_work
 from styrmin_backend.agent.service.kubernetes.primitives import (
     patch_custom_resource_status,
     apply_kubernetes_namespace,
@@ -142,16 +145,59 @@ async def orchestration_callback(flow, flow_run: FlowRun, state: State) -> None:
     on_running=[orchestration_callback],
 )
 async def apply_state(
-    task_id: UUID, deployment_id: UUID, remediation: Remediation | None
+    task_id: UUID,
+    deployment_id: UUID,
+    new_instance_id: UUID,
+    current_instance_id: UUID | None,
 ) -> State | None:
-    if remediation is None:
-        return Completed(message="No remediation needed")
+    """Reconcile a deployment to its declared state.
 
+    Post-#237 boundary: the flow loads the deployment + both instances
+    fresh from the DB at run time, builds the diff, and generates the
+    remediation here — not in the FastAPI request. This means a flow
+    retry sees fresh state, and DB writes that landed between scheduling
+    and run no longer produce a stale plan.
+    """
     if not config.SETTINGS.initialized:
         config.SETTINGS.initialize()
 
-    flow_info = await remediation.apply()
-    return flow_info.state
+    uow = await get_unit_of_work()
+    async with uow:
+        deployment = await uow.deployments.find(id=deployment_id)
+        if deployment is None:
+            return Completed(
+                message=f"Deployment {deployment_id} not found; nothing to apply",
+            )
+
+        new_instance_model = await uow.application_instances.get(id=new_instance_id)
+        assert new_instance_model is not None, (
+            f"new_instance {new_instance_id} not found"
+        )
+        new_instance = _build_instance_entity(new_instance_model)
+        assert new_instance is not None
+
+        current_instance = None
+        if current_instance_id is not None:
+            current_instance_model = await uow.application_instances.get(
+                id=current_instance_id
+            )
+            current_instance = _build_instance_entity(current_instance_model)
+
+        comparator = Comparator(
+            current_instance=current_instance,
+            new_instance=new_instance,
+        )
+        diff_report = comparator.compare()
+        get_run_logger().info(f"Flow-side diff report: {diff_report}")
+
+        remediator = Remediator(uow=uow)
+        remediation = await remediator.generate_remediation(diff_report=diff_report)
+
+        if remediation is None:
+            return Completed(message="No remediation needed")
+
+        flow_info = await remediation.apply()
+        return flow_info.state
 
 
 @flow(
@@ -756,4 +802,28 @@ async def upgrade_instance_crd(
 
     logger.info(
         "Upgrade CRD updated: %s:%s in %s", context.app.name, target_version, namespace
+    )
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────
+
+
+def _build_instance_entity(
+    model: ApplicationInstanceModel | None,
+) -> InstanceEntity | None:
+    """Convert a DB ApplicationInstance row to a domain Instance entity.
+
+    Returns None when *model* is None so callers can pass optional
+    ``current_instance`` rows without a separate null-check.
+    """
+    if model is None:
+        return None
+    return InstanceEntity(
+        id=model.id,
+        name=model.name,
+        application_version=model.application_version,
+        status=InstanceStatusEntity(model.status.value),
+        context=GlobalContext.model_validate(model.context),
+        application_driver_version_id=model.application_driver_version_id,
+        deployment_id=model.deployment_id,
     )

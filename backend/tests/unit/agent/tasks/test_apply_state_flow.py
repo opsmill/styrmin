@@ -17,6 +17,10 @@ import pytest
 
 @pytest.mark.asyncio
 @patch(
+    "styrmin_backend.agent.tasks.orchestration._build_instance_entity",
+    create=True,
+)
+@patch(
     "styrmin_backend.agent.tasks.orchestration.get_unit_of_work",
     create=True,
 )
@@ -32,6 +36,7 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     mock_remediator_cls,
     mock_comparator_cls,
     mock_get_uow,
+    mock_build_entity,
 ) -> None:
     from styrmin_backend.agent.tasks.orchestration import apply_state
 
@@ -42,9 +47,15 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
 
     fake_uow = AsyncMock()
     fake_uow.deployments.find = AsyncMock(return_value=MagicMock(id=deployment_id))
-    fake_uow.instances = AsyncMock()
-    fake_uow.instances.find = AsyncMock(side_effect=lambda *, id: MagicMock(id=id))
+    fake_uow.application_instances = AsyncMock()
+    fake_uow.application_instances.get = AsyncMock(
+        side_effect=lambda *, id: MagicMock(id=id)
+    )
     mock_get_uow.return_value = fake_uow
+
+    mock_build_entity.side_effect = (
+        lambda model: MagicMock(id=model.id) if model is not None else None
+    )
 
     diff_report = MagicMock()
     mock_comparator_cls.return_value.compare = MagicMock(return_value=diff_report)
@@ -72,6 +83,10 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
 
 @pytest.mark.asyncio
 @patch(
+    "styrmin_backend.agent.tasks.orchestration._build_instance_entity",
+    create=True,
+)
+@patch(
     "styrmin_backend.agent.tasks.orchestration.get_unit_of_work",
     create=True,
 )
@@ -87,15 +102,21 @@ async def test_apply_state_flow_handles_no_remediation_needed(
     mock_remediator_cls,
     mock_comparator_cls,
     mock_get_uow,
+    mock_build_entity,
 ) -> None:
     """If Remediator returns None, the flow should not error."""
     from styrmin_backend.agent.tasks.orchestration import apply_state
 
     fake_uow = AsyncMock()
     fake_uow.deployments.find = AsyncMock(return_value=MagicMock())
-    fake_uow.instances = AsyncMock()
-    fake_uow.instances.find = AsyncMock(return_value=MagicMock())
+    fake_uow.application_instances = AsyncMock()
+    fake_uow.application_instances.get = AsyncMock(return_value=MagicMock())
     mock_get_uow.return_value = fake_uow
+
+    mock_build_entity.side_effect = (
+        lambda model: MagicMock(id=model.id) if model is not None else None
+    )
+
     mock_comparator_cls.return_value.compare = MagicMock(return_value=MagicMock())
     mock_remediator_cls.return_value.generate_remediation = AsyncMock(return_value=None)
 
