@@ -1,0 +1,338 @@
+---
+title: Deploy an application
+sidebar_position: 2
+description: Create a new Deployment in an Environment by picking an Application Driver Version and filling in its parameters — walked through end-to-end via the UI, the CLI, and the GraphQL API.
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+## Deploy an application
+
+A **Deployment** is one application running in one Environment, pinned
+to one [Application Driver Version](../concepts-and-architecture/core-concepts.md#application-driver-version)
+and one Application Version. Creating one is the single most common
+thing you do with Styrmin: pick what to deploy, pick where, fill in
+the driver's parameters, submit.
+
+This guide walks through the same flow three times — once through
+the **UI**, once through the **`styrminctl` CLI**, once through the
+**GraphQL API**. Pick the tab that matches the surface you're using;
+the prerequisites and the result are identical across all three.
+
+### Prerequisites
+
+Before you start, confirm:
+
+1. **Styrmin is installed and reachable.** See
+   [Installation](../installation/index.mdx). For the fastest setup,
+   the [Quickstart](../installation/quickstart.md) brings everything
+   up in two commands.
+2. **You are authenticated.** Your account needs at least the
+   `READ_WRITE` role — the `deploy` mutation requires it. If you're
+   using the CLI, run `styrminctl auth login` first.
+3. **An Environment exists.** Every Deployment lives inside one
+   Environment, which in turn lives inside one Cluster. The Quickstart
+   creates a `local` Environment automatically; otherwise create one
+   with `styrminctl environments create`.
+4. **An Application Driver Version is loaded.** Styrmin can only
+   deploy applications it has a driver for. The Quickstart loads the
+   bundled `infrahub` and `semaphore` drivers automatically; to load
+   your own, follow
+   [Loading a driver](../drivers/loading-drivers.md).
+
+If any of those are missing, start there first — the deploy step
+itself takes seconds once they're in place.
+
+### The flow
+
+<Tabs groupId="styrmin-surface">
+
+<TabItem value="ui" label="UI" default>
+
+#### 1. Open the Deploy form
+
+From the Styrmin UI, navigate to your Environment and click **Deploy
+application**. The form lives at
+`/environments/<environmentId>/deploy`.
+
+#### 2. Fill in the form
+
+The form has up to five sections, top to bottom:
+
+| Field | What goes here |
+|---|---|
+| **Deployment Name** | A unique name for this Deployment within the Environment (e.g. `infrahub-dev`). Required. |
+| **Application Driver Version** | Pick a `{driver name} v{driver version}` from the dropdown. The list is sourced from every Application Driver Version registered with Styrmin. |
+| **Application Version** | The version of the application itself (e.g. `1.6.0`). If the selected Application Driver Version declares a `defaultVersion`, it's pre-filled and optional; otherwise it's required. The driver's supported version range is shown beneath the field. |
+| **Parameters** | Appears only if the selected Application Driver Version declares parameters. One field per parameter, with the driver-defined label, kind (string, integer, boolean, enum), and default. |
+| **Service name overrides** *(optional)* | Renames a service the driver publishes — useful when you want to run two instances of the same driver in one Environment under different service names. Each row pairs the driver's service name with your override name. |
+
+#### 3. Submit
+
+Click **Deploy**. The button is disabled while submission is in
+flight; if the server rejects the request, an alert appears at the top
+of the form with the error.
+
+#### 4. Watch the result
+
+On success, the form is replaced by a task result card showing the
+task status and, once available, the Deployment ID. From there:
+
+- **View Deployment** opens the Deployment detail page — the
+  authoritative view of status, components, pods, and events.
+- **Back to Environment** returns to the Environment overview.
+
+The Deployment transitions through `PENDING` → `DEPLOYING` →
+`RUNNING` as the agent reconciles the cluster.
+
+</TabItem>
+
+<TabItem value="cli" label="CLI">
+
+#### 1. (Optional) Discover what's available
+
+```bash
+styrminctl environments list
+styrminctl drivers list
+```
+
+The first lists Environments by name and ID; the second lists
+Application Drivers and their loaded versions. You can deploy by name
+or by UUID — pick whichever is more convenient.
+
+#### 2. Create the Deployment
+
+```bash
+styrminctl deployments create <driver> <version> <environment-name> \
+  --name <deployment-name>
+```
+
+The full signature:
+
+```text
+styrminctl deployments create DRIVER VERSION [ENVIRONMENT]
+                              [--id ENVIRONMENT_ID]
+                              [--cluster CLUSTER_NAME | --cluster-id CLUSTER_ID]
+                              [--name DEPLOYMENT_NAME]
+                              [--config JSON | @PATH]
+```
+
+| Argument | What it is |
+|---|---|
+| `DRIVER` *(positional, required)* | Application Driver name (e.g. `infrahub`). |
+| `VERSION` *(positional, required)* | Application Version to deploy (e.g. `1.6.0`). |
+| `ENVIRONMENT` *(positional, optional)* | Environment name. Pass this **or** `--id`, not both. |
+| `--id` | Environment UUID. Alternative to the positional name. |
+| `--cluster` | Cluster context name. Defaults to `default`. Mutually exclusive with `--cluster-id`. |
+| `--cluster-id` | Cluster UUID. Mutually exclusive with `--cluster`. |
+| `--name` | Custom Deployment name. Auto-generated if omitted. |
+| `--config` | JSON-encoded Deployment config, inline or `@path/to/file.json`. |
+
+**Example — deploy Infrahub 1.6.0 into the `local` Environment:**
+
+```bash
+styrminctl deployments create infrahub 1.6.0 local --name infrahub-dev
+```
+
+**Example — load config from a file:**
+
+```bash
+styrminctl deployments create infrahub 1.6.0 local \
+  --name infrahub-dev \
+  --config @./infrahub-dev.config.json
+```
+
+:::note Driver parameters and service overrides via CLI
+
+`styrminctl deployments create` does not currently accept driver
+**parameters** or **service name overrides** — only the deployment
+`config`. If your driver declares required parameters, use the UI or
+the GraphQL `deploy` mutation directly. Parameters will land on the
+CLI in a future release.
+
+:::
+
+#### 3. Watch the result
+
+The command returns immediately with the in-progress task and
+Deployment ID:
+
+```text
+✓ Deployment in progress (deployment: 5a…, task: 9c…)
+  Status: PENDING
+```
+
+Poll the Deployment to see it progress:
+
+```bash
+styrminctl deployments get <deployment-id>
+```
+
+The `Status` field transitions through `PENDING` → `DEPLOYING` →
+`RUNNING`.
+
+</TabItem>
+
+<TabItem value="graphql" label="GraphQL">
+
+#### 1. (Optional) Discover what's available
+
+Two queries you'll typically run first:
+
+```graphql
+query ListEnvironments {
+  environments {
+    id
+    name
+    cluster { id name }
+  }
+}
+
+query ListApplicationDrivers {
+  applicationDrivers {
+    id
+    name
+    versions {
+      id
+      version
+      supportedVersions
+      defaultVersion
+      parameters { name label kind default values }
+    }
+  }
+}
+```
+
+Pick the Environment you want to deploy into and the Application
+Driver Version that matches the application + version you want.
+
+#### 2. Run the `deploy` mutation
+
+```graphql
+mutation Deploy(
+  $driver: String!
+  $version: String
+  $environmentId: UUID
+  $environmentName: String
+  $clusterId: UUID
+  $clusterName: String
+  $name: String
+  $config: JSON
+  $parameters: JSON
+  $serviceNameOverrides: [ServiceNameOverride!]
+) {
+  deploy(
+    driver: $driver
+    version: $version
+    environmentId: $environmentId
+    environmentName: $environmentName
+    clusterId: $clusterId
+    clusterName: $clusterName
+    name: $name
+    config: $config
+    parameters: $parameters
+    serviceNameOverrides: $serviceNameOverrides
+  ) {
+    id
+    type
+    status
+    message
+    deploymentId
+  }
+}
+```
+
+| Variable | Type | Required | What it is |
+|---|---|---|---|
+| `driver` | `String!` | yes | Application Driver name (e.g. `"infrahub"`). |
+| `version` | `String` | no | Application Version. Required if the driver has no `defaultVersion`. |
+| `environmentId` | `UUID` | one of | Target Environment by UUID. Mutually exclusive with `environmentName`. |
+| `environmentName` | `String` | one of | Target Environment by name. Mutually exclusive with `environmentId`. |
+| `clusterId` | `UUID` | optional | Cluster by UUID. Resolved together with `environmentName`. |
+| `clusterName` | `String` | optional | Cluster context name. Defaults to `"default"`. |
+| `name` | `String` | no | Custom Deployment name; auto-generated if omitted. |
+| `config` | `JSON` | no | Deployment-level configuration object. |
+| `parameters` | `JSON` | no | Driver parameters, as a flat key→value object. |
+| `serviceNameOverrides` | `[ServiceNameOverride!]` | no | Renames driver-published services. Each entry is `{ driverServiceName, overrideName }`. |
+
+**Example variables:**
+
+```json
+{
+  "driver": "infrahub",
+  "version": "1.6.0",
+  "environmentName": "local",
+  "name": "infrahub-dev",
+  "parameters": { "storage_size": 20 }
+}
+```
+
+#### 3. Watch the result
+
+The mutation returns a `Task`:
+
+```json
+{
+  "data": {
+    "deploy": {
+      "id": "9c1b…",
+      "type": "CREATE_INSTANCE",
+      "status": "PENDING",
+      "message": null,
+      "deploymentId": "5a3f…"
+    }
+  }
+}
+```
+
+The Deployment exists immediately (you can query it by
+`deploymentId`); the cluster catches up asynchronously through the
+reconciliation loop. Poll the Deployment's `status` field — it
+transitions through `PENDING` → `DEPLOYING` → `RUNNING`.
+
+```graphql
+query GetDeployment($id: UUID!) {
+  deployment(id: $id) {
+    id
+    name
+    status
+    applicationVersion
+  }
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+### Verify the deployment is running
+
+Regardless of which surface you used, the same three checks confirm
+the deploy worked:
+
+1. **Deployment `status` is `RUNNING`** — visible in the UI, via
+   `styrminctl deployments get`, or via the `deployment` GraphQL
+   query.
+2. **Components are reporting pods** — the Deployment detail page
+   lists each Component the driver declared and the pods backing it.
+3. **The driver's `setup` hook completed** — if the driver declares
+   `setup` actions, they all reported success. Failures are surfaced
+   in the Deployment's task list.
+
+If the Deployment is stuck in `DEPLOYING` for more than a couple of
+minutes, check the agent logs in the target cluster
+(`kubectl logs -n styrmin-system deploy/styrmin-agent`); the most
+common causes are an unreachable Helm chart and a parameter the
+driver expected but didn't receive.
+
+### Related
+
+- [Concepts and Architecture → What is an Application Driver?](../concepts-and-architecture/what-is-a-driver.md)
+  — the unit you're picking from on the form.
+- [Drivers → Loading a driver](../drivers/loading-drivers.md) — if
+  the driver you want isn't registered yet.
+- [Concepts and Architecture → Reconciliation](../concepts-and-architecture/reconciliation.md)
+  — what happens between "create Deployment" and "cluster matches".
+- [Upgrade an application / deployment](./upgrade-deployment.md) —
+  the next thing you'll do with this Deployment.
