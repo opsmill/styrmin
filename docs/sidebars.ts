@@ -29,7 +29,6 @@ const sidebars: SidebarsConfig = {
       link: {type: 'doc', id: 'installation/index'},
       items: [
         'installation/quickstart',
-        'installation/prerequisites',
         'installation/digitalocean',
         'installation/gke',
         'installation/vcluster-local',

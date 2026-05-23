@@ -57,7 +57,7 @@ You need the following on your `PATH`:
 - [`doctl`](https://docs.digitalocean.com/reference/doctl/how-to/install/) — DigitalOcean CLI
 - [`helm`](https://helm.sh/docs/intro/install/) ≥ 3.8 (OCI support)
 - [`kubectl`](https://kubernetes.io/docs/tasks/tools/)
-- [`styrminctl`](./prerequisites.md) — the Styrmin CLI
+- [`styrminctl`](./quickstart.md) — the Styrmin CLI
 
 You also need:
 
