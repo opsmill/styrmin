@@ -117,10 +117,12 @@ async def test_apply_state_passes_ids_not_remediation_to_prefect() -> None:
     try:
         with (
             patch(
-                "styrmin_backend.services.reconciliation.Comparator"
+                "styrmin_backend.services.reconciliation.Comparator",
+                create=True,
             ) as mock_comparator,
             patch(
-                "styrmin_backend.services.reconciliation.Remediator"
+                "styrmin_backend.services.reconciliation.Remediator",
+                create=True,
             ) as mock_remediator,
         ):
             # Configure mocked Remediator so execution reaches our assertions
