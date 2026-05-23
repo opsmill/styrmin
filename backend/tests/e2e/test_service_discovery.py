@@ -111,3 +111,85 @@ async def test_service_discovery_between_apps(
                         f"Expected HTTP 200, got {data['status']}: {data['body']}"
                     )
                 await asyncio.sleep(3)
+
+
+@pytest.mark.api_only(
+    reason="Rename flow drives SDK calls + kubectl/kr8s only; the "
+    "[ui-chromium] variant would just re-run the same SDK call.",
+)
+@pytest.mark.ci
+async def test_service_rename_creates_new_kubernetes_service(
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    vcluster: dict,
+) -> None:
+    """#237: renaming a deployed service must create the new Service object."""
+    kubeconfig_path = vcluster["kubeconfig_path"]
+
+    dep = await scenario_driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": "before-rename"}
+        ],
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=dep.id, timeout=300.0
+    )
+
+    namespace = f"styrmin-{dep.id}"
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+
+    # Pre-rename: Service "before-rename" exists.
+    before = await _find_service(kr8s_api, namespace, "before-rename")
+    assert before is not None, "Pre-rename Service should exist"
+
+    # Trigger the rename via the same path that #237 broke.
+    await scenario_driver.update_deployment(
+        deployment_id=dep.id,
+        config={
+            "service_name_overrides": [
+                {"driverServiceName": "simple-app", "overrideName": "after-rename"}
+            ]
+        },
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=dep.id, timeout=300.0
+    )
+
+    # Post-rename: Service "after-rename" exists. Without the #237 fix this
+    # is the assertion that fails — the K8s Service for the new name is
+    # never created.
+    after_deadline = time.time() + 120
+    after = None
+    while time.time() < after_deadline:
+        after = await _find_service(kr8s_api, namespace, "after-rename")
+        if after is not None:
+            break
+        await asyncio.sleep(5)
+    assert after is not None, (
+        "Post-rename Service 'after-rename' was never created. "
+        "This is #237 regressing — the new instance's context did not "
+        "include the renamed service."
+    )
+
+
+async def _find_service(
+    kr8s_api: kr8s.asyncio.Api, namespace: str, name_substring: str
+) -> AsyncService | None:
+    services: list[AsyncService] = [
+        svc
+        async for svc in AsyncService.list(namespace=namespace, api=kr8s_api)
+        if isinstance(svc, AsyncService)
+    ]
+    return next(
+        (
+            svc
+            for svc in services
+            if name_substring in svc.name and "postgresql" not in svc.name
+        ),
+        None,
+    )
