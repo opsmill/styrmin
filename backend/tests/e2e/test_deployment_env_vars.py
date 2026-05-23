@@ -248,6 +248,7 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
     env_vars_second_deployment: dict,
     vcluster: dict,
     scenario_driver: ScenarioDriver,
+    driver_mode: str,
     _env_vars_driver_bound: None,
 ) -> None:
     """Quickstart Step 2: set ``OTEL_EXPORTER_OTLP_ENDPOINT`` at the
@@ -282,16 +283,27 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
         ),
     )
     # The two deployments may need to reconcile; their fixtures already
-    # parked them in RUNNING. Wait until the env var lands on each — in
-    # parallel, since the task-worker reconciles them concurrently.
-    await asyncio.gather(
-        scenario_driver.wait_for_deployment_running(
+    # parked them in RUNNING. Wait until the env var lands on each. In
+    # API mode wait in parallel — the task-worker reconciles them
+    # concurrently. In UI mode wait_for_deployment_running drives
+    # ``page.goto`` on the session-scoped Playwright Page; parallel calls
+    # would race with ``net::ERR_ABORTED``, so fall back to serial.
+    if driver_mode == "api":
+        await asyncio.gather(
+            scenario_driver.wait_for_deployment_running(
+                deployment_id=deployment_a_id, timeout=RECONCILE_TIMEOUT_SECONDS
+            ),
+            scenario_driver.wait_for_deployment_running(
+                deployment_id=deployment_b_id, timeout=RECONCILE_TIMEOUT_SECONDS
+            ),
+        )
+    else:
+        await scenario_driver.wait_for_deployment_running(
             deployment_id=deployment_a_id, timeout=RECONCILE_TIMEOUT_SECONDS
-        ),
-        scenario_driver.wait_for_deployment_running(
+        )
+        await scenario_driver.wait_for_deployment_running(
             deployment_id=deployment_b_id, timeout=RECONCILE_TIMEOUT_SECONDS
-        ),
-    )
+        )
 
     dep_a, dep_b = await asyncio.gather(
         _wait_for_pod_template(

@@ -102,20 +102,21 @@ async def env_update_environment(
 async def env_update_three_deployments(
     env_update_environment: dict,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    driver_mode: str,
     simple_app_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> list[dict]:
     """Three peer ``simple-app`` deployments parked in RUNNING — the
     fanout target set for the US1 headline scenario.
+
+    In API mode the three deployments are created concurrently via
+    ``asyncio.gather`` — the styrmin task-worker reconciles them in
+    parallel and the SDK calls are independent HTTP transactions. In UI
+    mode they are created sequentially because the session-scoped
+    Playwright ``Page`` is a single browser tab; concurrent ``page.goto``
+    calls on one tab race and abort with ``net::ERR_ABORTED``.
     """
     driver, _ = session_scenario_driver
-    # All three deployments share `env_update_environment` and use the
-    # `simple-app` driver, which declares a service named `simple-app`. The
-    # platform enforces service-name uniqueness within an environment, so each
-    # deployment must rename its service (see `test_pod_scheduling.py` for the
-    # same pattern). Deployments are created in parallel via ``asyncio.gather``
-    # — each one waits ~60–90s for Helm install + reconcile, and the styrmin
-    # task-worker handles them concurrently.
 
     async def _create_one(suffix: str) -> dict:
         deployment = await driver.create_deployment(
@@ -139,7 +140,9 @@ async def env_update_three_deployments(
             "kubeconfig_path": vcluster["kubeconfig_path"],
         }
 
-    return list(await asyncio.gather(*(_create_one(s) for s in ("a", "b", "c"))))
+    if driver_mode == "api":
+        return list(await asyncio.gather(*(_create_one(s) for s in ("a", "b", "c"))))
+    return [await _create_one(s) for s in ("a", "b", "c")]
 
 
 @pytest.fixture
@@ -164,6 +167,7 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
     env_update_three_deployments: list[dict],
     vcluster: dict,
     scenario_driver: ScenarioDriver,
+    driver_mode: str,
     _env_update_driver_bound: None,
 ) -> None:
     """Quickstart Steps 1-3: ``updateEnvironment`` with a single env var
@@ -200,10 +204,12 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
     )
 
     # Each deployment must reconcile to RUNNING with the new env entry on
-    # container[0] of its rendered pod template. Wait on the three
-    # deployments in parallel — the styrmin task-worker reconciles them
-    # concurrently, so serializing the test-side waits just stacks idle
-    # polling latency on top.
+    # container[0] of its rendered pod template. In API mode wait on the
+    # three deployments in parallel — the styrmin task-worker reconciles
+    # them concurrently, so serializing the test-side waits just stacks
+    # idle polling latency on top. In UI mode the wait_for_deployment_running
+    # path drives ``page.goto`` on the session-scoped Playwright Page;
+    # parallel calls would race and abort with ``net::ERR_ABORTED``.
     async def _check_one(dep: dict) -> None:
         await scenario_driver.wait_for_deployment_running(
             deployment_id=dep["deployment_id"], timeout=RECONCILE_TIMEOUT_SECONDS
@@ -232,7 +238,11 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
             f"var on container[0] — saw {envs}"
         )
 
-    await asyncio.gather(*(_check_one(dep) for dep in env_update_three_deployments))
+    if driver_mode == "api":
+        await asyncio.gather(*(_check_one(dep) for dep in env_update_three_deployments))
+    else:
+        for dep in env_update_three_deployments:
+            await _check_one(dep)
 
     # Each deployment's timeline gained at least one new entry whose
     # ``contextDiff`` mentions the env-config change. We don't lock the
