@@ -217,6 +217,9 @@ async def update_deployment(
         deployment_config: The new configuration for the deployment (optional).
         deployment_parameters: Parameter values to merge with existing parameters.
         deployment_name: New name for the deployment (optional).
+        service_name_overrides: Optional mapping of driver service name → desired
+            resolved name. Renames the corresponding DeployedService rows before
+            instance generation so the new instance context carries the updated names.
 
     Raises:
         InvalidContextError: If the context is invalid.
@@ -239,7 +242,6 @@ async def update_deployment(
         )
 
     async with uow:
-        # Get the deployment
         deployment = await uow.deployments.find(id=deployment_id)
         if deployment is None:
             raise DeploymentNotFoundError(
@@ -251,6 +253,13 @@ async def update_deployment(
             deployment.id,
             deployment.application_version,
         )
+
+        # ---- Phase 1: validate + write user intent to the DB ----
+        # Everything that affects the *desired-state context* must land here
+        # so that `generate_instance_from_deployment` in phase 2 reads
+        # already-committed rows. This is the #237 fix: the previous ordering
+        # ran reconcile_services_on_upgrade AFTER instance generation, so the
+        # context carried the old service name.
 
         if deployment_config is not None:
             # Reject component-level env var blocks targeting components the
@@ -276,17 +285,12 @@ async def update_deployment(
             except InvalidDeploymentContextError as e:
                 raise InvalidContextError() from e
 
-        # Update deployment name if provided
         if deployment_name is not None:
             try:
                 validated_name = validate_deployment_name(deployment_name)
             except ValueError as e:
                 raise DeploymentNameValidationError(str(e)) from e
 
-            # Allow same-name no-op. Conflict check is scoped to the
-            # current environment and ignores tombstoned deployments
-            # (so an operator can rename onto the name of a previously-
-            # deleted deployment in the same env).
             if validated_name != deployment.name:
                 existing = await uow.deployments.get_by_name(
                     validated_name, deployment.environment_id
@@ -298,17 +302,15 @@ async def update_deployment(
                     )
                 deployment.name = validated_name
 
-        # Update the deployment config if provided
         if deployment_config is not None:
             deployment.config = deployment_config
-        # Ensure dedicated ingress controller is healthy if configured
+
         await _ensure_ingress_controller(
             environment_id=deployment.environment_id,
             uow=uow,
             created_by_user_id=deployment.created_by_user_id,
         )
 
-        # Merge and validate parameters if provided
         if deployment_parameters is not None:
             application_driver_version = await uow.application_driver_versions.get(
                 id=deployment.application_driver_version_id
@@ -316,55 +318,24 @@ async def update_deployment(
             assert application_driver_version is not None, (
                 "Application driver version not found"
             )
-
-            # Merge: existing values as base, new values override
             merged_parameters = {
                 **deployment.parameters,
                 **deployment_parameters,
             }
-
             definitions = parse_parameter_definitions(
                 application_driver_version.parameters
             )
-            resolved_parameters = validate_parameter_values(
+            deployment.parameters = validate_parameter_values(
                 definitions=definitions,
                 values=merged_parameters,
             )
-            deployment.parameters = resolved_parameters
 
-        # Get the current instance
-        current_instance = deployment.active_instance
-
-        # Generate the instance from the updated deployment
-        logger.info("Generating new instance from updated deployment config")
-        new_instance = await generate_instance_from_deployment(
-            deployment=deployment,
-            uow=uow,
-        )
-
-        # Set the new instance as the active one
-        deployment.set_active_instance(instance=new_instance)
-        deployment.set_status(DeploymentState.PENDING)
-        logger.info("New instance set as active: instance_id={}", new_instance.id)
-
-        # Get the task from the reconciliation workflow
-        task = await apply_state(
-            deployment=deployment, current_instance=current_instance, uow=uow
-        )
-
-        await uow.deployments.save(deployment=deployment)
-
-        # Reconcile deployed services if overrides changed
         if service_name_overrides is not None:
-            application_driver_version_for_services = (
-                await uow.application_driver_versions.get(
-                    id=deployment.application_driver_version_id
-                )
+            adv_for_services = await uow.application_driver_versions.get(
+                id=deployment.application_driver_version_id
             )
-            assert application_driver_version_for_services is not None
-            service_defs = parse_service_definitions(
-                application_driver_version_for_services.services
-            )
+            assert adv_for_services is not None
+            service_defs = parse_service_definitions(adv_for_services.services)
             if service_defs:
                 await reconcile_services_on_upgrade(
                     deployment_id=deployment.id,
@@ -374,6 +345,40 @@ async def update_deployment(
                     service_name_overrides=service_name_overrides,
                 )
 
+        await uow.deployments.save(deployment=deployment)
+        await uow.commit()
+        logger.info(
+            "Phase 1 committed: deployment_id={} (intent written to DB)",
+            deployment.id,
+        )
+
+    # ---- Phase 2: regenerate instance against the freshly-committed DB ----
+    # Re-entry is a logical boundary, NOT a new session. SqlModelUnitOfWork is
+    # not nest-safe — __aenter__ rebuilds repository handles on the same
+    # underlying AsyncSession. The phase separation is enforced by the
+    # commit() above, which finalises phase 1's writes so that the find()
+    # below performs a real DB round-trip and reads the post-commit state.
+
+    async with uow:
+        deployment = await uow.deployments.find(id=deployment_id)
+        assert deployment is not None, (
+            "Deployment vanished between phase 1 commit and phase 2 load"
+        )
+
+        current_instance = deployment.active_instance
+        new_instance = await generate_instance_from_deployment(
+            deployment=deployment,
+            uow=uow,
+        )
+        deployment.set_active_instance(instance=new_instance)
+        deployment.set_status(DeploymentState.PENDING)
+        logger.info("New instance set as active: instance_id={}", new_instance.id)
+
+        task = await apply_state(
+            deployment=deployment, current_instance=current_instance, uow=uow
+        )
+
+        await uow.deployments.save(deployment=deployment)
         await uow.tasks.save(task=task)
         await uow.commit()
 

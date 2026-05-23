@@ -161,10 +161,6 @@ def _stub_task(*, deployment_id: UUID) -> Task:
     )
 
 
-@pytest.mark.xfail(
-    reason="Awaiting #237 fix in Task 1.3 and fakes in Task 1.2",
-    strict=True,
-)
 @pytest.mark.asyncio
 @patch("styrmin_backend.services.deployment.apply_state", new_callable=AsyncMock)
 async def test_service_rename_produces_instance_with_new_name(
@@ -210,4 +206,11 @@ async def test_service_rename_produces_instance_with_new_name(
     assert resolved_names == {"api-v2"}, (
         f"Expected the new instance context to carry the renamed service "
         f"'api-v2', got {resolved_names}. This is #237."
+    )
+    # Phase separation invariant: update_deployment must commit twice — once
+    # for user intent (parameters/config/services) and once for the new
+    # instance. If a future refactor collapses these into a single UoW we
+    # regress to #237; this assertion is the canary.
+    assert uow.commit_count == 2, (
+        f"Expected 2 commits (phase 1 + phase 2), got {uow.commit_count}"
     )
