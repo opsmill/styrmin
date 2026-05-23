@@ -25,20 +25,13 @@ from tests.unit.services.fakes import (
     FakeHelmRepositoryRepository,
     FakeHelmChartRepository,
     FakeApplicationRepository,
+    FakeApplicationDriverVersionRepository,
     FakeApplicationInstanceRepository,
     FakeActionRepository,
     FakeTaskRepository,
     FakeDeployedServiceRepository,
     FakeDeploymentRepository,
 )
-
-# ``FakeApplicationRepository`` implements ``ApplicationDriverVersionRepository``
-# (it is typed as ``FakeRepository[ApplicationDriverVersion]``).  We alias it
-# here so the UoW construction below uses a name that matches the slot it fills;
-# ``_make_uow`` passes two *separate* instances — one for
-# ``application_driver_versions``, one for ``application_drivers`` — so they
-# don't share state.
-FakeApplicationDriverVersionRepository = FakeApplicationRepository
 
 
 def _make_uow() -> FakeUnitOfWork:

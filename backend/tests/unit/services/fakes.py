@@ -166,6 +166,12 @@ class FakeApplicationRepository(
         return None
 
 
+# FakeApplicationRepository is already a FakeRepository[ApplicationDriverVersion]
+# that implements ApplicationDriverVersionRepository; this alias just names it
+# after the interface it implements, for clarity at the point of use.
+FakeApplicationDriverVersionRepository = FakeApplicationRepository
+
+
 class FakeHelmChartRepository(FakeRepository[HelmChart], HelmChartRepository):
     async def get_by_name_version(self, name: str, version: str):
         for chart in self.models:
