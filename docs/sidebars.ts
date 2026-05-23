@@ -46,6 +46,17 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Operations',
+      link: {type: 'doc', id: 'operations/index'},
+      items: [
+        'operations/clone-environment',
+        'operations/back-up-stack',
+        'operations/restore-stack',
+        'operations/run-upgrade',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Concepts and Architecture',
       link: {type: 'doc', id: 'concepts-and-architecture/index'},
       items: [
