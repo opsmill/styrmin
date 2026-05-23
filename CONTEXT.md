@@ -232,6 +232,23 @@ _Avoid_: silently running both variants when only one is meaningful.
 Per Constitution §V, every new feature MUST ship an E2E test covering the user-visible flow, executed and observed to pass. Skipping requires explicit reviewer approval; the implementer cannot decide unilaterally.
 _Avoid_: "we'll add E2E later", "covered by unit tests" without naming which one and getting approval.
 
+### Shard (CI E2E shard)
+
+A subset of E2E tests routed together to one matrix cell of the
+`e2e-tests` GitHub Actions job. Each shard boots its own vcluster.
+Tests opt into a shard via a bare-name `@pytest.mark.shard_<name>`
+marker. See [`dev/guides/e2e-parallelism.md`](dev/guides/e2e-parallelism.md).
+
+The six shards: `readonly`, `mutation_small`, `mutation_large`,
+`ingress`, `backup`, `infrahub`.
+
+### Test pod
+
+The set of tests that share one vcluster + styrmin install in CI —
+operationally, one shard's worth of tests. Synonym for "shard
+contents". Use "shard" when talking about the CI matrix cell; use
+"test pod" when talking about the test grouping itself.
+
 ## Relationships
 
 - **Styrmin** is composed of **server**, **agent**, **CLI**, **SDK**, and **frontend**.
