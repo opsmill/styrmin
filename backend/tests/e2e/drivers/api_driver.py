@@ -226,7 +226,10 @@ class ApiScenarioDriver:
                         application_version=deployment.application_version,
                         instance_id=instance_id,
                     )
-            await asyncio.sleep(10)
+            # 2s poll: a deployment becoming ready within the same second sees
+            # up to a 2s detection lag (was 10s). The styrmin-server's
+            # `GetDeployment` GraphQL is a single DB lookup — cheap to poll.
+            await asyncio.sleep(2)
         status = deployment.status if deployment else "unknown"
         raise ScenarioTimeout(
             f"Deployment {deployment_id} did not reach 'running' after {timeout}s "
