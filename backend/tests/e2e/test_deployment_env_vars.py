@@ -39,7 +39,7 @@ from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.helpers.workloads import _wait_for_pod_template
 
 pytestmark = [
-    pytest.mark.shard_mutation_large,
+    pytest.mark.shard_env_vars,
 ]
 
 RECONCILE_TIMEOUT_SECONDS = 480.0

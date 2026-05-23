@@ -22,12 +22,16 @@ Two viable parallelism approaches:
 
 ## Decision
 
-Use **GitHub Actions matrix sharding** with 5 shards × 2 entrypoints
+Use **GitHub Actions matrix sharding** with 7 shards × 2 entrypoints
 (minus exclusions for entirely api_only / ui_only shards). Each cell
 boots its own vcluster.
 
-Shards: `readonly`, `mutation_small`, `mutation_large`, `ingress`,
-`backup`. Routing via bare-name `@pytest.mark.shard_<name>` markers
+Shards: `readonly`, `mutation_small`, `env_vars`, `env_update`,
+`pod_scheduling`, `ingress`, `backup`. The `env_vars` / `env_update`
+/ `pod_scheduling` shards are file-level splits of what was initially
+one `mutation_large` shard — each of those files is heavy enough
+individually that running them in parallel cells halves the slowest-cell
+wall-clock. Routing via bare-name `@pytest.mark.shard_<name>` markers
 enforced by a conftest collection hook. Additional shards (e.g. for
 the Infrahub app stack) will be added when their tests are written.
 

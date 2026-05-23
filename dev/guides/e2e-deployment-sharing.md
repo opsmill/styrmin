@@ -24,8 +24,9 @@ The test creates and tears down its own deployment with a unique name.
 Multiple isolated-mutation tests can run in the same shard but each one
 must not depend on another's state.
 
-- **Shard:** `mutation_small` (short tests), `mutation_large` (long
-  tests like env-vars matrix, environment_update, pod_scheduling), or
+- **Shard:** `mutation_small` (short tests), or one of the file-specific
+  shards: `env_vars` (test_deployment_env_vars.py), `env_update`
+  (test_environment_update.py), `pod_scheduling` (test_pod_scheduling.py),
   `ingress` (the standalone ingress-controller suite).
 - **Examples:** `test_deploy_app`, `test_delete_deployment_*`,
   `test_environment_update`.
@@ -49,16 +50,20 @@ its own shard.
 1. Does the test mutate state? → No: `readonly`.
 2. Does it touch Velero or MinIO? → Yes: `backup`.
 3. Is it an ingress-controller test? → Yes: `ingress`.
-4. Is it expected to run for >2 minutes? → Yes: `mutation_large`,
-   otherwise `mutation_small`.
+4. Is it in `test_deployment_env_vars.py` / `test_environment_update.py`
+   / `test_pod_scheduling.py`? → Yes: `env_vars` / `env_update` /
+   `pod_scheduling` respectively (file-level shards split out for
+   parallelism — these files are heavy individually).
+5. Otherwise → `mutation_small`.
 
 ## Adding a new test
 
 Every `@pytest.mark.ci` E2E test MUST carry exactly one bare-name
 shard marker (`shard_readonly`, `shard_mutation_small`,
-`shard_mutation_large`, `shard_ingress`, or `shard_backup`). The
-conftest collection hook (`enforce_shard_markers`) rejects the
-suite if any test is missing the marker or carries more than one.
+`shard_env_vars`, `shard_env_update`, `shard_pod_scheduling`,
+`shard_ingress`, or `shard_backup`). The conftest collection hook
+(`enforce_shard_markers`) rejects the suite if any test is missing
+the marker or carries more than one.
 
 Apply at module scope when all tests in the file share the same
 shard:

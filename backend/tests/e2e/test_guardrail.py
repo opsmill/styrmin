@@ -24,7 +24,9 @@ markers =
     ci: foo
     shard_readonly: foo
     shard_mutation_small: foo
-    shard_mutation_large: foo
+    shard_env_vars: foo
+    shard_env_update: foo
+    shard_pod_scheduling: foo
     shard_ingress: foo
     shard_backup: foo
 """

@@ -62,7 +62,9 @@ _VALID_SHARDS = frozenset(
     {
         "shard_readonly",
         "shard_mutation_small",
-        "shard_mutation_large",
+        "shard_env_vars",
+        "shard_env_update",
+        "shard_pod_scheduling",
         "shard_ingress",
         "shard_backup",
     }
