@@ -298,4 +298,10 @@ markers = [
     "ci: e2e tests included in the CI pipeline",
     "api_only(reason): scenario runs only through the API entrypoint; [ui] variant is skipped with the given reason",
     "ui_only(reason): scenario runs only through the UI entrypoint; [api] variant is skipped with the given reason",
+    "shard_readonly: CI shard for read-only tests sharing the session deployment. See dev/guides/e2e-parallelism.md.",
+    "shard_mutation_small: CI shard for short tests that create/delete their own deployment.",
+    "shard_mutation_large: CI shard for long mutation tests (env-vars matrix, environment_update, pod_scheduling).",
+    "shard_ingress: CI shard for the standalone ingress-controller suite.",
+    "shard_backup: CI shard for Velero / MinIO heavy tests (cluster-wide state).",
+    "shard_infrahub: CI shard for the Infrahub app stack.",
 ]
