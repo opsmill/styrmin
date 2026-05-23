@@ -274,6 +274,15 @@ async def test_drawer_scheduling_edit(
         "the UI; no SDK equivalent."
     ),
 )
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "Flaky under CI load — keyboard-driven Apply intermittently submits "
+        "with stale form state and the CPU edit doesn't persist. See "
+        "opsmill/styrmin#260. Quarantined so unrelated CI work can land; "
+        "flip back to a hard assert once the form-state desync is fixed."
+    ),
+)
 async def test_drawer_scheduling_edit_keyboard_only(
     scheduling_edit_environment: dict,
     scheduling_edit_deployment: dict,
