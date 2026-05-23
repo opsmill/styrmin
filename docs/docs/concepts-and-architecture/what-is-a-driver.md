@@ -146,8 +146,6 @@ The reference repository ships a set of example drivers under
 | [`infrahub`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/infrahub) | OpsMill's Infrahub deployment driver — full-featured reference. |
 | [`semaphore`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/semaphore) | Semaphore CI deployment driver. |
 | [`slurpit`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/slurpit) | Slurpit network discovery driver. |
-| [`simple-app`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/simple-app) | Minimal driver used in tests — read this first if you want a small, complete example. |
-| [`db-test`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/db-test) | A driver fixture used by the test suite. |
 
 When you run [`uv run invoke start`](../installation/quickstart.md), the
 bootstrap step loads `infrahub` and `semaphore` automatically so you have
