@@ -15,7 +15,6 @@ The six shards:
 | `mutation_large` | `shard_mutation_large` | Long mutation tests (parametrized or multi-stage) | `test_deployment_env_vars`, `test_environment_update`, `test_pod_scheduling` |
 | `ingress` | `shard_ingress` | Ingress-controller scenarios (its own LB / IP allocation) | `test_ingress_controller` |
 | `backup` | `shard_backup` | Velero + MinIO; cluster-wide state | `test_backup_restore*` |
-| `infrahub` | `shard_infrahub` | The Infrahub app stack | (none yet — matrix cells excluded until tests exist) |
 
 The two entrypoints (`api`, `ui`) continue as before — each shard runs
 twice unless every test in it carries `@pytest.mark.api_only` or
@@ -35,8 +34,7 @@ the marker rules.
        pytest.mark.shard_readonly,          # one of shard_readonly,
                                              # shard_mutation_small,
                                              # shard_mutation_large,
-                                             # shard_ingress, shard_backup,
-                                             # shard_infrahub
+                                             # shard_ingress, shard_backup
    ]
    ```
 

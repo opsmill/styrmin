@@ -65,7 +65,6 @@ _VALID_SHARDS = frozenset(
         "shard_mutation_large",
         "shard_ingress",
         "shard_backup",
-        "shard_infrahub",
     }
 )
 

@@ -27,7 +27,6 @@ markers =
     shard_mutation_large: foo
     shard_ingress: foo
     shard_backup: foo
-    shard_infrahub: foo
 """
 
 

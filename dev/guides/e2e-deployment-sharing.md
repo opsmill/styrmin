@@ -35,21 +35,19 @@ must not depend on another's state.
 ### Heavy / exclusive
 
 The test depends on cluster-wide infrastructure that conflicts with
-other tests: Velero backups, MinIO, the Infrahub stack. It MUST live in
-its own file and its own shard.
+other tests: Velero backups, MinIO. It MUST live in its own file and
+its own shard.
 
-- **Shard:** `backup` (Velero / MinIO) or `infrahub` (the Infrahub
-  app stack).
+- **Shard:** `backup` (Velero / MinIO).
 - **Examples:** `test_backup_restore`, `test_backup_restore_databases`.
-- **Review rule:** Adding a new "heavy" test category? Open an ADR
-  first — the matrix YAML in `.github/workflows/ci.yml` needs a new
-  shard entry.
+- **Review rule:** Adding a new "heavy" test category (e.g. for the
+  Infrahub stack)? Open an ADR first — the matrix YAML in
+  `.github/workflows/ci.yml` needs a new shard entry.
 
 ## Decision tree
 
 1. Does the test mutate state? → No: `readonly`.
-2. Does it touch Velero, MinIO, or Infrahub? → Yes: `backup` or
-   `infrahub`.
+2. Does it touch Velero or MinIO? → Yes: `backup`.
 3. Is it an ingress-controller test? → Yes: `ingress`.
 4. Is it expected to run for >2 minutes? → Yes: `mutation_large`,
    otherwise `mutation_small`.
@@ -58,10 +56,9 @@ its own file and its own shard.
 
 Every `@pytest.mark.ci` E2E test MUST carry exactly one bare-name
 shard marker (`shard_readonly`, `shard_mutation_small`,
-`shard_mutation_large`, `shard_ingress`, `shard_backup`, or
-`shard_infrahub`). The conftest collection hook
-(`enforce_shard_markers`) rejects the suite if any test is missing
-the marker or carries more than one.
+`shard_mutation_large`, `shard_ingress`, or `shard_backup`). The
+conftest collection hook (`enforce_shard_markers`) rejects the
+suite if any test is missing the marker or carries more than one.
 
 Apply at module scope when all tests in the file share the same
 shard:

@@ -239,8 +239,8 @@ A subset of E2E tests routed together to one matrix cell of the
 Tests opt into a shard via a bare-name `@pytest.mark.shard_<name>`
 marker. See [`dev/guides/e2e-parallelism.md`](dev/guides/e2e-parallelism.md).
 
-The six shards: `readonly`, `mutation_small`, `mutation_large`,
-`ingress`, `backup`, `infrahub`.
+The five shards: `readonly`, `mutation_small`, `mutation_large`,
+`ingress`, `backup`.
 
 ### Test pod
 

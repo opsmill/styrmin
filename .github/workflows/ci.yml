@@ -208,14 +208,10 @@ jobs:
       fail-fast: false
       matrix:
         entrypoint: [api, ui]
-        shard: [readonly, mutation_small, mutation_large, ingress, backup, infrahub]
+        shard: [readonly, mutation_small, mutation_large, ingress, backup]
         exclude:
           # Shards that are entirely api_only (no UI surface to exercise)
           - {entrypoint: ui, shard: backup}
-          # Infrahub shard has no tests yet — remove these excludes once
-          # at least one test carries @pytest.mark.shard_infrahub.
-          - {entrypoint: api, shard: infrahub}
-          - {entrypoint: ui, shard: infrahub}
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8

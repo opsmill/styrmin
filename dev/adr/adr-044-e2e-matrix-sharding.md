@@ -22,13 +22,14 @@ Two viable parallelism approaches:
 
 ## Decision
 
-Use **GitHub Actions matrix sharding** with 6 shards × 2 entrypoints
-(minus exclusions for entirely api_only / ui_only shards, and for
-shards with no tests yet). Each cell boots its own vcluster.
+Use **GitHub Actions matrix sharding** with 5 shards × 2 entrypoints
+(minus exclusions for entirely api_only / ui_only shards). Each cell
+boots its own vcluster.
 
 Shards: `readonly`, `mutation_small`, `mutation_large`, `ingress`,
-`backup`, `infrahub`. Routing via bare-name `@pytest.mark.shard_<name>`
-markers enforced by a conftest collection hook.
+`backup`. Routing via bare-name `@pytest.mark.shard_<name>` markers
+enforced by a conftest collection hook. Additional shards (e.g. for
+the Infrahub app stack) will be added when their tests are written.
 
 ## Consequences
 

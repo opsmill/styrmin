@@ -303,5 +303,4 @@ markers = [
     "shard_mutation_large: CI shard for long mutation tests (env-vars matrix, environment_update, pod_scheduling).",
     "shard_ingress: CI shard for the standalone ingress-controller suite.",
     "shard_backup: CI shard for Velero / MinIO heavy tests (cluster-wide state).",
-    "shard_infrahub: CI shard for the Infrahub app stack.",
 ]
