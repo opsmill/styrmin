@@ -21,6 +21,7 @@ from styrmin_backend.db.models import (
     Restore,
     RestoreStatus,
     Task,
+    Utility,
 )
 from styrmin_backend.domain.models import Deployment as DeploymentEntity
 from styrmin_backend.repository.backup_storage_location import (
@@ -49,6 +50,7 @@ from styrmin_backend.repository.helm_chart import HelmChartRepository
 from styrmin_backend.repository.helm_repository import HelmRepositoryRepository
 from styrmin_backend.repository.restore import RestoreRepository
 from styrmin_backend.repository.tasks import TaskRepository
+from styrmin_backend.repository.utility import UtilityRepository
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 ModelType = TypeVar("ModelType")
@@ -162,6 +164,12 @@ class FakeApplicationRepository(
             ):
                 return application
         return None
+
+
+# FakeApplicationRepository is already a FakeRepository[ApplicationDriverVersion]
+# that implements ApplicationDriverVersionRepository; this alias just names it
+# after the interface it implements, for clarity at the point of use.
+FakeApplicationDriverVersionRepository = FakeApplicationRepository
 
 
 class FakeHelmChartRepository(FakeRepository[HelmChart], HelmChartRepository):
@@ -448,6 +456,20 @@ class FakeBackupScheduleRepository(
         return [s for s in self.models if s.deployment_id == deployment_id]
 
 
+class FakeUtilityRepository(FakeRepository[Utility], UtilityRepository):
+    """Fake utility repository — returns an empty list by default.
+
+    Tests that need specific utility rows can pre-populate ``self.models``
+    directly after constructing ``FakeUnitOfWork``.
+    """
+
+    async def get_by_kind(self, kind: str) -> Utility | None:
+        for u in self.models:
+            if u.kind == kind:
+                return u
+        return None
+
+
 class _FakeSession:
     async def refresh(self, obj: object) -> None:
         pass
@@ -471,6 +493,7 @@ class FakeUnitOfWork(UnitOfWork):
     backup_schedules: FakeBackupScheduleRepository  # type: ignore[assignment]
     pod_statuses: FakePodStatusRepository  # type: ignore[assignment]
     deployment_statuses: FakeDeploymentStatusRepository  # type: ignore[assignment]
+    utilities: FakeUtilityRepository  # type: ignore[assignment]
 
     def __init__(
         self,
@@ -491,6 +514,7 @@ class FakeUnitOfWork(UnitOfWork):
         backup_storage_locations: FakeBackupStorageLocationRepository | None = None,
         pod_statuses: FakePodStatusRepository | None = None,
         deployment_statuses: FakeDeploymentStatusRepository | None = None,
+        utilities: FakeUtilityRepository | None = None,
     ):
         self.backup_storage_locations = (
             backup_storage_locations or FakeBackupStorageLocationRepository()
@@ -518,6 +542,7 @@ class FakeUnitOfWork(UnitOfWork):
         self.deployment_statuses = (
             deployment_statuses or FakeDeploymentStatusRepository()
         )
+        self.utilities = utilities or FakeUtilityRepository()
         self.session = _FakeSession()  # type: ignore[assignment]
 
         self.committed = False

@@ -94,6 +94,12 @@ invalid-await = "ignore" # Upstream: kopf decorators wrap async handlers in Prot
 missing-argument = "ignore" # Upstream: kopf decorator Protocol signatures include extra params not passed in tests
 
 [[tool.ty.overrides]]
+include = ["backend/tests/**"]
+
+[tool.ty.overrides.rules]
+no-matching-overload = "ignore" # Tests intentionally call flows/functions with the target signature before it is implemented (RED phase)
+
+[[tool.ty.overrides]]
 include = ["driver/examples/db-test/src/**"]
 
 [tool.ty.overrides.rules]

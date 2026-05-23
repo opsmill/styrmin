@@ -8,8 +8,6 @@ from styrmin_backend.domain.models import (
     TaskType,
 )
 from styrmin_backend.services.context import generate_context_from_deployment
-from styrmin_backend.services.reconciliation.diffs.comparison import Comparator
-from styrmin_backend.services.reconciliation.remediation import Remediator
 from styrmin_backend.services.unit_of_work import UnitOfWork
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
@@ -30,10 +28,7 @@ async def generate_instance_from_deployment(
         context=context,
     )
 
-    # Tag the context with the instance id so the CRD carries it and
-    # the server can correlate agent status reports to the active instance.
     instance.context.instance.id = instance.id
-
     return instance
 
 
@@ -41,64 +36,47 @@ async def generate_instance_from_deployment(
 async def apply_state(
     deployment: Deployment,
     current_instance: Instance | None,
-    uow: UnitOfWork,
+    uow: UnitOfWork,  # noqa: ARG001  retained for caller-shape stability
     prefect_manager: PrefectManager = Depends(get_manager),
 ) -> Task:
-    """Reconciliate the running application instance with the new one."""
+    """Schedule a reconciliation pass for the deployment.
+
+    Server-side responsibility: create the Task row and kick off the
+    Prefect ``apply_state`` flow with the IDs the flow needs to load
+    fresh state. The flow itself computes the diff and remediation
+    against a freshly-loaded deployment — see
+    `agent/tasks/orchestration.py::apply_state`. Pre-#237 this function
+    pre-computed a Remediation and serialized it across the Prefect
+    boundary, which froze the plan against a snapshot of the world and
+    produced staleness bugs whenever DB writes landed between the
+    snapshot and the flow start.
+    """
     new_instance = deployment.active_instance
-
-    logger.info(
-        "Reconciling deployment_id={}: current_instance={} -> new_instance={}",
-        deployment.id,
-        current_instance.id if current_instance else "None",
-        new_instance.id if new_instance else "None",
-    )
-
-    # Generate diffs between the current instance and the new one
-    comparator = Comparator(
-        current_instance=current_instance,
-        new_instance=new_instance,
-    )
-    diff_report = comparator.compare()
-    logger.info("Diff report: {}", diff_report)
-
-    # Generate remediation for the diffs
-    remediator = Remediator(uow=uow)
-    remediation = await remediator.generate_remediation(diff_report=diff_report)
-
-    if remediation:
-        logger.info(
-            "Remediation generated: type={} instance_id={}",
-            remediation.type,
-            remediation.instance.id,
-        )
-    else:
-        logger.info("No remediation needed, deployment is up to date")
+    assert new_instance is not None, "Deployment must have an active instance"
 
     task = Task.create(
-        type=TaskType(remediation.type.value) if remediation else TaskType.NOOP,
+        type=TaskType.NOOP,
         deployment_id=deployment.id,
         prefect_flow_run_id=None,
     )
 
     logger.info(
-        "Running apply_state workflow: task_id={} task_type={}",
+        "Scheduling apply_state flow: task_id={} deployment_id={} "
+        "current_instance_id={} new_instance_id={}",
         task.id,
-        task.type,
+        deployment.id,
+        current_instance.id if current_instance else None,
+        new_instance.id,
     )
+
     flow_info = await prefect_manager.run_action(
         action=PrefectAction.APPLY_STATE,
         parameters={
-            "deployment_id": deployment.id,
-            "remediation": remediation,
             "task_id": task.id,
+            "deployment_id": deployment.id,
+            "new_instance_id": new_instance.id,
+            "current_instance_id": (current_instance.id if current_instance else None),
         },
     )
     task.prefect_flow_run_id = flow_info.id
-    logger.info(
-        "Apply state workflow started: task_id={} flow_run_id={}",
-        task.id,
-        flow_info.id,
-    )
-
     return task
