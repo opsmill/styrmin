@@ -68,7 +68,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          to: '/docs/category/application-drivers',
+          to: '/docs/drivers/what-is-a-driver',
           label: 'Drivers',
           position: 'left',
         },
@@ -95,7 +95,7 @@ const config: Config = {
             },
             {
               label: 'Application Drivers',
-              to: '/docs/category/application-drivers',
+              to: '/docs/drivers/what-is-a-driver',
             },
           ],
         },
