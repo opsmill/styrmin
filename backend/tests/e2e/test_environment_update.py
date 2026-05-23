@@ -35,6 +35,7 @@ Scenarios:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any, AsyncGenerator
 
@@ -108,13 +109,15 @@ async def env_update_three_deployments(
     fanout target set for the US1 headline scenario.
     """
     driver, _ = session_scenario_driver
-    deployments: list[dict] = []
     # All three deployments share `env_update_environment` and use the
     # `simple-app` driver, which declares a service named `simple-app`. The
     # platform enforces service-name uniqueness within an environment, so each
     # deployment must rename its service (see `test_pod_scheduling.py` for the
-    # same pattern).
-    for suffix in ("a", "b", "c"):
+    # same pattern). Deployments are created in parallel via ``asyncio.gather``
+    # — each one waits ~60–90s for Helm install + reconcile, and the styrmin
+    # task-worker handles them concurrently.
+
+    async def _create_one(suffix: str) -> dict:
         deployment = await driver.create_deployment(
             driver="simple-app",
             version="0.1.0",
@@ -130,14 +133,13 @@ async def env_update_three_deployments(
         deployment = await driver.wait_for_deployment_running(
             deployment_id=deployment.id
         )
-        deployments.append(
-            {
-                "deployment_id": str(deployment.id),
-                "namespace": f"styrmin-{deployment.id}",
-                "kubeconfig_path": vcluster["kubeconfig_path"],
-            }
-        )
-    return deployments
+        return {
+            "deployment_id": str(deployment.id),
+            "namespace": f"styrmin-{deployment.id}",
+            "kubeconfig_path": vcluster["kubeconfig_path"],
+        }
+
+    return list(await asyncio.gather(*(_create_one(s) for s in ("a", "b", "c"))))
 
 
 @pytest.fixture
@@ -198,8 +200,11 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
     )
 
     # Each deployment must reconcile to RUNNING with the new env entry on
-    # container[0] of its rendered pod template.
-    for dep in env_update_three_deployments:
+    # container[0] of its rendered pod template. Wait on the three
+    # deployments in parallel — the styrmin task-worker reconciles them
+    # concurrently, so serializing the test-side waits just stacks idle
+    # polling latency on top.
+    async def _check_one(dep: dict) -> None:
         await scenario_driver.wait_for_deployment_running(
             deployment_id=dep["deployment_id"], timeout=RECONCILE_TIMEOUT_SECONDS
         )
@@ -226,6 +231,8 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
             f"deployment {dep['deployment_id']} did not pick up the env "
             f"var on container[0] — saw {envs}"
         )
+
+    await asyncio.gather(*(_check_one(dep) for dep in env_update_three_deployments))
 
     # Each deployment's timeline gained at least one new entry whose
     # ``contextDiff`` mentions the env-config change. We don't lock the
