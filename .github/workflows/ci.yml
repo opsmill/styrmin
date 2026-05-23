@@ -197,52 +197,21 @@ jobs:
       - name: Run Python SDK unit tests
         run: uv run pytest -v python_sdk/tests
 
-  e2e-tests-api:
-    name: E2E Tests (API entrypoint)
+  e2e-tests:
+    name: E2E Tests (${{ matrix.entrypoint }} / ${{ matrix.shard }})
     needs: ["files-changed", "pre-commit-hooks"]
     if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
     runs-on:
       group: huge-runners
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v6
-      - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
-      - uses: azure/setup-helm@v4
-      - uses: azure/setup-kubectl@v4
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - run: uv sync
-      - name: Install tini
-        run: apt-get update && apt-get install -y tini
-      - name: "Set environment variables"
-        run: |
-          RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
-          echo "VCLUSTER_DIR=/var/lib/github/${RUNNER_NAME}/_temp/.vcluster/config.json" >> $GITHUB_ENV
-          echo "STYRMIN_IMAGE_VER=local-${{ runner.name }}-${{ github.sha }}" >> $GITHUB_ENV
-      - name: Enable E2E tracing
-        if: inputs.enable-e2e-tracing == true
-        run: |
-          echo "OTEL_SERVICE_NAME=styrmin-e2e-tests-api" >> $GITHUB_ENV
-          echo "OTEL_EXPORTER_OTLP_ENDPOINT=${{ secrets.TRACING_ENDPOINT }}" >> $GITHUB_ENV
-          echo "OTEL_EXPORTER_OTLP_HEADERS=${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}" >> $GITHUB_ENV
-          echo "OTEL_EXPORTER_OTLP_PROTOCOL=grpc" >> $GITHUB_ENV
-          echo "OTEL_RESOURCE_ATTRIBUTES=github.run_id=${GITHUB_RUN_ID}" >> $GITHUB_ENV
-          echo "PYTEST_OTEL_ARGS=--export-traces" >> $GITHUB_ENV
-      # Use tini to properly propagate cancellation signal to pytest, so that containers are properly destroyed
-      - name: Run E2E tests (API variants)
-        run: exec tini -s -g -- uv run pytest -v -m ci -k "api-chromium" ${PYTEST_OTEL_ARGS:-} backend/tests/e2e
-
-  e2e-tests-ui:
-    name: E2E Tests (UI entrypoint)
-    needs: ["files-changed", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
-    runs-on:
-      group: huge-runners
-    timeout-minutes: 60
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        entrypoint: [api, ui]
+        shard: [readonly, mutation_small, mutation_large, ingress, backup, infrahub]
+        exclude:
+          # Shards that are entirely api_only (no UI surface to exercise)
+          - {entrypoint: ui, shard: backup}
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
@@ -256,14 +225,12 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - run: uv sync
       - name: Install Playwright browser + system deps
+        if: matrix.entrypoint == 'ui'
         run: |
           uv run playwright install chromium
           uv run playwright install-deps chromium
-      # Build an LD_PRELOAD shim that fails NETLINK_ROUTE sockets with
-      # EAFNOSUPPORT so Chromium's AddressTrackerLinux takes its graceful
-      # "assume always online" path. Avoids netlink-driven flake on
-      # self-hosted runners without touching the browser binary.
       - name: Build no-netlink shim
+        if: matrix.entrypoint == 'ui'
         run: |
           apt-get update && apt-get install -y gcc
           gcc -shared -fPIC -Wall -Wextra \
@@ -276,24 +243,28 @@ jobs:
         run: |
           RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
           echo "VCLUSTER_DIR=/var/lib/github/${RUNNER_NAME}/_temp/.vcluster/config.json" >> $GITHUB_ENV
-          echo "STYRMIN_IMAGE_VER=local-${{ runner.name }}-${{ github.sha }}" >> $GITHUB_ENV
+          echo "STYRMIN_IMAGE_VER=local-${{ runner.name }}-${{ github.sha }}-${{ matrix.shard }}-${{ matrix.entrypoint }}" >> $GITHUB_ENV
       - name: Enable E2E tracing
         if: inputs.enable-e2e-tracing == true
         run: |
-          echo "OTEL_SERVICE_NAME=styrmin-e2e-tests-ui" >> $GITHUB_ENV
+          echo "OTEL_SERVICE_NAME=styrmin-e2e-${{ matrix.entrypoint }}-${{ matrix.shard }}" >> $GITHUB_ENV
           echo "OTEL_EXPORTER_OTLP_ENDPOINT=${{ secrets.TRACING_ENDPOINT }}" >> $GITHUB_ENV
           echo "OTEL_EXPORTER_OTLP_HEADERS=${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}" >> $GITHUB_ENV
           echo "OTEL_EXPORTER_OTLP_PROTOCOL=grpc" >> $GITHUB_ENV
           echo "OTEL_RESOURCE_ATTRIBUTES=github.run_id=${GITHUB_RUN_ID}" >> $GITHUB_ENV
           echo "PYTEST_OTEL_ARGS=--export-traces" >> $GITHUB_ENV
-      # Use tini to properly propagate cancellation signal to pytest, so that containers are properly destroyed
-      - name: Run E2E tests (UI variants)
-        run: exec tini -s -g -- uv run pytest -v -m ci -k "ui-chromium" ${PYTEST_OTEL_ARGS:-} backend/tests/e2e
+      - name: Run E2E tests
+        run: |
+          exec tini -s -g -- uv run pytest -v \
+            -m "ci and shard_${{ matrix.shard }}" \
+            -k "${{ matrix.entrypoint }}-chromium" \
+            ${PYTEST_OTEL_ARGS:-} \
+            backend/tests/e2e
       - name: Upload Playwright diagnostic artifacts
-        if: failure()
+        if: failure() && matrix.entrypoint == 'ui'
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-test-results
+          name: playwright-test-results-${{ matrix.shard }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
