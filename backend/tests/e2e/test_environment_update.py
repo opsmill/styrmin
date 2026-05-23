@@ -102,23 +102,22 @@ async def env_update_environment(
 async def env_update_three_deployments(
     env_update_environment: dict,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-    driver_mode: str,
     simple_app_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> list[dict]:
     """Three peer ``simple-app`` deployments parked in RUNNING — the
     fanout target set for the US1 headline scenario.
 
-    In API mode the three deployments are created concurrently via
-    ``asyncio.gather`` — the styrmin task-worker reconciles them in
-    parallel and the SDK calls are independent HTTP transactions. In UI
-    mode they are created sequentially because the session-scoped
-    Playwright ``Page`` is a single browser tab; concurrent ``page.goto``
-    calls on one tab race and abort with ``net::ERR_ABORTED``.
+    Deployments are created sequentially. Concurrent ``createDeployment``
+    mutations against the same environment surface a backend race
+    (``ScenarioActionError: An internal error occurred`` — observed on
+    CI run 26338948679, api/mutation_large): two of three parallel
+    creates failed with an internal error from the styrmin server.
+    Until that race is fixed in the server, the fixture stays serial.
     """
     driver, _ = session_scenario_driver
-
-    async def _create_one(suffix: str) -> dict:
+    deployments: list[dict] = []
+    for suffix in ("a", "b", "c"):
         deployment = await driver.create_deployment(
             driver="simple-app",
             version="0.1.0",
@@ -134,15 +133,14 @@ async def env_update_three_deployments(
         deployment = await driver.wait_for_deployment_running(
             deployment_id=deployment.id
         )
-        return {
-            "deployment_id": str(deployment.id),
-            "namespace": f"styrmin-{deployment.id}",
-            "kubeconfig_path": vcluster["kubeconfig_path"],
-        }
-
-    if driver_mode == "api":
-        return list(await asyncio.gather(*(_create_one(s) for s in ("a", "b", "c"))))
-    return [await _create_one(s) for s in ("a", "b", "c")]
+        deployments.append(
+            {
+                "deployment_id": str(deployment.id),
+                "namespace": f"styrmin-{deployment.id}",
+                "kubeconfig_path": vcluster["kubeconfig_path"],
+            }
+        )
+    return deployments
 
 
 @pytest.fixture
