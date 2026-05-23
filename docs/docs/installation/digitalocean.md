@@ -1,7 +1,7 @@
 ---
 title: DigitalOcean
 sidebar_position: 2
-description: Deploy Styrmin on a DigitalOcean Kubernetes cluster (DOKS) with Spaces-backed backups and hostname-based ingress.
+description: Deploy Styrmin on a DigitalOcean Kubernetes cluster (DOKS) with Spaces-backed backups and hostname-based ingress, using the published Styrmin container image and Helm chart.
 ---
 
 ## DigitalOcean
@@ -13,6 +13,13 @@ cluster (DOKS), wiring it up with two DigitalOcean Load Balancers
 DigitalOcean Spaces bucket for Velero backups. At the end you'll deploy
 **Infrahub** and **Semaphore** through Styrmin and reach them via
 hostname-based ingress.
+
+The guide assumes you're installing the **published** Styrmin
+container image and Helm chart from
+`registry.opsmill.io` — there's no source checkout, no `docker build`,
+and no `helm dependency update` step. If you need to run Styrmin from
+a local source checkout (e.g. while contributing), see the
+[Quickstart](./quickstart.md) instead.
 
 ### Architecture
 
@@ -48,18 +55,19 @@ hostname-based ingress.
 You need the following on your `PATH`:
 
 - [`doctl`](https://docs.digitalocean.com/reference/doctl/how-to/install/) — DigitalOcean CLI
-- [`helm`](https://helm.sh/docs/intro/install/) ≥ 3.x
+- [`helm`](https://helm.sh/docs/intro/install/) ≥ 3.8 (OCI support)
 - [`kubectl`](https://kubernetes.io/docs/tasks/tools/)
-- [Docker](https://docs.docker.com/get-docker/) (for building the Styrmin image)
-- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) (for running `styrminctl`)
+- [`styrminctl`](./prerequisites.md) — the Styrmin CLI
 
 You also need:
 
 - A DigitalOcean account with billing enabled.
 - A registered domain (this guide uses `demo.styrmin.app` for the control
   plane and `*.styrmin.io` for applications — substitute your own).
-- A container registry that DOKS can pull from. The README uses an OVH
-  Cloud registry; any public or DOKS-reachable private registry works.
+
+The Styrmin container image and Helm chart are pulled from the public
+OCI registry at `registry.opsmill.io` — no DigitalOcean-side container
+registry setup is required.
 
 ### 1. Authenticate with DigitalOcean
 
@@ -83,7 +91,7 @@ Spaces bucket in the same region as your cluster (this guide uses
    ```
 
 Record the returned **Access Key** and **Secret Key**. You'll need them
-in [step 11](#11-create-a-backup-storage-location).
+in [step 10](#10-create-a-backup-storage-location).
 
 ### 3. One-time infrastructure setup
 
@@ -131,7 +139,7 @@ Configure the following DNS records at your registrar:
 | `*.styrmin.io`     | `A`  | `<APPS_LB_IP>`   |
 
 If you use your own hostnames, substitute them in every subsequent step
-(including [step 9](#9-create-a-cluster-record) where the FQDN suffix is
+(including [step 8](#8-create-a-cluster-record) where the FQDN suffix is
 recorded on the Cluster).
 
 #### 3d. Kubernetes cluster
@@ -154,24 +162,7 @@ kubectl get nodes  # verify connectivity
 
 You should see two `Ready` nodes.
 
-### 5. Build and push the Styrmin image
-
-DOKS needs to be able to pull `styrmin:latest` from a registry it can
-reach. Substitute your own registry URL in the command below — the
-example uses an OVH container registry:
-
-```shell
-docker buildx build \
-  --platform linux/amd64 \
-  -t <registry>/opsmill/styrmin:latest \
-  -f docker/Dockerfile \
-  --push .
-```
-
-If the registry is private, also create an `imagePullSecret` in the
-`styrmin` namespace and reference it from `demo/do-values.yaml`.
-
-### 6. Install Traefik (front ingress controller)
+### 5. Install Traefik (front ingress controller)
 
 Install Traefik as the cluster-wide ingress controller, reusing the
 front load balancer you created in step 3a:
@@ -193,26 +184,46 @@ The `load-balancer-id` annotation tells the DigitalOcean cloud
 controller to attach this Service to the existing load balancer rather
 than provisioning a new one.
 
-### 7. Install Styrmin via Helm
+### 6. Install Styrmin from the published Helm chart
+
+Create a small values file with the public hostname and ingress class
+for your install. Save it as `do-values.yaml`:
+
+```yaml
+# do-values.yaml
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: traefik
+  hosts:
+    - host: demo.styrmin.app
+      paths:
+        - path: /
+          pathType: Prefix
+```
+
+Then install Styrmin from the OCI registry. The chart already pins its
+agent subchart and Bitnami dependencies, so no `helm dependency update`
+is needed. Pin to a specific version — `0.1.24` at time of writing — or
+omit `--version` to take the latest published release.
 
 ```shell
-helm dependency update helm/agent
-helm dependency update helm/styrmin
-helm upgrade --install styrmin helm/styrmin \
-  --dependency-update \
+helm upgrade --install styrmin \
+  oci://registry.opsmill.io/opsmill/chart/styrmin \
+  --version 0.1.24 \
   --create-namespace \
   -n styrmin \
-  -f demo/do-values.yaml \
+  -f do-values.yaml \
   --wait \
   --timeout 5m
 ```
 
-`demo/do-values.yaml` is the DigitalOcean-flavoured values file (image
-repository, host, ingress class, …). Review it before installing — at
-minimum you'll want to point `image.repository` at the registry you
-pushed to in step 5.
+The chart defaults `image.registry` to `registry.opsmill.io/opsmill`,
+so the cluster pulls the matching server and agent images directly from
+the public registry — no `image.repository` override and no
+`imagePullSecret` are required.
 
-### 8. Access the Styrmin API
+### 7. Access the Styrmin API
 
 Once Helm finishes, the GraphQL API is available through the front load
 balancer at:
@@ -227,27 +238,27 @@ For local debugging you can still port-forward:
 kubectl port-forward svc/styrmin-server 8000:8000 -n styrmin &
 ```
 
-From here on, every step uses [`styrminctl`](../installation/quickstart.md)
-against the public URL. Export it once:
+From here on, every step uses [`styrminctl`](./quickstart.md) against
+the public URL. Export it once:
 
 ```shell
 export STYRMIN_SERVER_ADDRESS=https://demo.styrmin.app
 ```
 
-### 9. Create a Cluster record
+### 8. Create a Cluster record
 
 Register the DOKS cluster with Styrmin. The `fqdn_suffix` is the wildcard
 domain you configured in step 3c, and `standard_storage` selects the
 DigitalOcean block-storage CSI driver as the default `StorageClass`:
 
 ```shell
-uv run styrminctl clusters create do-demo \
+styrminctl clusters create do-demo \
   -c '{"fqdn_suffix": "styrmin.io", "standard_storage": {"storage_class": "do-block-storage"}}'
 ```
 
 Record the returned `id` — referred to as `<CLUSTER_ID>` below.
 
-### 10. Create an Environment
+### 9. Create an Environment
 
 The environment carries the per-environment ingress configuration. The
 `dedicated_ingress.service.annotations` block tells the per-environment
@@ -255,7 +266,7 @@ Traefik controller (which Styrmin provisions for you) to attach to the
 **apps** load balancer from step 3b:
 
 ```shell
-uv run styrminctl environments create demo <CLUSTER_ID> \
+styrminctl environments create demo <CLUSTER_ID> \
   -c '{"ip_whitelist": ["0.0.0.0/0"], "dedicated_ingress": {"service": {"annotations": {"kubernetes.digitalocean.com/load-balancer-id": "<APPS_LB_ID>"}}}}'
 ```
 
@@ -264,13 +275,13 @@ Record the returned `id` — referred to as `<ENVIRONMENT_ID>` below.
 > **Tighten the IP whitelist before production.** `0.0.0.0/0` is open to
 > the public internet — use a real allowlist for non-demo workloads.
 
-### 11. Create a backup storage location
+### 10. Create a backup storage location
 
 Register the Spaces bucket from step 2 as a backup storage location.
 Substitute your Spaces credentials:
 
 ```shell
-uv run styrminctl backup-locations create do-spaces \
+styrminctl backup-locations create do-spaces \
   --endpoint https://ams3.digitaloceanspaces.com \
   --bucket styrmin-velero \
   --region ams3 \
@@ -280,44 +291,44 @@ uv run styrminctl backup-locations create do-spaces \
 
 Record the returned `id` — referred to as `<BSL_ID>` below.
 
-### 12. Assign the backup storage location to the environment
+### 11. Assign the backup storage location to the environment
 
 Link the BSL to the environment so every deployment in that environment
 backs up to the same Spaces bucket:
 
 ```shell
-uv run styrminctl backup-locations assign <ENVIRONMENT_ID> <BSL_ID>
+styrminctl backup-locations assign <ENVIRONMENT_ID> <BSL_ID>
 ```
 
-### 13. Load application drivers
+### 12. Load application drivers
 
-The bundled driver examples are baked into the Docker image at
-`/styrmin/drivers/`. Load the ones you want to deploy:
+The bundled driver examples are baked into the published Styrmin image
+at `/styrmin/drivers/`. Load the ones you want to deploy:
 
 ```shell
-uv run styrminctl drivers load-local-version /styrmin/drivers/infrahub
-uv run styrminctl drivers load-local-version /styrmin/drivers/semaphore
+styrminctl drivers load-local-version /styrmin/drivers/infrahub
+styrminctl drivers load-local-version /styrmin/drivers/semaphore
 ```
 
 To load a driver from a git repository (public or private) instead, see
 [Loading a Driver](../drivers/loading-drivers.md).
 
-### 14. Deploy Infrahub
+### 13. Deploy Infrahub
 
 ```shell
-uv run styrminctl deployments create infrahub 1.6.0 <ENVIRONMENT_ID>
+styrminctl deployments create infrahub 1.6.0 <ENVIRONMENT_ID>
 ```
 
-### 15. Deploy Semaphore
+### 14. Deploy Semaphore
 
 ```shell
-uv run styrminctl deployments create semaphore 2.16.47 <ENVIRONMENT_ID>
+styrminctl deployments create semaphore 2.16.47 <ENVIRONMENT_ID>
 ```
 
-### 16. Monitor deployments
+### 15. Monitor deployments
 
 ```shell
-uv run styrminctl deployments get <DEPLOYMENT_ID>
+styrminctl deployments get <DEPLOYMENT_ID>
 ```
 
 You can also forward the Prefect UI for a richer view of async tasks:
@@ -328,7 +339,7 @@ kubectl port-forward svc/prefect-server 4200:4200 -n styrmin &
 
 Then open [http://localhost:4200](http://localhost:4200).
 
-### 17. Access applications via Ingress
+### 16. Access applications via Ingress
 
 Once the deployments are running, Styrmin's per-environment Traefik
 controller publishes them via hostname-based routing through the apps
@@ -370,6 +381,13 @@ To fully clean up, also delete:
 **Helm install hangs on Traefik.** The `<FRONT_LB_ID>` annotation must
 match a load balancer that already exists in the same region as the
 cluster. Run `doctl compute load-balancer list` to confirm.
+
+**`helm pull` / `helm install` fails with `not found` on the OCI URL.**
+The published chart lives at
+`oci://registry.opsmill.io/opsmill/chart/styrmin`. Confirm your Helm
+version is ≥ 3.8 (`helm version`) — earlier releases don't speak OCI.
+If you pinned `--version` to a release that doesn't exist, drop the
+flag temporarily to take the latest, then re-pin to a real version.
 
 **`do-block-storage` PVCs stay `Pending`.** Make sure the cluster has the
 DigitalOcean block-storage CSI driver enabled (it is on by default for
