@@ -36,7 +36,7 @@ deployment's Instance — a re-resolution only happens when something
 changes and a new Instance is created. This means the driver always
 sees a stable, complete picture; it never has to call back to the
 server for "the latest value of X". See
-[Reconciliation](../how-it-works/reconciliation.md) for why this
+[Reconciliation](../concepts-and-architecture/reconciliation.md) for why this
 matters.
 
 ### Structure
@@ -248,5 +248,5 @@ need.
 
 - [**Creating a Driver**](./creating-a-driver.md) — write your first
   driver using the Context.
-- [**Reconciliation**](../how-it-works/reconciliation.md) — why the
+- [**Reconciliation**](../concepts-and-architecture/reconciliation.md) — why the
   Context is frozen per Instance.

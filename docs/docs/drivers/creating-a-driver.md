@@ -182,7 +182,7 @@ already sets is better than fighting it.
 
 Per component, decide _how_ it should be backed up. The choices come
 from a fixed set of **backup strategies** — full list and explanation
-in [Backups and restores](../how-it-works/backups-and-restores.md).
+in [Backups and restores](../concepts-and-architecture/backups-and-restores.md).
 Stateless components are typically left out entirely (no `backup`
 block); stateful components pick the strategy that matches the
 storage:
@@ -281,7 +281,7 @@ A few notes:
 - **The hostname** for an external service follows the pattern
   `<service-name>-<deployment-id>.<fqdn-suffix>`, and the template can
   reference it via `{{ services['<service-name>'].primary_fqdn }}`.
-- See [Ingress and networking](../how-it-works/ingress-and-networking.md)
+- See [Ingress and networking](../concepts-and-architecture/ingress-and-networking.md)
   for what actually happens with these declarations.
 
 ### Step 7: Lifecycle actions — only when you need them
@@ -351,7 +351,7 @@ Use the built-in primitives (`stop_components`, `start_components`,
 calling Kubernetes directly. They're idempotent, tested, and
 consistent across drivers.
 
-See [Lifecycle hooks and actions](../how-it-works/hooks-and-actions.md)
+See [Lifecycle hooks and actions](../concepts-and-architecture/hooks-and-actions.md)
 for the full hook/mode model.
 
 ### Step 8: Parameters — only when you need them
@@ -422,9 +422,9 @@ Before you call the driver done:
 
 - [**The Context**](./context.md) — full reference for the fields your
   template and actions receive.
-- [**Lifecycle hooks and actions**](../how-it-works/hooks-and-actions.md) —
+- [**Lifecycle hooks and actions**](../concepts-and-architecture/hooks-and-actions.md) —
   the hook / mode model and the available primitives.
-- [**Backups and restores**](../how-it-works/backups-and-restores.md) —
+- [**Backups and restores**](../concepts-and-architecture/backups-and-restores.md) —
   full list of backup strategies, what each one does.
 - [**Loading a Driver**](./loading-drivers.md) — how to ship your
   driver to production (git repository or custom image).
