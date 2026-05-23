@@ -13,7 +13,7 @@ driver — a 3-tier FastAPI + PostgreSQL application — because it's the
 smallest complete driver in the repo and it covers every concept this
 page introduces.
 
-Read [What is an Application Driver?](./what-is-a-driver.md) and
+Read [What is an Application Driver?](../concepts-and-architecture/what-is-a-driver.md) and
 [The Context](./context.md) first if you haven't.
 
 ### Before you start

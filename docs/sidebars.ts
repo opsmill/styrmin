@@ -39,7 +39,6 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Drivers',
       items: [
-        'drivers/what-is-a-driver',
         'drivers/loading-drivers',
         'drivers/context',
         'drivers/creating-a-driver',
@@ -50,6 +49,9 @@ const sidebars: SidebarsConfig = {
       label: 'Concepts and Architecture',
       link: {type: 'doc', id: 'concepts-and-architecture/index'},
       items: [
+        'concepts-and-architecture/core-concepts',
+        'concepts-and-architecture/what-is-a-driver',
+        'concepts-and-architecture/glossary',
         'concepts-and-architecture/architecture',
         'concepts-and-architecture/reconciliation',
         'concepts-and-architecture/operator-and-crds',

@@ -56,6 +56,13 @@ const config: Config = {
             from: '/docs/getting-started/quickstart',
             to: '/docs/installation/quickstart',
           },
+          // What is an Application Driver? moved from Drivers to
+          // Concepts and Architecture — it's a conceptual page that was
+          // mixed in with task-oriented driver guides.
+          {
+            from: '/docs/drivers/what-is-a-driver',
+            to: '/docs/concepts-and-architecture/what-is-a-driver',
+          },
           {
             from: '/docs/how-it-works/architecture',
             to: '/docs/concepts-and-architecture/architecture',
@@ -125,7 +132,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          to: '/docs/drivers/what-is-a-driver',
+          to: '/docs/drivers/loading-drivers',
           label: 'Drivers',
           position: 'left',
         },
@@ -152,7 +159,7 @@ const config: Config = {
             },
             {
               label: 'Application Drivers',
-              to: '/docs/drivers/what-is-a-driver',
+              to: '/docs/drivers/loading-drivers',
             },
           ],
         },

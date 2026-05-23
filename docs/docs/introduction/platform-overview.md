@@ -80,7 +80,7 @@ how to deploy, configure, back up, and upgrade a given application. One
 driver per application; without one, Styrmin doesn't know how to handle
 the app.
 
-Read more in [What is an Application Driver?](../drivers/what-is-a-driver.md).
+Read more in [What is an Application Driver?](../concepts-and-architecture/what-is-a-driver.md).
 
 #### Cluster
 
@@ -123,7 +123,7 @@ human-executed runbook.
 
 - [**Quickstart**](../installation/quickstart.md) — bring up the bundled vCluster demo
   end-to-end in two commands.
-- [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
+- [**What is an Application Driver?**](../concepts-and-architecture/what-is-a-driver.md) —
   the unit of deployment, in depth.
 - [**Local laptop (vcluster)**](../installation/vcluster-local.md) — the
   manual version of the quickstart, with every step unpacked.

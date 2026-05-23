@@ -386,7 +386,7 @@ changes to the values file require `helm upgrade` to take effect.
 
 - [**Platform Overview**](../introduction/platform-overview.md) — the
   conceptual model behind cluster, environment, deployment.
-- [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
+- [**What is an Application Driver?**](../concepts-and-architecture/what-is-a-driver.md) —
   the unit of deployment you just loaded.
 - [**DigitalOcean**](./digitalocean.md) — when you're ready to move off
   your laptop.

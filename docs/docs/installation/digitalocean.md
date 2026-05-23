@@ -389,7 +389,7 @@ exact bucket name.
 
 - [**Platform Overview**](../introduction/platform-overview.md) — how the
   pieces fit together once Styrmin is up.
-- [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
+- [**What is an Application Driver?**](../concepts-and-architecture/what-is-a-driver.md) —
   understand the unit you're deploying.
 - [**Creating a Driver**](../drivers/creating-a-driver.md) — write your
   own driver and load it onto the cluster.
