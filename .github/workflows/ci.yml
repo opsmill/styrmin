@@ -229,6 +229,11 @@ jobs:
     timeout-minutes: 40
     strategy:
       fail-fast: false
+      # Cap concurrent cells so Docker network IP pools on shared self-hosted
+      # runners don't collide. Observed flake without this cap: 'failed to
+      # create network ... Pool overlaps with other one on this address space'
+      # when too many vcluster cells start on the same runner concurrently.
+      max-parallel: 6
       matrix:
         entrypoint: [api, ui]
         shard: [readonly, mutation_small, configuration, env_vars, env_update, pod_scheduling, ingress, backup]
