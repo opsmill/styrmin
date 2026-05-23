@@ -57,6 +57,17 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Reference',
+      link: {type: 'doc', id: 'reference/index'},
+      items: [
+        'reference/styrmindeployment',
+        'reference/styrminctl',
+        'reference/driver-api',
+        'reference/configuration',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Concepts and Architecture',
       link: {type: 'doc', id: 'concepts-and-architecture/index'},
       items: [
