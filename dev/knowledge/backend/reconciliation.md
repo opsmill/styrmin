@@ -32,7 +32,9 @@ Current Instance ─┘                            |
 
 ## Entry Point: `apply_state`
 
-Located in `services/reconciliation/__init__.py`.
+The reconciliation entry point is split across a FastAPI/server side and a Prefect side.
+
+### Server-side: `services/reconciliation/__init__.py::apply_state`
 
 ```python
 @inject(cast_result=False)  # type: ignore[arg-type]
@@ -47,20 +49,50 @@ async def apply_state(
 Called by service functions in `services/deployment.py`:
 
 - `deploy_application()` - First deployment (current_instance is None)
-- `update_deployment()` - Config change
+- `update_deployment()` - Config change (uses a two-UoW pattern — see below)
 - `update_deployment_version()` - Version change
 - `refresh_deployment()` - Re-reconcile
 
-Steps:
+Server-side responsibility (post-#237 boundary):
 
-1. Read `deployment.active_instance` as the new instance
-2. Create a `Comparator(current_instance, new_instance)`
-3. Call `comparator.compare()` to get a `DiffReport`
-4. Create a `Remediator(uow)` and call `generate_remediation(diff_report)`
-5. Create a `Task` with `type=TaskType(remediation.type.value)` if a remediation was generated, otherwise `type=TaskType.NOOP`
-6. Submit `PrefectAction.APPLY_STATE` to Prefect with parameters `{deployment_id, remediation, task_id}`
-7. Set `task.prefect_flow_run_id = flow_info.id` from the submission result
-8. Return the task
+1. Read `deployment.active_instance` as the new instance.
+2. Create a `Task` with `type=TaskType.NOOP` (the Prefect flow refines the type once it computes the diff).
+3. Submit `PrefectAction.APPLY_STATE` to Prefect with parameters `{task_id, deployment_id, new_instance_id, current_instance_id}` — **IDs only, no pre-built `Remediation`**.
+4. Set `task.prefect_flow_run_id = flow_info.id` and return the task.
+
+The diff and remediation are no longer built server-side. Pre-#237 we computed both here and serialized the `Remediation` pydantic model as a Prefect parameter — that froze the plan against a snapshot of the world and produced staleness bugs whenever DB writes landed between scheduling and the flow start (issue #237). The boundary now carries IDs, not plans.
+
+### Prefect-side: `agent/tasks/orchestration.py::apply_state`
+
+```python
+@flow(...)
+async def apply_state(
+    task_id: UUID,
+    deployment_id: UUID,
+    new_instance_id: UUID,
+    current_instance_id: UUID | None,
+) -> State | None
+```
+
+Flow-side responsibility:
+
+1. Open a fresh `UnitOfWork` via `get_unit_of_work()`.
+2. Load the deployment by id; load both instances by id (converting DB models to domain `Instance` entities via the in-file `_build_instance_entity` helper, which mirrors the conversion already in `repository/deployment.py`).
+3. Create a `Comparator(current_instance, new_instance)` and call `comparator.compare()` to get a `DiffReport`.
+4. Create a `Remediator(uow)` and call `generate_remediation(diff_report)`.
+5. If no remediation is needed, return `Completed("No remediation needed")`.
+6. Call `remediation.apply()` (which chains into the appropriate sub-flow: `create_instance`, `update_instance`, `upgrade_instance`, …) and return its state.
+
+Because the flow re-reads from the DB at run time, retries see fresh state — DB writes that landed between scheduling and the flow start are picked up rather than silently ignored. This is what closes the #237 bug class structurally.
+
+### Two-UoW pattern in `update_deployment`
+
+For mutations that affect the desired-state context (notably `service_name_overrides`), the server-side `update_deployment` splits its work into two UoW phases:
+
+- **Phase 1** commits the user's intent: validation, name/config/parameter updates, `_ensure_ingress_controller`, and `reconcile_services_on_upgrade`. The DB is then in the post-rename state.
+- **Phase 2** (a fresh `async with uow:` re-entry on the same request-scoped session) reloads the deployment, regenerates the instance via `generate_instance_from_deployment`, sets it active, schedules `apply_state`, and commits.
+
+The phase boundary is enforced by `commit()` between the two blocks. Phase 2's `find()` is a real DB round-trip on the same session and picks up phase-1's committed rows. `SqlModelUnitOfWork` is **not nest-safe** in the sense of opening a new session — the re-entry rebuilds repository handles on the same `AsyncSession`. The phase separation is a logical boundary that relies on the intervening `commit()`, not on session isolation.
 
 The companion function `generate_instance_from_deployment()` creates a new `Instance` by resolving the deployment context and tagging the context with the instance id so the CRD can carry it for status correlation:
 
