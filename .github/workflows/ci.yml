@@ -240,6 +240,8 @@ jobs:
           - {entrypoint: ui, shard: backup}
           - {entrypoint: ui, shard: env_vars}
           - {entrypoint: ui, shard: pod_scheduling}
+          # configuration/ is entirely ui_only — drawer flows have no SDK equivalent
+          - {entrypoint: api, shard: configuration}
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
