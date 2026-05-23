@@ -18,6 +18,10 @@ from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
+pytestmark = [
+    pytest.mark.shard_mutation_small,
+]
+
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,

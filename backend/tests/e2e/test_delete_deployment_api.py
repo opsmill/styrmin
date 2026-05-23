@@ -48,6 +48,10 @@ from styrmin_sdk.exceptions import ResourceNotFoundError
 
 from tests.e2e.drivers import ScenarioDriver
 
+pytestmark = [
+    pytest.mark.shard_mutation_small,
+]
+
 
 async def _namespace_exists(kubeconfig_path: str, namespace: str) -> bool:
     """Return True iff the namespace is present on the cluster."""
