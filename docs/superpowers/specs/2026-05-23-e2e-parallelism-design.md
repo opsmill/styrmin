@@ -33,7 +33,7 @@ amortizing the constant**.
 
 | Phase | Risk | Effort | Expected win on slower job |
 |---|---|---|---|
-| 1 — Baseline + marker hygiene | Low | ~1 day | 15–30% (UI job only) |
+| 1 — Marker hygiene | Low | ~1 day | 15–30% (UI job only) |
 | 2 — Tiering + UI smoke merge + sharing policy | Low–Med | ~1–2 days | ~5% direct; unblocks Phase 3 |
 | 3 — Matrix sharding × 6 shards × 2 entrypoints | Med–High | ~3–5 days incl. tuning | 35–55% — the headline win |
 | 4 — Docs + ADR + guardrails | Low | ~1 day | 0% direct; prevents regression |
@@ -42,22 +42,15 @@ amortizing the constant**.
 
 ---
 
-## Phase 1 — Baseline & marker hygiene
+## Phase 1 — Marker hygiene
 
-**Goal:** make the suite observable and cut the obvious dead weight before any
-rearchitecting.
+**Goal:** cut the obvious dead weight before any rearchitecting.
 
-### 1a — Capture a baseline
+Measurement is via direct CI job-duration comparison against a recent
+`develop` run (GitHub Actions already records and surfaces this); no
+committed baseline table is needed.
 
-- Run E2E with `--durations=0 --durations-min=1.0` and upload pytest's JSON
-  report as a CI artifact.
-- Keep the existing `--export-traces` OTEL plumbing.
-- Commit the per-test duration table to a comment on #242 so future changes
-  can be measured against it.
-
-Without this, no claim of "X% faster" is defensible.
-
-### 1b — Marker audit
+### 1a — Marker audit
 
 Walk each of the 22 files against the AGENTS.md heuristic ("every action goes
 through `client.X.Y()` / `kubectl` / `kr8s` and the test never calls
@@ -80,7 +73,7 @@ identified:
 Expected: ~7 more files become `api_only` → the UI job runs ~13 files
 instead of ~20.
 
-### 1c — Guardrail
+### 1b — Guardrail
 
 Add a `pytest_collection_modifyitems` hook (or a lint) that **fails CI** if a
 new `mark.ci` E2E test lacks an explicit `api_only` / `ui_only` / `dual`
@@ -253,8 +246,8 @@ vcluster.
 ### 4d — ADR
 
 Short ADR (`dev/adr/00NN-e2e-matrix-sharding.md`) recording why we chose
-matrix sharding over xdist, what we'd reconsider, and the
-baseline → post-change numbers.
+matrix sharding over xdist, what we'd reconsider, and the before/after CI
+job durations (taken from the GitHub Actions run page).
 
 ### 4e — CI guardrail
 
@@ -268,12 +261,12 @@ A `conftest.py`-level `pytest_collection_modifyitems` that:
 - Optionally: prints the per-shard count at collection time so a PR adding
   5 tests to one shard is visible in CI logs.
 
-### 4f — Performance regression check
+### 4f — Performance regression check (optional)
 
-Diff each run's per-test durations against a stored baseline (committed
-alongside the ADR) and emit a warning if a single test grew >50%. Not a
-blocker — visibility only. The OTEL pipeline already exists; this is
-plumbing.
+Lightweight follow-up: compare per-shard wall-clock against the previous
+green `develop` run via the GitHub Actions API and warn in the PR if any
+shard grew >50%. Visibility only, not a blocker. Skip if Phase 3's matrix
+already makes drift obvious in the job list.
 
 ---
 
@@ -294,9 +287,9 @@ plumbing.
 - **Cross-shard fixture coupling.** Velero's `BackupStorageLocation` and
   the MinIO instance are created inside `styrmin_resources` at session
   scope. If any test relies on backup state created by a prior test in a
-  *different* shard, the matrix split will break it. Phase 1's baseline
-  run should surface this; if it does, either merge the shards involved
-  or refactor the cross-test coupling.
+  *different* shard, the matrix split will break it. The first
+  matrix-enabled run on the feature branch will surface this; if it does,
+  either merge the shards involved or refactor the cross-test coupling.
 - **Runner-minute cost.** Matrix sharding ~6× the runner-minutes vs.
   today. Acceptable on `huge-runners` group; would not be acceptable on
   GitHub-hosted runners.
@@ -311,11 +304,10 @@ out of scope for the first pass).
 
 ## Acceptance criteria (from #242)
 
-- [ ] Baseline + post-refactor numbers documented (issue comment or
-      `dev/knowledge/e2e-performance.md`).
 - [ ] CI wall-clock for `e2e-tests-api` and `e2e-tests-ui` measurably
       lower on `develop` after the change lands; state the % drop in the
-      merging PR.
+      merging PR (referencing GitHub Actions job durations directly, no
+      committed baseline table required).
 - [ ] All existing E2E scenarios still execute (no skips introduced);
       suite remains green on `develop`.
 - [ ] `api_only` / `ui_only` markers correctly applied across the suite;
