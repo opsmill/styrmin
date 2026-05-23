@@ -55,6 +55,58 @@ def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
+# Shard-marker guardrail
+# ---------------------------------------------------------------------------
+
+_VALID_SHARDS = frozenset(
+    {
+        "shard_readonly",
+        "shard_mutation_small",
+        "shard_mutation_large",
+        "shard_ingress",
+        "shard_backup",
+        "shard_infrahub",
+    }
+)
+
+
+def enforce_shard_markers(
+    config: pytest.Config,  # noqa: ARG001
+    items: list[pytest.Item],
+) -> None:
+    """Fail collection if any ``mark.ci`` test lacks exactly one ``shard_*`` marker.
+
+    Locks in the matrix-sharding contract: every CI-included E2E test MUST
+    name the shard it routes to (see ``dev/guides/e2e-parallelism.md``).
+    A test that lacks the marker would silently drop out of every shard
+    and disappear from coverage; rejecting it at collection time is the
+    only place to catch this before CI is green-on-nothing.
+    """
+    errors: list[str] = []
+    for item in items:
+        if "ci" not in item.keywords:
+            continue
+        shard_marks = [m.name for m in item.iter_markers() if m.name in _VALID_SHARDS]
+        if not shard_marks:
+            errors.append(
+                f"missing required @pytest.mark.shard_<name> on {item.nodeid} — "
+                f"one of {sorted(_VALID_SHARDS)}; "
+                f"see dev/guides/e2e-parallelism.md"
+            )
+            continue
+        if len(shard_marks) > 1:
+            errors.append(
+                f"has multiple shard markers {shard_marks} on {item.nodeid}; "
+                f"exactly one is allowed"
+            )
+    if errors:
+        pytest.exit(
+            "E2E shard marker check failed:\n" + "\n".join(errors),
+            returncode=4,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Hook + fixture: dump k8s logs on test failure
 # ---------------------------------------------------------------------------
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
@@ -1226,10 +1278,12 @@ def _driver_param_id(item: pytest.Item) -> str | None:
 
 
 def pytest_collection_modifyitems(
-    config: pytest.Config,  # noqa: ARG001
+    config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
-    """Enforce api_only/ui_only contract."""
+    """Enforce api_only/ui_only contract and shard-marker guardrail."""
+    enforce_shard_markers(config, items)
+
     for item in items:
         driver_id = _driver_param_id(item)
         if driver_id is None:
