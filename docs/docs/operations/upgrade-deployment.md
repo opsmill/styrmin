@@ -1,10 +1,10 @@
 ---
-title: Run an upgrade
-sidebar_position: 5
-description: Upgrade a deployment to a newer Application Driver Version through the driver-defined upgrade sequence — stop components, run migrations, restart, verify.
+title: Upgrade an application / deployment
+sidebar_position: 4
+description: Move a Deployment to a newer Application Driver Version through the driver-defined upgrade sequence — stop components, run migrations, restart, verify.
 ---
 
-## Run an upgrade
+## Upgrade an application / deployment
 
 :::info Stub page
 

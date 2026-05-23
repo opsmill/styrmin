@@ -49,10 +49,10 @@ const sidebars: SidebarsConfig = {
       label: 'Operations',
       link: {type: 'doc', id: 'operations/index'},
       items: [
+        'operations/deploy-application',
+        'operations/backup-deployment',
+        'operations/upgrade-deployment',
         'operations/clone-environment',
-        'operations/back-up-stack',
-        'operations/restore-stack',
-        'operations/run-upgrade',
       ],
     },
     {

@@ -1,21 +1,18 @@
 ---
 title: Clone an environment
-sidebar_position: 2
+sidebar_position: 5
 description: Duplicate an environment — applications, configuration, and live data — to a fresh target so changes can be validated against real data before they touch production.
 ---
 
 ## Clone an environment
 
-:::info Stub page
+:::warning Not yet available
 
-This guide is a placeholder while the environment-clone flow stabilises
-behind the GraphQL API. The capability exists today: it's exercised end
-to end by the cloning E2E scenarios in `backend/tests/e2e/`. This page
-will be filled in once the user-facing CLI / SDK surface is final.
-
-For now, see the E2E flows in
-[`backend/tests/e2e/scenarios/`](https://github.com/opsmill/styrmin/tree/develop/backend/tests/e2e)
-for the authoritative sequence of API calls.
+Environment cloning is **not available yet**. It is a headline
+Styrmin capability and will be delivered before the beta release.
+This page describes the intended shape of the feature so the docs
+match where the product is going; the CLI / SDK / GraphQL surface
+will land alongside the feature itself.
 
 :::
 
@@ -30,7 +27,7 @@ to the source.
 This is the headline capability behind "test upgrades against real
 data" and "rehearse a change without touching production".
 
-### Outline (to be filled in)
+### Outline (planned)
 
 1. **Prepare the source.** Confirm the source Environment is healthy
    and that a recent backup exists in its Backup Storage Location.
@@ -49,5 +46,5 @@ data" and "rehearse a change without touching production".
 - [Concepts and Architecture → Backups and restores](../concepts-and-architecture/backups-and-restores.md)
   — what Styrmin actually does on backup/restore and where the data
   ends up.
-- [Run an upgrade](./run-upgrade.md) — the most common reason to clone
-  an Environment.
+- [Upgrade an application / deployment](./upgrade-deployment.md) — the
+  most common reason to clone an Environment.
