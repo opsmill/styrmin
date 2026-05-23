@@ -8,9 +8,7 @@ description: Lookup pages for Styrmin's primary surfaces — the StyrminDeployme
 
 This section is for **lookup**: schemas, fields, flags, defaults. It's
 not for learning — if you want to understand how a piece works, head
-to [Concepts and Architecture](../concepts-and-architecture/index.md);
-if you want to do a specific thing, head to
-[Operations](../operations/index.md).
+to [Concepts and Architecture](../concepts-and-architecture/index.md).
 
 > **Status: in progress.** The pages below are currently stubs while
 > the auto-generation pipeline is being set up. Each notes which

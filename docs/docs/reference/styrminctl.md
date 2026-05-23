@@ -52,5 +52,3 @@ This page will document, command by command:
 
 - [Installation → Quickstart](../installation/quickstart.md) — the
   CLI's first appearance, plus authentication.
-- [Operations](../operations/index.md) — the operational flows the
-  CLI is used to drive.

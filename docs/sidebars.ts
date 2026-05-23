@@ -46,17 +46,6 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Operations',
-      link: {type: 'doc', id: 'operations/index'},
-      items: [
-        'operations/deploy-application',
-        'operations/backup-deployment',
-        'operations/upgrade-deployment',
-        'operations/clone-environment',
-      ],
-    },
-    {
-      type: 'category',
       label: 'Reference',
       link: {type: 'doc', id: 'reference/index'},
       items: [
