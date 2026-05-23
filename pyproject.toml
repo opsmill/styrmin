@@ -300,6 +300,7 @@ markers = [
     "ui_only(reason): scenario runs only through the UI entrypoint; [api] variant is skipped with the given reason",
     "shard_readonly: CI shard for read-only tests sharing the session deployment. See dev/guides/e2e-parallelism.md.",
     "shard_mutation_small: CI shard for short tests that create/delete their own deployment.",
+    "shard_configuration: CI shard for backend/tests/e2e/configuration/ (deployment-config drawer UI flows).",
     "shard_env_vars: CI shard for test_deployment_env_vars.py (env-var precedence matrix, mostly api_only).",
     "shard_env_update: CI shard for test_environment_update.py (env-level fan-out tests).",
     "shard_pod_scheduling: CI shard for test_pod_scheduling.py (affinity / anti-affinity, mostly api_only).",

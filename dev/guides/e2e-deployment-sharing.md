@@ -60,10 +60,10 @@ its own shard.
 
 Every `@pytest.mark.ci` E2E test MUST carry exactly one bare-name
 shard marker (`shard_readonly`, `shard_mutation_small`,
-`shard_env_vars`, `shard_env_update`, `shard_pod_scheduling`,
-`shard_ingress`, or `shard_backup`). The conftest collection hook
-(`enforce_shard_markers`) rejects the suite if any test is missing
-the marker or carries more than one.
+`shard_configuration`, `shard_env_vars`, `shard_env_update`,
+`shard_pod_scheduling`, `shard_ingress`, or `shard_backup`). The
+conftest collection hook (`enforce_shard_markers`) rejects the suite
+if any test is missing the marker or carries more than one.
 
 Apply at module scope when all tests in the file share the same
 shard:

@@ -34,7 +34,7 @@ from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
-pytestmark = [pytest.mark.shard_mutation_small]
+pytestmark = [pytest.mark.shard_configuration]
 
 RECONCILE_TIMEOUT_SECONDS = 480.0
 

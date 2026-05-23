@@ -12,6 +12,7 @@ The six shards:
 |---|---|---|---|
 | `readonly` | `shard_readonly` | Tests that only read shared state | `test_ui_smoke`, `test_admin_*` |
 | `mutation_small` | `shard_mutation_small` | Short tests that create/delete their own deployment | `test_deploy_app`, `test_delete_deployment_*`, `test_service_discovery` |
+| `configuration` | `shard_configuration` | `backend/tests/e2e/configuration/` — unified config-drawer UI flows (one deployment + drawer per test) | `test_drawer_env_vars_edit`, `test_drawer_scheduling_edit` |
 | `env_vars` | `shard_env_vars` | `test_deployment_env_vars.py` (env-var precedence matrix, all api_only) | `test_us1_deployment_level_env_var`, `test_us2_environment_level_env_var_propagates` |
 | `env_update` | `shard_env_update` | `test_environment_update.py` (env-level fan-out) | `test_us1_environment_update_fans_out_to_all_deployments` |
 | `pod_scheduling` | `shard_pod_scheduling` | `test_pod_scheduling.py` (affinity / anti-affinity, all api_only) | `test_scheduling_end_to_end`, `test_pod_anti_affinity_cross_deployment_via_graphql` |
@@ -35,6 +36,7 @@ the marker rules.
        pytest.mark.api_only(reason="..."),  # or ui_only, or omit for dual
        pytest.mark.shard_readonly,          # one of shard_readonly,
                                              # shard_mutation_small,
+                                             # shard_configuration,
                                              # shard_env_vars,
                                              # shard_env_update,
                                              # shard_pod_scheduling,

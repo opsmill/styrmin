@@ -231,7 +231,7 @@ jobs:
       fail-fast: false
       matrix:
         entrypoint: [api, ui]
-        shard: [readonly, mutation_small, env_vars, env_update, pod_scheduling, ingress, backup]
+        shard: [readonly, mutation_small, configuration, env_vars, env_update, pod_scheduling, ingress, backup]
         exclude:
           # Shards whose every test carries @pytest.mark.api_only — the UI
           # cell would collect 0 tests and exit with code 5, failing the
