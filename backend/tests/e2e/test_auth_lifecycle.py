@@ -36,7 +36,7 @@ from tests.e2e.pages.login import LoginPage
 # We cannot gate the shared session-scoped page on a marker because the
 # session fixture is lazy: a marker on the first test to request it would
 # poison every subsequent test's UI session.
-pytestmark = [pytest.mark.ci]
+pytestmark = [pytest.mark.ci, pytest.mark.shard_readonly]
 
 
 @pytest.fixture

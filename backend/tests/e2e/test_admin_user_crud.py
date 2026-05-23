@@ -29,7 +29,7 @@ from styrmin_sdk.graphql._generated.enums import Role
 
 from tests.e2e.pages import UsersAdminPage
 
-pytestmark = [pytest.mark.ci]
+pytestmark = [pytest.mark.ci, pytest.mark.shard_readonly]
 
 
 async def _user_can_login(server: str, username: str, password: str) -> bool:

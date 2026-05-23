@@ -31,6 +31,10 @@ from playwright.async_api import expect
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
+pytestmark = [
+    pytest.mark.shard_readonly,
+]
+
 
 @pytest.mark.ci
 @pytest.mark.ui_only(
