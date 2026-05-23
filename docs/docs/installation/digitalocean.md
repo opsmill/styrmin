@@ -227,7 +227,7 @@ For local debugging you can still port-forward:
 kubectl port-forward svc/styrmin-server 8000:8000 -n styrmin &
 ```
 
-From here on, every step uses [`styrminctl`](../getting-started/quickstart.md)
+From here on, every step uses [`styrminctl`](../installation/quickstart.md)
 against the public URL. Export it once:
 
 ```shell
@@ -387,7 +387,7 @@ exact bucket name.
 
 ### Next steps
 
-- [**Platform Overview**](../getting-started/overview.md) — how the
+- [**Platform Overview**](../introduction/platform-overview.md) — how the
   pieces fit together once Styrmin is up.
 - [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
   understand the unit you're deploying.

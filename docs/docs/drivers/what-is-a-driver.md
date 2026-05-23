@@ -149,7 +149,7 @@ The reference repository ships a set of example drivers under
 | [`simple-app`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/simple-app) | Minimal driver used in tests — read this first if you want a small, complete example. |
 | [`db-test`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/db-test) | A driver fixture used by the test suite. |
 
-When you run [`uv run invoke start`](../getting-started/quickstart.md), the
+When you run [`uv run invoke start`](../installation/quickstart.md), the
 bootstrap step loads `infrahub` and `semaphore` automatically so you have
 something to deploy out of the box.
 

@@ -41,6 +41,21 @@ const config: Config = {
         // redirects so deep links from blog posts, slack, etc. keep working.
         redirects: [
           {from: '/docs/how-it-works', to: '/docs/concepts-and-architecture'},
+          // `/docs/getting-started/*` was dissolved per audit: Why Styrmin?
+          // and Platform Overview moved under Introduction, Quickstart moved
+          // under Installation.
+          {
+            from: '/docs/getting-started/why-styrmin',
+            to: '/docs/introduction/why-styrmin',
+          },
+          {
+            from: '/docs/getting-started/overview',
+            to: '/docs/introduction/platform-overview',
+          },
+          {
+            from: '/docs/getting-started/quickstart',
+            to: '/docs/installation/quickstart',
+          },
           {
             from: '/docs/how-it-works/architecture',
             to: '/docs/concepts-and-architecture/architecture',
@@ -102,7 +117,7 @@ const config: Config = {
           type: 'docSidebar',
           sidebarId: 'docs',
           position: 'left',
-          label: 'Getting Started',
+          label: 'Introduction',
         },
         {
           to: '/docs/installation',
@@ -128,8 +143,8 @@ const config: Config = {
           title: 'Documentation',
           items: [
             {
-              label: 'Getting Started',
-              to: '/docs/getting-started/overview',
+              label: 'Introduction',
+              to: '/docs/introduction/why-styrmin',
             },
             {
               label: 'Installation',

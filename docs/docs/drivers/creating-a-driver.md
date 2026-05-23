@@ -24,7 +24,7 @@ You need:
   should already install successfully on its own with `helm install`.
   Styrmin doesn't write Helm charts; it operates them.
 - **A running Styrmin instance** to load and test against. The
-  [Quickstart](../getting-started/quickstart.md) or
+  [Quickstart](../installation/quickstart.md) or
   [Local laptop](../installation/vcluster-local.md) guide both work.
 - **Familiarity with the application's lifecycle** — what it stores,
   what needs to happen during an upgrade, how it expects to be backed

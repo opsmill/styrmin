@@ -193,8 +193,8 @@ applications.
 
 ### Next steps
 
-- [**Platform Overview**](./overview.md) — the conceptual model behind
+- [**Platform Overview**](./platform-overview.md) — the conceptual model behind
   driver, cluster, environment, deployment.
-- [**Quickstart**](./quickstart.md) — try the bundled demo end-to-end.
+- [**Quickstart**](../installation/quickstart.md) — try the bundled demo end-to-end.
 - [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
   understand the unit that makes the rest of Styrmin work.

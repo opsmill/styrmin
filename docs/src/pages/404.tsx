@@ -24,7 +24,7 @@ export default function NotFound(): ReactNode {
               </Link>
               <Link
                 className="button button--secondary button--lg"
-                to="/docs/getting-started/overview">
+                to="/docs/introduction/platform-overview">
                 Browse Documentation
               </Link>
             </div>

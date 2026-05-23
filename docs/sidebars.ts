@@ -18,8 +18,8 @@ const sidebars: SidebarsConfig = {
       label: 'Introduction',
       collapsed: false,
       items: [
-        'getting-started/why-styrmin',
-        'getting-started/overview',
+        'introduction/why-styrmin',
+        'introduction/platform-overview',
       ],
     },
     {
@@ -27,7 +27,7 @@ const sidebars: SidebarsConfig = {
       label: 'Installation',
       link: {type: 'doc', id: 'installation/index'},
       items: [
-        'getting-started/quickstart',
+        'installation/quickstart',
         'installation/prerequisites',
         'installation/digitalocean',
         'installation/gke',

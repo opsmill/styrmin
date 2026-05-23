@@ -121,7 +121,7 @@ human-executed runbook.
 
 ### What you'll do next
 
-- [**Quickstart**](./quickstart.md) — bring up the bundled vCluster demo
+- [**Quickstart**](../installation/quickstart.md) — bring up the bundled vCluster demo
   end-to-end in two commands.
 - [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
   the unit of deployment, in depth.
