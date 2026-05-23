@@ -54,6 +54,11 @@ function HomepageHeader() {
             to="/docs/installation">
             Install Styrmin
           </Link>
+          <Link
+            className="button button--secondary button--lg"
+            to="/docs/">
+            Browse documentation
+          </Link>
         </div>
       </div>
     </header>
