@@ -7,13 +7,12 @@ description: A practical guide — pick a Helm chart, end up with a working Appl
 ## Creating a Driver
 
 This page walks you through writing a new driver from scratch. The
-example used throughout is the bundled
-[`simple-app`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/simple-app)
-driver — a 3-tier FastAPI + PostgreSQL application — because it's the
-smallest complete driver in the repo and it covers every concept this
-page introduces.
+running example is a small two-component application — call it
+`my-app` — with a FastAPI server and a PostgreSQL database. It's
+deliberately minimal so every concept on this page has a place to
+land; substitute your own chart and naming as you read.
 
-Read [What is an Application Driver?](./what-is-a-driver.md) and
+Read [What is an Application Driver?](../concepts-and-architecture/what-is-a-driver.md) and
 [The Context](./context.md) first if you haven't.
 
 ### Before you start
@@ -24,7 +23,7 @@ You need:
   should already install successfully on its own with `helm install`.
   Styrmin doesn't write Helm charts; it operates them.
 - **A running Styrmin instance** to load and test against. The
-  [Quickstart](../getting-started/quickstart.md) or
+  [Quickstart](../installation/quickstart.md) or
   [Local laptop](../installation/vcluster-local.md) guide both work.
 - **Familiarity with the application's lifecycle** — what it stores,
   what needs to happen during an upgrade, how it expects to be backed
@@ -63,7 +62,7 @@ You're looking for two things.
 need to start, stop, scale, or back up independently. These are your
 candidate **components**.
 
-For `simple-app`, the chart produces two workloads: the FastAPI server
+For `my-app`, the chart produces two workloads: the FastAPI server
 (a `Deployment`) and a PostgreSQL primary (a `StatefulSet`). That's the
 list of candidate components.
 
@@ -79,7 +78,7 @@ any order" property. These are the ones that need extra care:
 - **Background workers** (task queues, async processors) → often a
   separate component if you need to stop them during a migration.
 
-For `simple-app`: the FastAPI server is a single stateless workload
+For `my-app`: the FastAPI server is a single stateless workload
 (one component, no backup), and PostgreSQL is stateful (one component,
 needs a `postgres` backup strategy).
 
@@ -95,17 +94,17 @@ Create `driver.styrmin.yml`. The minimum a Styrmin install will accept:
 apiVersion: "styrmin.io/v1"
 kind: ApplicationDriver
 metadata:
-  name: simple-app          # must be unique across the Styrmin install
+  name: my-app              # must be unique across the Styrmin install
 spec:
   version: "1"              # the driver version (you'll bump this as you iterate)
   supported_versions: ">=0.1,<1.0"   # semver range of the application versions this driver knows how to deploy
   info:
-    description: Simple 3-tier FastAPI application with PostgreSQL
-    authors: [opsmill]
+    description: Example FastAPI application with PostgreSQL
+    authors: [you]
     license: Apache-2.0
   helm:
     main:
-      location: simple-app   # OCI URL or local path the server can resolve
+      location: my-app       # OCI URL or local path the server can resolve
       version: 0.1.0         # the chart version
 ```
 
@@ -121,8 +120,8 @@ A few notes:
   someone selecting a version your driver hasn't been tested with.
 - **`helm.main.location`** is whatever the Styrmin server can pass to
   Helm — an OCI URL (`oci://registry.example.com/charts/foo`), an HTTP
-  repository URL, or (as `simple-app` does) a relative path inside the
-  baked-in chart directory.
+  repository URL, or a relative path inside a baked-in chart
+  directory.
 
 ### Step 3: Declare the components
 
@@ -135,7 +134,7 @@ spec:
     server:
       identifier:
         label:
-          app.kubernetes.io/name: simple-app
+          app.kubernetes.io/name: my-app
     database:
       identifier:
         label:
@@ -152,10 +151,10 @@ combination Styrmin can match on. Two paths to make that happen:
 
 - **The chart already labels things distinctly.** Most well-maintained
   charts label pods by `app.kubernetes.io/name` (or similar), and
-  different sub-charts use different names. `simple-app` rides on
-  that: the embedded `postgresql` chart labels its pods
+  different sub-charts use different names. The `my-app` example
+  rides on that: the embedded `postgresql` chart labels its pods
   `app.kubernetes.io/name: postgresql` and the main chart labels its
-  pods `app.kubernetes.io/name: simple-app`. The driver just points at
+  pods `app.kubernetes.io/name: my-app`. The driver just points at
   the existing labels.
 - **You add a label via chart values.** Many charts expose `podLabels`
   or `extraLabels` in their `values.yaml`. The convention Styrmin uses
@@ -182,7 +181,7 @@ already sets is better than fighting it.
 
 Per component, decide _how_ it should be backed up. The choices come
 from a fixed set of **backup strategies** — full list and explanation
-in [Backups and restores](../how-it-works/backups-and-restores.md).
+in [Backups and restores](../concepts-and-architecture/backups-and-restores.md).
 Stateless components are typically left out entirely (no `backup`
 block); stateful components pick the strategy that matches the
 storage:
@@ -193,7 +192,7 @@ spec:
     server:
       identifier:
         label:
-          app.kubernetes.io/name: simple-app
+          app.kubernetes.io/name: my-app
       # no backup — stateless
 
     database:
@@ -203,7 +202,7 @@ spec:
       backup:
         enabled: true
         kind: postgres                # use pg_dump + Velero snapshot
-        database_name: simple_app     # strategy-specific config
+        database_name: my_app         # strategy-specific config
 ```
 
 If none of the built-in strategies fits, set `kind: action` and
@@ -216,13 +215,13 @@ template that produces the values file Helm receives. The
 [Context](./context.md) is available to it — the same context that
 gets embedded in the `StyrminDeployment` CRD.
 
-A short, real example (from `simple-app`):
+A short example for `my-app`:
 
 ```yaml
-fullnameOverride: styrmin-simple-app
+fullnameOverride: styrmin-my-app
 
 image:
-  repository: simple-app
+  repository: my-app
   tag: "{{ app.version }}"
 
 extraEnv: {{ components | component_env_vars("server") | tojson }}
@@ -231,7 +230,7 @@ ingress:
   enabled: true
   className: "{{ instance.config.ingress_class }}"
   hosts:
-    - host: "{{ services['simple-app'].primary_fqdn }}"
+    - host: "{{ services['my-app'].primary_fqdn }}"
       paths:
         - path: /
           pathType: Prefix
@@ -266,7 +265,7 @@ and tells the ingress controller what to route:
 ```yaml
 spec:
   services:
-    - name: simple-app
+    - name: my-app
       kind: http             # http | https | tcp
       scope: internal        # internal | external
       port: 8000
@@ -281,7 +280,7 @@ A few notes:
 - **The hostname** for an external service follows the pattern
   `<service-name>-<deployment-id>.<fqdn-suffix>`, and the template can
   reference it via `{{ services['<service-name>'].primary_fqdn }}`.
-- See [Ingress and networking](../how-it-works/ingress-and-networking.md)
+- See [Ingress and networking](../concepts-and-architecture/ingress-and-networking.md)
   for what actually happens with these declarations.
 
 ### Step 7: Lifecycle actions — only when you need them
@@ -307,12 +306,12 @@ spec:
     - name: upgrade
       hook: upgrade           # setup | upgrade
       mode: core              # pre | core | post
-      description: Upgrade Simple App
+      description: Upgrade my-app
       location: "actions.py::upgrade"
 ```
 
-…and implemented as Prefect flows in `actions.py`. Real example from
-`simple-app`:
+…and implemented as Prefect flows in `actions.py`. An example
+implementation for `my-app`:
 
 ```python
 from styrmin_backend.actions import (
@@ -333,11 +332,11 @@ async def upgrade(context: GlobalContext, target_version: str):
     await upgrade_deployment_version(target_version=target_version, context=context)
 
     images = await get_component_images(component="server", context=context)
-    image = next(img for img in images if "simple-app" in img)
+    image = next(img for img in images if "my-app" in img)
     image_base = image.rsplit(":", 1)[0]
 
     await execute_commands(
-        ["simple-app-upgrade"],
+        ["my-app-upgrade"],
         image=f"{image_base}:{target_version}",
         context=context,
         env_from_component="server",
@@ -351,7 +350,7 @@ Use the built-in primitives (`stop_components`, `start_components`,
 calling Kubernetes directly. They're idempotent, tested, and
 consistent across drivers.
 
-See [Lifecycle hooks and actions](../how-it-works/hooks-and-actions.md)
+See [Lifecycle hooks and actions](../concepts-and-architecture/hooks-and-actions.md)
 for the full hook/mode model.
 
 ### Step 8: Parameters — only when you need them
@@ -374,7 +373,7 @@ Values land in `{{ parameters.storage_size }}` in the template.
 ### Step 9: Load and test
 
 ```shell
-uv run styrminctl drivers load-local-version /styrmin/drivers/simple-app
+uv run styrminctl drivers load-local-version /styrmin/drivers/my-app
 ```
 
 (See [Loading a Driver](./loading-drivers.md) for the in-container path
@@ -383,7 +382,7 @@ convention and the git-repository alternative.)
 Then deploy:
 
 ```shell
-uv run styrminctl deployments create simple-app 0.1.0 <environment-id>
+uv run styrminctl deployments create my-app 0.1.0 <environment-id>
 ```
 
 Watch the deployment in the UI. Things to check:
@@ -422,9 +421,9 @@ Before you call the driver done:
 
 - [**The Context**](./context.md) — full reference for the fields your
   template and actions receive.
-- [**Lifecycle hooks and actions**](../how-it-works/hooks-and-actions.md) —
+- [**Lifecycle hooks and actions**](../concepts-and-architecture/hooks-and-actions.md) —
   the hook / mode model and the available primitives.
-- [**Backups and restores**](../how-it-works/backups-and-restores.md) —
+- [**Backups and restores**](../concepts-and-architecture/backups-and-restores.md) —
   full list of backup strategies, what each one does.
 - [**Loading a Driver**](./loading-drivers.md) — how to ship your
   driver to production (git repository or custom image).

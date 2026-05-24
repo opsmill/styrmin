@@ -109,7 +109,7 @@ spec:
       component: server
 ```
 
-[Creating a Driver](./creating-a-driver.md) walks through writing one
+[Creating a Driver](../drivers/creating-a-driver.md) walks through writing one
 from scratch.
 
 ### How a driver becomes a deployment
@@ -146,10 +146,8 @@ The reference repository ships a set of example drivers under
 | [`infrahub`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/infrahub) | OpsMill's Infrahub deployment driver — full-featured reference. |
 | [`semaphore`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/semaphore) | Semaphore CI deployment driver. |
 | [`slurpit`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/slurpit) | Slurpit network discovery driver. |
-| [`simple-app`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/simple-app) | Minimal driver used in tests — read this first if you want a small, complete example. |
-| [`db-test`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/db-test) | A driver fixture used by the test suite. |
 
-When you run [`uv run invoke start`](../getting-started/quickstart.md), the
+When you run [`uv run invoke start`](../installation/quickstart.md), the
 bootstrap step loads `infrahub` and `semaphore` automatically so you have
 something to deploy out of the box.
 
@@ -158,7 +156,7 @@ something to deploy out of the box.
 Anywhere you can put a directory that follows the layout above, you can
 register it with Styrmin — either as a path mounted into the server
 container or as a git repository (public or private). See
-[Loading a Driver](./loading-drivers.md) for the full walkthrough,
+[Loading a Driver](../drivers/loading-drivers.md) for the full walkthrough,
 including the GraphQL mutations, the `styrminctl` commands, and how to
 configure the private-repo token.
 
@@ -168,9 +166,9 @@ format.
 
 ### Next steps
 
-- [**Loading a Driver**](./loading-drivers.md) — register a driver with
+- [**Loading a Driver**](../drivers/loading-drivers.md) — register a driver with
   Styrmin from a local directory or a git repository.
-- [**The Context**](./context.md) — the data structure every driver
+- [**The Context**](../drivers/context.md) — the data structure every driver
   template and action receives at runtime.
-- [**Creating a Driver**](./creating-a-driver.md) — write your first
+- [**Creating a Driver**](../drivers/creating-a-driver.md) — write your first
   driver, step by step.

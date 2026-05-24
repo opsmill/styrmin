@@ -98,8 +98,8 @@ upgrade the deployments that pin the old one.
 
 The reference repository ships several example drivers under
 [`driver/examples/`](https://github.com/opsmill/styrmin/tree/develop/driver/examples)
-(`infrahub`, `semaphore`, `slurpit`, `simple-app`, `db-test`). They're a
-good starting point for writing your own.
+(`infrahub`, `semaphore`, `slurpit`). They're a good starting point
+for writing your own.
 
 For your own drivers, the typical layouts are:
 

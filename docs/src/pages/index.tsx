@@ -41,18 +41,23 @@ function HomepageHeader() {
         <div className={styles.buttons}>
           <Link
             className="button button--secondary button--lg"
-            to="/docs/getting-started/why-styrmin">
+            to="/docs/introduction/why-styrmin">
             Why Styrmin?
           </Link>
           <Link
             className="button button--secondary button--lg"
-            to="/docs/getting-started/quickstart">
+            to="/docs/installation/quickstart">
             Quickstart
           </Link>
           <Link
             className="button button--secondary button--lg"
             to="/docs/installation">
             Install Styrmin
+          </Link>
+          <Link
+            className="button button--secondary button--lg"
+            to="/docs/">
+            Browse documentation
           </Link>
         </div>
       </div>

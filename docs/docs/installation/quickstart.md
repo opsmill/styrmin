@@ -170,9 +170,9 @@ start over; alternatively `uv run invoke destroy` and then `start`.
 
 ### Next steps
 
-- [**Platform Overview**](./overview.md) — get the conceptual picture if
+- [**Platform Overview**](../introduction/platform-overview.md) — get the conceptual picture if
   you skipped it.
-- [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
+- [**What is an Application Driver?**](../concepts-and-architecture/what-is-a-driver.md) —
   understand the unit of deployment in Styrmin.
 - [**Creating a Driver**](../drivers/creating-a-driver.md) — write your
   own driver and load it into the demo.

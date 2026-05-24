@@ -24,7 +24,7 @@ By the end you'll have:
 - the UI reachable at `http://styrmin.local.styrmin.io:8080`.
 
 > If you just want the one-command experience, see the
-> [Quickstart](../getting-started/quickstart.md) — it runs every step in
+> [Quickstart](../installation/quickstart.md) — it runs every step in
 > this guide for you.
 
 ### How this compares to `uv run invoke start`
@@ -384,9 +384,9 @@ changes to the values file require `helm upgrade` to take effect.
 
 ### Next steps
 
-- [**Platform Overview**](../getting-started/overview.md) — the
+- [**Platform Overview**](../introduction/platform-overview.md) — the
   conceptual model behind cluster, environment, deployment.
-- [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
+- [**What is an Application Driver?**](../concepts-and-architecture/what-is-a-driver.md) —
   the unit of deployment you just loaded.
 - [**DigitalOcean**](./digitalocean.md) — when you're ready to move off
   your laptop.

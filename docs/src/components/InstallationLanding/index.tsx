@@ -75,7 +75,7 @@ const platforms: Platform[] = [
     name: 'kubeadm',
     subtitle: 'Self-hosted Kubernetes',
     description:
-      'Bring-your-own kubeadm cluster. Use the prerequisites guide today; full walkthrough coming.',
+      'Bring-your-own kubeadm cluster. Walkthrough coming.',
     Logo: KubeadmLogo,
     badge: 'Planned',
   },

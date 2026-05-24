@@ -40,7 +40,7 @@ Styrmin gives every environment its own Traefik instance because:
   them. Per-environment Traefik makes that trivial — you configure each
   one independently.
 - **Self-contained cloned environments.** When you clone an environment
-  (see [why this matters](../getting-started/why-styrmin.md)), the
+  (see [why this matters](../introduction/why-styrmin.md)), the
   clone gets its own Traefik too. Applications in the clone reach each
   other through the clone's network, not back to production.
 - **Operational blast radius.** A misconfiguration in one environment's

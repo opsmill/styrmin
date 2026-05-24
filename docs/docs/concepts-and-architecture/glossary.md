@@ -1,0 +1,218 @@
+---
+title: Glossary
+sidebar_position: 3
+description: Every term Styrmin uses, in one alphabetical list, with cross-references to the page that explains it in depth.
+---
+
+## Glossary
+
+Single-line definitions for every Styrmin term that appears in the
+docs, the GraphQL schema, the SDK, the CLI, and the UI. Use this page
+when you encounter a word and want to know what it means in one
+sentence. For the mental model and how the pieces fit together, read
+[Core concepts](./core-concepts.md).
+
+### A
+
+**Action** — A Python function declared by an Application Driver that
+runs inside a Prefect flow at a specific lifecycle **hook** and
+**mode** (e.g. `setup` / `pre`). See [Lifecycle hooks and
+actions](./hooks-and-actions.md).
+
+**Active instance** — The single **Instance** currently considered
+live for a **Deployment**. Reconciliation compares the newly generated
+Instance against the active Instance.
+
+**Agent** — The container Styrmin runs inside a target Kubernetes
+cluster. Reconciles **recorded intent** into Kubernetes resources and
+reports observed state back to the **server**. One per **cluster**.
+
+**Application Driver** — A versioned, self-contained deployment
+specification for one application. The unit of deployment in Styrmin.
+See [What is an Application Driver?](./what-is-a-driver.md).
+
+**Application Driver Version** — A specific revision of an
+Application Driver, with its own Helm chart pin, components,
+parameters, services, and actions. A **Deployment** points at one
+Application Driver Version.
+
+**Application Version** — The user-facing version of the application
+itself (e.g. Infrahub `1.6.0`). Distinct from the Application Driver
+Version that knows how to deploy it.
+
+### B
+
+**Backup Storage Location (BSL)** — An S3-compatible object store
+registered as a destination for Velero backups. Assigned to an
+**Environment**; all deployments in that environment back up there.
+
+### C
+
+**CLI / styrminctl** — The Cyclopts-based command-line client. Thin
+wrapper over the GraphQL API.
+
+**Cluster** — A Kubernetes cluster registered with Styrmin.
+Cluster-level settings are inherited by every Environment and
+Deployment on it. One **agent** runs per Cluster.
+
+**Component** — A logical sub-part of an application (e.g. `server`,
+`task-worker`) declared by the Application Driver and identified by a
+Kubernetes label selector. Lifecycle controls (start/stop, restart,
+scale) act on the Component as a unit.
+
+**Component overrides** — The mechanism by which a Deployment
+overrides the Application Driver Version's default Component config.
+First-class to the deployment-config feature.
+
+**Context (GlobalContext)** — The resolved configuration snapshot
+both the **server** and the **agent** act on. Embedded in both the
+**Instance**'s `context` field and the **StyrminDeployment** CRD spec.
+Frozen for the lifetime of an Instance. See [the Context
+page](../drivers/context.md).
+
+### D
+
+**Deployment** — The long-lived record carrying the desired state of
+one application in one Environment: which Application Driver Version,
+which Application Version, and the user's config. Editing it triggers
+**reconciliation**.
+
+**DeploymentStatus** — The latest `StyrminDeployment` CRD `.status`
+snapshot per deployment. Distinct from the **Deployment state** enum.
+
+**Deployment state** — The enum on `Deployment.status`: `PENDING`,
+`DEPLOYING`, `RUNNING`, `RESTORING`, `FAILED`, `DELETING`, `DELETED`.
+
+**Dual-entrypoint E2E** — E2E tests that run twice, once driven
+through the SDK and once through Playwright, so both the API surface
+and the UI surface stay in sync.
+
+### E
+
+**E2E (test tier)** — End-to-end test against a real vcluster with
+FluxCD, Prefect, and supporting services — no mocks.
+
+**Environment** — A logical deployment target inside a **Cluster** —
+`dev`, `staging`, `prod`, etc. Groups Deployments that share a
+lifecycle and a Backup Storage Location.
+
+### F
+
+**Flow / Prefect flow** — A unit of orchestration (`CREATE_INSTANCE`,
+`UPDATE_INSTANCE`, `UPGRADE_INSTANCE`, ...) submitted by the server
+and executed on the agent's Prefect worker.
+
+**Frontend** — The React 19 + Vite single-page app that consumes the
+GraphQL API.
+
+### G
+
+**Generator** — The server component that builds a fresh **Instance**
+from a **Deployment**, resolving the **Context** as part of the build.
+
+**GlobalContext** — See **Context**.
+
+**GraphQL operation** — A query or mutation defined in a `.graphql`
+file. Inline GraphQL strings in Python are not allowed.
+
+### H
+
+**HelmRelease** — The FluxCD v2 CRD declaring desired Helm chart
+state. Created and updated by the **operator** based on the resolved
+Context.
+
+**Hook** — A lifecycle slot at which Actions run. Currently `setup`
+(during create) and `upgrade` (during upgrade). Each Hook has three
+**Modes**.
+
+### I
+
+**Instance (ApplicationInstance)** — A frozen snapshot of what was
+deployed at a point in time. Generated from a Deployment at
+reconciliation time. A Deployment owns at most one **active
+instance** at a time.
+
+### M
+
+**Mode** — The execution phase within a **Hook**: `pre`, `core`, or
+`post`. Ordering across modes is strict; ordering inside a mode is
+unspecified.
+
+### O
+
+**Observed state** — What the agent actually sees in the cluster, as
+opposed to declared state. Captured in `PodStatus` and
+`DeploymentStatus`. Drift between observed and declared is expected.
+
+**Operator** — The kopf-based controller running inside the agent
+that watches **StyrminDeployment** CRDs and reconciles them into
+Kubernetes resources. See [The operator and
+`StyrminDeployment`](./operator-and-crds.md).
+
+### P
+
+**Parameter** — A user-configurable input declared by the Application
+Driver. Surfaced through the GraphQL API and frontend forms.
+
+**PodStatus** — Per-pod observed-state record (one row per
+`(deployment_id, pod_name)`).
+
+**Prefect** — The workflow engine Styrmin uses to orchestrate Flows
+on the agent.
+
+### R
+
+**Reconciliation** — The act of comparing the Deployment's newly
+generated Instance against the active Instance and planning the
+convergence work. The core loop of Styrmin. See
+[Reconciliation](./reconciliation.md).
+
+**Recorded intent** — The flow of direction from server to agent
+through database rows and CRDs, not direct RPC. The server never
+calls the agent directly.
+
+**Remediator** — The server service that maps the diff between a
+newly generated Instance and the active Instance to a Prefect flow.
+
+### S
+
+**SDK / styrmin-sdk** — The async Python client SDK that wraps
+GraphQL operations as typed Pydantic models.
+
+**Server** — The Styrmin backend process. Owns the database, exposes
+the GraphQL API. The single source of truth for what should be
+running.
+
+**Service (deployed service)** — A network-addressable endpoint
+declared by the Application Driver and materialised as a Kubernetes
+`Service` object.
+
+**Status reporter** — The coroutine inside the agent that polls
+Kubernetes and posts `PodStatus` / `DeploymentStatus` snapshots back
+to the server. See [Status reporting](./status-reporting.md).
+
+**StyrminDeployment (CRD)** — Styrmin's primary Custom Resource
+Definition. Carries the embedded Context in `spec`; watched by the
+**operator**.
+
+### T
+
+**Task (database record)** — A row tracking one asynchronous
+operation, with `status`, `type`, and the Prefect flow run id. Not to
+be confused with Prefect's in-process `task` primitive.
+
+**Tombstone / tombstoned deployment** — A Deployment row whose
+cluster-side workload has been torn down but whose record is retained
+for timeline, backups, and audit.
+
+### U
+
+**Utility** — A cluster-level resource (ingress controller, service
+discovery, ...) managed by the same builders that produce application
+resources. Internal to Styrmin; not user-facing in normal use.
+
+### V
+
+**vcluster** — The virtual Kubernetes cluster used as the E2E test
+target and the local-demo runtime. Bundled with the Styrmin repo's
+Quickstart workflow.

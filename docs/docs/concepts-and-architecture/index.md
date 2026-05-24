@@ -1,20 +1,21 @@
 ---
-title: How It Works
+title: Concepts and Architecture
 sidebar_position: 1
-description: Optional deep dives into how Styrmin actually works — pick the topic you want.
+description: The mental model and the under-the-hood architecture — pick the depth you need.
 ---
 
-## How It Works
+## Concepts and Architecture
 
-You don't need this section to use Styrmin. If you can deploy an
-application and run a backup, the rest is implementation detail you can
-safely ignore.
+This section serves two purposes:
 
-These pages exist for the moment when you _want_ to understand what's
-happening under the hood — usually because something surprised you,
-because you're integrating Styrmin into a larger system, or because
-you're about to write a driver and want to know which lifecycle hook
-runs when.
+- **The first few pages give you the mental model** you need to use
+  Styrmin — driver, cluster, environment, deployment, reconciliation,
+  context. Read these.
+- **The remaining pages are optional under-the-hood detail.** Read them
+  when you want to understand what's happening internally — usually
+  because something surprised you, because you're integrating Styrmin
+  into a larger system, or because you're about to write a driver and
+  want to know which lifecycle hook runs when.
 
 Each page is **short, educational, and assumes you are not a Kubernetes
 expert.** We explain the moving parts in plain English and link out to

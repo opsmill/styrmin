@@ -42,7 +42,7 @@ is designed to make them routine.
 The unit that makes this work is the **driver**: a versioned, per-application
 specification that captures everything Styrmin needs to deploy, configure,
 back up, and upgrade that application correctly. See
-[What is an Application Driver?](../drivers/what-is-a-driver.md).
+[What is an Application Driver?](../concepts-and-architecture/what-is-a-driver.md).
 
 ### Who Styrmin is for
 
@@ -193,8 +193,8 @@ applications.
 
 ### Next steps
 
-- [**Platform Overview**](./overview.md) — the conceptual model behind
+- [**Platform Overview**](./platform-overview.md) — the conceptual model behind
   driver, cluster, environment, deployment.
-- [**Quickstart**](./quickstart.md) — try the bundled demo end-to-end.
-- [**What is an Application Driver?**](../drivers/what-is-a-driver.md) —
+- [**Quickstart**](../installation/quickstart.md) — try the bundled demo end-to-end.
+- [**What is an Application Driver?**](../concepts-and-architecture/what-is-a-driver.md) —
   understand the unit that makes the rest of Styrmin work.

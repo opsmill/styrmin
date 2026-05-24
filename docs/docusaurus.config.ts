@@ -32,6 +32,70 @@ const config: Config = {
     ],
   ],
 
+  plugins: [
+    [
+      '@docusaurus/plugin-client-redirects',
+      {
+        // Old `/docs/how-it-works/*` URLs now live under
+        // `/docs/concepts-and-architecture/*`. Generated as client-side
+        // redirects so deep links from blog posts, slack, etc. keep working.
+        redirects: [
+          {from: '/docs/how-it-works', to: '/docs/concepts-and-architecture'},
+          // `/docs/getting-started/*` was dissolved per audit: Why Styrmin?
+          // and Platform Overview moved under Introduction, Quickstart moved
+          // under Installation.
+          {
+            from: '/docs/getting-started/why-styrmin',
+            to: '/docs/introduction/why-styrmin',
+          },
+          {
+            from: '/docs/getting-started/overview',
+            to: '/docs/introduction/platform-overview',
+          },
+          {
+            from: '/docs/getting-started/quickstart',
+            to: '/docs/installation/quickstart',
+          },
+          // What is an Application Driver? moved from Drivers to
+          // Concepts and Architecture — it's a conceptual page that was
+          // mixed in with task-oriented driver guides.
+          {
+            from: '/docs/drivers/what-is-a-driver',
+            to: '/docs/concepts-and-architecture/what-is-a-driver',
+          },
+          {
+            from: '/docs/how-it-works/architecture',
+            to: '/docs/concepts-and-architecture/architecture',
+          },
+          {
+            from: '/docs/how-it-works/reconciliation',
+            to: '/docs/concepts-and-architecture/reconciliation',
+          },
+          {
+            from: '/docs/how-it-works/operator-and-crds',
+            to: '/docs/concepts-and-architecture/operator-and-crds',
+          },
+          {
+            from: '/docs/how-it-works/ingress-and-networking',
+            to: '/docs/concepts-and-architecture/ingress-and-networking',
+          },
+          {
+            from: '/docs/how-it-works/backups-and-restores',
+            to: '/docs/concepts-and-architecture/backups-and-restores',
+          },
+          {
+            from: '/docs/how-it-works/hooks-and-actions',
+            to: '/docs/concepts-and-architecture/hooks-and-actions',
+          },
+          {
+            from: '/docs/how-it-works/status-reporting',
+            to: '/docs/concepts-and-architecture/status-reporting',
+          },
+        ],
+      },
+    ],
+  ],
+
   themes: [
     [
       '@easyops-cn/docusaurus-search-local',
@@ -60,7 +124,7 @@ const config: Config = {
           type: 'docSidebar',
           sidebarId: 'docs',
           position: 'left',
-          label: 'Getting Started',
+          label: 'Introduction',
         },
         {
           to: '/docs/installation',
@@ -68,7 +132,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          to: '/docs/category/application-drivers',
+          to: '/docs/drivers/loading-drivers',
           label: 'Drivers',
           position: 'left',
         },
@@ -86,8 +150,8 @@ const config: Config = {
           title: 'Documentation',
           items: [
             {
-              label: 'Getting Started',
-              to: '/docs/getting-started/overview',
+              label: 'Introduction',
+              to: '/docs/introduction/why-styrmin',
             },
             {
               label: 'Installation',
@@ -95,7 +159,7 @@ const config: Config = {
             },
             {
               label: 'Application Drivers',
-              to: '/docs/category/application-drivers',
+              to: '/docs/drivers/loading-drivers',
             },
           ],
         },
