@@ -27,6 +27,10 @@ from styrmin_sdk.models import UpdateDeploymentInput
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 
+pytestmark = [
+    pytest.mark.shard_compute,
+]
+
 
 async def test_deploy_with_dedicated_ingress(
     scenario_driver: ScenarioDriver,

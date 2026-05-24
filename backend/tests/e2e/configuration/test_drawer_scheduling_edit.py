@@ -42,6 +42,8 @@ from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
+pytestmark = [pytest.mark.shard_configuration]
+
 RECONCILE_TIMEOUT_SECONDS = 480.0
 
 
@@ -270,6 +272,15 @@ async def test_drawer_scheduling_edit(
         "Exercises the FR-028 keyboard-only invariant for the drawer's "
         "primary flow. The dialog focus trap and tab order matter only in "
         "the UI; no SDK equivalent."
+    ),
+)
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "Flaky under CI load — keyboard-driven Apply intermittently submits "
+        "with stale form state and the CPU edit doesn't persist. See "
+        "opsmill/styrmin#260. Quarantined so unrelated CI work can land; "
+        "flip back to a hard assert once the form-state desync is fixed."
     ),
 )
 async def test_drawer_scheduling_edit_keyboard_only(

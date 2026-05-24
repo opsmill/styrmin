@@ -7,6 +7,10 @@ import pytest
 
 from tests.e2e.drivers import ScenarioDriver
 
+pytestmark = [
+    pytest.mark.shard_general,
+]
+
 VALID_TASK_TYPES = {
     "noop",
     "run_job",

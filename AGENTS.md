@@ -146,6 +146,8 @@ Use `.agents/skills/e2e-troubleshoot/SKILL.md` for the structured multi-iteratio
 
 `--reruns` from ``pytest-rerunfailures`` is incompatible with ``--pdb``, which is why the plugin and its auto-retry markers were removed in bce37c1. Do not reintroduce them.
 
+The matrix-sharded CI layout (one vcluster per shard) does not change this recipe — each shard runs pytest single-threaded.
+
 ### Dual-entrypoint scope — mark `api_only` when there's no UI flow
 
 E2E tests run twice by default: once as `[api-chromium]` (driver = SDK) and once as `[ui-chromium]` (driver = Playwright). Each variant adds ~20 minutes of CI time, so running both should be a deliberate choice tied to actually exercising the UI.
@@ -165,6 +167,8 @@ async def test_<name>(...):
 **Use `@pytest.mark.ui_only(reason=...)`** for the inverse — tests that assert on UI-specific behaviour (rendering, click flows, accessibility) that has no SDK equivalent.
 
 **Heuristic for whether a test is `api_only`:** if every action you take in the test goes through `client.X.Y()`, `kubectl`, or `kr8s`, and the test never calls `scenario_driver.create_deployment` / `upgrade_deployment` / `create_backup` / `start_components` / etc. (the dual-entrypoint methods), it's an `api_only` candidate. Tests that *do* call those methods exercise both the UI and API code paths and should run under both variants.
+
+**Shard markers (matrix CI):** Every `@pytest.mark.ci` E2E test ALSO carries exactly one bare-name shard marker (`shard_readonly`, `shard_mutation_small`, `shard_mutation_large`, `shard_ingress`, `shard_backup`, or `shard_infrahub`) that routes it to one of six CI matrix shards. See [`dev/guides/e2e-parallelism.md`](dev/guides/e2e-parallelism.md) for the shard scheme and [`dev/guides/e2e-deployment-sharing.md`](dev/guides/e2e-deployment-sharing.md) for the decision tree. The conftest hook `enforce_shard_markers` fails collection if the marker is missing or duplicated.
 
 ### UI-variant troubleshooting — use the Playwright MCP server
 

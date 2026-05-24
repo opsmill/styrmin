@@ -18,6 +18,10 @@ from kr8s.asyncio.objects import Service as AsyncService
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ResourceNotFound, ScenarioDriver
 
+pytestmark = [
+    pytest.mark.shard_backup,
+]
+
 
 @asynccontextmanager
 async def portforward_simple_app(

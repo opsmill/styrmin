@@ -9,6 +9,10 @@ from tests.e2e.conftest import (
 )
 from tests.e2e.drivers import ScenarioDriver
 
+pytestmark = [
+    pytest.mark.shard_general,
+]
+
 
 @pytest.mark.e2e
 async def test_deploy_semaphore(

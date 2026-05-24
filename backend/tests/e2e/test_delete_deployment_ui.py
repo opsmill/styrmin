@@ -29,6 +29,10 @@ from tests.e2e.pages.environments import EnvironmentDetailPage
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
+pytestmark = [
+    pytest.mark.shard_general,
+]
+
 
 @pytest.mark.ci
 @pytest.mark.ui_only(

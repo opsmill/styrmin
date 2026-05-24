@@ -35,6 +35,7 @@ Scenarios:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any, AsyncGenerator
 
@@ -48,6 +49,10 @@ from styrmin_sdk.graphql._generated.input_types import (
 
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.helpers.workloads import _wait_for_pod_template
+
+pytestmark = [
+    pytest.mark.shard_env,
+]
 
 RECONCILE_TIMEOUT_SECONDS = 480.0
 
@@ -102,14 +107,16 @@ async def env_update_three_deployments(
 ) -> list[dict]:
     """Three peer ``simple-app`` deployments parked in RUNNING — the
     fanout target set for the US1 headline scenario.
+
+    Deployments are created sequentially. Concurrent ``createDeployment``
+    mutations against the same environment surface a backend race
+    (``ScenarioActionError: An internal error occurred`` — observed on
+    CI run 26338948679, api/mutation_large): two of three parallel
+    creates failed with an internal error from the styrmin server.
+    Until that race is fixed in the server, the fixture stays serial.
     """
     driver, _ = session_scenario_driver
     deployments: list[dict] = []
-    # All three deployments share `env_update_environment` and use the
-    # `simple-app` driver, which declares a service named `simple-app`. The
-    # platform enforces service-name uniqueness within an environment, so each
-    # deployment must rename its service (see `test_pod_scheduling.py` for the
-    # same pattern).
     for suffix in ("a", "b", "c"):
         deployment = await driver.create_deployment(
             driver="simple-app",
@@ -158,6 +165,7 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
     env_update_three_deployments: list[dict],
     vcluster: dict,
     scenario_driver: ScenarioDriver,
+    driver_mode: str,
     _env_update_driver_bound: None,
 ) -> None:
     """Quickstart Steps 1-3: ``updateEnvironment`` with a single env var
@@ -194,8 +202,13 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
     )
 
     # Each deployment must reconcile to RUNNING with the new env entry on
-    # container[0] of its rendered pod template.
-    for dep in env_update_three_deployments:
+    # container[0] of its rendered pod template. In API mode wait on the
+    # three deployments in parallel — the styrmin task-worker reconciles
+    # them concurrently, so serializing the test-side waits just stacks
+    # idle polling latency on top. In UI mode the wait_for_deployment_running
+    # path drives ``page.goto`` on the session-scoped Playwright Page;
+    # parallel calls would race and abort with ``net::ERR_ABORTED``.
+    async def _check_one(dep: dict) -> None:
         await scenario_driver.wait_for_deployment_running(
             deployment_id=dep["deployment_id"], timeout=RECONCILE_TIMEOUT_SECONDS
         )
@@ -222,6 +235,12 @@ async def test_us1_environment_update_fans_out_to_all_deployments(
             f"deployment {dep['deployment_id']} did not pick up the env "
             f"var on container[0] — saw {envs}"
         )
+
+    if driver_mode == "api":
+        await asyncio.gather(*(_check_one(dep) for dep in env_update_three_deployments))
+    else:
+        for dep in env_update_three_deployments:
+            await _check_one(dep)
 
     # Each deployment's timeline gained at least one new entry whose
     # ``contextDiff`` mentions the env-config change. We don't lock the

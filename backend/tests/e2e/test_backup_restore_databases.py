@@ -19,6 +19,10 @@ from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ResourceNotFound, ScenarioDriver
 from tests.e2e.test_backup_restore import wait_for_pods_ready
 
+pytestmark = [
+    pytest.mark.shard_backup,
+]
+
 
 @asynccontextmanager
 async def portforward_db_test(

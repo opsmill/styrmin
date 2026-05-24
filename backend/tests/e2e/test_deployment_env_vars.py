@@ -27,6 +27,7 @@ up.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any, AsyncGenerator
 
@@ -36,6 +37,10 @@ from styrmin_sdk._queries import load_query
 
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.helpers.workloads import _wait_for_pod_template
+
+pytestmark = [
+    pytest.mark.shard_env,
+]
 
 RECONCILE_TIMEOUT_SECONDS = 480.0
 
@@ -243,6 +248,7 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
     env_vars_second_deployment: dict,
     vcluster: dict,
     scenario_driver: ScenarioDriver,
+    driver_mode: str,
     _env_vars_driver_bound: None,
 ) -> None:
     """Quickstart Step 2: set ``OTEL_EXPORTER_OTLP_ENDPOINT`` at the
@@ -277,42 +283,58 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
         ),
     )
     # The two deployments may need to reconcile; their fixtures already
-    # parked them in RUNNING. Wait until the env var lands on each.
-    await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment_a_id, timeout=RECONCILE_TIMEOUT_SECONDS
-    )
-    await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment_b_id, timeout=RECONCILE_TIMEOUT_SECONDS
-    )
+    # parked them in RUNNING. Wait until the env var lands on each. In
+    # API mode wait in parallel — the task-worker reconciles them
+    # concurrently. In UI mode wait_for_deployment_running drives
+    # ``page.goto`` on the session-scoped Playwright Page; parallel calls
+    # would race with ``net::ERR_ABORTED``, so fall back to serial.
+    if driver_mode == "api":
+        await asyncio.gather(
+            scenario_driver.wait_for_deployment_running(
+                deployment_id=deployment_a_id, timeout=RECONCILE_TIMEOUT_SECONDS
+            ),
+            scenario_driver.wait_for_deployment_running(
+                deployment_id=deployment_b_id, timeout=RECONCILE_TIMEOUT_SECONDS
+            ),
+        )
+    else:
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_a_id, timeout=RECONCILE_TIMEOUT_SECONDS
+        )
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_b_id, timeout=RECONCILE_TIMEOUT_SECONDS
+        )
 
-    dep_a = await _wait_for_pod_template(
-        vcluster,
-        namespace=deployment_a_namespace,
-        label_selector="app.kubernetes.io/name=simple-app",
-        predicate=lambda d: any(
-            entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
-            and entry.value == "https://otel.staging"
-            for container in d.spec.template.spec.containers or []
-            for entry in container.env or []
+    dep_a, dep_b = await asyncio.gather(
+        _wait_for_pod_template(
+            vcluster,
+            namespace=deployment_a_namespace,
+            label_selector="app.kubernetes.io/name=simple-app",
+            predicate=lambda d: any(
+                entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
+                and entry.value == "https://otel.staging"
+                for container in d.spec.template.spec.containers or []
+                for entry in container.env or []
+            ),
+            description=(
+                "OTEL_EXPORTER_OTLP_ENDPOINT to land on deployment A from the "
+                "environment scope"
+            ),
         ),
-        description=(
-            "OTEL_EXPORTER_OTLP_ENDPOINT to land on deployment A from the "
-            "environment scope"
-        ),
-    )
-    dep_b = await _wait_for_pod_template(
-        vcluster,
-        namespace=deployment_b_namespace,
-        label_selector="app.kubernetes.io/name=simple-app",
-        predicate=lambda d: any(
-            entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
-            and entry.value == "https://otel.staging"
-            for container in d.spec.template.spec.containers or []
-            for entry in container.env or []
-        ),
-        description=(
-            "OTEL_EXPORTER_OTLP_ENDPOINT to land on peer deployment B "
-            "without any per-deployment env vars set"
+        _wait_for_pod_template(
+            vcluster,
+            namespace=deployment_b_namespace,
+            label_selector="app.kubernetes.io/name=simple-app",
+            predicate=lambda d: any(
+                entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
+                and entry.value == "https://otel.staging"
+                for container in d.spec.template.spec.containers or []
+                for entry in container.env or []
+            ),
+            description=(
+                "OTEL_EXPORTER_OTLP_ENDPOINT to land on peer deployment B "
+                "without any per-deployment env vars set"
+            ),
         ),
     )
 

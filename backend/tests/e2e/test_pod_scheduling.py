@@ -44,6 +44,10 @@ from styrmin_sdk.graphql._generated.get_deployment_resolved_scheduling import (
 
 from tests.e2e.drivers import ScenarioDriver
 
+pytestmark = [
+    pytest.mark.shard_compute,
+]
+
 # Single-node vcluster: we cannot verify actual node placement, only that
 # the rendered pod template carries the intended scheduling fields.
 #

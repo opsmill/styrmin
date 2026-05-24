@@ -9,6 +9,10 @@ from styrmin_sdk import StyrminClient
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 
+pytestmark = [
+    pytest.mark.shard_general,
+]
+
 
 @pytest.mark.ci
 async def test_deploy_simple_app(

@@ -40,7 +40,7 @@ from styrmin_sdk.graphql._generated.enums import Role
 
 from tests.e2e.pages import GroupsAdminPage
 
-pytestmark = [pytest.mark.ci]
+pytestmark = [pytest.mark.ci, pytest.mark.shard_general]
 
 
 async def _member_ids(client: StyrminClient, group_id: str) -> set[str]:
