@@ -10,14 +10,11 @@ The six shards:
 
 | Shard | Marker | Purpose | Sample tests |
 |---|---|---|---|
-| `readonly` | `shard_readonly` | Tests that only read shared state | `test_ui_smoke`, `test_admin_*` |
-| `mutation_small` | `shard_mutation_small` | Short tests that create/delete their own deployment | `test_deploy_app`, `test_delete_deployment_*`, `test_service_discovery` |
-| `configuration` | `shard_configuration` | `backend/tests/e2e/configuration/` — unified config-drawer UI flows (one deployment + drawer per test) | `test_drawer_env_vars_edit`, `test_drawer_scheduling_edit` |
-| `env_vars` | `shard_env_vars` | `test_deployment_env_vars.py` (env-var precedence matrix, all api_only) | `test_us1_deployment_level_env_var`, `test_us2_environment_level_env_var_propagates` |
-| `env_update` | `shard_env_update` | `test_environment_update.py` (env-level fan-out) | `test_us1_environment_update_fans_out_to_all_deployments` |
-| `pod_scheduling` | `shard_pod_scheduling` | `test_pod_scheduling.py` (affinity / anti-affinity, all api_only) | `test_scheduling_end_to_end`, `test_pod_anti_affinity_cross_deployment_via_graphql` |
-| `ingress` | `shard_ingress` | Ingress-controller scenarios (its own LB / IP allocation) | `test_ingress_controller` |
-| `backup` | `shard_backup` | Velero + MinIO; cluster-wide state | `test_backup_restore*` |
+| `general` | `shard_general` | Readonly readers + short-mutation tests (deploy, delete, admin, auth, smoke) | `test_ui_smoke`, `test_deploy_app`, `test_admin_*`, `test_service_discovery` |
+| `env` | `shard_env` | `test_deployment_env_vars.py` + `test_environment_update.py` (env-var precedence and env-level fan-out) | `test_us1_deployment_level_env_var`, `test_us1_environment_update_fans_out_to_all_deployments` |
+| `compute` | `shard_compute` | `test_pod_scheduling.py` + `test_ingress_controller.py` (scheduling / ingress) | `test_scheduling_end_to_end`, `test_ingress_controller` |
+| `backup` | `shard_backup` | Velero + MinIO; cluster-wide state (kept isolated to avoid cross-test pollution) | `test_backup_restore*` |
+| `configuration` | `shard_configuration` | `backend/tests/e2e/configuration/` — unified config-drawer UI flows | `test_drawer_env_vars_edit`, `test_drawer_scheduling_edit` |
 
 The two entrypoints (`api`, `ui`) continue as before — each shard runs
 twice unless every test in it carries `@pytest.mark.api_only` or
@@ -34,13 +31,9 @@ the marker rules.
    pytestmark = [
        pytest.mark.ci,
        pytest.mark.api_only(reason="..."),  # or ui_only, or omit for dual
-       pytest.mark.shard_readonly,          # one of shard_readonly,
-                                             # shard_mutation_small,
-                                             # shard_configuration,
-                                             # shard_env_vars,
-                                             # shard_env_update,
-                                             # shard_pod_scheduling,
-                                             # shard_ingress, shard_backup
+       pytest.mark.shard_general,           # one of shard_general,
+                                             # shard_env, shard_compute,
+                                             # shard_backup, shard_configuration
    ]
    ```
 

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
 
 pytestmark = [
-    pytest.mark.shard_mutation_small,
+    pytest.mark.shard_general,
 ]
 
 

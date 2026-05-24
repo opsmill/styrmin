@@ -22,14 +22,11 @@ _INI = """
 [pytest]
 markers =
     ci: foo
-    shard_readonly: foo
-    shard_mutation_small: foo
-    shard_configuration: foo
-    shard_env_vars: foo
-    shard_env_update: foo
-    shard_pod_scheduling: foo
-    shard_ingress: foo
+    shard_general: foo
+    shard_env: foo
+    shard_compute: foo
     shard_backup: foo
+    shard_configuration: foo
 """
 
 
@@ -79,7 +76,7 @@ import pytest
 
 
 @pytest.mark.ci
-@pytest.mark.shard_readonly
+@pytest.mark.shard_general
 def test_has_shard():
     pass
 """,
@@ -104,7 +101,7 @@ import pytest
 
 
 @pytest.mark.ci
-@pytest.mark.shard_readonly
+@pytest.mark.shard_general
 @pytest.mark.shard_backup
 def test_double_marked():
     pass

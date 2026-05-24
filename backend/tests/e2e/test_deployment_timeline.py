@@ -8,7 +8,7 @@ import pytest
 from tests.e2e.drivers import ScenarioDriver
 
 pytestmark = [
-    pytest.mark.shard_mutation_small,
+    pytest.mark.shard_general,
 ]
 
 VALID_TASK_TYPES = {

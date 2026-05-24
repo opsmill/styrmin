@@ -44,7 +44,7 @@ pytestmark = [
             "and the same SDK login path with no incremental coverage."
         ),
     ),
-    pytest.mark.shard_readonly,
+    pytest.mark.shard_general,
 ]
 
 

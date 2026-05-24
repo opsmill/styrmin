@@ -34,7 +34,7 @@ from styrmin_sdk import StyrminClient
 from tests.e2e.drivers import ScenarioDriver
 
 pytestmark = [
-    pytest.mark.shard_readonly,
+    pytest.mark.shard_general,
 ]
 
 _COMPONENT_LABEL_KEY = "styrmin/component"

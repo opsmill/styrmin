@@ -28,7 +28,7 @@ from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 
 pytestmark = [
-    pytest.mark.shard_ingress,
+    pytest.mark.shard_compute,
 ]
 
 

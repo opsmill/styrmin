@@ -22,18 +22,21 @@ Two viable parallelism approaches:
 
 ## Decision
 
-Use **GitHub Actions matrix sharding** with 8 shards × 2 entrypoints
+Use **GitHub Actions matrix sharding** with 5 shards × 2 entrypoints
 (minus exclusions for entirely api_only / ui_only shards). Each cell
 boots its own vcluster.
 
-Shards: `readonly`, `mutation_small`, `configuration`, `env_vars`,
-`env_update`, `pod_scheduling`, `ingress`, `backup`. The
-`env_vars` / `env_update` / `pod_scheduling` shards are file-level
-splits of what was initially one `mutation_large` shard. The
-`configuration` shard is a directory-level split of
-`backend/tests/e2e/configuration/` (the unified config-drawer UI
-flows), pulled out of `mutation_small` because the UI-heavy drawer
-tests dominated that cell's wall-clock. Routing via bare-name `@pytest.mark.shard_<name>` markers
+Shards: `general` (readonly + short-mutation tests), `env` (env-vars
++ env-update), `compute` (pod scheduling + ingress controller),
+`backup` (Velero / MinIO, isolated), `configuration` (config-drawer
+UI flows).
+
+The grouping intentionally targets per-cell wall-clock of 15-20
+minutes, matched to the intrinsic floor set by the `configuration`
+shard (~25-30 min for the drawer suite). Over-sharding past that
+floor traded matrix overhead and Docker network IP-pool contention
+(opsmill/styrmin#261) for cells that finished in 5-8 minutes — no
+net wall-clock benefit. Routing via bare-name `@pytest.mark.shard_<name>` markers
 enforced by a conftest collection hook. Additional shards (e.g. for
 the Infrahub app stack) will be added when their tests are written.
 

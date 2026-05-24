@@ -60,14 +60,11 @@ def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
 
 _VALID_SHARDS = frozenset(
     {
-        "shard_readonly",
-        "shard_mutation_small",
-        "shard_configuration",
-        "shard_env_vars",
-        "shard_env_update",
-        "shard_pod_scheduling",
-        "shard_ingress",
+        "shard_general",
+        "shard_env",
+        "shard_compute",
         "shard_backup",
+        "shard_configuration",
     }
 )
 

@@ -47,7 +47,7 @@ from styrmin_sdk.graphql._generated.input_types import (
 from tests.e2e.drivers import ScenarioDriver
 
 pytestmark = [
-    pytest.mark.shard_mutation_small,
+    pytest.mark.shard_general,
 ]
 
 RECONCILE_TIMEOUT_SECONDS = 480.0

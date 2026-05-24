@@ -38,7 +38,7 @@ pytestmark = [
     pytest.mark.ui_only(
         reason="UI smoke assertions — rendered DOM only; no SDK equivalent.",
     ),
-    pytest.mark.shard_readonly,
+    pytest.mark.shard_general,
 ]
 
 
