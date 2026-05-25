@@ -71,6 +71,7 @@ from .get_cluster import GetCluster, GetClusterCluster
 from .get_deployment import (
     GetDeployment,
     GetDeploymentDeployment,
+    GetDeploymentDeploymentApplicationDriverVersion,
     GetDeploymentDeploymentApplicationInstance,
     GetDeploymentDeploymentComponents,
     GetDeploymentDeploymentCreatedBy,
@@ -311,6 +312,7 @@ __all__ = [
     "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVars",
     "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVarsEnvVars",
     "GetDeploymentDeployment",
+    "GetDeploymentDeploymentApplicationDriverVersion",
     "GetDeploymentDeploymentApplicationInstance",
     "GetDeploymentDeploymentComponents",
     "GetDeploymentDeploymentCreatedBy",

@@ -755,6 +755,11 @@ class Client(AsyncBaseClient):
                 config
                 applicationVersion
                 applicationDriverVersionId
+                applicationDriverVersion {
+                  version
+                  contentHash
+                  sourceCommitSha
+                }
                 environmentId
                 createdBy {
                   id

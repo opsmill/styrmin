@@ -158,10 +158,10 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### CLI rendering
 
-- [ ] T040 [US4] In `cli/styrminctl/commands/driver.py` (or the file rendering the `driver list` output — confirm path during implementation), wrap the version column with `format_driver_version_label`
-- [ ] T041 [US4] In the CLI driver-detail rendering, add lines showing the full `Content hash:` or `Commit SHA:` value (whichever is populated)
-- [ ] T042 [US4] In `cli/styrminctl/commands/deployment.py` (or equivalent), apply the helper anywhere a deployment renders its driver-version reference (list and detail)
-- [ ] T043 [P] [US4] Add CLI tests in `cli/tests/` asserting the rendered output contains `<version>@<short>` for a fixture row and the full fingerprint line on detail
+- [x] T040 [US4] In `cli/styrminctl/commands/driver.py` (or the file rendering the `driver list` output — confirm path during implementation), wrap the version column with `format_driver_version_label`
+- [x] T041 [US4] In the CLI driver-detail rendering, add lines showing the full `Content hash:` or `Commit SHA:` value (whichever is populated)
+- [x] T042 [US4] In `cli/styrminctl/commands/deployment.py` (or equivalent), apply the helper anywhere a deployment renders its driver-version reference (list and detail)
+- [x] T043 [P] [US4] Add CLI tests in `cli/tests/` asserting the rendered output contains `<version>@<short>` for a fixture row and the full fingerprint line on detail
 
 ### Frontend rendering
 

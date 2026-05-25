@@ -1,3 +1,6 @@
+# A 4-line duplicate of this helper lives at cli/src/styrminctl/labels.py
+# because the CLI is a separate package. Keep them in sync; the canonical
+# rendering rule is specs/013-driver-fingerprint/contracts/sdk-cli-rendering.md.
 """Driver version label formatting.
 
 Per spec 013 (Provenance fingerprint), every user-visible surface that

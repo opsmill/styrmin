@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated
 from cyclopts import App, Parameter
 
 from styrminctl import client
+from styrminctl.labels import format_driver_version_label
 from styrminctl.output import console, print_success, print_table, styrmin_error_handler
 from styrminctl.types import validate_directory_exists
 
@@ -18,9 +19,20 @@ drivers_app = App(name="drivers", help="Manage application drivers.")
 
 def _print_version_details(version: Any) -> None:  # noqa: ANN401
     """Print driver version details (shared by load-version and load-local-version)."""
-    print_success(f"Application driver version '{version.version}' loaded (id: {version.id})")
+    content_hash = getattr(version, "content_hash", None)
+    source_commit_sha = getattr(version, "source_commit_sha", None)
+    label = format_driver_version_label(
+        version=version.version,
+        content_hash=content_hash,
+        source_commit_sha=source_commit_sha,
+    )
+    print_success(f"Application driver version '{label}' loaded (id: {version.id})")
     console.print(f"  Driver ID: {version.application_driver_id}")
     console.print(f"  Supported versions: {version.supported_versions}")
+    if content_hash:
+        console.print(f"  Content hash: {content_hash}")
+    elif source_commit_sha:
+        console.print(f"  Commit SHA: {source_commit_sha}")
 
     if version.component_configs:
         rows = [
