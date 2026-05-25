@@ -63,6 +63,7 @@ export type ApplicationDriverVersion = {
   applicationDriverId: Scalars['UUID']['output'];
   componentConfigs: Array<ComponentConfig>;
   components?: Maybe<Scalars['JSON']['output']>;
+  contentHash?: Maybe<Scalars['String']['output']>;
   createdOn: Scalars['DateTime']['output'];
   defaultVersion?: Maybe<Scalars['String']['output']>;
   /** Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block. */
@@ -72,6 +73,7 @@ export type ApplicationDriverVersion = {
   parameters: Array<ParameterDefinition>;
   services: Array<ServiceDefinition>;
   sourceBranch?: Maybe<Scalars['String']['output']>;
+  sourceCommitSha?: Maybe<Scalars['String']['output']>;
   sourcePath?: Maybe<Scalars['String']['output']>;
   sourceRepository: Scalars['String']['output'];
   sourceType: Scalars['String']['output'];

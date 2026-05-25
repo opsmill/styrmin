@@ -5,6 +5,8 @@ query GetDriverEnvVarDocs($applicationDriverId: UUID!) {
         versions {
             id
             version
+            contentHash
+            sourceCommitSha
             envVars {
                 name
                 description

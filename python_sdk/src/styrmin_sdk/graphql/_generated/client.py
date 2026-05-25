@@ -996,6 +996,8 @@ class Client(AsyncBaseClient):
                 versions {
                   id
                   version
+                  contentHash
+                  sourceCommitSha
                   envVars {
                     name
                     description
@@ -1481,6 +1483,8 @@ class Client(AsyncBaseClient):
                 id
                 applicationDriverId
                 version
+                contentHash
+                sourceCommitSha
                 supportedVersions
                 components
                 componentConfigs {
@@ -1528,6 +1532,8 @@ class Client(AsyncBaseClient):
                   name
                 }
                 version
+                contentHash
+                sourceCommitSha
                 supportedVersions
                 components
                 componentConfigs {

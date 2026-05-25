@@ -68,10 +68,10 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Schema + SDK regeneration
 
-- [ ] T016 Run `uv run styrmin export graphql-schema schema.graphql` from the repo root to refresh `schema.graphql` with the two new fields
-- [ ] T017 Update any existing `.graphql` operation files under `python_sdk/src/styrmin_sdk/graphql/` that select `ApplicationDriverVersion` so they include `contentHash` and `sourceCommitSha`
-- [ ] T018 Run `uv run invoke generate` to regenerate Pydantic SDK types under `python_sdk/src/styrmin_sdk/graphql/_generated/`
-- [ ] T019 Run `uv run invoke validate-graphql` to confirm all SDK operations still schema-validate
+- [x] T016 Run `uv run styrmin export graphql-schema schema.graphql` from the repo root to refresh `schema.graphql` with the two new fields
+- [x] T017 Update any existing `.graphql` operation files under `python_sdk/src/styrmin_sdk/graphql/` that select `ApplicationDriverVersion` so they include `contentHash` and `sourceCommitSha`
+- [x] T018 Run `uv run invoke generate` to regenerate Pydantic SDK types under `python_sdk/src/styrmin_sdk/graphql/_generated/`
+- [x] T019 Run `uv run invoke validate-graphql` to confirm all SDK operations still schema-validate
 
 **Checkpoint**: Foundation ready — all four user stories can now proceed in parallel.
 

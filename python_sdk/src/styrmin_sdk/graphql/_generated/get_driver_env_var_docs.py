@@ -25,6 +25,8 @@ class GetDriverEnvVarDocsApplicationDriver(BaseModel):
 class GetDriverEnvVarDocsApplicationDriverVersions(BaseModel):
     id: UUID
     version: str
+    content_hash: Optional[str] = Field(alias="contentHash")
+    source_commit_sha: Optional[str] = Field(alias="sourceCommitSha")
     env_vars: list["GetDriverEnvVarDocsApplicationDriverVersionsEnvVars"] = Field(
         alias="envVars"
     )
