@@ -53,8 +53,8 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     )
     mock_get_uow.return_value = fake_uow
 
-    mock_build_entity.side_effect = (
-        lambda model: MagicMock(id=model.id) if model is not None else None
+    mock_build_entity.side_effect = lambda model: (
+        MagicMock(id=model.id) if model is not None else None
     )
 
     diff_report = MagicMock()
@@ -113,8 +113,8 @@ async def test_apply_state_flow_handles_no_remediation_needed(
     fake_uow.application_instances.get = AsyncMock(return_value=MagicMock())
     mock_get_uow.return_value = fake_uow
 
-    mock_build_entity.side_effect = (
-        lambda model: MagicMock(id=model.id) if model is not None else None
+    mock_build_entity.side_effect = lambda model: (
+        MagicMock(id=model.id) if model is not None else None
     )
 
     mock_comparator_cls.return_value.compare = MagicMock(return_value=MagicMock())

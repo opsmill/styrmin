@@ -52,8 +52,8 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Git provider commit-SHA exposure
 
-- [ ] T009 Extend `GitDriverProvider` in `backend/styrmin_backend/services/driver/provider.py` so `provide()` resolves and stores the cloned repo's HEAD commit SHA (via `dulwich.repo.Repo(tempdir_path).head().decode()`) and exposes it via a new accessor (e.g. `get_resolved_commit_sha() -> str`) called after the context manager exits or recorded on the returned source
-- [ ] T010 [P] Write unit tests in `backend/tests/unit/services/driver/test_provider_commit_sha.py` covering: a clone of a small fixture repo resolves the expected 40-char SHA; the SHA is stable across two clones of the same ref; passing an unreachable repo/branch raises through `DriverLoadingError`
+- [X] T009 Extend `GitDriverProvider` in `backend/styrmin_backend/services/driver/provider.py` so `provide()` resolves and stores the cloned repo's HEAD commit SHA (via `dulwich.repo.Repo(tempdir_path).head().decode()`) and exposes it via a new accessor (e.g. `get_resolved_commit_sha() -> str`) called after the context manager exits or recorded on the returned source
+- [X] T010 [P] Write unit tests in `backend/tests/unit/services/driver/test_provider_commit_sha.py` covering: a clone of a small fixture repo resolves the expected 40-char SHA; the SHA is stable across two clones of the same ref; passing an unreachable repo/branch raises through `DriverLoadingError`
 
 ### Repository widened lookup
 
