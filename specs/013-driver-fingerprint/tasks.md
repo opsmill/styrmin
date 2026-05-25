@@ -165,11 +165,11 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Frontend rendering
 
-- [ ] T044 [US4] In `frontend/src/components/drivers/VersionList.tsx` (or wherever the driver list renders a version label), use `formatDriverVersionLabel`
-- [ ] T045 [US4] In `frontend/src/pages/drivers/DriverDetailPage.tsx` (and its Overview/Source tabs), render the full `contentHash` or `sourceCommitSha` value with a copy-to-clipboard button
-- [ ] T046 [US4] In `frontend/src/components/deployment/DeploymentTimeline.tsx`, apply the helper to any driver-version reference
-- [ ] T047 [US4] In `frontend/src/components/deployment/configuration/ConfigEditDrawer.tsx` and `frontend/src/components/deployment/configuration/sections/edit/IdentitySection.tsx`, apply the helper anywhere the driver-version reference is shown
-- [ ] T048 [P] [US4] Add/extend frontend tests in `frontend/src/__tests__/driver-detail/VersionList.test.tsx` and a new component test for the deployment surfaces, asserting the rendered label contains `@<short>` and the detail surface contains the full fingerprint string plus a reachable copy button
+- [x] T044 [US4] In `frontend/src/components/drivers/VersionList.tsx` (or wherever the driver list renders a version label), use `formatDriverVersionLabel`
+- [x] T045 [US4] In `frontend/src/pages/drivers/DriverDetailPage.tsx` (and its Overview/Source tabs), render the full `contentHash` or `sourceCommitSha` value with a copy-to-clipboard button
+- [x] T046 [US4] In `frontend/src/components/deployment/DeploymentTimeline.tsx`, apply the helper to any driver-version reference
+- [x] T047 [US4] In `frontend/src/components/deployment/configuration/ConfigEditDrawer.tsx` and `frontend/src/components/deployment/configuration/sections/edit/IdentitySection.tsx`, apply the helper anywhere the driver-version reference is shown
+- [x] T048 [P] [US4] Add/extend frontend tests in `frontend/src/__tests__/driver-detail/VersionList.test.tsx` and a new component test for the deployment surfaces, asserting the rendered label contains `@<short>` and the detail surface contains the full fingerprint string plus a reachable copy button
 
 ### Query updates
 

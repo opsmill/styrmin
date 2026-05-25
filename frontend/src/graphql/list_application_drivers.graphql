@@ -7,6 +7,8 @@ query ListApplicationDrivers {
       version
       supportedVersions
       defaultVersion
+      contentHash
+      sourceCommitSha
       parameters {
         name
         label

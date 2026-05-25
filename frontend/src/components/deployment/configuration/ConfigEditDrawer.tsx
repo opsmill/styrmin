@@ -13,6 +13,7 @@ import {
   deploymentConfigToInput,
   deploymentParametersToInput,
 } from "@/lib/deployment-input";
+import { formatDriverVersionLabel } from "@/lib/driverVersion";
 import { diff } from "@/lib/config-diff";
 import {
   DRAWER_SECTION_GROUPS,
@@ -233,14 +234,20 @@ export function ConfigEditDrawer({
   const renderSection = (sectionId: SectionId) => {
     switch (sectionId) {
       case "identity": {
-        const driverVersion =
-          deployment.applicationDriverVersion?.version ?? "";
+        const driverVersionRef = deployment.applicationDriverVersion;
+        const driverVersionLabel = driverVersionRef
+          ? formatDriverVersionLabel({
+              version: driverVersionRef.version,
+              contentHash: driverVersionRef.contentHash ?? null,
+              sourceCommitSha: driverVersionRef.sourceCommitSha ?? null,
+            })
+          : "";
         const driverName =
           deployment.applicationDriverVersion?.applicationDriver?.name ?? "";
         const driverLabel =
-          driverName && driverVersion
-            ? `${driverName}@${driverVersion}`
-            : driverName || driverVersion;
+          driverName && driverVersionLabel
+            ? `${driverName}@${driverVersionLabel}`
+            : driverName || driverVersionLabel;
         return (
           <IdentitySection
             key={sectionId}

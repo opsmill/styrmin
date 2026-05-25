@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { formatDriverVersionLabel } from "@/lib/driverVersion";
 import { formatRelativeTime } from "./relative-time";
 import type { DriverVersionDetail } from "./types";
 
@@ -23,6 +24,11 @@ export function VersionListItem({
   onSelect,
 }: VersionListItemProps) {
   const isGit = version.sourceType === "git";
+  const label = formatDriverVersionLabel({
+    version: version.version,
+    contentHash: version.contentHash ?? null,
+    sourceCommitSha: version.sourceCommitSha ?? null,
+  });
   return (
     <button
       type="button"
@@ -44,9 +50,9 @@ export function VersionListItem({
       <div className="flex w-full items-center gap-2">
         <span
           className="flex-1 truncate font-mono text-[13px] font-medium"
-          title={version.version}
+          title={label}
         >
-          {version.version}
+          {label}
         </span>
         <Badge
           variant={isGit ? "secondary" : "outline"}

@@ -26,6 +26,8 @@ function makeVersion(
     sourceRepository: "",
     sourceBranch: null as string | null,
     sourcePath: null as string | null,
+    sourceCommitSha: null as string | null,
+    contentHash: null as string | null,
     createdOn: "2026-01-01T00:00:00Z",
     components: null,
     parameters: [],
@@ -122,5 +124,47 @@ describe("SourceTab (T026)", () => {
       screen.queryByTestId("driver-source-branch"),
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId("driver-source-git")).not.toBeInTheDocument();
+  });
+
+  it("renders the full commit SHA with a copyable Copy button on a git source (feature 013, T045)", () => {
+    const commitSha = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+    const version = makeVersion({
+      id: "v-git-fp",
+      version: "1.2.3",
+      sourceType: "git",
+      sourceRepository: "github.com/acme/driver",
+      sourceBranch: "main",
+      sourceCommitSha: commitSha,
+    });
+
+    render(<SourceTab version={version} />);
+
+    const valueEl = screen.getByTestId("driver-source-commit-sha");
+    expect(valueEl).toHaveTextContent(commitSha);
+    expect(valueEl.textContent).toHaveLength(40);
+    const copyBtn = screen.getByRole("button", { name: /copy commit sha/i });
+    expect(copyBtn).toBeInTheDocument();
+  });
+
+  it("renders the full content hash with a copyable Copy button on a local source (feature 013, T045)", () => {
+    const contentHash =
+      "deadbeefcafefacefeedbabec0ffee1234567890abcdef0123456789abcdef01";
+    const version = makeVersion({
+      id: "v-local-fp",
+      version: "0.1.0",
+      sourceType: "local",
+      sourcePath: "/tmp/local-driver",
+      sourceRepository: "",
+      sourceBranch: null,
+      contentHash,
+    });
+
+    render(<SourceTab version={version} />);
+
+    const valueEl = screen.getByTestId("driver-source-content-hash");
+    expect(valueEl).toHaveTextContent(contentHash);
+    expect(valueEl.textContent).toHaveLength(64);
+    const copyBtn = screen.getByRole("button", { name: /copy content hash/i });
+    expect(copyBtn).toBeInTheDocument();
   });
 });

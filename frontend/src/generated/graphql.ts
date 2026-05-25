@@ -1350,7 +1350,7 @@ export type GetDeploymentQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string }, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }> }, environment: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown> } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
+export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string }, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }> }, environment: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown> } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
 
 export type GetDeploymentPodsQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -1378,7 +1378,7 @@ export type GetDriverQueryVariables = Exact<{
 }>;
 
 
-export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, createdOn: any, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, components?: Record<string, unknown> | null, createdOn: any, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
+export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, createdOn: any, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, components?: Record<string, unknown> | null, createdOn: any, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
 
 export type GetEnvironmentQueryVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -1410,7 +1410,7 @@ export type GetTaskQuery = { __typename?: 'Query', task?: { __typename?: 'Task',
 export type ListApplicationDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }> }> }> };
+export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, contentHash?: string | null, sourceCommitSha?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }> }> }> };
 
 export type ListBackupStorageLocationsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1432,7 +1432,7 @@ export type ListClustersQuery = { __typename?: 'Query', clusters: Array<{ __type
 export type ListDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null }> }> };
+export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null }> }> };
 
 export type ListEnvironmentsQueryVariables = Exact<{
   includeDeleted?: InputMaybe<Scalars['Boolean']['input']>;
@@ -2054,6 +2054,8 @@ export const GetDeploymentDocument = `
     applicationDriverVersion {
       id
       version
+      contentHash
+      sourceCommitSha
       applicationDriver {
         id
         name
@@ -2248,6 +2250,8 @@ export const GetDriverDocument = `
       sourceRepository
       sourceBranch
       sourcePath
+      sourceCommitSha
+      contentHash
       components
       createdOn
       parameters {
@@ -2460,6 +2464,8 @@ export const ListApplicationDriversDocument = `
       version
       supportedVersions
       defaultVersion
+      contentHash
+      sourceCommitSha
       parameters {
         name
         label
@@ -2595,6 +2601,8 @@ export const ListDriversDocument = `
       sourceRepository
       sourceBranch
       sourcePath
+      sourceCommitSha
+      contentHash
     }
   }
 }

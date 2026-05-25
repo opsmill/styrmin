@@ -9,6 +9,8 @@ query ListDrivers {
       sourceRepository
       sourceBranch
       sourcePath
+      sourceCommitSha
+      contentHash
     }
   }
 }
