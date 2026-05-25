@@ -35,8 +35,9 @@ rootRoute (AppShell layout)
 ├── /drivers                                                driverListRoute
 ├── /drivers/add                                            addDriverRoute
 ├── /drivers/$driverId                                      driverDetailRoute
-├── /settings                                               settingsRoute
-└── /settings/clusters/$clusterId                           clusterDetailRoute
+├── /clusters                                               clusterListRoute
+├── /clusters/$clusterId                                    clusterDetailRoute
+└── /settings                                               settingsRoute
 ```
 
 Route parameters use `$paramName` (TanStack Router syntax), not `:paramName`.

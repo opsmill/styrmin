@@ -4,6 +4,7 @@ import {
   LayoutGrid,
   Layers,
   HardDrive,
+  Server,
   Settings,
   PanelLeftClose,
   PanelLeft,
@@ -12,26 +13,43 @@ import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/use-theme";
 import { useAuth } from "@/auth/AuthProvider";
 import { HeaderUserMenu } from "@/components/HeaderUserMenu";
+import { IfRole } from "@/auth/IfRole";
+import type { Role } from "@/generated/graphql";
 
 const STORAGE_KEY = "sidebar-collapsed";
 
 const navItems = [
   { label: "Environments", icon: LayoutGrid, href: "/", exact: true },
   { label: "Drivers", icon: Layers, href: "/drivers", exact: false },
+];
+
+// Users/Groups admin surfaces are reachable from the Settings page,
+// not the top-level sidebar — see SettingsPage. Settings itself is
+// admin-only after the Cluster section moved to the dedicated Clusters
+// page; the Settings entry below is gated by `minRole`.
+interface BottomNavItem {
+  label: string;
+  icon: typeof Settings;
+  href: string;
+  exact: boolean;
+  minRole?: Role;
+}
+
+const bottomNavItems: BottomNavItem[] = [
+  { label: "Clusters", icon: Server, href: "/clusters", exact: false },
   {
     label: "Backup Storage",
     icon: HardDrive,
     href: "/backup-storage-locations",
     exact: false,
   },
-];
-
-// Users/Groups admin surfaces are reachable from the Settings page,
-// not the top-level sidebar — see SettingsPage. Keeping them off the
-// sidebar means a non-admin browser only ever sees the same five nav
-// entries every other role does.
-const bottomNavItems = [
-  { label: "Settings", icon: Settings, href: "/settings", exact: false },
+  {
+    label: "Settings",
+    icon: Settings,
+    href: "/settings",
+    exact: false,
+    minRole: "ADMIN",
+  },
 ];
 
 export function AppShell() {
@@ -71,6 +89,18 @@ export function AppShell() {
         {!collapsed && <span>{item.label}</span>}
       </Link>
     );
+  }
+
+  function renderBottomNavLink(item: BottomNavItem) {
+    const link = renderNavLink(item);
+    if (item.minRole) {
+      return (
+        <IfRole key={item.href} minimum={item.minRole}>
+          {link}
+        </IfRole>
+      );
+    }
+    return link;
   }
 
   if (isLoginRoute) {
@@ -134,7 +164,7 @@ export function AppShell() {
 
         {/* Bottom */}
         <div className="space-y-1 border-t border-border px-3 py-2">
-          {bottomNavItems.map(renderNavLink)}
+          {bottomNavItems.map(renderBottomNavLink)}
           <button
             onClick={() => setCollapsed((prev) => !prev)}
             className={cn(

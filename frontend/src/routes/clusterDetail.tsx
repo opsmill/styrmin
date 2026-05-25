@@ -3,8 +3,8 @@ import { rootRoute } from "./__root";
 
 export const clusterDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/settings/clusters/$clusterId",
+  path: "/clusters/$clusterId",
   component: lazyRouteComponent(
-    () => import("@/pages/settings/ClusterDetailPage"),
+    () => import("@/pages/clusters/ClusterDetailPage"),
   ),
 });

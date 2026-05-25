@@ -14,7 +14,7 @@ function formatDate(iso: string): string {
 }
 
 export default function ClusterDetailPage() {
-  const { clusterId } = useParams({ from: "/settings/clusters/$clusterId" });
+  const { clusterId } = useParams({ from: "/clusters/$clusterId" });
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const { data, isLoading, error, refetch, dataUpdatedAt } = useGetClusterQuery(
     { clusterId },
@@ -37,7 +37,7 @@ export default function ClusterDetailPage() {
     <PageLayout
       title={cluster.name}
       breadcrumbs={[
-        { label: "Settings", href: "/settings" },
+        { label: "Clusters", href: "/clusters" },
         { label: cluster.name },
       ]}
       actions={

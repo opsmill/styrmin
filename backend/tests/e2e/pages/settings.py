@@ -1,4 +1,11 @@
-"""Page object for the settings area (``/settings``)."""
+"""Page object for the clusters area (``/clusters``).
+
+Originally lived under ``/settings`` — the cluster surface moved out of
+Settings into a dedicated top-level page when multi-cluster support was
+introduced. The page object class is still called ``SettingsPage`` so
+downstream drivers don't have to know about the move; only the route
+and the heading wait changed.
+"""
 
 from __future__ import annotations
 
@@ -18,11 +25,11 @@ class SettingsPage:
         self._page = page
 
     async def goto(self) -> None:
-        await self._page.goto("/settings")
-        # Wait for either the cluster card or the create-cluster button to exist,
-        # whichever the page chose to render.
+        await self._page.goto("/clusters")
         try:
-            await expect(self._page.get_by_text("Cluster", exact=True)).to_be_visible()
+            await expect(
+                self._page.get_by_role("heading", name="Clusters")
+            ).to_be_visible()
         except AssertionError:
             # Surface what the browser is actually showing — most
             # auth-misconfiguration paths land us on /login or on the
@@ -39,9 +46,9 @@ class SettingsPage:
     async def create_cluster(self, *, name: str, config: dict[str, Any]) -> ClusterRef:
         """Create a cluster by driving the CreateClusterDialog form.
 
-        The SettingsPage only shows the "New Cluster" button when no cluster
-        exists yet. Callers must ensure this is the first cluster on the
-        instance (``styrmin_resources`` currently enforces this).
+        The Clusters page only shows the "New Cluster" button when no
+        cluster exists yet. Callers must ensure this is the first cluster
+        on the instance (``styrmin_resources`` currently enforces this).
         """
         await self.goto()
         trigger = self._page.get_by_role("button", name="New Cluster")
@@ -95,7 +102,7 @@ class SettingsPage:
         await dialog.get_by_role("button", name="Create", exact=True).click()
         await dialog.wait_for(state="hidden")
 
-        # After creation the SettingsPage refreshes and renders the cluster
+        # After creation the Clusters page refreshes and renders the cluster
         # card with a stable data-cluster-id attribute.
         card = self._page.locator(
             f"[data-testid=cluster-card][data-cluster-name='{name}']"
