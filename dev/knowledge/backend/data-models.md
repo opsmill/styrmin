@@ -96,6 +96,13 @@ class ApplicationDriver(StyrminModel, table=True):
 
 ```python
 class ApplicationDriverVersion(StyrminModel, table=True):
+    # Identity is the tuple (application_driver_id, source_type,
+    # source_repository, source_branch, source_path, version,
+    # content_hash, source_commit_sha) -- enforced by the
+    # uq_application_driver_version_identity UNIQUE index with
+    # postgresql_nulls_not_distinct=True (so NULL fingerprints
+    # compare equal). See specs/013-driver-fingerprint.
+
     version: str
     application_supported_versions: str          # Semver specifier
     default_version: str | None = None           # Default app version when unspecified
@@ -103,6 +110,14 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     source_repository: str
     source_branch: str | None = None
     source_path: str | None = None               # Path within the source repo/dir
+
+    # Provenance fingerprint (spec 013). Exactly one is non-null on rows
+    # created by the load path; the discriminator is ``source_type``.
+    content_hash: str | None = None              # SHA-256 hex over canonical
+                                                 # driver bytes (local source)
+    source_commit_sha: str | None = None         # Resolved git commit SHA at
+                                                 # the loaded ref (git source)
+
     components: dict | None = Field(sa_column=Column(JSON))
     parameters: list | None = Field(sa_column=Column(JSON))
     services: list | None = Field(sa_column=Column(JSON))
@@ -110,6 +125,10 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     application_driver_id: UUID
     helm_chart_id: UUID
 
+    # cascade="all, delete-orphan" on both child relations (spec 013):
+    # deleting an ApplicationDriverVersion atomically removes its
+    # Action and ComponentConfig rows. ``deployments`` is intentionally
+    # NOT cascaded -- deployments outlive their driver version.
     component_configs: list[ComponentConfig]    # Relationship
     actions: list[Action]                        # Relationship
     deployments: list["Deployment"]              # Relationship
