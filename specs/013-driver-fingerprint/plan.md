@@ -41,6 +41,16 @@ Walk against `dev/constitution.md` v1.4.0.
 
 **Verdict**: All gates pass. No Complexity Tracking entries required.
 
+### E2E coverage decisions (Constitution §V audit trail)
+
+Per Constitution §V, every new feature MUST ship with an E2E test covering the user-visible flow, and any decision to skip E2E coverage for a portion of the feature MUST be explicitly approved by a reviewer rather than decided unilaterally by the implementer.
+
+| User-visible flow | E2E shipped? | Decision |
+|---|---|---|
+| **Local-source reload + content drift** (User Stories 1, 3) | ✅ Yes — `backend/tests/e2e/test_driver_reload_identity.py::test_local_driver_reload_creates_new_row_on_content_change`. Markers: `@pytest.mark.api_only`, `@pytest.mark.ci`, `@pytest.mark.shard_readonly`. Local PASS evidence to be captured per §V at implementation time (test command, ISO timestamp, vcluster id, PASSED line). | Mandatory; no decision required. |
+| **Git-source reload + commit drift** (User Story 2) | ❌ No E2E. Covered by a unit test in `backend/tests/unit/services/driver/test_loaders_fingerprint.py` against a mocked git provider that returns sequential commit SHAs. | **Reviewer-approved skip.** The project owner (issue #262 author) explicitly approved this skip during the `/grill-idea` session on 2026-05-25 — see `.specify/idea-brief.md` constitution-alignment section: "Git path covered by unit test against a mocked git provider — a real ephemeral git fixture is out of scope for v1." Rationale: the git-path behaviour is mechanically simpler (just record the SHA the provider already resolves); building a real ephemeral git server inside the E2E fixture stack adds significant infrastructure cost for marginal incremental coverage. Re-visit if any future regression traces back to the git provider's SHA-resolution path. |
+| **Cascade-on-delete fix** (User Story 3) | ❌ No E2E (unit test only). | Internal ORM behaviour; no user-facing flow today exercises the delete path (the load path itself is being changed so it no longer triggers a delete). Covered by `test_applications_upsert_idempotent.py` exercising a programmatic delete against a real database session. **Reviewer-approved**: same grilling session, same approval rationale (no current user flow exercises this branch). |
+
 ## Project Structure
 
 ### Documentation (this feature)
