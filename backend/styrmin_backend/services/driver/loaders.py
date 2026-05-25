@@ -120,6 +120,27 @@ class DriverLoader:
                     f"Failed to read driver source files for content hash: {err!s}"
                 ) from err
 
+            # Spec 013 / T030 — for git-sourced drivers, capture the
+            # resolved HEAD commit SHA from the provider. The provider
+            # records it during ``provide()`` (see ``GitDriverProvider``
+            # added in T009); ``content_hash`` and ``source_commit_sha``
+            # are mutually exclusive per source type, so we leave
+            # ``content_hash`` populated for local and ``source_commit_sha``
+            # populated for git. Duck-type via ``getattr`` so any future
+            # provider type that exposes the same accessor participates
+            # without needing an ``isinstance`` branch here.
+            source_commit_sha: str | None = None
+            get_sha = getattr(self.provider, "get_resolved_commit_sha", None)
+            if callable(get_sha):
+                source_commit_sha = get_sha()
+                # When a provider exposes a commit SHA it owns the
+                # fingerprint dimension; clear the per-byte hash so the
+                # row's identity column reflects the canonical choice
+                # (git rows match on SHA, local rows match on content
+                # hash — never both).
+                if source_commit_sha is not None:
+                    content_hash = None
+
             return ApplicationDriver(
                 source=self.provider.get_source(),
                 driver_spec=driver_spec,  # type: ignore[arg-type]
@@ -127,6 +148,7 @@ class DriverLoader:
                 if isinstance(values_template, str)
                 else "",
                 content_hash=content_hash,
+                source_commit_sha=source_commit_sha,
             )
 
 

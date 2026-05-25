@@ -108,16 +108,16 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Tests for User Story 2
 
-- [ ] T027 [P] [US2] Write a unit test `backend/tests/unit/services/driver/test_loaders_git_commit_sha.py::test_git_load_records_resolved_commit_sha` using a mocked `GitDriverProvider` that returns a known SHA; assert the resulting `ApplicationDriverVersion` row carries that SHA on `source_commit_sha` and `content_hash` is None
-- [ ] T028 [P] [US2] In the same file, `test_git_load_same_commit_is_noop` — call the load service twice with a provider that returns the same SHA both times; assert one row exists, no error
-- [ ] T029 [P] [US2] In the same file, `test_git_load_new_commit_creates_new_row` — provider returns SHA1 then SHA2 on two successive loads; assert two rows, both with the same `version`, different `source_commit_sha`
+- [X] T027 [P] [US2] Write a unit test `backend/tests/unit/services/driver/test_loaders_git_commit_sha.py::test_git_load_records_resolved_commit_sha` using a mocked `GitDriverProvider` that returns a known SHA; assert the resulting `ApplicationDriverVersion` row carries that SHA on `source_commit_sha` and `content_hash` is None
+- [X] T028 [P] [US2] In the same file, `test_git_load_same_commit_is_noop` — call the load service twice with a provider that returns the same SHA both times; assert one row exists, no error
+- [X] T029 [P] [US2] In the same file, `test_git_load_new_commit_creates_new_row` — provider returns SHA1 then SHA2 on two successive loads; assert two rows, both with the same `version`, different `source_commit_sha`
 
 ### Implementation for User Story 2
 
-- [ ] T030 [US2] In `backend/styrmin_backend/services/driver/loaders.py`, when the provider is a `GitDriverProvider`, fetch the resolved commit SHA via the accessor from T009 after `load_driver()` returns and attach it to the `ApplicationDriver` object
-- [ ] T031 [US2] In `backend/styrmin_backend/services/applications.py::load_application_driver_from_git_repository`, before creating a new row call `get_by_identity(source_type="git", source_repository=..., source_branch=..., version=..., source_commit_sha=resolved_sha, ...)`; on hit return existing; on miss fall through to creation
-- [ ] T032 [US2] In `backend/styrmin_backend/services/applications.py` (creation path), persist `source_commit_sha` to the new row on creation for git-sourced drivers
-- [ ] T033 [US2] Verify T027-T029 PASS locally
+- [X] T030 [US2] In `backend/styrmin_backend/services/driver/loaders.py`, the loader now duck-types the provider via `getattr(self.provider, "get_resolved_commit_sha", None)` and attaches the resolved SHA to the returned `ApplicationDriver`. When a SHA is reported, `content_hash` is cleared on the object so the identity tuple reflects the canonical fingerprint per source type (git rows match on SHA, local rows match on content hash).
+- [X] T031 [US2] In `backend/styrmin_backend/services/applications.py::load_application_driver_from_git_repository` — verified, no new code needed. C8's reorg moved the identity check into `load_application_driver_from_object`, which the git path already routes through. The check now fires with `source_type="git"` and `source_commit_sha=driver_object.source_commit_sha` automatically.
+- [X] T032 [US2] In `backend/styrmin_backend/services/applications.py` (creation path) — verified, no new code needed. C8 already plumbed `source_commit_sha=driver_object.source_commit_sha` into the `ApplicationDriverVersion(...)` constructor so git rows persist the SHA on creation.
+- [X] T033 [US2] T027-T029 PASS locally (`uv run pytest backend/tests/unit/services/driver/test_loaders_git_commit_sha.py -v` → 3 passed).
 
 **Checkpoint**: User Stories 1 AND 2 both ship the data behaviour.
 
