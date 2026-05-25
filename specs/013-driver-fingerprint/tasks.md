@@ -57,8 +57,8 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Repository widened lookup
 
-- [ ] T011 In `backend/styrmin_backend/repository/application_driver_version.py`, replace `get_by_source_path_and_version` with `get_by_identity(*, application_driver_id, source_type, source_repository, source_branch, source_path, version, content_hash, source_commit_sha) -> ApplicationDriverVersion | None`. Match all identity columns; treat fingerprint nullability per `source_type` (local matches on `content_hash`, git matches on `source_commit_sha`)
-- [ ] T012 [P] Write unit tests in `backend/tests/unit/repository/test_application_driver_version_get_by_identity.py` covering: exact-tuple match returns row; differing fingerprint returns None; differing `source_branch` returns None; cascade delete via `delete()` removes child `Action` and `ComponentConfig` rows atomically
+- [X] T011 In `backend/styrmin_backend/repository/application_driver_version.py`, replace `get_by_source_path_and_version` with `get_by_identity(*, application_driver_id, source_type, source_repository, source_branch, source_path, version, content_hash, source_commit_sha) -> ApplicationDriverVersion | None`. Match all identity columns; treat fingerprint nullability per `source_type` (local matches on `content_hash`, git matches on `source_commit_sha`)
+- [X] T012 [P] Write unit tests in `backend/tests/unit/repository/test_application_driver_version_get_by_identity.py` covering: exact-tuple match returns row; differing fingerprint returns None; differing `source_branch` returns None; cascade delete via `delete()` removes child `Action` and `ComponentConfig` rows atomically
 
 ### GraphQL surface
 
