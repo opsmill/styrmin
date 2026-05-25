@@ -94,6 +94,39 @@ the `applicationDrivers` field through the GraphQL API. Versions are
 immutable once loaded — to "update" a driver, load a new version and
 upgrade the deployments that pin the old one.
 
+Every driver-version label in the UI, CLI, and SDK is rendered as
+`<version>@<short>`, where `<short>` is the first 7 hex chars of the
+**provenance fingerprint** — the content hash for local drivers, the
+resolved git commit SHA for git drivers. Detail surfaces show the full
+64-char content hash (or 40-char SHA) next to a copy-to-clipboard
+control. The corresponding GraphQL fields on `ApplicationDriverVersion`
+are `contentHash` (populated for `sourceType == "local"`) and
+`sourceCommitSha` (populated for `sourceType == "git"`); exactly one is
+non-null per row.
+
+### Reloading a local driver while you iterate
+
+You do **not** need to bump `spec.version` in `driver.styrmin.yml` to
+record a change. Re-running `drivers load-local-version` against the
+same path:
+
+- creates a new Application Driver Version row when the bytes of
+  `driver.styrmin.yml`, the values template, or `actions.py` have
+  changed (the three files that feed the content hash);
+- is a no-op when those three files are byte-identical to the existing
+  row — any number of repeated loads produces a single row.
+
+Edits to other files in the driver directory (`README.md`, examples,
+screenshots) are invisible to the fingerprint and never produce a new
+row.
+
+For git-sourced drivers, the fingerprint is the resolved commit SHA on
+the requested branch — loading the same `repo@branch@commit` twice is a
+no-op; loading after a new commit lands creates a new row.
+
+See [`dev/guides/driver-iteration.md`](https://github.com/opsmill/styrmin/blob/develop/dev/guides/driver-iteration.md)
+for the full iteration-loop reference.
+
 ### Where to put your own drivers
 
 The reference repository ships several example drivers under

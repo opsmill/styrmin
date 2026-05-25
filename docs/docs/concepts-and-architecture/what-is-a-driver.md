@@ -53,6 +53,16 @@ Three terms come up together. They are not interchangeable:
 When you upgrade a deployment, you change which driver version it points
 at. The driver itself doesn't mutate — every change is a new version.
 
+A driver version's identity is a tuple that includes a **provenance
+fingerprint** — a SHA-256 content hash for local drivers, the resolved
+git commit SHA for git drivers. The fingerprint is what makes
+re-loading idempotent on unchanged content and what creates a new row
+when any of the three hashed files (`driver.styrmin.yml`, the values
+template, `actions.py`) change — even when `spec.version` is the same.
+Surfaces render the label as `<version>@<short-fingerprint>`. See
+[Loading a Driver](../drivers/loading-drivers.md#reloading-a-local-driver-while-you-iterate)
+for the iteration workflow.
+
 ### File layout
 
 A driver is just a directory:

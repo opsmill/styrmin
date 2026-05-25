@@ -11,39 +11,56 @@
 ## Step 1 — Load the driver
 
 ```bash
-styrminctl driver load ./driver/infrahub/
-styrminctl driver list
+styrminctl drivers load-local-version ./driver/infrahub/
+# Inspect the loaded versions via the frontend "Drivers" view or the GraphQL
+# applicationDrivers query (Step 6). There is no `styrminctl drivers list`
+# subcommand today.
 ```
 
-**Expected**: one application driver version row is shown for `infrahub`. The label includes the new suffix:
+**Expected**: the load completes and the CLI prints a single-version
+summary that includes the new suffix on the label:
 
 ```
-infrahub  1.0.0@a1b2c3d   local
+Application driver version '1.0.0@a1b2c3d' loaded (id: 1)
+  Content hash: a1b2c3d4e5f6...
+  ...
 ```
+
+The same label format appears on the **Drivers** page in the frontend.
 
 ## Step 2 — Reload with no changes (idempotency)
 
 ```bash
-styrminctl driver load ./driver/infrahub/
-styrminctl driver list
+styrminctl drivers load-local-version ./driver/infrahub/
+# Inspect the loaded versions via the frontend "Drivers" view or the GraphQL
+# applicationDrivers query (Step 6). There is no `styrminctl drivers list`
+# subcommand today.
 ```
 
-**Expected**: same row count as Step 1 (still one row). The fingerprint suffix is identical. No error, no warning, no new row.
+**Expected**: the load returns the same `id` as Step 1 (still one row
+in the database) and the printed label is identical. No error, no
+warning, no new row. Confirm via the GraphQL query in Step 6 if needed.
 
 ## Step 3 — Edit and reload (drift detection)
 
 Edit `driver/infrahub/templates/values.yml.j2` (or whichever file is the values template) to add a `commonLabels:` entry — any meaningful or trivial edit will do. Do NOT bump `version` in `driver.styrmin.yml`.
 
 ```bash
-styrminctl driver load ./driver/infrahub/
-styrminctl driver list
+styrminctl drivers load-local-version ./driver/infrahub/
+# Inspect the loaded versions via the frontend "Drivers" view or the GraphQL
+# applicationDrivers query (Step 6). There is no `styrminctl drivers list`
+# subcommand today.
 ```
 
-**Expected**: two rows for `infrahub` are now shown, both with the same `version` string but different short fingerprints:
+**Expected**: the load returns a new `id` (different from Step 1) and
+the label carries a different short fingerprint. The GraphQL query in
+Step 6 now returns two `ApplicationDriverVersion` entries under the
+same `infrahub` driver, with the same `version` string and different
+`contentHash` values:
 
 ```
-infrahub  1.0.0@a1b2c3d   local
-infrahub  1.0.0@e9f0a1b   local
+1.0.0@a1b2c3d   (id: 1)
+1.0.0@e9f0a1b   (id: 2)
 ```
 
 ## Step 4 — Confirm cascade fix (no IntegrityError on reload)
@@ -81,7 +98,7 @@ EOF
 Load a driver from a git repository:
 
 ```bash
-styrminctl driver load --git https://example.com/your-driver.git --branch main
+styrminctl drivers load-version https://example.com/your-driver.git main
 ```
 
 **Expected**: one row appears with the suffix `@<short-commit-sha>`. Push a new commit on the branch, then reload — a second row appears with the new short SHA.

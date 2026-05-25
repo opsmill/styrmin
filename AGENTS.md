@@ -168,7 +168,7 @@ async def test_<name>(...):
 
 **Heuristic for whether a test is `api_only`:** if every action you take in the test goes through `client.X.Y()`, `kubectl`, or `kr8s`, and the test never calls `scenario_driver.create_deployment` / `upgrade_deployment` / `create_backup` / `start_components` / etc. (the dual-entrypoint methods), it's an `api_only` candidate. Tests that *do* call those methods exercise both the UI and API code paths and should run under both variants.
 
-**Shard markers (matrix CI):** Every `@pytest.mark.ci` E2E test ALSO carries exactly one bare-name shard marker (`shard_readonly`, `shard_mutation_small`, `shard_mutation_large`, `shard_ingress`, `shard_backup`, or `shard_infrahub`) that routes it to one of six CI matrix shards. See [`dev/guides/e2e-parallelism.md`](dev/guides/e2e-parallelism.md) for the shard scheme and [`dev/guides/e2e-deployment-sharing.md`](dev/guides/e2e-deployment-sharing.md) for the decision tree. The conftest hook `enforce_shard_markers` fails collection if the marker is missing or duplicated.
+**Shard markers (matrix CI):** Every `@pytest.mark.ci` E2E test ALSO carries exactly one bare-name shard marker (`shard_general`, `shard_env`, `shard_compute`, `shard_backup`, or `shard_configuration`) that routes it to one of five CI matrix shards. The authoritative list lives in `backend/tests/e2e/conftest.py` (`_VALID_SHARDS`). See [`dev/guides/e2e-parallelism.md`](dev/guides/e2e-parallelism.md) for the shard scheme and [`dev/guides/e2e-deployment-sharing.md`](dev/guides/e2e-deployment-sharing.md) for the decision tree. The conftest hook `enforce_shard_markers` fails collection if the marker is missing or duplicated.
 
 ### UI-variant troubleshooting — use the Playwright MCP server
 
