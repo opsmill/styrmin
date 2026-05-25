@@ -70,12 +70,27 @@ describe("AppShell", () => {
     await render(<Shell />);
     expect(screen.getByText("Environments")).toBeInTheDocument();
     expect(screen.getByText("Drivers")).toBeInTheDocument();
+  });
+
+  it("renders Clusters and Backup Storage in the bottom nav regardless of role", async () => {
+    await render(<Shell />);
+    expect(screen.getByText("Clusters")).toBeInTheDocument();
     expect(screen.getByText("Backup Storage")).toBeInTheDocument();
   });
 
-  it("renders Clusters in the bottom nav regardless of role", async () => {
-    await render(<Shell />);
-    expect(screen.getByText("Clusters")).toBeInTheDocument();
+  it("orders the bottom nav as Clusters → Backup Storage → Settings", async () => {
+    await render(<Shell role="ADMIN" />);
+    const clusters = screen.getByText("Clusters");
+    const backup = screen.getByText("Backup Storage");
+    const settings = screen.getByText("Settings");
+    expect(
+      clusters.compareDocumentPosition(backup) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      backup.compareDocumentPosition(settings) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("hides Settings for non-admin users", async () => {
@@ -88,16 +103,9 @@ describe("AppShell", () => {
     expect(screen.queryByText("Settings")).toBeNull();
   });
 
-  it("shows Settings for ADMIN users, immediately after Clusters", async () => {
+  it("shows Settings for ADMIN users", async () => {
     await render(<Shell role="ADMIN" />);
-    const clusters = screen.getByText("Clusters");
-    const settings = screen.getByText("Settings");
-    expect(settings).toBeInTheDocument();
-    // DOM order: Clusters comes before Settings in the bottom group.
-    expect(
-      clusters.compareDocumentPosition(settings) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 
   it("renders the Styrmin brand name", async () => {

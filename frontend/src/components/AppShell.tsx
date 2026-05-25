@@ -21,12 +21,6 @@ const STORAGE_KEY = "sidebar-collapsed";
 const navItems = [
   { label: "Environments", icon: LayoutGrid, href: "/", exact: true },
   { label: "Drivers", icon: Layers, href: "/drivers", exact: false },
-  {
-    label: "Backup Storage",
-    icon: HardDrive,
-    href: "/backup-storage-locations",
-    exact: false,
-  },
 ];
 
 // Users/Groups admin surfaces are reachable from the Settings page,
@@ -43,6 +37,12 @@ interface BottomNavItem {
 
 const bottomNavItems: BottomNavItem[] = [
   { label: "Clusters", icon: Server, href: "/clusters", exact: false },
+  {
+    label: "Backup Storage",
+    icon: HardDrive,
+    href: "/backup-storage-locations",
+    exact: false,
+  },
   {
     label: "Settings",
     icon: Settings,
