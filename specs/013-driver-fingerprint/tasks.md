@@ -47,8 +47,8 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Pure hash helper
 
-- [ ] T007 [P] Create `backend/styrmin_backend/services/driver/hash.py` exposing `compute_driver_content_hash(driver_spec: bytes, values_template: bytes, actions_py: bytes | None) -> str` returning SHA-256 hex over the length-framed three-file canonical concatenation per `data-model.md`
-- [ ] T008 [P] Write unit tests in `backend/tests/unit/services/driver/test_hash.py` covering: identical inputs → identical hash; whitespace-only edit to any file → different hash; absent `actions_py` (None) → file omitted from hash; reordering the three files would produce a different hash (test framing); length-prefix prevents boundary collisions
+- [X] T007 [P] Create `backend/styrmin_backend/services/driver/hash.py` exposing `compute_driver_content_hash(driver_spec: bytes, values_template: bytes, actions_py: bytes | None) -> str` returning SHA-256 hex over the length-framed three-file canonical concatenation per `data-model.md`
+- [X] T008 [P] Write unit tests in `backend/tests/unit/services/driver/test_hash.py` covering: identical inputs → identical hash; whitespace-only edit to any file → different hash; absent `actions_py` (None) → file omitted from hash; reordering the three files would produce a different hash (test framing); length-prefix prevents boundary collisions
 
 ### Git provider commit-SHA exposure
 
