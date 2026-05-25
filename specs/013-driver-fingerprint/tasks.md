@@ -27,8 +27,8 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 **Purpose**: Pre-flight checks. No new initialisation required (existing dev environment).
 
-- [ ] T001 Confirm dev stack is reachable (`uv run invoke dev` or vcluster fixture per `dev/knowledge/backend/e2e-testing.md`) before starting backend work
-- [ ] T002 Confirm pre-commit hooks are installed (`uv run invoke pre-commit-install`) per `AGENTS.md`
+- [X] T001 Confirm dev stack is reachable (`uv run invoke dev` or vcluster fixture per `dev/knowledge/backend/e2e-testing.md`) before starting backend work — docker:OK, vcluster:OK on PATH
+- [X] T002 Confirm pre-commit hooks are installed (`uv run invoke pre-commit-install`) per `AGENTS.md` — hooks observed firing during prep-phase commits (ruff, rumdl)
 
 ---
 
