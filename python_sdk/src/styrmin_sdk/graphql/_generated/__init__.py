@@ -56,6 +56,11 @@ from .exceptions import (
     GraphQLClientHttpError,
     GraphQLClientInvalidResponseError,
 )
+from .get_application_driver_versions import (
+    GetApplicationDriverVersions,
+    GetApplicationDriverVersionsApplicationDriver,
+    GetApplicationDriverVersionsApplicationDriverVersions,
+)
 from .get_backup import GetBackup, GetBackupBackup
 from .get_backup_schedule import GetBackupSchedule, GetBackupScheduleBackupSchedule
 from .get_backup_storage_location import (
@@ -289,6 +294,9 @@ __all__ = [
     "ExternalDnsEndpointsType",
     "ExternalUrlScheme",
     "FastStorageInput",
+    "GetApplicationDriverVersions",
+    "GetApplicationDriverVersionsApplicationDriver",
+    "GetApplicationDriverVersionsApplicationDriverVersions",
     "GetBackup",
     "GetBackupBackup",
     "GetBackupSchedule",

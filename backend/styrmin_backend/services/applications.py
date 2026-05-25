@@ -41,7 +41,6 @@ from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.services.driver.models.structure.source import GitSource
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
-    ApplicationDriverVersionAlreadyExistsError,
     EnvironmentNotFoundError,
     InvalidContextError,
     InvalidVersionError,
@@ -85,17 +84,37 @@ async def load_application_driver_from_object(
                 ApplicationDriverModel(name=name)
             )
 
-        application_driver_version = (
-            await uow.application_driver_versions.get_by_supported_versions(
-                application_driver_id=application_driver.id,
-                versions=driver_object.driver_spec.spec.supported_versions,
-            )
-        )
+        # Build the source-identity tuple ahead of the duplicate check so
+        # spec 013 (provenance fingerprint) can disambiguate two rows that
+        # share the same ``application_supported_versions`` range but differ
+        # on ``content_hash`` (local) or ``source_commit_sha`` (git).
+        if isinstance(driver_object.source, GitSource):
+            source_type = "git"
+            source_repository = driver_object.source.repository
+            source_branch: str | None = driver_object.source.branch
+            source_path: str | None = None
+        else:
+            source_type = "local"
+            source_repository = ""
+            source_branch = None
+            source_path = driver_object.source.path
 
-        if application_driver_version is not None:
-            raise ApplicationDriverVersionAlreadyExistsError(
-                f"An application with the name {name} and supported versions {supported_versions} already exists."
-            )
+        # Spec 013 / T024 — idempotency check on the full identity tuple.
+        # A row that matches every identity column (incl. the new fingerprint
+        # columns) means this exact driver byte-content is already loaded;
+        # return it instead of either raising or creating a duplicate.
+        existing_identity = await uow.application_driver_versions.get_by_identity(
+            application_driver_id=application_driver.id,
+            source_type=source_type,
+            source_repository=source_repository,
+            source_branch=source_branch,
+            source_path=source_path,
+            version=driver_object.driver_spec.spec.version,
+            content_hash=driver_object.content_hash,
+            source_commit_sha=driver_object.source_commit_sha,
+        )
+        if existing_identity is not None:
+            return existing_identity
 
         # Get or create Helm repository
         helm_chart_repository = get_chart_repository_from_chart_url(
@@ -152,18 +171,6 @@ async def load_application_driver_from_object(
                         mode=action.mode,
                     )
 
-        # Build source fields for DB record
-        if isinstance(driver_object.source, GitSource):
-            source_type = "git"
-            source_repository = driver_object.source.repository
-            source_branch: str | None = driver_object.source.branch
-            source_path: str | None = None
-        else:
-            source_type = "local"
-            source_repository = ""
-            source_branch = None
-            source_path = driver_object.source.path
-
         # Create application
         components = (
             driver_object.driver_spec.spec.components.model_dump()
@@ -213,6 +220,12 @@ async def load_application_driver_from_object(
                 source_repository=source_repository,
                 source_branch=source_branch,
                 source_path=source_path,
+                # Spec 013 / T025 — persist the provenance fingerprint
+                # captured by the driver loader. ``content_hash`` is set for
+                # local-sourced drivers; ``source_commit_sha`` is set for
+                # git-sourced drivers (US2, C9). Both nullable.
+                content_hash=driver_object.content_hash,
+                source_commit_sha=driver_object.source_commit_sha,
             )
         )
 
@@ -293,29 +306,22 @@ async def load_application_driver_from_local_directory(
 
     Returns:
         ApplicationDriverVersion: The loaded application driver version.
+
+    Notes:
+        Spec 013 / T024 — the previous ``get_by_source_path_and_version`` +
+        ``delete(existing)`` block has been removed. Idempotency now lives
+        inside :func:`load_application_driver_from_object`, which uses
+        :meth:`ApplicationDriverVersionRepository.get_by_identity` to look
+        up the full identity tuple (including the new ``content_hash``
+        column). Two reloads of the same content return the same row; a
+        reload with edited content creates a new row (no delete of the
+        prior one) so historical deployments stay reproducible.
     """
     driver_loader = get_local_driver_loader(path=path)
     application_driver = driver_loader.load_driver()
 
-    async with uow:
-        name = application_driver.driver_spec.metadata.name
-
-        application_driver_obj = await uow.application_drivers.get_by_name(name=name)
-        if application_driver_obj is None:
-            application_driver_obj = await uow.application_drivers.create(
-                ApplicationDriverModel(name=name)
-            )
-
-        # Upsert: if a version with the same source_path and version string exists, delete it
-        existing = await uow.application_driver_versions.get_by_source_path_and_version(
-            application_driver_id=application_driver_obj.id,
-            source_path=path,
-            version=application_driver.driver_spec.spec.version,
-        )
-        if existing is not None:
-            await uow.application_driver_versions.delete(existing)
-
-    # Create the application driver objects in database
+    # Create the application driver objects in database (idempotent on
+    # identity-tuple via ``get_by_identity`` inside).
     return await load_application_driver_from_object(
         driver_object=application_driver, uow=uow
     )

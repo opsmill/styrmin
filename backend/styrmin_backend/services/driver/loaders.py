@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Type
 
 from styrmin_backend.services.driver import ApplicationDriver
+from styrmin_backend.services.driver.hash import compute_driver_content_hash
 from styrmin_backend.services.driver.deserializers import (
     Deserializer,
     get_deserializer,
@@ -76,14 +77,48 @@ class DriverLoader:
                 validate_driver_env_var_docs(driver_spec.spec)
 
             # Post-deserialization: validate actions against actions.py if present
-            if isinstance(driver_spec, DriverSpec) and driver_spec.spec.actions:
+            has_actions = bool(
+                isinstance(driver_spec, DriverSpec) and driver_spec.spec.actions
+            )
+            if has_actions:
                 validator = build_user_actions_validator(
-                    actions=driver_spec.spec.actions
+                    actions=driver_spec.spec.actions  # type: ignore[union-attr]
                 )
                 get_resource_file_loader(
                     resource_file=directory_map.actions_code,
                     validator=validator,
                 ).load()
+
+            # Spec 013 / T023 — capture the raw bytes of the three driver
+            # files and compute the content-hash fingerprint. The provider's
+            # ``driver_dir`` is still valid inside this ``with`` block, so
+            # reading from disk here is safe even though ``GitDriverProvider``
+            # tears the temp dir down on exit. ``actions.py`` is included in
+            # the hash iff the spec declares any actions, mirroring the
+            # loader's existing "only validate when present" behaviour.
+            try:
+                driver_spec_bytes = directory_map.driver_spec.path.read_bytes()
+                values_template_bytes = (
+                    directory_map.values_template.path.read_bytes()
+                    if directory_map.values_template.path.exists()
+                    else b""
+                )
+                actions_py_bytes: bytes | None = None
+                if has_actions:
+                    actions_py_bytes = directory_map.actions_code.path.read_bytes()
+                content_hash = compute_driver_content_hash(
+                    driver_spec=driver_spec_bytes,
+                    values_template=values_template_bytes,
+                    actions_py=actions_py_bytes,
+                )
+            except OSError as err:
+                # If we cannot re-read the bytes we already parsed, the
+                # driver source is broken in ways that should surface as a
+                # load-time failure rather than silently producing a row
+                # with no fingerprint.
+                raise DriverLoadingError(
+                    f"Failed to read driver source files for content hash: {err!s}"
+                ) from err
 
             return ApplicationDriver(
                 source=self.provider.get_source(),
@@ -91,6 +126,7 @@ class DriverLoader:
                 values_template=values_template
                 if isinstance(values_template, str)
                 else "",
+                content_hash=content_hash,
             )
 
 

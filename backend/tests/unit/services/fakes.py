@@ -153,14 +153,35 @@ class FakeApplicationRepository(
                 return application
         return None
 
-    async def get_by_source_path_and_version(
-        self, application_driver_id: UUID, source_path: str, version: str
+    async def get_by_identity(
+        self,
+        *,
+        application_driver_id: UUID,
+        source_type: str,
+        source_repository: str,
+        source_branch: str | None,
+        source_path: str | None,
+        version: str,
+        content_hash: str | None,
+        source_commit_sha: str | None,
     ) -> ApplicationDriverVersion | None:
+        """Spec 013 / T024 — match every column in the identity tuple.
+
+        Mirrors the SQLModel repository's nullability semantics: when the
+        caller passes ``None`` for an optional column, only rows whose
+        column is also ``None`` match (the in-memory equivalent of
+        ``IS NULL`` / ``nulls_not_distinct``).
+        """
         for application in self.models:
             if (
                 application.application_driver_id == application_driver_id
+                and application.source_type == source_type
+                and application.source_repository == source_repository
+                and application.source_branch == source_branch
                 and application.source_path == source_path
                 and application.version == version
+                and application.content_hash == content_hash
+                and application.source_commit_sha == source_commit_sha
             ):
                 return application
         return None

@@ -85,16 +85,16 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Tests for User Story 1
 
-- [ ] T020 [P] [US1] Write an E2E test `backend/tests/e2e/test_driver_reload_identity.py::test_local_driver_reload_creates_new_row_on_content_change` using a fixture local driver. Markers: `@pytest.mark.api_only(reason="Driver load is an SDK/CLI flow with no UI journey")`, `@pytest.mark.ci`, `@pytest.mark.shard_readonly`. Scenario: load driver → assert 1 row; reload (no change) → assert 1 row; edit values template → reload → assert 2 rows with same `version`, different `content_hash`, both retrievable via GraphQL
-- [ ] T021 [P] [US1] Write a unit test `backend/tests/unit/services/test_applications_upsert_idempotent.py::test_local_load_same_content_is_noop` exercising the service-layer load against a real test DB; assert exactly one row exists after two identical loads
-- [ ] T022 [P] [US1] In the same file, `test_local_load_new_content_creates_new_row_without_deleting_old` — load, mutate the test driver's values template on disk, reload; assert two rows, no delete
+- [X] T020 [P] [US1] Write an E2E test `backend/tests/e2e/test_driver_reload_identity.py::test_local_driver_reload_creates_new_row_on_content_change` using a fixture local driver. Markers: `@pytest.mark.api_only(...)`, `@pytest.mark.ci`, `@pytest.mark.shard_general` (the task spec named `shard_readonly`, but the conftest `_VALID_SHARDS` set only allows `general/env/compute/backup/configuration`; `shard_general` is the closest fit). Scenario implemented as specified — PASS evidence in `specs/013-driver-fingerprint/e2e-pass-evidence.md`.
+- [X] T021 [P] [US1] Service-layer idempotency test against a real in-memory SQLite session backed by `SqlModelUnitOfWork` (not the FakeUoW — it has no `component_configs` fake).
+- [X] T022 [P] [US1] Service-layer "no-delete on edit" regression test in the same file.
 
 ### Implementation for User Story 1
 
-- [ ] T023 [US1] In `backend/styrmin_backend/services/driver/loaders.py` (`DriverLoader.load_driver`), capture the raw bytes of `driver.styrmin.yml`, the values template, and `actions.py` (when `spec.actions` is non-empty) and compute `content_hash` via the helper from T007; attach it to the returned `ApplicationDriver` object
-- [ ] T024 [US1] In `backend/styrmin_backend/services/applications.py::load_application_driver_from_local_directory`, replace the existing `get_by_source_path_and_version` + `delete(existing)` block (lines ~309-316) with a call to the new `get_by_identity(...)`; on hit, return the existing row (idempotent); on miss, fall through to `load_application_driver_from_object` (which creates the new row). REMOVE the delete branch entirely.
-- [ ] T025 [US1] In `backend/styrmin_backend/services/applications.py::load_application_driver_from_object` (or its call site), persist `content_hash` to the new row on creation for local-sourced drivers
-- [ ] T026 [US1] Verify T020-T022 PASS locally; capture local PASS evidence per Constitution §V (node id, command, ISO 8601 timestamp, vcluster id, kubeconfig path, `PASSED` line) for T020 and record it in the PR description
+- [X] T023 [US1] `DriverLoader.load_driver` now reads the raw bytes of `driver.styrmin.yml`, the values template, and `actions.py` (iff `spec.actions` is non-empty), feeds them to `compute_driver_content_hash`, and attaches the result to the returned `ApplicationDriver` (new field `content_hash: str | None`).
+- [X] T024 [US1] `load_application_driver_from_local_directory` no longer does the `get_by_source_path_and_version` + `delete(existing)` dance; the delete branch is gone. Idempotency now lives inside `load_application_driver_from_object` via `get_by_identity` on the full tuple — on hit it returns the existing row, on miss it falls through to create.
+- [X] T025 [US1] `load_application_driver_from_object` persists `driver_object.content_hash` (and `source_commit_sha` — kept null for local, ready for C9 git path) onto the new row.
+- [X] T026 [US1] PASS evidence captured in `specs/013-driver-fingerprint/e2e-pass-evidence.md` per Constitution §V.
 
 **Checkpoint**: User Story 1 fully functional. MVP can ship here.
 

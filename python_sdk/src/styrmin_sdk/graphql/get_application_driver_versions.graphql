@@ -1,0 +1,14 @@
+query GetApplicationDriverVersions($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        id
+        name
+        versions {
+            id
+            version
+            contentHash
+            sourceCommitSha
+            sourceType
+            sourcePath
+        }
+    }
+}
