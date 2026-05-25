@@ -151,10 +151,10 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Helper modules
 
-- [ ] T036 [P] [US4] Create `backend/styrmin_backend/services/driver/labels.py` with `format_driver_version_label(*, version: str, content_hash: str | None, source_commit_sha: str | None) -> str` per `contracts/sdk-cli-rendering.md`
-- [ ] T037 [P] [US4] Write unit tests in `backend/tests/unit/services/driver/test_labels.py` covering: local row with hash → `"<version>@<first-7>"`; git row with commit SHA → same form; both null → bare `version` (legacy fallback)
-- [ ] T038 [P] [US4] Create `frontend/src/lib/driverVersion.ts` with `formatDriverVersionLabel({ version, contentHash, sourceCommitSha })` per the contract
-- [ ] T039 [P] [US4] Write a Vitest unit test `frontend/src/__tests__/lib/driverVersion.test.ts` covering the same three cases
+- [x] T036 [P] [US4] Create `backend/styrmin_backend/services/driver/labels.py` with `format_driver_version_label(*, version: str, content_hash: str | None, source_commit_sha: str | None) -> str` per `contracts/sdk-cli-rendering.md`
+- [x] T037 [P] [US4] Write unit tests in `backend/tests/unit/services/driver/test_labels.py` covering: local row with hash → `"<version>@<first-7>"`; git row with commit SHA → same form; both null → bare `version` (legacy fallback)
+- [x] T038 [P] [US4] Create `frontend/src/lib/driverVersion.ts` with `formatDriverVersionLabel({ version, contentHash, sourceCommitSha })` per the contract
+- [x] T039 [P] [US4] Write a Vitest unit test `frontend/src/__tests__/lib/driverVersion.test.ts` covering the same three cases
 
 ### CLI rendering
 
