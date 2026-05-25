@@ -19,6 +19,7 @@ from styrmin_backend.services.driver.models.resources import DriverResource
 from styrmin_backend.services.driver.models.resources.driver import DriverSpec
 from styrmin_backend.services.driver.models.structure.directory import DriverDirectory
 from styrmin_backend.services.driver.models.structure.resource import ResourceFile
+from styrmin_backend.services.driver.models.structure.source import GitSource
 from styrmin_backend.services.driver.parsers import Parser, get_parser
 from styrmin_backend.services.driver.provider import (
     DriverProvider,
@@ -89,60 +90,56 @@ class DriverLoader:
                     validator=validator,
                 ).load()
 
-            # Spec 013 / T023 — capture the raw bytes of the three driver
-            # files and compute the content-hash fingerprint. The provider's
-            # ``driver_dir`` is still valid inside this ``with`` block, so
-            # reading from disk here is safe even though ``GitDriverProvider``
-            # tears the temp dir down on exit. ``actions.py`` is included in
-            # the hash iff the spec declares any actions, mirroring the
-            # loader's existing "only validate when present" behaviour.
-            try:
-                driver_spec_bytes = directory_map.driver_spec.path.read_bytes()
-                values_template_bytes = (
-                    directory_map.values_template.path.read_bytes()
-                    if directory_map.values_template.path.exists()
-                    else b""
-                )
-                actions_py_bytes: bytes | None = None
-                if has_actions:
-                    actions_py_bytes = directory_map.actions_code.path.read_bytes()
-                content_hash = compute_driver_content_hash(
-                    driver_spec=driver_spec_bytes,
-                    values_template=values_template_bytes,
-                    actions_py=actions_py_bytes,
-                )
-            except OSError as err:
-                # If we cannot re-read the bytes we already parsed, the
-                # driver source is broken in ways that should surface as a
-                # load-time failure rather than silently producing a row
-                # with no fingerprint.
-                raise DriverLoadingError(
-                    f"Failed to read driver source files for content hash: {err!s}"
-                ) from err
-
-            # Spec 013 / T030 — for git-sourced drivers, capture the
-            # resolved HEAD commit SHA from the provider. The provider
-            # records it during ``provide()`` (see ``GitDriverProvider``
-            # added in T009); ``content_hash`` and ``source_commit_sha``
-            # are mutually exclusive per source type, so we leave
-            # ``content_hash`` populated for local and ``source_commit_sha``
-            # populated for git. Duck-type via ``getattr`` so any future
-            # provider type that exposes the same accessor participates
-            # without needing an ``isinstance`` branch here.
+            # Spec 013 — branch on the typed source discriminator (not a
+            # duck-typed ``getattr`` on the provider). Git-sourced drivers
+            # carry the commit SHA as their fingerprint dimension and skip
+            # the per-byte hash entirely; local-sourced drivers compute the
+            # content hash from the canonical three files. The two
+            # fingerprint columns are mutually exclusive per source type,
+            # so the discriminator is the right axis to branch on — see
+            # ``DriverSource`` in models/structure/source.py.
+            source = self.provider.get_source()
+            content_hash: str | None = None
             source_commit_sha: str | None = None
-            get_sha = getattr(self.provider, "get_resolved_commit_sha", None)
-            if callable(get_sha):
-                source_commit_sha = get_sha()
-                # When a provider exposes a commit SHA it owns the
-                # fingerprint dimension; clear the per-byte hash so the
-                # row's identity column reflects the canonical choice
-                # (git rows match on SHA, local rows match on content
-                # hash — never both).
-                if source_commit_sha is not None:
-                    content_hash = None
+
+            if isinstance(source, GitSource):
+                # Git rows match on SHA; do not compute or persist
+                # ``content_hash`` for them. The provider records the SHA
+                # during ``provide()``; the GitDriverProvider type
+                # guarantees this accessor exists.
+                source_commit_sha = self.provider.get_resolved_commit_sha()  # type: ignore[attr-defined]
+            else:
+                # Local-sourced driver: compute the content-hash
+                # fingerprint from the raw bytes of the three driver
+                # files. The provider's ``driver_dir`` is still valid
+                # inside this ``with`` block. ``actions.py`` participates
+                # in the hash iff the spec declares any actions.
+                try:
+                    driver_spec_bytes = directory_map.driver_spec.path.read_bytes()
+                    values_template_bytes = (
+                        directory_map.values_template.path.read_bytes()
+                        if directory_map.values_template.path.exists()
+                        else b""
+                    )
+                    actions_py_bytes: bytes | None = None
+                    if has_actions:
+                        actions_py_bytes = directory_map.actions_code.path.read_bytes()
+                    content_hash = compute_driver_content_hash(
+                        driver_spec=driver_spec_bytes,
+                        values_template=values_template_bytes,
+                        actions_py=actions_py_bytes,
+                    )
+                except OSError as err:
+                    # If we cannot re-read the bytes we already parsed, the
+                    # driver source is broken in ways that should surface
+                    # as a load-time failure rather than silently producing
+                    # a row with no fingerprint.
+                    raise DriverLoadingError(
+                        f"Failed to read driver source files for content hash: {err!s}"
+                    ) from err
 
             return ApplicationDriver(
-                source=self.provider.get_source(),
+                source=source,
                 driver_spec=driver_spec,  # type: ignore[arg-type]
                 values_template=values_template
                 if isinstance(values_template, str)

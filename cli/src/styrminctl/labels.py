@@ -13,6 +13,10 @@ fingerprint -- ``content_hash`` for ``source_type == "local"``, or
 unconditionally so labels stay stable when a second row appears.
 """
 
+import logging
+
+_LOGGER = logging.getLogger(__name__)
+
 
 def format_driver_version_label(
     *,
@@ -24,7 +28,11 @@ def format_driver_version_label(
 
     Falls back to the bare ``version`` string when neither fingerprint is
     populated (only expected for legacy rows on dev databases predating
-    the provenance backfill).
+    the provenance backfill). A warning is emitted on the fallback path
+    -- on rows created by the spec-013 load path both columns are always
+    set for the matching ``source_type``, so this fallback firing in
+    production indicates a loader regression, a manual DB insert, or a
+    missed backfill rather than expected behaviour.
 
     When both fingerprints are set (not expected by invariant -- a row is
     either ``source_type == "local"`` or ``source_type == "git"``),
@@ -33,5 +41,12 @@ def format_driver_version_label(
 
     fingerprint = content_hash or source_commit_sha
     if not fingerprint:
+        _LOGGER.warning(
+            "ApplicationDriverVersion %s rendered without a provenance "
+            "fingerprint; this should not happen on rows created by the "
+            "spec-013 load path. Check for legacy rows, manual inserts, "
+            "or loader regressions.",
+            version,
+        )
         return version
     return f"{version}@{fingerprint[:7]}"

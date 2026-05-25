@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 from fast_depends import dependency_provider
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, select
@@ -183,3 +184,105 @@ async def test_local_load_new_content_creates_new_row_without_deleting_old(
     assert second.id != first_id
     assert second.content_hash != first_hash
     assert second.version == first_version
+
+
+@pytest.mark.asyncio
+async def test_local_load_resolves_race_when_concurrent_insert_wins(
+    db_session: AsyncSession,
+    driver_dir: Path,
+    prefect_manager_mock,  # noqa: ARG001 — keeps the @inject hop quiet
+    monkeypatch,
+):
+    """Spec 013 review FIX 1 — concurrent same-identity insert returns the winner.
+
+    The ``get_by_identity`` lookup inside ``load_application_driver_from_object``
+    handles the happy path where the row already exists. But two parallel
+    loads of the same byte-identical driver can both miss that lookup and
+    race to the INSERT; the new UNIQUE index
+    ``uq_application_driver_version_identity`` guarantees exactly one wins
+    and the loser surfaces ``sqlalchemy.exc.IntegrityError``. The service
+    must catch that, rollback, and re-fetch the winner's row rather than
+    bubble a 500 to the caller.
+
+    We simulate the race by:
+
+    1. First load runs normally, creates the row, commits.
+    2. Patch ``application_driver_versions.create`` to raise
+       ``IntegrityError`` BEFORE checking the identity row (forcing the
+       loser branch), then call the loader a second time. The "winner" in
+       this test is the row from step 1; the patched ``create`` stands in
+       for "concurrent insert landed between our get_by_identity and our
+       create".
+    3. Assert exactly one row in DB and the returned row is the original.
+    """
+    # First load — happy path, creates the row.
+    uow = SqlModelUnitOfWork(session=db_session)
+    first = await load_application_driver_from_local_directory(
+        path=str(driver_dir), uow=uow
+    )
+    assert first is not None
+    assert await _row_count(db_session) == 1
+
+    # Now force a race on the next load by short-circuiting the
+    # ``get_by_identity`` fast-path AND making ``create`` raise as if
+    # another worker landed first. The pre-existing row from step 1 is
+    # what the post-rollback ``get_by_identity`` re-fetches as the
+    # "winner".
+    from styrmin_backend.repository.application_driver_version import (
+        SQLModelApplicationDriverVersionRepository,
+    )
+
+    original_get_by_identity = (
+        SQLModelApplicationDriverVersionRepository.get_by_identity
+    )
+    original_create = SQLModelApplicationDriverVersionRepository.create
+
+    call_count = {"identity": 0, "create": 0}
+
+    async def fake_get_by_identity(self, **kwargs):  # type: ignore[no-untyped-def]
+        call_count["identity"] += 1
+        # First call (the fast-path lookup): pretend the row isn't there
+        # so the service falls through to ``create``. Subsequent calls
+        # (the post-rollback re-fetch) delegate to the real implementation
+        # and find the winner's row.
+        if call_count["identity"] == 1:
+            return None
+        return await original_get_by_identity(self, **kwargs)
+
+    async def fake_create(self, entity):  # type: ignore[no-untyped-def]
+        call_count["create"] += 1
+        # Simulate the concurrent winner having already inserted the
+        # same identity tuple between our lookup and our INSERT.
+        raise IntegrityError(
+            statement="INSERT INTO applicationdriverversion ...",
+            params=None,
+            orig=Exception("uq_application_driver_version_identity"),
+        )
+
+    monkeypatch.setattr(
+        SQLModelApplicationDriverVersionRepository,
+        "get_by_identity",
+        fake_get_by_identity,
+    )
+    monkeypatch.setattr(
+        SQLModelApplicationDriverVersionRepository,
+        "create",
+        fake_create,
+    )
+
+    uow2 = SqlModelUnitOfWork(session=db_session)
+    second = await load_application_driver_from_local_directory(
+        path=str(driver_dir), uow=uow2
+    )
+
+    # No new row was committed; the loser observed the winner's row.
+    assert await _row_count(db_session) == 1
+    # Both calls happened: the fast-path lookup (which we suppressed)
+    # and the create (which raised IntegrityError).
+    assert call_count["create"] == 1
+    # The post-rollback re-fetch returned the original row.
+    assert second.id == first.id
+
+    # Restore (monkeypatch undoes this at fixture teardown, but being
+    # explicit keeps the original_create reference live until then).
+    _ = original_create

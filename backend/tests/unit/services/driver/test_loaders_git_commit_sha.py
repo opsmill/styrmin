@@ -273,3 +273,63 @@ async def test_git_load_new_commit_creates_new_row(
     assert second.id != first.id
     assert second.version == first.version
     assert {r.source_commit_sha for r in rows} == {sha1, sha2}
+
+
+@pytest.mark.asyncio
+async def test_register_user_action_keyed_on_fingerprint_across_reloads(
+    db_session: AsyncSession,
+    patch_git_loader: _FakeGitProvider,
+    prefect_manager_mock,
+):
+    """Spec 013 review FIX 2 — Prefect registration key includes fingerprint.
+
+    Two loads of the same ``application@version`` but with distinct commit
+    SHAs must produce distinct Prefect workflow registration keys, so that
+    older deployments pinned to the older driver-version row keep
+    resolving to their original workflow rather than getting overwritten
+    by the newer load.
+
+    The fingerprint is the first 7 characters of the row's
+    ``source_commit_sha`` (git source) or ``content_hash`` (local source).
+    The PrefectManager mock records each ``register_user_action`` call;
+    we assert the ``fingerprint`` argument differs across the two loads.
+    """
+    sha1 = "a" * 40
+    sha2 = "b" * 40
+
+    patch_git_loader.set_commit_sha(sha1)
+    uow = SqlModelUnitOfWork(session=db_session)
+    await load_application_driver_from_git_repository(
+        repository_url="https://example.com/fake.git",
+        branch="main",
+        uow=uow,
+    )
+
+    patch_git_loader.set_commit_sha(sha2)
+    await load_application_driver_from_git_repository(
+        repository_url="https://example.com/fake.git",
+        branch="main",
+        uow=uow,
+    )
+
+    # The fixture driver declares two actions, so each load triggers
+    # two ``register_user_action`` calls. Across two loads we expect
+    # four calls in total: two with fingerprint sha1[:7] and two with
+    # fingerprint sha2[:7].
+    register_calls = prefect_manager_mock.register_user_action.await_args_list
+    assert len(register_calls) == 4, (
+        f"expected 4 register_user_action calls across two loads, "
+        f"got {len(register_calls)}"
+    )
+
+    fingerprints = [call.kwargs["fingerprint"] for call in register_calls]
+    assert all(f is not None for f in fingerprints), (
+        f"all registrations must carry a fingerprint, got {fingerprints}"
+    )
+    # First two registrations are from the sha1 load, last two from sha2.
+    assert fingerprints[0] == sha1[:7]
+    assert fingerprints[1] == sha1[:7]
+    assert fingerprints[2] == sha2[:7]
+    assert fingerprints[3] == sha2[:7]
+    # The two loads use different keys, so they do NOT collide.
+    assert {fingerprints[0], fingerprints[2]} == {sha1[:7], sha2[:7]}

@@ -112,7 +112,7 @@ async def test_upgrade_with_version_change_and_core_hook(
     prehook_id = uuid4()
     posthook_id = uuid4()
 
-    async def fake_get_user_action(application, hook, mode, version):
+    async def fake_get_user_action(application, hook, mode, version, fingerprint=None):  # noqa: ARG001 — spec 013 fingerprint disambiguator, mock-irrelevant here
         if hook == HookKind.UPGRADE and mode == "core":
             return upgrade_hook_id
         if hook == HookKind.UPGRADE and mode == "pre":
@@ -163,7 +163,7 @@ async def test_upgrade_fallback_to_update_when_no_core_hook(
     update_flow_id = uuid4()
     update_helm_flow_id = uuid4()
 
-    async def fake_get_user_action(application, hook, mode, version):
+    async def fake_get_user_action(application, hook, mode, version, fingerprint=None):  # noqa: ARG001 — spec 013 fingerprint disambiguator, mock-irrelevant here
         return None  # No hooks defined
 
     async def fake_get_action(action):
@@ -237,7 +237,7 @@ async def test_upgrade_without_pre_post_hooks(uow, instance, prefect_manager_moc
     upgrade_flow_id = uuid4()
     update_helm_flow_id = uuid4()
 
-    async def fake_get_user_action(application, hook, mode, version):
+    async def fake_get_user_action(application, hook, mode, version, fingerprint=None):  # noqa: ARG001 — spec 013 fingerprint disambiguator, mock-irrelevant here
         if hook == HookKind.UPGRADE and mode == "core":
             return upgrade_hook_id
         return None  # No pre/post hooks
