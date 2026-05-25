@@ -173,8 +173,8 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Query updates
 
-- [ ] T049 [US4] Audit GraphQL queries used by the frontend (`frontend/src/**/*.graphql` or codegen sources) and ensure any query selecting `ApplicationDriverVersion` includes `contentHash` and `sourceCommitSha`; regenerate frontend types as needed (`cd frontend && pnpm codegen` or per project convention)
-- [ ] T050 [US4] Audit `tasks/graphql/` and `python_sdk/src/styrmin_sdk/graphql/` for any operation feeding the CLI driver/deployment listings; ensure they select both new fields
+- [x] T049 [US4] Audit GraphQL queries used by the frontend (`frontend/src/**/*.graphql` or codegen sources) and ensure any query selecting `ApplicationDriverVersion` includes `contentHash` and `sourceCommitSha`; regenerate frontend types as needed (`cd frontend && pnpm codegen` or per project convention)
+- [x] T050 [US4] Audit `tasks/graphql/` and `python_sdk/src/styrmin_sdk/graphql/` for any operation feeding the CLI driver/deployment listings; ensure they select both new fields
 
 **Checkpoint**: All four user stories are independently functional.
 

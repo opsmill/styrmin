@@ -1470,7 +1470,7 @@ export type LoadLocalDriverMutationVariables = Exact<{
 }>;
 
 
-export type LoadLocalDriverMutation = { __typename?: 'Mutation', loadLocalApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, applicationDriverId: string } | null };
+export type LoadLocalDriverMutation = { __typename?: 'Mutation', loadLocalApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriverId: string } | null };
 
 export type LoadRemoteDriverMutationVariables = Exact<{
   repositoryUrl: Scalars['String']['input'];
@@ -1478,7 +1478,7 @@ export type LoadRemoteDriverMutationVariables = Exact<{
 }>;
 
 
-export type LoadRemoteDriverMutation = { __typename?: 'Mutation', loadRemoteApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, applicationDriverId: string } | null };
+export type LoadRemoteDriverMutation = { __typename?: 'Mutation', loadRemoteApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriverId: string } | null };
 
 export type LoginMutationVariables = Exact<{
   username: Scalars['String']['input'];
@@ -2780,6 +2780,8 @@ export const LoadLocalDriverDocument = `
   loadLocalApplicationDriverVersion(path: $path) {
     id
     version
+    contentHash
+    sourceCommitSha
     applicationDriverId
   }
 }
@@ -2806,6 +2808,8 @@ export const LoadRemoteDriverDocument = `
   ) {
     id
     version
+    contentHash
+    sourceCommitSha
     applicationDriverId
   }
 }

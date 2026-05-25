@@ -2,6 +2,8 @@ mutation LoadLocalDriver($path: String!) {
   loadLocalApplicationDriverVersion(path: $path) {
     id
     version
+    contentHash
+    sourceCommitSha
     applicationDriverId
   }
 }
