@@ -69,6 +69,13 @@ prefect-server:
   enabled: true
   fullnameOverride: styrmin-task-manager
   postgresql:
+    # Propagate the styrmin identifier label to every resource the bitnami
+    # postgresql subchart renders (StatefulSet metadata.labels included), so
+    # the styrmin/component Kustomize patch can target the StatefulSet by
+    # `infrahub/service=task-manager-db`. Without this, the chart only puts
+    # the label on the pod template via podLabels.
+    commonLabels:
+      infrahub/service: task-manager-db
     architecture: standalone
     auth:
       database: prefect
@@ -112,6 +119,10 @@ prefect-server:
 rabbitmq:
   enabled: true
   fullnameOverride: styrmin-message-queue
+  # See postgresql.commonLabels above — same reason: lift the identifier
+  # label onto StatefulSet metadata so styrmin/component can attach.
+  commonLabels:
+    infrahub/service: message-queue
   auth:
     erlangCookie: styrmin-infrahub-supersecret
   # Operator-supplied env vars for the `message-queue` component.
@@ -131,6 +142,10 @@ rabbitmq:
 redis:
   enabled: true
   fullnameOverride: styrmin-cache
+  # See postgresql.commonLabels above — same reason: lift the identifier
+  # label onto StatefulSet metadata so styrmin/component can attach.
+  commonLabels:
+    infrahub/service: cache
   master:
     # Operator-supplied env vars for the `cache` component.
     extraEnvVars: {{ components | component_env_vars("cache") | tojson }}
