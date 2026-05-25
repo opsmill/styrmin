@@ -62,6 +62,10 @@ _Avoid_: "version" alone (ambiguous with **application version**), "driver relea
 The `driver.styrmin.yml` file at the root of a driver directory. Single source of truth for driver metadata, supported application versions, Helm chart, components, parameters, services, and action declarations.
 _Avoid_: "driver yaml", "driver manifest".
 
+**Provenance fingerprint** (driver-version fingerprint):
+The content-addressable identifier carried by each **application driver version** that makes the row's identity stable across reloads with the same `version` string. Stored as two columns on `ApplicationDriverVersion` — `content_hash` (SHA-256 hex of the canonical local driver bytes) for `source_type = "local"`, and `source_commit_sha` (resolved git commit SHA) for `source_type = "git"`. Exactly one is non-null per row; the discriminator is `source_type`. Surfaced in the UI/CLI as `<version>@<short-fingerprint>` (first 7 chars). See [issue #262](https://github.com/opsmill/styrmin/issues/262).
+_Avoid_: "driver hash" alone (ambiguous across source types), "version hash" (conflates with **driver version**), "build id".
+
 **Application version**:
 The user-facing version of the deployed application (e.g. `infrahub` `1.6.0`), distinct from the **driver version** that knows how to deploy it. A **driver version** declares a semver specifier (`application_supported_versions`) describing which **application versions** it can deploy.
 _Avoid_: "app version" (in code is fine, in prose write it out), conflating with **driver version**.

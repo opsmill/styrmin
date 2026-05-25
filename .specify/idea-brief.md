@@ -1,145 +1,130 @@
-# Idea Brief: Driver Detail Page Redesign (Tabbed Layout)
+# Idea Brief: Driver Reload Identity — Content Hash + Git Commit Provenance
 
 **Status**: Ready for /speckit-specify
-**Seed**: Redesign the **application driver** detail page (`frontend/src/pages/drivers/DriverDetailPage.tsx`) using "Option A" from the Paper mocks: a left rail listing all **driver versions** + a vertical divider + a right pane with **Overview / Parameters / Components / Actions / Source** tabs. Replace the current raw-JSON dumps of `components` and `componentConfigs` with structured rendering. Selected version persists across tab switches; selected tab persists across version switches.
+**Source issue**: [opsmill/styrmin#262](https://github.com/opsmill/styrmin/issues/262)
+**Seed**: Re-loading a local **application driver** with the same `(source_path, version)` pair raises `IntegrityError` (cascade misconfiguration on `ApplicationDriverVersion.actions` / `.component_configs`). Separately, the upsert key `(source_path, version)` is too coarse: a driver author can edit the YAML, values template, or `actions.py` without bumping `version` and the platform silently replaces the row, destroying provenance for any **deployment** or **instance** that referenced it. The same drift problem exists on the git load path. Fix the cascade bug AND introduce a **provenance fingerprint** — `content_hash` (SHA-256) for local drivers, `source_commit_sha` for git drivers — so that distinct content under the same `version` string coexists as distinct `ApplicationDriverVersion` rows.
 
 ## Users and Value
 
-**Primary user**: a **platform engineer** who maintains the catalogue of **application drivers**. They land on the driver detail page from the Drivers list to:
+- **Primary user**: driver authors (internal platform team + external integrators) iterating on a driver locally or via git, and platform operators reading deployment provenance.
+- **Pain today**:
+  - Local reloads of the same `(path, version)` crash with `IntegrityError`. Workaround is bumping `version` manually each iteration.
+  - Same `version` string with different content silently replaces the previous row, breaking the link between historical **instances** and the bytes they were deployed from.
+  - Git authors hit the analogous trap: amending a tag or pushing new content under the same `version` string silently shifts what "v1.2.3" means.
+- **Better looks like**: authors iterate freely (no `version` bumps required); every load that produces different content becomes its own addressable `ApplicationDriverVersion` row; old deployments keep pointing at the exact bytes they were deployed from; the UI/CLI surfaces a `<version>@<short>` form so users can tell two same-`version` rows apart at a glance.
 
-- verify what a specific **driver version** declares (helm chart, parameters, components, actions),
-- trace where a deployment's behaviour comes from (driver source repo / branch / subpath, or local path),
-- decide whether to register a new version.
+## Scope
 
-**Secondary user**: a developer or operator inspecting which **driver version** a live deployment is using, navigating here to understand its declared shape.
+Applies to **both** load paths:
 
-**Pain points the redesign targets**:
-
-1. `components` and `componentConfigs` are rendered as raw JSON dumps — hard to scan, looks unfinished.
-2. Every **driver version** renders at once, so finding "what does v1.3.0 expose?" requires scrolling past unrelated versions.
-3. There is no source-level visibility (repo, branch, subpath) on the page; the user has to click out to GitHub.
-
-**Smallest observable better**: opening any **application driver**, picking a **driver version** from the left rail, and immediately seeing a structured table of that version's parameters — without scrolling past stale content.
+- **Local source** (`source_type = "local"`): provenance fingerprint = SHA-256 over canonical local driver bytes (see Decisions).
+- **Git source** (`source_type = "git"`): provenance fingerprint = resolved git commit SHA from the provider (already content-addressable, no recompute).
 
 ## User Journeys
 
-### P1 — Inspect a driver version's parameters
+### P1 — Local driver iteration without `version` bumps
 
-- **Journey**: A platform engineer navigates from the Drivers list to a specific **application driver**'s detail page; they need to confirm which parameters (and defaults) the latest **driver version** exposes.
-- **Given** an **application driver** named `nginx-app` with three **driver versions** (`v1.3.0`, `v1.2.1`, `v1.0.0`) exists
-- **When** the user navigates to that driver's detail page
-- **Then** the left rail shows the three versions in newest-first order, `v1.3.0` is selected by default, and the right pane shows the v1.3.0 overview and parameters table without rendering any other version's content
-- **Ships with**: left rail, vertical divider, tab scaffold, Overview tab, Parameters tab.
+- **Journey**: an author edits `driver.styrmin.yml`, the values template, or `actions.py` on local disk and re-runs `styrminctl driver load <path>`. A new `ApplicationDriverVersion` row is created alongside the old one. A subsequent reload with no changes is a no-op.
+- **Given** a driver loaded at `version: "1"` with content state A,
+  **When** the author edits the values template (e.g. adds a `commonLabels` entry) and re-runs `driver load`,
+  **Then** a new `ApplicationDriverVersion` row exists with the same `version` and a different `content_hash`; the previous row is intact; any deployment that referenced the previous row still references it.
 
-### P2 — Inspect a driver version's components and actions
+### P2 — Git driver reload distinguishes commits
 
-- **Journey**: A platform engineer wants to see what components a **driver version** declares and which actions it exposes, in a structured form (not JSON).
-- **Given** a **driver version** is selected
-- **When** the user clicks the Components tab, then the Actions tab
-- **Then** each component renders as a structured row (name + readable subset of declared fields) and each action renders as a card (name, description, location) — with zero raw JSON output on the page
-- **Ships independently on top of P1.**
+- **Journey**: a CI pipeline or user loads a driver from git, then loads again after a new commit lands on the same branch/tag. Each load resolves a commit SHA; loads at distinct SHAs create distinct rows.
+- **Given** a driver loaded from `repo@branch` at commit `abc123…` with `version: "1.2.3"`,
+  **When** the same load is repeated after a new commit `def456…` is pushed,
+  **Then** a new `ApplicationDriverVersion` row exists with the same `version` and `source_commit_sha = def456…`; the `abc123…` row is intact.
 
-### P3 — Trace where a driver version came from
+### P3 — Cascade crash on local reload is gone
 
-- **Journey**: A platform engineer needs to know which repository/branch/subpath (or local path) a **driver version** was sourced from.
-- **Given** a **driver version** is selected
-- **When** the user clicks the Source tab
-- **Then** the source repository or local path is rendered (with branch and subpath where applicable), differentiated by `sourceType`
-- **Ships independently on top of P1.**
+- **Journey**: the cascade-misconfiguration bug is fixed independently of the content-hash work, so the "bump version each reload" workaround is no longer required even when a future operation does delete an `ApplicationDriverVersion`.
+- **Given** an `ApplicationDriverVersion` row with children (`actions`, `component_configs`),
+  **When** the row is deleted via the repository,
+  **Then** the children are deleted by ORM cascade, no `IntegrityError` is raised, no orphan rows remain.
 
-## Functional Requirements (draft)
+## Functional Requirements
 
-### System
+- **FR-001**: System MUST add `sa_relationship_kwargs={"cascade": "all, delete-orphan"}` to `ApplicationDriverVersion.actions` and `ApplicationDriverVersion.component_configs` in `backend/styrmin_backend/db/models.py`.
+- **FR-002**: System MUST add two nullable columns to `ApplicationDriverVersion` — `content_hash: str | None` (SHA-256 hex) and `source_commit_sha: str | None` (git commit SHA). Exactly one of the two is non-null on any new row; the discriminator is `source_type`.
+- **FR-003**: System MUST compute `content_hash` at load time for `source_type = "local"` as SHA-256 over the length-prefixed concatenation of three files in fixed order: (1) `driver.styrmin.yml`, (2) the values template, (3) `actions.py` (only when `spec.actions` is non-empty). Raw bytes, no YAML canonicalisation. Other files in the directory MUST NOT contribute.
+- **FR-004**: System MUST record `source_commit_sha` at load time for `source_type = "git"` from the resolved commit returned by the git provider.
+- **FR-005**: System MUST treat `(application_driver_id, source_type, source_repository, source_branch, source_path, version, content_hash | source_commit_sha)` as the upsert lookup key. Same key → idempotent no-op (no new row, no error). Different fingerprint → new row created, **no delete of any existing row**.
+- **FR-006**: System MUST remove the existing `if existing is not None: await uow.application_driver_versions.delete(existing)` branch in `load_application_driver_from_local_directory`.
+- **FR-007**: System MUST surface `content_hash` and `source_commit_sha` on the GraphQL `ApplicationDriverVersion` type as read-only fields.
+- **FR-008**: Frontend, CLI, and SDK MUST render any driver-version reference as `<version>@<short>` where `<short>` is the first 7 chars of the populated fingerprint, on lists and on deployment detail surfaces. Detail surfaces MUST also show the full fingerprint verbatim with a copy affordance.
+- **FR-009**: Users MUST be able to load a local driver repeatedly without `IntegrityError`.
 
-- **FR-001** System MUST render all **driver versions** for an **application driver** in a left rail in newest-first order by `createdOn`, with the most recent version selected by default on page load. *Verify:* unit test seeds three versions at distinct `createdOn` timestamps and asserts rail order + active-state class.
-- **FR-002** System MUST render `parameters` for the selected **driver version** as a structured table — columns: name, label, kind, required-flag, default. *Verify:* unit test asserts N rows for N parameters and a REQUIRED badge where `default` is null/undefined.
-- **FR-003** System MUST render `components` and `actions` as structured rows — never as a raw JSON dump. *Verify:* unit test asserts no `<pre>` block with JSON output in either tab.
-- **FR-004** System MUST distinguish git-sourced from local-sourced **driver versions** in both the left rail and the Source tab. *Verify:* unit test renders one of each and asserts source-type-specific text.
-- **FR-005** System MUST preserve the existing 10-second auto-refresh and the `AutoRefreshIndicator` toggle. *Verify:* the existing query hook usage stays intact; no regression.
-- **FR-006** System MUST gate the "Add Version" action behind `IfRole minimum="READ_WRITE"`. *Verify:* unit test renders with a `READ` role and asserts the button is absent.
-- **FR-007** System MUST expose `createdOn: DateTime!` on `ApplicationDriver` and `ApplicationDriverVersion` in the GraphQL schema. *Verify:* GraphQL propagation test per `dev/guides/graphql-propagation-tests.md`.
-- **FR-008** System MUST display a relative-time label (e.g. "2 days ago") on each **driver version** row, derived from `createdOn`. *Verify:* unit test asserts rendered text given a fixed `createdOn`.
+### Verification ideas (testability checks for the above)
 
-### Users
-
-- **FR-009** Users MUST be able to switch the active **driver version** by clicking a row in the left rail; the right pane updates without a route change; the active tab is preserved. *Verify:* unit test clicks a non-active row and asserts the right pane updates while the active-tab state stays unchanged.
-- **FR-010** Users MUST be able to switch between Overview / Parameters / Components / Actions / Source tabs by clicking a tab header; the selected **driver version** is preserved across tab switches. *Verify:* unit test clicks a tab → asserts active panel; clicks a different version → asserts tab stays on the previously-active one.
-- **FR-011** Users MUST be able to navigate back to the Drivers list via the breadcrumb. *Verify:* existing breadcrumb behaviour from `PageLayout`.
+- FR-001: deleting an `ApplicationDriverVersion` row with children no longer raises `IntegrityError`; children are gone after the delete.
+- FR-002: schema introspection (or a unit test against the model) confirms both columns exist with the expected nullability.
+- FR-003: unit test loads two driver directories that differ only in `actions.py`, asserts hashes differ; another test adds/removes `README.md` between loads, asserts hashes equal.
+- FR-005: unit test reloads the same content → one row; reloads with edited values template → two rows.
+- FR-007: GraphQL propagation test (mandatory per Constitution §V) — write `content_hash` via a service call, read it back via the resolver.
+- FR-008: frontend visual test or component test asserts the `<version>@<short>` label appears.
 
 ## Key Entities
 
-| Entity | Status | Role on this page |
-| --- | --- | --- |
-| **Application driver** | existing | Root of the page; gains `createdOn` field exposure. |
-| **Application driver version** | existing | Selected via left rail; drives all tabs; gains `createdOn` field exposure; ordered newest-first. |
-| **Parameter** | existing | Rendered as a structured table in the Parameters tab. |
-| **Component** (driver-declared) | existing | Rendered as structured rows in the Components tab. Only **driver-declared** shape is surfaced; no runtime data (pods, live containers) is consulted. |
-| **Action** | existing | Rendered as a structured card per action in the Actions tab. |
-
-**No new entities.**
+- **ApplicationDriverVersion** (existing, modified): gains `content_hash` and `source_commit_sha` columns; identity widens from `(source_path, version)` to include the fingerprint.
+- **Action**, **ComponentConfig** (existing): the parent relationship on `ApplicationDriverVersion` gains `cascade="all, delete-orphan"`.
+- No new entities.
 
 ## Edge Cases
 
-- **EC-001 Driver with zero versions.** Left rail shows a short "No versions yet" line; right pane shows an empty state with the role-gated "Add Version" button; tabs are not rendered.
-- **EC-002 Selected version no longer exists after auto-refresh.** Silently fall back to the new newest version. No error, no toast.
-- **EC-003 New version appears during auto-refresh.** Append to the list; do not auto-switch — the user's current selection wins.
-- **EC-004 `components` JSON is `null` or unexpectedly shaped.** Components tab shows "This version declares no components" — no JSON dump fallback.
-- **EC-005 Empty `parameters` / `actions` / `components`.** Per-tab empty state ("No parameters declared", etc.); no table header when empty.
-- **EC-006 Local-source driver version (`sourceType === "local"`).** Source tab renders `sourcePath` (no branch); left rail row shows "local" instead of "git".
-- **EC-007 Long parameter list.** Page scrolls naturally; no internal scrolling region inside the tab.
+- **Identical content, different `source_path` (local)**: two different on-disk locations produce identical hashes. Treated as distinct rows because `source_path` is part of identity.
+- **Identical commit SHA, different branch (git)**: same commit reachable from two branches. Treated as distinct rows because `source_branch` is part of identity.
+- **`actions.py` exists but `spec.actions` is empty**: file is ignored by the hash, mirroring loader behaviour. Editing the orphan file does not produce a new row.
+- **`actions.py` is required but missing**: handled by existing loader validation, not by the hash design. Hash is never computed in this failure case.
+- **Concurrent reloads of the same driver**: both compute the same fingerprint and race to insert. Upsert path MUST handle the race (existing repository idempotency or a unique index covering the fingerprint).
+- **`source_type` outside `{local, git}`**: not present today; if added later, that source type MUST define its own fingerprint column or extend the discriminator rule explicitly.
 
-## Success Criteria (draft)
+## Success Criteria
 
-- **SC-001** A platform engineer can locate any declared parameter (name, kind, default, required status) for any **driver version** in under 5 seconds, regardless of how many other versions the driver has.
-- **SC-002** Components and actions render structured (one row per item, name visible at first glance) — no raw JSON output appears on the page. Verified by an automated assertion that no `<pre>` block contains JSON-shaped content for any driver's content tabs.
-- **SC-003** The page renders without overflow or layout breakage for drivers with up to 20 **driver versions** (left rail scrolls within its column, right pane unaffected). Verified by a fixture-based render test.
-- **SC-004** A platform engineer can identify the source (repository or local path; branch where applicable) of any **driver version** without leaving the page.
-- **SC-005** Switching between any two **driver versions** of the same **application driver** updates the right pane in under 1 second on a typical engineering laptop. No fresh network round-trip is required (data is cached by the existing query).
+- **SC-001**: A driver author can reload a local driver 100 times with mixed no-op and content-change patterns and observe zero errors; the resulting `ApplicationDriverVersion` row count equals the number of distinct content snapshots loaded.
+- **SC-002**: For any given `Deployment` or `ApplicationInstance` row, the `ApplicationDriverVersion` it references at creation time is the same row it still references at any later read — no in-place mutation, no replacement.
+- **SC-003**: When a driver author re-loads a local driver with no file changes, the operation completes without creating a new `ApplicationDriverVersion` row (idempotency).
+- **SC-004**: When a driver author re-loads a local driver after any whitespace-only or content edit to the three hashed files, a new `ApplicationDriverVersion` row is created (drift detection).
+- **SC-005**: Any user-facing surface that names a driver version (frontend driver list, deployment detail, `styrminctl` driver list output) includes the short fingerprint suffix so two rows with the same `version` are visually distinguishable.
 
 ## Constitution Alignment
 
-- **§I Declarative state reconciliation.** N/A — read-only UI rendering of existing data; no reconciliation behaviour added or changed.
-- **§II Driver-based deployment.** Aligned — this displays what a driver declares; no ad-hoc deployment logic is introduced.
-- **§III Layered architecture.** Aligned — the one backend change (`createdOn` exposure) is a thin resolver addition on existing GraphQL types; no cross-layer shortcuts.
-- **§IV Typed errors.** No new `ServiceError` subclasses required. View degrades through empty states for missing data; query failures continue to flow through the existing `ErrorState` component.
-- **§V E2E coverage (mandatory).** UI-only test: `test_driver_detail_inspects_versions_via_tabs`. Seed an **application driver** with three **driver versions** (distinct `createdOn` timestamps, parameters, components, sources). Navigate to the driver detail page; assert (a) three rows in newest-first order, latest selected by default, parameters table rendered; (b) clicking an older version updates the right pane; (c) Components tab renders structured rows (no `<pre>` JSON); (d) Source tab renders the seeded repo/branch/subpath. Marked `@pytest.mark.ui_only(reason="...")`. Local PASS evidence per §V NON-NEGOTIABLE clause: must record pytest node ID, exact command, ISO timestamp, vcluster id, and verbatim PASSED line.
-- **§V GraphQL propagation test (mandatory).** New field; propagation test asserts that `ApplicationDriver(Version).createdOn` propagates from DB row → resolver for both types. Procedure: `dev/guides/graphql-propagation-tests.md`.
-- **§VI Format and lint.** Standard pre-commit gate.
+- **§I Declarative reconciliation**: driver loading is idempotent by construction (same fingerprint → no-op). No impact on the reconciliation loop — `Deployment` and `ApplicationInstance` rows continue to reference specific `ApplicationDriverVersion.id` UUIDs as before.
+- **§II Driver-based deployment**: unchanged. Sharpens driver identity without altering driver semantics.
+- **§III Layered architecture**: hash computation lives in `services/driver/loaders.py`, called from `services/applications.py`. Repository methods extend their upsert lookup. GraphQL layer exposes the new fields. No cross-layer shortcuts.
+- **§IV Typed errors**: no new `ServiceError` subclass needed. Hash computation cannot fail meaningfully; git commit resolution failures continue to surface via existing `DriverLoadingError`.
+- **§V E2E coverage**: ship `backend/tests/e2e/test_driver_reload_identity.py::test_local_driver_reload_creates_new_row_on_content_change`. Loads a local fixture driver, mutates the values template, reloads via SDK, asserts two `ApplicationDriverVersion` rows with the same `version` and distinct `content_hash` exist and are queryable via GraphQL. Markers: `@pytest.mark.api_only`, `@pytest.mark.ci`, `@pytest.mark.shard_readonly`.
+- **§V Git path coverage**: covered by a unit test against a mocked git provider that returns sequential commit SHAs — a real ephemeral git fixture is out of scope for v1.
+- **§V GraphQL propagation tests**: required for `ApplicationDriverVersion.content_hash` and `ApplicationDriverVersion.source_commit_sha` (new read fields). Use the schema-walking propagation harness per [`dev/guides/graphql-propagation-tests.md`](dev/guides/graphql-propagation-tests.md).
+- **§VII Documentation accuracy**:
+  - New entry in [`CONTEXT.md`](../CONTEXT.md) under "Application drivers" — added during this grilling session (term: **Provenance fingerprint**).
+  - New `dev/guides/` entry describing the iteration loop ("you do not need to bump `version` while iterating; the platform tracks drift via fingerprint and keeps history") and the row-accumulation behaviour.
+  - Update any `docs/` page that documents driver loading or the driver-version surface to reflect the new fingerprint fields and `<version>@<short>` display form.
 
 ## Governance Gates Crossed
 
-- [ ] Database schema change — **No** (`created_on` already exists via `StyrminModel`)
-- [x] GraphQL schema change — **Yes**: `createdOn: DateTime!` added to `ApplicationDriver` and `ApplicationDriverVersion`. Acknowledged. Propagation test mandatory.
-- [ ] New dependency — **No** (reuses existing `Tabs`/`TabPanel`, `Card`, `Badge`, `Button`, `PageLayout`, `AutoRefreshIndicator`, `IfRole`)
-- [ ] CI/CD change — **No**
-- [ ] Auth change — **No** (existing `IfRole minimum="READ_WRITE"` gating is preserved)
-
-**Required post-gate artefact regeneration steps** (not separate gates):
-
-1. `uv run styrmin export graphql-schema schema.graphql` — regenerate root schema.
-2. Update `frontend/src/graphql/get_driver.graphql` to request `createdOn` on both types.
-3. `uv run invoke generate` — regenerate SDK Pydantic types and frontend TypeScript types.
+- [x] Database schema change — two new nullable columns on `ApplicationDriverVersion`; cascade kwargs added to two existing relationships.
+- [x] GraphQL schema change — two new read-only fields on the `ApplicationDriverVersion` type.
+- [ ] New dependency — none (hashlib stdlib; git commit resolution already in place).
+- [ ] CI/CD change — none.
+- [ ] Auth change — none.
 
 ## Assumptions
 
-- `applicationDriver.versions` returns a populated list for normal drivers (≥1 version); zero-version is an edge case.
-- `createdOn` will be a timezone-aware timestamp suitable for client-side relative-time formatting; precision matches `StyrminModel.created_on`.
-- Platform engineers have **READ_WRITE** role to add versions; **READ** users browse without the "Add Version" affordance.
-- Auto-refresh at 10s is acceptable (matches current behaviour); not changing.
-- "Newest by `createdOn`" is an acceptable proxy for "latest" — drivers are typically registered in chronological order matching semver progression. Edge cases (re-registering an older version after a newer one) may mis-order; users can scan the version string to confirm.
+- Styrmin is not yet deployed anywhere in production. There are no legacy `ApplicationDriverVersion` rows requiring backfill. New columns are added via `metadata.create_all()` on fresh databases.
+- The git driver provider already resolves and exposes the commit SHA of the loaded ref; no provider changes are required beyond surfacing that value to the service layer.
+- The frontend driver-detail page and CLI driver list are the only user-facing surfaces that name driver versions today; any other surface added during implementation will adopt the same `<version>@<short>` convention.
+- `ApplicationDriverVersion` rows accumulate without bound under v1; this is operationally acceptable given typical row size (a few KB).
 
 ## Out of Scope (v1)
 
-- Per-version "Used by N deployments" count.
-- Action `inputs[]` data and any "Run action" UI (no triggering, not even a stub button).
-- Component runtime data (pods, live containers, ports, resource usage).
-- Latest commit metadata for git-sourced versions (message, author, sha, file tree).
-- Side-by-side diff view between two **driver versions**.
-- Inline editing of a **driver version** (the existing "Add Version" flow remains the only mutation path).
-- URL search-param persistence for active tab (tab state is local; matches existing convention).
-- Filter / search inside the Parameters table.
-- Any change to the Drivers list page or other unrelated pages.
+- Automatic garbage collection of unreferenced `ApplicationDriverVersion` rows. A future admin-driven `styrminctl driver prune` command (or equivalent admin GraphQL mutation) is filed as a follow-up.
+- Backfilling `content_hash` / `source_commit_sha` for any pre-existing rows (no such rows exist).
+- Extending the local content hash to cover a multi-file `actions/` directory or additional driver files. Hash input is fixed at the three files the loader currently reads.
+- Parsing or accepting `<version>@<short>` as input (e.g. as a CLI argument). Display-only.
+- Any change to the git driver provider beyond exposing the commit SHA it already resolves.
+- E2E coverage of the git path (covered by unit test against a mocked git provider in v1).
 
 ## Open Questions
 
-*None remaining. All decisions resolved during grilling on 2026-05-21.*
+None — all clarifications resolved during grilling.
