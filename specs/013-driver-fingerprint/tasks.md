@@ -62,9 +62,9 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### GraphQL surface
 
-- [ ] T013 In `backend/styrmin_backend/api/definitions/application_driver/model.py`, add `content_hash: str | None = None` and `source_commit_sha: str | None = None` to the `ApplicationDriverVersion` Strawberry type, and populate them from the model in `from_instance()`
-- [ ] T014 [P] Write a propagation test in `backend/tests/unit/api/schema/test_application_driver_version_propagation.py` that seeds an `ApplicationDriverVersion` row via the real repository layer with `source_type="local"` and a known `content_hash`, runs a GraphQL query selecting `contentHash`, and asserts the resolver returns the seeded hex verbatim
-- [ ] T015 [P] In the same propagation test file, add a second test that seeds a row with `source_type="git"` and a known `source_commit_sha`, queries `sourceCommitSha`, and asserts the resolver returns the seeded SHA verbatim
+- [X] T013 In `backend/styrmin_backend/api/definitions/application_driver/model.py`, add `content_hash: str | None = None` and `source_commit_sha: str | None = None` to the `ApplicationDriverVersion` Strawberry type, and populate them from the model in `from_instance()`
+- [X] T014 [P] Write a propagation test in `backend/tests/functional/graphql/test_application_driver_version_propagation.py` (project-correct location per `dev/guides/graphql-propagation-tests.md`; original task path was `backend/tests/unit/api/schema/...` but the harness lives in `functional/graphql/`) that seeds an `ApplicationDriverVersion` row via the real repository layer with `source_type="local"` and a known `content_hash`, runs a GraphQL query selecting `contentHash`, and asserts the resolver returns the seeded hex verbatim
+- [X] T015 [P] In the same propagation test file, add a second test that seeds a row with `source_type="git"` and a known `source_commit_sha`, queries `sourceCommitSha`, and asserts the resolver returns the seeded SHA verbatim
 
 ### Schema + SDK regeneration
 
