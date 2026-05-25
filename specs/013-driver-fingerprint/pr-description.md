@@ -45,7 +45,33 @@ by `sourceType`.
   `docs/docs/concepts-and-architecture/what-is-a-driver.md`, and
   `docs/docs/changelog.md`; CONTEXT.md "Provenance fingerprint" entry;
   shard-marker list in `AGENTS.md` reconciled with the authoritative
-  `_VALID_SHARDS` set in `backend/tests/e2e/conftest.py`.
+  `_VALID_SHARDS` set in `backend/tests/e2e/conftest.py`; `dev/knowledge/backend/`
+  refreshed (`data-models.md`, `services.md`, `api.md`) for the new
+  identity semantics and removed `ApplicationDriverVersionAlreadyExistsError`.
+
+## Post-review fixes (in this PR)
+
+A dual-lens review pass surfaced four findings that were addressed in
+the same branch before opening this PR:
+
+- **Concurrent-reload race** (critical): `IntegrityError` from the new
+  `uq_application_driver_version_identity` index is caught, the session
+  is rolled back, and the winner's row is re-fetched and returned — so
+  two parallel reloads of identical content converge to one row instead
+  of surfacing a 500.
+- **Prefect workflow re-registration** (high): `PrefectManager.register_user_action`
+  and `get_user_action_deployment_id` thread the provenance fingerprint
+  short prefix as an additional tag, so older deployments keep resolving
+  actions to the bytes they were deployed from when a same-`version`
+  reload creates a new row.
+- **Provider discriminator** (high): the loader now branches on
+  `isinstance(source, GitSource)` instead of duck-typing
+  `get_resolved_commit_sha`, so a local provider that ever grew the
+  accessor cannot silently flip a row to git semantics.
+- **Silent label fallback** (high): backend (loguru) and CLI (stdlib
+  logging) emit a `warning` when a label is rendered without a
+  fingerprint, so any future loader regression or manual DB insert
+  surfaces in logs instead of silently dropping the suffix.
 
 ## Test evidence
 
