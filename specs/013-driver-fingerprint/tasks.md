@@ -40,10 +40,10 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Database model
 
-- [ ] T003 Add two nullable columns to `ApplicationDriverVersion` in `backend/styrmin_backend/db/models.py` (`content_hash: str | None = None`, `source_commit_sha: str | None = None`)
-- [ ] T004 Add `sa_relationship_kwargs={"cascade": "all, delete-orphan"}` to `ApplicationDriverVersion.actions` in `backend/styrmin_backend/db/models.py`
-- [ ] T005 Add `sa_relationship_kwargs={"cascade": "all, delete-orphan"}` to `ApplicationDriverVersion.component_configs` in `backend/styrmin_backend/db/models.py`
-- [ ] T006 Add a UNIQUE composite index over the identity tuple `(application_driver_id, source_type, source_repository, source_branch, source_path, version, content_hash, source_commit_sha)` to `ApplicationDriverVersion.__table_args__` in `backend/styrmin_backend/db/models.py` (per critique R-X-1; uses Postgres `IS NOT DISTINCT FROM` nullability semantics)
+- [X] T003 Add two nullable columns to `ApplicationDriverVersion` in `backend/styrmin_backend/db/models.py` (`content_hash: str | None = None`, `source_commit_sha: str | None = None`)
+- [X] T004 Add `sa_relationship_kwargs={"cascade": "all, delete-orphan"}` to `ApplicationDriverVersion.actions` in `backend/styrmin_backend/db/models.py`
+- [X] T005 Add `sa_relationship_kwargs={"cascade": "all, delete-orphan"}` to `ApplicationDriverVersion.component_configs` in `backend/styrmin_backend/db/models.py`
+- [X] T006 Add a UNIQUE composite index over the identity tuple `(application_driver_id, source_type, source_repository, source_branch, source_path, version, content_hash, source_commit_sha)` to `ApplicationDriverVersion.__table_args__` in `backend/styrmin_backend/db/models.py` (per critique R-X-1; uses Postgres `IS NOT DISTINCT FROM` nullability semantics)
 
 ### Pure hash helper
 

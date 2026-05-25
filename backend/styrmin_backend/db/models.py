@@ -241,10 +241,35 @@ class ApplicationDriver(StyrminModel, table=True):
 
 
 class ApplicationDriverVersion(StyrminModel, table=True):
+    # 013 / R-X-1: UNIQUE composite index on the widened identity tuple.
+    # ``postgresql_nulls_not_distinct=True`` gives ``IS NOT DISTINCT FROM``
+    # semantics so that two rows whose fingerprint columns are both NULL
+    # still collide (exactly one of ``content_hash`` / ``source_commit_sha``
+    # is non-null per row, see data-model.md).
+    __table_args__ = (
+        Index(
+            "uq_application_driver_version_identity",
+            "application_driver_id",
+            "source_type",
+            "source_repository",
+            "source_branch",
+            "source_path",
+            "version",
+            "content_hash",
+            "source_commit_sha",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
+
     application_driver_id: UUID = Field(foreign_key="applicationdriver.id")
     application_driver: ApplicationDriver = Relationship(back_populates="versions")
 
     version: str
+    # 013: SHA-256 hex of the canonical three-file byte concatenation
+    # (driver.styrmin.yml + values template + actions.py when present).
+    # Populated for ``source_type="local"`` rows.
+    content_hash: str | None = None
 
     application_supported_versions: str
     default_version: str | None = None
@@ -253,6 +278,9 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     source_repository: str
     source_branch: str | None = None
     source_path: str | None = None
+    # 013: resolved git commit SHA at the loaded ref. Populated for
+    # ``source_type="git"`` rows.
+    source_commit_sha: str | None = None
 
     components: dict | None = Field(default=None, sa_column=Column(JSON))
     parameters: list | None = Field(default=None, sa_column=Column(JSON))
@@ -262,13 +290,17 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     # level, components). Empty/None when the driver omits the block.
     env_vars: list | None = Field(default=None, sa_column=Column(JSON))
     component_configs: list[ComponentConfig] = Relationship(
-        back_populates="application_driver_version"
+        back_populates="application_driver_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
 
     helm_chart_id: UUID = Field(foreign_key="helmchart.id")
     helm_chart: HelmChart = Relationship(back_populates="application_driver_versions")
 
-    actions: list[Action] = Relationship(back_populates="application_driver_version")
+    actions: list[Action] = Relationship(
+        back_populates="application_driver_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
 
     deployments: list["Deployment"] = Relationship(
         back_populates="application_driver_version"
