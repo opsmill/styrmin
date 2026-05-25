@@ -131,13 +131,13 @@ Web-application layout per `plan.md` — `backend/`, `frontend/`, `python_sdk/`,
 
 ### Tests for User Story 3
 
-- [ ] T034 [P] [US3] Write a unit test `backend/tests/unit/repository/test_application_driver_version_cascade.py::test_delete_cascades_actions_and_component_configs`. Create a real DB session via the existing fixtures; insert an `ApplicationDriverVersion` with two `Action` rows and two `ComponentConfig` rows; call `repository.delete(version)`; assert: no `IntegrityError`, no rows remain in `Action` or `ComponentConfig` for that parent, no orphan FKs.
+- [x] T034 [P] [US3] Write a unit test `backend/tests/unit/repository/test_application_driver_version_cascade.py::test_delete_cascades_actions_and_component_configs`. Create a real DB session via the existing fixtures; insert an `ApplicationDriverVersion` with two `Action` rows and two `ComponentConfig` rows; call `repository.delete(version)`; assert: no `IntegrityError`, no rows remain in `Action` or `ComponentConfig` for that parent, no orphan FKs. **Covered by C5: `backend/tests/unit/repository/test_application_driver_version_get_by_identity.py::test_delete_cascades_actions_and_component_configs` already implements this exact scenario (2 Actions + 2 ComponentConfigs, `repo.delete`, no-IntegrityError + empty-child-rows assertions). Dedicated file skipped to avoid duplicate coverage.**
 
 ### Implementation for User Story 3
 
 > Implementation already covered by T004 (`actions` cascade) and T005 (`component_configs` cascade) in Phase 2. This story phase only validates the behaviour via T034.
 
-- [ ] T035 [US3] Verify T034 PASSES locally
+- [x] T035 [US3] Verify T034 PASSES locally — PASS (1 passed in 0.16s)
 
 **Checkpoint**: Cascade-delete-orphan is exercised under test.
 
