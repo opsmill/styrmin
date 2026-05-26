@@ -1386,7 +1386,7 @@ export type GetEnvironmentQueryVariables = Exact<{
 }>;
 
 
-export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, applicationDriverVersionId: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
+export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, applicationDriverVersionId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', name: string } }, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
 
 export type GetGroupQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2324,6 +2324,14 @@ export const GetEnvironmentDocument = `
       internal
       applicationVersion
       applicationDriverVersionId
+      applicationDriverVersion {
+        version
+        contentHash
+        sourceCommitSha
+        applicationDriver {
+          name
+        }
+      }
       components {
         id
         name

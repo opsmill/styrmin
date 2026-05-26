@@ -19,6 +19,14 @@ query GetEnvironment($environmentId: UUID!, $includeDeleted: Boolean = false) {
       internal
       applicationVersion
       applicationDriverVersionId
+      applicationDriverVersion {
+        version
+        contentHash
+        sourceCommitSha
+        applicationDriver {
+          name
+        }
+      }
       components {
         id
         name
