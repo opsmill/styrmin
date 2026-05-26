@@ -4,6 +4,16 @@
 # -- Number of replicas for styrmin-server
 replicaCount: 1
 
+# -- Override the container command for styrmin-server. Leave empty (default)
+# to use the built-in `styrmin server start` entrypoint.
+command: []
+#   - styrmin
+#   - server
+#   - start
+
+# -- Extra arguments appended to the styrmin-server container command.
+args: []
+
 # -- Number of replicas for styrmin task-worker (Prefect worker)
 taskWorkerReplicaCount: 1
 

@@ -41,9 +41,17 @@ spec:
           image: {{ include "styrmin.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
+            {{- with .Values.command }}
+            {{- toYaml . | nindent 12 }}
+            {{- else }}
             - styrmin
             - server
             - start
+            {{- end }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 8000
