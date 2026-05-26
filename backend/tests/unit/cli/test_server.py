@@ -52,7 +52,7 @@ def test_server_start_invokes_uvicorn_with_defaults(mocker: MockerFixture) -> No
     mock_config.SETTINGS.initialize.assert_called_once_with()
     mock_uvicorn.run.assert_called_once_with(
         "styrmin_backend.server.app:app",
-        host="0.0.0.0",
+        host="",
         port=8000,
         workers=1,
         reload=False,
@@ -90,7 +90,7 @@ def test_server_start_with_reload_uses_single_worker(mocker: MockerFixture) -> N
     assert exc_info.value.code == 0
     mock_uvicorn.run.assert_called_once_with(
         "styrmin_backend.server.app:app",
-        host="0.0.0.0",
+        host="",
         port=8000,
         workers=1,  # Should be 1 when reload is enabled
         reload=True,
