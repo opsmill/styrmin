@@ -33,6 +33,10 @@ UUID_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Header driver text is rendered as "<driver-name> v<version>@<short-hash>"
+# per spec 013 (provenance fingerprint). This regex matches the suffix.
+DRIVER_VERSION_SUFFIX_RE = re.compile(r"\sv[^\s]+@[0-9a-f]{7}$")
+
 pytestmark = [
     pytest.mark.ci,
     pytest.mark.ui_only(
@@ -61,13 +65,20 @@ async def test_deployment_header_shows_driver_name(
         f"data-driver-name should be 'simple-app', got {driver_name!r}"
     )
 
-    # And the rendered header value should match — and must not be a UUID.
+    # And the rendered header value should start with the driver name and
+    # include the spec-013 provenance fingerprint suffix
+    # ``v<version>@<short-hash>``. The header MUST NOT fall back to a UUID.
     header_text = await page.read_header_driver_text()
-    assert header_text == "simple-app", (
-        f"deployment header should show driver name 'simple-app', got {header_text!r}"
+    assert header_text.startswith("simple-app"), (
+        f"deployment header should start with driver name 'simple-app', "
+        f"got {header_text!r}"
     )
     assert not UUID_RE.match(header_text), (
         f"deployment header is rendering a UUID instead of a driver name: {header_text!r}"
+    )
+    assert DRIVER_VERSION_SUFFIX_RE.search(header_text), (
+        f"deployment header should include a 'v<version>@<short-hash>' "
+        f"provenance suffix per spec 013, got {header_text!r}"
     )
 
 
