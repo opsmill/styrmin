@@ -260,22 +260,23 @@ class TestIngressServiceConfigModel:
             ip_families=["IPv6"], ip_family_policy="SingleStack"
         )
         rendered = _render_chart_values(config)
-        assert rendered["service"]["ipFamilies"] == ["IPv6"]
-        assert rendered["service"]["ipFamilyPolicy"] == "SingleStack"
+        assert rendered["service"]["spec"]["ipFamilies"] == ["IPv6"]
+        assert rendered["service"]["spec"]["ipFamilyPolicy"] == "SingleStack"
 
     def test_render_dual_stack_required_emits_keys(self):
         config = IngressServiceConfig(
             ip_families=["IPv4", "IPv6"], ip_family_policy="RequireDualStack"
         )
         rendered = _render_chart_values(config)
-        assert rendered["service"]["ipFamilies"] == ["IPv4", "IPv6"]
-        assert rendered["service"]["ipFamilyPolicy"] == "RequireDualStack"
+        assert rendered["service"]["spec"]["ipFamilies"] == ["IPv4", "IPv6"]
+        assert rendered["service"]["spec"]["ipFamilyPolicy"] == "RequireDualStack"
 
     def test_render_omits_ip_family_keys_when_unset(self):
         config = IngressServiceConfig()
         rendered = _render_chart_values(config)
-        assert "ipFamilies" not in rendered["service"]
-        assert "ipFamilyPolicy" not in rendered["service"]
+        if "spec" in rendered["service"]:
+            assert "ipFamilies" not in rendered["service"]["spec"]
+            assert "ipFamilyPolicy" not in rendered["service"]["spec"]
 
     # ------------------------------------------------------------------
     # T009 [US2] — node_port range

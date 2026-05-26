@@ -68,6 +68,16 @@ nfs-server-provisioner:
 prefect-server:
   enabled: true
   fullnameOverride: styrmin-task-manager
+  server:
+    # Hardcoded analytics flag plus operator-supplied env vars for the
+    # `task-manager-db` component.
+    env:
+      - name: PREFECT_SERVER_ANALYTICS_ENABLED
+        value: "{{ parameters.enable_analytics }}"
+  {%- for entry in components | component_env_vars("task-manager-db") %}
+      - name: {{ entry.name | tojson }}
+        value: {{ entry.value | tojson }}
+  {%- endfor %}
   postgresql:
     # Propagate the styrmin identifier label to every resource the bitnami
     # postgresql subchart renders (StatefulSet metadata.labels included), so
@@ -107,15 +117,6 @@ prefect-server:
         timeoutSeconds: 1
         failureThreshold: 120
       resourcesPreset: none
-    # Hardcoded analytics flag plus operator-supplied env vars for the
-    # `task-manager-db` component.
-    env:
-      - name: PREFECT_SERVER_ANALYTICS_ENABLED
-        value: "{{ parameters.enable_analytics }}"
-{%- for entry in components | component_env_vars("task-manager-db") %}
-      - name: {{ entry.name | tojson }}
-        value: {{ entry.value | tojson }}
-{%- endfor %}
 rabbitmq:
   enabled: true
   fullnameOverride: styrmin-message-queue
