@@ -410,7 +410,10 @@ function relativeTimeFromNow(iso: string): string {
   return `${days}d ago`;
 }
 
-function DeploymentRow({
+// Exported for component-level testing (see
+// frontend/src/__tests__/environment-detail/DeploymentRow.test.tsx). The row
+// is otherwise a private implementation detail of this page.
+export function DeploymentRow({
   deployment,
   environmentId,
   index,
