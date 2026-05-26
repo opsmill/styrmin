@@ -13,8 +13,12 @@
  */
 export function formatDriverVersionLabel(v: {
   version: string;
-  contentHash: string | null;
-  sourceCommitSha: string | null;
+  // Optional + nullable: matches the generated GraphQL types
+  // (`contentHash?: string | null`) which mark fields as both
+  // nullable and optional. Accepting `undefined` here lets callers
+  // pass generated objects directly without unsafe casts.
+  contentHash?: string | null;
+  sourceCommitSha?: string | null;
 }): string {
   const fingerprint = v.contentHash || v.sourceCommitSha;
   if (!fingerprint) return v.version;

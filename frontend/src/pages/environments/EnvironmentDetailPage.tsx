@@ -426,8 +426,8 @@ export function DeploymentRow({
     applicationVersion: string;
     applicationDriverVersion?: {
       version: string;
-      contentHash: string | null;
-      sourceCommitSha: string | null;
+      contentHash?: string | null;
+      sourceCommitSha?: string | null;
       applicationDriver: { name: string };
     } | null;
     components: { id: string }[];
