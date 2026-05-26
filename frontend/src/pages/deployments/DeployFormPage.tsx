@@ -26,6 +26,7 @@ import { AlertCircle } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { IfRole } from "@/auth/IfRole";
 import { ParameterField } from "@/components/deployment/configuration/ParameterField";
+import { formatDriverVersionLabel } from "@/lib/driverVersion";
 
 const deployFormSchema = z.object({
   name: z.string().min(1, "Deployment name is required"),
@@ -260,7 +261,8 @@ export default function DeployFormPage() {
                 <SelectTrigger data-testid="driver-version-select">
                   {selectedVersion ? (
                     <span>
-                      {selectedVersion.driverName} v{selectedVersion.version}
+                      {selectedVersion.driverName} v
+                      {formatDriverVersionLabel(selectedVersion)}
                     </span>
                   ) : (
                     <SelectValue placeholder="Select a driver version" />
@@ -269,7 +271,7 @@ export default function DeployFormPage() {
                 <SelectContent>
                   {allVersions.map((v) => (
                     <SelectItem key={v.id} value={v.id}>
-                      {v.driverName} v{v.version}
+                      {v.driverName} v{formatDriverVersionLabel(v)}
                     </SelectItem>
                   ))}
                 </SelectContent>

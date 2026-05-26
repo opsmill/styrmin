@@ -46,6 +46,7 @@ import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
 import { IfRole } from "@/auth/IfRole";
 import { PodsTab } from "./PodsTab";
+import { formatDriverVersionLabel } from "@/lib/driverVersion";
 
 const DEPLOYMENT_TABS = [
   { id: "overview", label: "Overview" },
@@ -223,6 +224,9 @@ export default function DeploymentDetailPage() {
   const isTerminal = isDeleting || isDeleted;
   const driverName =
     deployment.applicationDriverVersion?.applicationDriver?.name ?? null;
+  const driverVersionLabel = deployment.applicationDriverVersion
+    ? formatDriverVersionLabel(deployment.applicationDriverVersion)
+    : null;
 
   return (
     <div
@@ -272,6 +276,14 @@ export default function DeploymentDetailPage() {
               Driver{" "}
               <span className="font-semibold text-foreground">
                 {driverName ?? deployment.applicationDriverVersionId}
+                {driverVersionLabel && (
+                  <>
+                    {" "}
+                    <span className="font-mono text-muted-foreground">
+                      v{driverVersionLabel}
+                    </span>
+                  </>
+                )}
               </span>
             </span>
           </div>
