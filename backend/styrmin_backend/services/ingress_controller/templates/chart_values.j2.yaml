@@ -51,17 +51,22 @@ service:
 {% if instance.config.dedicated_ingress.service.load_balancer_ip %}
   loadBalancerIP: "{{ instance.config.dedicated_ingress.service.load_balancer_ip }}"
 {% endif %}
+{% if instance.config.dedicated_ingress.service.external_traffic_policy
+   or instance.config.dedicated_ingress.service.ip_families
+   or instance.config.dedicated_ingress.service.ip_family_policy %}
+  spec:
 {% if instance.config.dedicated_ingress.service.external_traffic_policy %}
-  externalTrafficPolicy: "{{ instance.config.dedicated_ingress.service.external_traffic_policy }}"
+    externalTrafficPolicy: "{{ instance.config.dedicated_ingress.service.external_traffic_policy }}"
 {% endif %}
 {% if instance.config.dedicated_ingress.service.ip_families %}
-  ipFamilies:
+    ipFamilies:
 {% for family in instance.config.dedicated_ingress.service.ip_families %}
-    - {{ family }}
+      - {{ family }}
 {% endfor %}
 {% endif %}
 {% if instance.config.dedicated_ingress.service.ip_family_policy %}
-  ipFamilyPolicy: {{ instance.config.dedicated_ingress.service.ip_family_policy }}
+    ipFamilyPolicy: {{ instance.config.dedicated_ingress.service.ip_family_policy }}
+{% endif %}
 {% endif %}
 {% if instance.config.dedicated_ingress.service.node_port %}
 ports:
