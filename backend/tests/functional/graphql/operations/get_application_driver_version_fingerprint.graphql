@@ -1,0 +1,12 @@
+query GetApplicationDriverVersionFingerprint($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        id
+        versions {
+            id
+            version
+            sourceType
+            contentHash
+            sourceCommitSha
+        }
+    }
+}

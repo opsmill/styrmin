@@ -26,6 +26,8 @@ function makeVersion(
     sourceRepository: "https://github.com/example/repo.git",
     sourceBranch: "main" as string | null,
     sourcePath: null as string | null,
+    sourceCommitSha: null as string | null,
+    contentHash: null as string | null,
     components: null,
     parameters: [],
     componentConfigs: [],
@@ -173,5 +175,51 @@ describe("VersionList (T020)", () => {
     const labelSpan = row.querySelector("span[title]")!;
     expect(labelSpan.getAttribute("title")).toBe(longLabel);
     expect(labelSpan.className).toContain("truncate");
+  });
+
+  it("renders the <version>@<short> label using the formatDriverVersionLabel helper (feature 013)", async () => {
+    const versions = [
+      makeVersion({
+        id: "git-sha",
+        version: "1.2.3",
+        createdOn: "2026-03-01T00:00:00Z",
+        sourceType: "git",
+        sourceCommitSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        contentHash: null,
+      }),
+      makeVersion({
+        id: "local-hash",
+        version: "0.1.0",
+        createdOn: "2026-02-01T00:00:00Z",
+        sourceType: "local",
+        sourceRepository: "",
+        sourceBranch: null,
+        sourcePath: "/tmp/driver",
+        sourceCommitSha: null,
+        contentHash:
+          "deadbeefcafefacefeedbabec0ffee1234567890abcdef0123456789abcdef01",
+      }),
+    ];
+
+    await render(
+      <VersionList
+        versions={versions}
+        selectedVersionId={null}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const rows = screen.getAllByTestId("driver-version-row");
+    const gitRow = rows.find(
+      (r) => r.getAttribute("data-version-id") === "git-sha",
+    )!;
+    const localRow = rows.find(
+      (r) => r.getAttribute("data-version-id") === "local-hash",
+    )!;
+
+    // Git-sourced row: `<version>@<sourceCommitSha[:7]>`.
+    expect(gitRow.textContent).toContain("1.2.3@a1b2c3d");
+    // Local-sourced row: `<version>@<contentHash[:7]>`.
+    expect(localRow.textContent).toContain("0.1.0@deadbee");
   });
 });

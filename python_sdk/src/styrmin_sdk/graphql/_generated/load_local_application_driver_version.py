@@ -19,6 +19,8 @@ class LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersion(BaseMod
     id: UUID
     application_driver_id: UUID = Field(alias="applicationDriverId")
     version: str
+    content_hash: Optional[str] = Field(alias="contentHash")
+    source_commit_sha: Optional[str] = Field(alias="sourceCommitSha")
     supported_versions: str = Field(alias="supportedVersions")
     components: Optional[Any]
     component_configs: list[

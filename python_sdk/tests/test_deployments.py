@@ -58,7 +58,11 @@ async def test_get_deployment_success(client: StyrminClient, mock_transport: Asy
                 "parameters": {},
                 "applicationVersion": "1.0.0",
                 "applicationDriverVersionId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-                "applicationDriverVersion": None,
+                "applicationDriverVersion": {
+                    "version": "1.0.0",
+                    "contentHash": None,
+                    "sourceCommitSha": None,
+                },
                 "environmentId": "22222222-3333-4444-5555-666666666666",
                 "createdBy": {
                     "id": "55555555-6666-7777-8888-999999999999",

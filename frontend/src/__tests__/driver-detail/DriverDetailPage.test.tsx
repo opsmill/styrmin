@@ -92,6 +92,8 @@ function makeVersion(
     sourceRepository: "https://github.com/example/repo.git",
     sourceBranch: "main" as string | null,
     sourcePath: null as string | null,
+    sourceCommitSha: null as string | null,
+    contentHash: null as string | null,
     components: null,
     parameters: [],
     componentConfigs: [],

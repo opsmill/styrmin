@@ -13,6 +13,7 @@ from styrmin_backend.agent.tasks.utils import run_deployment_or_fail
 from pydantic import BaseModel
 
 from styrmin_backend.domain.models import Instance
+from styrmin_backend.services.driver.labels import short_fingerprint
 from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.services.reconciliation.diffs.diffs import (
     ApplicationDriverVersionChange,
@@ -116,18 +117,27 @@ class InstanceCreationStrategy(RemediationStrategy):
 
         # The CRD flow only needs pre/post hooks — the operator handles
         # HelmRelease creation and utility resource management.
+        # Spec 013 — pass the row-bound fingerprint so we resolve the
+        # workflow registered against this specific driver version, not
+        # whatever last-write-wins for the (application, version) tuple.
+        instance_fingerprint = short_fingerprint(
+            content_hash=driver_version.content_hash,
+            source_commit_sha=driver_version.source_commit_sha,
+        )
         prehook, posthook = await asyncio.gather(
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,
                 hook=HookKind.SETUP,
                 mode="pre",
                 version=driver_version.application_supported_versions,
+                fingerprint=instance_fingerprint,
             ),
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,
                 hook=HookKind.SETUP,
                 mode="post",
                 version=driver_version.application_supported_versions,
+                fingerprint=instance_fingerprint,
             ),
         )
 
@@ -211,12 +221,21 @@ class InstanceUpdateStrategy(RemediationStrategy):
             driver_version.application_supported_versions,
         )
 
+        # Spec 013 — bind lookups to the row's provenance fingerprint so
+        # an older instance whose driver was reloaded under a new commit
+        # still resolves to its original workflow registration.
+        upgrade_fingerprint = short_fingerprint(
+            content_hash=driver_version.content_hash,
+            source_commit_sha=driver_version.source_commit_sha,
+        )
+
         # Look up the upgrade core hook from Prefect
         upgrade_hook = await prefect_manager.get_user_action_deployment_id(
             application=application.name,
             hook=HookKind.UPGRADE,
             mode="core",
             version=driver_version.application_supported_versions,
+            fingerprint=upgrade_fingerprint,
         )
 
         # If no upgrade core hook is defined, fall back to regular update
@@ -243,12 +262,14 @@ class InstanceUpdateStrategy(RemediationStrategy):
                 hook=HookKind.UPGRADE,
                 mode="pre",
                 version=driver_version.application_supported_versions,
+                fingerprint=upgrade_fingerprint,
             ),
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,
                 hook=HookKind.UPGRADE,
                 mode="post",
                 version=driver_version.application_supported_versions,
+                fingerprint=upgrade_fingerprint,
             ),
         )
         assert upgrade_instance_flow is not None, (

@@ -80,3 +80,61 @@ def test_drivers_create_error(mock_client: MagicMock) -> None:
     with pytest.raises(SystemExit) as exc:
         app(["drivers", "create", "bad-driver"])
     assert exc.value.code == 1
+
+
+def test_drivers_load_local_version_renders_label_and_full_content_hash(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Spec 013 / US4: local driver detail renders <version>@<short> and the full Content hash line."""
+    full_hash = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+    mock_version = MagicMock(
+        id="v-2",
+        version="2.0.0",
+        application_driver_id="d-1",
+        supported_versions=">=14",
+        content_hash=full_hash,
+        source_commit_sha=None,
+        component_configs=[],
+        actions=[],
+        helm_chart=None,
+    )
+    mock_client.drivers.load_local_version = AsyncMock(return_value=mock_version)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["drivers", "load-local-version", str(tmp_path)])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    # T040: label rendered with @<short>
+    assert "2.0.0@a1b2c3d" in output
+    # T041: full fingerprint exposed on detail
+    assert f"Content hash: {full_hash}" in output
+    assert "Commit SHA:" not in output
+
+
+def test_drivers_load_version_renders_label_and_full_commit_sha(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Spec 013 / US4: git driver detail renders <version>@<short> and the full Commit SHA line."""
+    full_sha = "def4567890abcdef1234567890abcdef12345678"
+    mock_version = MagicMock(
+        id="v-1",
+        version="1.0.0",
+        application_driver_id="d-1",
+        supported_versions=">=14",
+        content_hash=None,
+        source_commit_sha=full_sha,
+        component_configs=[],
+        actions=[],
+        helm_chart=None,
+    )
+    mock_client.drivers.load_version = AsyncMock(return_value=mock_version)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["drivers", "load-version", "https://github.com/example/driver.git", "main"])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    # T040: label rendered with @<short>
+    assert "1.0.0@def4567" in output
+    # T041: full fingerprint exposed on detail
+    assert f"Commit SHA: {full_sha}" in output
+    assert "Content hash:" not in output

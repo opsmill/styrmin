@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Plus } from "lucide-react";
+import { formatDriverVersionLabel } from "@/lib/driverVersion";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { IfRole } from "@/auth/IfRole";
 import { useEffectiveRole } from "@/auth/useEffectiveRole";
@@ -270,8 +271,11 @@ export default function EnvironmentDetailPage() {
                 <span className="w-[180px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Name
                 </span>
-                <span className="w-[100px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="w-[90px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Version
+                </span>
+                <span className="w-[220px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Driver
                 </span>
                 <span className="w-[100px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Status
@@ -406,7 +410,10 @@ function relativeTimeFromNow(iso: string): string {
   return `${days}d ago`;
 }
 
-function DeploymentRow({
+// Exported for component-level testing (see
+// frontend/src/__tests__/environment-detail/DeploymentRow.test.tsx). The row
+// is otherwise a private implementation detail of this page.
+export function DeploymentRow({
   deployment,
   environmentId,
   index,
@@ -417,6 +424,12 @@ function DeploymentRow({
     name: string;
     status: string;
     applicationVersion: string;
+    applicationDriverVersion?: {
+      version: string;
+      contentHash?: string | null;
+      sourceCommitSha?: string | null;
+      applicationDriver: { name: string };
+    } | null;
     components: { id: string }[];
     deletedAt?: string | null;
   };
@@ -429,6 +442,9 @@ function DeploymentRow({
   const isDeleted =
     deployment.status === "deleted" ||
     (deployment.deletedAt !== null && deployment.deletedAt !== undefined);
+  const adv = deployment.applicationDriverVersion;
+  const driverName = adv?.applicationDriver.name ?? null;
+  const driverVersionLabel = adv ? formatDriverVersionLabel(adv) : null;
   // Tombstoned rows render visually de-emphasised with no inline action
   // affordances. The detail page is still reachable by clicking the row
   // (US7 — direct id lookup is unfiltered).
@@ -480,10 +496,27 @@ function DeploymentRow({
           )}
         </div>
         <span
-          className={`w-[100px] font-mono text-[13px] ${isTombstoned || internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+          className={`w-[90px] font-mono text-[13px] ${isTombstoned || internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
         >
           {deployment.applicationVersion}
         </span>
+        <div
+          className={`w-[220px] text-[13px] ${isTombstoned || internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+          data-testid="deployment-driver-cell"
+        >
+          {driverName ? (
+            <div className="flex flex-col">
+              <span className="truncate">{driverName}</span>
+              {driverVersionLabel && (
+                <span className="truncate font-mono text-[11px] text-muted-foreground/80">
+                  v{driverVersionLabel}
+                </span>
+              )}
+            </div>
+          ) : (
+            <span className="text-muted-foreground/50">—</span>
+          )}
+        </div>
         <div className="w-[100px]">
           <StatusBadge status={deployment.status} />
         </div>

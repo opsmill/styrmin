@@ -11,6 +11,8 @@ query GetDeployment($deploymentId: UUID!) {
     applicationDriverVersion {
       id
       version
+      contentHash
+      sourceCommitSha
       applicationDriver {
         id
         name

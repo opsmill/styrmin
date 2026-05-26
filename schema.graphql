@@ -45,6 +45,8 @@ type ApplicationDriverVersion {
   sourceRepository: String!
   sourceBranch: String
   sourcePath: String
+  contentHash: String
+  sourceCommitSha: String
   createdOn: DateTime!
   components: JSON
   applicationDriver: ApplicationDriver!

@@ -113,6 +113,8 @@ class ApplicationDriverVersion:
     source_repository: str
     source_branch: str | None
     source_path: str | None
+    content_hash: str | None = None
+    source_commit_sha: str | None = None
 
     created_on: datetime
 
@@ -188,6 +190,8 @@ class ApplicationDriverVersion:
             source_repository=instance.source_repository,
             source_branch=instance.source_branch,
             source_path=instance.source_path,
+            content_hash=instance.content_hash,
+            source_commit_sha=instance.source_commit_sha,
             created_on=instance.created_on,
             instance=instance,
         )

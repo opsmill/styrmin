@@ -6,6 +6,8 @@ mutation LoadRemoteApplicationDriverVersion($repositoryUrl: String!, $branch: St
             name
         }
         version
+        contentHash
+        sourceCommitSha
         supportedVersions
         components
         componentConfigs {

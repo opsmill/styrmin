@@ -93,8 +93,8 @@ Defined on `type Mutation`:
 | `deleteBackupStorageLocation` | `backupStorageLocationId` | `String` |
 | `assignBackupStorageLocation` | `environmentId, backupStorageLocationId` | `Environment` |
 | `unassignBackupStorageLocation` | `environmentId` | `Environment` |
-| `loadLocalApplicationDriverVersion` | `path` | `ApplicationDriverVersion` |
-| `loadRemoteApplicationDriverVersion` | `repositoryUrl, branch` | `ApplicationDriverVersion` |
+| `loadLocalApplicationDriverVersion` | `path` | `ApplicationDriverVersion` (identity-aware per spec 013: same content → idempotent, new content → new row alongside existing) |
+| `loadRemoteApplicationDriverVersion` | `repositoryUrl, branch` | `ApplicationDriverVersion` (identity-aware: keyed on resolved git commit SHA) |
 | `deploy` | `driver, environmentId?, environmentName?, clusterId?, clusterName?, version?, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
 | `updateDeployment` | `deploymentId, input: UpdateDeploymentInput!` | `Task` |
 | `deleteDeployment` | `deploymentId` | `Task!` (born-complete `DELETE_DEPLOYMENT` audit record; patches `spec.deletionRequested` on the CR — operator drives teardown asynchronously) |

@@ -2,6 +2,10 @@
 
 ## Active Technologies
 
+- Python 3.14+ (backend, SDK, CLI); TypeScript 5.9.3 (frontend, Node 22) + Strawberry GraphQL, SQLModel + SQLAlchemy (async, asyncpg), Pydantic, Cyclopts (CLI), httpx (SDK), `dulwich` (git driver provider). Frontend: React 19, TanStack Query/Router, Radix UI, Tailwind. (013-driver-fingerprint)
+
+- PostgreSQL via SQLModel/SQLAlchemy. Schema managed by `metadata.create_all()` — no Alembic migration required since Styrmin is not yet deployed in production. (013-driver-fingerprint)
+
 - TypeScript (Docusaurus config), Markdown/MDX (content), Node.js 22+ + Docusaurus v3, `@easyops-ci/docusaurus-search-local`, pnpm (003-docs-site)
 
 - N/A (static site, no database) (003-docs-site)

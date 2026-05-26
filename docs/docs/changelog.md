@@ -8,6 +8,39 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Driver reload no longer requires bumping `version`
+
+Application Driver Versions are now identified by a **provenance
+fingerprint** in addition to their `spec.version` string. The
+fingerprint is a SHA-256 content hash for local drivers and the
+resolved git commit SHA for git drivers.
+
+#### What's new
+
+- Re-running `styrminctl drivers load-local-version <path>` on an
+  edited driver records a new Application Driver Version row, even when
+  `spec.version` is unchanged. Three files feed the content hash:
+  `driver.styrmin.yml`, the values template, and `actions.py` (only
+  when `spec.actions` is non-empty).
+- Re-loading unchanged content is now a no-op — repeated loads no
+  longer create duplicate rows and no longer crash with the cascade
+  `IntegrityError` that used to surface on local reloads.
+- Every driver-version label across the UI, CLI, and SDK is rendered as
+  `<version>@<short-fingerprint>` (the first 7 hex chars). Detail
+  surfaces show the full 64-char content hash or 40-char commit SHA
+  with a copy-to-clipboard control.
+- The `ApplicationDriverVersion` GraphQL type gains two nullable fields:
+  `contentHash` (set for `sourceType == "local"`) and `sourceCommitSha`
+  (set for `sourceType == "git"`). Exactly one is non-null per row.
+
+#### Migration
+
+- No action required. The new columns are nullable; legacy rows keep
+  the bare `version` label until reloaded once.
+- See [`dev/guides/driver-iteration.md`](https://github.com/opsmill/styrmin/blob/develop/dev/guides/driver-iteration.md)
+  for the iteration-loop reference and the planned `drivers prune`
+  follow-up.
+
 ### Unified deployment Settings tab
 
 The deployment detail page's **Parameters** tab has been replaced with a unified **Settings** tab.

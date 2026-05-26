@@ -27,6 +27,7 @@ from .delete_group import DeleteGroup
 from .delete_user import DeleteUser
 from .deploy import Deploy
 from .enums import BackupStatus, RestoreStatus, Role
+from .get_application_driver_versions import GetApplicationDriverVersions
 from .get_backup import GetBackup
 from .get_backup_schedule import GetBackupSchedule
 from .get_backup_storage_location import GetBackupStorageLocation
@@ -635,6 +636,35 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return Deploy.model_validate(data)
 
+    async def get_application_driver_versions(
+        self, application_driver_id: UUID, **kwargs: Any
+    ) -> GetApplicationDriverVersions:
+        query = gql("""
+            query GetApplicationDriverVersions($applicationDriverId: UUID!) {
+              applicationDriver(applicationDriverId: $applicationDriverId) {
+                id
+                name
+                versions {
+                  id
+                  version
+                  contentHash
+                  sourceCommitSha
+                  sourceType
+                  sourcePath
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"applicationDriverId": application_driver_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetApplicationDriverVersions",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetApplicationDriverVersions.model_validate(data)
+
     async def get_backup(self, backup_id: UUID, **kwargs: Any) -> GetBackup:
         query = gql("""
             query GetBackup($backupId: UUID!) {
@@ -725,6 +755,11 @@ class Client(AsyncBaseClient):
                 config
                 applicationVersion
                 applicationDriverVersionId
+                applicationDriverVersion {
+                  version
+                  contentHash
+                  sourceCommitSha
+                }
                 environmentId
                 createdBy {
                   id
@@ -996,6 +1031,8 @@ class Client(AsyncBaseClient):
                 versions {
                   id
                   version
+                  contentHash
+                  sourceCommitSha
                   envVars {
                     name
                     description
@@ -1481,6 +1518,8 @@ class Client(AsyncBaseClient):
                 id
                 applicationDriverId
                 version
+                contentHash
+                sourceCommitSha
                 supportedVersions
                 components
                 componentConfigs {
@@ -1528,6 +1567,8 @@ class Client(AsyncBaseClient):
                   name
                 }
                 version
+                contentHash
+                sourceCommitSha
                 supportedVersions
                 components
                 componentConfigs {

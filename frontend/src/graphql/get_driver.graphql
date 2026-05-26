@@ -11,6 +11,8 @@ query GetDriver($applicationDriverId: UUID!) {
       sourceRepository
       sourceBranch
       sourcePath
+      sourceCommitSha
+      contentHash
       components
       createdOn
       parameters {

@@ -7,6 +7,7 @@ from fast_depends import Depends, inject
 from loguru import logger
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
+from sqlalchemy.exc import IntegrityError
 
 from styrmin_backend import config as styrmin_config
 from styrmin_backend.context.exceptions import InvalidDeploymentContextError
@@ -33,6 +34,7 @@ from styrmin_backend.domain.payloads import (
     HookDeploymentsPayload,
 )
 from styrmin_backend.services.driver import ApplicationDriver
+from styrmin_backend.services.driver.labels import short_fingerprint
 from styrmin_backend.services.driver.loaders import (
     get_git_driver_loader,
     get_local_driver_loader,
@@ -41,7 +43,6 @@ from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.services.driver.models.structure.source import GitSource
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
-    ApplicationDriverVersionAlreadyExistsError,
     EnvironmentNotFoundError,
     InvalidContextError,
     InvalidVersionError,
@@ -85,17 +86,37 @@ async def load_application_driver_from_object(
                 ApplicationDriverModel(name=name)
             )
 
-        application_driver_version = (
-            await uow.application_driver_versions.get_by_supported_versions(
-                application_driver_id=application_driver.id,
-                versions=driver_object.driver_spec.spec.supported_versions,
-            )
-        )
+        # Build the source-identity tuple ahead of the duplicate check so
+        # spec 013 (provenance fingerprint) can disambiguate two rows that
+        # share the same ``application_supported_versions`` range but differ
+        # on ``content_hash`` (local) or ``source_commit_sha`` (git).
+        if isinstance(driver_object.source, GitSource):
+            source_type = "git"
+            source_repository = driver_object.source.repository
+            source_branch: str | None = driver_object.source.branch
+            source_path: str | None = None
+        else:
+            source_type = "local"
+            source_repository = ""
+            source_branch = None
+            source_path = driver_object.source.path
 
-        if application_driver_version is not None:
-            raise ApplicationDriverVersionAlreadyExistsError(
-                f"An application with the name {name} and supported versions {supported_versions} already exists."
-            )
+        # Spec 013 / T024 — idempotency check on the full identity tuple.
+        # A row that matches every identity column (incl. the new fingerprint
+        # columns) means this exact driver byte-content is already loaded;
+        # return it instead of either raising or creating a duplicate.
+        existing_identity = await uow.application_driver_versions.get_by_identity(
+            application_driver_id=application_driver.id,
+            source_type=source_type,
+            source_repository=source_repository,
+            source_branch=source_branch,
+            source_path=source_path,
+            version=driver_object.driver_spec.spec.version,
+            content_hash=driver_object.content_hash,
+            source_commit_sha=driver_object.source_commit_sha,
+        )
+        if existing_identity is not None:
+            return existing_identity
 
         # Get or create Helm repository
         helm_chart_repository = get_chart_repository_from_chart_url(
@@ -128,8 +149,19 @@ async def load_application_driver_from_object(
                 )
             )
 
-        # Register token and action workflows only for git-sourced drivers
+        # Register token and action workflows only for git-sourced drivers.
+        # Spec 013 — the registration tags include a ``fingerprint/{short}``
+        # disambiguator so two same-version reloads with different commit
+        # SHAs (or local content hashes, for the future-local-actions case)
+        # do not clobber each other. Execution-time lookups in
+        # ``instantiate_application`` and the reconciliation strategies
+        # pass the same fingerprint so older deployments keep resolving
+        # to their original workflows.
         if isinstance(driver_object.source, GitSource):
+            fingerprint = short_fingerprint(
+                content_hash=driver_object.content_hash,
+                source_commit_sha=driver_object.source_commit_sha,
+            )
             await prefect_manager.register_token(
                 namespace="user",
                 token=driver_object.source.token,
@@ -142,7 +174,7 @@ async def load_application_driver_from_object(
                         action=action
                     )
                     logger.info(
-                        f"Registering user action {action.name}: {workflow.name}, {supported_versions}, {action.hook}, {action.mode}"
+                        f"Registering user action {action.name}: {workflow.name}, {supported_versions}, {action.hook}, {action.mode}, fingerprint={fingerprint}"
                     )
                     await prefect_manager.register_user_action(
                         workflow=workflow,
@@ -150,19 +182,8 @@ async def load_application_driver_from_object(
                         version=supported_versions,
                         hook=action.hook,
                         mode=action.mode,
+                        fingerprint=fingerprint,
                     )
-
-        # Build source fields for DB record
-        if isinstance(driver_object.source, GitSource):
-            source_type = "git"
-            source_repository = driver_object.source.repository
-            source_branch: str | None = driver_object.source.branch
-            source_path: str | None = None
-        else:
-            source_type = "local"
-            source_repository = ""
-            source_branch = None
-            source_path = driver_object.source.path
 
         # Create application
         components = (
@@ -198,23 +219,81 @@ async def load_application_driver_from_object(
             if driver_object.driver_spec.spec.env_vars
             else None
         )
-        application_driver_version = await uow.application_driver_versions.create(
-            ApplicationDriverVersion(
-                version=driver_object.driver_spec.spec.version,
-                application_driver_id=application_driver.id,
-                application_supported_versions=supported_versions,
-                default_version=driver_object.driver_spec.spec.default_version,
-                components=components,
-                parameters=parameters,
-                services=services,
-                env_vars=env_vars_payload,
-                helm_chart_id=helm_chart.id,
+        # Spec 013 — the ``get_by_identity`` fast-path above resolves the
+        # common case where the row already exists. Two concurrent loads
+        # of the same content can still both miss the lookup and race
+        # to the INSERT; the UNIQUE index ``uq_application_driver_version_identity``
+        # guarantees exactly one wins. The loser surfaces an
+        # ``IntegrityError``; we rollback the poisoned transaction and
+        # re-run the identity lookup to return the winner's row instead
+        # of leaking a 500 to the caller.
+        try:
+            application_driver_version = await uow.application_driver_versions.create(
+                ApplicationDriverVersion(
+                    version=driver_object.driver_spec.spec.version,
+                    application_driver_id=application_driver.id,
+                    application_supported_versions=supported_versions,
+                    default_version=driver_object.driver_spec.spec.default_version,
+                    components=components,
+                    parameters=parameters,
+                    services=services,
+                    env_vars=env_vars_payload,
+                    helm_chart_id=helm_chart.id,
+                    source_type=source_type,
+                    source_repository=source_repository,
+                    source_branch=source_branch,
+                    source_path=source_path,
+                    # Spec 013 / T025 — persist the provenance fingerprint
+                    # captured by the driver loader. ``content_hash`` is
+                    # set for local-sourced drivers; ``source_commit_sha``
+                    # is set for git-sourced drivers (US2, C9). Both
+                    # nullable.
+                    content_hash=driver_object.content_hash,
+                    source_commit_sha=driver_object.source_commit_sha,
+                )
+            )
+        except IntegrityError:
+            # A concurrent loader landed first. Rollback the poisoned
+            # transaction (the failed flush leaves the session in an
+            # unusable state until we do) and re-fetch the winner's row
+            # via the same identity tuple. The UNIQUE index ensures the
+            # second lookup resolves to exactly one row; anything else
+            # would be a genuine bug in the identity definition rather
+            # than a race, so we let the original IntegrityError surface
+            # by re-raising.
+            logger.info(
+                "IntegrityError on application_driver_versions insert; "
+                "treating as concurrent-load race and re-fetching identity "
+                "row (application={}, version={}, source_type={}).",
+                name,
+                driver_object.driver_spec.spec.version,
+                source_type,
+            )
+            await uow.rollback()
+            # Rollback undoes any ancillary inserts we performed in this
+            # transaction (e.g. the ``application_driver`` row created at
+            # the top), so re-resolve the parent driver in the fresh
+            # transaction. The winning concurrent loader is guaranteed to
+            # have committed an ``ApplicationDriver`` row with this name
+            # before its identity-tuple INSERT (same code path).
+            parent = await uow.application_drivers.get_by_name(name=name)
+            if parent is None:
+                raise
+            winner = await uow.application_driver_versions.get_by_identity(
+                application_driver_id=parent.id,
                 source_type=source_type,
                 source_repository=source_repository,
                 source_branch=source_branch,
                 source_path=source_path,
+                version=driver_object.driver_spec.spec.version,
+                content_hash=driver_object.content_hash,
+                source_commit_sha=driver_object.source_commit_sha,
             )
-        )
+            if winner is None:
+                # The UNIQUE-index violation wasn't our identity tuple
+                # after all — surface the original error.
+                raise
+            return winner
 
         # Create component configs
         if components:
@@ -293,29 +372,22 @@ async def load_application_driver_from_local_directory(
 
     Returns:
         ApplicationDriverVersion: The loaded application driver version.
+
+    Notes:
+        Spec 013 / T024 — the previous ``get_by_source_path_and_version`` +
+        ``delete(existing)`` block has been removed. Idempotency now lives
+        inside :func:`load_application_driver_from_object`, which uses
+        :meth:`ApplicationDriverVersionRepository.get_by_identity` to look
+        up the full identity tuple (including the new ``content_hash``
+        column). Two reloads of the same content return the same row; a
+        reload with edited content creates a new row (no delete of the
+        prior one) so historical deployments stay reproducible.
     """
     driver_loader = get_local_driver_loader(path=path)
     application_driver = driver_loader.load_driver()
 
-    async with uow:
-        name = application_driver.driver_spec.metadata.name
-
-        application_driver_obj = await uow.application_drivers.get_by_name(name=name)
-        if application_driver_obj is None:
-            application_driver_obj = await uow.application_drivers.create(
-                ApplicationDriverModel(name=name)
-            )
-
-        # Upsert: if a version with the same source_path and version string exists, delete it
-        existing = await uow.application_driver_versions.get_by_source_path_and_version(
-            application_driver_id=application_driver_obj.id,
-            source_path=path,
-            version=application_driver.driver_spec.spec.version,
-        )
-        if existing is not None:
-            await uow.application_driver_versions.delete(existing)
-
-    # Create the application driver objects in database
+    # Create the application driver objects in database (idempotent on
+    # identity-tuple via ``get_by_identity`` inside).
     return await load_application_driver_from_object(
         driver_object=application_driver, uow=uow
     )
@@ -396,18 +468,27 @@ async def instantiate_application(
             )
         )
 
+        # Spec 013 — pass the driver row's short fingerprint so we resolve
+        # the workflow registered against this exact ``ApplicationDriverVersion``
+        # rather than whatever shares the same (application, version) tuple.
+        instance_fingerprint = short_fingerprint(
+            content_hash=application.content_hash,
+            source_commit_sha=application.source_commit_sha,
+        )
         prehook, posthook, corehook = await asyncio.gather(
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,  # type: ignore[attr-defined]
                 hook=HookKind.SETUP,
                 mode="pre",
                 version=application.application_supported_versions,
+                fingerprint=instance_fingerprint,
             ),
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,  # type: ignore[attr-defined]
                 hook=HookKind.SETUP,
                 mode="post",
                 version=application.application_supported_versions,
+                fingerprint=instance_fingerprint,
             ),
             prefect_manager.get_action_deployment_id(
                 action=PrefectAction.CREATE_HELM_RELEASE

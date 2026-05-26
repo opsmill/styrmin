@@ -61,13 +61,27 @@ class PrefectManager:
         version: str,
         hook: HookKind,
         mode: Literal["pre", "core", "post"],
+        fingerprint: str | None = None,
     ) -> None:
-        """Register a user action in the Prefect catalogue."""
+        """Register a user action in the Prefect catalogue.
+
+        Spec 013 — when ``fingerprint`` is provided (the first 7 chars of
+        the driver row's ``source_commit_sha`` or ``content_hash``), it is
+        included as a ``fingerprint/{short}`` tag. This keeps two distinct
+        same-version reloads (different content / commit) from clobbering
+        each other's deployment: deployments are keyed on
+        (application, version, hook, mode, fingerprint), and execution-time
+        lookups in :meth:`get_user_action_deployment_id` must pass the same
+        fingerprint so older instances keep resolving to their original
+        workflow.
+        """
         # Add tags to the workflow
         workflow.tags.append(f"application/{application}")
         workflow.tags.append(f"version/{version}")
         workflow.tags.append(f"hook/{hook.value}")
         workflow.tags.append(f"mode/{mode}")
+        if fingerprint:
+            workflow.tags.append(f"fingerprint/{fingerprint}")
         async with get_client(sync_client=False) as client:
             await workflow.save(
                 client=client,
@@ -80,19 +94,29 @@ class PrefectManager:
         version: str,
         hook: HookKind,
         mode: Literal["pre", "core", "post"],
+        fingerprint: str | None = None,
     ) -> UUID | None:
-        """Get the workflow ID for a specific user action in the Prefect deployments."""
+        """Get the workflow ID for a specific user action in the Prefect deployments.
+
+        Spec 013 — ``fingerprint`` (the short form of the driver row's
+        provenance fingerprint) must match the value used at registration
+        time. ``None`` is preserved for legacy rows whose driver was
+        registered before the fingerprint tag existed; for those rows the
+        lookup omits the tag and continues to find the historical
+        deployment.
+        """
+        tags = [
+            f"application/{application}",
+            f"hook/{hook.value}",
+            f"mode/{mode}",
+            f"version/{version}",
+        ]
+        if fingerprint:
+            tags.append(f"fingerprint/{fingerprint}")
         async with get_client() as client:
             deployments = await client.read_deployments(
                 deployment_filter=DeploymentFilter(
-                    tags=DeploymentFilterTags(
-                        all_=[
-                            f"application/{application}",
-                            f"hook/{hook.value}",
-                            f"mode/{mode}",
-                            f"version/{version}",
-                        ]
-                    )
+                    tags=DeploymentFilterTags(all_=tags)
                 ),
             )
             if not deployments:

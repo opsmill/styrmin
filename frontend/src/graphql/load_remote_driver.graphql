@@ -5,6 +5,8 @@ mutation LoadRemoteDriver($repositoryUrl: String!, $branch: String!) {
   ) {
     id
     version
+    contentHash
+    sourceCommitSha
     applicationDriverId
   }
 }

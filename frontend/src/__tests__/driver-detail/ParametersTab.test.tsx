@@ -25,6 +25,8 @@ function makeVersion(
     sourceRepository: "https://github.com/example/repo.git",
     sourceBranch: "main",
     sourcePath: null,
+    sourceCommitSha: null,
+    contentHash: null,
     createdOn: "2026-01-01T00:00:00Z",
     components: null,
     parameters,

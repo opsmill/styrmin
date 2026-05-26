@@ -180,3 +180,33 @@ def test_deployments_create_error(mock_client: MagicMock) -> None:
     with pytest.raises(SystemExit) as exc:
         app(["deployments", "create", "postgres", "14.0", ENV_UUID])
     assert exc.value.code == 1
+
+
+def test_deployments_get_renders_driver_version_label_with_short_suffix(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Spec 013 / US4: deployment detail renders the driver-version reference as <version>@<short>
+    and emits a full Content hash line when the underlying row is a local driver."""
+    full_hash = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+    adv = MagicMock(version="14.0", content_hash=full_hash, source_commit_sha=None)
+    mock_deployment = MagicMock(
+        id=DEPLOYMENT_UUID,
+        name="my-db",
+        status="running",
+        application_version="14.0",
+        application_driver_version_id="dv-1",
+        application_driver_version=adv,
+        environment_id=ENV_UUID,
+        config=None,
+        application_instance=None,
+        components=[],
+    )
+    mock_client.deployments.get = AsyncMock(return_value=mock_deployment)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "get", DEPLOYMENT_UUID])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "Application version: 14.0@a1b2c3d" in output
+    assert f"Content hash: {full_hash}" in output
+    assert "Commit SHA:" not in output

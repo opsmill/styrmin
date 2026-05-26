@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { formatDriverVersionLabel } from "@/lib/driverVersion";
 import type { DriverVersionDetail } from "./types";
 
 interface VersionHeaderProps {
@@ -17,12 +18,20 @@ interface VersionHeaderProps {
  */
 export function VersionHeader({ version }: VersionHeaderProps) {
   const isGit = version.sourceType === "git";
+  const label = formatDriverVersionLabel({
+    version: version.version,
+    contentHash: version.contentHash ?? null,
+    sourceCommitSha: version.sourceCommitSha ?? null,
+  });
 
   return (
     <header className="flex flex-col gap-2" data-testid="driver-version-header">
       <div className="flex items-center gap-2">
-        <h2 className="font-mono text-xl font-semibold text-foreground">
-          {version.version}
+        <h2
+          className="font-mono text-xl font-semibold text-foreground"
+          data-testid="driver-version-header-label"
+        >
+          {label}
         </h2>
         <Badge variant={isGit ? "secondary" : "outline"} className="uppercase">
           {isGit ? "git" : "local"}

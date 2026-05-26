@@ -8,6 +8,7 @@ from cyclopts import App, Parameter
 from styrmin_sdk.models import UpdateDeploymentInput
 
 from styrminctl import client
+from styrminctl.labels import format_driver_version_label
 from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
 from styrminctl.types import ClusterContextId, ClusterContextName, DeploymentId, EnvironmentName, OptionalEnvironmentId
 
@@ -59,11 +60,24 @@ async def get(deployment_id: DeploymentId) -> None:
         async with client.get_client() as sdk:
             deployment = await sdk.deployments.get(deployment_id)
 
+    adv = getattr(deployment, "application_driver_version", None)
+    adv_content_hash = getattr(adv, "content_hash", None) if adv is not None else None
+    adv_source_commit_sha = getattr(adv, "source_commit_sha", None) if adv is not None else None
+    version_label = format_driver_version_label(
+        version=deployment.application_version,
+        content_hash=adv_content_hash,
+        source_commit_sha=adv_source_commit_sha,
+    )
+
     console.print(f"  ID: {deployment.id}")
     console.print(f"  Name: {deployment.name}")
     console.print(f"  Status: {deployment.status}")
-    console.print(f"  Application version: {deployment.application_version}")
+    console.print(f"  Application version: {version_label}")
     console.print(f"  Driver version ID: {deployment.application_driver_version_id}")
+    if adv_content_hash:
+        console.print(f"  Content hash: {adv_content_hash}")
+    elif adv_source_commit_sha:
+        console.print(f"  Commit SHA: {adv_source_commit_sha}")
     console.print(f"  Environment ID: {deployment.environment_id}")
     console.print(f"  Config: {deployment.config or ''}")
 

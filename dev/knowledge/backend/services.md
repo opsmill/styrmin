@@ -232,6 +232,8 @@ Read-side accessors for application drivers stored in the database.
 
 Driver loading and application instantiation. The "loaders" pull a driver spec from a source (Git, local directory, or in-memory object), validate it, register its actions with Prefect, and persist the resulting `ApplicationDriver` / `ApplicationDriverVersion` rows.
 
+Loading is **identity-aware** (spec 013): each load computes a provenance fingerprint — `content_hash` (SHA-256 over the canonical three-file input) for local source, `source_commit_sha` (resolved at HEAD) for git source — and looks up via `get_by_identity`. Same identity tuple → idempotent no-op (returns the existing row). New fingerprint at the same `(driver, source, version)` → a new row is created alongside the existing ones; no row is ever deleted by the load path. The Prefect action registration is keyed on the fingerprint short prefix so historical deployments keep resolving actions to the bytes they were deployed from.
+
 | Function | Description |
 |----------|-------------|
 | `load_application_driver_from_object(driver_spec, uow, ...)` | Load a driver from an in-memory `DriverSpec` |
@@ -414,7 +416,6 @@ ServiceError (base)
 ├── InvalidContextError
 ├── ApplicationDriverNotFoundError
 ├── ApplicationDriverVersionNotFoundError
-├── ApplicationDriverVersionAlreadyExistsError
 ├── ClusterLimitReachedError
 ├── ClusterAlreadyExistsError
 ├── ClusterNotFoundError
