@@ -1,0 +1,112 @@
+---
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: infrahub-enterprise
+spec:
+  version: "1"
+  supported_versions: ">=1.5,<1.9"
+  info:
+    icon: xxxx
+    description: Enterprise edition of Infrahub — next generation source of truth for infrastructure management
+    authors: [fatih]
+    license: Apache-2.0
+    links:
+      - link: Homepage
+        url: 'https://www.opsmill.com/'
+      - link: Documentation
+        url: 'https://docs.infrahub.app'
+      - link: Github
+        url: 'https://github.com/opsmill/infrahub'
+  helm:
+    main:
+      location: oci://registry.opsmill.io/opsmill/chart/infrahub-enterprise
+      version: 4.7.6
+
+  parameters:
+    - name: replicas_server
+      label: "Number of server replicas"
+      kind: integer
+      default: 1
+    - name: replicas_task_worker
+      label: "Number of task worker replicas"
+      kind: integer
+      default: 2
+    - name: database_storage_size
+      label: "Database storage size (Gi)"
+      kind: integer
+      default: 100
+    - name: enable_analytics
+      label: "Enable analytics"
+      kind: boolean
+      default: true
+
+  components:
+    server:
+      cpu: 4
+      identifier:
+        label:
+          service: infrahub-server
+
+    task-worker:
+      identifier:
+        label:
+          service: infrahub-task-worker
+
+    database:
+      identifier:
+        label:
+          infrahub/service: database
+      backup:
+        enabled: true
+        kind: neo4j
+
+    cache:
+      identifier:
+        label:
+          infrahub/service: cache
+
+    message-queue:
+      identifier:
+        label:
+          infrahub/service: message-queue
+
+    task-manager:
+      identifier:
+        label:
+          app.kubernetes.io/name: prefect-server
+
+    task-manager-db:
+      identifier:
+        label:
+          infrahub/service: task-manager-db
+      backup:
+        enabled: true
+        kind: postgres
+        database_name: prefect
+
+  services:
+    - name: infrahub
+      kind: http
+      scope: internal
+      port: 8000
+      component: server
+
+  actions:
+    - name: upgrade
+      hook: upgrade
+      mode: core
+      description: Upgrade Infrahub
+      location: "actions.py::upgrade"
+
+    - name: pre_setup
+      hook: setup
+      mode: pre
+      description: Initial Setup of Infrahub
+      location: "actions.py::pre_setup"
+
+    - name: post_setup
+      hook: setup
+      mode: post
+      description: Initial Setup of Infrahub
+      location: "actions.py::post_setup"

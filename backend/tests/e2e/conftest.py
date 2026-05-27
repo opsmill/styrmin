@@ -481,6 +481,9 @@ async def git_server(
         "infrahub": {
             "source": PROJECT_ROOT / "driver" / "examples" / "infrahub",
         },
+        "infrahub-enterprise": {
+            "source": PROJECT_ROOT / "driver" / "examples" / "infrahub-enterprise",
+        },
     }
 
     tmp_repo = tmp_path_factory.mktemp("driver-repo")
@@ -565,6 +568,14 @@ async def styrmin_deployment(
     # Build agent chart dependencies (prefect-worker) before installing styrmin
     subprocess.run(
         ["helm", "dependency", "update", str(PROJECT_ROOT / "helm" / "agent")],
+        check=True,
+    )
+    # Refresh the parent chart's bundled subchart .tgz files. `--dependency-update`
+    # on `helm upgrade --install` won't refresh an already-cached `styrmin-agent-X.tgz`
+    # that's now out-of-step with the local `helm/agent` source, which causes the
+    # agent pod to render with a stale (sometimes registry-less) image reference.
+    subprocess.run(
+        ["helm", "dependency", "update", str(PROJECT_ROOT / "helm" / "styrmin")],
         check=True,
     )
 
@@ -1018,6 +1029,64 @@ async def deployed_infrahub_app(
 
     deployment = await driver.create_deployment(
         driver="infrahub", version="1.6.0", environment_id=environment_id
+    )
+    # Infrahub has many components — wait longer than the default.
+    deployment = await driver.wait_for_deployment_running(
+        deployment_id=deployment.id, timeout=600.0
+    )
+
+    return {
+        "deployment_id": deployment.id,
+        "instance_id": deployment.instance_id,
+        "namespace": f"styrmin-{deployment.id}",
+        "kubeconfig_path": vcluster["kubeconfig_path"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fixture: load_infrahub_enterprise
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="session")
+async def load_infrahub_enterprise(
+    styrmin_resources: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    git_server: dict[str, str],
+) -> AsyncGenerator[dict, None]:
+    """Load the infrahub-enterprise application driver from the in-cluster git server."""
+    driver, _ = session_scenario_driver
+    version = await driver.load_driver_version(
+        git_url=git_server["infrahub-enterprise"], ref="master"
+    )
+    yield {
+        **styrmin_resources,
+        "infrahub_enterprise_driver_id": version.application_driver_id,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fixture: deployed_infrahub_enterprise_app
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="session")
+async def deployed_infrahub_enterprise_app(
+    load_infrahub_enterprise: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    vcluster: dict,
+) -> dict:
+    """Deploy infrahub-enterprise and return deployment info for reuse by tests."""
+    driver, _ = session_scenario_driver
+    environment_id = load_infrahub_enterprise["environment_id"]
+
+    deployment = await driver.create_deployment(
+        driver="infrahub-enterprise",
+        version="1.6.0",
+        environment_id=environment_id,
+        # Rename the styrmin service from the driver's declared `infrahub` to
+        # `infrahub-enterprise` so the OSS and enterprise variants can coexist
+        # in the same shared environment without colliding on the per-env
+        # unique service name constraint.
+        service_name_overrides=[
+            {"driverServiceName": "infrahub", "overrideName": "infrahub-enterprise"}
+        ],
     )
     # Infrahub has many components — wait longer than the default.
     deployment = await driver.wait_for_deployment_running(

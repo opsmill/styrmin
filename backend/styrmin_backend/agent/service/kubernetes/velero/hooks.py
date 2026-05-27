@@ -24,7 +24,14 @@ def postgres_backup_hooks(
                 command=[
                     "/bin/sh",
                     "-c",
-                    f"PGPASSWORD=$(cat $POSTGRES_PASSWORD_FILE) pg_dump -U $POSTGRES_USER -d $POSTGRES_DATABASE -Fc -f {backup_mount_path}/pre-snapshot.dump && sync",
+                    # Read the password from $POSTGRES_PASSWORD_FILE when the chart
+                    # exposes one (older bitnami postgres releases, vault/sealed-secret
+                    # mounts); otherwise fall back to $POSTGRES_PASSWORD (current
+                    # bitnami releases set this directly). The `cat "$VAR" 2>/dev/null`
+                    # construct returns empty and exits non-zero when the var is unset,
+                    # empty, or points at a nonexistent path, which triggers the `||`
+                    # fallback to the plain env var.
+                    f'PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE" 2>/dev/null || printf %s "$POSTGRES_PASSWORD")" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -Fc -f {backup_mount_path}/pre-snapshot.dump && sync',
                 ],
                 on_error="Fail",
                 timeout=timeout,
@@ -258,7 +265,9 @@ def postgres_restore_hooks(
                 command=[
                     "/bin/sh",
                     "-c",
-                    f"sleep 5 && PGPASSWORD=$(cat $POSTGRES_PASSWORD_FILE) pg_restore -U $POSTGRES_USER -d $POSTGRES_DATABASE --no-owner -c --if-exists {backup_mount_path}/pre-snapshot.dump",
+                    # See the matching backup hook for the rationale on resolving
+                    # $POSTGRES_PASSWORD_FILE with a $POSTGRES_PASSWORD fallback.
+                    f'sleep 5 && PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE" 2>/dev/null || printf %s "$POSTGRES_PASSWORD")" pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" --no-owner -c --if-exists {backup_mount_path}/pre-snapshot.dump',
                 ],
                 on_error="Fail",
                 timeout=timeout,
