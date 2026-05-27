@@ -8,7 +8,7 @@ from cyclopts import App, Parameter
 
 from styrminctl import client
 from styrminctl.output import console, print_error, print_success, print_table, styrmin_error_handler
-from styrminctl.types import BackupId, InstanceId, MaxWait, OptionalInstanceId, PollInterval, RestoreId
+from styrminctl.types import BackupId, InstanceId, MaxWait, OptionalInstanceId, PollInterval, RestoreId, validate_uuid
 
 backups_app = App(name="backups", help="Manage backups and restores.")
 
@@ -99,17 +99,42 @@ async def delete(backup_id: BackupId) -> None:
 
 @backups_app.command
 async def restore(
-    backup_id: BackupId,
+    backup_id: Annotated[
+        str | None,
+        Parameter(help="UUID of the backup to restore (omit when using --last).", validator=validate_uuid),
+    ] = None,
     *,
     target_namespace: Annotated[str, Parameter(help="Target Kubernetes namespace.")],
     target_instance_id: OptionalInstanceId = None,
+    last: Annotated[
+        bool,
+        Parameter(help="Restore the most recent completed backup of --target-instance-id (in-place)."),
+    ] = False,
     wait: Annotated[bool, Parameter(help="Wait for restore to complete.")] = False,
     max_wait: MaxWait = 300,
     interval: PollInterval = 5,
 ) -> None:
     """Restore from a backup."""
     with styrmin_error_handler():
+        if last and backup_id is not None:
+            raise ValueError("Provide either a backup_id or --last, not both")
+        if last and target_instance_id is None:
+            raise ValueError("--last requires --target-instance-id")
+        if not last and backup_id is None:
+            raise ValueError("backup_id is required (or use --last with --target-instance-id)")
+
         async with client.get_client() as sdk:
+            if last and target_instance_id is not None:
+                backups_list = await sdk.backups.list_backups(instance_id=target_instance_id, status="completed")
+                if not backups_list:
+                    print_error(f"No completed backups found for instance {target_instance_id}")
+                    raise SystemExit(1)
+                backup_id = str(backups_list[0].id)
+                console.print(f"Selected latest completed backup: {backup_id}")
+
+            if backup_id is None:
+                raise ValueError("backup_id is required (or use --last with --target-instance-id)")
+
             rst = await sdk.backups.create_restore(
                 backup_id=backup_id,
                 target_namespace=target_namespace,
