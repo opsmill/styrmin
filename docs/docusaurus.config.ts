@@ -113,6 +113,15 @@ const config: Config = {
     colorMode: {
       respectPrefersColorScheme: true,
     },
+    announcementBar: {
+      id: 'alpha-status-v1',
+      content:
+        '🚧 Styrmin is in <strong>alpha</strong> — APIs and features may change. ' +
+        '<a href="/docs/alpha-status">Read the alpha status →</a>',
+      backgroundColor: '#fef3c7',
+      textColor: '#78350f',
+      isCloseable: true,
+    },
     navbar: {
       title: 'Styrmin',
       logo: {
