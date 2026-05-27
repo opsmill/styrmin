@@ -58,6 +58,5 @@ lot of weight right now.
   for any bug report or feature request originating from your local
   workflow.
 - **General discussion, questions, or "is this the right approach?"**
-  → join the OpsMill Discord (invite link: `<DISCORD_INVITE_URL>` — to be
-  filled in before publish). It's the fastest way to reach the team and
-  the rest of the community.
+  → join the [OpsMill Discord](https://discord.gg/opsmill). It's the
+  fastest way to reach the team and the rest of the community.

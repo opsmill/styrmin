@@ -70,8 +70,7 @@ Page outline:
      (`/create-issue`) — it formats the issue to project conventions and
      fills in the right labels.
    - General discussion, questions, feedback → OpsMill Discord at
-     `<DISCORD_INVITE_URL>` (Damien to supply the exact invite URL before
-     publish).
+     `https://discord.gg/opsmill`.
 
 ### 3. Sidebar update
 
@@ -90,11 +89,6 @@ Welcome.
   out-of-the-box Docusaurus and Markdown handles the page.
 - No new redirect rules. The page is new; nothing to redirect from.
 - No changes to issue templates, README, or `AGENTS.md`.
-
-## Open inputs from the user
-
-- `<DISCORD_INVITE_URL>` — exact OpsMill Discord invite link.
-  The placeholder ships in the source file and is replaced before merge.
 
 ## Acceptance
 
