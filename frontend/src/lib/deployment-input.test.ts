@@ -123,6 +123,163 @@ describe("deploymentConfigToInput", () => {
     expect(input.envVars).toEqual([{ name: "A", value: "1" }]);
   });
 
+  it("renames scheduling.inject snake_case keys to camelCase", () => {
+    // Regression: the persisted ``PostRenderInjection`` Pydantic model uses
+    // snake_case (``node_affinity``, ``pod_affinity``, ``topology_spread``,
+    // ``runtime_class``). Without conversion, those keys leak into the form
+    // state; when the user toggles a checkbox the form writes the camelCase
+    // sibling and Strawberry rejects the dual-key payload with
+    // "Field 'node_affinity' is not defined by type 'PostRenderInjectionInput'".
+    const input = deploymentConfigToInput({
+      scheduling: {
+        inject: {
+          node_affinity: true,
+          pod_affinity: false,
+          topology_spread: true,
+          runtime_class: false,
+          resources: true,
+          tolerations: false,
+        },
+      },
+    });
+    expect(input.scheduling?.inject).toEqual({
+      nodeAffinity: true,
+      podAffinity: false,
+      topologySpread: true,
+      runtimeClass: false,
+      resources: true,
+      tolerations: false,
+    });
+    // Guard against the dual-key payload — no snake_case key may survive.
+    const injectKeys = Object.keys(input.scheduling?.inject ?? {});
+    expect(injectKeys.filter((k) => k.includes("_"))).toEqual([]);
+  });
+
+  it("renames the top-level scheduling.pod_affinity block to podAffinity", () => {
+    // Regression: ``node_affinity`` and ``pod_anti_affinity`` had explicit
+    // rename branches but ``pod_affinity`` did not, leaving the snake_case
+    // block in the form state.
+    const input = deploymentConfigToInput({
+      scheduling: {
+        pod_affinity: {
+          required: [
+            {
+              topology_key: "kubernetes.io/hostname",
+              label_selector: { match_labels: { app: "web" } },
+            },
+          ],
+        },
+      },
+    });
+    expect(input.scheduling).not.toHaveProperty("pod_affinity");
+    expect(input.scheduling?.podAffinity).toBeDefined();
+    expect(input.scheduling?.podAffinity?.required?.[0]).toMatchObject({
+      topologyKey: "kubernetes.io/hostname",
+      labelSelector: { matchLabels: { app: "web" } },
+    });
+  });
+
+  it("normalizes nested affinity term keys to camelCase end-to-end", () => {
+    // Regression: ``topology_key``, ``match_label_keys``, ``mismatch_label_keys``,
+    // ``deployment_ref`` were not renamed inside affinity terms; and
+    // ``normalizeLabelSelector`` left ``match_expressions`` next to its
+    // camelCase sibling (the spread did not delete the snake key), producing
+    // the duplicate ``match_expressions``/``matchExpressions`` pair visible
+    // in the "Review configuration changes" diff.
+    const input = deploymentConfigToInput({
+      scheduling: {
+        node_affinity: {
+          required: [
+            {
+              topology_key: "",
+              match_label_keys: ["a"],
+              mismatch_label_keys: ["b"],
+              deployment_ref: { deployment_name: "peer" },
+              label_selector: {
+                match_labels: { tier: "data" },
+                match_expressions: [
+                  { key: "role", operator: "In", values: ["data"] },
+                ],
+              },
+              namespace_selector: {
+                match_expressions: [
+                  { key: "team", operator: "NotIn", values: ["ops"] },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+    const term = input.scheduling?.nodeAffinity?.required?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(term).toBeDefined();
+    expect(term).toMatchObject({
+      topologyKey: "",
+      matchLabelKeys: ["a"],
+      mismatchLabelKeys: ["b"],
+      deploymentRef: { deployment_name: "peer" },
+      labelSelector: {
+        matchLabels: { tier: "data" },
+        matchExpressions: [{ key: "role", operator: "IN", values: ["data"] }],
+      },
+      namespaceSelector: {
+        matchExpressions: [
+          { key: "team", operator: "NOT_IN", values: ["ops"] },
+        ],
+      },
+    });
+    // No snake_case key may survive on the term, the labelSelector, or the
+    // namespaceSelector.
+    const allKeys = [
+      ...Object.keys(term),
+      ...Object.keys(term.labelSelector as Record<string, unknown>),
+      ...Object.keys(term.namespaceSelector as Record<string, unknown>),
+    ];
+    expect(allKeys.filter((k) => k.includes("_"))).toEqual([]);
+  });
+
+  it("normalizes topology_spread_constraints row keys to camelCase", () => {
+    // Regression: only ``when_unsatisfiable`` and ``label_selector`` were
+    // renamed on each row; ``max_skew``, ``topology_key``, ``min_domains``,
+    // ``node_affinity_policy``, ``node_taints_policy``, and ``match_label_keys``
+    // leaked through.
+    const input = deploymentConfigToInput({
+      scheduling: {
+        topology_spread_constraints: [
+          {
+            max_skew: 1,
+            topology_key: "kubernetes.io/hostname",
+            when_unsatisfiable: "DoNotSchedule",
+            min_domains: 2,
+            node_affinity_policy: "Honor",
+            node_taints_policy: "Ignore",
+            match_label_keys: ["x"],
+            label_selector: { match_labels: { app: "web" } },
+          },
+        ],
+      },
+    });
+    const row = input.scheduling?.topologySpreadConstraints?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      maxSkew: 1,
+      topologyKey: "kubernetes.io/hostname",
+      whenUnsatisfiable: "DO_NOT_SCHEDULE",
+      minDomains: 2,
+      nodeAffinityPolicy: "Honor",
+      nodeTaintsPolicy: "Ignore",
+      matchLabelKeys: ["x"],
+      labelSelector: { matchLabels: { app: "web" } },
+    });
+    expect(Object.keys(row).filter((k) => k.includes("_"))).toEqual([]);
+  });
+
   it("translates scheduling enum values from K8s casing to GraphQL identifiers", () => {
     // The persisted config stores enum *values* (K8s-native casing — e.g.
     // ``operator: "Equal"``) but ``UpdateDeploymentInput`` requires the

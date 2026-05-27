@@ -106,44 +106,78 @@ function translateEnum(
   return table[raw] ?? raw;
 }
 
+/**
+ * Rename a snake_case key to its camelCase counterpart in place. If the
+ * destination key is already present (e.g. because the value was already
+ * normalized upstream), the snake_case key is dropped without overwriting.
+ * Symmetric with the backend's ``_convert_value()`` round-trip in
+ * ``api/definitions/config/inputs.py``.
+ */
+function renameKey(
+  obj: Record<string, unknown>,
+  from: string,
+  to: string,
+): void {
+  if (from in obj) {
+    if (!(to in obj)) obj[to] = obj[from];
+    delete obj[from];
+  }
+}
+
+/**
+ * Like {@link renameKey} but also applies ``transform`` to the value (snake
+ * branch *or* already-camel branch). Useful when the rename is paired with a
+ * recursive normalization or an enum translation.
+ */
+function moveAndTransform(
+  obj: Record<string, unknown>,
+  from: string,
+  to: string,
+  transform: (value: unknown) => unknown,
+): void {
+  if (from in obj) {
+    const src = obj[from];
+    delete obj[from];
+    if (!(to in obj)) obj[to] = transform(src);
+  } else if (to in obj) {
+    obj[to] = transform(obj[to]);
+  }
+}
+
 function normalizeLabelSelector(sel: unknown): unknown {
   if (sel == null || typeof sel !== "object") return sel;
-  const s = sel as Record<string, unknown>;
-  const matchExpressions = Array.isArray(s.matchExpressions)
-    ? s.matchExpressions
-    : Array.isArray(s.match_expressions)
-      ? s.match_expressions
-      : undefined;
-  if (!matchExpressions) return sel;
-  return {
-    ...s,
-    matchExpressions: matchExpressions.map((expr) => {
+  const out: Record<string, unknown> = { ...(sel as Record<string, unknown>) };
+  renameKey(out, "match_labels", "matchLabels");
+  moveAndTransform(out, "match_expressions", "matchExpressions", (raw) => {
+    if (!Array.isArray(raw)) return raw;
+    return raw.map((expr) => {
       if (expr == null || typeof expr !== "object") return expr;
       const e = expr as Record<string, unknown>;
       return {
         ...e,
         operator: translateEnum(LABEL_SELECTOR_OPERATOR_K8S_TO_GQL, e.operator),
       };
-    }),
-  };
+    });
+  });
+  return out;
 }
 
 function normalizeAffinityTerm(term: unknown): unknown {
   if (term == null || typeof term !== "object") return term;
-  const t = term as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...t };
-  if (t.label_selector !== undefined) {
-    out.labelSelector = normalizeLabelSelector(t.label_selector);
-    delete out.label_selector;
-  } else if (t.labelSelector !== undefined) {
-    out.labelSelector = normalizeLabelSelector(t.labelSelector);
-  }
-  if (t.namespace_selector !== undefined) {
-    out.namespaceSelector = normalizeLabelSelector(t.namespace_selector);
-    delete out.namespace_selector;
-  } else if (t.namespaceSelector !== undefined) {
-    out.namespaceSelector = normalizeLabelSelector(t.namespaceSelector);
-  }
+  const out: Record<string, unknown> = {
+    ...(term as Record<string, unknown>),
+  };
+  renameKey(out, "topology_key", "topologyKey");
+  renameKey(out, "match_label_keys", "matchLabelKeys");
+  renameKey(out, "mismatch_label_keys", "mismatchLabelKeys");
+  renameKey(out, "deployment_ref", "deploymentRef");
+  moveAndTransform(out, "label_selector", "labelSelector", normalizeLabelSelector);
+  moveAndTransform(
+    out,
+    "namespace_selector",
+    "namespaceSelector",
+    normalizeLabelSelector,
+  );
   return out;
 }
 
@@ -164,79 +198,80 @@ function normalizeAffinityBlock(block: unknown): unknown {
   return out;
 }
 
+/**
+ * Project the persisted ``scheduling.inject`` block (``PostRenderInjection``
+ * Pydantic model, snake_case keys) onto its ``PostRenderInjectionInput``
+ * camelCase counterpart. Without this step the snake_case keys leak into
+ * the form's initial state; once the user toggles a checkbox the form
+ * writes the camelCase key alongside, producing a dual-key payload that
+ * Strawberry rejects with "Field 'node_affinity' is not defined".
+ */
+function normalizeInject(inject: unknown): unknown {
+  if (inject == null || typeof inject !== "object") return inject;
+  const out: Record<string, unknown> = {
+    ...(inject as Record<string, unknown>),
+  };
+  renameKey(out, "node_affinity", "nodeAffinity");
+  renameKey(out, "pod_affinity", "podAffinity");
+  renameKey(out, "topology_spread", "topologySpread");
+  renameKey(out, "runtime_class", "runtimeClass");
+  return out;
+}
+
+function normalizeTopologySpreadConstraint(c: unknown): unknown {
+  if (c == null || typeof c !== "object") return c;
+  const r: Record<string, unknown> = { ...(c as Record<string, unknown>) };
+  renameKey(r, "max_skew", "maxSkew");
+  renameKey(r, "topology_key", "topologyKey");
+  renameKey(r, "min_domains", "minDomains");
+  renameKey(r, "node_affinity_policy", "nodeAffinityPolicy");
+  renameKey(r, "node_taints_policy", "nodeTaintsPolicy");
+  renameKey(r, "match_label_keys", "matchLabelKeys");
+  moveAndTransform(r, "when_unsatisfiable", "whenUnsatisfiable", (v) =>
+    translateEnum(WHEN_UNSATISFIABLE_K8S_TO_GQL, v),
+  );
+  moveAndTransform(r, "label_selector", "labelSelector", normalizeLabelSelector);
+  return r;
+}
+
 function normalizeSchedulingEnums(
   scheduling: unknown,
 ): SchedulingInput | undefined {
   if (scheduling == null || typeof scheduling !== "object") return undefined;
-  const s = scheduling as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...s };
-  if (Array.isArray(s.tolerations)) {
-    out.tolerations = s.tolerations.map((t) => {
+  const out: Record<string, unknown> = {
+    ...(scheduling as Record<string, unknown>),
+  };
+  if (Array.isArray(out.tolerations)) {
+    out.tolerations = out.tolerations.map((t) => {
       if (t == null || typeof t !== "object") return t;
-      const row = t as Record<string, unknown>;
-      const r: Record<string, unknown> = { ...row };
-      if (row.operator !== undefined) {
-        r.operator = translateEnum(
-          TOLERATION_OPERATOR_K8S_TO_GQL,
-          row.operator,
-        );
+      const r: Record<string, unknown> = { ...(t as Record<string, unknown>) };
+      if (r.operator !== undefined) {
+        r.operator = translateEnum(TOLERATION_OPERATOR_K8S_TO_GQL, r.operator);
       }
-      if (row.effect !== undefined) {
-        r.effect = translateEnum(TOLERATION_EFFECT_K8S_TO_GQL, row.effect);
+      if (r.effect !== undefined) {
+        r.effect = translateEnum(TOLERATION_EFFECT_K8S_TO_GQL, r.effect);
       }
-      if (
-        row.toleration_seconds !== undefined &&
-        r.tolerationSeconds === undefined
-      ) {
-        r.tolerationSeconds = row.toleration_seconds;
-        delete r.toleration_seconds;
-      }
+      renameKey(r, "toleration_seconds", "tolerationSeconds");
       return r;
     });
   }
-  const tsc = Array.isArray(s.topology_spread_constraints)
-    ? (s.topology_spread_constraints as unknown[])
-    : Array.isArray(s.topologySpreadConstraints)
-      ? (s.topologySpreadConstraints as unknown[])
-      : undefined;
-  if (tsc) {
-    out.topologySpreadConstraints = tsc.map((c) => {
-      if (c == null || typeof c !== "object") return c;
-      const row = c as Record<string, unknown>;
-      const r: Record<string, unknown> = { ...row };
-      if (
-        row.whenUnsatisfiable !== undefined ||
-        row.when_unsatisfiable !== undefined
-      ) {
-        r.whenUnsatisfiable = translateEnum(
-          WHEN_UNSATISFIABLE_K8S_TO_GQL,
-          row.whenUnsatisfiable ?? row.when_unsatisfiable,
-        );
-        delete r.when_unsatisfiable;
-      }
-      if (row.label_selector !== undefined) {
-        r.labelSelector = normalizeLabelSelector(row.label_selector);
-        delete r.label_selector;
-      }
-      return r;
-    });
-    delete out.topology_spread_constraints;
-  }
-  if (s.node_affinity !== undefined) {
-    out.nodeAffinity = normalizeAffinityBlock(s.node_affinity);
-    delete out.node_affinity;
-  } else if (s.nodeAffinity !== undefined) {
-    out.nodeAffinity = normalizeAffinityBlock(s.nodeAffinity);
-  }
-  if (s.pod_anti_affinity !== undefined) {
-    out.podAntiAffinity = normalizeAffinityBlock(s.pod_anti_affinity);
-    delete out.pod_anti_affinity;
-  } else if (s.podAntiAffinity !== undefined) {
-    out.podAntiAffinity = normalizeAffinityBlock(s.podAntiAffinity);
-  }
-  if (s.runtime_class !== undefined && out.runtimeClass === undefined) {
-    out.runtimeClass = s.runtime_class;
-    delete out.runtime_class;
+  moveAndTransform(
+    out,
+    "topology_spread_constraints",
+    "topologySpreadConstraints",
+    (raw) => (Array.isArray(raw) ? raw.map(normalizeTopologySpreadConstraint) : raw),
+  );
+  moveAndTransform(out, "node_affinity", "nodeAffinity", normalizeAffinityBlock);
+  moveAndTransform(out, "pod_affinity", "podAffinity", normalizeAffinityBlock);
+  moveAndTransform(
+    out,
+    "pod_anti_affinity",
+    "podAntiAffinity",
+    normalizeAffinityBlock,
+  );
+  renameKey(out, "runtime_class", "runtimeClass");
+  if ("inject" in out) {
+    out.inject = normalizeInject(out.inject);
   }
   return out as unknown as SchedulingInput;
 }
