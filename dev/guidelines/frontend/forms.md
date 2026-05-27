@@ -105,6 +105,52 @@ The pattern generalises beyond enums: any persisted-vs-GraphQL shape
 divergence (date strings, partial objects, JSON-encoded payloads) belongs
 at the same boundary with the same throw-on-unknown discipline.
 
+### snake_case → camelCase key conversion at the same boundary
+
+The persisted JSON blob in `Deployment.config` (and any other full-replacement
+read-side payload) uses **snake_case** keys — it materialises the Pydantic
+models in `backend/styrmin_backend/context/models/` verbatim. The
+`UpdateDeploymentInput` GraphQL boundary uses **camelCase** (Strawberry
+auto-converts on the backend, but the frontend has to do the conversion
+itself when projecting persisted JSON back into the typed input).
+
+This conversion lives in `frontend/src/lib/deployment-input.ts`
+(`deploymentConfigToInput()` and its nested helpers `normalizeSchedulingEnums`,
+`normalizeAffinityTerm`, `normalizeLabelSelector`, `normalizeInject`,
+`normalizeTopologySpreadConstraint`). When you add or modify a nested
+field on either side of that boundary, you **must** add the corresponding
+key-rename. Failing to do so produces a silent dual-key payload bug:
+
+1. The snake_case key leaks through the projection into the form's initial
+   state.
+2. The form's Zod schema is camelCase, so toggling a field writes the
+   camelCase sibling next to the leaked snake_case key.
+3. The full-replacement mutation submits `{node_affinity: true, nodeAffinity:
+   false}`, which Strawberry rejects with `"Field 'node_affinity' is not
+   defined by type 'PostRenderInjectionInput'"`.
+
+The diff dialog also visibly leaks the snake_case keys (e.g. duplicate
+`match_expressions` next to `matchExpressions`), which is a good early
+warning that the projection is incomplete.
+
+Use the two small in-file helpers — `renameKey(obj, from, to)` for plain
+renames and `moveAndTransform(obj, from, to, fn)` when the rename pairs with
+a recursive normalization or an enum translation. Don't reach for a generic
+"deep snake-to-camel" utility: the explicit per-field rename is symmetric
+with the backend's `_convert_value()` in
+`api/definitions/config/inputs.py` and makes drift visible at code-review
+time.
+
+Regression tests for new fields should assert two things: (a) the camelCase
+value is set as expected, and (b) **no** snake_case key survives. The
+second guard is what catches the dual-key payload bug:
+
+```ts
+expect(Object.keys(out).filter((k) => k.includes("_"))).toEqual([]);
+```
+
+The canonical reference is `frontend/src/lib/deployment-input.test.ts`.
+
 ### Dialog Forms
 
 - For forms inside dialogs, call `form.reset()` from the dialog's `onOpenChange` when transitioning to closed. This restores defaults and clears errors and matches the long-standing UX expectation that closing a dialog discards in-flight edits.
