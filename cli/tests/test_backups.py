@@ -128,6 +128,89 @@ def test_backups_restore(mock_client: MagicMock, capsys: pytest.CaptureFixture[s
     assert "restore-1" in output
 
 
+def test_backups_restore_with_last_picks_newest_completed_backup(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    newest = MagicMock(id=BACKUP_UUID, status="completed")
+    older = MagicMock(id="11111111-2222-3333-4444-555555555555", status="completed")
+    mock_client.backups.list_backups = AsyncMock(return_value=[newest, older])
+    mock_restore = MagicMock(id=RESTORE_UUID, name="restore-1", status="pending")
+    mock_client.backups.create_restore = AsyncMock(return_value=mock_restore)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "restore", "--last", "--target-instance-id", INSTANCE_UUID, "--target-namespace", NS])
+    assert exc.value.code == 0
+    mock_client.backups.list_backups.assert_called_once_with(instance_id=INSTANCE_UUID, status="completed")
+    mock_client.backups.create_restore.assert_called_once_with(
+        backup_id=BACKUP_UUID,
+        target_namespace=NS,
+        target_instance_id=INSTANCE_UUID,
+    )
+    output = capsys.readouterr().out
+    assert BACKUP_UUID in output
+    assert "restore-1" in output
+
+
+def test_backups_restore_with_last_requires_target_instance_id(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "restore", "--last", "--target-namespace", NS])
+    assert exc.value.code == 1
+    mock_client.backups.list_backups.assert_not_called()
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "--target-instance-id" in output
+
+
+def test_backups_restore_with_last_and_backup_id_is_rejected(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "backups",
+                "restore",
+                BACKUP_UUID,
+                "--last",
+                "--target-instance-id",
+                INSTANCE_UUID,
+                "--target-namespace",
+                NS,
+            ]
+        )
+    assert exc.value.code == 1
+    mock_client.backups.list_backups.assert_not_called()
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "not both" in output
+
+
+def test_backups_restore_with_last_no_completed_backups_exits_nonzero(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mock_client.backups.list_backups = AsyncMock(return_value=[])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "restore", "--last", "--target-instance-id", INSTANCE_UUID, "--target-namespace", NS])
+    assert exc.value.code == 1
+    mock_client.backups.list_backups.assert_called_once_with(instance_id=INSTANCE_UUID, status="completed")
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "No completed backups" in output
+
+
+def test_backups_restore_without_backup_id_or_last_is_rejected(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "restore", "--target-namespace", NS])
+    assert exc.value.code == 1
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "backup_id is required" in output
+
+
 def test_backups_restore_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
     mock_restore = MagicMock(
         id=RESTORE_UUID,
