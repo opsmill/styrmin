@@ -64,6 +64,7 @@ _VALID_SHARDS = frozenset(
         "shard_env",
         "shard_compute",
         "shard_backup",
+        "shard_infrahub",
         "shard_configuration",
     }
 )
@@ -846,6 +847,7 @@ async def styrmin_resources(
             },
             "runtime_class": "default",
             "standard_storage": {"storage_class": "local-path"},
+            "fast_storage": {"storage_class": "local-path"},
             "external_dns_endpoints_type": "NodeExternalIP",
         },
     )

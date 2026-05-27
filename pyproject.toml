@@ -302,5 +302,6 @@ markers = [
     "shard_env: CI shard for env-var + env-update tests (test_deployment_env_vars.py + test_environment_update.py).",
     "shard_compute: CI shard for pod scheduling + ingress controller tests.",
     "shard_backup: CI shard for Velero / MinIO heavy tests (cluster-wide state — kept isolated).",
+    "shard_infrahub: CI shard for heavy Infrahub-stack tests (boots full Infrahub server + DB; kept isolated from shard_backup so simple-app backup tests aren't blocked by Infrahub boot time).",
     "shard_configuration: CI shard for backend/tests/e2e/configuration/ (deployment-config drawer UI flows, all ui_only).",
 ]
