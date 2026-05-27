@@ -15,7 +15,7 @@ from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 INTERNAL_DRIVER_NAME = "styrmin-ingress-controller"
 INTERNAL_DRIVER_VERSION = "1.0.0"
 TRAEFIK_CHART_NAME = "traefik"
-TRAEFIK_CHART_VERSION = "28.2.0"
+TRAEFIK_CHART_VERSION = "40.2.0"
 TRAEFIK_REPO_URL = "https://traefik.github.io/charts"
 
 
