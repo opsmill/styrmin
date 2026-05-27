@@ -62,7 +62,7 @@ infrahub:
         dynamic:
           requests:
             storage: "{{ parameters.database_storage_size }}Gi"
-          storageClassName: "{{ instance.config.standard_storage.storage_class }}"
+          storageClassName: "{{ instance.config.fast_storage.storage_class }}"
         mode: dynamic
   nfs-server-provisioner:
     enabled: false
@@ -89,7 +89,7 @@ infrahub:
       primary:
         persistence:
           enabled: true
-          storageClass: "{{ instance.config.standard_storage.storage_class }}"
+          storageClass: "{{ instance.config.fast_storage.storage_class }}"
         extraVolumes:
           - name: backup
             emptyDir: {}

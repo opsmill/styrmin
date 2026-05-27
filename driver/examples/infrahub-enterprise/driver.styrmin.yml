@@ -5,7 +5,7 @@ metadata:
   name: infrahub-enterprise
 spec:
   version: "1"
-  supported_versions: ">=1.5,<1.9"
+  supported_versions: ">=1.5,<2.0"
   info:
     icon: xxxx
     description: Enterprise edition of Infrahub — next generation source of truth for infrastructure management
