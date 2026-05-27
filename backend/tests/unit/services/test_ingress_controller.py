@@ -78,7 +78,8 @@ def _render_chart_values(service_config: IngressServiceConfig) -> dict:
     instance = SimpleNamespace(
         config=SimpleNamespace(
             dedicated_ingress=SimpleNamespace(service=service_config)
-        )
+        ),
+        namespace="styrmin-test",
     )
     labels = SimpleNamespace(environment_id="test-env")
     rendered = template.render(instance=instance, labels=labels)
@@ -379,6 +380,42 @@ class TestIngressServiceConfigModel:
         assert "ipFamilyPolicy" not in rendered_pre_feature["service"]
         assert "ports" not in rendered_pre_feature
         assert rendered_explicit_none == rendered_pre_feature
+
+    def test_render_emits_published_service_arg_with_namespace(self):
+        """The publishedservice CLI arg must interpolate instance.namespace."""
+        config = IngressServiceConfig()
+        rendered = _render_chart_values(config)
+        args = rendered["additionalArguments"]
+        assert (
+            "--providers.kubernetesingress.ingressendpoint.publishedservice=styrmin-test/styrmin-traefik"
+            in args
+        )
+        assert (
+            "--providers.kubernetesingress.ingressendpoint.restricttobackendnodes=true"
+            in args
+        )
+        assert (
+            "--providers.kubernetesingress.ingressendpoint.publishinternalipv6=true"
+            in args
+        )
+
+    def test_render_disables_chart_published_service_flag(self):
+        """Chart's auto-publishedService must stay disabled to avoid duplicate
+        --publishedservice CLI args (we set it explicitly above)."""
+        config = IngressServiceConfig()
+        rendered = _render_chart_values(config)
+        assert (
+            rendered["providers"]["kubernetesIngress"]["publishedService"]["enabled"]
+            is False
+        )
+
+    def test_render_emits_patched_opsmill_image(self):
+        """Image must point at the OpsMill patched Traefik build."""
+        config = IngressServiceConfig()
+        rendered = _render_chart_values(config)
+        assert rendered["image"]["registry"] == "registry.opsmill.io"
+        assert rendered["image"]["repository"] == "opsmill/traefik"
+        assert rendered["image"]["tag"] == "v3.7.1-opsmill"
 
     def test_config_merge_preserves_service(self):
         """Service config survives cluster/environment merge."""

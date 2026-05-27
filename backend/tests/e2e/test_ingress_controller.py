@@ -81,6 +81,30 @@ async def test_deploy_with_dedicated_ingress(
     ]
     assert len(traefik_pods) >= 1, "Expected at least one Traefik pod running"
 
+    # Verify the Traefik container uses the OpsMill-patched image and that the
+    # three publishedService/restricttobackendnodes/publishinternalipv6 CLI args
+    # are present with the namespace correctly interpolated.
+    traefik_pod = traefik_pods[0]
+    containers = traefik_pod.spec.get("containers", [])
+    traefik_container = next(
+        (c for c in containers if c.get("name") == "traefik"), containers[0]
+    )
+    assert (
+        traefik_container["image"]
+        == "registry.opsmill.io/opsmill/traefik:v3.7.1-opsmill"
+    ), f"Expected OpsMill-patched Traefik image, got: {traefik_container['image']}"
+    traefik_namespace = traefik_pod.namespace
+    traefik_args = traefik_container.get("args", [])
+    expected_args = {
+        f"--providers.kubernetesingress.ingressendpoint.publishedservice={traefik_namespace}/styrmin-traefik",
+        "--providers.kubernetesingress.ingressendpoint.restricttobackendnodes=true",
+        "--providers.kubernetesingress.ingressendpoint.publishinternalipv6=true",
+    }
+    missing = expected_args - set(traefik_args)
+    assert not missing, (
+        f"Traefik pod missing expected CLI args: {missing}; full args: {traefik_args}"
+    )
+
     # Verify the app's Ingress uses annotation-based matching (not ingressClassName)
     namespace = f"styrmin-{deployment_id}"
     ingresses: list[AsyncIngress] = [

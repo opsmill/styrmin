@@ -1,12 +1,15 @@
 fullnameOverride: "styrmin-traefik"
 instanceLabelOverride: "styrmin-traefik"
 image:
-  tag: v3.0.1
+  registry: registry.opsmill.io
+  repository: opsmill/traefik
+  tag: v3.7.1-opsmill
 ingressClass:
   enabled: false
   name: traefik
   isDefaultClass: false
-globalArguments: "" # disable anonymous telemetry
+global:
+  sendAnonymousUsage: false
 additionalArguments:
   - "--providers.kubernetesingress.labelselector=styrmin/environment_id={{ labels.environment_id }}"
   # Trust X-Forwarded-* headers from any source on the public entrypoints so
@@ -17,12 +20,21 @@ additionalArguments:
   # ``insecure=true`` with ``trustedIPs=<comma-list>``.
   - "--entryPoints.web.forwardedHeaders.insecure=true"
   - "--entryPoints.websecure.forwardedHeaders.insecure=true"
+  - "--providers.kubernetesingress.ingressendpoint.publishedservice={{ instance.namespace }}/styrmin-traefik"
+  - "--providers.kubernetesingress.ingressendpoint.restricttobackendnodes=true"
+  - "--providers.kubernetesingress.ingressendpoint.publishinternalipv6=true"
 rbac:
   enabled: true
   namespaced: false
 providers:
   kubernetesIngress:
     disableIngressClassLookup: true
+    # Disable the chart's auto-publishedService — we set the equivalent CLI
+    # arg explicitly in additionalArguments above. Leaving the chart default
+    # (enabled: true) would emit a duplicate --publishedservice flag and
+    # Traefik would refuse to start.
+    publishedService:
+      enabled: false
 deployment:
   replicas: 1
   podLabels:
@@ -47,14 +59,11 @@ service:
     {{ key }}: "{{ value }}"
 {% endfor %}
 {% endif %}
-  type: {{ instance.config.dedicated_ingress.service.type }}
-{% if instance.config.dedicated_ingress.service.load_balancer_ip %}
-  loadBalancerIP: "{{ instance.config.dedicated_ingress.service.load_balancer_ip }}"
-{% endif %}
-{% if instance.config.dedicated_ingress.service.external_traffic_policy
-   or instance.config.dedicated_ingress.service.ip_families
-   or instance.config.dedicated_ingress.service.ip_family_policy %}
   spec:
+    type: {{ instance.config.dedicated_ingress.service.type }}
+{% if instance.config.dedicated_ingress.service.load_balancer_ip %}
+    loadBalancerIP: "{{ instance.config.dedicated_ingress.service.load_balancer_ip }}"
+{% endif %}
 {% if instance.config.dedicated_ingress.service.external_traffic_policy %}
     externalTrafficPolicy: "{{ instance.config.dedicated_ingress.service.external_traffic_policy }}"
 {% endif %}
@@ -66,7 +75,6 @@ service:
 {% endif %}
 {% if instance.config.dedicated_ingress.service.ip_family_policy %}
     ipFamilyPolicy: {{ instance.config.dedicated_ingress.service.ip_family_policy }}
-{% endif %}
 {% endif %}
 {% if instance.config.dedicated_ingress.service.node_port %}
 ports:
