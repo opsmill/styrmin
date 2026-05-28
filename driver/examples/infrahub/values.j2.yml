@@ -48,7 +48,10 @@ neo4j:
     - emptyDir: {}
       name: backup
   # Operator-supplied env vars for the `database` component.
-  env: {{ components | component_env_vars("database") | tojson }}
+  env:
+{%- for entry in components | component_env_vars("database") %}
+    {{ entry.name }}: {{ entry.value | tojson }}
+{%- endfor %}
   config:
     server.backup.enabled: "true"
   disableLookups: true
@@ -70,11 +73,11 @@ prefect-server:
   fullnameOverride: styrmin-task-manager
   server:
     # Hardcoded analytics flag plus operator-supplied env vars for the
-    # `task-manager-db` component.
+    # `task-manager` component.
     env:
       - name: PREFECT_SERVER_ANALYTICS_ENABLED
         value: "{{ parameters.enable_analytics }}"
-  {%- for entry in components | component_env_vars("task-manager-db") %}
+  {%- for entry in components | component_env_vars("task-manager") %}
       - name: {{ entry.name | tojson }}
         value: {{ entry.value | tojson }}
   {%- endfor %}
@@ -96,6 +99,8 @@ prefect-server:
     image:
       tag: 14.13.0
     primary:
+      # Operator-supplied env vars for the `task-manager-db` component.
+      extraEnvVars: {{ components | component_env_vars("task-manager-db") | tojson }}
       persistence:
         enabled: true
         storageClass: "{{ instance.config.fast_storage.storage_class }}"
