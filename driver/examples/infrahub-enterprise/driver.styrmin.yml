@@ -47,6 +47,9 @@ spec:
       identifier:
         label:
           service: infrahub-server
+      backup:
+        enabled: true
+        kind: disk
 
     task-worker:
       identifier:
