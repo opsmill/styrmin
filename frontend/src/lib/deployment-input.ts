@@ -171,7 +171,12 @@ function normalizeAffinityTerm(term: unknown): unknown {
   renameKey(out, "match_label_keys", "matchLabelKeys");
   renameKey(out, "mismatch_label_keys", "mismatchLabelKeys");
   renameKey(out, "deployment_ref", "deploymentRef");
-  moveAndTransform(out, "label_selector", "labelSelector", normalizeLabelSelector);
+  moveAndTransform(
+    out,
+    "label_selector",
+    "labelSelector",
+    normalizeLabelSelector,
+  );
   moveAndTransform(
     out,
     "namespace_selector",
@@ -230,7 +235,12 @@ function normalizeTopologySpreadConstraint(c: unknown): unknown {
   moveAndTransform(r, "when_unsatisfiable", "whenUnsatisfiable", (v) =>
     translateEnum(WHEN_UNSATISFIABLE_K8S_TO_GQL, v),
   );
-  moveAndTransform(r, "label_selector", "labelSelector", normalizeLabelSelector);
+  moveAndTransform(
+    r,
+    "label_selector",
+    "labelSelector",
+    normalizeLabelSelector,
+  );
   return r;
 }
 
@@ -259,9 +269,15 @@ function normalizeSchedulingEnums(
     out,
     "topology_spread_constraints",
     "topologySpreadConstraints",
-    (raw) => (Array.isArray(raw) ? raw.map(normalizeTopologySpreadConstraint) : raw),
+    (raw) =>
+      Array.isArray(raw) ? raw.map(normalizeTopologySpreadConstraint) : raw,
   );
-  moveAndTransform(out, "node_affinity", "nodeAffinity", normalizeAffinityBlock);
+  moveAndTransform(
+    out,
+    "node_affinity",
+    "nodeAffinity",
+    normalizeAffinityBlock,
+  );
   moveAndTransform(out, "pod_affinity", "podAffinity", normalizeAffinityBlock);
   moveAndTransform(
     out,
