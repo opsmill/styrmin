@@ -1,130 +1,118 @@
-# Idea Brief: Driver Reload Identity — Content Hash + Git Commit Provenance
+# Idea Brief: Component-scope `command` / `args` overrides
 
 **Status**: Ready for /speckit-specify
-**Source issue**: [opsmill/styrmin#262](https://github.com/opsmill/styrmin/issues/262)
-**Seed**: Re-loading a local **application driver** with the same `(source_path, version)` pair raises `IntegrityError` (cascade misconfiguration on `ApplicationDriverVersion.actions` / `.component_configs`). Separately, the upsert key `(source_path, version)` is too coarse: a driver author can edit the YAML, values template, or `actions.py` without bumping `version` and the platform silently replaces the row, destroying provenance for any **deployment** or **instance** that referenced it. The same drift problem exists on the git load path. Fix the cascade bug AND introduce a **provenance fingerprint** — `content_hash` (SHA-256) for local drivers, `source_commit_sha` for git drivers — so that distinct content under the same `version` string coexists as distinct `ApplicationDriverVersion` rows.
+**Source issue**: [opsmill/styrmin#283](https://github.com/opsmill/styrmin/issues/283)
+**Seed**: Add support for overriding container `command` and `args` on application deployments at **component** scope only, following the env-vars pattern (#4 / #209). Operators need to change entrypoints / argument lists (debugging, runtime tuning, feature-flag CLI args, swapping a CLI into worker mode) without forking the driver. Surface: Pydantic `ComponentConfigBlock` fields, validation service, typed Jinja filters (`component_command` / `component_args`), GraphQL inputs on `deploy` / `updateDeployment`, frontend deployment / component editor, and a doc-only `command`/`args` declaration block in `driver.styrmin.yml`.
 
 ## Users and Value
 
-- **Primary user**: driver authors (internal platform team + external integrators) iterating on a driver locally or via git, and platform operators reading deployment provenance.
-- **Pain today**:
-  - Local reloads of the same `(path, version)` crash with `IntegrityError`. Workaround is bumping `version` manually each iteration.
-  - Same `version` string with different content silently replaces the previous row, breaking the link between historical **instances** and the bytes they were deployed from.
-  - Git authors hit the analogous trap: amending a tag or pushing new content under the same `version` string silently shifts what "v1.2.3" means.
-- **Better looks like**: authors iterate freely (no `version` bumps required); every load that produces different content becomes its own addressable `ApplicationDriverVersion` row; old deployments keep pointing at the exact bytes they were deployed from; the UI/CLI surfaces a `<version>@<short>` form so users can tell two same-`version` rows apart at a glance.
+**Primary user**: deployment operator (the persona who today edits a `Deployment` via SDK, CLI, or frontend to change parameters / env vars).
 
-## Scope
+**Pain today**: the only way to change a container's `command` or `args` is to fork the **application driver** version (edit the Helm chart, re-publish). Legitimate operator-side reasons (debug entrypoint, feature-flag CLI arg, `--max-connections=…`, worker-mode swap) currently demand a driver fork.
 
-Applies to **both** load paths:
-
-- **Local source** (`source_type = "local"`): provenance fingerprint = SHA-256 over canonical local driver bytes (see Decisions).
-- **Git source** (`source_type = "git"`): provenance fingerprint = resolved git commit SHA from the provider (already content-addressable, no recompute).
+**Smallest observable better**: an operator can set `command` / `args` on a single **component** via `updateDeployment`, the platform redeploys, and `kubectl get pod -o jsonpath='{.spec.containers[*].args}'` reflects the override — no driver fork, no chart edit.
 
 ## User Journeys
 
-### P1 — Local driver iteration without `version` bumps
+### P1 — Override `args` on a single component during deploy / update
+- Journey: Operator picks an existing deployment, opens the component editor (or calls `updateDeployment`), sets `args=["--log-level=debug"]` on the `server` **component**, the **deployment** redeploys, the resulting pod's container runs with the new args.
+- Given / When / Then:
+  - **Given** a deployment exists with `driver=simple-app@v1`, `component=server`, no override set.
+  - **When** the operator submits `updateDeployment` with `componentArgs: [{component: "server", args: ["--log-level=debug"]}]` (or its UI equivalent) and confirms the redeploy.
+  - **Then** the new **instance** is generated, **reconciliation** plans an `UPDATE_INSTANCE` **flow**, the **StyrminDeployment** CRD is updated with the override embedded in the **GlobalContext**, FluxCD applies the new `HelmRelease`, and the `server` pod restarts with `.spec.containers[*].args == ["--log-level=debug"]`.
 
-- **Journey**: an author edits `driver.styrmin.yml`, the values template, or `actions.py` on local disk and re-runs `styrminctl driver load <path>`. A new `ApplicationDriverVersion` row is created alongside the old one. A subsequent reload with no changes is a no-op.
-- **Given** a driver loaded at `version: "1"` with content state A,
-  **When** the author edits the values template (e.g. adds a `commonLabels` entry) and re-runs `driver load`,
-  **Then** a new `ApplicationDriverVersion` row exists with the same `version` and a different `content_hash`; the previous row is intact; any deployment that referenced the previous row still references it.
+### P2 — Override `command` on the same component (independent of args)
+- Journey: Same operator now needs to swap entrypoint for a one-off run (`python -m foo.cli worker` instead of the default `serve`). Setting `command` alone leaves `args` falling through to the chart default.
+- Given / When / Then:
+  - **Given** the same deployment with `componentArgs` already set on `server`.
+  - **When** the operator sets `componentCommand: [{component: "server", command: ["python", "-m", "foo.cli", "worker"]}]` and leaves `args` untouched.
+  - **Then** the rendered pod runs with the new `command` and the previously set `args`.
 
-### P2 — Git driver reload distinguishes commits
+### P3 — Clear an override and fall back to the chart default
+- Journey: Operator decides the override was a mistake and removes it. The pod redeploys with the driver's default `command` / `args`.
+- Given / When / Then:
+  - **Given** the deployment has `componentArgs` set on `server`.
+  - **When** the operator submits `componentArgs: [{component: "server", args: null}]` (or omits the entry) and confirms redeploy.
+  - **Then** the next **instance** has no `args` override; the Jinja filter returns the omit-marker; the chart's default args reach the pod.
 
-- **Journey**: a CI pipeline or user loads a driver from git, then loads again after a new commit lands on the same branch/tag. Each load resolves a commit SHA; loads at distinct SHAs create distinct rows.
-- **Given** a driver loaded from `repo@branch` at commit `abc123…` with `version: "1.2.3"`,
-  **When** the same load is repeated after a new commit `def456…` is pushed,
-  **Then** a new `ApplicationDriverVersion` row exists with the same `version` and `source_commit_sha = def456…`; the `abc123…` row is intact.
+## Functional Requirements (draft)
 
-### P3 — Cascade crash on local reload is gone
-
-- **Journey**: the cascade-misconfiguration bug is fixed independently of the content-hash work, so the "bump version each reload" workaround is no longer required even when a future operation does delete an `ApplicationDriverVersion`.
-- **Given** an `ApplicationDriverVersion` row with children (`actions`, `component_configs`),
-  **When** the row is deleted via the repository,
-  **Then** the children are deleted by ORM cascade, no `IntegrityError` is raised, no orphan rows remain.
-
-## Functional Requirements
-
-- **FR-001**: System MUST add `sa_relationship_kwargs={"cascade": "all, delete-orphan"}` to `ApplicationDriverVersion.actions` and `ApplicationDriverVersion.component_configs` in `backend/styrmin_backend/db/models.py`.
-- **FR-002**: System MUST add two nullable columns to `ApplicationDriverVersion` — `content_hash: str | None` (SHA-256 hex) and `source_commit_sha: str | None` (git commit SHA). Exactly one of the two is non-null on any new row; the discriminator is `source_type`.
-- **FR-003**: System MUST compute `content_hash` at load time for `source_type = "local"` as SHA-256 over the length-prefixed concatenation of three files in fixed order: (1) `driver.styrmin.yml`, (2) the values template, (3) `actions.py` (only when `spec.actions` is non-empty). Raw bytes, no YAML canonicalisation. Other files in the directory MUST NOT contribute.
-- **FR-004**: System MUST record `source_commit_sha` at load time for `source_type = "git"` from the resolved commit returned by the git provider.
-- **FR-005**: System MUST treat `(application_driver_id, source_type, source_repository, source_branch, source_path, version, content_hash | source_commit_sha)` as the upsert lookup key. Same key → idempotent no-op (no new row, no error). Different fingerprint → new row created, **no delete of any existing row**.
-- **FR-006**: System MUST remove the existing `if existing is not None: await uow.application_driver_versions.delete(existing)` branch in `load_application_driver_from_local_directory`.
-- **FR-007**: System MUST surface `content_hash` and `source_commit_sha` on the GraphQL `ApplicationDriverVersion` type as read-only fields.
-- **FR-008**: Frontend, CLI, and SDK MUST render any driver-version reference as `<version>@<short>` where `<short>` is the first 7 chars of the populated fingerprint, on lists and on deployment detail surfaces. Detail surfaces MUST also show the full fingerprint verbatim with a copy affordance.
-- **FR-009**: Users MUST be able to load a local driver repeatedly without `IntegrityError`.
-
-### Verification ideas (testability checks for the above)
-
-- FR-001: deleting an `ApplicationDriverVersion` row with children no longer raises `IntegrityError`; children are gone after the delete.
-- FR-002: schema introspection (or a unit test against the model) confirms both columns exist with the expected nullability.
-- FR-003: unit test loads two driver directories that differ only in `actions.py`, asserts hashes differ; another test adds/removes `README.md` between loads, asserts hashes equal.
-- FR-005: unit test reloads the same content → one row; reloads with edited values template → two rows.
-- FR-007: GraphQL propagation test (mandatory per Constitution §V) — write `content_hash` via a service call, read it back via the resolver.
-- FR-008: frontend visual test or component test asserts the `<version>@<short>` label appears.
+- **FR-001**: System MUST persist `command` and `args` on `ComponentConfigBlock` (the per-component override slot) as independent optional fields. Verifiable by a GraphQL **propagation test** writing each field and asserting the column on the merged `Deployment.config` JSON.
+- **FR-002**: Users MUST be able to set `command` and/or `args` on any component declared by the **application driver version**, scoped to the **deployment** (no environment-scope override). Verifiable by an SDK call setting each independently, then reading them back.
+- **FR-003**: On **write** (mutation boundary), system MUST reject overrides referencing a component name not declared by the driver, with a typed error (analogue to `UnknownComponentEnvVarError`). On **resolve** (render boundary), the resolver MUST tolerate orphan entries left over from a driver-version upgrade, emit them as `is_orphaned=True`, and skip them when rendering — mirroring env-vars US5 (FR-029..FR-033). Verifiable by (a) an SDK call submitting `component="ghost"` against a known driver and asserting the typed error, and (b) a unit test that simulates a driver upgrade dropping a component and asserts the orphan flag in the resolved context plus no override reaching the rendered chart values.
+- **FR-004**: System MUST validate each override before any **reconciliation** runs: each list entry is a string, empty strings inside the list ARE accepted (mirrors Kubernetes container API and env-vars FR-007), the list is non-empty when set (no `[]` sentinel — explicit clear is `null`/omit). Verifiable by SDK calls submitting (a) `["sh", "-c", ""]` and asserting success, (b) `[]` and asserting `InvalidContainerCommandError` / `InvalidContainerArgsError`, (c) `[123]` (non-string entry) and asserting the typed error.
+- **FR-005**: Drivers MUST be able to consume the resolved override via typed Jinja filters `component_command(<component_name>)` and `component_args(<component_name>)` returning a list of strings or `None`/omitted when no override is set. Verifiable by a unit test rendering a template that calls each filter against a context with / without the override.
+- **FR-006**: Changing `command` or `args` MUST trigger the same redeploy-confirmation flow as env-var changes. Verifiable by reusing the existing redeploy-confirmation E2E hook for env-vars and asserting it fires for command/args.
+- **FR-007**: `driver.styrmin.yml` MUST accept a doc-only `command` / `args` declaration block per component (analogous to `env_vars:`); the platform does not enforce that listed components actually wire the filter (informational, mirroring env-vars). Verifiable by parsing a driver spec with the new block and asserting it appears on the materialised `ApplicationDriverVersion`.
+- **FR-008**: GraphQL `deploy` and `updateDeployment` mutations MUST accept a single nested input list `componentContainerOverrides: [{component: <name>, command: [<str>]?, args: [<str>]?}]` (mirrors `componentEnvVars` shape) and the matching read fields MUST return them, including orphan entries with an `is_orphaned` flag. Both `command` and `args` are optional and nullable per entry so partial updates and explicit clears work. Verifiable by **propagation tests** covering each field independently and the orphan-read path.
 
 ## Key Entities
 
-- **ApplicationDriverVersion** (existing, modified): gains `content_hash` and `source_commit_sha` columns; identity widens from `(source_path, version)` to include the fingerprint.
-- **Action**, **ComponentConfig** (existing): the parent relationship on `ApplicationDriverVersion` gains `cascade="all, delete-orphan"`.
-- No new entities.
+- **ComponentConfigBlock** (existing, `backend/styrmin_backend/context/models/config.py:476`) — gains `command: list[str] | None` and `args: list[str] | None`. Already nullable JSON in `Deployment.config`.
+- **Application driver** / **Application driver version** (existing) — driver spec parser gains optional `command` / `args` declaration block per component (doc-only, like `env_vars`).
+- **GlobalContext** → `ComponentsContext` (existing) — already carries `env_vars` per component; absorbs `command` / `args` the same way.
+- **Jinja filters** `component_command` / `component_args` — new, registered alongside `component_env_vars` in `agent/service/kubernetes/resources/builders/application.py`.
+
+No new database tables, no new GraphQL root types.
 
 ## Edge Cases
 
-- **Identical content, different `source_path` (local)**: two different on-disk locations produce identical hashes. Treated as distinct rows because `source_path` is part of identity.
-- **Identical commit SHA, different branch (git)**: same commit reachable from two branches. Treated as distinct rows because `source_branch` is part of identity.
-- **`actions.py` exists but `spec.actions` is empty**: file is ignored by the hash, mirroring loader behaviour. Editing the orphan file does not produce a new row.
-- **`actions.py` is required but missing**: handled by existing loader validation, not by the hash design. Hash is never computed in this failure case.
-- **Concurrent reloads of the same driver**: both compute the same fingerprint and race to insert. Upsert path MUST handle the race (existing repository idempotency or a unique index covering the fingerprint).
-- **`source_type` outside `{local, git}`**: not present today; if added later, that source type MUST define its own fingerprint column or extend the discriminator rule explicitly.
+- Operator sets a **new** override targeting a component name that does not exist in the selected driver version → typed error at the GraphQL boundary, no reconciliation (write-side strictness).
+- Operator upgrades the driver version and a previously overridden component is **renamed or removed** in the new driver version → match env-vars (US5 / FR-029..FR-033): the stored block is preserved, the resolver emits an **orphan entry** (`is_orphaned=True`) carrying only the stored values, the renderer **skips orphans** so no override reaches the pod, and the GraphQL surface returns the orphan so the operator can see it and clean it up via standard mutations. Read-vs-write asymmetry by design.
+- Driver author hasn't wired `component_command` / `component_args` into `values.j2.yml` → override stored, never reaches the pod (silent — same behaviour as env-vars per ADR-013).
+- Override set, then the driver version is rolled back to one that pre-dates the filter → same silent-no-op as above.
+- Multi-container component: the chart renders a pod with N containers. Resolved: the platform exposes one override per component and the driver author wires the filter call into whichever container they want. Targeting a non-default container in a multi-container pod is **not in scope** for v1.
+- Concurrent `updateDeployment` calls both setting `args` on the same component → standard last-writer-wins on the JSON config column.
+- Setting `command=[]` (empty list) → rejected at validation (`InvalidContainerCommandError`); explicit clear is `null` / omit.
+- Setting `command=["sh", "-c", ""]` (empty string inside list) → accepted (mirrors K8s container API and env-vars FR-007).
 
-## Success Criteria
+## Success Criteria (draft)
 
-- **SC-001**: A driver author can reload a local driver 100 times with mixed no-op and content-change patterns and observe zero errors; the resulting `ApplicationDriverVersion` row count equals the number of distinct content snapshots loaded.
-- **SC-002**: For any given `Deployment` or `ApplicationInstance` row, the `ApplicationDriverVersion` it references at creation time is the same row it still references at any later read — no in-place mutation, no replacement.
-- **SC-003**: When a driver author re-loads a local driver with no file changes, the operation completes without creating a new `ApplicationDriverVersion` row (idempotency).
-- **SC-004**: When a driver author re-loads a local driver after any whitespace-only or content edit to the three hashed files, a new `ApplicationDriverVersion` row is created (drift detection).
-- **SC-005**: Any user-facing surface that names a driver version (frontend driver list, deployment detail, `styrminctl` driver list output) includes the short fingerprint suffix so two rows with the same `version` are visually distinguishable.
+- **SC-001**: An operator can set `args` on one component and observe it on the pod within one redeploy cycle, with **zero** driver-source changes required (no fork, no edit to `driver.styrmin.yml`, no chart edit) for drivers that have already wired the filter.
+- **SC-002**: A driver author wires the override end-to-end (declaration in `driver.styrmin.yml`, filter call in `values.j2.yml`, optional chart-default fallback in `templates/deployment.yaml`) in ≤ 10 lines of changes across those three files.
+- **SC-003**: Setting an invalid override (unknown component, empty list, malformed entry) MUST surface a typed error at the GraphQL boundary before any **flow** is submitted — zero pods restarted on rejection.
+- **SC-004**: No regression: existing env-vars, parameters, and config E2Es pass unchanged.
 
 ## Constitution Alignment
 
-- **§I Declarative reconciliation**: driver loading is idempotent by construction (same fingerprint → no-op). No impact on the reconciliation loop — `Deployment` and `ApplicationInstance` rows continue to reference specific `ApplicationDriverVersion.id` UUIDs as before.
-- **§II Driver-based deployment**: unchanged. Sharpens driver identity without altering driver semantics.
-- **§III Layered architecture**: hash computation lives in `services/driver/loaders.py`, called from `services/applications.py`. Repository methods extend their upsert lookup. GraphQL layer exposes the new fields. No cross-layer shortcuts.
-- **§IV Typed errors**: no new `ServiceError` subclass needed. Hash computation cannot fail meaningfully; git commit resolution failures continue to surface via existing `DriverLoadingError`.
-- **§V E2E coverage**: ship `backend/tests/e2e/test_driver_reload_identity.py::test_local_driver_reload_creates_new_row_on_content_change`. Loads a local fixture driver, mutates the values template, reloads via SDK, asserts two `ApplicationDriverVersion` rows with the same `version` and distinct `content_hash` exist and are queryable via GraphQL. Markers: `@pytest.mark.api_only`, `@pytest.mark.ci`, `@pytest.mark.shard_readonly`.
-- **§V Git path coverage**: covered by a unit test against a mocked git provider that returns sequential commit SHAs — a real ephemeral git fixture is out of scope for v1.
-- **§V GraphQL propagation tests**: required for `ApplicationDriverVersion.content_hash` and `ApplicationDriverVersion.source_commit_sha` (new read fields). Use the schema-walking propagation harness per [`dev/guides/graphql-propagation-tests.md`](dev/guides/graphql-propagation-tests.md).
-- **§VII Documentation accuracy**:
-  - New entry in [`CONTEXT.md`](../CONTEXT.md) under "Application drivers" — added during this grilling session (term: **Provenance fingerprint**).
-  - New `dev/guides/` entry describing the iteration loop ("you do not need to bump `version` while iterating; the platform tracks drift via fingerprint and keeps history") and the row-accumulation behaviour.
-  - Update any `docs/` page that documents driver loading or the driver-version surface to reflect the new fingerprint fields and `<version>@<short>` display form.
+- **§I Declarative**: ✅ Override is a field on the **deployment**'s config, diffed into the new **instance**, reconciled idempotently. No imperative side effects.
+- **§II Driver-based deployment**: ✅ The driver opts in (declaration block + filter call). The platform never injects command/args without driver participation — mirrors env-vars post-010 behaviour.
+- **§III Layered architecture**: ✅ GraphQL → service (validator) → repository (JSON column on `Deployment.config`). New filter registration is in the agent's renderer module — `agent/service/kubernetes/resources/builders/application.py`. No cross-layer shortcuts.
+- **§IV Typed errors**: Three new `ServiceError` subclasses mirroring the env-vars precedent (`UnknownComponentEnvVarError` + `InvalidEnvVarName/Value`):
+  - `UnknownComponentContainerOverrideError` — write-time, raised when a `componentContainerOverrides` entry targets a component name not declared by the driver. One class covers both fields (the unknown-component check is field-agnostic).
+  - `InvalidContainerCommandError` — shape violation on `command` (non-string entry, empty list, wrong type).
+  - `InvalidContainerArgsError` — same for `args`.
+  Validation logic is shared in a helper (`validate_container_override_list(field, value)`); the two `Invalid*` classes diverge only in their `error_code` so clients can route on the field that failed.
+- **§V E2E coverage**: New scenario — deploy a `simple-app`, set `componentArgs: [{component: "server", args: ["--log-level=debug"]}]` via SDK, assert `kubectl get pod -o jsonpath='{.spec.containers[*].args}'` matches. Dual-entrypoint (both `[api-chromium]` and `[ui-chromium]`).
+- **§V GraphQL propagation**: ✅ Yes — new fields on `deploy` / `updateDeployment` inputs and on the read side. Propagation tests required for each.
+- **§VII Documentation**: docs/ user-facing page (mirrors deployment-env-vars), `dev/guides/driver-env-var-consumption.md` sibling for command/args, ADR mirroring `adr-013`, `dev/knowledge/backend/` operator reference. `CONTEXT.md` likely unchanged (no new domain concept name).
 
 ## Governance Gates Crossed
 
-- [x] Database schema change — two new nullable columns on `ApplicationDriverVersion`; cascade kwargs added to two existing relationships.
-- [x] GraphQL schema change — two new read-only fields on the `ApplicationDriverVersion` type.
-- [ ] New dependency — none (hashlib stdlib; git commit resolution already in place).
+- [x] **GraphQL schema change** — new input fields on `deploy` / `updateDeployment`, new read fields, new typed error codes.
+- [ ] Database schema change — none expected (lands in existing `Deployment.config` JSON via Pydantic `ComponentConfigBlock` extension, per ADR-029).
+- [ ] New dependency — none.
 - [ ] CI/CD change — none.
 - [ ] Auth change — none.
 
 ## Assumptions
 
-- Styrmin is not yet deployed anywhere in production. There are no legacy `ApplicationDriverVersion` rows requiring backfill. New columns are added via `metadata.create_all()` on fresh databases.
-- The git driver provider already resolves and exposes the commit SHA of the loaded ref; no provider changes are required beyond surfacing that value to the service layer.
-- The frontend driver-detail page and CLI driver list are the only user-facing surfaces that name driver versions today; any other surface added during implementation will adopt the same `<version>@<short>` convention.
-- `ApplicationDriverVersion` rows accumulate without bound under v1; this is operationally acceptable given typical row size (a few KB).
+- The Pydantic `ComponentConfigBlock` extension lands in the existing `Deployment.config` JSON column with no SQL migration (consistent with ADR-029 — config additions via `BaseConfigSection` need no migration). Verified against the model on disk; new fields add to the same `JSON` column.
+- The doc-only driver declaration is informational only — platform does not enforce that a declared component actually wires the filter (matches env-vars policy in ADR-013 / `dev/guides/driver-env-var-consumption.md`).
+- **One override per component, driver-wired.** The platform exposes exactly one resolved `command` and one resolved `args` per component to the rendering layer; the driver author chooses which container in the rendered chart the filter calls land on. Mirrors the env-vars contract (ADR-013): the platform never injects into a pod the driver template did not wire. The doc-only `command` / `args` declaration block in `driver.styrmin.yml` is where the driver author documents which container the override targets, so operators can read the spec before setting an override.
+- For multi-container components today, v1 does **not** support targeting non-default containers — operators continue to fork the driver if they need that. A future iteration can add per-container granularity without breaking this contract.
 
 ## Out of Scope (v1)
 
-- Automatic garbage collection of unreferenced `ApplicationDriverVersion` rows. A future admin-driven `styrminctl driver prune` command (or equivalent admin GraphQL mutation) is filed as a follow-up.
-- Backfilling `content_hash` / `source_commit_sha` for any pre-existing rows (no such rows exist).
-- Extending the local content hash to cover a multi-file `actions/` directory or additional driver files. Hash input is fixed at the three files the loader currently reads.
-- Parsing or accepting `<version>@<short>` as input (e.g. as a CLI argument). Display-only.
-- Any change to the git driver provider beyond exposing the commit SHA it already resolves.
-- E2E coverage of the git path (covered by unit test against a mocked git provider in v1).
+- Environment-scope or deployment-scope command/args overrides (intentionally excluded — different components have heterogeneous entrypoints, so a single broader-scope override has no sensible semantics).
+- Overriding other container fields (`image`, `resources`, `securityContext`, `workingDir`, env-vars-from-secret).
+- Per-container override inside a multi-container pod with a stable contract — v1 surfaces one override per component, driver-wired; targeting non-default containers requires a future iteration.
+- Templating / variable expansion inside override values (pass-through verbatim, same as env-vars).
 
 ## Open Questions
 
-None — all clarifications resolved during grilling.
+_None remaining. All grilling-stage clarifications resolved during this session._
+
+## Notes / corrections
+
+- The issue text references `adr-019-deployment-env-vars.md` and `adr-021-driver-env-var-consumption.md`, but those filenames do not exist in `dev/adr/`. The actual env-var driver-consumption ADR is **[`adr-013-driver-env-var-consumption.md`](../dev/adr/adr-013-driver-env-var-consumption.md)**. ADRs 019 and 021 cover unrelated topics (CRD phase coexistence, deployment CRD status snapshot). The deployment-env-vars side does not have a standalone ADR — the spec is at `specs/008-deployment-env-vars/` / `specs/010-driver-env-var-consumption/`.
