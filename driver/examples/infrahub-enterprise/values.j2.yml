@@ -49,7 +49,10 @@ infrahub:
       - emptyDir: {}
         name: backup
     # Operator-supplied env vars for the `database` component.
-    env: {{ components | component_env_vars("database") | tojson }}
+    env:
+  {%- for entry in components | component_env_vars("database") %}
+      {{ entry.name }}: {{ entry.value | tojson }}
+  {%- endfor %}
     config:
       server.backup.enabled: "true"
     disableLookups: true
@@ -69,6 +72,16 @@ infrahub:
   prefect-server:
     enabled: true
     fullnameOverride: styrmin-task-manager
+    server:
+      # Hardcoded analytics flag plus operator-supplied env vars for the
+      # `task-manager` component.
+      env:
+        - name: PREFECT_SERVER_ANALYTICS_ENABLED
+          value: "{{ parameters.enable_analytics }}"
+    {%- for entry in components | component_env_vars("task-manager") %}
+        - name: {{ entry.name | tojson }}
+          value: {{ entry.value | tojson }}
+    {%- endfor %}
     postgresql:
       # Propagate the styrmin identifier label to every resource the bitnami
       # postgresql subchart renders (StatefulSet metadata.labels included), so
@@ -87,6 +100,8 @@ infrahub:
       image:
         tag: 14.13.0
       primary:
+        # Operator-supplied env vars for the `task-manager-db` component.
+        extraEnvVars: {{ components | component_env_vars("task-manager-db") | tojson }}
         persistence:
           enabled: true
           storageClass: "{{ instance.config.fast_storage.storage_class }}"
@@ -108,15 +123,6 @@ infrahub:
           timeoutSeconds: 1
           failureThreshold: 120
         resourcesPreset: none
-      # Hardcoded analytics flag plus operator-supplied env vars for the
-      # `task-manager-db` component.
-      env:
-        - name: PREFECT_SERVER_ANALYTICS_ENABLED
-          value: "{{ parameters.enable_analytics }}"
-  {%- for entry in components | component_env_vars("task-manager-db") %}
-        - name: {{ entry.name | tojson }}
-          value: {{ entry.value | tojson }}
-  {%- endfor %}
   rabbitmq:
     enabled: true
     fullnameOverride: styrmin-message-queue
