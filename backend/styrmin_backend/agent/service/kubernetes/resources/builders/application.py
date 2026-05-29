@@ -92,6 +92,69 @@ def component_env_vars(components: object, name: str) -> list[dict[str, str]]:
     return [{"name": str(k), "value": str(v)} for k, v in config.items()]
 
 
+def _resolved_container_override(components: object, name: str) -> dict | None:
+    """Return the resolved ``container_override`` dict for component ``name``.
+
+    Defensive read against the ``model_dump(exclude_none=True)`` rendering
+    context: returns ``None`` when ``components`` is not a dict, the component
+    is absent, or it has no resolved ``container_override`` block.
+    """
+    if not isinstance(components, dict):
+        return None
+    component = components.get(name)
+    if not isinstance(component, dict):
+        return None
+    override = component.get("container_override")
+    if not isinstance(override, dict):
+        return None
+    return override
+
+
+def component_command(components: object, name: str) -> list[str]:
+    """Resolved ``command`` override for component ``name``, or ``[]`` when unset.
+
+    Empty-list marker contract (ADR-045): returns the resolved non-empty list
+    when the operator has set a ``command`` override, or **``[]``** when unset
+    (component absent, no override block, or the ``command`` slot unset). The
+    driver template emits it unconditionally
+    (``command: {{ components | component_command("server") | tojson }}``); the
+    chart guards with ``{{- with .Values.command }}``, and an empty list is
+    falsy so the chart skips the key and the image/chart default applies
+    (FR-007/US2 Sc.2, FR-009).
+
+    The empty-list marker (not an omitted key) is **required** because the
+    operator applies the HelmRelease ``spec.values`` via JSON merge-patch
+    (RFC 7386): an omitted key leaves a previously-set override in place, so
+    clearing would never reach the pod. Emitting ``[]`` overwrites the prior
+    value under merge-patch, and the chart's ``with`` guard makes ``[]`` safe
+    (it never blanks the entrypoint). Mirrors the env-vars
+    ``component_env_vars`` always-present-list convention.
+    """
+    override = _resolved_container_override(components, name)
+    if override is None:
+        return []
+    command = override.get("command")
+    if not isinstance(command, list):
+        return []
+    return command
+
+
+def component_args(components: object, name: str) -> list[str]:
+    """Resolved ``args`` override for component ``name``, or ``[]`` when unset.
+
+    Same empty-list-marker contract as :func:`component_command` for the
+    ``args`` slot — returns the resolved list or ``[]``, consumed under a chart
+    ``with`` guard. See :func:`component_command` for the merge-patch rationale.
+    """
+    override = _resolved_container_override(components, name)
+    if override is None:
+        return []
+    args = override.get("args")
+    if not isinstance(args, list):
+        return []
+    return args
+
+
 def _validate_renders(patches: list[TargetPatch]) -> list[TargetPatch]:
     """Eagerly render each patch so serialisation failures raise before
     Kustomize gets them (spec US6 Scenario 3 / T054). Returns *patches*
@@ -149,6 +212,8 @@ def get_jinja_environment(**kwargs: object) -> jinja2.Environment:
     env.filters["to_fqdn_label"] = to_fqdn_label
     env.filters["split"] = split_string
     env.filters["component_env_vars"] = component_env_vars
+    env.filters["component_command"] = component_command
+    env.filters["component_args"] = component_args
     return env
 
 

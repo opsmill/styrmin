@@ -30,6 +30,7 @@ from styrmin_backend.services.driver.validators import (
     Validator,
     build_user_actions_validator,
     get_validator,
+    validate_driver_container_override_docs,
     validate_driver_env_var_docs,
 )
 
@@ -76,6 +77,9 @@ class DriverLoader:
             # (FR-014).
             if isinstance(driver_spec, DriverSpec):
                 validate_driver_env_var_docs(driver_spec.spec)
+                # 014 / US6: every container_overrides doc must reference a
+                # declared component (mirrors the env-var-doc check above).
+                validate_driver_container_override_docs(driver_spec.spec)
 
             # Post-deserialization: validate actions against actions.py if present
             has_actions = bool(

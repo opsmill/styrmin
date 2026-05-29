@@ -14,6 +14,34 @@ repo root. After that:
 uv run styrminctl --help
 ```
 
+## Managing deployments
+
+`styrminctl deployments update <deployment-id> --config '<json>'` takes a JSON
+`UpdateDeploymentInput` payload (inline or `@filepath`; snake_case or camelCase
+keys accepted). Because the payload is the full typed input, per-component
+container `command` / `args` overrides
+(014-component-container-overrides) ride through with no extra flags — set them
+under `components`:
+
+```bash
+uv run styrminctl deployments update <deployment-id> --config '{
+  "components": [
+    {
+      "name": "server",
+      "command": ["uvicorn", "simple_app.main:app"],
+      "args": ["--host", "0.0.0.0", "--port", "8000", "--log-level", "debug"]
+    }
+  ]
+}'
+```
+
+`command`/`args` are independent, optional lists. Under full-replacement
+semantics, omitting a field from a component block **clears** it (the chart /
+image default flows through) — clearing is never an empty list `[]`, which is
+rejected with `INVALID_CONTAINER_COMMAND` / `INVALID_CONTAINER_ARGS`. An
+override targeting a component the driver does not declare is rejected with
+`UNKNOWN_COMPONENT_CONTAINER_OVERRIDE` before any redeploy.
+
 ## Authentication
 
 `styrminctl` supports three credential flows. Pick one per environment.

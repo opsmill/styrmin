@@ -42,4 +42,12 @@ ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 USER 1000
 
-CMD ["uvicorn", "simple_app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Split ENTRYPOINT (the uvicorn binary + app target) from CMD (the runtime
+# flags) so a Kubernetes container-`args`-only override replaces just the flags
+# while keeping the entrypoint — see 014-component-container-overrides. The
+# effective default command is unchanged from the previous single-CMD form
+# (`uvicorn simple_app.main:app --host 0.0.0.0 --port 8000`). In Styrmin
+# deployments the chart's `values.yaml` supplies the default `args`, which
+# shadows this CMD; the CMD is retained for standalone `docker run` use.
+ENTRYPOINT ["uvicorn", "simple_app.main:app"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]

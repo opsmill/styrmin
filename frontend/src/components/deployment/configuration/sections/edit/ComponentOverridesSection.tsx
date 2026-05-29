@@ -39,11 +39,12 @@ const POSIX_ENV_VAR = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /**
  * Zod schema for the per-component override list (`UpdateDeploymentInput.components`).
  *
- * Today the backend `ComponentConfigInput` only accepts a name + an env-var
- * list. Future per-component knobs (CPU/memory, replicas, image overrides)
- * are intentionally rendered as muted "coming soon" placeholders in the UI
- * so the section has visible room to grow without restructuring; they are
- * **not** part of this validation schema until the GraphQL surface widens.
+ * The backend `ComponentConfigInput` accepts a name, an env-var list, and the
+ * container-override slots `command` / `args` (014-component-container-overrides).
+ * Future per-component knobs (CPU/memory, replicas, image overrides) are
+ * intentionally rendered as muted "coming soon" placeholders in the UI so the
+ * section has visible room to grow without restructuring; they are **not** part
+ * of this validation schema until the GraphQL surface widens.
  *
  * Rules:
  *  - `name` non-empty (driver-declared component name; backend re-validates).
@@ -51,11 +52,18 @@ const POSIX_ENV_VAR = /^[A-Za-z_][A-Za-z0-9_]*$/;
  *  - Per-component env-var names are unique within that block.
  *  - Per-component `name` is unique across the whole list (one block per
  *    component).
+ *  - `command` / `args` are optional `string[]`. Deliberately **no** `.min(1)`:
+ *    removing every row means "clear the override", which the submit boundary
+ *    encodes by omitting the field entirely (omit = clear, never `[]` — see
+ *    FR-007 / `ConfigDiffDialog.handleApply`). An empty array passing the
+ *    schema is fine because it never reaches the wire.
  */
 export const componentOverridesSchema = z
   .array(
     z.object({
       name: z.string().min(1, "Component name is required"),
+      command: z.array(z.string()).optional(),
+      args: z.array(z.string()).optional(),
       envVars: z
         .array(
           z.object({
@@ -105,6 +113,30 @@ export const componentOverridesSchema = z
 
 function emptyEnvVar(): EnvVarInput {
   return { name: "", value: "" };
+}
+
+/**
+ * Right-aligned one-line summary for a component-override trigger. Renders a
+ * token per non-empty scope (env vars / command / args) so a component with
+ * only a command/args override (no env vars) still reads sensibly. Falls back
+ * to "override (empty)" when the block exists but carries no scope yet.
+ */
+function summariseOverrideRow(
+  envVarCount: number,
+  commandCount: number,
+  argsCount: number,
+): string {
+  const parts: string[] = [];
+  if (envVarCount > 0) {
+    parts.push(`${envVarCount} env var${envVarCount === 1 ? "" : "s"}`);
+  }
+  if (commandCount > 0) {
+    parts.push(`command: ${commandCount}`);
+  }
+  if (argsCount > 0) {
+    parts.push(`args: ${argsCount}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "override (empty)";
 }
 
 interface Props {
@@ -218,6 +250,13 @@ export function ComponentOverridesSection({
                   overrideIndex !== undefined ? rows[overrideIndex] : undefined;
                 const hasOverride = overrideRow !== undefined;
                 const envVarCount = overrideRow?.envVars?.length ?? 0;
+                const commandCount = overrideRow?.command?.length ?? 0;
+                const argsCount = overrideRow?.args?.length ?? 0;
+                const summary = summariseOverrideRow(
+                  envVarCount,
+                  commandCount,
+                  argsCount,
+                );
 
                 return (
                   <Collapsible
@@ -248,9 +287,7 @@ export function ComponentOverridesSection({
                         )}
                       </span>
                       <span className="text-[11px] text-muted-foreground">
-                        {hasOverride
-                          ? `${envVarCount} env var${envVarCount === 1 ? "" : "s"}`
-                          : "no override"}
+                        {hasOverride ? summary : "no override"}
                       </span>
                     </CollapsibleTrigger>
                     <CollapsibleContent
@@ -354,6 +391,10 @@ function ComponentOverrideBody({
   const blockPath = `components.${existingIndex}` as const;
   const initialEnvVars = initialBlock?.envVars ?? [];
   const envEnvVars = environmentBlock?.envVars ?? [];
+  const initialCommand = initialBlock?.command ?? [];
+  const envCommand = environmentBlock?.command ?? [];
+  const initialArgs = initialBlock?.args ?? [];
+  const envArgs = environmentBlock?.args ?? [];
 
   return (
     <div className="space-y-4">
@@ -471,6 +512,146 @@ function ComponentOverrideBody({
                   onClick={() => envField.pushValue(emptyEnvVar())}
                 >
                   Add env var
+                </Button>
+              </div>
+            );
+          }}
+        </form.Field>
+      </div>
+
+      <div data-testid={`component-command-editor-${componentName}`}>
+        <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Command
+        </Label>
+        <form.Field name={`${blockPath}.command`} mode="array">
+          {(commandField: any) => {
+            const commandRows: string[] = commandField.state.value ?? [];
+            return (
+              <div className="mt-2 space-y-2">
+                {commandRows.length === 0 && (
+                  <p className="text-xs italic text-muted-foreground">
+                    No command override.
+                  </p>
+                )}
+                {commandRows.map((_row, index) => {
+                  const itemPath = `${blockPath}.command.${index}` as const;
+                  return (
+                    <div
+                      key={`comp-${componentName}-command-${index}`}
+                      className="grid grid-cols-[1fr_auto] items-start gap-2"
+                    >
+                      <form.Field name={itemPath}>
+                        {(f: any) => (
+                          <ChangedFieldFrame
+                            name={itemPath}
+                            form={form}
+                            initial={initialCommand[index]}
+                            environment={envCommand[index]}
+                          >
+                            <Input
+                              data-testid={`comp-command-${componentName}-${index}`}
+                              value={f.state.value ?? ""}
+                              onChange={(e: any) =>
+                                f.handleChange(e.target.value)
+                              }
+                              onBlur={f.handleBlur}
+                              placeholder="/bin/sh"
+                              autoComplete="off"
+                            />
+                          </ChangedFieldFrame>
+                        )}
+                      </form.Field>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Remove command argument ${index + 1} on ${componentName}`}
+                        onClick={() => commandField.removeValue(index)}
+                        data-testid={`comp-command-remove-${componentName}-${index}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid={`comp-command-add-${componentName}`}
+                  onClick={() => commandField.pushValue("")}
+                >
+                  Add command argument
+                </Button>
+              </div>
+            );
+          }}
+        </form.Field>
+      </div>
+
+      <div data-testid={`component-args-editor-${componentName}`}>
+        <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Args
+        </Label>
+        <form.Field name={`${blockPath}.args`} mode="array">
+          {(argsField: any) => {
+            const argsRows: string[] = argsField.state.value ?? [];
+            return (
+              <div className="mt-2 space-y-2">
+                {argsRows.length === 0 && (
+                  <p className="text-xs italic text-muted-foreground">
+                    No args override.
+                  </p>
+                )}
+                {argsRows.map((_row, index) => {
+                  const itemPath = `${blockPath}.args.${index}` as const;
+                  return (
+                    <div
+                      key={`comp-${componentName}-args-${index}`}
+                      className="grid grid-cols-[1fr_auto] items-start gap-2"
+                    >
+                      <form.Field name={itemPath}>
+                        {(f: any) => (
+                          <ChangedFieldFrame
+                            name={itemPath}
+                            form={form}
+                            initial={initialArgs[index]}
+                            environment={envArgs[index]}
+                          >
+                            <Input
+                              data-testid={`comp-args-${componentName}-${index}`}
+                              value={f.state.value ?? ""}
+                              onChange={(e: any) =>
+                                f.handleChange(e.target.value)
+                              }
+                              onBlur={f.handleBlur}
+                              placeholder="--verbose"
+                              autoComplete="off"
+                            />
+                          </ChangedFieldFrame>
+                        )}
+                      </form.Field>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Remove args entry ${index + 1} on ${componentName}`}
+                        onClick={() => argsField.removeValue(index)}
+                        data-testid={`comp-args-remove-${componentName}-${index}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid={`comp-args-add-${componentName}`}
+                  onClick={() => argsField.pushValue("")}
+                >
+                  Add args entry
                 </Button>
               </div>
             );

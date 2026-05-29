@@ -22,6 +22,12 @@ from styrmin_backend.domain.utils import (
 )
 from styrmin_backend.context.models.config import DedicatedIngressConfig
 from styrmin_backend.operator.config import CRD_GROUP, CRD_PLURAL, CRD_VERSION
+from styrmin_backend.services.container_overrides.exceptions import (
+    UnknownComponentContainerOverrideError,
+)
+from styrmin_backend.services.container_overrides.validator import (
+    validate_container_override,
+)
 from styrmin_backend.services.env_vars.exceptions import (
     UnknownComponentEnvVarError,
 )
@@ -127,6 +133,65 @@ def _prevalidate_deployment_env_vars(deployment_config: dict | None) -> None:
             comp_env = block.get("env_vars")
             if isinstance(comp_env, dict):
                 validate_env_vars_dict("component", comp_env)
+
+
+def _validate_component_container_overrides(
+    deployment_config: dict | None,
+    known_component_names: list[str],
+) -> None:
+    """Reject malformed / mis-targeted ``command``/``args`` overrides at the write boundary.
+
+    Runs ahead of Pydantic-driven ``DeploymentConfig`` validation (like
+    :func:`_validate_component_env_var_targets` /
+    :func:`_prevalidate_deployment_env_vars`) so the typed
+    :class:`UnknownComponentContainerOverrideError` /
+    :class:`InvalidContainerCommandError` / :class:`InvalidContainerArgsError`
+    reach the GraphQL caller intact instead of collapsing into
+    ``INVALID_CONTEXT`` (014-component-container-overrides / FR-004, FR-006).
+
+    For each ``components[<name>]`` block carrying a non-null ``command`` or
+    ``args``:
+
+    * if ``<name>`` is not declared by the deployment's current driver →
+      :class:`UnknownComponentContainerOverrideError` (FR-004, US4 Sc.1) — no
+      reconcile is planned on rejection;
+    * each present ``command``/``args`` is shape-validated via
+      :func:`validate_container_override` (non-empty list-of-string;
+      empty-string elements accepted; ``[]`` rejected — FR-006, US4 Sc.2/Sc.3).
+
+    Read-vs-write asymmetry (US5 / FR-005): this validator runs on the **write**
+    path only. The read path (``Deployment.componentContainerOverrides``)
+    tolerates orphaned blocks and exposes ``isOrphaned=true`` so a driver
+    upgrade that renames/removes a component succeeds, while new typos are
+    blocked at the boundary.
+    """
+    if not deployment_config:
+        return
+    components_block = deployment_config.get("components")
+    if not isinstance(components_block, dict) or not components_block:
+        return
+    known = set(known_component_names)
+    for name, block in components_block.items():
+        if not isinstance(block, dict):
+            continue
+        command = block.get("command")
+        args = block.get("args")
+        has_command = command is not None
+        has_args = args is not None
+        if not has_command and not has_args:
+            continue
+        # Unknown-component rejection fires before shape validation so the
+        # operator learns the component is undeclared rather than getting a
+        # shape error for a block that could never apply (US4 Sc.1).
+        if name not in known:
+            raise UnknownComponentContainerOverrideError(
+                component_name=name,
+                known_components=sorted(known),
+            )
+        if has_command:
+            validate_container_override("command", command, component_name=name)
+        if has_args:
+            validate_container_override("args", args, component_name=name)
 
 
 async def get_deployment(
@@ -272,6 +337,11 @@ async def update_deployment(
             assert adv is not None, "Application driver version not found"
             known_names = [cc.name for cc in (adv.component_configs or [])]
             _validate_component_env_var_targets(deployment_config, known_names)
+
+            # Reject component-level container command/args overrides that
+            # target an unknown component or carry a malformed list, before
+            # any reconcile (014 / FR-004, FR-006).
+            _validate_component_container_overrides(deployment_config, known_names)
 
             # Pre-validate env-var bundles so the typed error codes
             # (INVALID_ENV_VAR_NAME / ENV_VAR_SIZE_LIMIT_EXCEEDED /
@@ -864,6 +934,12 @@ async def deploy_application(
             cc.name for cc in (application_driver_version.component_configs or [])
         ]
         _validate_component_env_var_targets(deployment_config, known_names)
+
+        # Reject component-level container command/args overrides submitted at
+        # create time (via the deploy mutation's config JSON) that target an
+        # unknown component or carry a malformed list, before any reconcile
+        # (014 / FR-002 covers both deploy and update flows; FR-004, FR-006).
+        _validate_component_container_overrides(deployment_config, known_names)
 
         # Pre-validate env-var bundles so the typed error codes
         # (INVALID_ENV_VAR_NAME / ENV_VAR_SIZE_LIMIT_EXCEEDED /

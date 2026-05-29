@@ -58,6 +58,34 @@ class DriverEnvVarDoc:
         )
 
 
+@strawberry.type(
+    description=(
+        "Doc-only declaration that a component's container ``command``/``args`` "
+        "are overridable per deployment (014-component-container-overrides). "
+        "Surfaces in the driver detail view; informational only — it does not "
+        "validate, default, or constrain operator-set override values (FR-010/FR-011)."
+    )
+)
+class DriverContainerOverrideDoc:
+    component: str
+    description: str
+    container: str | None
+    command: bool
+    args: bool
+
+    @classmethod
+    def from_dict(cls, data: dict) -> DriverContainerOverrideDoc:
+        # ``data`` is the JSON-column payload stored at registration
+        # (see ``services/applications.py``: ``model_dump(mode="json")``).
+        return cls(
+            component=data["component"],
+            description=data.get("description") or "",
+            container=data.get("container"),
+            command=bool(data.get("command", False)),
+            args=bool(data.get("args", False)),
+        )
+
+
 # FIXME: Support domain models serialization instead
 
 
@@ -159,6 +187,21 @@ class ApplicationDriverVersion:
         if not raw:
             return []
         return [DriverEnvVarDoc.from_dict(d) for d in raw]
+
+    @strawberry.field(
+        description=(
+            "Doc-only container-override declarations from the driver's "
+            "spec.container_overrides block (014). Empty when the driver "
+            "omits the block."
+        )
+    )
+    def container_overrides(self) -> list[DriverContainerOverrideDoc]:
+        # Nullable JSON column → coerce NULL to ``[]`` for the non-null
+        # ``[DriverContainerOverrideDoc!]!`` contract.
+        raw = self.instance.container_overrides
+        if not raw:
+            return []
+        return [DriverContainerOverrideDoc.from_dict(d) for d in raw]
 
     @strawberry.field
     def component_configs(self) -> list[ComponentConfig]:

@@ -1,0 +1,11 @@
+query GetDeploymentComponentContainerOverrides($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        componentContainerOverrides {
+            component
+            command
+            args
+            isOrphaned
+        }
+    }
+}

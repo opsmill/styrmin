@@ -24,14 +24,19 @@ interface Props {
 
 interface ComponentOverrideBlock {
   env_vars?: Record<string, unknown> | null;
+  /** Container-override slots (014-component-container-overrides). */
+  command?: string[] | null;
+  args?: string[] | null;
   [key: string]: unknown;
 }
 
 /**
  * One-line override summary for a component override block. Each scope
- * the block carries is rendered as a small token; today the persisted
- * `components` shape carries env vars, but the future-extension hook
- * (resources / replicas) plugs in here without touching callers.
+ * the block carries is rendered as a small token; the persisted
+ * `components` shape carries env vars plus the `command`/`args`
+ * container overrides (014-component-container-overrides), and the
+ * future-extension hook (resources / replicas) plugs in here without
+ * touching callers.
  */
 function summariseOverride(block: ComponentOverrideBlock): string {
   const parts: string[] = [];
@@ -42,6 +47,12 @@ function summariseOverride(block: ComponentOverrideBlock): string {
       : 0;
   if (envVarCount > 0) {
     parts.push(`env_vars: ${envVarCount} key${envVarCount === 1 ? "" : "s"}`);
+  }
+  if (Array.isArray(block.command) && block.command.length > 0) {
+    parts.push(`command: ${block.command.length}`);
+  }
+  if (Array.isArray(block.args) && block.args.length > 0) {
+    parts.push(`args: ${block.args.length}`);
   }
   if (parts.length === 0) return "override (empty)";
   return parts.join(" · ");

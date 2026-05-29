@@ -10,6 +10,7 @@ from styrmin_backend.context.models.components import (
     ResolvedComponentScheduling,
 )
 from styrmin_backend.context.models.config import (
+    ComponentConfigBlock,
     DeploymentConfig,
     EnvironmentConfig,
     SchedulingConfig,
@@ -36,6 +37,9 @@ from styrmin_backend.context.resolvers import (
 from styrmin_backend.domain.models import Deployment
 from styrmin_backend.services.env_vars.exceptions import (
     EnvVarSizeLimitExceededError,
+)
+from styrmin_backend.services.container_overrides.resolver import (
+    ContainerOverridesResolver,
 )
 from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
 from styrmin_backend.services.env_vars.validator import (
@@ -236,6 +240,19 @@ async def generate_context_from_deployment(
             deployment_config=deployment.config,
         )
 
+        # Resolve container command/args overrides per component
+        # (014-component-container-overrides / US1). Reads per-component
+        # ``command``/``args`` blocks from
+        # ``DeploymentConfig.components[<name>]`` and assigns the resolved
+        # value (component-scope only, NO layering — research.md D2) to each
+        # ``ComponentContext.container_override``. Orphan blocks are computed
+        # by the resolver but never attached here (they surface only on the
+        # GraphQL read path; the renderer skips them).
+        _populate_component_container_overrides(
+            context=context,
+            deployment_config=deployment.config,
+        )
+
         return context
 
 
@@ -396,6 +413,56 @@ def _populate_component_env_vars(
             component_ctx.env_vars = None
             continue
         component_ctx.env_vars = entry.resolved
+
+
+def _populate_component_container_overrides(
+    *,
+    context: GlobalContext,
+    deployment_config: dict | None,
+) -> None:
+    """Populate ``ComponentContext.container_override`` per component.
+
+    Reads per-component ``command``/``args`` blocks from
+    ``DeploymentConfig.components[<name>]`` and assigns each
+    :class:`ComponentContext` a :class:`ResolvedComponentContainerOverride`.
+    Component-scope only — there is NO ``env → dep → comp`` layering
+    (research.md D2): the resolved value is the stored block's value or
+    ``None``.
+
+    Orphan entries (stored blocks whose component the driver no longer
+    declares) are produced by the resolver for the read surface but are NOT
+    attached to any component context here — there is no live
+    ``ComponentContext`` to attach them to, and the renderer must never inject
+    an orphaned override into a pod (FR-005). Components whose resolved
+    ``command`` and ``args`` are both ``None`` get ``None`` so the render
+    filters fall through to the chart default.
+    """
+    if context.components is None or len(context.components.root) == 0:
+        return
+
+    dep_cfg = _validate_env_section(deployment_config, scope="deployment")
+    component_blocks: dict[str, ComponentConfigBlock | None] = {}
+    if dep_cfg is not None and isinstance(dep_cfg, DeploymentConfig):
+        component_blocks = dict(dep_cfg.components or {})
+
+    driver_components = list(context.components.root.keys())
+    entries = ContainerOverridesResolver.resolve_for_deployment(
+        component_overrides=component_blocks,
+        driver_components=driver_components,
+    )
+
+    for entry in entries:
+        # Orphans are never attached to a live component context — they exist
+        # only for the GraphQL read surface and must not reach a pod.
+        if entry.resolved.is_orphaned:
+            continue
+        component_ctx = context.components.root.get(entry.component_name)
+        if component_ctx is None:
+            continue
+        if entry.resolved.command is None and entry.resolved.args is None:
+            component_ctx.container_override = None
+            continue
+        component_ctx.container_override = entry.resolved
 
 
 def _validate_env_section(

@@ -37,7 +37,7 @@ from styrmin_backend.api.definitions.deployment.inputs import (
 )
 from styrmin_backend.api.schema.mutation import Mutation
 from styrmin_backend.api.schema.query import Query
-from styrmin_backend.context.models.config import DeploymentConfig
+from styrmin_backend.context.models.config import ComponentConfigBlock, DeploymentConfig
 
 
 def _build_schema() -> strawberry.Schema:
@@ -74,6 +74,39 @@ def test_update_deployment_input_field_coverage() -> None:
         f"UpdateDeploymentInput has unexpected fields: {sorted(extra)}. "
         "Remove them or add the matching attribute to "
         "DeploymentConfig in "
+        "backend/styrmin_backend/context/models/config.py."
+    )
+
+
+def test_component_config_input_field_coverage() -> None:
+    """``ComponentConfigInput.fields`` == ``ComponentConfigBlock.model_fields`` ∪ {``name``}.
+
+    Pins the per-component input ↔ storage-model parity (ADR-014,
+    014-component-container-overrides contracts/graphql-deltas.md §Propagation
+    #2): any field added to ``ComponentConfigBlock`` (e.g. ``command`` /
+    ``args``) without the matching field on ``ComponentConfigInput`` — or vice
+    versa — fails this test. ``name`` is the input-only addressing field with
+    no counterpart on the storage block. Compares on ``python_name``
+    (snake_case) so the assertion is robust against Strawberry's automatic
+    GraphQL camelCase conversion.
+    """
+    input_field_names = {
+        f.python_name for f in ComponentConfigInput.__strawberry_definition__.fields
+    }
+    block_field_names = set(ComponentConfigBlock.model_fields.keys())
+    expected = block_field_names | {"name"}
+
+    missing = expected - input_field_names
+    assert not missing, (
+        f"ComponentConfigInput is missing fields: {sorted(missing)}. "
+        "Every ComponentConfigBlock field (plus the input-only ``name``) MUST "
+        "exist on the input. Add the missing field to "
+        "backend/styrmin_backend/api/definitions/deployment/inputs.py."
+    )
+    extra = input_field_names - expected
+    assert not extra, (
+        f"ComponentConfigInput has unexpected fields: {sorted(extra)}. "
+        "Remove them or add the matching attribute to ComponentConfigBlock in "
         "backend/styrmin_backend/context/models/config.py."
     )
 

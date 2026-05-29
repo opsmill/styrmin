@@ -19,6 +19,9 @@ from styrmin_backend.services.driver.models.resources.env_vars import (
     DriverEnvVarLevel,
 )
 from styrmin_backend.services.driver.models.structure.resource import Role
+from styrmin_backend.services.container_overrides.exceptions import (
+    DriverContainerOverrideDocComponentMismatchError,
+)
 from styrmin_backend.services.env_vars.exceptions import (
     DriverEnvVarDocComponentMismatchError,
 )
@@ -278,6 +281,36 @@ def validate_driver_env_var_docs(specification: Specification) -> None:
                     component_name=component_name,
                     known_components=known_sorted,
                 )
+
+
+def validate_driver_container_override_docs(specification: Specification) -> None:
+    """Cross-validate ``spec.container_overrides`` against the driver's components.
+
+    014 / US6: every ``component`` referenced by a ``container_overrides`` doc
+    MUST exist in ``Specification.components.root``. The Pydantic field
+    validators on :class:`DriverContainerOverrideDoc` / ``Specification``
+    already enforce per-entry shape and component uniqueness; this function
+    runs the cross-field rule that needs the parent ``Specification``
+    (mirrors :func:`validate_driver_env_var_docs`).
+
+    Raises:
+        DriverContainerOverrideDocComponentMismatchError: when a ``component``
+            reference does not resolve to a declared component.
+    """
+    if not specification.container_overrides:
+        return
+
+    declared_components: set[str] = set()
+    if specification.components is not None:
+        declared_components = set(specification.components.root.keys())
+
+    known_sorted = sorted(declared_components)
+    for doc in specification.container_overrides:
+        if doc.component not in declared_components:
+            raise DriverContainerOverrideDocComponentMismatchError(
+                component_name=doc.component,
+                known_components=known_sorted,
+            )
 
 
 def build_user_actions_validator(

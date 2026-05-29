@@ -77,6 +77,11 @@ from .get_deployment import (
     GetDeploymentDeploymentCreatedBy,
     GetDeploymentDeploymentDeployedServices,
 )
+from .get_deployment_component_container_overrides_full import (
+    GetDeploymentComponentContainerOverridesFull,
+    GetDeploymentComponentContainerOverridesFullDeployment,
+    GetDeploymentComponentContainerOverridesFullDeploymentComponentContainerOverrides,
+)
 from .get_deployment_component_env_vars_full import (
     GetDeploymentComponentEnvVarsFull,
     GetDeploymentComponentEnvVarsFullDeployment,
@@ -117,6 +122,12 @@ from .get_deployment_timeline_context_diff import (
     GetDeploymentTimelineContextDiffDeploymentTimelineContextDiff,
     GetDeploymentTimelineContextDiffDeploymentTimelineContextDiffChanges,
     GetDeploymentTimelineContextDiffDeploymentTimelineTask,
+)
+from .get_driver_container_override_docs import (
+    GetDriverContainerOverrideDocs,
+    GetDriverContainerOverrideDocsApplicationDriver,
+    GetDriverContainerOverrideDocsApplicationDriverVersions,
+    GetDriverContainerOverrideDocsApplicationDriverVersionsContainerOverrides,
 )
 from .get_driver_env_var_docs import (
     GetDriverEnvVarDocs,
@@ -307,6 +318,9 @@ __all__ = [
     "GetCluster",
     "GetClusterCluster",
     "GetDeployment",
+    "GetDeploymentComponentContainerOverridesFull",
+    "GetDeploymentComponentContainerOverridesFullDeployment",
+    "GetDeploymentComponentContainerOverridesFullDeploymentComponentContainerOverrides",
     "GetDeploymentComponentEnvVarsFull",
     "GetDeploymentComponentEnvVarsFullDeployment",
     "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVars",
@@ -340,6 +354,10 @@ __all__ = [
     "GetDeploymentTimelineDeploymentTimelineContextDiff",
     "GetDeploymentTimelineDeploymentTimelineContextDiffChanges",
     "GetDeploymentTimelineDeploymentTimelineTask",
+    "GetDriverContainerOverrideDocs",
+    "GetDriverContainerOverrideDocsApplicationDriver",
+    "GetDriverContainerOverrideDocsApplicationDriverVersions",
+    "GetDriverContainerOverrideDocsApplicationDriverVersionsContainerOverrides",
     "GetDriverEnvVarDocs",
     "GetDriverEnvVarDocsApplicationDriver",
     "GetDriverEnvVarDocsApplicationDriverVersions",

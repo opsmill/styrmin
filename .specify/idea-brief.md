@@ -15,6 +15,7 @@
 ## User Journeys
 
 ### P1 — Override `args` on a single component during deploy / update
+
 - Journey: Operator picks an existing deployment, opens the component editor (or calls `updateDeployment`), sets `args=["--log-level=debug"]` on the `server` **component**, the **deployment** redeploys, the resulting pod's container runs with the new args.
 - Given / When / Then:
   - **Given** a deployment exists with `driver=simple-app@v1`, `component=server`, no override set.
@@ -22,6 +23,7 @@
   - **Then** the new **instance** is generated, **reconciliation** plans an `UPDATE_INSTANCE` **flow**, the **StyrminDeployment** CRD is updated with the override embedded in the **GlobalContext**, FluxCD applies the new `HelmRelease`, and the `server` pod restarts with `.spec.containers[*].args == ["--log-level=debug"]`.
 
 ### P2 — Override `command` on the same component (independent of args)
+
 - Journey: Same operator now needs to swap entrypoint for a one-off run (`python -m foo.cli worker` instead of the default `serve`). Setting `command` alone leaves `args` falling through to the chart default.
 - Given / When / Then:
   - **Given** the same deployment with `componentArgs` already set on `server`.
@@ -29,6 +31,7 @@
   - **Then** the rendered pod runs with the new `command` and the previously set `args`.
 
 ### P3 — Clear an override and fall back to the chart default
+
 - Journey: Operator decides the override was a mistake and removes it. The pod redeploys with the driver's default `command` / `args`.
 - Given / When / Then:
   - **Given** the deployment has `componentArgs` set on `server`.

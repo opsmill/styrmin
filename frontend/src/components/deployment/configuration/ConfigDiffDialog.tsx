@@ -216,6 +216,32 @@ export function ConfigDiffDialog({
         const operatorEdited = !formArrayEmptyEqual(cur[key], frozen[key]);
         mergedInput[key] = operatorEdited ? cur[key] : refreshed[key];
       }
+
+      // FR-007 (014-component-container-overrides): clearing a container
+      // override is expressed by *omitting* `command`/`args`, never by
+      // sending an empty array. The backend rejects `[]` with
+      // INVALID_CONTAINER_COMMAND / INVALID_CONTAINER_ARGS. So at the submit
+      // boundary, drop any `command`/`args` that the field-array editor left
+      // as an empty array (operator removed every row = clear). A non-empty
+      // array passes through; a missing/undefined value stays absent. Note
+      // that `envVars: []` is a legitimate clear and is intentionally NOT
+      // touched here.
+      if (Array.isArray(mergedInput.components)) {
+        mergedInput.components = (
+          mergedInput.components as Record<string, unknown>[]
+        ).map((block) => {
+          if (block == null || typeof block !== "object") return block;
+          const next: Record<string, unknown> = { ...block };
+          if (Array.isArray(next.command) && next.command.length === 0) {
+            delete next.command;
+          }
+          if (Array.isArray(next.args) && next.args.length === 0) {
+            delete next.args;
+          }
+          return next;
+        });
+      }
+
       await updateMutation.mutateAsync({
         deploymentId: deployment.id,
         input: mergedInput as UpdateDeploymentInput,

@@ -28,6 +28,7 @@ from styrmin_backend.context.fqdn import (
     compute_primary_fqdn,
 )
 from styrmin_backend.context.models.config import (
+    ComponentConfigBlock,
     DeploymentConfig,
     EnvironmentConfig,
 )
@@ -104,6 +105,40 @@ class ComponentEnvVars:
             "this component (the upgrade renamed or removed it). Orphaned "
             "blocks are visible in the API but are NOT injected into "
             "rendered pods, so the operator can audit and clean them up."
+        )
+    )
+
+
+@strawberry.type(
+    description=(
+        "The resolved container ``command``/``args`` override targeting one "
+        "component of a deployment, plus an ``isOrphaned`` flag indicating "
+        "whether the deployment's current driver still declares the targeted "
+        "component. Orphaned blocks remain visible in the API but are NOT "
+        "injected into rendered pods. ``command``/``args`` are ``null`` when "
+        "no override is set for that slot (the chart default flows through)."
+    )
+)
+class ComponentContainerOverrides:
+    component: str = strawberry.field(description="Name of the targeted component.")
+    command: list[str] | None = strawberry.field(
+        description=(
+            "Resolved entrypoint override for this component, or ``null`` "
+            "when unset (the chart/image default applies)."
+        )
+    )
+    args: list[str] | None = strawberry.field(
+        description=(
+            "Resolved args override for this component, or ``null`` when "
+            "unset (the chart/image default applies)."
+        )
+    )
+    is_orphaned: bool = strawberry.field(
+        description=(
+            "True when the deployment's current driver no longer declares "
+            "this component (the upgrade renamed or removed it). Orphaned "
+            "blocks are visible in the API but are NOT injected into rendered "
+            "pods, so the operator can audit and clean them up."
         )
     )
 
@@ -481,6 +516,79 @@ class Deployment:
                         EnvVar(name=k, value=v)
                         for k, v in entry.resolved.config.items()
                     ],
+                    is_orphaned=entry.resolved.is_orphaned,
+                )
+            )
+        return results
+
+    @strawberry.field(
+        description=(
+            "Per-component container ``command``/``args`` overrides, including "
+            "orphaned blocks (``isOrphaned=true``). Component-scope only — "
+            "there is NO environment/deployment layering. Live components with "
+            "neither slot set are omitted to keep the surface tidy. Orphaned "
+            "blocks (component renamed or removed by a driver upgrade — FR-005) "
+            "are always surfaced here but skipped by the renderer so no value "
+            "reaches a rendered pod. Cleared slots are returned as ``null``."
+        )
+    )
+    async def component_container_overrides(
+        self, info: strawberry.Info
+    ) -> list[ComponentContainerOverrides]:
+        """Resolve container overrides per declared component.
+
+        Pulls per-component blocks from ``DeploymentConfig.components[<name>]``
+        and runs :class:`ContainerOverridesResolver` (direct per-component
+        lookup, no merge). Orphaned blocks are always surfaced regardless of
+        whether they carry both slots — their purpose is operator visibility
+        after a driver upgrade.
+        """
+        from styrmin_backend.services.container_overrides.resolver import (
+            ContainerOverridesResolver,
+        )
+
+        uow = info.context["uow"]
+        async with uow:
+            deployment = await uow.deployments.find(self.id)
+            if deployment is None:
+                logger.warning(
+                    "component_container_overrides: deployment {} not found "
+                    "(likely deleted between parent query and sub-field "
+                    "resolution)",
+                    self.id,
+                )
+                return []
+            dep_config_raw = deployment.config
+            driver_components = [c.name for c in (deployment.components or [])]
+
+        dep_cfg = (
+            DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None
+        )
+
+        component_blocks: dict[str, ComponentConfigBlock | None] = {}
+        if dep_cfg is not None:
+            component_blocks = dict(dep_cfg.components or {})
+
+        entries = ContainerOverridesResolver.resolve_for_deployment(
+            component_overrides=component_blocks,
+            driver_components=driver_components,
+        )
+
+        results: list[ComponentContainerOverrides] = []
+        for entry in entries:
+            # Live entries with neither slot set carry no override signal —
+            # drop them to keep the surface tidy. Orphans are always surfaced.
+            if (
+                not entry.resolved.is_orphaned
+                and entry.resolved.command is None
+                and entry.resolved.args is None
+            ):
+                continue
+            results.append(
+                ComponentContainerOverrides(
+                    component=entry.component_name,
+                    command=entry.resolved.command,
+                    args=entry.resolved.args,
                     is_orphaned=entry.resolved.is_orphaned,
                 )
             )

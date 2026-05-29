@@ -89,6 +89,24 @@ class ComponentConfigInput:
             "component scope in the payload."
         ),
     )
+    command: list[str] | None = strawberry.field(
+        default=None,
+        description=(
+            "Container entrypoint override for this component, scoped to this "
+            "deployment. A non-empty list of strings; an empty list raises "
+            "``INVALID_CONTAINER_COMMAND``. ``null``/omitted leaves the "
+            "persisted value untouched (clear by submitting the component "
+            "block without it under full-replacement). Passed through "
+            "verbatim — no templating."
+        ),
+    )
+    args: list[str] | None = strawberry.field(
+        default=None,
+        description=(
+            "Container args override for this component. Same shape and rules "
+            "as ``command``, raising ``INVALID_CONTAINER_ARGS``."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
