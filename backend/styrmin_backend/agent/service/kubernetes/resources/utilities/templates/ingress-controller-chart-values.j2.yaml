@@ -124,6 +124,15 @@ networkpolicies:
                   - 192.168.0.0/16
                   - 100.64.0.0/10
         - to:
+            - ipBlock:
+                cidr: ::/0
+                except:
+                  - ::1/128
+                  - fc00::/7
+                  - fe80::/10
+                  - 64:ff9b::/96
+                  - 2001:db8::/32
+        - to:
             - podSelector:
                 matchLabels:
                   helm.neo4j.com/pod_category: neo4j-instance
