@@ -4,6 +4,19 @@ image:
   repository: simple-app
   tag: "{{ app.version }}"
 
+# Operator-supplied container entrypoint/args overrides for the `server`
+# component (014-component-container-overrides). The `component_command` /
+# `component_args` filters return the operator's list, or `[]` when no override
+# is set. We emit the keys UNCONDITIONALLY (always present in the rendered
+# values) so that *clearing* an override propagates through the operator's
+# JSON merge-patch HelmRelease apply — an omitted key would leave a prior
+# override in place. The chart guards each with `{{- with .Values.command }}`,
+# and an empty list is falsy there, so when unset the chart skips the key and
+# the image ENTRYPOINT/CMD (or chart default) flows through. `command` and
+# `args` are independent so one may be overridden while the other falls back.
+command: {{ components | component_command("server") | tojson }}
+args: {{ components | component_args("server") | tojson }}
+
 # Operator-supplied env vars for the `server` component (env→dep→comp
 # deepest-wins per spec 010). Per-component dict already includes the
 # deployment-level env vars merged in, so the 008/009 E2E that asserts

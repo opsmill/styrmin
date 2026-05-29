@@ -476,20 +476,26 @@ class EnvironmentConfig(BaseConfigSection):
 class ComponentConfigBlock(BaseModel):
     """Per-component override block carried under ``DeploymentConfig.components``.
 
-    For US3 (008-deployment-env-vars) this slot only carries ``env_vars`` —
-    the per-component free-form env var dict (FR-001 component scope, FR-002
-    deepest-wins precedence). Future iterations may add per-component
-    ``scheduling`` or ``inject`` overrides under the same block; only
-    ``env_vars`` is wired today.
+    Carries the per-component free-form ``env_vars`` dict (008-deployment-env-vars,
+    FR-001 component scope, FR-002 deepest-wins precedence) plus the
+    component-scope container ``command``/``args`` overrides
+    (014-component-container-overrides). Future iterations may add per-component
+    ``scheduling`` or ``inject`` overrides under the same block.
 
     The ``env_vars`` dict is validated against the same caps as the
     deployment-scope dict via :func:`validate_env_vars_dict` with
-    ``scope="component"``.
+    ``scope="component"``. ``command`` and ``args`` are two independent,
+    optional, nullable slots — ``None`` means "unset" (chart default flows
+    through); each is validated through
+    :func:`validate_container_override` (non-empty list-of-string, empty-string
+    elements accepted, ``[]`` rejected).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     env_vars: dict[str, str] | None = None
+    command: list[str] | None = None
+    args: list[str] | None = None
 
     @field_validator("env_vars")
     @classmethod
@@ -503,6 +509,24 @@ class ComponentConfigBlock(BaseModel):
         )
 
         return validate_env_vars_dict("component", v)
+
+    @field_validator("command")
+    @classmethod
+    def _validate_command(cls, v: list[str] | None) -> list[str] | None:
+        from styrmin_backend.services.container_overrides.validator import (
+            validate_container_override,
+        )
+
+        return validate_container_override("command", v)
+
+    @field_validator("args")
+    @classmethod
+    def _validate_args(cls, v: list[str] | None) -> list[str] | None:
+        from styrmin_backend.services.container_overrides.validator import (
+            validate_container_override,
+        )
+
+        return validate_container_override("args", v)
 
 
 class DeploymentConfig(ClusterConfig, EnvironmentConfig):

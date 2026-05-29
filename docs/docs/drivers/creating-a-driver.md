@@ -179,7 +179,7 @@ already sets is better than fighting it.
 
 ### Step 4: Configure backups
 
-Per component, decide _how_ it should be backed up. The choices come
+Per component, decide *how* it should be backed up. The choices come
 from a fixed set of **backup strategies** — full list and explanation
 in [Backups and restores](../concepts-and-architecture/backups-and-restores.md).
 Stateless components are typically left out entirely (no `backup`
@@ -253,6 +253,55 @@ Patterns to know:
 - **`{{ components | component_env_vars("<name>") | tojson }}`** to
   inject the per-component env vars (declared via `env_vars` —
   optional).
+
+#### Container `command` / `args` overrides (optional)
+
+To let an operator override a component's container entrypoint or args for one
+deployment — without forking your driver — emit the `component_command` /
+`component_args` filters **unconditionally** in `values.j2.yml`:
+
+```jinja
+command: {{ components | component_command("server") | tojson }}
+args: {{ components | component_args("server") | tojson }}
+```
+
+Each filter returns the operator's list when set, or **`[]`** when unset. Emit
+the keys unconditionally (do **not** wrap them in an `if`): the key must be
+present so that *clearing* an override propagates (the platform applies the
+HelmRelease values via JSON merge-patch, where an omitted key would leave a
+prior override in place). In your **chart**, guard consumption with a `with`
+block so an empty list falls through to the image/chart default:
+
+```yaml
+{{- with .Values.command }}
+command:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .Values.args }}
+args:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+```
+
+An empty list is falsy, so `{{- with }}` skips it and never blanks the
+container entrypoint. `command` and `args` are independent — one may be
+overridden while the other falls through.
+
+Optionally advertise overridability (doc-only, discoverable via the API/UI)
+under `spec.container_overrides` in `driver.styrmin.yml`:
+
+```yaml
+spec:
+  container_overrides:
+    - component: server
+      container: my-app       # informational: which rendered container
+      command: true
+      args: true
+      description: "Override the server entrypoint/args for a worker/debug mode."
+```
+
+The declaration does **not** enforce consumption: a driver that declares but
+does not wire the filters stores the override and silently never applies it.
 
 See [The Context](./context.md) for the full set of available fields.
 

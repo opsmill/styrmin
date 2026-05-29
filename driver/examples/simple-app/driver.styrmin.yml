@@ -43,6 +43,19 @@ spec:
       components:
         - database
 
+  # Doc-only declaration that the `server` component's container
+  # command/args are overridable per deployment (014). Informational — the
+  # platform never requires a declared component to actually wire the
+  # filters; here `values.j2.yml` does wire them, so the override applies.
+  container_overrides:
+    - component: server
+      container: simple-app
+      command: true
+      args: true
+      description: >-
+        Override the server container entrypoint/args (e.g. to run a worker
+        mode or raise the log level) without forking the driver.
+
   services:
     - name: simple-app
       kind: http

@@ -49,7 +49,7 @@ An operator decides an override was a mistake and removes it. The component must
 
 **Why this priority**: An override that cannot be cleanly removed is a trap — operators must be able to return a component to its driver-defined baseline. It is P2 because it only matters once US1/US2 are in use, but it is part of the same minimal usable loop.
 
-**Independent Test**: On a deployment with `args` set on `server`, clear the override (submit a null value for `args`, or omit the entry), confirm the redeploy, and verify the rendered pod's container uses the chart's default `args` and carries no override.
+**Independent Test**: On a deployment with `args` set on `server`, clear the override (submit a null value for `args`, or omit the `args` field — distinct from omitting the whole `server` component entry, which would clear every field on it), confirm the redeploy, and verify the rendered pod's container uses the chart's default `args` and carries no override.
 
 **Acceptance Scenarios**:
 

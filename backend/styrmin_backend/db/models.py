@@ -289,6 +289,12 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     # Each entry shape matches :class:`DriverEnvVarDoc` (name, description,
     # level, components). Empty/None when the driver omits the block.
     env_vars: list | None = Field(default=None, sa_column=Column(JSON))
+    # 014 / US6: doc-only container-override declarations parsed from
+    # ``spec.container_overrides``. Each entry shape matches
+    # :class:`DriverContainerOverrideDoc` (component, description, container,
+    # command, args). Additive JSON column (no Alembic — metadata.create_all);
+    # existing rows deserialize the absent key to ``None``.
+    container_overrides: list | None = Field(default=None, sa_column=Column(JSON))
     component_configs: list[ComponentConfig] = Relationship(
         back_populates="application_driver_version",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},

@@ -63,6 +63,8 @@ export type ApplicationDriverVersion = {
   applicationDriverId: Scalars['UUID']['output'];
   componentConfigs: Array<ComponentConfig>;
   components?: Maybe<Scalars['JSON']['output']>;
+  /** Doc-only container-override declarations from the driver's spec.container_overrides block (014). Empty when the driver omits the block. */
+  containerOverrides: Array<DriverContainerOverrideDoc>;
   contentHash?: Maybe<Scalars['String']['output']>;
   createdOn: Scalars['DateTime']['output'];
   defaultVersion?: Maybe<Scalars['String']['output']>;
@@ -183,10 +185,27 @@ export type ComponentConfig = {
 
 /** Per-component override block for a deployment. Carries env-var overrides today; future per-component knobs (e.g. replicas) slot into this same input without a schema renumber. */
 export type ComponentConfigInput = {
+  /** Container args override for this component. Same shape and rules as ``command``, raising ``INVALID_CONTAINER_ARGS``. */
+  args?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Container entrypoint override for this component, scoped to this deployment. A non-empty list of strings; an empty list raises ``INVALID_CONTAINER_COMMAND``. ``null``/omitted leaves the persisted value untouched (clear by submitting the component block without it under full-replacement). Passed through verbatim — no templating. */
+  command?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Environment-variable overrides scoped to this component. Submitted as a list of ``{name, value}`` rows; duplicates within the list raise ``DUPLICATE_ENV_VAR_NAME`` with the component scope in the payload. */
   envVars?: InputMaybe<Array<EnvVarInput>>;
   /** The component name as declared by the deployment's currently pinned application-driver version. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. */
   name: Scalars['String']['input'];
+};
+
+/** The resolved container ``command``/``args`` override targeting one component of a deployment, plus an ``isOrphaned`` flag indicating whether the deployment's current driver still declares the targeted component. Orphaned blocks remain visible in the API but are NOT injected into rendered pods. ``command``/``args`` are ``null`` when no override is set for that slot (the chart default flows through). */
+export type ComponentContainerOverrides = {
+  __typename?: 'ComponentContainerOverrides';
+  /** Resolved args override for this component, or ``null`` when unset (the chart/image default applies). */
+  args?: Maybe<Array<Scalars['String']['output']>>;
+  /** Resolved entrypoint override for this component, or ``null`` when unset (the chart/image default applies). */
+  command?: Maybe<Array<Scalars['String']['output']>>;
+  /** Name of the targeted component. */
+  component: Scalars['String']['output'];
+  /** True when the deployment's current driver no longer declares this component (the upgrade renamed or removed it). Orphaned blocks are visible in the API but are NOT injected into rendered pods, so the operator can audit and clean them up. */
+  isOrphaned: Scalars['Boolean']['output'];
 };
 
 /** A bundle of environment variables targeting one component of a deployment, plus an ``isOrphaned`` flag indicating whether the deployment's current driver still declares the targeted component. Orphaned blocks remain visible in the API but are NOT injected into rendered pods. */
@@ -280,6 +299,8 @@ export type Deployment = {
   applicationDriverVersionId: Scalars['UUID']['output'];
   applicationInstance?: Maybe<ApplicationInstance>;
   applicationVersion: Scalars['String']['output'];
+  /** Per-component container ``command``/``args`` overrides, including orphaned blocks (``isOrphaned=true``). Component-scope only — there is NO environment/deployment layering. Live components with neither slot set are omitted to keep the surface tidy. Orphaned blocks (component renamed or removed by a driver upgrade — FR-005) are always surfaced here but skipped by the renderer so no value reaches a rendered pod. Cleared slots are returned as ``null``. */
+  componentContainerOverrides: Array<ComponentContainerOverrides>;
   /** Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Orphaned blocks (component renamed or removed by a driver upgrade — FR-029..FR-033) are visible here but skipped by the post-render injector so no env entries reach rendered pods. */
   componentEnvVars: Array<ComponentEnvVars>;
   components: Array<Component>;
@@ -343,6 +364,16 @@ export type DeploymentTimelineEntry = {
   applicationVersion?: Maybe<Scalars['String']['output']>;
   contextDiff?: Maybe<ContextDiff>;
   task: Task;
+};
+
+/** Doc-only declaration that a component's container ``command``/``args`` are overridable per deployment (014-component-container-overrides). Surfaces in the driver detail view; informational only — it does not validate, default, or constrain operator-set override values (FR-010/FR-011). */
+export type DriverContainerOverrideDoc = {
+  __typename?: 'DriverContainerOverrideDoc';
+  args: Scalars['Boolean']['output'];
+  command: Scalars['Boolean']['output'];
+  component: Scalars['String']['output'];
+  container?: Maybe<Scalars['String']['output']>;
+  description: Scalars['String']['output'];
 };
 
 /** Doc-only declaration of an env var the driver's app respects. Surfaces in the driver detail view; does not validate, default, or constrain operator-set values (FR-015). */

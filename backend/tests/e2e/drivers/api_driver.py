@@ -299,6 +299,12 @@ class ApiScenarioDriver:
                         if isinstance(block, dict) and block.get("env_vars") is not None
                         else None
                     ),
+                    # Container overrides (014): carry command/args through
+                    # from the test-friendly dict block. ``None``/absent stays
+                    # absent so a full-replacement write omits the field
+                    # (omit = clear, never []).
+                    command=(block.get("command") if isinstance(block, dict) else None),
+                    args=(block.get("args") if isinstance(block, dict) else None),
                 )
                 for name, block in components.items()
             ]

@@ -207,6 +207,13 @@ Notice the typical patterns:
   cluster-wide value (e.g. the FQDN suffix).
 - **`components | component_env_vars("<name>")`** as a Jinja filter to
   produce the per-component env-var list.
+- **`components | component_command("<name>")`** /
+  **`components | component_args("<name>")`** as Jinja filters to read an
+  operator's per-component container `command`/`args` override. Each returns
+  the list or **`[]`** when unset; emit the keys unconditionally and guard
+  consumption in your chart with `{{- with .Values.command }}` so an empty list
+  falls through to the image/chart default. See
+  [Creating a driver](./creating-a-driver.md) for the canonical pattern.
 
 ### Using context in an action
 

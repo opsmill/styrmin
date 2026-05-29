@@ -57,6 +57,11 @@ type ApplicationDriverVersion {
   Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block.
   """
   envVars: [DriverEnvVarDoc!]!
+
+  """
+  Doc-only container-override declarations from the driver's spec.container_overrides block (014). Empty when the driver omits the block.
+  """
+  containerOverrides: [DriverContainerOverrideDoc!]!
   componentConfigs: [ComponentConfig!]!
   helmChart: HelmChart!
   actions: [Action!]!
@@ -167,6 +172,39 @@ input ComponentConfigInput {
   Environment-variable overrides scoped to this component. Submitted as a list of ``{name, value}`` rows; duplicates within the list raise ``DUPLICATE_ENV_VAR_NAME`` with the component scope in the payload.
   """
   envVars: [EnvVarInput!] = null
+
+  """
+  Container entrypoint override for this component, scoped to this deployment. A non-empty list of strings; an empty list raises ``INVALID_CONTAINER_COMMAND``. ``null``/omitted leaves the persisted value untouched (clear by submitting the component block without it under full-replacement). Passed through verbatim — no templating.
+  """
+  command: [String!] = null
+
+  """
+  Container args override for this component. Same shape and rules as ``command``, raising ``INVALID_CONTAINER_ARGS``.
+  """
+  args: [String!] = null
+}
+
+"""
+The resolved container ``command``/``args`` override targeting one component of a deployment, plus an ``isOrphaned`` flag indicating whether the deployment's current driver still declares the targeted component. Orphaned blocks remain visible in the API but are NOT injected into rendered pods. ``command``/``args`` are ``null`` when no override is set for that slot (the chart default flows through).
+"""
+type ComponentContainerOverrides {
+  """Name of the targeted component."""
+  component: String!
+
+  """
+  Resolved entrypoint override for this component, or ``null`` when unset (the chart/image default applies).
+  """
+  command: [String!]
+
+  """
+  Resolved args override for this component, or ``null`` when unset (the chart/image default applies).
+  """
+  args: [String!]
+
+  """
+  True when the deployment's current driver no longer declares this component (the upgrade renamed or removed it). Orphaned blocks are visible in the API but are NOT injected into rendered pods, so the operator can audit and clean them up.
+  """
+  isOrphaned: Boolean!
 }
 
 """
@@ -287,6 +325,11 @@ type Deployment {
   Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Orphaned blocks (component renamed or removed by a driver upgrade — FR-029..FR-033) are visible here but skipped by the post-render injector so no env entries reach rendered pods.
   """
   componentEnvVars: [ComponentEnvVars!]!
+
+  """
+  Per-component container ``command``/``args`` overrides, including orphaned blocks (``isOrphaned=true``). Component-scope only — there is NO environment/deployment layering. Live components with neither slot set are omitted to keep the surface tidy. Orphaned blocks (component renamed or removed by a driver upgrade — FR-005) are always surfaced here but skipped by the renderer so no value reaches a rendered pod. Cleared slots are returned as ``null``.
+  """
+  componentContainerOverrides: [ComponentContainerOverrides!]!
   crdStatus: DeploymentStatusType
   createdBy: User!
 
@@ -334,6 +377,17 @@ type DeploymentTimelineEntry {
   task: Task!
   applicationVersion: String
   contextDiff: ContextDiff
+}
+
+"""
+Doc-only declaration that a component's container ``command``/``args`` are overridable per deployment (014-component-container-overrides). Surfaces in the driver detail view; informational only — it does not validate, default, or constrain operator-set override values (FR-010/FR-011).
+"""
+type DriverContainerOverrideDoc {
+  component: String!
+  description: String!
+  container: String
+  command: Boolean!
+  args: Boolean!
 }
 
 """

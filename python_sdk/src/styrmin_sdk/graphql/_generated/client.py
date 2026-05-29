@@ -33,6 +33,9 @@ from .get_backup_schedule import GetBackupSchedule
 from .get_backup_storage_location import GetBackupStorageLocation
 from .get_cluster import GetCluster
 from .get_deployment import GetDeployment
+from .get_deployment_component_container_overrides_full import (
+    GetDeploymentComponentContainerOverridesFull,
+)
 from .get_deployment_component_env_vars_full import GetDeploymentComponentEnvVarsFull
 from .get_deployment_pod_statuses import GetDeploymentPodStatuses
 from .get_deployment_resolved_scheduling import GetDeploymentResolvedScheduling
@@ -40,6 +43,7 @@ from .get_deployment_services import GetDeploymentServices
 from .get_deployment_status import GetDeploymentStatus
 from .get_deployment_timeline import GetDeploymentTimeline
 from .get_deployment_timeline_context_diff import GetDeploymentTimelineContextDiff
+from .get_driver_container_override_docs import GetDriverContainerOverrideDocs
 from .get_driver_env_var_docs import GetDriverEnvVarDocs
 from .get_environment import GetEnvironment
 from .get_environment_services import GetEnvironmentServices
@@ -798,6 +802,32 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetDeployment.model_validate(data)
 
+    async def get_deployment_component_container_overrides_full(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentComponentContainerOverridesFull:
+        query = gql("""
+            query GetDeploymentComponentContainerOverridesFull($deploymentId: UUID!) {
+              deployment(deploymentId: $deploymentId) {
+                id
+                componentContainerOverrides {
+                  component
+                  command
+                  args
+                  isOrphaned
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentComponentContainerOverridesFull",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentComponentContainerOverridesFull.model_validate(data)
+
     async def get_deployment_component_env_vars_full(
         self, deployment_id: UUID, **kwargs: Any
     ) -> GetDeploymentComponentEnvVarsFull:
@@ -1019,6 +1049,40 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeploymentTimelineContextDiff.model_validate(data)
+
+    async def get_driver_container_override_docs(
+        self, application_driver_id: UUID, **kwargs: Any
+    ) -> GetDriverContainerOverrideDocs:
+        query = gql("""
+            query GetDriverContainerOverrideDocs($applicationDriverId: UUID!) {
+              applicationDriver(applicationDriverId: $applicationDriverId) {
+                id
+                name
+                versions {
+                  id
+                  version
+                  contentHash
+                  sourceCommitSha
+                  containerOverrides {
+                    component
+                    description
+                    container
+                    command
+                    args
+                  }
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"applicationDriverId": application_driver_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDriverContainerOverrideDocs",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDriverContainerOverrideDocs.model_validate(data)
 
     async def get_driver_env_var_docs(
         self, application_driver_id: UUID, **kwargs: Any

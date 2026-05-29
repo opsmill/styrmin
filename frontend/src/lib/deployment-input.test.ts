@@ -64,9 +64,59 @@ describe("deploymentConfigToInput", () => {
         {
           name: "web",
           envVars: [{ name: "LOG_LEVEL", value: "debug" }],
+          command: undefined,
+          args: undefined,
         },
-        { name: "api", envVars: [] },
-        { name: "worker", envVars: undefined },
+        { name: "api", envVars: [], command: undefined, args: undefined },
+        {
+          name: "worker",
+          envVars: undefined,
+          command: undefined,
+          args: undefined,
+        },
+      ]),
+    );
+  });
+
+  it("carries per-component command/args from the config block into the input", () => {
+    // 014-component-container-overrides: a persisted component block may
+    // carry `command`/`args` (list[str]) alongside `env_vars`. The
+    // dict-to-list projection must surface them on the typed
+    // `ComponentConfigInput` so the edit drawer renders the existing override.
+    const input = deploymentConfigToInput({
+      components: {
+        web: {
+          env_vars: { LOG_LEVEL: "debug" },
+          command: ["/bin/sh", "-c"],
+          args: ["echo", "hi"],
+        },
+      },
+    });
+    expect(input.components).toEqual([
+      {
+        name: "web",
+        envVars: [{ name: "LOG_LEVEL", value: "debug" }],
+        command: ["/bin/sh", "-c"],
+        args: ["echo", "hi"],
+      },
+    ]);
+  });
+
+  it("maps a null command/args block to undefined (omit = clear, never [])", () => {
+    // 014-component-container-overrides / FR-007: a persisted `null` (or
+    // absent) container override stays `undefined` on the input so a
+    // full-replacement write omits the field rather than sending `[]`
+    // (the backend rejects `[]` with INVALID_CONTAINER_COMMAND / _ARGS).
+    const input = deploymentConfigToInput({
+      components: {
+        web: { env_vars: {}, command: null, args: null },
+        api: { env_vars: {} },
+      },
+    });
+    expect(input.components).toEqual(
+      expect.arrayContaining([
+        { name: "web", envVars: [], command: undefined, args: undefined },
+        { name: "api", envVars: [], command: undefined, args: undefined },
       ]),
     );
   });
@@ -93,7 +143,12 @@ describe("deploymentConfigToInput", () => {
 
     expect(input.envVars).toEqual([{ name: "GLOBAL", value: "1" }]);
     expect(input.components).toEqual([
-      { name: "web", envVars: [{ name: "COMP", value: "2" }] },
+      {
+        name: "web",
+        envVars: [{ name: "COMP", value: "2" }],
+        command: undefined,
+        args: undefined,
+      },
     ]);
     expect(input.ipWhitelist).toEqual(["10.0.0.0/8", "192.168.0.0/16"]);
     expect(input.dedicatedIngress).toEqual({ enabled: true, replicas: 2 });

@@ -83,6 +83,26 @@ class ResolvedComponentEnvVars(BaseModel):
     is_orphaned: bool = False
 
 
+class ResolvedComponentContainerOverride(BaseModel):
+    """Per-component effective container ``command``/``args`` override.
+
+    Unlike :class:`ResolvedComponentEnvVars` there is **no provenance field**:
+    container overrides are component-scope-only (no environment/deployment
+    layering — research.md D2), so each slot has exactly one possible source
+    and provenance is meaningless. ``command`` / ``args`` are the resolved
+    lists (or ``None`` = unset → chart default). ``is_orphaned`` is set when
+    the targeted component is no longer declared by the deployment's current
+    driver (FR-005); orphaned blocks are surfaced on read but skipped by the
+    renderer so no value reaches a container.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: list[str] | None = None
+    args: list[str] | None = None
+    is_orphaned: bool = False
+
+
 class ComponentContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -91,6 +111,7 @@ class ComponentContext(BaseModel):
     enabled: bool
     scheduling: ResolvedComponentScheduling | None = None
     env_vars: ResolvedComponentEnvVars | None = None
+    container_override: ResolvedComponentContainerOverride | None = None
 
 
 class ComponentsContext(RootModel):

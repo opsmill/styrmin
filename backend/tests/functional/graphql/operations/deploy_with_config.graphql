@@ -1,0 +1,17 @@
+mutation DeployWithConfig(
+    $driver: String!
+    $environmentId: UUID!
+    $version: String!
+    $name: String!
+    $config: JSON
+) {
+    deploy(
+        driver: $driver
+        environmentId: $environmentId
+        version: $version
+        name: $name
+        config: $config
+    ) {
+        id
+    }
+}

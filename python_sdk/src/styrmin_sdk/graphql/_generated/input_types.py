@@ -55,6 +55,10 @@ class ComponentConfigInput(BaseModel):
     "The component name as declared by the deployment's currently pinned application-driver version. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``."
     env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
     "Environment-variable overrides scoped to this component. Submitted as a list of ``{name, value}`` rows; duplicates within the list raise ``DUPLICATE_ENV_VAR_NAME`` with the component scope in the payload."
+    command: Optional[list[str]] = None
+    "Container entrypoint override for this component, scoped to this deployment. A non-empty list of strings; an empty list raises ``INVALID_CONTAINER_COMMAND``. ``null``/omitted leaves the persisted value untouched (clear by submitting the component block without it under full-replacement). Passed through verbatim — no templating."
+    args: Optional[list[str]] = None
+    "Container args override for this component. Same shape and rules as ``command``, raising ``INVALID_CONTAINER_ARGS``."
 
 
 class CrdConditionInput(BaseModel):

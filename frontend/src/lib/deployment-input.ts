@@ -30,10 +30,15 @@ export type DeploymentConfig = Record<string, unknown>;
 type ReadEnvVars = Record<string, string>;
 
 /**
- * Read-side per-component override block: `{ env_vars: {...} }`.
+ * Read-side per-component override block: `{ env_vars: {...}, command: [...],
+ * args: [...] }`. `command`/`args` are the container-override slots
+ * (014-component-container-overrides); each is a `list[str] | null` in the
+ * persisted `ComponentConfigBlock`.
  */
 type ReadComponentBlock = {
   env_vars?: ReadEnvVars | null;
+  command?: string[] | null;
+  args?: string[] | null;
 };
 
 function envVarsDictToList(
@@ -50,6 +55,11 @@ function componentsDictToList(
   return Object.entries(dict).map(([name, block]) => ({
     name,
     envVars: envVarsDictToList(block?.env_vars),
+    // Container overrides (014). Carry the persisted lists through unchanged;
+    // `null`/absent stays absent so a full-replacement write omits the field
+    // (omit = clear, never `[]`).
+    command: block?.command ?? undefined,
+    args: block?.args ?? undefined,
   }));
 }
 

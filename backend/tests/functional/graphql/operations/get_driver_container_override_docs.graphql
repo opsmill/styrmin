@@ -1,0 +1,16 @@
+query GetDriverContainerOverrideDocs($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        id
+        versions {
+            id
+            version
+            containerOverrides {
+                component
+                description
+                container
+                command
+                args
+            }
+        }
+    }
+}

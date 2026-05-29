@@ -10,6 +10,27 @@ RECONCILE_TIMEOUT_SECONDS = 480.0
 RECONCILE_POLL_INTERVAL = 3.0
 
 
+def container_command_args(
+    workload: Any, *, container_name: str | None = None
+) -> tuple[list[str] | None, list[str] | None]:
+    """Return ``(command, args)`` for a container in the rendered pod template.
+
+    Reads ``spec.template.spec.containers[*].{command,args}`` off a rendered
+    workload (the desired-state pod template). Returns the first container's
+    pair when ``container_name`` is ``None``, else the named container's.
+    Each element is ``None`` when the container does not set that field (the
+    image ENTRYPOINT/CMD applies) — used by the 014 container-override E2E to
+    assert overrides land on (or fall back from) the container spec.
+    """
+    containers = workload.spec.template.spec.containers or []
+    for container in containers:
+        if container_name is None or container.name == container_name:
+            command = list(container.command) if container.command else None
+            args = list(container.args) if container.args else None
+            return command, args
+    return None, None
+
+
 async def _wait_for_pod_template(
     vcluster: dict,
     *,
