@@ -2,20 +2,23 @@
 ``ApplicationHelmReleaseBuilder.render_value_template`` (014-component-container-overrides).
 
 Mirrors ``test_render_value_template_env_vars.py`` but verifies the
-**omit-marker** contract (research.md D8): the ``component_command`` /
-``component_args`` Jinja filters return the resolved list when set, or
-**``None``** (never ``[]``) when unset, so the canonical
-``{%- if _x is not none %}`` driver guard omits the key entirely and the chart
-default flows through.
+**empty-list-marker** contract (ADR-045 §2): the ``component_command`` /
+``component_args`` Jinja filters return the resolved list when set, or **``[]``**
+(never ``None``) when unset. The driver template emits the key unconditionally
+and the chart's ``{{- with }}`` guard treats ``[]`` as falsy so the chart/image
+default flows through. The always-present key (empty-list marker, not an omitted
+key) is what lets a *cleared* override propagate under the operator's RFC 7386
+JSON merge-patch HelmRelease apply.
 
 Test cases (contracts/jinja-filters.md §Unit tests):
 
 1. Both set → both keys rendered.
-2. ``command`` set, ``args`` unset → ``command:`` emitted, ``args:`` key
-   **absent** (chart default flows through). [US2 Sc.2]
-3. Neither set → neither key emitted, no ``UndefinedError``.
+2. ``command`` set, ``args`` unset → ``command:`` is the list, ``args:`` is
+   ``[]`` (present-but-empty; the chart's ``{{- with }}`` guard skips it so the
+   chart default flows through). [US2 Sc.2]
+3. Neither set → both keys present as ``[]``, no ``UndefinedError``.
 4. Empty-string element ``["sh", "-c", ""]`` rendered verbatim. [US4 Sc.4]
-5. Filters return ``None`` (not ``[]``) for absent component / missing block.
+5. Filters return ``[]`` (not ``None``) for absent component / missing block.
 """
 
 from __future__ import annotations

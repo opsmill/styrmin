@@ -40,6 +40,7 @@ class ComponentConfigBlock(BaseModel):
 - Empty-string elements (`""`) ARE accepted (FR-006, US4 Sc.4).
 - A present list MUST be non-empty; `[]` is rejected with the per-field typed error (FR-006, US4 Sc.2).
 - "Clear" is `None` / field omission — NOT `[]` (FR-007).
+- A present list is bounded by a per-list element-count cap (1024) and serialised UTF-8 byte cap (256 KiB) → else `CONTAINER_OVERRIDE_SIZE_LIMIT_EXCEEDED`. Mirrors the env-vars caps; there is no separate post-merge cap because container overrides do not layer/merge (the input list IS the resolved value).
 - Values are passed through verbatim; no templating/expansion (FR-014).
 
 **`DeploymentConfig.components`** is unchanged in shape: `dict[str, ComponentConfigBlock] | None`. A block targeting a component the pinned driver does not declare is rejected on write (§5) and surfaced as orphaned on read (§4).
@@ -184,6 +185,7 @@ def validate_container_override(field: Literal["command", "args"], value: list[s
 | `["serve"]`, `["sh","-c",""]` | OK (empty-string element accepted) |
 | `[]` | `INVALID_CONTAINER_{COMMAND,ARGS}` |
 | `[123]`, `["ok", 5]` | `INVALID_CONTAINER_{COMMAND,ARGS}` (non-string element) |
+| `>1024` elements, or `>256 KiB` serialised | `CONTAINER_OVERRIDE_SIZE_LIMIT_EXCEEDED` |
 
 ---
 

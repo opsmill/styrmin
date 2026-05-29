@@ -174,7 +174,7 @@ input ComponentConfigInput {
   envVars: [EnvVarInput!] = null
 
   """
-  Container entrypoint override for this component, scoped to this deployment. A non-empty list of strings; an empty list raises ``INVALID_CONTAINER_COMMAND``. ``null``/omitted leaves the persisted value untouched (clear by submitting the component block without it under full-replacement). Passed through verbatim — no templating.
+  Container entrypoint override for this component, scoped to this deployment. A non-empty list of strings; an empty list raises ``INVALID_CONTAINER_COMMAND``. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart/image default flows through) — clearing is never an empty list. Passed through verbatim — no templating.
   """
   command: [String!] = null
 

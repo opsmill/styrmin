@@ -1,6 +1,6 @@
 from typing import Any, ItemsView, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from .config import SchedulingConfig
 
@@ -101,6 +101,26 @@ class ResolvedComponentContainerOverride(BaseModel):
     command: list[str] | None = None
     args: list[str] | None = None
     is_orphaned: bool = False
+
+    @model_validator(mode="after")
+    def _reject_empty_lists(self) -> "ResolvedComponentContainerOverride":
+        """Reject the empty-list state so it can never reach the renderer.
+
+        ``[]`` is an invalid value upstream (the write boundary and
+        ``validate_container_override`` reject it; "clear" is ``None``/omit,
+        not ``[]`` — FR-007). Enforcing the same invariant here makes "no
+        empty list" local to this type instead of relying on every caller, so
+        the resolver's ``not block.command`` and the context populator's
+        ``command is None`` emptiness checks are provably equivalent, and a
+        future direct-construction caller cannot smuggle an ``[]`` past them.
+        """
+        for slot in ("command", "args"):
+            if getattr(self, slot) == []:
+                raise ValueError(
+                    f"{slot} must be a non-empty list or None, never [] "
+                    "(clear is None/omit, not [])"
+                )
+        return self
 
 
 class ComponentContext(BaseModel):

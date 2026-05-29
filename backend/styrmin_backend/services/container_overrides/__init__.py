@@ -10,15 +10,19 @@ the component-scope-only contract (FR-003):
   per-key. ``command``/``args`` have no broader scope — the resolved value is
   simply the component block's value or "unset". Resolution is a direct lookup,
   not a merge (research.md D2).
-* **Omit-marker filter.** The driver-consumption filters return the list **or
-  ``None``** (never ``[]``), because ``[]`` is a meaningful Kubernetes value
-  distinct from "unset"; the driver template guards with a conditional so the
-  chart default flows through when unset (research.md D8).
+* **Empty-list marker.** The driver-consumption filters return the list **or
+  ``[]``** (never ``None``) and the driver template emits the key
+  unconditionally; the chart's ``{{- with }}`` guard treats ``[]`` as falsy so
+  the chart/image default flows through when unset. The empty-list marker (not
+  an omitted key) is required so that *clearing* an override propagates under
+  the operator's RFC 7386 JSON merge-patch HelmRelease apply — an omitted key
+  would leave the previously-set value in place (ADR-045 §2).
 
 Modules:
 
 * :mod:`validator` — :func:`validate_container_override` (non-empty
-  list-of-string, empty-string elements accepted, ``[]`` rejected).
+  list-of-string, empty-string elements accepted, ``[]`` rejected, per-list
+  size caps).
 * :mod:`resolver` — :class:`ContainerOverridesResolver` (per-component direct
   lookup plus orphan detection; no merge).
 * :mod:`exceptions` — :class:`~styrmin_backend.services.exceptions.ServiceError`
@@ -31,6 +35,7 @@ divergences from ADR-013.
 """
 
 from styrmin_backend.services.container_overrides.exceptions import (
+    ContainerOverrideSizeLimitExceededError,
     InvalidContainerArgsError,
     InvalidContainerCommandError,
     UnknownComponentContainerOverrideError,
@@ -44,6 +49,7 @@ from styrmin_backend.services.container_overrides.validator import (
 )
 
 __all__ = [
+    "ContainerOverrideSizeLimitExceededError",
     "ContainerOverridesResolver",
     "InvalidContainerArgsError",
     "InvalidContainerCommandError",

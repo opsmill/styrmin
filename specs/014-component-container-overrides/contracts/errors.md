@@ -9,6 +9,7 @@ All inherit `ServiceError` (carry `error_code` + `default_message`) and surface 
 | `InvalidContainerCommandError` | `INVALID_CONTAINER_COMMAND` | `command` is `[]`, or contains a non-string element | `component_name`, offending detail | FR-006, US4 Sc.2/Sc.3 |
 | `InvalidContainerArgsError` | `INVALID_CONTAINER_ARGS` | `args` is `[]`, or contains a non-string element | `component_name`, offending detail | FR-006, US4 Sc.2/Sc.3 |
 | `UnknownComponentContainerOverrideError` | `UNKNOWN_COMPONENT_CONTAINER_OVERRIDE` | a `command`/`args` block targets a component the pinned driver version does not declare | `component_name`, `known_components` (sorted) | FR-004, US4 Sc.1 |
+| `ContainerOverrideSizeLimitExceededError` | `CONTAINER_OVERRIDE_SIZE_LIMIT_EXCEEDED` | a `command`/`args` list exceeds the per-list element-count cap (1024) or serialised-byte cap (256 KiB) | `field`, `component_name`, `elements`/`bytes`, `cap` | mirrors env-vars FR-008 (keeps the deployment CRD under the Kubernetes resource size limit) |
 
 **Reused, unchanged**:
 
