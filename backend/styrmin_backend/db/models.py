@@ -217,7 +217,6 @@ class Action(StyrminModel, table=True):
 
 class Utility(StyrminModel, table=True):
     kind: str
-    resource_template: str = Field(default="")
 
 
 class ComponentConfig(StyrminModel, table=True):

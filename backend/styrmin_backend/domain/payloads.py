@@ -15,13 +15,6 @@ class UtilityKind(str, Enum):
     SERVICE_DISCOVERY = "service-discovery"
 
 
-class Utility(BaseModel):
-    """Utility model."""
-
-    kind: UtilityKind
-    values_template_file: str
-
-
 class HelmChartPayload(BaseModel):
     """Helm chart payload model."""
 
