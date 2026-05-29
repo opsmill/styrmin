@@ -133,8 +133,9 @@ and accepts empty-string elements. Note that for the **typed**
 
 - **Resolution stays trivial.** A direct O(components) dict lookup at render
   time; no merge, no provenance, negligible cost.
-- **Drivers gain a precise, safe opt-in.** The `if … is not none` guard is the
-  one thing a driver author must remember; the simple-app reference and the
+- **Drivers gain a precise, safe opt-in.** The chart's `{{- with }}` guard
+  (which skips the empty-list marker) is the one thing a driver author must
+  remember; the simple-app reference and the
   [driver consumption guide](../guides/driver-container-override-consumption.md)
   document the canonical shape.
 - **Env-vars behaviour is unchanged.** The parallel `services/container_overrides/`

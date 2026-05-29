@@ -17,19 +17,33 @@ Rules (data-model.md §6):
   value — clearing is null/omit, never ``[]`` — FR-007).
 * Empty-string elements (``["sh", "-c", ""]``) ARE accepted (FR-006, mirrors
   Kubernetes).
+* A present list is bounded by a per-list element-count cap and a serialised
+  UTF-8 byte cap (mirrors the env-vars caps) so a pathological override cannot
+  bloat the deployment CRD past the Kubernetes resource size limit. There is
+  no layering/merge for container overrides, so the input list IS the resolved
+  value — this single input-time cap is sufficient (no separate post-merge
+  cap, unlike env-vars).
 * Values pass through verbatim — no templating/expansion (FR-014).
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from styrmin_backend.services.container_overrides.exceptions import (
+    ContainerOverrideSizeLimitExceededError,
     InvalidContainerArgsError,
     InvalidContainerCommandError,
 )
 
 ContainerOverrideField = Literal["command", "args"]
+
+# Per-list size caps. The 256 KiB byte ceiling reuses the env-vars per-scope
+# cap (``PER_SCOPE_BYTE_CAP``) so ``command`` + ``args`` together stay well
+# under the Kubernetes 1.5 MiB resource size limit; the element cap guards
+# against a pathological token list inflating the CRD.
+CONTAINER_OVERRIDE_MAX_ELEMENTS: int = 1024
+CONTAINER_OVERRIDE_BYTE_CAP: int = 256 * 1024  # 262144
 
 
 def _raise(
@@ -44,7 +58,7 @@ def _raise(
 
 def validate_container_override(
     field: ContainerOverrideField,
-    value: list[str] | None,
+    value: Any,
     component_name: str | None = None,
 ) -> list[str] | None:
     """Validate a single ``command``/``args`` override list.
@@ -52,10 +66,18 @@ def validate_container_override(
     Returns the value unchanged on success (``None`` passes straight through as
     "unset"). Raises :class:`InvalidContainerCommandError` or
     :class:`InvalidContainerArgsError` — chosen by ``field`` — on any shape
-    violation, so the offending field is unambiguous in the error
+    violation, and :class:`ContainerOverrideSizeLimitExceededError` when a cap
+    is exceeded, so the offending field is unambiguous in the error
     (US4 Scenario 3). ``component_name`` is threaded into the error metadata
     when the caller knows it (the mutation boundary does; the Pydantic field
     validator does not).
+
+    Accepts ``value: Any`` because it runs as a Pydantic ``mode="before"``
+    field validator (so it sees the raw, un-coerced input and rejects a
+    non-list / non-string element with the typed error rather than letting
+    Pydantic's ``list[str]`` coercion fail first into a generic
+    ``ValidationError``) as well as a pre-Pydantic dict check at the mutation
+    boundary.
     """
     if value is None:
         return None
@@ -82,4 +104,21 @@ def validate_container_override(
                 component_name,
                 f"every element must be a string; got {type(element).__name__}",
             )
+    # Size caps — every element is now known to be a ``str`` so ``.encode`` is
+    # safe. Element-count first (cheap), then the serialised-byte budget.
+    if len(value) > CONTAINER_OVERRIDE_MAX_ELEMENTS:
+        raise ContainerOverrideSizeLimitExceededError(
+            field=field,
+            component_name=component_name,
+            elements=len(value),
+            cap=CONTAINER_OVERRIDE_MAX_ELEMENTS,
+        )
+    total_bytes = sum(len(element.encode("utf-8")) for element in value)
+    if total_bytes > CONTAINER_OVERRIDE_BYTE_CAP:
+        raise ContainerOverrideSizeLimitExceededError(
+            field=field,
+            component_name=component_name,
+            bytes=total_bytes,
+            cap=CONTAINER_OVERRIDE_BYTE_CAP,
+        )
     return value

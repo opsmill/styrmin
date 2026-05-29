@@ -1,5 +1,5 @@
 import re
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -510,18 +510,27 @@ class ComponentConfigBlock(BaseModel):
 
         return validate_env_vars_dict("component", v)
 
-    @field_validator("command")
+    # ``mode="before"`` so the validator sees the raw, un-coerced value: a
+    # non-list or non-string element raises the typed
+    # ``InvalidContainerCommandError`` / ``InvalidContainerArgsError`` directly
+    # (a ``ServiceError``, which Pydantic v2 propagates un-wrapped) instead of
+    # Pydantic's ``list[str]`` coercion failing first into a generic
+    # ``ValidationError``. This keeps the typed ``extensions.code`` intact on
+    # every path that builds the model — including read/CRD-sourced resolution
+    # that bypasses the mutation-boundary pre-validator (symmetry with the
+    # write path).
+    @field_validator("command", mode="before")
     @classmethod
-    def _validate_command(cls, v: list[str] | None) -> list[str] | None:
+    def _validate_command(cls, v: Any) -> Any:
         from styrmin_backend.services.container_overrides.validator import (
             validate_container_override,
         )
 
         return validate_container_override("command", v)
 
-    @field_validator("args")
+    @field_validator("args", mode="before")
     @classmethod
-    def _validate_args(cls, v: list[str] | None) -> list[str] | None:
+    def _validate_args(cls, v: Any) -> Any:
         from styrmin_backend.services.container_overrides.validator import (
             validate_container_override,
         )
@@ -542,9 +551,13 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
             environment scope per FR-002 deepest-wins precedence.
         components (dict[str, ComponentConfigBlock] | None): Per-component
             override blocks keyed by component name (US3). Each block carries
-            the component-scope ``env_vars`` dict. Component names that do
-            not match a driver-declared component are rejected at the service
-            boundary with ``UnknownComponentEnvVarError`` (FR-010).
+            the component-scope ``env_vars`` dict plus the component-scope
+            container ``command``/``args`` overrides
+            (014-component-container-overrides). Component names that do not
+            match a driver-declared component are rejected at the service
+            boundary with ``UnknownComponentEnvVarError`` (env-var block) or
+            ``UnknownComponentContainerOverrideError`` (command/args block,
+            FR-004).
     """
 
     model_config = ConfigDict(extra="forbid")

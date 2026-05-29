@@ -94,9 +94,9 @@ class ComponentConfigInput:
         description=(
             "Container entrypoint override for this component, scoped to this "
             "deployment. A non-empty list of strings; an empty list raises "
-            "``INVALID_CONTAINER_COMMAND``. ``null``/omitted leaves the "
-            "persisted value untouched (clear by submitting the component "
-            "block without it under full-replacement). Passed through "
+            "``INVALID_CONTAINER_COMMAND``. Under full-replacement semantics "
+            "``null``/omitting it CLEARS the override (the chart/image default "
+            "flows through) — clearing is never an empty list. Passed through "
             "verbatim — no templating."
         ),
     )
@@ -275,11 +275,11 @@ def update_deployment_input_to_dict(input: UpdateDeploymentInput) -> dict[str, A
     * ``parameters`` — list of ``{name, value}`` → ``dict[str, Any]``
       with duplicate-name detection raising
       :class:`DuplicateParameterNameError`.
-    * ``components`` — list of ``{name, env_vars?}`` →
+    * ``components`` — list of ``{name, env_vars?, command?, args?}`` →
       ``dict[str, dict]`` with duplicate-name detection raising
       :class:`DuplicateComponentNameError`. Each component's
       ``env_vars`` sub-list is flattened recursively with scope
-      ``f"component:{name}"``.
+      ``f"component:{name}"``; ``command``/``args`` pass through verbatim.
     * ``service_name_overrides`` — list of
       ``{driver_service_name, override_name}`` →
       ``dict[str, str]`` keyed on ``driver_service_name``.

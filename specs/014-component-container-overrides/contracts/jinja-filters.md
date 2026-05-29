@@ -80,7 +80,7 @@ args:
 `backend/tests/unit/agent/test_render_value_template_container_overrides.py` (mirrors `test_render_value_template_env_vars.py`):
 
 - Both set → both rendered.
-- `command` set, `args` unset → `command:` emitted, `args:` key **absent** (chart default flows through).
-- Neither set → neither key emitted, no `UndefinedError`.
+- `command` set, `args` unset → `command:` is the list, `args:` is `[]` (present-but-empty; the chart's `{{- with }}` guard skips it so the chart default flows through).
+- Neither set → both keys present as `[]`, no `UndefinedError`.
 - Empty-string element (`["sh","-c",""]`) → rendered verbatim.
-- Filter returns `None` (not `[]`) for absent component / missing block.
+- Filter returns `[]` (not `None`) for absent component / missing block.

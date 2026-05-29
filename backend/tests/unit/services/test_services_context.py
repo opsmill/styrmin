@@ -29,7 +29,10 @@ from styrmin_backend.context.models.contexts import (
 from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
 from styrmin_backend.context.models.services import ServiceReference
 from styrmin_backend.services import context as context_service
-from styrmin_backend.services.context import _populate_component_scheduling
+from styrmin_backend.services.context import (
+    _populate_component_container_overrides,
+    _populate_component_scheduling,
+)
 
 
 class TestServiceReference:
@@ -211,3 +214,57 @@ class TestPopulateComponentScheduling:
         assert scheduling.config.resources is not None
         assert scheduling.provenance["runtime_class"] == "environment"
         assert scheduling.provenance["resources.requests.cpu"] == "deployment"
+
+
+class TestPopulateComponentContainerOverrides:
+    """FR-005: container overrides reach the renderer via
+    ``context.components[*].container_override``, and an orphaned block (whose
+    component the current driver no longer declares) is NEVER attached to a
+    live component context — it exists only for the GraphQL read surface and
+    must not inject a stale command/args into any pod.
+    """
+
+    def test_live_override_attached(self) -> None:
+        context = _make_context_with_component("server")
+        _populate_component_container_overrides(
+            context=context,
+            deployment_config={"components": {"server": {"command": ["serve"]}}},
+        )
+        assert context.components is not None
+        override = context.components.root["server"].container_override
+        assert override is not None
+        assert override.command == ["serve"]
+        assert override.args is None
+        assert override.is_orphaned is False
+
+    def test_orphan_block_never_attached_to_any_component(self) -> None:
+        context = _make_context_with_component("server")
+        _populate_component_container_overrides(
+            context=context,
+            deployment_config={
+                "components": {
+                    "server": {"command": ["serve"]},
+                    # ``ghost`` is not declared by the (single-"server") driver
+                    # so it resolves as an orphan.
+                    "ghost": {"command": ["ghost-cmd"], "args": ["--orphan"]},
+                }
+            },
+        )
+        assert context.components is not None
+        # The orphaned component is not materialised as a live context...
+        assert "ghost" not in context.components.root
+        # ...and its values never leak onto the live component.
+        live = context.components.root["server"].container_override
+        assert live is not None
+        assert live.command == ["serve"]
+        assert "ghost-cmd" not in (live.command or [])
+        assert "--orphan" not in (live.args or [])
+
+    def test_block_with_no_command_or_args_leaves_override_none(self) -> None:
+        context = _make_context_with_component("server")
+        _populate_component_container_overrides(
+            context=context,
+            deployment_config={"components": {"server": {"env_vars": {"X": "1"}}}},
+        )
+        assert context.components is not None
+        assert context.components.root["server"].container_override is None
