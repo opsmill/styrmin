@@ -206,3 +206,58 @@ async def test_delete_deployment_restoring_raises_typed_error(client: StyrminCli
 
     with pytest.raises(DeploymentRestoringError, match="restore is in progress"):
         await client.deployments.delete("11111111-2222-3333-4444-555555555555")
+
+
+# ---------------------------------------------------------------------------
+# list (deployments-by-environment; backs the styrminctl deployment lookup)
+# ---------------------------------------------------------------------------
+
+
+async def test_list_deployments_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {
+        "data": {
+            "environment": {
+                "deployments": [
+                    {
+                        "id": "11111111-2222-3333-4444-555555555555",
+                        "name": "demo",
+                        "status": "deployed",
+                        "applicationInstance": {
+                            "id": "33333333-4444-5555-6666-777777777777",
+                            "status": "running",
+                        },
+                    },
+                    {
+                        "id": "99999999-8888-7777-6666-555555555555",
+                        "name": "idle",
+                        "status": "pending",
+                        "applicationInstance": None,
+                    },
+                ]
+            }
+        }
+    }
+
+    deployments = await client.deployments.list("22222222-3333-4444-5555-666666666666")
+
+    assert [d.name for d in deployments] == ["demo", "idle"]
+    assert deployments[0].application_instance is not None
+    assert str(deployments[0].application_instance.id) == "33333333-4444-5555-6666-777777777777"
+    assert deployments[1].application_instance is None
+
+    # Active instance excluded deleted deployments by default.
+    sent_variables = mock_transport.execute.await_args.args[1]
+    assert sent_variables == {
+        "environmentId": "22222222-3333-4444-5555-666666666666",
+        "includeDeleted": False,
+    }
+
+
+async def test_list_deployments_unknown_environment_returns_empty(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.return_value = {"data": {"environment": None}}
+
+    deployments = await client.deployments.list("22222222-3333-4444-5555-666666666666")
+
+    assert deployments == []

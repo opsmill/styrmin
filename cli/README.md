@@ -42,6 +42,36 @@ rejected with `INVALID_CONTAINER_COMMAND` / `INVALID_CONTAINER_ARGS`. An
 override targeting a component the driver does not declare is rejected with
 `UNKNOWN_COMPONENT_CONTAINER_OVERRIDE` before any redeploy.
 
+## Backups and restores
+
+Backups and restores act on a deployment's **active application instance**, so
+the `backups` commands take a **deployment** — by name or by `--id` — and
+resolve the active instance for you. A raw `--instance-id` escape hatch is kept
+for targeting a specific (non-active) instance.
+
+```bash
+# Back up a deployment's active instance (by name, by id, or a raw instance)
+uv run styrminctl backups create my-app
+uv run styrminctl backups create my-app --environment prod   # disambiguate a shared name
+uv run styrminctl backups create --id <deployment-id> --wait
+uv run styrminctl backups create --instance-id <instance-id> # escape hatch
+
+# List a deployment's backups
+uv run styrminctl backups list my-app
+
+# Restore a specific backup into a deployment (in-place). The target namespace
+# defaults to the deployment's namespace, so you usually don't pass it.
+uv run styrminctl backups restore <backup-id> --target-deployment my-app
+
+# Restore the most recent completed backup of a deployment, in-place
+uv run styrminctl backups restore --last --target-deployment my-app
+```
+
+Name lookups search every environment by default; pass `--environment` when the
+same deployment name exists in more than one. When you restore to a raw
+`--target-instance-id`, `--target-namespace` is required (there is no deployment
+to derive it from).
+
 ## Authentication
 
 `styrminctl` supports three credential flows. Pick one per environment.

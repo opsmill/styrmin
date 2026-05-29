@@ -1,0 +1,13 @@
+query ListDeployments($environmentId: UUID!, $includeDeleted: Boolean! = false) {
+    environment(environmentId: $environmentId) {
+        deployments(includeDeleted: $includeDeleted) {
+            id
+            name
+            status
+            applicationInstance {
+                id
+                status
+            }
+        }
+    }
+}

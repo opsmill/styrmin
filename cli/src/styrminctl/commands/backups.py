@@ -2,30 +2,61 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from cyclopts import App, Parameter
 
 from styrminctl import client
 from styrminctl.output import console, print_error, print_success, print_table, styrmin_error_handler
-from styrminctl.types import BackupId, InstanceId, MaxWait, OptionalInstanceId, PollInterval, RestoreId, validate_uuid
+from styrminctl.resolve import resolve_active_instance
+
+if TYPE_CHECKING:
+    from styrmin_sdk import StyrminClient
+from styrminctl.types import (
+    BackupId,
+    DeploymentName,
+    EnvironmentContextName,
+    InstanceIdOption,
+    MaxWait,
+    OptionalDeploymentId,
+    OptionalInstanceId,
+    PollInterval,
+    RestoreId,
+    TargetDeploymentId,
+    TargetDeploymentName,
+    validate_uuid,
+)
 
 backups_app = App(name="backups", help="Manage backups and restores.")
 
 
 @backups_app.command
 async def create(
-    instance_id: InstanceId,
+    deployment: DeploymentName = None,
     *,
+    id: OptionalDeploymentId = None,
+    environment: EnvironmentContextName = None,
+    instance_id: InstanceIdOption = None,
     name: Annotated[str | None, Parameter(help="Optional backup name.")] = None,
     wait: Annotated[bool, Parameter(help="Wait for backup to complete.")] = False,
     max_wait: MaxWait = 300,
     interval: PollInterval = 5,
 ) -> None:
-    """Create a backup of an application instance."""
+    """Create a backup of a deployment's active application instance.
+
+    Target the deployment by name (optionally with --environment), by --id, or
+    a specific instance with --instance-id.
+    """
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            backup = await sdk.backups.create_backup(instance_id=instance_id, name=name)
+            target = await resolve_active_instance(
+                sdk,
+                deployment_name=deployment,
+                deployment_id=id,
+                instance_id=instance_id,
+                environment=environment,
+            )
+            backup = await sdk.backups.create_backup(instance_id=target.instance_id, name=name)
 
             print_success(f"Backup '{backup.name}' created (id: {backup.id}, status: {backup.status})")
 
@@ -60,14 +91,28 @@ async def get(backup_id: BackupId) -> None:
 
 @backups_app.command(name="list")
 async def list_backups(
-    instance_id: InstanceId,
+    deployment: DeploymentName = None,
     *,
+    id: OptionalDeploymentId = None,
+    environment: EnvironmentContextName = None,
+    instance_id: InstanceIdOption = None,
     status: Annotated[str | None, Parameter(help="Filter by status.")] = None,
 ) -> None:
-    """List backups for an application instance."""
+    """List backups for a deployment's active application instance.
+
+    Target the deployment by name (optionally with --environment), by --id, or
+    a specific instance with --instance-id.
+    """
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            backups = await sdk.backups.list_backups(instance_id=instance_id, status=status)
+            target = await resolve_active_instance(
+                sdk,
+                deployment_name=deployment,
+                deployment_id=id,
+                instance_id=instance_id,
+                environment=environment,
+            )
+            backups = await sdk.backups.list_backups(instance_id=target.instance_id, status=status)
 
     if not backups:
         console.print("No backups found.")
@@ -97,6 +142,61 @@ async def delete(backup_id: BackupId) -> None:
     print_success(f"Backup '{backup_id}' deleted")
 
 
+async def _prepare_restore(
+    sdk: StyrminClient,
+    *,
+    backup_id: str | None,
+    target_deployment: str | None,
+    target_deployment_id: str | None,
+    target_instance_id: str | None,
+    environment: str | None,
+    target_namespace: str | None,
+    last: bool,
+) -> tuple[str, str, str | None]:
+    """Resolve the restore target, pick the backup for ``--last``, and derive the namespace.
+
+    Returns ``(backup_id, target_namespace, target_instance_id)`` ready for
+    ``create_restore``. Raises ``ValueError`` on any invalid combination.
+    """
+    target_selectors = [s for s in (target_deployment, target_deployment_id, target_instance_id) if s is not None]
+    if len(target_selectors) > 1:
+        raise ValueError("Provide only one of --target-deployment, --target-deployment-id, or --target-instance-id")
+
+    target = None
+    if target_selectors:
+        target = await resolve_active_instance(
+            sdk,
+            deployment_name=target_deployment,
+            deployment_id=target_deployment_id,
+            instance_id=target_instance_id,
+            environment=environment,
+        )
+    resolved_instance_id = target.instance_id if target else None
+
+    if last:
+        if resolved_instance_id is None:
+            raise ValueError(
+                "--last requires a target deployment (--target-deployment/--target-deployment-id) "
+                "or --target-instance-id"
+            )
+        backups_list = await sdk.backups.list_backups(instance_id=resolved_instance_id, status="completed")
+        if not backups_list:
+            raise ValueError(f"No completed backups found for instance {resolved_instance_id}")
+        backup_id = str(backups_list[0].id)
+        console.print(f"Selected latest completed backup: {backup_id}")
+
+    if backup_id is None:
+        raise ValueError("backup_id is required (or use --last with a target deployment/instance)")
+
+    if target_namespace is None:
+        if target is not None and target.deployment_id is not None:
+            target_namespace = f"styrmin-{target.deployment_id}"
+        else:
+            raise ValueError("--target-namespace is required when restoring to a raw --target-instance-id")
+
+    return backup_id, target_namespace, resolved_instance_id
+
+
 @backups_app.command
 async def restore(
     backup_id: Annotated[
@@ -104,41 +204,47 @@ async def restore(
         Parameter(help="UUID of the backup to restore (omit when using --last).", validator=validate_uuid),
     ] = None,
     *,
-    target_namespace: Annotated[str, Parameter(help="Target Kubernetes namespace.")],
+    target_deployment: TargetDeploymentName = None,
+    target_deployment_id: TargetDeploymentId = None,
     target_instance_id: OptionalInstanceId = None,
+    environment: EnvironmentContextName = None,
+    target_namespace: Annotated[
+        str | None,
+        Parameter(help="Target Kubernetes namespace (defaults to the target deployment's namespace)."),
+    ] = None,
     last: Annotated[
         bool,
-        Parameter(help="Restore the most recent completed backup of --target-instance-id (in-place)."),
+        Parameter(help="Restore the most recent completed backup of the target deployment/instance (in-place)."),
     ] = False,
     wait: Annotated[bool, Parameter(help="Wait for restore to complete.")] = False,
     max_wait: MaxWait = 300,
     interval: PollInterval = 5,
 ) -> None:
-    """Restore from a backup."""
+    """Restore from a backup.
+
+    Target an in-place restore by deployment name (with --environment), by
+    --target-deployment-id, or a specific instance with --target-instance-id.
+    """
     with styrmin_error_handler():
         if last and backup_id is not None:
             raise ValueError("Provide either a backup_id or --last, not both")
-        if last and target_instance_id is None:
-            raise ValueError("--last requires --target-instance-id")
-        if not last and backup_id is None:
-            raise ValueError("backup_id is required (or use --last with --target-instance-id)")
 
         async with client.get_client() as sdk:
-            if last and target_instance_id is not None:
-                backups_list = await sdk.backups.list_backups(instance_id=target_instance_id, status="completed")
-                if not backups_list:
-                    print_error(f"No completed backups found for instance {target_instance_id}")
-                    raise SystemExit(1)
-                backup_id = str(backups_list[0].id)
-                console.print(f"Selected latest completed backup: {backup_id}")
-
-            if backup_id is None:
-                raise ValueError("backup_id is required (or use --last with --target-instance-id)")
+            backup_id, target_namespace, resolved_instance_id = await _prepare_restore(
+                sdk,
+                backup_id=backup_id,
+                target_deployment=target_deployment,
+                target_deployment_id=target_deployment_id,
+                target_instance_id=target_instance_id,
+                environment=environment,
+                target_namespace=target_namespace,
+                last=last,
+            )
 
             rst = await sdk.backups.create_restore(
                 backup_id=backup_id,
                 target_namespace=target_namespace,
-                target_instance_id=target_instance_id,
+                target_instance_id=resolved_instance_id,
             )
 
             print_success(f"Restore '{rst.name}' created (id: {rst.id}, status: {rst.status})")

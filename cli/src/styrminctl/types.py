@@ -42,6 +42,10 @@ def validate_directory_exists(_type: Any, value: Any) -> None:  # noqa: ANN401
 
 ClusterName = Annotated[str | None, Parameter(help="Name of the cluster.")]
 EnvironmentName = Annotated[str | None, Parameter(help="Name of the environment.")]
+DeploymentName = Annotated[
+    str | None,
+    Parameter(help="Name of the deployment (resolves its active instance)."),
+]
 
 # --- Optional ID flags (--id for backward-compatible UUID access) ---
 
@@ -52,6 +56,32 @@ OptionalClusterId = Annotated[
 OptionalEnvironmentId = Annotated[
     str | None,
     Parameter(name="--id", help="UUID of the environment.", validator=validate_uuid),
+]
+OptionalDeploymentId = Annotated[
+    str | None,
+    Parameter(name="--id", help="UUID of the deployment (resolves its active instance).", validator=validate_uuid),
+]
+
+# --- Environment context flag (disambiguates a deployment name lookup) ---
+
+EnvironmentContextName = Annotated[
+    str | None,
+    Parameter(name="--environment", help="Environment name to disambiguate the deployment name."),
+]
+
+# --- Restore target deployment flags ---
+
+TargetDeploymentName = Annotated[
+    str | None,
+    Parameter(name="--target-deployment", help="Name of the target deployment (restore into its active instance)."),
+]
+TargetDeploymentId = Annotated[
+    str | None,
+    Parameter(
+        name="--target-deployment-id",
+        help="UUID of the target deployment (restore into its active instance).",
+        validator=validate_uuid,
+    ),
 ]
 
 # --- Cluster context flags for environment commands ---
@@ -82,6 +112,14 @@ InstanceId = Annotated[str, Parameter(help="UUID of the application instance.", 
 
 OptionalInstanceId = Annotated[
     str | None, Parameter(help="UUID of the target application instance.", validator=validate_uuid)
+]
+InstanceIdOption = Annotated[
+    str | None,
+    Parameter(
+        name="--instance-id",
+        help="UUID of a specific application instance (bypasses deployment resolution).",
+        validator=validate_uuid,
+    ),
 ]
 
 # --- Numeric type aliases ---
