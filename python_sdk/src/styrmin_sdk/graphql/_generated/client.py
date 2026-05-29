@@ -67,6 +67,7 @@ from .list_backup_schedules import ListBackupSchedules
 from .list_backup_storage_locations import ListBackupStorageLocations
 from .list_backups import ListBackups
 from .list_clusters import ListClusters
+from .list_deployments import ListDeployments
 from .list_environments import ListEnvironments
 from .list_groups import ListGroups
 from .list_restores import ListRestores
@@ -1413,6 +1414,34 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return ListClusters.model_validate(data)
+
+    async def list_deployments(
+        self, environment_id: UUID, include_deleted: bool, **kwargs: Any
+    ) -> ListDeployments:
+        query = gql("""
+            query ListDeployments($environmentId: UUID!, $includeDeleted: Boolean! = false) {
+              environment(environmentId: $environmentId) {
+                deployments(includeDeleted: $includeDeleted) {
+                  id
+                  name
+                  status
+                  applicationInstance {
+                    id
+                    status
+                  }
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {
+            "environmentId": environment_id,
+            "includeDeleted": include_deleted,
+        }
+        response = await self.execute(
+            query=query, operation_name="ListDeployments", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return ListDeployments.model_validate(data)
 
     async def list_environments(self, **kwargs: Any) -> ListEnvironments:
         query = gql("""

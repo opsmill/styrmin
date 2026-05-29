@@ -20,6 +20,10 @@ from styrmin_sdk.graphql._generated.get_deployment_timeline import (
     GetDeploymentTimeline,
     GetDeploymentTimelineDeploymentTimeline,
 )
+from styrmin_sdk.graphql._generated.list_deployments import (
+    ListDeployments,
+    ListDeploymentsEnvironmentDeployments,
+)
 from styrmin_sdk.graphql._generated.run_job import RunJob, RunJobRunJob
 from styrmin_sdk.graphql._generated.start_components import StartComponents, StartComponentsStartComponents
 from styrmin_sdk.graphql._generated.stop_components import StopComponents, StopComponentsStopComponents
@@ -79,6 +83,26 @@ class DeploymentResource(BaseResource):
         result = await self._transport.execute(load_query("get_deployment"), {"deploymentId": str(deployment_id)})
         self._check_graphql_errors(result)
         return self._parse(GetDeployment, result["data"], "deployment", GetDeploymentDeployment)
+
+    async def list(
+        self,
+        environment_id: str | UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> list[ListDeploymentsEnvironmentDeployments]:
+        """List the deployments belonging to an environment.
+
+        Each entry carries the deployment's active application instance
+        (``application_instance``), or ``None`` when the deployment has no
+        active instance yet.
+        """
+        result = await self._transport.execute(
+            load_query("list_deployments"),
+            {"environmentId": str(environment_id), "includeDeleted": include_deleted},
+        )
+        self._check_graphql_errors(result)
+        validated = ListDeployments.model_validate(result["data"])
+        return validated.environment.deployments if validated.environment else []
 
     async def update(
         self,

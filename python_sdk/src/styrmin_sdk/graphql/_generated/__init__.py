@@ -192,6 +192,12 @@ from .list_backup_storage_locations import (
 )
 from .list_backups import ListBackups, ListBackupsBackups
 from .list_clusters import ListClusters, ListClustersClusters
+from .list_deployments import (
+    ListDeployments,
+    ListDeploymentsEnvironment,
+    ListDeploymentsEnvironmentDeployments,
+    ListDeploymentsEnvironmentDeploymentsApplicationInstance,
+)
 from .list_environments import (
     ListEnvironments,
     ListEnvironmentsEnvironments,
@@ -395,6 +401,10 @@ __all__ = [
     "ListBackupsBackups",
     "ListClusters",
     "ListClustersClusters",
+    "ListDeployments",
+    "ListDeploymentsEnvironment",
+    "ListDeploymentsEnvironmentDeployments",
+    "ListDeploymentsEnvironmentDeploymentsApplicationInstance",
     "ListEnvironments",
     "ListEnvironmentsEnvironments",
     "ListEnvironmentsEnvironmentsCluster",
