@@ -2723,6 +2723,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "argon2-cffi" },
+    { name = "cli" },
     { name = "coolname" },
     { name = "cyclopts" },
     { name = "deepdiff" },
@@ -2746,7 +2747,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "ariadne-codegen" },
-    { name = "cli" },
     { name = "infrahub-sdk" },
     { name = "invoke" },
     { name = "kr8s" },
@@ -2771,6 +2771,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.21.0" },
     { name = "argon2-cffi", specifier = ">=23.1.0" },
+    { name = "cli", editable = "cli" },
     { name = "coolname", specifier = ">=4.1.0" },
     { name = "cyclopts", specifier = ">=3.0.0" },
     { name = "deepdiff", specifier = ">=8.6.1" },
@@ -2794,7 +2795,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "ariadne-codegen", specifier = ">=0.14" },
-    { name = "cli", editable = "cli" },
     { name = "infrahub-sdk", specifier = ">=0.16" },
     { name = "invoke", specifier = ">=2.2.0" },
     { name = "kr8s", specifier = ">=0.20.15" },

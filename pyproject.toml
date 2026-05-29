@@ -8,6 +8,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aiosqlite>=0.21.0",
     "styrmin-backend",
+    "cli",
     "fast-depends>=2.4.12",
     "fastapi[standard]>=0.119.0",
     "gunicorn>=23.0.0",
@@ -32,7 +33,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "styrmin-sdk",
-    "cli",
     "infrahub-sdk>=0.16",
     "invoke>=2.2.0",
     "kr8s>=0.20.15",
