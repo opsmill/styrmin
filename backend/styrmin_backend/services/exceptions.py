@@ -360,6 +360,18 @@ class AmbiguousIdentifierError(ServiceError):
     default_message = "Provide either an ID or a name, not both"
 
 
+class InvalidDeploymentLookupArgsError(ServiceError):
+    """The deployment(...) query was called with an invalid argument
+    combination.
+
+    Exactly one of ``deploymentId`` (alone) or ``name`` + ``environmentId``
+    (together) must be provided.
+    """
+
+    error_code = "INVALID_DEPLOYMENT_LOOKUP_ARGS"
+    default_message = "specify either deploymentId or (name + environmentId), not both"
+
+
 class BackupStorageLocationNotFoundError(ServiceError):
     """The backup storage location was not found."""
 

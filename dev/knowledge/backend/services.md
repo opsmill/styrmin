@@ -184,8 +184,8 @@ Orchestrates application deployments.
 |----------|-------------|
 | `deploy_application(name, version, environment_id, config, uow)` | Deploy an application |
 | `get_deployment(deployment_id, uow)` | Get deployment by ID |
-| `update_deployment(deployment_id, config, uow)` | Update deployment configuration |
-| `update_deployment_version(deployment_id, version, uow)` | Change application version |
+| `update_deployment(deployment_id, config, uow)` | Update deployment configuration. Returns `Task \| None` — a no-op update (resolved desired state equals the current instance) returns `None` with no new instance and no reconcile dispatched. |
+| `update_deployment_version(deployment_id, version, uow)` | Change application version. Returns `Task \| None` — requesting the current version is a no-op (`None`, no instance, no reconcile). |
 | `redeploy_for_environment_update(deployment, uow)` | Per-deployment redeploy helper used by the env-config fanout (009). Regenerates the active instance against the deployment's currently-bound driver and dispatches a Task; does NOT change `application_version`, `parameters`, or `service_name_overrides`. |
 | `refresh_deployment(deployment_id, uow)` | Re-reconcile deployment state |
 | `delete_deployment(deployment_id, uow)` | Request platform-driven teardown — see lifecycle below |

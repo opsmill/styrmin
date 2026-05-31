@@ -1,0 +1,13 @@
+query GetDeploymentWithBothArgs(
+    $deploymentId: UUID!
+    $name: String!
+    $environmentId: UUID!
+) {
+    deployment(
+        deploymentId: $deploymentId
+        name: $name
+        environmentId: $environmentId
+    ) {
+        id
+    }
+}

@@ -324,6 +324,40 @@ export type Deployment = {
   status: Scalars['String']['output'];
 };
 
+/** Typed deployment-configuration payload shared by the ``deploy`` (create) and ``updateDeployment`` mutations. Mirrors the source-of-truth ``DeploymentConfig`` Pydantic model field-for-field so both mutations accept an identical config shape. */
+export type DeploymentConfigInput = {
+  /** Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block. */
+  components?: InputMaybe<Array<ComponentConfigInput>>;
+  /** Default database size hint applied to managed-database components in this deployment. */
+  dbSize?: InputMaybe<Scalars['String']['input']>;
+  /** Dedicated per-environment ingress controller configuration for this deployment. */
+  dedicatedIngress?: InputMaybe<DedicatedIngressInput>;
+  /** Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload. */
+  envVars?: InputMaybe<Array<EnvVarInput>>;
+  /** Endpoint source type used by external-DNS when publishing records for services in this deployment. */
+  externalDnsEndpointsType?: InputMaybe<ExternalDnsEndpointsType>;
+  /** Port used when constructing external URLs for services in this deployment. Pydantic enforces ``1 <= port <= 65535`` at validation time. */
+  externalUrlPort?: InputMaybe<Scalars['Int']['input']>;
+  /** URL scheme (``http`` or ``https``) used when constructing external URLs for services in this deployment. */
+  externalUrlScheme?: InputMaybe<ExternalUrlScheme>;
+  /** Fast storage configuration (Kubernetes ``StorageClass`` for the fast / NVMe tier) used by this deployment. */
+  fastStorage?: InputMaybe<FastStorageInput>;
+  /** Suffix appended to the auto-derived FQDN for every service in this deployment. */
+  fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
+  /** Name of the IngressClass used by services in this deployment. */
+  ingressClass?: InputMaybe<Scalars['String']['input']>;
+  /** CIDR allowlist applied at the ingress layer. An empty list explicitly clears the persisted allowlist. */
+  ipWhitelist?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Node-selector expression applied to pods in this deployment. */
+  nodeSelector?: InputMaybe<Scalars['String']['input']>;
+  /** Kubernetes RuntimeClass name applied to pods in this deployment. */
+  runtimeClass?: InputMaybe<Scalars['String']['input']>;
+  /** Hierarchical pod scheduling & resource configuration (affinities, tolerations, topology spread, resource requests/limits, runtime class, post-render injection opt-outs). */
+  scheduling?: InputMaybe<SchedulingInput>;
+  /** Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment. */
+  standardStorage?: InputMaybe<StandardStorageInput>;
+};
+
 export type DeploymentPodStatusReport = {
   deploymentId: Scalars['UUID']['input'];
   pods: Array<PodStatusInput>;
@@ -679,13 +713,13 @@ export type MutationDeleteUserArgs = {
 export type MutationDeployArgs = {
   clusterId?: InputMaybe<Scalars['UUID']['input']>;
   clusterName?: InputMaybe<Scalars['String']['input']>;
-  config?: InputMaybe<Scalars['JSON']['input']>;
+  config?: InputMaybe<DeploymentConfigInput>;
   driver: Scalars['String']['input'];
   driverVersionId?: InputMaybe<Scalars['UUID']['input']>;
   environmentId?: InputMaybe<Scalars['UUID']['input']>;
   environmentName?: InputMaybe<Scalars['String']['input']>;
   name?: InputMaybe<Scalars['String']['input']>;
-  parameters?: InputMaybe<Scalars['JSON']['input']>;
+  parameters?: InputMaybe<Array<ParameterValueInput>>;
   serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride>>;
   version?: InputMaybe<Scalars['String']['input']>;
 };
@@ -935,7 +969,9 @@ export type QueryClusterArgs = {
 
 
 export type QueryDeploymentArgs = {
-  deploymentId: Scalars['UUID']['input'];
+  deploymentId?: InputMaybe<Scalars['UUID']['input']>;
+  environmentId?: InputMaybe<Scalars['UUID']['input']>;
+  name?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1145,7 +1181,7 @@ export type TopologySpreadConstraintInput = {
   whenUnsatisfiable: WhenUnsatisfiable;
 };
 
-/** Full-replacement input for the ``updateDeployment`` mutation. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive). */
+/** Full-replacement input for the ``updateDeployment`` mutation. Inherits every config field from ``DeploymentConfigInput`` (shared with the ``deploy`` create mutation) and adds the update-only ``name`` / ``parameters`` / ``serviceNameOverrides`` fields. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive). */
 export type UpdateDeploymentInput = {
   /** Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block. */
   components?: InputMaybe<Array<ComponentConfigInput>>;
@@ -1153,7 +1189,7 @@ export type UpdateDeploymentInput = {
   dbSize?: InputMaybe<Scalars['String']['input']>;
   /** Dedicated per-environment ingress controller configuration for this deployment. */
   dedicatedIngress?: InputMaybe<DedicatedIngressInput>;
-  /** Deployment-scoped environment-variable overrides. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload. */
+  /** Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload. */
   envVars?: InputMaybe<Array<EnvVarInput>>;
   /** Endpoint source type used by external-DNS when publishing records for services in this deployment. */
   externalDnsEndpointsType?: InputMaybe<ExternalDnsEndpointsType>;
@@ -1356,8 +1392,8 @@ export type DeployMutationVariables = Exact<{
   driver: Scalars['String']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
   environmentId: Scalars['UUID']['input'];
-  config?: InputMaybe<Scalars['JSON']['input']>;
-  parameters?: InputMaybe<Scalars['JSON']['input']>;
+  config?: InputMaybe<DeploymentConfigInput>;
+  parameters?: InputMaybe<Array<ParameterValueInput> | ParameterValueInput>;
   serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride> | ServiceNameOverride>;
 }>;
 
@@ -1975,7 +2011,7 @@ export const useDeleteUserMutation = <
     )};
 
 export const DeployDocument = `
-    mutation Deploy($version: String, $driver: String!, $name: String, $environmentId: UUID!, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
+    mutation Deploy($version: String, $driver: String!, $name: String, $environmentId: UUID!, $config: DeploymentConfigInput, $parameters: [ParameterValueInput!], $serviceNameOverrides: [ServiceNameOverride!]) {
   deploy(
     version: $version
     driver: $driver

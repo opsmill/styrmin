@@ -89,7 +89,15 @@ export default function DeployFormPage() {
           version: value.applicationVersion || null,
           environmentId,
           parameters:
-            Object.keys(dynamicParams).length > 0 ? dynamicParams : null,
+            Object.keys(dynamicParams).length > 0
+              ? Object.entries(dynamicParams).map(([name, value]) => ({
+                  name,
+                  // The GraphQL `value` is the JSON scalar; parameter values
+                  // are scalars (string/int/bool) so cast through the scalar
+                  // input type the codegen expects.
+                  value: value as Record<string, unknown>,
+                }))
+              : null,
           serviceNameOverrides: overrides.length > 0 ? overrides : null,
         });
         queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });

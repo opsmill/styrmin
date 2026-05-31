@@ -116,6 +116,14 @@ _Avoid_: "soft-deleted row" (correct mechanism, wrong vocabulary in user-facing 
 The enum value on `Deployment.status`: `PENDING`, `DEPLOYING`, `RUNNING`, `RESTORING`, `FAILED`, `DELETING`, `DELETED`. Sole source of truth for the column is the **status reporter** mapping the **operator**'s `displayState`.
 _Avoid_: "deployment status" (use this for the _record_ `DeploymentStatus`, not the state value), "phase" (that is the operator's `.status.phase`).
 
+**Declarative deployment manifest**:
+A YAML document with `apiVersion: styrmin/v1` and `kind: Deployment` that describes the desired state of one **deployment** (`metadata.name`, `spec.driver`, `spec.version`, `spec.environment`, optional `spec.cluster`, `spec.config`, `spec.parameters`). The input format for **declarative apply**. A single file may contain multiple manifests separated by `---`. `config` and `parameters` are fully replaced on update, not deep-merged. Full schema in `specs/009-deployments-apply/contracts/manifest-schema.md`.
+_Avoid_: "deployment spec" (overloaded — `Deployment.spec` also refers to the cluster-side CR), "k8s manifest" (these are not Kubernetes objects), "yaml file".
+
+**Declarative apply**:
+The upsert operation exposed as `styrminctl deployments apply -f <path>` and the SDK's `DeploymentResource.apply_files(...)`. Resolves each **declarative deployment manifest** by `(name, environment)` identity, then creates if absent or updates if present (driver-disagreement fails with `DriverMismatchError`; driver changes require explicit delete-and-recreate). Continue-on-error within a batch; exits non-zero if any manifest failed. With `--wait`, blocks until each successfully submitted deployment reaches a terminal **reconciliation** state. Not a delete operation — manifests missing from a directory are not pruned.
+_Avoid_: "kubectl apply" (intentionally similar UX but not the same semantics — no pruning, no server-side merge), "deploy" (overloaded with the existing `deploy()` mutation, which is create-only).
+
 ### Instances — current (realised) state
 
 **Instance** (`ApplicationInstance`):

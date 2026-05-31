@@ -410,6 +410,13 @@ class FakeDeploymentRepository(DeploymentRepository):
             return d
         return None
 
+    async def find_one_by_name_and_environment(
+        self,
+        name: str,
+        environment_id: UUID,
+    ) -> DeploymentEntity | None:
+        return await self.get_by_name(name, environment_id, include_deleted=False)
+
     async def find_names_with_prefix(
         self,
         prefix: str,

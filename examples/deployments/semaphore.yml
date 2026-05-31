@@ -1,0 +1,18 @@
+---
+#
+# uv run styrminctl deployments apply -f examples/deployments/semaphore.yml --environment local
+#
+apiVersion: styrmin/v1
+kind: Deployment
+metadata:
+  name: ansible             # optional in manifest; required at resolve-time
+spec:
+  driver: semaphore
+  version: 2.16.47          # optional in manifest; required at resolve-time
+  config:
+    env_vars:
+      - name: MY_ENV
+        value: value02
+    service_name_overrides:
+      - driver_service_name: semaphore
+        override_name: ansible

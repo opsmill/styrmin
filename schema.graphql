@@ -339,6 +339,80 @@ type Deployment {
   createdByUsername: String
 }
 
+"""
+Typed deployment-configuration payload shared by the ``deploy`` (create) and ``updateDeployment`` mutations. Mirrors the source-of-truth ``DeploymentConfig`` Pydantic model field-for-field so both mutations accept an identical config shape.
+"""
+input DeploymentConfigInput {
+  """
+  Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block.
+  """
+  components: [ComponentConfigInput!] = null
+
+  """
+  Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.
+  """
+  envVars: [EnvVarInput!] = null
+
+  """
+  CIDR allowlist applied at the ingress layer. An empty list explicitly clears the persisted allowlist.
+  """
+  ipWhitelist: [String!] = null
+
+  """
+  Dedicated per-environment ingress controller configuration for this deployment.
+  """
+  dedicatedIngress: DedicatedIngressInput = null
+
+  """
+  Hierarchical pod scheduling & resource configuration (affinities, tolerations, topology spread, resource requests/limits, runtime class, post-render injection opt-outs).
+  """
+  scheduling: SchedulingInput = null
+
+  """
+  Suffix appended to the auto-derived FQDN for every service in this deployment.
+  """
+  fqdnSuffix: String = null
+
+  """
+  URL scheme (``http`` or ``https``) used when constructing external URLs for services in this deployment.
+  """
+  externalUrlScheme: ExternalUrlScheme = null
+
+  """
+  Port used when constructing external URLs for services in this deployment. Pydantic enforces ``1 <= port <= 65535`` at validation time.
+  """
+  externalUrlPort: Int = null
+
+  """
+  Endpoint source type used by external-DNS when publishing records for services in this deployment.
+  """
+  externalDnsEndpointsType: ExternalDnsEndpointsType = null
+
+  """Name of the IngressClass used by services in this deployment."""
+  ingressClass: String = null
+
+  """
+  Default database size hint applied to managed-database components in this deployment.
+  """
+  dbSize: String = null
+
+  """Kubernetes RuntimeClass name applied to pods in this deployment."""
+  runtimeClass: String = null
+
+  """Node-selector expression applied to pods in this deployment."""
+  nodeSelector: String = null
+
+  """
+  Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment.
+  """
+  standardStorage: StandardStorageInput = null
+
+  """
+  Fast storage configuration (Kubernetes ``StorageClass`` for the fast / NVMe tier) used by this deployment.
+  """
+  fastStorage: FastStorageInput = null
+}
+
 input DeploymentPodStatusReport {
   deploymentId: UUID!
   pods: [PodStatusInput!]!
@@ -557,7 +631,7 @@ type Mutation {
   unassignBackupStorageLocation(environmentId: UUID!): Environment @requiresRole
   loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion @requiresRole
   loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!): ApplicationDriverVersion @requiresRole
-  deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null, driverVersionId: UUID = null): Task @requiresRole
+  deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: DeploymentConfigInput = null, parameters: [ParameterValueInput!] = null, serviceNameOverrides: [ServiceNameOverride!] = null, driverVersionId: UUID = null): Task @requiresRole
   updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!): Task @requiresRole
   deleteDeployment(deploymentId: UUID!): Task! @requiresRole
   createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
@@ -657,7 +731,7 @@ type Query {
   tasks: [Task!]!
   environments: [Environment!]!
   environment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): Environment
-  deployment(deploymentId: UUID!): Deployment
+  deployment(deploymentId: UUID = null, name: String = null, environmentId: UUID = null): Deployment
   backup(backupId: UUID!): Backup
   backups(instanceId: UUID!, status: BackupStatus = null): [Backup!]!
   restore(restoreId: UUID!): Restore
@@ -819,29 +893,16 @@ input TopologySpreadConstraintInput {
 scalar UUID
 
 """
-Full-replacement input for the ``updateDeployment`` mutation. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive).
+Full-replacement input for the ``updateDeployment`` mutation. Inherits every config field from ``DeploymentConfigInput`` (shared with the ``deploy`` create mutation) and adds the update-only ``name`` / ``parameters`` / ``serviceNameOverrides`` fields. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive).
 """
 input UpdateDeploymentInput {
-  """New name for the deployment. Omitted means "do not rename"."""
-  name: String = null
-
-  """
-  Driver-defined parameter assignments. **Merge semantics** (asymmetric with the rest of this input): entries in the list merge on top of the persisted parameters dict, so existing keys not named in the input survive. Duplicate ``name`` entries within the list raise ``DUPLICATE_PARAMETER_NAME``.
-  """
-  parameters: [ParameterValueInput!] = null
-
-  """
-  Full-replacement list of service-name overrides applied at deploy time. Each entry maps a driver-declared service name to the operator-chosen override name.
-  """
-  serviceNameOverrides: [ServiceNameOverride!] = null
-
   """
   Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block.
   """
   components: [ComponentConfigInput!] = null
 
   """
-  Deployment-scoped environment-variable overrides. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.
+  Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.
   """
   envVars: [EnvVarInput!] = null
 
@@ -903,6 +964,19 @@ input UpdateDeploymentInput {
   Fast storage configuration (Kubernetes ``StorageClass`` for the fast / NVMe tier) used by this deployment.
   """
   fastStorage: FastStorageInput = null
+
+  """New name for the deployment. Omitted means "do not rename"."""
+  name: String = null
+
+  """
+  Driver-defined parameter assignments. **Merge semantics** (asymmetric with the rest of this input): entries in the list merge on top of the persisted parameters dict, so existing keys not named in the input survive. Duplicate ``name`` entries within the list raise ``DUPLICATE_PARAMETER_NAME``.
+  """
+  parameters: [ParameterValueInput!] = null
+
+  """
+  Full-replacement list of service-name overrides applied at deploy time. Each entry maps a driver-declared service name to the operator-chosen override name.
+  """
+  serviceNameOverrides: [ServiceNameOverride!] = null
 }
 
 """

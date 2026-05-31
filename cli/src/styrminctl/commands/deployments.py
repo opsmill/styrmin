@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Annotated
 
 from cyclopts import App, Parameter
+from styrmin_sdk.exceptions import ApplyError, BatchNameConflictError, StyrminError
 from styrmin_sdk.models import UpdateDeploymentInput
+from styrmin_sdk.models.deployment_manifest import ApplyEvent, ApplyOutcome, ApplyOverrides
 
 from styrminctl import client
 from styrminctl.labels import format_driver_version_label
 from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
 from styrminctl.types import ClusterContextId, ClusterContextName, DeploymentId, EnvironmentName, OptionalEnvironmentId
 
-deployments_app = App(name="deployments", help="Manage deployments.")
+# ``version_flags=()`` disables cyclopts's default ``--version`` meta-flag on
+# this sub-app so ``deployments apply --version <X>`` binds to the subcommand
+# parameter (which overrides spec.version in a manifest) instead of triggering
+# the parent App's version banner.
+deployments_app = App(name="deployments", help="Manage deployments.", version_flags=())
 
 
 @deployments_app.command
@@ -115,6 +123,9 @@ async def update(
         async with client.get_client() as sdk:
             task = await sdk.deployments.update(deployment_id, input=update_input)
 
+    if task is None:
+        print_success("Deployment already up to date; no changes applied.")
+        return
     print_success(f"Deployment update in progress (task: {task.id})")
     console.print(f"  Status: {task.status}")
 
@@ -138,6 +149,9 @@ async def update_version(
                 deployment_id, version=version, driver_version_id=driver_version_id
             )
 
+    if task is None:
+        print_success("Deployment already on the requested version; no changes applied.")
+        return
     print_success(f"Version update in progress (task: {task.id})")
     console.print(f"  Status: {task.status}")
 
@@ -198,3 +212,119 @@ async def context(deployment_id: DeploymentId) -> None:
             ctx = await sdk.deployments.get_context(deployment_id)
 
     console.print_json(data=ctx.context)
+
+
+# Per-request HTTP timeout for `apply`. Lower than the global default (30s)
+# so the command fails fast against an unreachable server instead of making
+# the operator wait out the full budget. Each ``--wait`` poll is an
+# individual request bounded by this value; the overall wait budget is the
+# SDK's separate ``WAIT_TIMEOUT_SECONDS``.
+_APPLY_REQUEST_TIMEOUT_SECONDS = 10.0
+
+
+def _failed_line(outcome: ApplyOutcome) -> str:
+    return f"failed {outcome.name}: {outcome.failure_reason or 'unknown error'}"
+
+
+def _format_outcome_line(outcome: ApplyOutcome) -> str:
+    if outcome.action == "failed":
+        return _failed_line(outcome)
+    return f"{outcome.action} {outcome.name}"
+
+
+def _format_wait_event_line(event: ApplyEvent) -> str | None:
+    """Translate a streaming ``ApplyEvent`` into the ``--wait`` two-line format.
+
+    Returns ``None`` if the event is a redundant ``terminal`` event for an
+    outcome that already failed at submission — that failure has already
+    been printed by the matching ``submitted`` event, so we suppress the
+    duplicate to keep the two-line cadence honest.
+    """
+    outcome = event.outcome
+    if event.type == "submitted":
+        if outcome.action == "failed":
+            return _failed_line(outcome)
+        # An ``unchanged`` outcome dispatched no mutation, so no ``terminal``
+        # event follows — report its final state on the submitted line.
+        if outcome.action == "unchanged":
+            return f"unchanged {outcome.name}"
+        return f"submitted {outcome.name}"
+    if outcome.action == "failed":
+        return _failed_line(outcome)
+    return f"running {outcome.name}"
+
+
+def _summary_line(outcomes: list[ApplyOutcome]) -> str:
+    created = sum(1 for o in outcomes if o.action == "created")
+    updated = sum(1 for o in outcomes if o.action == "updated")
+    unchanged = sum(1 for o in outcomes if o.action == "unchanged")
+    failed = sum(1 for o in outcomes if o.action == "failed")
+    return f"{created} created, {updated} updated, {unchanged} unchanged, {failed} failed"
+
+
+@deployments_app.command
+async def apply(
+    *,
+    file: Annotated[
+        list[Path],
+        Parameter(
+            name=["-f", "--file"],
+            help="Path to a YAML manifest file or a directory of YAML files (repeatable).",
+        ),
+    ],
+    name: Annotated[str | None, Parameter(help="Override metadata.name (env: STYRMIN_NAME).")] = None,
+    version: Annotated[str | None, Parameter(help="Override spec.version (env: STYRMIN_VERSION).")] = None,
+    environment: Annotated[
+        str | None,
+        Parameter(help="Override spec.environment (env: STYRMIN_ENVIRONMENT)."),
+    ] = None,
+    cluster: Annotated[str | None, Parameter(help="Override spec.cluster (env: STYRMIN_CLUSTER).")] = None,
+    wait: Annotated[bool, Parameter(help="Block until each deployment reaches a terminal state.")] = False,
+) -> None:
+    """Create or update deployments from one or more YAML manifests.
+
+    Manifests use ``apiVersion: styrmin/v1`` / ``kind: Deployment``. Each ``-f``
+    argument may point at a YAML file or a directory of YAML files; pass
+    ``-f`` more than once to combine sources. A single file may contain
+    multiple ``---``-separated documents; each is applied independently.
+
+    Override precedence: CLI flag > environment variable > manifest field.
+    The env vars are ``STYRMIN_NAME``, ``STYRMIN_VERSION``,
+    ``STYRMIN_ENVIRONMENT``, ``STYRMIN_CLUSTER``. ``--name`` cannot be
+    combined with batch input (more than one manifest).
+
+    The ``spec.config`` block follows the typed ``UpdateDeploymentInput``
+    semantics on update: top-level fields use full-replacement (omitting a
+    field leaves the persisted state untouched, an empty list explicitly
+    clears it), while ``spec.parameters`` uses merge semantics (entries
+    merge on top of the persisted parameters dict).
+
+    Example::
+
+        styrminctl deployments apply -f my-app.yaml --version 1.2.3
+        styrminctl deployments apply -f manifests/ -f extra.yaml
+    """
+    overrides = ApplyOverrides(name=name, version=version, environment=environment, cluster=cluster)
+
+    def _stream_event(event: ApplyEvent) -> None:
+        line = _format_wait_event_line(event)
+        if line is not None:
+            print(line)
+
+    on_event = _stream_event if wait else None
+
+    try:
+        async with client.get_client(timeout=_APPLY_REQUEST_TIMEOUT_SECONDS) as sdk:
+            outcomes = await sdk.deployments.apply_files(file, overrides=overrides, wait=wait, on_event=on_event)
+    except (BatchNameConflictError, ApplyError, FileNotFoundError, StyrminError) as exc:
+        prefix = "file not found: " if isinstance(exc, FileNotFoundError) else ""
+        print(f"failed: {prefix}{exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    if not wait:
+        for outcome in outcomes:
+            print(_format_outcome_line(outcome))
+    print(_summary_line(outcomes))
+
+    if any(o.action == "failed" for o in outcomes):
+        raise SystemExit(1)

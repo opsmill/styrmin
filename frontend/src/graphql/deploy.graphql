@@ -3,8 +3,8 @@ mutation Deploy(
   $driver: String!
   $name: String
   $environmentId: UUID!
-  $config: JSON
-  $parameters: JSON
+  $config: DeploymentConfigInput
+  $parameters: [ParameterValueInput!]
   $serviceNameOverrides: [ServiceNameOverride!]
 ) {
   deploy(

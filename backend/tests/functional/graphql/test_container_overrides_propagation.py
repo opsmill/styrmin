@@ -243,11 +243,12 @@ async def test_deploy_create_persists_command_args(
                 "environmentId": str(environment.id),
                 "version": "1.0.0",
                 "name": "co-create",
-                # ``deploy``'s ``config: JSON`` is the persisted ``DeploymentConfig``
-                # shape — ``components`` keyed by name (dict), NOT the typed
-                # ``UpdateDeploymentInput`` list shape.
+                # ``deploy``'s ``config: DeploymentConfigInput`` now shares the
+                # same typed list shape as ``updateDeployment``: ``components``
+                # is a list of ``{name, command?, args?, env_vars?}`` rows,
+                # flattened resolver-side to the persisted dict-keyed-by-name.
                 "config": {
-                    "components": {"server": {"command": command, "args": args}}
+                    "components": [{"name": "server", "command": command, "args": args}]
                 },
             },
         },
@@ -433,10 +434,10 @@ async def test_update_rejects_empty_list(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("field", "value", "code"),
+    ("field", "value"),
     [
-        ("command", [123], "INVALID_CONTAINER_COMMAND"),
-        ("args", ["ok", 5], "INVALID_CONTAINER_ARGS"),
+        ("command", [123]),
+        ("args", ["ok", 5]),
     ],
 )
 async def test_deploy_create_rejects_non_string_element(
@@ -445,13 +446,19 @@ async def test_deploy_create_rejects_non_string_element(
     prefect_manager_mock,  # noqa: ARG001
     field: str,
     value: list,
-    code: str,
 ) -> None:
-    """A non-string element raises the per-field typed error on the untyped
-    ``config`` JSON path (US4 Sc.3, FR-006). The typed ``updateDeployment``
-    input cannot carry a non-string element — GraphQL's ``[String!]`` coercion
-    rejects it first — so the per-field typed code is exercised via the
-    ``deploy`` mutation's JSON config (and the Pydantic field validator)."""
+    """A non-string ``command`` / ``args`` element is rejected at the GraphQL
+    coercion boundary on the create path.
+
+    Previously the ``deploy`` mutation took a freeform ``JSON`` config and the
+    per-field typed error (``INVALID_CONTAINER_COMMAND`` /
+    ``INVALID_CONTAINER_ARGS``) fired inside the Pydantic field validator.
+    With ``deploy`` now sharing the typed ``DeploymentConfigInput`` (009),
+    ``command`` / ``args`` are typed ``[String!]`` and GraphQL's scalar
+    coercion rejects a non-string element before any resolver runs — same
+    behaviour as the ``updateDeployment`` path. The per-field typed code is
+    still reachable for shape failures the typed input cannot encode
+    (e.g. empty list — see :func:`test_deploy_create_rejects_empty_list`)."""
     environment = await seed_environment(session)
     adv = await seed_application_driver_version(session, version="1.0.0")
     cc = ComponentConfig(
@@ -473,15 +480,17 @@ async def test_deploy_create_rejects_non_string_element(
                 "environmentId": str(environment.id),
                 "version": "1.0.0",
                 "name": "co-nonstring",
-                "config": {"components": {"server": {field: value}}},
+                "config": {"components": [{"name": "server", field: value}]},
             },
         },
     )
-    assert response.status_code == 200
     payload = response.json()
     assert "errors" in payload, payload
-    extensions = payload["errors"][0].get("extensions") or {}
-    assert extensions.get("code") == code
+    # GraphQL scalar coercion error — no typed extensions.code, just the
+    # standard "String cannot represent a non string value" message naming
+    # the offending value.
+    message = payload["errors"][0]["message"]
+    assert "String cannot represent a non string value" in message, message
 
 
 @pytest.mark.asyncio
@@ -514,7 +523,7 @@ async def test_deploy_create_rejects_unknown_component(
                 "environmentId": str(environment.id),
                 "version": "1.0.0",
                 "name": "co-reject",
-                "config": {"components": {"ghost": {"args": ["--x"]}}},
+                "config": {"components": [{"name": "ghost", "args": ["--x"]}]},
             },
         },
     )
@@ -554,7 +563,7 @@ async def test_deploy_create_rejects_empty_list(
                 "environmentId": str(environment.id),
                 "version": "1.0.0",
                 "name": "co-reject-empty",
-                "config": {"components": {"server": {"args": []}}},
+                "config": {"components": [{"name": "server", "args": []}]},
             },
         },
     )

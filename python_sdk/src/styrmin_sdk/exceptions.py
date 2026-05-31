@@ -52,3 +52,31 @@ class StyrminAuthorizationError(StyrminAPIError):
 
 class DeploymentRestoringError(StyrminAPIError):
     """The deployment is restoring; deletion was refused for data integrity."""
+
+
+class ApplyError(StyrminError):
+    """Base error for failures during ``DeploymentResource.apply``."""
+
+
+class ManifestValidationError(ApplyError):
+    """A YAML manifest failed schema validation."""
+
+
+class MissingRequiredFieldError(ManifestValidationError):
+    """A required manifest field was absent after override resolution."""
+
+
+class EnvironmentAmbiguityError(ApplyError):
+    """The environment resolves to multiple clusters and ``cluster`` was not specified."""
+
+
+class EnvironmentNotFoundError(ApplyError):
+    """No environment matches the resolved ``(environment, cluster)`` pair."""
+
+
+class DriverMismatchError(ApplyError):
+    """The manifest's driver does not match the existing deployment's driver."""
+
+
+class BatchNameConflictError(ApplyError):
+    """Two manifests in a batch resolve to the same (name, environment) pair."""
