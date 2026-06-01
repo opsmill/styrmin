@@ -15,6 +15,8 @@ import kr8s.asyncio
 import pytest
 import yaml
 from dulwich import porcelain
+from kr8s.asyncio.objects import APIObject, object_from_spec
+from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 from kubernetes_asyncio import client as kubeclient
 from kubernetes_asyncio.client.exceptions import ApiException as K8sApiException
@@ -819,6 +821,81 @@ async def session_scenario_driver(
 
 
 # ---------------------------------------------------------------------------
+# Fixture: csi_hostpath_storage
+# ---------------------------------------------------------------------------
+# kr8s ships built-in classes for the core kinds in the CSI manifest, but not
+# for these two cluster-scoped storage kinds. `object_from_spec(..., allow_
+# unknown_type=True)` mis-infers them (StorageClass -> "storageclasss", and
+# both as namespaced), so we register correct definitions here; once defined,
+# `object_from_spec` resolves them automatically.
+class _CSIDriver(APIObject):
+    kind = "CSIDriver"
+    version = "storage.k8s.io/v1"
+    endpoint = "csidrivers"
+    plural = "csidrivers"
+    singular = "csidriver"
+    namespaced = False
+
+
+class _StorageClass(APIObject):
+    kind = "StorageClass"
+    version = "storage.k8s.io/v1"
+    endpoint = "storageclasses"
+    plural = "storageclasses"
+    singular = "storageclass"
+    namespaced = False
+
+
+@pytest.fixture(scope="session")
+async def csi_hostpath_storage(vcluster: dict) -> str:
+    """Install the CSI hostpath driver and return its storage class name.
+
+    The vcluster ships only `local-path` (rancher.io/local-path), which
+    provisions PVs of type `hostPath`. Velero's file-system backup refuses
+    hostPath volumes, so a `kind: disk` backup of a real PVC captures nothing
+    (see ``test_infrahub_backup_restore.py``). The CSI hostpath driver
+    provisions PVs of type `csi`, which Velero FSB backs up normally — so
+    disk-backed components can actually be captured and restored.
+
+    We point the cluster's ``standard_storage`` at this class so that
+    components backed up with ``kind: disk`` (e.g. the Infrahub server's
+    object store) land on FSB-capable storage.
+    """
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    manifest = FIXTURES_DIR / "csi-hostpath" / "csi-hostpath-driver.yaml"
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+
+    for doc in yaml.safe_load_all(manifest.read_text()):
+        if not doc:
+            continue
+        obj = object_from_spec(doc, api=kr8s_api, allow_unknown_type=True)
+        try:
+            await obj.create()
+        except kr8s.ServerError as exc:
+            # 409 Conflict == already exists; keep the apply idempotent.
+            if exc.response is None or exc.response.status_code != 409:
+                raise
+
+    # Wait for the plugin pod (StatefulSet csi-hostpathplugin) to be Ready so
+    # the storage class is usable before any deployment provisions a PVC.
+    deadline = asyncio.get_event_loop().time() + 180
+    while asyncio.get_event_loop().time() < deadline:
+        pods = [
+            pod
+            async for pod in AsyncPod.list(
+                namespace="kube-system",
+                label_selector="app.kubernetes.io/name=csi-hostpathplugin",
+                api=kr8s_api,
+            )
+        ]
+        if pods:
+            await pods[0].wait("condition=Ready", timeout=180)
+            return "csi-hostpath-sc"
+        await asyncio.sleep(3)
+    raise TimeoutError("csi-hostpathplugin pod did not appear within 180s")
+
+
+# ---------------------------------------------------------------------------
 # Fixture: styrmin_resources
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
@@ -826,6 +903,7 @@ async def styrmin_resources(
     git_server: dict[str, str],
     styrmin_deployment: str,
     driver_mode: str,
+    csi_hostpath_storage: str,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
 ) -> AsyncGenerator[dict, None]:
     styrmin_url = styrmin_deployment
@@ -846,7 +924,11 @@ async def styrmin_resources(
                 "service": {"type": "LoadBalancer"},
             },
             "runtime_class": "default",
-            "standard_storage": {"storage_class": "local-path"},
+            # `standard_storage` uses the CSI hostpath driver (not local-path)
+            # so PVCs bind to CSI-backed PVs that Velero file-system backup can
+            # capture — required for `kind: disk` backups (e.g. the Infrahub
+            # server object store). See the `csi_hostpath_storage` fixture.
+            "standard_storage": {"storage_class": csi_hostpath_storage},
             "fast_storage": {"storage_class": "local-path"},
             "external_dns_endpoints_type": "NodeExternalIP",
         },
