@@ -50,6 +50,10 @@ spec:
       backup:
         enabled: true
         kind: disk
+        # Pod-template volume name mounted at /opt/infrahub/storage (artifact
+        # content / object store). Required: without it the disk backup emits
+        # no Velero backup-volumes annotation and silently captures nothing.
+        volume: infrahub-server-storage-data
 
     task-worker:
       identifier:

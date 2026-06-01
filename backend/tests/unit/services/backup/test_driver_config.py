@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     TargetPatch,
@@ -21,6 +24,9 @@ from styrmin_backend.services.driver.validators import (
     BackupConfigValidator,
     validate_driver_backup_configs,
 )
+
+# Repo root: .../backend/tests/unit/services/backup/test_driver_config.py
+_REPO_ROOT = Path(__file__).resolve().parents[5]
 
 
 # ---------------------------------------------------------------------------
@@ -493,6 +499,56 @@ class TestBuildBackupVolumeAnnotationPatches:
         patches = build_backup_volume_annotation_patches(configs, label_selectors)
 
         assert patches == []
+
+
+class TestInfrahubExampleDriverDiskBackup:
+    """Guard the infrahub example drivers' disk backup against silent no-ops.
+
+    Commit af6fc28 enabled ``kind: disk`` on the infrahub ``server`` component
+    but omitted the ``volume`` name. Because the disk-volume validator is not
+    wired into the driver-load path, that misconfiguration produced no Velero
+    ``backup-volumes`` annotation and the server PVC (object-store / artifact
+    content at ``/opt/infrahub/storage``) was silently never backed up. These
+    tests pin the fix: the server's disk backup must name the
+    ``infrahub-server-storage-data`` volume so it is actually captured.
+    """
+
+    # Pod-template volume name the infrahub chart mounts at
+    # ``/opt/infrahub/storage`` (verified against the rendered chart).
+    _SERVER_STORAGE_VOLUME = "infrahub-server-storage-data"
+
+    @pytest.mark.parametrize("driver_dir", ["infrahub", "infrahub-enterprise"])
+    def test_server_disk_backup_names_storage_volume(self, driver_dir: str) -> None:
+        spec_path = (
+            _REPO_ROOT / "driver" / "examples" / driver_dir / "driver.styrmin.yml"
+        )
+        spec = yaml.safe_load(spec_path.read_text())
+
+        server = spec["spec"]["components"]["server"]
+        backup_raw = server.get("backup")
+        assert backup_raw is not None, (
+            f"{driver_dir}: server component is missing a 'backup' block"
+        )
+
+        config = ComponentBackupConfig.model_validate(backup_raw)
+        assert config.enabled is True
+        assert config.kind == BackupKind.DISK
+
+        # A disk backup with no volume name is a silent no-op; the volume must
+        # be named for Velero's opt-in file-system backup to capture the PVC.
+        patches = build_backup_volume_annotation_patches(
+            {"server": config},
+            {"server": "service=infrahub-server"},
+        )
+        assert patches, (
+            f"{driver_dir}: server disk backup produced no backup-volumes "
+            "annotation — the storage PVC would not be captured"
+        )
+        for patch in patches:
+            assert (
+                patch.patch.annotations[VELERO_BACKUP_VOLUMES_ANNOTATION]  # type: ignore[attr-defined]
+                == self._SERVER_STORAGE_VOLUME
+            )
 
 
 class TestTemplateAnnotationPatchRendering:

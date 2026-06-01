@@ -3,6 +3,18 @@
 Split out of ``test_backup_restore.py`` so the Infrahub server + DB boot
 runs in its own CI matrix cell (``shard_infrahub``) and doesn't gate
 debug iterations on the lighter simple-app backup tests.
+
+These tests exercise **two** independent backup paths in a single
+backup/restore cycle:
+
+* **Database** (``database`` component, ``kind: neo4j``) — a ``BuiltinTag``
+  node lives only in Neo4j.
+* **Disk** (``server`` component, ``kind: disk``) — artifact content and
+  file objects live in Infrahub's object store on the server's
+  ``infrahub-server-storage-data`` PVC, mounted at ``/opt/infrahub/storage``.
+  This is what commit af6fc28 enabled and what we validate here by writing
+  object-store content, backing up, and confirming the content survives a
+  restore (which deletes and recreates the namespace + its PVCs).
 """
 
 from __future__ import annotations
@@ -34,6 +46,26 @@ pytestmark = [
 # it as the admin token immediately after the initial setup completes.
 # Infrahub 1.6+ requires authentication for writes through the SDK.
 _INFRAHUB_ADMIN_TOKEN = "06438eb2-8019-4776-878c-0941b1f1d1ec"
+
+# Distinctive payload uploaded to the Infrahub object store. Object-store
+# content is exactly where rendered artifact content and file objects are
+# persisted on disk (``CoreArtifact.storage_id`` -> object store), so a
+# round-trip through it is a faithful proxy for "the content of one artifact"
+# and lives only on the server's disk-backed PVC — never in Neo4j.
+_ARTIFACT_CONTENT = (
+    "# styrmin disk-backup artifact probe\n"
+    "interface Ethernet1\n"
+    "  description styrmin-backup-disk-probe\n"
+    "  ip address 10.0.0.1/31\n"
+)
+
+
+def _make_infrahub_client(port: int) -> InfrahubSDKClient:
+    """Build an authenticated Infrahub SDK client against a forwarded port."""
+    config = InfrahubConfig(
+        address=f"http://localhost:{port}", api_token=_INFRAHUB_ADMIN_TOKEN
+    )
+    return InfrahubSDKClient(config=config)
 
 
 @asynccontextmanager
@@ -78,7 +110,11 @@ async def test_infrahub_backup_and_restore_lifecycle(
     deployed_infrahub_app: dict,
     vcluster: dict,
 ) -> None:
-    """Full lifecycle: create data -> backup -> modify -> restore -> verify (Infrahub)."""
+    """Full lifecycle: create data -> backup -> modify -> restore -> verify (Infrahub).
+
+    Validates both the database backup (``BuiltinTag`` in Neo4j) and the disk
+    backup (object-store content on the server PVC).
+    """
     client: StyrminClient = load_infrahub["client"]
     instance_id = deployed_infrahub_app["instance_id"]
     namespace = deployed_infrahub_app["namespace"]
@@ -90,18 +126,27 @@ async def test_infrahub_backup_and_restore_lifecycle(
 
     # 1. Port-forward and create test data via Infrahub SDK
     async with portforward_infrahub(kubeconfig_path, namespace) as port:
-        config = InfrahubConfig(
-            address=f"http://localhost:{port}", api_token=_INFRAHUB_ADMIN_TOKEN
-        )
-        infrahub_client = InfrahubSDKClient(config=config)
+        infrahub_client = _make_infrahub_client(port)
 
-        # Create a BuiltinTag as test data
+        # Create a BuiltinTag as test data (database / Neo4j)
         tag = await infrahub_client.create(kind="BuiltinTag", name=tag_name)
         await tag.save()
 
         # Verify the tag exists
         retrieved = await infrahub_client.get(kind="BuiltinTag", name__value=tag_name)
         assert retrieved.name.value == tag_name  # type: ignore[union-attr]
+
+        # Upload artifact content to the object store (disk / server PVC) and
+        # capture its identifier. This is the disk-backup probe.
+        upload = await infrahub_client.object_store.upload(content=_ARTIFACT_CONTENT)
+        storage_id = upload["identifier"]
+        assert storage_id, f"Object store upload returned no identifier: {upload!r}"
+
+        # Verify the content is readable before the backup.
+        pre_backup_content = await infrahub_client.object_store.get(
+            identifier=storage_id
+        )
+        assert pre_backup_content == _ARTIFACT_CONTENT
 
     # 2. Create backup via Styrmin SDK, wait for completion
     created_backup = await client.backups.create_backup(instance_id=instance_id)
@@ -118,10 +163,7 @@ async def test_infrahub_backup_and_restore_lifecycle(
 
     # 3. Delete the tag (modify data post-backup)
     async with portforward_infrahub(kubeconfig_path, namespace) as port:
-        config = InfrahubConfig(
-            address=f"http://localhost:{port}", api_token=_INFRAHUB_ADMIN_TOKEN
-        )
-        infrahub_client = InfrahubSDKClient(config=config)
+        infrahub_client = _make_infrahub_client(port)
 
         tag_to_delete = await infrahub_client.get(
             kind="BuiltinTag", name__value=tag_name
@@ -143,17 +185,24 @@ async def test_infrahub_backup_and_restore_lifecycle(
     # 5. Wait for pods to recover after restore
     await wait_for_pods_ready(kubeconfig_path, namespace, timeout=300.0)
 
-    # 6. Verify the tag has been restored
+    # 6. Verify the tag (DB) and the artifact content (disk) survived the restore
     async with portforward_infrahub(kubeconfig_path, namespace) as port:
-        config = InfrahubConfig(
-            address=f"http://localhost:{port}", api_token=_INFRAHUB_ADMIN_TOKEN
-        )
-        infrahub_client = InfrahubSDKClient(config=config)
+        infrahub_client = _make_infrahub_client(port)
 
         restored_tag = await infrahub_client.get(
             kind="BuiltinTag", name__value=tag_name
         )
         assert restored_tag.name.value == tag_name  # type: ignore[union-attr]
+
+        # Disk backup assertion: the object-store content present at backup
+        # time must still be readable after the restore deleted and recreated
+        # the namespace + its PVCs. If `server.backup` did not actually
+        # capture the `infrahub-server-storage-data` volume, this 404s.
+        restored_content = await infrahub_client.object_store.get(identifier=storage_id)
+        assert restored_content == _ARTIFACT_CONTENT, (
+            "Object-store (artifact) content was not restored from the disk "
+            "backup — the server PVC content was lost across the restore."
+        )
 
     # 7. Delete backup and verify deletion
     await client.backups.delete_backup(backup.id)
@@ -173,7 +222,12 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
     deployed_infrahub_enterprise_app: dict,
     vcluster: dict,
 ) -> None:
-    """Full lifecycle: create data -> backup -> modify -> restore -> verify (Infrahub Enterprise)."""
+    """Full lifecycle: create data -> backup -> modify -> restore -> verify (Infrahub Enterprise).
+
+    Validates both the database backup (``BuiltinTag`` in Neo4j) and the disk
+    backup (object-store / artifact content on the server PVC, enabled in
+    af6fc28).
+    """
     client: StyrminClient = load_infrahub_enterprise["client"]
     instance_id = deployed_infrahub_enterprise_app["instance_id"]
     namespace = deployed_infrahub_enterprise_app["namespace"]
@@ -185,18 +239,27 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
 
     # 1. Port-forward and create test data via Infrahub SDK
     async with portforward_infrahub(kubeconfig_path, namespace) as port:
-        config = InfrahubConfig(
-            address=f"http://localhost:{port}", api_token=_INFRAHUB_ADMIN_TOKEN
-        )
-        infrahub_client = InfrahubSDKClient(config=config)
+        infrahub_client = _make_infrahub_client(port)
 
-        # Create a BuiltinTag as test data
+        # Create a BuiltinTag as test data (database / Neo4j)
         tag = await infrahub_client.create(kind="BuiltinTag", name=tag_name)
         await tag.save()
 
         # Verify the tag exists
         retrieved = await infrahub_client.get(kind="BuiltinTag", name__value=tag_name)
         assert retrieved.name.value == tag_name  # type: ignore[union-attr]
+
+        # Upload artifact content to the object store (disk / server PVC) and
+        # capture its identifier. This is the disk-backup probe.
+        upload = await infrahub_client.object_store.upload(content=_ARTIFACT_CONTENT)
+        storage_id = upload["identifier"]
+        assert storage_id, f"Object store upload returned no identifier: {upload!r}"
+
+        # Verify the content is readable before the backup.
+        pre_backup_content = await infrahub_client.object_store.get(
+            identifier=storage_id
+        )
+        assert pre_backup_content == _ARTIFACT_CONTENT
 
     # 2. Create backup via Styrmin SDK, wait for completion
     created_backup = await client.backups.create_backup(instance_id=instance_id)
@@ -213,10 +276,7 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
 
     # 3. Delete the tag (modify data post-backup)
     async with portforward_infrahub(kubeconfig_path, namespace) as port:
-        config = InfrahubConfig(
-            address=f"http://localhost:{port}", api_token=_INFRAHUB_ADMIN_TOKEN
-        )
-        infrahub_client = InfrahubSDKClient(config=config)
+        infrahub_client = _make_infrahub_client(port)
 
         tag_to_delete = await infrahub_client.get(
             kind="BuiltinTag", name__value=tag_name
@@ -238,17 +298,24 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
     # 5. Wait for pods to recover after restore
     await wait_for_pods_ready(kubeconfig_path, namespace, timeout=300.0)
 
-    # 6. Verify the tag has been restored
+    # 6. Verify the tag (DB) and the artifact content (disk) survived the restore
     async with portforward_infrahub(kubeconfig_path, namespace) as port:
-        config = InfrahubConfig(
-            address=f"http://localhost:{port}", api_token=_INFRAHUB_ADMIN_TOKEN
-        )
-        infrahub_client = InfrahubSDKClient(config=config)
+        infrahub_client = _make_infrahub_client(port)
 
         restored_tag = await infrahub_client.get(
             kind="BuiltinTag", name__value=tag_name
         )
         assert restored_tag.name.value == tag_name  # type: ignore[union-attr]
+
+        # Disk backup assertion: the object-store content present at backup
+        # time must still be readable after the restore deleted and recreated
+        # the namespace + its PVCs. If `server.backup` did not actually
+        # capture the `infrahub-server-storage-data` volume, this 404s.
+        restored_content = await infrahub_client.object_store.get(identifier=storage_id)
+        assert restored_content == _ARTIFACT_CONTENT, (
+            "Object-store (artifact) content was not restored from the disk "
+            "backup — the server PVC content was lost across the restore."
+        )
 
     # 7. Delete backup and verify deletion
     await client.backups.delete_backup(backup.id)

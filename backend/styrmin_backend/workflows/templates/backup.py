@@ -202,8 +202,13 @@ async def execute_velero_restore_flow(
                 f"Namespace {target_namespace} does not exist, skipping deletion"
             )
 
-        # Poll until the namespace is gone (404) or timeout
-        ns_timeout = 300
+        # Poll until the namespace is gone (404) or timeout. Heavy
+        # multi-component deployments (e.g. the Infrahub stack: Neo4j alone
+        # ships a 3600s terminationGracePeriod, plus several StatefulSets and
+        # PVCs whose volume teardown adds up) can take well over 5 minutes to
+        # fully terminate, so allow generous headroom — the overall restore
+        # flow budget is 7200s.
+        ns_timeout = 600
         poll_interval = POLL_RETRY_DELAY_SECONDS
         elapsed = 0
         while elapsed < ns_timeout:

@@ -43,6 +43,28 @@ kinds to strategies:
 The driver author picks the strategy per component. The operator runs
 the right one when a backup is triggered — you don't think about it.
 
+:::caution Disk backups must name the volume
+
+The `disk` strategy backs up **only the volumes you name** via the
+component's `backup.volume` (single) or `backup.volumes` (list) field. The
+name is the **pod-template volume name** (the entry under `volumes:` in the
+rendered pod spec), not the PVC name. If you set `kind: disk` but omit
+`volume`/`volumes`, Velero's opt-in file-system backup captures nothing and
+the backup is a silent no-op — the component's data is not protected.
+
+```yaml
+server:
+  identifier:
+    label:
+      app.kubernetes.io/name: my-app
+  backup:
+    enabled: true
+    kind: disk
+    volume: my-app-storage-data   # required: the pod-template volume name
+```
+
+:::
+
 ### What happens when you click "backup"
 
 1. You trigger a backup for a deployment (UI, CLI, or GraphQL).
