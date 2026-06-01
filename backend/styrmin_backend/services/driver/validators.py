@@ -246,6 +246,46 @@ def validate_driver_backup_configs(
     validator.validate(backup_configs)
 
 
+def validate_driver_backup_configs_for_spec(specification: Specification) -> None:
+    """Validate the ``backup`` block of every component in a driver spec.
+
+    Run at driver-load time (alongside the other ``validate_driver_*`` checks)
+    so a misconfigured backup fails loudly at registration instead of silently
+    no-opping at backup time — e.g. ``kind: disk`` with no ``volume``/``volumes``
+    produces no Velero ``backup-volumes`` annotation and captures nothing.
+
+    Volume *existence* is not cross-checked here because the chart's rendered
+    pod-template volume names aren't known until deploy time; the "disk backup
+    requires at least one volume" rule (and the action-hook rule) still fire,
+    which is what guards against the silent no-op.
+
+    Raises:
+        ValidationError: If any component's backup configuration is invalid.
+    """
+    if specification.components is None:
+        return
+
+    backup_configs: dict[str, ComponentBackupConfig] = {}
+    for name, component in specification.components.root.items():
+        backup_raw = (component.__pydantic_extra__ or {}).get("backup")
+        if backup_raw is None:
+            continue
+        try:
+            backup_configs[name] = ComponentBackupConfig.model_validate(backup_raw)
+        except ValueError as exc:
+            raise ValidationError(
+                f"Component '{name}': invalid backup configuration: {exc}"
+            ) from exc
+
+    if not backup_configs:
+        return
+
+    validate_driver_backup_configs(
+        backup_configs=backup_configs,
+        actions=specification.actions,
+    )
+
+
 def validate_driver_env_var_docs(specification: Specification) -> None:
     """Cross-validate ``spec.env_vars`` doc entries against the driver's components.
 

@@ -20,9 +20,11 @@ from styrmin_backend.services.driver.models.resources.backup import (
     BackupKind,
     ComponentBackupConfig,
 )
+from styrmin_backend.services.driver.models.resources.driver import Specification
 from styrmin_backend.services.driver.validators import (
     BackupConfigValidator,
     validate_driver_backup_configs,
+    validate_driver_backup_configs_for_spec,
 )
 
 # Repo root: .../backend/tests/unit/services/backup/test_driver_config.py
@@ -499,6 +501,71 @@ class TestBuildBackupVolumeAnnotationPatches:
         patches = build_backup_volume_annotation_patches(configs, label_selectors)
 
         assert patches == []
+
+
+def _spec(components: dict | None) -> Specification:
+    """Build a minimal driver Specification with the given components block."""
+    spec: dict = {
+        "version": "1",
+        "supported_versions": ">=1.0,<2.0",
+        "info": {},
+        "helm": {"main": {"location": "oci://example/chart", "version": "1.0.0"}},
+    }
+    if components is not None:
+        spec["components"] = components
+    return Specification.model_validate(spec)
+
+
+def _component(backup: dict | None) -> dict:
+    """A minimal component section, optionally carrying a backup block."""
+    comp: dict = {"identifier": {"label": {"app.kubernetes.io/name": "x"}}}
+    if backup is not None:
+        comp["backup"] = backup
+    return comp
+
+
+class TestValidateDriverBackupConfigsForSpec:
+    """The driver-load hook that fails loudly on misconfigured backups.
+
+    Wires :func:`validate_driver_backup_configs` into the spec so e.g.
+    ``kind: disk`` with no volume is rejected at registration instead of
+    silently producing no Velero annotation (the af6fc28 bug class).
+    """
+
+    def test_disk_without_volume_fails(self) -> None:
+        spec = _spec({"server": _component({"enabled": True, "kind": "disk"})})
+        with pytest.raises(
+            ValidationError, match="disk backup requires at least one volume"
+        ):
+            validate_driver_backup_configs_for_spec(spec)
+
+    def test_disk_with_volume_passes(self) -> None:
+        spec = _spec(
+            {"server": _component({"enabled": True, "kind": "disk", "volume": "data"})}
+        )
+        validate_driver_backup_configs_for_spec(spec)  # no raise
+
+    def test_database_kind_passes(self) -> None:
+        spec = _spec({"db": _component({"enabled": True, "kind": "neo4j"})})
+        validate_driver_backup_configs_for_spec(spec)
+
+    def test_disabled_backup_ignored(self) -> None:
+        spec = _spec({"server": _component({"enabled": False})})
+        validate_driver_backup_configs_for_spec(spec)
+
+    def test_component_without_backup_block_ignored(self) -> None:
+        spec = _spec({"server": _component(None)})
+        validate_driver_backup_configs_for_spec(spec)
+
+    def test_no_components_is_noop(self) -> None:
+        validate_driver_backup_configs_for_spec(_spec(None))
+
+    def test_action_kind_without_hooks_fails(self) -> None:
+        spec = _spec({"custom": _component({"enabled": True, "kind": "action"})})
+        with pytest.raises(
+            ValidationError, match="action backup requires action hooks"
+        ):
+            validate_driver_backup_configs_for_spec(spec)
 
 
 class TestInfrahubExampleDriverDiskBackup:
