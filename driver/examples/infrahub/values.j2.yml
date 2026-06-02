@@ -22,6 +22,11 @@ infrahubServer:
 {%- for entry in components | component_env_vars("server") %}
       {{ entry.name }}: {{ entry.value | tojson }}
 {%- endfor %}
+{%- if components | component_args("server") %}
+    args: {{ components | component_args("server") | tojson }}
+{%- else %}
+    args: null
+{%- endif %}
   persistence:
     accessMode: ReadWriteOnce
     enabled: true
@@ -37,6 +42,11 @@ infrahubTaskWorker:
 {%- for entry in components | component_env_vars("task-worker") %}
       {{ entry.name }}: {{ entry.value | tojson }}
 {%- endfor %}
+{%- if components | component_args("task-worker") %}
+    args: {{ components | component_args("task-worker") | tojson }}
+{%- else %}
+    args: null
+{%- endif %}
   replicas: "{{ parameters.replicas_task_worker }}"
 nats:
   enabled: false
@@ -81,6 +91,8 @@ prefect-server:
       - name: {{ entry.name | tojson }}
         value: {{ entry.value | tojson }}
   {%- endfor %}
+    command: {{ components | component_command("task-manager") | tojson }}
+    args: {{ components | component_args("task-manager") | tojson }}
   postgresql:
     # Propagate the styrmin identifier label to every resource the bitnami
     # postgresql subchart renders (StatefulSet metadata.labels included), so

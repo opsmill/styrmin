@@ -41,6 +41,34 @@ spec:
       kind: boolean
       default: true
 
+  # Doc-only declaration that the `server` and `task-worker` containers expose
+  # an overridable `args` (014). Informational only — the actual wiring lives
+  # in values.j2.yml. `command` is intentionally NOT advertised: the infrahub
+  # chart's pod templates have no `command` field, so only `args` is overridable.
+  container_overrides:
+    - component: server
+      container: infrahub-server
+      args: true
+      description: >-
+        Override the API server container args (e.g. gunicorn worker count or
+        logger class) for one deployment without forking the driver. `command`
+        is not overridable — the chart wires only `args`.
+    - component: task-worker
+      container: infrahub-task-worker
+      args: true
+      description: >-
+        Override the task worker container args (e.g. the Prefect pool or
+        worker flags) for one deployment without forking the driver. `command`
+        is not overridable — the chart wires only `args`.
+    - component: task-manager
+      container: prefect-server
+      command: true
+      args: true
+      description: >-
+        Override the task manager (Prefect server) container command and/or
+        args for one deployment without forking the driver. The Prefect chart
+        guards both fields and falls back to its own defaults when unset.
+
   components:
     server:
       cpu: 4
