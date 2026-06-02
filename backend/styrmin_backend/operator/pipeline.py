@@ -217,6 +217,11 @@ async def execute_phase_helmrelease(
             group="helm.toolkit.fluxcd.io",
             version="v2",
             namespace=namespace,
+            # Driver value templates emit ``null`` to clear an override (the
+            # merge-patch update deletes the key, so the chart default applies).
+            # Strip those nulls on the create POST so a first reconcile treats
+            # them as absent rather than persisting a literal null. ADR-045 §5.
+            prune_none_on_create=True,
         )
         logger.info(
             "Created HelmRelease %s in %s",

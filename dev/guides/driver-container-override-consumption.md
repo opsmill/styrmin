@@ -76,6 +76,62 @@ args:
 - `command` and `args` are independent — one may be overridden while the other
   falls through to the chart/image default.
 
+## When the chart consumes the value *unconditionally* (no `with` guard)
+
+The empty-list-marker contract above assumes the chart guards consumption with
+`{{- with .Values.command }}`, so an empty list is skipped. **Some upstream
+charts you don't control consume the value unconditionally** — e.g. the Infrahub
+chart renders `args: {{- toYaml .Values.infrahubServer.infrahubServer.args }}`
+with no `with` guard and exposes no `command` field at all. Handing such a chart
+the `[]` marker would **replace** its default args with an empty list and blank
+the entrypoint.
+
+For these charts you have two Jinja-side options. The Infrahub examples
+(`driver/examples/infrahub`, `driver/examples/infrahub-enterprise`) use the
+**`null` clear-marker** — render the override when set, or a literal `null` when
+unset, with no need to re-declare the chart's default:
+
+```jinja
+{%- if components | component_args("server") %}
+args: {{ components | component_args("server") | tojson }}
+{%- else %}
+args: null
+{%- endif %}
+```
+
+This works because the two HelmRelease apply paths treat the `null` exactly as
+clearing needs (see [ADR-045](../adr/adr-045-container-override-no-layering-and-omit-marker.md) §5):
+
+- on a **merge-patch update**, `null` *deletes* the key (RFC 7386) so the
+  chart's own default flows through — clearing reverts to the default;
+- on the **create POST**, the operator strips `null`s first
+  (`prune_none_on_create`), so a first reconcile treats it as absent rather than
+  persisting a literal null that the unguarded chart would render and blank.
+
+The alternative is a **default fallback** — always emit the key, falling back to
+the chart's documented default instead of `[]`:
+
+```jinja
+args: {{ ((components | component_args("server")) or ["gunicorn", "--config", "…"]) | tojson }}
+```
+
+Both clear correctly; pick based on the remaining trade-off:
+
+| Approach | Pros | Cons |
+|---|---|---|
+| **`null` marker** (Infrahub) | No duplicated default; clearing reverts to the chart default | Relies on the operator's create-path `null` prune (ADR-045 §5) |
+| **Default fallback** | Self-contained in the template | Duplicates the chart's default, which can drift on a chart-version bump (pin the chart and keep it in sync) |
+
+Either way, **only the fields the chart actually exposes are overridable.** The
+Infrahub chart wires `args` but not `command`, so its examples advertise
+`args: true` only and leave `command` off the doc block — declaring
+`command: true` would be a misleading silent no-op.
+
+The canonical `{{- with }}` chart pattern (always-present empty-list marker, see
+`driver/examples/simple-app`) remains preferred whenever you **own** the chart,
+because it gets clearing right *and* avoids duplicating the default. The two
+options above are escape hatches for charts you don't control.
+
 ## Declaring overridability (doc-only, no enforcement)
 
 You may advertise that a component is overridable in `driver.styrmin.yml`:

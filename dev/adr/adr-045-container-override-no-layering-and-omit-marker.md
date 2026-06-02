@@ -129,6 +129,51 @@ and accepts empty-string elements. Note that for the **typed**
 `[String!]` coercion; the per-field typed code is exercised on the untyped
 `config` JSON (`deploy`) path and via the Pydantic field validators.
 
+### 5. Unguarded charts: `null` clear-marker + create-path prune
+
+The empty-list marker in §2 is safe **only** when the chart guards consumption
+with `{{- with }}`. Some upstream charts Styrmin does not own consume the value
+unconditionally — e.g. the infrahub chart renders
+`args: {{- toYaml .Values.infrahubServer.infrahubServer.args }}` with no guard
+and exposes no `command` field. Feeding such a chart the `[]` marker blanks the
+field, so those drivers cannot use the §2 pattern. For them the driver template
+emits the resolved override when set, or a literal `null` when unset:
+
+```jinja
+{%- if components | component_args("server") %}
+args: {{ components | component_args("server") | tojson }}
+{%- else %}
+args: null
+{%- endif %}
+```
+
+This pairs with one narrowly-scoped apply-path change: `upsert_custom_resource`
+gained a `prune_none_on_create` flag that the operator's HelmRelease apply (and
+only that apply) sets. The two apply paths then treat the `null` exactly as
+clearing needs:
+
+- **update** (merge-patch): `null` deletes the key (RFC 7386), so the chart's
+  own default flows through — clearing works **without** the driver duplicating
+  the chart default.
+- **create** (`POST`, body stored verbatim): the flag strips `None` keys first,
+  so a first reconcile treats the `null` as absent rather than persisting a
+  literal null that the unguarded chart would render and blank.
+
+**Why this and not the full-replace / SSA rejected in §2.** The prune is a
+single recursive `None`-strip applied to the create body of one caller; it
+changes no behaviour for any other custom resource and leaves the merge-patch
+path untouched. Full replace / server-side apply was rejected because it
+reshaped the apply path for **every** resource — this does not.
+
+**Trade-off vs. the default-fallback alternative.** A driver could instead keep
+the §2 always-present key and fall back to the chart's documented default list
+(`(… | component_args(…)) or [<default>]`). That also clears correctly but
+duplicates the chart default in the template (drift risk on a chart-version
+bump). The `null`-marker keeps clearing correct with no duplication, at the cost
+of the create-path prune. Both are documented in the
+[driver consumption guide](../guides/driver-container-override-consumption.md);
+the infrahub examples use the `null`-marker.
+
 ## Consequences
 
 - **Resolution stays trivial.** A direct O(components) dict lookup at render

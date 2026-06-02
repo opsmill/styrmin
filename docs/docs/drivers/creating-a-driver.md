@@ -287,6 +287,32 @@ An empty list is falsy, so `{{- with }}` skips it and never blanks the
 container entrypoint. `command` and `args` are independent — one may be
 overridden while the other falls through.
 
+:::note Charts you don't control
+
+The pattern above assumes your chart guards consumption with `{{- with }}`. Some
+upstream charts consume the value **unconditionally** (e.g. the Infrahub chart
+does `args: {{- toYaml .Values…args }}` with no guard, and exposes no `command`
+field). For those, never hand the chart the `[]` marker — it would blank the
+entrypoint. The Infrahub examples instead emit the override when set, or a
+literal `null` when unset:
+
+```jinja
+{%- if components | component_args("server") %}
+args: {{ components | component_args("server") | tojson }}
+{%- else %}
+args: null
+{%- endif %}
+```
+
+On a merge-patch update the `null` deletes the key so the chart's own default
+applies (clearing reverts to the default); on the initial create the operator
+strips the `null` so the key is simply absent. See `driver/examples/infrahub`
+for the worked example and the
+[container-override consumption guide](https://github.com/opsmill/styrmin/blob/develop/dev/guides/driver-container-override-consumption.md)
+for this and the default-fallback alternative.
+
+:::
+
 Optionally advertise overridability (doc-only, discoverable via the API/UI)
 under `spec.container_overrides` in `driver.styrmin.yml`:
 

@@ -17,6 +17,36 @@ from .dependency import get_api_client
 from .exceptions import CustomResourceNotFound, JobFailedError
 
 
+def _prune_none(value: Any) -> Any:
+    """Recursively drop dict keys whose value is ``None`` (lists are recursed
+    but their elements are kept).
+
+    Used on the **create** path of :func:`upsert_custom_resource` only. The two
+    apply paths treat a ``null`` differently:
+
+    - **create** (``POST``) stores the body verbatim, so a ``key: null`` lands
+      in the object as a literal null;
+    - **update** (``application/merge-patch+json``) interprets ``key: null`` as
+      "delete this member" (RFC 7386).
+
+    Driver value templates exploit the merge-patch semantics to *clear* an
+    override: they emit ``args: null`` when the operator has no override set, so
+    the update path removes the key and the chart's own default flows through.
+    But on the first reconcile (create) that same ``null`` would persist
+    literally — and an upstream chart that consumes the value unconditionally
+    (e.g. infrahub's server ``args``, which the chart ``toYaml``s with no
+    ``with`` guard) would render ``null`` and blank the field. Stripping ``None``
+    on create makes a rendered ``null`` behave as "absent" (chart default
+    applies), while the merge-patch path keeps the ``null`` so clearing still
+    deletes the key. See ADR-045 §5.
+    """
+    if isinstance(value, dict):
+        return {k: _prune_none(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_prune_none(v) for v in value]
+    return value
+
+
 @inject
 async def run_kubernetes_job(
     namespace: str,
@@ -82,10 +112,17 @@ async def upsert_custom_resource(
     version: str,
     namespace: str,
     update: bool = True,
+    prune_none_on_create: bool = False,
     client: ApiClient = Depends(get_api_client),
 ) -> None:
     # Declare the kubernetes client object
     custom_obj_api = kubeclient.CustomObjectsApi(client)
+
+    # On create, a ``null`` would be stored verbatim; on the merge-patch update
+    # below it deletes the key. Drivers emit ``null`` to clear an override, so
+    # callers that carry such values (the HelmRelease apply) prune ``None`` from
+    # the *create* body only — the update path keeps it. See ADR-045 §5.
+    create_body = _prune_none(body) if prune_none_on_create else body
 
     try:
         await custom_obj_api.create_namespaced_custom_object(
@@ -93,7 +130,7 @@ async def upsert_custom_resource(
             version=version,
             namespace=namespace,
             plural=plurals,
-            body=body,
+            body=create_body,
         )
     except ApiException as exc:
         if update:
