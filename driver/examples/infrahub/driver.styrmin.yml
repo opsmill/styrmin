@@ -66,8 +66,11 @@ spec:
       args: true
       description: >-
         Override the task manager (Prefect server) container command and/or
-        args for one deployment without forking the driver. The Prefect chart
-        guards both fields and falls back to its own defaults when unset.
+        args for one deployment without forking the driver. When unset, the
+        values template omits both keys (renders null, pruned on create /
+        deleted on update) so the infrahub chart's own Prefect command/args
+        defaults flow through — emitting an empty list instead would clobber
+        them and force the prefect-server subchart's broken entrypoint fallback.
 
   components:
     server:
