@@ -92,8 +92,16 @@ infrahub:
         - name: {{ entry.name | tojson }}
           value: {{ entry.value | tojson }}
     {%- endfor %}
+    {%- if components | component_command("task-manager") %}
       command: {{ components | component_command("task-manager") | tojson }}
+    {%- else %}
+      command: null
+    {%- endif %}
+    {%- if components | component_args("task-manager") %}
       args: {{ components | component_args("task-manager") | tojson }}
+    {%- else %}
+      args: null
+    {%- endif %}
     postgresql:
       # Propagate the styrmin identifier label to every resource the bitnami
       # postgresql subchart renders (StatefulSet metadata.labels included), so
