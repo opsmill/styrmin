@@ -217,14 +217,22 @@ class UiScenarioDriver:
             instance_id=instance_id,
         )
 
-    async def upgrade_deployment(self, *, deployment_id: str, version: str) -> None:
+    async def upgrade_deployment(
+        self,
+        *,
+        deployment_id: str,
+        version: str,
+        driver_version_id: str | None = None,
+    ) -> None:
         environment_id = self._require_environment_context(deployment_id=deployment_id)
         async with _ui_errors(f"upgrading deployment {deployment_id}"):
             await self._deployment_detail.goto(
                 environment_id=environment_id, deployment_id=deployment_id
             )
             await self._deployment_detail.open_upgrade_dialog()
-            await self._deployment_detail.confirm_upgrade(version=version)
+            await self._deployment_detail.confirm_upgrade(
+                version=version, driver_version_id=driver_version_id
+            )
 
     async def update_deployment(
         self, *, deployment_id: str, config: dict[str, Any]

@@ -8,6 +8,7 @@ propagation test contract.
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import uuid4
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -85,7 +86,22 @@ async def seed_application_driver_version(
     *,
     driver_name: str | None = None,
     version: str = "1.0.0",
+    driver: ApplicationDriver | None = None,
+    application_supported_versions: str = ">=1.0.0",
+    default_version: str | None = None,
+    content_hash: str | None = None,
+    source_commit_sha: str | None = None,
+    created_on: datetime | None = None,
 ) -> ApplicationDriverVersion:
+    """Seed a driver version (and its driver/chart graph).
+
+    Pass ``driver`` to attach a second version to an existing driver —
+    e.g. for overlapping ``application_supported_versions`` reselection
+    tests. Distinct rows on the same driver must differ in ``version`` or
+    fingerprint (``content_hash``/``source_commit_sha``) to satisfy the
+    identity index. ``created_on`` overrides the server default for
+    deterministic latest-wins tie-break tests.
+    """
     repo = HelmRepository(url=f"https://helm.example.com/{uuid4().hex[:6]}")
     session.add(repo)
     await session.commit()
@@ -97,18 +113,24 @@ async def seed_application_driver_version(
     )
     session.add(chart)
     await session.commit()
-    driver = ApplicationDriver(name=driver_name or f"driver-{uuid4().hex[:8]}")
-    session.add(driver)
-    await session.commit()
+    if driver is None:
+        driver = ApplicationDriver(name=driver_name or f"driver-{uuid4().hex[:8]}")
+        session.add(driver)
+        await session.commit()
     adv = ApplicationDriverVersion(
         application_driver_id=driver.id,
         version=version,
-        application_supported_versions=">=1.0.0",
+        application_supported_versions=application_supported_versions,
+        default_version=default_version,
         source_type="git",
         source_repository="https://github.com/test/repo",
         source_branch="main",
+        content_hash=content_hash,
+        source_commit_sha=source_commit_sha,
         helm_chart_id=chart.id,
     )
+    if created_on is not None:
+        adv.created_on = created_on
     session.add(adv)
     await session.commit()
     return adv

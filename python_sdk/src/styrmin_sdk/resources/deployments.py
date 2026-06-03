@@ -53,6 +53,7 @@ class DeploymentResource(BaseResource):
         config: JsonValue | None = None,
         parameters: JsonValue | None = None,
         service_name_overrides: list[dict[str, str]] | None = None,
+        driver_version_id: str | UUID | None = None,
     ) -> DeployDeploy:
         variables: dict[str, Any] = {
             "driver": driver,
@@ -74,6 +75,8 @@ class DeploymentResource(BaseResource):
             variables["parameters"] = parameters
         if service_name_overrides is not None:
             variables["serviceNameOverrides"] = service_name_overrides
+        if driver_version_id is not None:
+            variables["driverVersionId"] = str(driver_version_id)
 
         result = await self._transport.execute(load_query("deploy"), variables)
         self._check_graphql_errors(result)
@@ -166,11 +169,30 @@ class DeploymentResource(BaseResource):
         )
 
     async def update_version(
-        self, deployment_id: str | UUID, version: str
+        self,
+        deployment_id: str | UUID,
+        version: str,
+        *,
+        parameters: JsonValue | None = None,
+        driver_version_id: str | UUID | None = None,
     ) -> UpdateDeploymentVersionUpdateDeploymentVersion:
+        """Update a deployment's application version.
+
+        Without ``driver_version_id`` the deployment is bound to the latest
+        loaded driver version supporting ``version``; with it, the binding is
+        pinned to that specific driver version.
+        """
+        variables: dict[str, Any] = {
+            "deploymentId": str(deployment_id),
+            "version": version,
+        }
+        if parameters is not None:
+            variables["parameters"] = parameters
+        if driver_version_id is not None:
+            variables["driverVersionId"] = str(driver_version_id)
         result = await self._transport.execute(
             load_query("update_version"),
-            {"deploymentId": str(deployment_id), "version": version},
+            variables,
         )
         self._check_graphql_errors(result)
         return self._parse(

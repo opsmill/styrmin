@@ -2,11 +2,13 @@ mutation UpdateDeploymentVersion(
   $deploymentId: UUID!
   $version: String!
   $parameters: JSON
+  $driverVersionId: UUID
 ) {
   updateDeploymentVersion(
     deploymentId: $deploymentId
     version: $version
     parameters: $parameters
+    driverVersionId: $driverVersionId
   ) {
     id
     type

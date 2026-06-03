@@ -1,0 +1,17 @@
+mutation DeployWithDriverVersion(
+    $driver: String!
+    $environmentId: UUID!
+    $name: String!
+    $version: String
+    $driverVersionId: UUID
+) {
+    deploy(
+        driver: $driver
+        environmentId: $environmentId
+        name: $name
+        version: $version
+        driverVersionId: $driverVersionId
+    ) {
+        id
+    }
+}

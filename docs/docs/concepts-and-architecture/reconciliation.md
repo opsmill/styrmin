@@ -60,7 +60,13 @@ Reconciliation is what happens between them:
 
 1. **You change something** — edit a deployment, change a parameter,
    pick a new driver version. The server writes the change to the
-   database.
+   database. Version upgrades also re-resolve which driver version the
+   deployment binds to: unless you pin one explicitly, the latest loaded
+   driver version supporting the requested application version wins
+   (deterministically — see
+   [Selecting a driver version](../drivers/loading-drivers.md#selecting-a-driver-version-when-deploying-or-upgrading)),
+   so re-running an upgrade at the same application version moves the
+   deployment onto a newly loaded driver build.
 2. **The server generates a new Instance** from the updated deployment.
    This is a frozen snapshot of what _would_ be running if the change
    took effect: the resolved configuration, the driver version, the

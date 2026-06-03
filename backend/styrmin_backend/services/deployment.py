@@ -2,7 +2,7 @@ from uuid import UUID, uuid4
 
 from loguru import logger
 from packaging.specifiers import SpecifierSet
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 
 from styrmin_backend.agent.service.kubernetes.primitives import patch_custom_resource
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
@@ -21,6 +21,7 @@ from styrmin_backend.domain.utils import (
     validate_deployment_name,
 )
 from styrmin_backend.context.models.config import DedicatedIngressConfig
+from styrmin_backend.db.models import ApplicationDriver, ApplicationDriverVersion
 from styrmin_backend.operator.config import CRD_GROUP, CRD_PLURAL, CRD_VERSION
 from styrmin_backend.services.container_overrides.exceptions import (
     UnknownComponentContainerOverrideError,
@@ -38,6 +39,7 @@ from styrmin_backend.services.exceptions import (
     DeploymentNameValidationError,
     DeploymentNotFoundError,
     DeploymentRestoringError,
+    DriverVersionNotFoundError,
     EnvironmentNotFoundError,
     IngressControllerNotHealthyError,
     InvalidContextError,
@@ -459,21 +461,118 @@ async def update_deployment(
         return result
 
 
+def _driver_version_sort_key(
+    driver_version: ApplicationDriverVersion,
+) -> tuple[int, Version, float, UUID]:
+    """Total "latest-wins" ordering key for application driver versions.
+
+    Sorted descending (``max`` wins), the latest driver version is:
+
+    1. the one with the highest *parseable* ``version`` string
+       (:class:`packaging.version.Version`); unparseable version strings sort
+       below all parseable ones;
+    2. ties broken by ``created_on`` descending — most recently loaded wins
+       (``None`` sorts oldest);
+    3. final tie-break on ``id`` for a stable, total order.
+    """
+    try:
+        parsed = Version(driver_version.version)
+        parseable = 1
+    except InvalidVersion:
+        # Placeholder keeps the tuple comparable across rows; the
+        # ``parseable`` flag guarantees unparseable rows never outrank
+        # parseable ones.
+        parsed = Version("0")
+        parseable = 0
+    created_ts = (
+        driver_version.created_on.timestamp()
+        if driver_version.created_on is not None
+        else float("-inf")
+    )
+    return (parseable, parsed, created_ts, driver_version.id)
+
+
+def _resolve_latest_matching_version(
+    application_driver: ApplicationDriver,
+    app_version: str,
+) -> ApplicationDriverVersion | None:
+    """Return the latest driver version supporting ``app_version``, if any.
+
+    Among the driver's versions whose ``application_supported_versions``
+    specifier matches the requested application version, pick the latest by
+    :func:`_driver_version_sort_key` — never the implicit DB insertion order.
+    """
+    target = Version(app_version)
+    candidates = [
+        driver_version
+        for driver_version in application_driver.versions
+        if target in SpecifierSet(driver_version.application_supported_versions)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=_driver_version_sort_key)
+
+
+async def _load_pinned_driver_version(
+    driver_version_id: UUID,
+    application_driver: ApplicationDriver,
+    uow: UnitOfWork,
+) -> ApplicationDriverVersion:
+    """Load an explicitly pinned driver version and check driver ownership."""
+    pinned = await uow.application_driver_versions.get(id=driver_version_id)
+    if pinned is None:
+        raise DriverVersionNotFoundError(
+            f"Application driver version {driver_version_id} not found"
+        )
+    if pinned.application_driver_id != application_driver.id:
+        raise InvalidVersionError(
+            f"Driver version {driver_version_id} does not belong to application "
+            f"driver {application_driver.name}; cross-driver moves are not supported"
+        )
+    return pinned
+
+
+def _ensure_pin_supports_version(
+    pinned: ApplicationDriverVersion, version: str
+) -> None:
+    """Reject a pin whose specifier does not cover the requested version."""
+    if Version(version) not in SpecifierSet(pinned.application_supported_versions):
+        raise InvalidVersionError(
+            f"Version {version} is not supported by driver version {pinned.id} "
+            f"(supports {pinned.application_supported_versions})"
+        )
+
+
 async def update_deployment_version(
     deployment_id: UUID,
     version: str,
     uow: UnitOfWork,
     deployment_parameters: dict | None = None,
+    driver_version_id: UUID | None = None,
 ) -> Task:
-    """Update a deployment with the given configuration.
+    """Update a deployment's application version and driver-version binding.
+
+    The driver binding is always re-resolved: without an explicit pin the
+    latest driver version (per :func:`_driver_version_sort_key`) whose
+    specifier matches ``version`` is bound — so calling with the deployment's
+    current application version moves it onto a newly loaded overlapping
+    driver build.
 
     Args:
         deployment_id (UUID): The ID of the deployment to update.
-        deployment_config (dict): The new configuration for the deployment.
+        version (str): The target application version.
         uow (UnitOfWork): The unit of work to use.
+        deployment_parameters (dict | None): Parameter values to validate and
+            persist; falls back to the deployment's current parameters.
+        driver_version_id (UUID | None): Pin a specific driver version instead
+            of latest-wins resolution. Must belong to the deployment's driver
+            and support ``version``.
 
     Raises:
         InvalidContextError: If the context is invalid.
+        DriverVersionNotFoundError: If the pinned driver version does not exist.
+        InvalidVersionError: If no driver version (or the pinned one) supports
+            ``version``, or the pin belongs to a different driver.
 
     Returns:
         Task: The task created for the deployment update.
@@ -512,79 +611,78 @@ async def update_deployment_version(
         )
         assert application_driver_version is not None, "Version not found"
 
-        # Check if the version is supported by the application driver
-        new_application_driver_version = None
-        if Version(version) not in SpecifierSet(
-            application_driver_version.application_supported_versions
-        ):
-            logger.info(
-                "Version {} not supported by current driver version (supports {}), searching for compatible driver version",
-                version,
-                application_driver_version.application_supported_versions,
-            )
-            # Check if the version is supported by another application driver version
-            application_driver = await uow.application_drivers.get(
-                id=application_driver_version.application_driver_id
-            )
-            assert application_driver is not None, "Application driver not found"
-            for driver_version in application_driver.versions:
-                if Version(version) in SpecifierSet(
-                    driver_version.application_supported_versions
-                ):
-                    new_application_driver_version = driver_version
-                    break
+        # Resolve the target driver version. With an explicit pin, validate
+        # it; otherwise always re-resolve to the latest driver version (per
+        # _driver_version_sort_key) whose specifier matches the requested
+        # application version — even when the currently bound version still
+        # matches, so a newly loaded overlapping driver build is picked up.
+        application_driver = await uow.application_drivers.get(
+            id=application_driver_version.application_driver_id
+        )
+        assert application_driver is not None, "Application driver not found"
 
-            # If the version is not supported by any application driver version, raise an error
-            if new_application_driver_version is None:
+        if driver_version_id is not None:
+            target_driver_version = await _load_pinned_driver_version(
+                driver_version_id=driver_version_id,
+                application_driver=application_driver,
+                uow=uow,
+            )
+            _ensure_pin_supports_version(target_driver_version, version)
+            logger.info(
+                "Pinned driver version: id={} supports={}",
+                target_driver_version.id,
+                target_driver_version.application_supported_versions,
+            )
+        else:
+            target_driver_version = _resolve_latest_matching_version(
+                application_driver=application_driver,
+                app_version=version,
+            )
+            if target_driver_version is None:
                 raise InvalidVersionError(
                     f"Version {version} is not supported by the application driver {application_driver.name}"
                 )
-
             logger.info(
-                "Found compatible driver version: id={} supports={}",
-                new_application_driver_version.id,
-                new_application_driver_version.application_supported_versions,
+                "Resolved latest matching driver version: id={} supports={}",
+                target_driver_version.id,
+                target_driver_version.application_supported_versions,
             )
 
+        if target_driver_version.id != deployment.application_driver_version_id:
             # Store components state
             components_state = {}
             for component in deployment.components:
                 components_state[component.name] = component.enabled
 
-            # Bind the new version to the deployment
-            deployment.application_driver_version_id = new_application_driver_version.id
-            logger.info(
-                "Switched driver version: old={} new={}",
-                application_driver_version.id,
-                new_application_driver_version.id,
-            )
-
-            # Recreate the components
-            for component_config in new_application_driver_version.component_configs:
-                deployment.add_component(
-                    component=Component.create(
+            # Recreate the components from the target driver version,
+            # preserving the enabled state of same-named components.
+            deployment.set_components(
+                [
+                    Component.create(
                         name=component_config.name,
                         config=component_config.config,
                         enabled=components_state.get(component_config.name, True),
-                    ),
-                )
+                    )
+                    for component_config in target_driver_version.component_configs
+                ]
+            )
+
+            # Bind the new version to the deployment
+            deployment.application_driver_version_id = target_driver_version.id
             logger.info(
-                "Recreated {} components with preserved state",
-                len(new_application_driver_version.component_configs),
+                "Switched driver version: old={} new={} ({} components recreated with preserved state)",
+                application_driver_version.id,
+                target_driver_version.id,
+                len(target_driver_version.component_configs),
             )
         else:
             logger.info(
-                "Version {} supported by current driver version (supports {})",
-                version,
-                application_driver_version.application_supported_versions,
+                "Driver version binding unchanged: id={}",
+                target_driver_version.id,
             )
 
-        # Determine the effective driver version for parameter validation
-        effective_driver_version = (
-            new_application_driver_version
-            if new_application_driver_version is not None
-            else application_driver_version
-        )
+        # The driver version used for parameter validation and the new instance
+        effective_driver_version = target_driver_version
 
         # Validate parameters against the new driver version's definitions
         # User-provided parameters take priority, then existing, then None
@@ -799,16 +897,12 @@ async def _ensure_ingress_controller(
             "Ensure Styrmin startup completed successfully."
         )
 
-    # Find the driver version
-    ingress_driver_version = None
-    for dv in ingress_driver.versions:
-        ingress_driver_version = dv
-        break
-
-    if ingress_driver_version is None:
+    # Find the driver version (latest by the canonical ordering)
+    if not ingress_driver.versions:
         raise ApplicationDriverNotFoundError(
             f"No version found for internal driver '{INTERNAL_DRIVER_NAME}'"
         )
+    ingress_driver_version = max(ingress_driver.versions, key=_driver_version_sort_key)
 
     logger.info(
         "Creating internal ingress controller deployment for environment={}",
@@ -856,13 +950,15 @@ async def deploy_application(
     deployment_parameters: dict | None = None,
     deployment_name: str | None = None,
     service_name_overrides: dict[str, str] | None = None,
+    driver_version_id: UUID | None = None,
 ) -> Task:
     """Instantiate an application in the given environment.
 
     Args:
         driver_name: The name of the application driver.
         version: The version of the application. If None or empty, the driver's
-            default_version is used.
+            default_version is used (from the pinned driver version when one is
+            given, otherwise from the latest driver version declaring one).
         environment_id: The id of the environment to instantiate the application in.
         uow: The unit of work to use.
         created_by_user_id: The id of the user creating the deployment. Used for
@@ -871,11 +967,17 @@ async def deploy_application(
         deployment_parameters: Optional parameter values.
         deployment_name: Optional custom name for the deployment. If not provided,
             a name is auto-generated as <driver_name>-<N>.
+        driver_version_id: Pin a specific driver version instead of latest-wins
+            resolution. Must belong to ``driver_name`` and support the resolved
+            application version.
 
     Raises:
         InvalidContextError: If the context is invalid.
         DeploymentNameValidationError: If the provided name is invalid.
         DeploymentNameConflictError: If the provided name is already in use.
+        DriverVersionNotFoundError: If the pinned driver version does not exist.
+        InvalidVersionError: If no driver version (or the pinned one) supports
+            the resolved version, or the pin belongs to a different driver.
 
     Returns:
         Task: the task created for the application instantiation.
@@ -900,25 +1002,53 @@ async def deploy_application(
                 f"Application driver {driver_name} not found in the database"
             )
 
-        # If no version provided, resolve from driver's default_version
+        # Explicit pin: validate ownership, derive the version from the pin's
+        # default when none was provided, then check the pin's specifier.
+        pinned_driver_version = None
+        if driver_version_id is not None:
+            pinned_driver_version = await _load_pinned_driver_version(
+                driver_version_id=driver_version_id,
+                application_driver=application,
+                uow=uow,
+            )
+            if version is None:
+                version = pinned_driver_version.default_version
+                if version is None:
+                    raise InvalidVersionError(
+                        f"No version specified and pinned driver version "
+                        f"{pinned_driver_version.id} declares no default version"
+                    )
+            _ensure_pin_supports_version(pinned_driver_version, version)
+
+        # If no version provided, resolve the default_version declared by the
+        # latest driver version (per _driver_version_sort_key) that has one.
         if version is None:
-            for driver_version in application.versions:
-                if driver_version.default_version:
-                    version = driver_version.default_version
-                    break
+            version = next(
+                (
+                    driver_version.default_version
+                    for driver_version in sorted(
+                        application.versions,
+                        key=_driver_version_sort_key,
+                        reverse=True,
+                    )
+                    if driver_version.default_version
+                ),
+                None,
+            )
             if version is None:
                 raise InvalidVersionError(
                     f"No version specified and no default version found for driver {driver_name}"
                 )
 
-        # Get the application driver version
-        application_driver_version = None
-        for driver_version in application.versions:
-            if Version(version) in SpecifierSet(
-                driver_version.application_supported_versions
-            ):
-                application_driver_version = driver_version
-                break
+        # Get the application driver version: the pin when given, otherwise
+        # the latest driver version whose specifier matches the version.
+        application_driver_version = (
+            pinned_driver_version
+            if pinned_driver_version is not None
+            else _resolve_latest_matching_version(
+                application_driver=application, app_version=version
+            )
+        )
 
         if application_driver_version is None:
             raise InvalidVersionError(

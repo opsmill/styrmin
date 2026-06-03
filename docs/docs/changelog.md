@@ -8,6 +8,37 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Deterministic driver-version selection and explicit pinning
+
+When several loaded driver versions support the same application version,
+deployments now bind to a **deterministic latest-wins** choice, and the
+deploy/upgrade APIs accept an explicit driver-version pin.
+
+#### What's new
+
+- Driver-version resolution is deterministic: highest parseable
+  `spec.version` wins, ties (including same-`version` rebuilds with
+  different fingerprints) break by load time, newest first. Previously
+  the first matching row in database order was used.
+- Upgrades always re-resolve the binding. Re-running
+  `styrminctl deployments update-version <id> <same-version>` after
+  loading a fresher overlapping driver build moves the deployment onto
+  that build — previously this was a no-op while the current build still
+  matched.
+- The `deploy` and `updateDeploymentVersion` GraphQL mutations accept an
+  optional `driverVersionId` to pin a specific build, plumbed through
+  the SDK (`deployments.create` / `deployments.update_version`) and the
+  CLI (`--driver-version-id` on `deployments create` /
+  `deployments update-version`).
+- The UI's Upgrade dialog gains a driver-version picker that defaults to
+  **Latest (auto)**.
+
+#### Migration
+
+- No action required. Deployments keep their current binding until the
+  next upgrade; from then on resolution follows the documented rule.
+  See [Selecting a driver version](./drivers/loading-drivers.md#selecting-a-driver-version-when-deploying-or-upgrading).
+
 ### Driver reload no longer requires bumping `version`
 
 Application Driver Versions are now identified by a **provenance

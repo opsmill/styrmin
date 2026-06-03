@@ -726,8 +726,14 @@ class Mutation:
         config: JSON | None = None,
         parameters: JSON | None = None,
         service_name_overrides: list[ServiceNameOverride] | None = None,
+        driver_version_id: UUID | None = None,
     ) -> Task | None:
-        """Deploy an application in an environment."""
+        """Deploy an application in an environment.
+
+        Without ``driverVersionId`` the deployment is bound to the latest
+        loaded driver version supporting the resolved application version;
+        with it, the binding is pinned to that specific driver version.
+        """
         uow = info.context["uow"]
         current_user = info.context["current_user"]
         # RequiresAuthentication + RequiresRole(READ_WRITE) above guarantee a
@@ -758,6 +764,7 @@ class Mutation:
             service_name_overrides=overrides_dict,
             uow=uow,
             created_by_user_id=current_user.id,
+            driver_version_id=driver_version_id,
         )
         return Task.from_instance(task)
 
@@ -1100,8 +1107,14 @@ class Mutation:
         version: str,
         info: strawberry.Info,
         parameters: JSON | None = None,
+        driver_version_id: UUID | None = None,
     ) -> Task | None:
-        """Update the version of an application instance."""
+        """Update the version of an application instance.
+
+        Without ``driverVersionId`` the deployment is bound to the latest
+        loaded driver version supporting ``version``; with it, the binding is
+        pinned to that specific driver version.
+        """
         uow = info.context["uow"]
         deployment = await get_deployment(deployment_id=deployment_id, uow=uow)
         if deployment.internal:
@@ -1111,6 +1124,7 @@ class Mutation:
             deployment_parameters=parameters,
             version=version,
             uow=uow,
+            driver_version_id=driver_version_id,
         )
         return Task.from_instance(task)
 
