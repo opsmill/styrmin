@@ -557,7 +557,7 @@ type Mutation {
   unassignBackupStorageLocation(environmentId: UUID!): Environment @requiresRole
   loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion @requiresRole
   loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!): ApplicationDriverVersion @requiresRole
-  deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null): Task @requiresRole
+  deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: JSON = null, parameters: JSON = null, serviceNameOverrides: [ServiceNameOverride!] = null, driverVersionId: UUID = null): Task @requiresRole
   updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!): Task @requiresRole
   deleteDeployment(deploymentId: UUID!): Task! @requiresRole
   createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
@@ -570,7 +570,7 @@ type Mutation {
   stopComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
   startComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
   runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task @requiresRole
-  updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null): Task @requiresRole
+  updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null, driverVersionId: UUID = null): Task @requiresRole
   reportPodStatuses(reports: [DeploymentPodStatusReport!]!): ReportPodStatusesResponse!
   reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!): ReportDeploymentStatusesResponse!
 }

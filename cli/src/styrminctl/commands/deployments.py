@@ -26,6 +26,12 @@ async def create(
     cluster_id: ClusterContextId = None,
     name: Annotated[str | None, Parameter(help="Custom deployment name (auto-generated if omitted).")] = None,
     config: Annotated[str | None, Parameter(help="JSON config (inline or @filepath).")] = None,
+    driver_version_id: Annotated[
+        str | None,
+        Parameter(
+            help="Pin a specific driver version (UUID). Defaults to the latest loaded driver version supporting the application version."
+        ),
+    ] = None,
 ) -> None:
     """Create a new deployment (deploy an application)."""
     with styrmin_error_handler():
@@ -47,6 +53,7 @@ async def create(
                 cluster_name=cluster if cluster_id is None and id is None else None,
                 name=name,
                 config=parsed_config,
+                driver_version_id=driver_version_id,
             )
 
     print_success(f"Deployment in progress (deployment: {task.deployment_id}, task: {task.id})")
@@ -116,11 +123,20 @@ async def update(
 async def update_version(
     deployment_id: DeploymentId,
     version: Annotated[str, Parameter(help="New application version.")],
+    *,
+    driver_version_id: Annotated[
+        str | None,
+        Parameter(
+            help="Pin a specific driver version (UUID). Defaults to the latest loaded driver version supporting the application version."
+        ),
+    ] = None,
 ) -> None:
     """Update a deployment's application version (internal API)."""
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            task = await sdk.deployments.update_version(deployment_id, version=version)
+            task = await sdk.deployments.update_version(
+                deployment_id, version=version, driver_version_id=driver_version_id
+            )
 
     print_success(f"Version update in progress (task: {task.id})")
     console.print(f"  Status: {task.status}")

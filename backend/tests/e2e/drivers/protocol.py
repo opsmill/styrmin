@@ -100,7 +100,21 @@ class ScenarioDriver(Protocol):
         self, *, deployment_id: str, timeout: float = 300.0
     ) -> DeploymentRef: ...
 
-    async def upgrade_deployment(self, *, deployment_id: str, version: str) -> None: ...
+    async def upgrade_deployment(
+        self,
+        *,
+        deployment_id: str,
+        version: str,
+        driver_version_id: str | None = None,
+    ) -> None:
+        """Upgrade a deployment's application version.
+
+        Without ``driver_version_id`` the backend binds the latest loaded
+        driver version supporting ``version`` (latest-wins resolution); with
+        it, the binding is pinned to that specific driver version. The UI
+        driver drives the upgrade dialog's driver-version picker; the API
+        driver forwards the id to the SDK.
+        """
 
     async def update_deployment(
         self, *, deployment_id: str, config: dict[str, Any]

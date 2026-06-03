@@ -127,6 +127,51 @@ no-op; loading after a new commit lands creates a new row.
 See [`dev/guides/driver-iteration.md`](https://github.com/opsmill/styrmin/blob/develop/dev/guides/driver-iteration.md)
 for the full iteration-loop reference.
 
+### Selecting a driver version when deploying or upgrading
+
+Several loaded driver versions can support the same application version
+(their `supported_versions` specifiers overlap) — for example after
+loading a bugfixed build of a driver whose range did not change. Styrmin
+resolves which one a deployment binds to with a deterministic
+**latest-wins** rule:
+
+1. the driver version with the highest *parseable* `spec.version` wins
+   (compared as versions, so `"10"` beats `"9"`); unparseable version
+   strings rank below all parseable ones;
+2. ties — including same-`version` rebuilds with different fingerprints —
+   are broken by load time, most recent first;
+3. any remaining tie falls back to the row id, so the order is total.
+
+The rule applies on **initial deploy** and on **every upgrade**. An
+upgrade always re-resolves the binding, so re-running an upgrade at the
+deployment's *current* application version is the canonical way to move
+it onto a newly loaded driver build:
+
+```shell
+# load the fresh build, then re-apply the same application version
+uv run styrminctl drivers load-version https://github.com/your-org/styrmin-drivers.git main
+uv run styrminctl deployments update-version <deployment-id> 1.6.0
+```
+
+To bypass latest-wins and pin a specific build, pass its driver-version
+UUID (shown as `Driver version ID` in `deployments get`, or via the
+`applicationDriver.versions` GraphQL field):
+
+```shell
+uv run styrminctl deployments update-version <deployment-id> 1.6.0 \
+  --driver-version-id <uuid>
+
+uv run styrminctl deployments create infrahub 1.6.0 my-env \
+  --driver-version-id <uuid>
+```
+
+The pinned version must belong to the deployment's driver and its
+`supported_versions` must cover the requested application version —
+cross-driver moves are rejected. The UI's **Upgrade** dialog exposes the
+same choice through a driver-version picker that defaults to
+**Latest (auto)**. The pin applies to that call only: a later upgrade
+without an explicit pin re-resolves to the latest matching build again.
+
 ### Where to put your own drivers
 
 The reference repository ships several example drivers under

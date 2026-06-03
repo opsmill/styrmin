@@ -115,6 +115,16 @@ class Deployment(BaseModel):
             raise ValueError(f"Component with name {component.name} already exists.")
         self._components[component.name] = component
 
+    def set_components(self, components: list[Component]) -> None:
+        """Replace all components of the deployment.
+
+        Used when rebinding the deployment to a different application driver
+        version, whose component set supersedes the current one.
+        """
+        self._components = {}
+        for component in components:
+            self.add_component(component)
+
     def update_component(self, name: str, enabled: bool) -> None:
         """Update a component in the deployment."""
         if name not in self._components:

@@ -36,6 +36,55 @@ async def test_create_deployment_success(client: StyrminClient, mock_transport: 
     assert task.status == "pending"
 
 
+async def test_create_deployment_with_driver_version_pin(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {
+        "data": {
+            "deploy": {
+                "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "type": "deploy",
+                "status": "pending",
+                "message": None,
+                "deploymentId": "11111111-2222-3333-4444-555555555555",
+            },
+        }
+    }
+
+    await client.deployments.create(
+        driver="my-app",
+        version="1.0.0",
+        environment_id="22222222-3333-4444-5555-666666666666",
+        driver_version_id="77777777-8888-9999-aaaa-bbbbbbbbbbbb",
+    )
+
+    sent_variables = mock_transport.execute.await_args.args[1]
+    assert sent_variables["driverVersionId"] == "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
+
+
+async def test_create_deployment_omits_driver_version_id_when_unset(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.return_value = {
+        "data": {
+            "deploy": {
+                "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "type": "deploy",
+                "status": "pending",
+                "message": None,
+                "deploymentId": "11111111-2222-3333-4444-555555555555",
+            },
+        }
+    }
+
+    await client.deployments.create(
+        driver="my-app",
+        version="1.0.0",
+        environment_id="22222222-3333-4444-5555-666666666666",
+    )
+
+    sent_variables = mock_transport.execute.await_args.args[1]
+    assert "driverVersionId" not in sent_variables
+
+
 async def test_create_deployment_failed(client: StyrminClient, mock_transport: AsyncMock) -> None:
     mock_transport.execute.return_value = {
         "data": {"deploy": None},
@@ -152,6 +201,52 @@ async def test_update_deployment_success(client: StyrminClient, mock_transport: 
         ],
         "envVars": [{"name": "LOG_LEVEL", "value": "debug"}],
     }
+
+
+# ---------------------------------------------------------------------------
+# update_version (driver-version reselection / pinning)
+# ---------------------------------------------------------------------------
+
+
+_UPDATE_VERSION_RESPONSE = {
+    "data": {
+        "updateDeploymentVersion": {
+            "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "status": "pending",
+            "type": "update_version",
+            "message": None,
+            "deploymentId": "11111111-2222-3333-4444-555555555555",
+        },
+    }
+}
+
+
+async def test_update_version_defaults_to_latest_wins(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """Without a pin, only deploymentId/version are sent — the backend's
+    latest-wins resolution decides the driver-version binding."""
+    mock_transport.execute.return_value = _UPDATE_VERSION_RESPONSE
+
+    task = await client.deployments.update_version("11111111-2222-3333-4444-555555555555", "2.0.0")
+
+    assert task.status == "pending"
+    sent_variables = mock_transport.execute.await_args.args[1]
+    assert sent_variables == {
+        "deploymentId": "11111111-2222-3333-4444-555555555555",
+        "version": "2.0.0",
+    }
+
+
+async def test_update_version_with_driver_version_pin(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = _UPDATE_VERSION_RESPONSE
+
+    await client.deployments.update_version(
+        "11111111-2222-3333-4444-555555555555",
+        "2.0.0",
+        driver_version_id="77777777-8888-9999-aaaa-bbbbbbbbbbbb",
+    )
+
+    sent_variables = mock_transport.execute.await_args.args[1]
+    assert sent_variables["driverVersionId"] == "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
 
 
 # ---------------------------------------------------------------------------

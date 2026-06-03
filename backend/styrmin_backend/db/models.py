@@ -393,8 +393,13 @@ class Deployment(StyrminModel, table=True):
     # Relationships
     # ==============
 
-    # Components
-    components: list[Component] = Relationship(back_populates="deployment")
+    # Components. ``delete-orphan`` so that replacing the component set on a
+    # driver-version rebind deletes the superseded rows on merge instead of
+    # leaving them stranded.
+    components: list[Component] = Relationship(
+        back_populates="deployment",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
 
     # Deployed services
     deployed_services: list["DeployedService"] = Relationship(

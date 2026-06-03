@@ -1,5 +1,5 @@
-mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!) {
-    updateDeploymentVersion(deploymentId: $deploymentId, version: $version) {
+mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!, $driverVersionId: UUID) {
+    updateDeploymentVersion(deploymentId: $deploymentId, version: $version, driverVersionId: $driverVersionId) {
         id
     }
 }

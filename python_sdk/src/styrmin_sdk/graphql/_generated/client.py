@@ -599,10 +599,11 @@ class Client(AsyncBaseClient):
         service_name_overrides: Union[
             Optional[list[ServiceNameOverride]], UnsetType
         ] = UNSET,
+        driver_version_id: Union[Optional[UUID], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> Deploy:
         query = gql("""
-            mutation Deploy($driver: String!, $version: String, $environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!]) {
+            mutation Deploy($driver: String!, $version: String, $environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!], $driverVersionId: UUID) {
               deploy(
                 driver: $driver
                 version: $version
@@ -614,6 +615,7 @@ class Client(AsyncBaseClient):
                 config: $config
                 parameters: $parameters
                 serviceNameOverrides: $serviceNameOverrides
+                driverVersionId: $driverVersionId
               ) {
                 id
                 type
@@ -634,6 +636,7 @@ class Client(AsyncBaseClient):
             "config": config,
             "parameters": parameters,
             "serviceNameOverrides": service_name_overrides,
+            "driverVersionId": driver_version_id,
         }
         response = await self.execute(
             query=query, operation_name="Deploy", variables=variables, **kwargs
@@ -2097,11 +2100,21 @@ class Client(AsyncBaseClient):
         return UpdateUser.model_validate(data)
 
     async def update_deployment_version(
-        self, deployment_id: UUID, version: str, **kwargs: Any
+        self,
+        deployment_id: UUID,
+        version: str,
+        parameters: Union[Optional[Any], UnsetType] = UNSET,
+        driver_version_id: Union[Optional[UUID], UnsetType] = UNSET,
+        **kwargs: Any,
     ) -> UpdateDeploymentVersion:
         query = gql("""
-            mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!) {
-              updateDeploymentVersion(deploymentId: $deploymentId, version: $version) {
+            mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!, $parameters: JSON, $driverVersionId: UUID) {
+              updateDeploymentVersion(
+                deploymentId: $deploymentId
+                version: $version
+                parameters: $parameters
+                driverVersionId: $driverVersionId
+              ) {
                 id
                 status
                 type
@@ -2113,6 +2126,8 @@ class Client(AsyncBaseClient):
         variables: dict[str, object] = {
             "deploymentId": deployment_id,
             "version": version,
+            "parameters": parameters,
+            "driverVersionId": driver_version_id,
         }
         response = await self.execute(
             query=query,

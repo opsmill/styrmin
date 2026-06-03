@@ -236,9 +236,17 @@ class ApiScenarioDriver:
             f"(status: {status})"
         )
 
-    async def upgrade_deployment(self, *, deployment_id: str, version: str) -> None:
+    async def upgrade_deployment(
+        self,
+        *,
+        deployment_id: str,
+        version: str,
+        driver_version_id: str | None = None,
+    ) -> None:
         try:
-            await self._client.deployments.update_version(deployment_id, version)
+            await self._client.deployments.update_version(
+                deployment_id, version, driver_version_id=driver_version_id
+            )
         except StyrminError as exc:
             raise _normalise(exc) from exc
 

@@ -150,6 +150,13 @@ class InvalidVersionSyntaxError(ServiceError):
     default_message = "The version syntax is invalid"
 
 
+class DriverVersionNotFoundError(ServiceError):
+    """The pinned application driver version was not found."""
+
+    error_code = "NOT_FOUND"
+    default_message = "Application driver version not found"
+
+
 class UnupgradableApplicationInstanceError(ServiceError):
     """The application instance is not upgradable."""
 

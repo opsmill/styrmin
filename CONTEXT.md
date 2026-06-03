@@ -70,6 +70,10 @@ _Avoid_: "driver hash" alone (ambiguous across source types), "version hash" (co
 The user-facing version of the deployed application (e.g. `infrahub` `1.6.0`), distinct from the **driver version** that knows how to deploy it. A **driver version** declares a semver specifier (`application_supported_versions`) describing which **application versions** it can deploy.
 _Avoid_: "app version" (in code is fine, in prose write it out), conflating with **driver version**.
 
+**Latest-wins driver-version resolution**:
+The deterministic rule that picks which **application driver version** a **deployment** binds to when several support the requested **application version**: highest parseable `version` string first (unparseable strings rank below all parseable ones), ties broken by `created_on` descending (most recently loaded), final tie-break on row id. Applies on initial deploy and on every upgrade — an upgrade always re-resolves the binding unless the caller pins one explicitly via `driverVersionId` (the **driver-version pin**, valid only within the deployment's own driver). Implemented by `_driver_version_sort_key` / `_resolve_latest_matching_version` in `backend/styrmin_backend/services/deployment.py`.
+_Avoid_: "newest version" (ambiguous between the two orderings), "first match" (the pre-rule behavior), "default driver version" (conflates with `default_version`).
+
 **Component**:
 A logical sub-part of an application (e.g. `server`, `task-worker`) declared by the **application driver** and identified by a Kubernetes label selector (`styrmin/component`). A **deployment** can enable/disable and configure components individually. Lifecycle controls (start/stop, restart, scaling) act on the **component** as a unit.
 _Avoid_: "service" (that is its own concept), "pod" (a **component** is observed via one or more **pods**), "module".

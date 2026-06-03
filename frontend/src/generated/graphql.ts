@@ -681,6 +681,7 @@ export type MutationDeployArgs = {
   clusterName?: InputMaybe<Scalars['String']['input']>;
   config?: InputMaybe<Scalars['JSON']['input']>;
   driver: Scalars['String']['input'];
+  driverVersionId?: InputMaybe<Scalars['UUID']['input']>;
   environmentId?: InputMaybe<Scalars['UUID']['input']>;
   environmentName?: InputMaybe<Scalars['String']['input']>;
   name?: InputMaybe<Scalars['String']['input']>;
@@ -776,6 +777,7 @@ export type MutationUpdateDeploymentArgs = {
 
 export type MutationUpdateDeploymentVersionArgs = {
   deploymentId: Scalars['UUID']['input'];
+  driverVersionId?: InputMaybe<Scalars['UUID']['input']>;
   parameters?: InputMaybe<Scalars['JSON']['input']>;
   version: Scalars['String']['input'];
 };
@@ -1564,6 +1566,7 @@ export type UpdateDeploymentVersionMutationVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
   version: Scalars['String']['input'];
   parameters?: InputMaybe<Scalars['JSON']['input']>;
+  driverVersionId?: InputMaybe<Scalars['UUID']['input']>;
 }>;
 
 
@@ -3022,11 +3025,12 @@ export const useUpdateDeploymentMutation = <
     )};
 
 export const UpdateDeploymentVersionDocument = `
-    mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!, $parameters: JSON) {
+    mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!, $parameters: JSON, $driverVersionId: UUID) {
   updateDeploymentVersion(
     deploymentId: $deploymentId
     version: $version
     parameters: $parameters
+    driverVersionId: $driverVersionId
   ) {
     id
     type

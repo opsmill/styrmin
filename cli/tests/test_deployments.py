@@ -44,6 +44,7 @@ def test_deployments_create(mock_client: MagicMock, capsys: pytest.CaptureFixtur
         cluster_name="default",
         name=None,
         config=None,
+        driver_version_id=None,
     )
     output = capsys.readouterr().out
     assert DEPLOYMENT_UUID in output
@@ -65,6 +66,27 @@ def test_deployments_create_with_options(mock_client: MagicMock) -> None:
         cluster_name="default",
         name="my-db",
         config={"key": "val"},
+        driver_version_id=None,
+    )
+
+
+def test_deployments_create_with_driver_version_pin(mock_client: MagicMock) -> None:
+    mock_task = MagicMock(id="t-1", deployment_id=DEPLOYMENT_UUID, status="pending")
+    mock_client.deployments.create = AsyncMock(return_value=mock_task)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "create", "postgres", "14.0", ENV_UUID, "--driver-version-id", "dv-1"])
+    assert exc.value.code == 0
+    mock_client.deployments.create.assert_called_once_with(
+        driver="postgres",
+        version="14.0",
+        environment_id=None,
+        environment_name=ENV_UUID,
+        cluster_id=None,
+        cluster_name="default",
+        name=None,
+        config=None,
+        driver_version_id="dv-1",
     )
 
 
@@ -111,7 +133,25 @@ def test_deployments_update_version(mock_client: MagicMock, capsys: pytest.Captu
     with pytest.raises(SystemExit) as exc:
         app(["deployments", "update-version", DEPLOYMENT_UUID, "15.0"])
     assert exc.value.code == 0
-    mock_client.deployments.update_version.assert_called_once_with(DEPLOYMENT_UUID, version="15.0")
+    mock_client.deployments.update_version.assert_called_once_with(
+        DEPLOYMENT_UUID, version="15.0", driver_version_id=None
+    )
+    output = capsys.readouterr().out
+    assert "t-1" in output
+
+
+def test_deployments_update_version_with_driver_version_pin(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mock_task = MagicMock(id="t-1", status="pending")
+    mock_client.deployments.update_version = AsyncMock(return_value=mock_task)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "update-version", DEPLOYMENT_UUID, "15.0", "--driver-version-id", "dv-2"])
+    assert exc.value.code == 0
+    mock_client.deployments.update_version.assert_called_once_with(
+        DEPLOYMENT_UUID, version="15.0", driver_version_id="dv-2"
+    )
     output = capsys.readouterr().out
     assert "t-1" in output
 

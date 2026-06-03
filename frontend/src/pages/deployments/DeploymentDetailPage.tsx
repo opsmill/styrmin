@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetDeploymentQuery,
   useGetDeploymentTimelineQuery,
+  useGetDriverQuery,
   useCreateBackupMutation,
   useDeleteBackupMutation,
   useDeleteDeploymentMutation,
@@ -35,6 +36,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Archive,
   ChevronRight,
@@ -96,6 +104,25 @@ export default function DeploymentDetailPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  // Driver-version pin for the upgrade dialog. The "latest" sentinel keeps
+  // the backend's default latest-wins resolution (driverVersionId omitted);
+  // a UUID pins the binding to that specific driver version.
+  const [selectedDriverVersionId, setSelectedDriverVersionId] =
+    useState("latest");
+
+  // Versions of the deployment's driver, fetched lazily when the upgrade
+  // dialog opens so the picker can offer an explicit driver-version pin.
+  const upgradeDriverId =
+    deployment?.applicationDriverVersion?.applicationDriver?.id;
+  const { data: upgradeDriverData } = useGetDriverQuery(
+    { applicationDriverId: upgradeDriverId ?? "" },
+    { enabled: upgradeOpen && !!upgradeDriverId },
+  );
+  const upgradeDriverVersions = [
+    ...(upgradeDriverData?.applicationDriver?.versions ?? []),
+  ].sort(
+    (a, b) => new Date(b.createdOn).getTime() - new Date(a.createdOn).getTime(),
+  );
 
   // Deployment-deletion state (spec 008).
   const deleteDeploymentMutation = useDeleteDeploymentMutation();
@@ -173,10 +200,15 @@ export default function DeploymentDetailPage() {
       await updateVersionMutation.mutateAsync({
         deploymentId,
         version: newVersion,
+        driverVersionId:
+          selectedDriverVersionId === "latest"
+            ? undefined
+            : selectedDriverVersionId,
       });
       queryClient.invalidateQueries({ queryKey: ["GetDeployment"] });
       setUpgradeOpen(false);
       setNewVersion("");
+      setSelectedDriverVersionId("latest");
     } catch (err) {
       console.error("[update-version] mutation failed", err);
       setUpgradeError(err instanceof Error ? err.message : "Unknown error");
@@ -737,7 +769,16 @@ export default function DeploymentDetailPage() {
       </Dialog>
 
       {/* Upgrade dialog */}
-      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
+      <Dialog
+        open={upgradeOpen}
+        onOpenChange={(open) => {
+          setUpgradeOpen(open);
+          if (!open) {
+            setSelectedDriverVersionId("latest");
+            setUpgradeError(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Upgrade Deployment</DialogTitle>
@@ -760,11 +801,41 @@ export default function DeploymentDetailPage() {
               placeholder="e.g. 2.0.0"
             />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="upgrade-driver-version">Driver Version</Label>
+            <Select
+              value={selectedDriverVersionId}
+              onValueChange={setSelectedDriverVersionId}
+            >
+              <SelectTrigger
+                id="upgrade-driver-version"
+                data-testid="upgrade-driver-version-select"
+              >
+                <SelectValue placeholder="Latest (auto)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="latest">Latest (auto)</SelectItem>
+                {upgradeDriverVersions.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    {formatDriverVersionLabel(v)}
+                    {v.id === deployment.applicationDriverVersionId
+                      ? " (current)"
+                      : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Latest (auto) binds the newest loaded driver version supporting
+              the new application version; pick one to pin it explicitly.
+            </p>
+          </div>
           <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {
                 setUpgradeOpen(false);
+                setSelectedDriverVersionId("latest");
                 setUpgradeError(null);
               }}
             >

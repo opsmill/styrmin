@@ -78,10 +78,21 @@ class DeploymentDetailPage:
         await self._page.get_by_role("button", name="Upgrade", exact=True).click()
         await self._page.get_by_role("dialog", name="Upgrade Deployment").wait_for()
 
-    async def confirm_upgrade(self, *, version: str) -> None:
-        """Fill the New Version input and click Upgrade inside the dialog."""
+    async def confirm_upgrade(
+        self, *, version: str, driver_version_id: str | None = None
+    ) -> None:
+        """Fill the New Version input and click Upgrade inside the dialog.
+
+        When ``driver_version_id`` is given, pin that driver version through
+        the dialog's picker instead of the default "Latest (auto)" option.
+        """
         dialog = self._page.get_by_role("dialog", name="Upgrade Deployment")
         await dialog.get_by_label("New Version").fill(version)
+        if driver_version_id is not None:
+            await dialog.get_by_test_id("upgrade-driver-version-select").click()
+            # SelectItem mirrors its value to data-value; the popup renders in
+            # a portal outside the dialog element, so locate page-wide.
+            await self._page.locator(f'[data-value="{driver_version_id}"]').click()
         await dialog.get_by_role("button", name="Upgrade", exact=True).click()
         # Dialog closes on success; treat its disappearance as the signal.
         await dialog.wait_for(state="hidden")
