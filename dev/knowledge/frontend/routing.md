@@ -126,7 +126,7 @@ For component tests that just need router context (e.g. anything rendering a `<L
 
 ### Auth and role-gated routes
 
-Feature 011 adds an authenticated-user surface and role-gated admin routes on top of the auth foundation from #179 (see [ADR-016](../../adr/adr-016-authentication-and-sessions.md) / [ADR-017](../../adr/adr-017-authorization-model.md)).
+Feature 011 adds an authenticated-user surface and role-gated admin routes on top of the auth foundation from #179 (see [ADR-016](../../adr/0016-authentication-and-sessions.md) / [ADR-017](../../adr/0017-authorization-model.md)).
 
 #### Routes
 

@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-05-08
 **Source**: specs/010-driver-env-var-consumption/ (spec, plan, research)
-**Supersedes**: the post-render env-vars injection design from 008-deployment-env-vars (`EnvVarsPatch` / `envVarCollisions` surfaces and the chart-vs-operator conflict policy); [ADR-012](adr-012-environment-config-fanout.md)'s environment-config fanout is unaffected.
+**Supersedes**: the post-render env-vars injection design from 008-deployment-env-vars (`EnvVarsPatch` / `envVarCollisions` surfaces and the chart-vs-operator conflict policy); [ADR-012](0012-environment-config-fanout.md)'s environment-config fanout is unaffected.
 
 ## Context
 
@@ -59,7 +59,7 @@ This is a feature, not a bug: each driver decides whether to expose the surface.
 
 010 supersedes 008's post-render injection design + conflict-policy machinery (`EnvVarsPatch`, `EnvVarCollision`, `ChartEnvCollision`, `DeploymentTimelineEntry.envVarCollisions`, `PostRenderInjection.envVars`). The operator-facing config model from 008 — typed-vs-free-form boundary, doc-only driver-side declarations, upgrade-orphan policy — and the validation pipeline (name regex, size caps, error codes) are preserved.
 
-[ADR-012](adr-012-environment-config-fanout.md) (009's env-config fanout) is unaffected. Environment-config edits still trigger per-deployment redeploys; the redeploy path now flows through the driver's values template (010) instead of a post-render patch (008). The fanout machinery itself is identical.
+[ADR-012](0012-environment-config-fanout.md) (009's env-config fanout) is unaffected. Environment-config edits still trigger per-deployment redeploys; the redeploy path now flows through the driver's values template (010) instead of a post-render patch (008). The fanout machinery itself is identical.
 
 ## Consequences
 

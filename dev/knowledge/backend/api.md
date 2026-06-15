@@ -86,7 +86,7 @@ Defined on `type Mutation`:
 | `createCluster` | `name="default", config?` | `Cluster` |
 | `deleteCluster` | `clusterId?, clusterName?` | `String` |
 | `createEnvironment` | `name, clusterId?, clusterName?, config?` | `Environment` |
-| `updateEnvironment` | `environmentId, input: UpdateEnvironmentInput!` | `Environment` (typed full-replacement input; triggers per-deployment redeploy fanout — see [ADR-012](../adr/adr-012-environment-config-fanout.md)) |
+| `updateEnvironment` | `environmentId, input: UpdateEnvironmentInput!` | `Environment` (typed full-replacement input; triggers per-deployment redeploy fanout — see [ADR-012](../adr/0012-environment-config-fanout.md)) |
 | `deleteEnvironment` | `environmentId?, environmentName?, clusterId?, clusterName?` | `String` |
 | `createBackupStorageLocation` | `name, endpoint, bucket, region, accessKeyId, secretAccessKey` | `BackupStorageLocation` |
 | `updateBackupStorageLocation` | `backupStorageLocationId, name?, endpoint?, bucket?, region?, accessKeyId?, secretAccessKey?` | `BackupStorageLocation` |
@@ -168,7 +168,7 @@ On the client side, errors arrive as standard GraphQL errors with `extensions.co
 |------|--------|---------|
 | `INVALID_ENV_VAR_VALUE` | `validate_env_var_value` rejecting a non-string value at the validator entry point (spec 011 / US3) | Reachable only on the JSON-config write path through `deploy()` (the env-var write paths through `updateDeployment()` and `updateEnvironment()` are now typed — `EnvVarInput.value: String!` — and reject non-string values at the GraphQL wire boundary before the validator runs). `error_metadata` carries `name`, `value_type`, and (when known) `scope`. |
 
-The validator type-checks every env-var value against `isinstance(value, str)` *before* any encoding or size computation. Non-string inputs surface as a typed `INVALID_ENV_VAR_VALUE` rather than crashing the resolver with a generic `AttributeError` from a downstream `.encode("utf-8")` call. See [`adr-014`](../../adr/adr-014-schema-walking-input-propagation-tests.md) for the matching schema-walking input-completeness test pattern that prevents the upstream "missing field" class of bugs.
+The validator type-checks every env-var value against `isinstance(value, str)` *before* any encoding or size computation. Non-string inputs surface as a typed `INVALID_ENV_VAR_VALUE` rather than crashing the resolver with a generic `AttributeError` from a downstream `.encode("utf-8")` call. See [`adr-014`](../../adr/0014-schema-walking-input-propagation-tests.md) for the matching schema-walking input-completeness test pattern that prevents the upstream "missing field" class of bugs.
 
 <!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
 
@@ -306,9 +306,9 @@ type Deployment {
 
 Validation flows through the same Pydantic pipeline as `deploy()` / `updateDeployment()`, surfacing the typed error codes from 008 at the GraphQL boundary: `INVALID_ENV_VAR_NAME`, `ENV_VAR_SIZE_LIMIT_EXCEEDED`, `DUPLICATE_ENV_VAR_NAME`, plus `ENVIRONMENT_NOT_FOUND` for unknown ids.
 
-After persistence, the platform fans out a redeploy Task to **every non-tombstoned, non-internal deployment in the environment** whose active instance is not already at the new config (per-deployment no-op detection — see [ADR-012](../adr/adr-012-environment-config-fanout.md) §1). The mutation returns once the env-config row is committed and Tasks are dispatched (it does NOT block on Task completion). Per-deployment Task failures are recorded on the affected deployment's timeline; they do NOT roll back the env-config row or affect peer deployments (FR-008/FR-009a).
+After persistence, the platform fans out a redeploy Task to **every non-tombstoned, non-internal deployment in the environment** whose active instance is not already at the new config (per-deployment no-op detection — see [ADR-012](../adr/0012-environment-config-fanout.md) §1). The mutation returns once the env-config row is committed and Tasks are dispatched (it does NOT block on Task completion). Per-deployment Task failures are recorded on the affected deployment's timeline; they do NOT roll back the env-config row or affect peer deployments (FR-008/FR-009a).
 
-Frontend form caveat (v1, US4): the env-vars edit form on the environment detail Configuration tab maps only the `envVars` and flat-scalar slices of `EnvironmentConfig` back into the full-replacement input. The nested `dedicatedIngress` and `scheduling` fields are NOT yet carried through the form — to prevent silent clears under full-replacement semantics, **the form blocks submission** when the persisted config carries either nested override: it renders a destructive Alert above the rows and disables the Save button, leaving the rows readable + editable so operators can copy values into their SDK call. When neither nested override is set, the form behaves normally. Operators hitting the block use the SDK or GraphiQL until a future iteration extends the form. See [ADR-012](../adr/adr-012-environment-config-fanout.md) §2 for details.
+Frontend form caveat (v1, US4): the env-vars edit form on the environment detail Configuration tab maps only the `envVars` and flat-scalar slices of `EnvironmentConfig` back into the full-replacement input. The nested `dedicatedIngress` and `scheduling` fields are NOT yet carried through the form — to prevent silent clears under full-replacement semantics, **the form blocks submission** when the persisted config carries either nested override: it renders a destructive Alert above the rows and disables the Save button, leaving the rows readable + editable so operators can copy values into their SDK call. When neither nested override is set, the form behaves normally. Operators hitting the block use the SDK or GraphiQL until a future iteration extends the form. See [ADR-012](../adr/0012-environment-config-fanout.md) §2 for details.
 
 Observability:
 
@@ -319,9 +319,9 @@ Observability:
 
 <!-- Extracted from specs/011-typed-deployment-input on 2026-05-16 -->
 
-`updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!)` is the single typed write surface for deployment configuration. The prior loose-argument shape (`name`, `config: JSON`, `parameters: JSON`, `serviceNameOverrides: [ServiceNameOverride!]`) is **gone** in the same release that ships the typed input — clean replace, no deprecation window (mirrors the 009 cutover precedent; see [ADR-012](../adr/adr-012-environment-config-fanout.md) §3 and [ADR-018](../adr/adr-018-typed-update-deployment-input.md)).
+`updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!)` is the single typed write surface for deployment configuration. The prior loose-argument shape (`name`, `config: JSON`, `parameters: JSON`, `serviceNameOverrides: [ServiceNameOverride!]`) is **gone** in the same release that ships the typed input — clean replace, no deprecation window (mirrors the 009 cutover precedent; see [ADR-012](../adr/0012-environment-config-fanout.md) §3 and [ADR-018](../adr/0018-typed-update-deployment-input.md)).
 
-`UpdateDeploymentInput` is **full-replacement** at the top level with **one deliberate exception**: `parameters` keeps merge semantics. Omitting any other top-level field (`envVars`, `ipWhitelist`, `dedicatedIngress`, `scheduling`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `ingressClass`, `dbSize`, `runtimeClass`, `nodeSelector`, `standardStorage`, `components`, `serviceNameOverrides`, `name`) persists it as its unset state; omitting `parameters` leaves the persisted parameters dict alone. The asymmetry is documented on the GraphQL field description so introspection consumers see it without reading source. See [ADR-018](../adr/adr-018-typed-update-deployment-input.md) for the rationale (operators bumping one parameter value continue to work with a single-entry input; the unnamed keys survive).
+`UpdateDeploymentInput` is **full-replacement** at the top level with **one deliberate exception**: `parameters` keeps merge semantics. Omitting any other top-level field (`envVars`, `ipWhitelist`, `dedicatedIngress`, `scheduling`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `ingressClass`, `dbSize`, `runtimeClass`, `nodeSelector`, `standardStorage`, `components`, `serviceNameOverrides`, `name`) persists it as its unset state; omitting `parameters` leaves the persisted parameters dict alone. The asymmetry is documented on the GraphQL field description so introspection consumers see it without reading source. See [ADR-018](../adr/0018-typed-update-deployment-input.md) for the rationale (operators bumping one parameter value continue to work with a single-entry input; the unnamed keys survive).
 
 Named-dict-typed config fields (`parameters`, `components`, top-level `envVars`, per-component `envVars`) travel as `list[{name, value, …}]` on the wire and are flattened to `dict` at the GraphQL-input boundary with typed duplicate detection. The flatten step raises:
 
@@ -329,7 +329,7 @@ Named-dict-typed config fields (`parameters`, `components`, top-level `envVars`,
 - `DUPLICATE_COMPONENT_NAME` (`DuplicateComponentNameError`) — two `components` entries with the same `name`.
 - `DUPLICATE_ENV_VAR_NAME` (existing) — two env-var entries with the same `name`, with scope `"deployment"` (top-level) or `"component:<name>"` (per-component).
 
-Detection at the flatten step is the only natural location — by the time the dict is built, duplicate keys silently collapse with last-wins semantics. Future typed inputs that mirror a Pydantic `dict[str, T]` field MUST use the same list-shape grammar; JSON-typed dict inputs are forbidden ([ADR-018](../adr/adr-018-typed-update-deployment-input.md)).
+Detection at the flatten step is the only natural location — by the time the dict is built, duplicate keys silently collapse with last-wins semantics. Future typed inputs that mirror a Pydantic `dict[str, T]` field MUST use the same list-shape grammar; JSON-typed dict inputs are forbidden ([ADR-018](../adr/0018-typed-update-deployment-input.md)).
 
 Explicit empty list = full clear; omitted/null field = "do not touch". `components: []` clears every per-component block; `components: [{name: "web", envVars: null}]` keeps the `web` key but collapses its inner env-vars block to its absent state (recursive nested-omission rule inherited from the shared `_convert_value` helper in `api/definitions/config/inputs.py`).
 
@@ -339,7 +339,7 @@ Submitting an empty input (`input: {}`) surfaces a `VALIDATION_ERROR` from the e
 
 Shared leaf inputs (`EnvVarInput`, `SchedulingInput`, `DedicatedIngressInput`, `AffinityBlockInput`, `ResourceRequirementsInput`, the enum mirrors, …) live in `api/definitions/config/inputs.py` and are reused unchanged by `UpdateEnvironmentInput` and `UpdateDeploymentInput`. Top-level inputs and their conversion helpers (`update_environment_input_to_dict`, `update_deployment_input_to_dict`) stay co-located with their entities under `api/definitions/{environment,deployment}/inputs.py`.
 
-The frontend `deploymentConfigToInput()` helper in `frontend/src/lib/deployment-input.ts` converts the read-API config dict (with dict-shaped `envVars` and `components`) into the new list-shaped input shape; the `SchedulingConfigDialog` and any future caller submitting `UpdateDeploymentInput` go through this helper (mirrors the submit-boundary-transform discipline in [ADR-015](../adr/adr-015-frontend-value-transform-boundary.md)).
+The frontend `deploymentConfigToInput()` helper in `frontend/src/lib/deployment-input.ts` converts the read-API config dict (with dict-shaped `envVars` and `components`) into the new list-shaped input shape; the `SchedulingConfigDialog` and any future caller submitting `UpdateDeploymentInput` go through this helper (mirrors the submit-boundary-transform discipline in [ADR-015](../adr/0015-frontend-value-transform-boundary.md)).
 
 There is no `tasks` field on `Deployment` — query `tasks` at the root and filter by `deploymentId` if you need a deployment's task history.
 
@@ -395,7 +395,7 @@ type ResolvedComponentScheduling {
 }
 ```
 
-`scheduling` is a typed `SchedulingConfig` blob — see [`data-models.md`](data-models.md) → SchedulingConfig for the field set. Exposing it as `JSON` (rather than as strongly-typed GraphQL types per sub-object) preserves the same loose-typed JSON wire pattern the rest of `config` uses; clients introspect by dotted path. See [ADR-029](../adr/adr-029-config-additions-via-baseconfigsection-no-migration.md).
+`scheduling` is a typed `SchedulingConfig` blob — see [`data-models.md`](data-models.md) → SchedulingConfig for the field set. Exposing it as `JSON` (rather than as strongly-typed GraphQL types per sub-object) preserves the same loose-typed JSON wire pattern the rest of `config` uses; clients introspect by dotted path. See [ADR-029](../adr/0029-config-additions-via-baseconfigsection-no-migration.md).
 
 `provenance` is a flat dict keyed by dotted paths into the resolved `scheduling` object — e.g.:
 
@@ -409,13 +409,13 @@ type ResolvedComponentScheduling {
 }
 ```
 
-For accumulated lists (affinity terms, tolerations, topology-spread constraints), provenance is recorded **per element** at the resolved list's index — drivers and the frontend index into the map by index. See [ADR-036](../adr/adr-036-scheduling-provenance-map.md) for the rationale.
+For accumulated lists (affinity terms, tolerations, topology-spread constraints), provenance is recorded **per element** at the resolved list's index — drivers and the frontend index into the map by index. See [ADR-036](../adr/0036-scheduling-provenance-map.md) for the rationale.
 
 ### DeploymentTimelineEntry
 
 <!-- Extracted from specs/001-deployment-history-timeline on 2026-05-17 -->
 
-Per-deployment history exposed through the `deploymentTimeline(deploymentId: UUID!): [DeploymentTimelineEntry!]!` query, ordered `created_on DESC` (newest first). The entry, version, and context diff are all **derived server-side** from the existing `Task` and `ApplicationInstance` rows — no schema additions back this query. See [ADR-028](../adr/adr-028-deployment-history-derived-from-existing-data.md).
+Per-deployment history exposed through the `deploymentTimeline(deploymentId: UUID!): [DeploymentTimelineEntry!]!` query, ordered `created_on DESC` (newest first). The entry, version, and context diff are all **derived server-side** from the existing `Task` and `ApplicationInstance` rows — no schema additions back this query. See [ADR-028](../adr/0028-deployment-history-derived-from-existing-data.md).
 
 ```graphql
 type DeploymentTimelineEntry {
@@ -461,13 +461,13 @@ type DeployedService {
 }
 ```
 
-Both FQDN fields are computed at runtime by the `Deployment.deployed_services()` resolver (single batched lookup of environment + cluster + resolved config, one pass over all services) and injected into the Strawberry instances. They are **not** persisted on `DeployedService` in the database — see [ADR-022](../adr/adr-022-compute-service-fqdns-at-runtime.md). The same `context/fqdn.py` helpers compute these values for driver-template context, guaranteeing UI ↔ driver consistency.
+Both FQDN fields are computed at runtime by the `Deployment.deployed_services()` resolver (single batched lookup of environment + cluster + resolved config, one pass over all services) and injected into the Strawberry instances. They are **not** persisted on `DeployedService` in the database — see [ADR-022](../adr/0022-compute-service-fqdns-at-runtime.md). The same `context/fqdn.py` helpers compute these values for driver-template context, guaranteeing UI ↔ driver consistency.
 
 ### DeploymentStatusType
 
 <!-- Extracted from specs/001-crd-status-reporting on 2026-05-17 -->
 
-Latest StyrminDeployment CRD status snapshot, exposed as `Deployment.crdStatus`. The wire types reflect the post-rename surface (`DeploymentStatusType` / `reportDeploymentStatuses` / `DeploymentStatusReportInput`); the original spec authored these as `DeploymentCrdStatus` / `reportCrdStatuses`. See [ADR-020](../adr/adr-020-separate-crd-status-reporting-mutation.md) and [ADR-021](../adr/adr-021-deployment-crd-status-snapshot-table.md).
+Latest StyrminDeployment CRD status snapshot, exposed as `Deployment.crdStatus`. The wire types reflect the post-rename surface (`DeploymentStatusType` / `reportDeploymentStatuses` / `DeploymentStatusReportInput`); the original spec authored these as `DeploymentCrdStatus` / `reportCrdStatuses`. See [ADR-020](../adr/0020-separate-crd-status-reporting-mutation.md) and [ADR-021](../adr/0021-deployment-crd-status-snapshot-table.md).
 
 ```graphql
 type CrdCondition {

@@ -8,7 +8,7 @@
 
 The agent already polls pod statuses and reports them to the backend via a dedicated `reportPodStatuses` GraphQL mutation. Extending the agent to also collect StyrminDeployment CRD status raised the question of transport: bundle the CRD payload into `reportPodStatuses`, or add a companion mutation?
 
-Pod status and CRD status are observed-state snapshots of two different Kubernetes object kinds. They share a polling cadence but nothing else — their schemas are unrelated, their failure modes are independent (a missing CRD does not stop pod observation, and vice versa), and they are consumed by different parts of the backend (pod statuses update component state; CRD status updates `Deployment.status` per [[adr-019-crd-phase-and-task-callback-coexist]]).
+Pod status and CRD status are observed-state snapshots of two different Kubernetes object kinds. They share a polling cadence but nothing else — their schemas are unrelated, their failure modes are independent (a missing CRD does not stop pod observation, and vice versa), and they are consumed by different parts of the backend (pod statuses update component state; CRD status updates `Deployment.status` per [[0019-crd-phase-and-task-callback-coexist]]).
 
 ## Decision
 

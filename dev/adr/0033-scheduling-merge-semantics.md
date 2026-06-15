@@ -6,7 +6,7 @@
 
 ## Context
 
-`SchedulingConfig` propagates through three levels — **Environment → Deployment → Component** — and the resolver has to merge them into one effective config per component before post-render injection. Most fields on `SchedulingConfig` are scalars (`runtime_class`, `node_selector`, `inject.*` booleans) and follow the deepest-wins rule already established for [[adr-029-config-additions-via-baseconfigsection-no-migration]] siblings.
+`SchedulingConfig` propagates through three levels — **Environment → Deployment → Component** — and the resolver has to merge them into one effective config per component before post-render injection. Most fields on `SchedulingConfig` are scalars (`runtime_class`, `node_selector`, `inject.*` booleans) and follow the deepest-wins rule already established for [[0029-config-additions-via-baseconfigsection-no-migration]] siblings.
 
 Two fields, though, are intrinsically list-shaped and force a non-trivial merge semantics decision:
 

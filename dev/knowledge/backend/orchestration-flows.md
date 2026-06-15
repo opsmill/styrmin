@@ -31,7 +31,7 @@ Orchestration flows are Prefect `@flow` functions that execute multi-step deploy
             └──────────────┘
 ```
 
-The non-CRD variants (`create_instance`, `update_instance`, `upgrade_instance`) still exist in `agent/tasks/orchestration.py` for now but are not registered in the catalogue and are not on the live execution path. The CRD variants are what the operator actually drives — see [ADR-006](../adr/adr-006-prefect-crd-intent-declaration.md).
+The non-CRD variants (`create_instance`, `update_instance`, `upgrade_instance`) still exist in `agent/tasks/orchestration.py` for now but are not registered in the catalogue and are not on the live execution path. The CRD variants are what the operator actually drives — see [ADR-006](../adr/0006-prefect-crd-intent-declaration.md).
 
 ## Lifecycles without Prefect
 

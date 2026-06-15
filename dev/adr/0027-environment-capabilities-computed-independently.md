@@ -6,7 +6,7 @@
 
 ## Context
 
-Both `Cluster` and `Environment` carry a `capabilities` JSON column (see [[adr-025-capabilities-as-extensible-json-column]]). Environments live inside clusters and share several config knobs (storage class, ingress, fqdn_suffix). The naive approach would be: compute cluster capabilities once, then derive environment capabilities by copying and filtering the cluster's view.
+Both `Cluster` and `Environment` carry a `capabilities` JSON column (see [[0025-capabilities-as-extensible-json-column]]). Environments live inside clusters and share several config knobs (storage class, ingress, fqdn_suffix). The naive approach would be: compute cluster capabilities once, then derive environment capabilities by copying and filtering the cluster's view.
 
 That would have two failure modes:
 
@@ -33,4 +33,4 @@ This means:
 ## Alternatives Considered
 
 - **Copy cluster capabilities and filter**: rejected. Creates coupling that wasn't there before: a cluster-side change becomes an environment-side change without any environment-level signal. Also misrepresents the semantics — environments are not "subsets of clusters", they are entities with their own resolved configuration.
-- **Compute cluster capabilities only, derive environment view on read**: rejected for the same persistence-correctness reason as [[adr-026-capabilities-recalculation-in-service-layer]]: we already decided capabilities are persisted, not computed-on-read. A hybrid "persist cluster, derive environment on read" splits the policy and creates exactly one new edge case where the derivation rule has to live (read path vs write path).
+- **Compute cluster capabilities only, derive environment view on read**: rejected for the same persistence-correctness reason as [[0026-capabilities-recalculation-in-service-layer]]: we already decided capabilities are persisted, not computed-on-read. A hybrid "persist cluster, derive environment on read" splits the policy and creates exactly one new edge case where the derivation rule has to live (read path vs write path).

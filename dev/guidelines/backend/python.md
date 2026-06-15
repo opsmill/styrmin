@@ -150,7 +150,7 @@ Every Strawberry input that mirrors a Pydantic config model MUST have a
 runtime test that introspects both sides and asserts every Pydantic field
 has a corresponding Strawberry input field. The test fails fast with the
 missing field name when schema drift introduces a Pydantic field without
-its input mirror. See [ADR-014](../../adr/adr-014-schema-walking-input-propagation-tests.md)
+its input mirror. See [ADR-014](../../adr/0014-schema-walking-input-propagation-tests.md)
 for the full pattern and the `EnvironmentConfig` ↔ `UpdateEnvironmentInput`
 exemplar at `backend/tests/functional/graphql/test_environment_update_propagation.py`.
 
@@ -186,7 +186,7 @@ This pattern is what makes a fanout write resilient to per-deployment
 chart-render failures, missing drivers, or transient cluster errors —
 one bad deployment does not block the rest. The failure surface is
 queryable via `Deployment.timeline` after the fact; see [ADR-012 §commit
-ordering](../../adr/adr-012-environment-config-fanout.md) for the
+ordering](../../adr/0012-environment-config-fanout.md) for the
 durability contract.
 
 <!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->

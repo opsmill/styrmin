@@ -244,7 +244,7 @@ User actions run in the Kubernetes work pool, meaning they execute as K8s Jobs w
 
 ## Setup Hooks - IMPLEMENTED
 
-The setup hook lifecycle is fully implemented for instance creation. Under the CRD-based flow ([ADR-006](../adr/adr-006-prefect-crd-intent-declaration.md)), Prefect no longer creates the HelmRelease directly — the kopf operator does, by reconciling the `StyrminDeployment` CRD that the flow writes. Driver pre/post hooks remain Prefect-managed.
+The setup hook lifecycle is fully implemented for instance creation. Under the CRD-based flow ([ADR-006](../adr/0006-prefect-crd-intent-declaration.md)), Prefect no longer creates the HelmRelease directly — the kopf operator does, by reconciling the `StyrminDeployment` CRD that the flow writes. Driver pre/post hooks remain Prefect-managed.
 
 ### Remediation (`InstanceCreationStrategy`)
 

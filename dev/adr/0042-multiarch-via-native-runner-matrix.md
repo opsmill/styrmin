@@ -9,7 +9,7 @@
 The release pipeline publishes Docker images for both `linux/amd64` and `linux/arm64`. Two build strategies exist:
 
 1. **QEMU emulation on a single x86 runner** — `docker/setup-qemu-action` + `docker buildx build --platform linux/amd64,linux/arm64`. One job, one runner. The arm64 binary runs through user-mode emulation on x86, which is 5–10× slower than native.
-2. **Per-architecture native builds + manifest merge** — a matrix of two jobs, one on `ubuntu-24.04` (amd64), one on `ubuntu-24.04-arm64` (arm64). Each pushes an image **by digest only** (no tag). A third merge job stitches the per-arch digests into a multi-arch manifest list, then a signing job ([[adr-040-cosign-keyless-image-signing]]) signs the manifest digest.
+2. **Per-architecture native builds + manifest merge** — a matrix of two jobs, one on `ubuntu-24.04` (amd64), one on `ubuntu-24.04-arm64` (arm64). Each pushes an image **by digest only** (no tag). A third merge job stitches the per-arch digests into a multi-arch manifest list, then a signing job ([[0040-cosign-keyless-image-signing]]) signs the manifest digest.
 
 GitHub now provides hosted arm64 runners (`ubuntu-24.04-arm64`) suitable for native ARM builds. With a daily release target under 15 minutes (SC-002), the emulation tax is not affordable.
 
@@ -31,7 +31,7 @@ Build multi-arch images with a **native-runner matrix + manifest merge** pipelin
    - Exports the manifest-list digest for the sign job.
 
 3. **`sign` job** depends on `merge`:
-   - Runs cosign keyless against the **manifest-list digest**, not the per-arch digests (see [[adr-040-cosign-keyless-image-signing]]).
+   - Runs cosign keyless against the **manifest-list digest**, not the per-arch digests (see [[0040-cosign-keyless-image-signing]]).
 
 ## Consequences
 
@@ -49,5 +49,5 @@ Build multi-arch images with a **native-runner matrix + manifest merge** pipelin
 - **Single multi-platform `buildx build`** without QEMU and without an arm64 runner: not actually possible — `buildx` needs **some** way to execute arm64 instructions; either native or emulated.
 - **Separate workflows per arch** (one `docker-publish-amd64.yml`, one `docker-publish-arm64.yml`, one orchestrator): rejected. Unnecessary file proliferation; matrix strategy achieves the same parallelism with one workflow.
 - **Per-arch tags** (`image:1.2.3-amd64`, `image:1.2.3-arm64`) without a manifest list: rejected. Forces consumers to know about per-arch tags and pick the right one; `docker pull image:1.2.3` should resolve transparently regardless of host architecture, which is what the manifest list enables.
-- **Sign each per-arch digest separately**: rejected. See [[adr-040-cosign-keyless-image-signing]] — the manifest list is the unit consumers pull, so it is the unit that should be signed.
+- **Sign each per-arch digest separately**: rejected. See [[0040-cosign-keyless-image-signing]] — the manifest list is the unit consumers pull, so it is the unit that should be signed.
 - **Shared cache scope across arches**: rejected. Cache layers from one arch's build are useless to the other (compiled binaries differ); using one shared scope would just produce cache thrash.

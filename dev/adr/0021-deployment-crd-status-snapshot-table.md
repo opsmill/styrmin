@@ -13,7 +13,7 @@ Two questions had to be settled:
 1. Should CRD status live on the `Deployment` model directly, or in its own table?
 2. Should the nested fields (`conditions`, `managedResourceCounts`) be normalized into relational tables, or stored as JSON blobs?
 
-This decision sits in the same family as [[adr-007-pod-status-records-observed-state-not-declared-state]] — both are observed-state snapshots fed by the agent. The pod-status pattern is the established precedent.
+This decision sits in the same family as [[0007-pod-status-records-observed-state-not-declared-state]] — both are observed-state snapshots fed by the agent. The pod-status pattern is the established precedent.
 
 ## Decision
 
@@ -31,7 +31,7 @@ Conditions and managed resource counts are stored as JSON, not normalized.
 
 ## Consequences
 
-- The `Deployment` model stays free of Kubernetes-specific observed fields; declared-state and observed-state remain cleanly separated, consistent with [[adr-007-pod-status-records-observed-state-not-declared-state]].
+- The `Deployment` model stays free of Kubernetes-specific observed fields; declared-state and observed-state remain cleanly separated, consistent with [[0007-pod-status-records-observed-state-not-declared-state]].
 - Upsert semantics on `deployment_id` keep the table size O(deployments) — no historical accumulation, no janitor needed.
 - JSON storage is appropriate here because conditions and resource counts are **read-only snapshots**: the backend never queries `WHERE condition.type = X` or aggregates across deployments. The whole blob is read together, displayed, and replaced on the next poll.
 - Cascade DELETE means cleanup is automatic when a deployment is removed (FR-009).
@@ -39,6 +39,6 @@ Conditions and managed resource counts are stored as JSON, not normalized.
 
 ## Alternatives Considered
 
-- **Store CRD fields directly on the `Deployment` model**: rejected. Pollutes the declared-state model with K8s-specific observed fields; conflicts with [[adr-007-pod-status-records-observed-state-not-declared-state]] which already separates the two concerns for pods.
+- **Store CRD fields directly on the `Deployment` model**: rejected. Pollutes the declared-state model with K8s-specific observed fields; conflicts with [[0007-pod-status-records-observed-state-not-declared-state]] which already separates the two concerns for pods.
 - **Normalize conditions into a separate `CrdCondition` table**: rejected as over-normalized. Conditions are a read-only snapshot replaced atomically each poll; relational queries against them have no use case, and the join cost on every read is pure overhead.
 - **Reuse the `PodStatus` table with a discriminator column**: rejected. PodStatus is per-pod (one Deployment → many rows); CRD status is one-to-one. Forcing them into one table would either denormalize the pod relationship or invent a sentinel pod for CRD rows.

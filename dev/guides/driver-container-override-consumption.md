@@ -9,7 +9,7 @@ deliberately does **not** do for you.
 The override is a close sibling of the env-vars consumption surface
 ([`driver-env-var-consumption.md`](driver-env-var-consumption.md)). The one
 behavioural divergence recorded in
-[ADR-045](../adr/adr-045-container-override-no-layering-and-omit-marker.md) is
+[ADR-045](../adr/0045-container-override-no-layering-and-omit-marker.md) is
 **no layering** (component-scope only). Like env vars, the filters return an
 **always-present list** (`[]` when unset) and the chart guards consumption with
 a `{{- with }}` block.
@@ -100,7 +100,7 @@ args: null
 ```
 
 This works because the two HelmRelease apply paths treat the `null` exactly as
-clearing needs (see [ADR-045](../adr/adr-045-container-override-no-layering-and-omit-marker.md) §5):
+clearing needs (see [ADR-045](../adr/0045-container-override-no-layering-and-omit-marker.md) §5):
 
 - on a **merge-patch update**, `null` *deletes* the key (RFC 7386) so the
   chart's own default flows through — clearing reverts to the default;

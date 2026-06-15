@@ -17,9 +17,9 @@ The question was the wire shape for status reports:
 
 ## Decision
 
-Add a dedicated `reportPodStatuses(reports: [DeploymentPodStatusReport!]!)` GraphQL mutation. The mutation accepts a batched payload covering every active deployment in one HTTP round-trip. Server-side, the handler upserts pod rows and removes stale ones (see [[adr-024-two-pronged-stale-data-cleanup]]).
+Add a dedicated `reportPodStatuses(reports: [DeploymentPodStatusReport!]!)` GraphQL mutation. The mutation accepts a batched payload covering every active deployment in one HTTP round-trip. Server-side, the handler upserts pod rows and removes stale ones (see [[0024-two-pronged-stale-data-cleanup]]).
 
-This establishes the **pattern** for every subsequent observed-state channel: each kind of observed state gets its own `report<X>Statuses` mutation, batched per cycle. [[adr-020-separate-crd-status-reporting-mutation]] later applied the same pattern to CRD status (`reportDeploymentStatuses` / `reportCrdStatuses`).
+This establishes the **pattern** for every subsequent observed-state channel: each kind of observed state gets its own `report<X>Statuses` mutation, batched per cycle. [[0020-separate-crd-status-reporting-mutation]] later applied the same pattern to CRD status (`reportDeploymentStatuses` / `reportCrdStatuses`).
 
 ## Consequences
 

@@ -6,7 +6,7 @@
 
 ## Context
 
-[[adr-025-capabilities-as-extensible-json-column]] establishes that capabilities are persisted (not computed on every read). That introduces a cache-coherence question: when does the persisted value get refreshed?
+[[0025-capabilities-as-extensible-json-column]] establishes that capabilities are persisted (not computed on every read). That introduces a cache-coherence question: when does the persisted value get refreshed?
 
 Capabilities derive from a small, well-known set of inputs:
 
