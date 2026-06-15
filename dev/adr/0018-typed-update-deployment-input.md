@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-05-16
 **Source**: specs/archive/011-typed-deployment-input/ (research §1, §3, §4, §5; data-model.md §1, §3, §4)
-**Builds on**: [ADR-012](adr-012-environment-config-fanout.md) (full-replacement typed input convention, clean-replace cutover), [ADR-014](adr-014-schema-walking-input-propagation-tests.md) (schema-walking propagation tests), [ADR-015](adr-015-frontend-value-transform-boundary.md) (frontend submit-boundary transforms).
+**Builds on**: [ADR-012](0012-environment-config-fanout.md) (full-replacement typed input convention, clean-replace cutover), [ADR-014](0014-schema-walking-input-propagation-tests.md) (schema-walking propagation tests), [ADR-015](0015-frontend-value-transform-boundary.md) (frontend submit-boundary transforms).
 
 ## Context
 

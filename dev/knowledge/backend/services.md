@@ -150,7 +150,7 @@ Manages environments within clusters.
 | `create_environment(name, cluster_id, uow, config=None)` | Create environment in cluster (name unique per cluster). Computes and persists capabilities. |
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
-| `update_environment(environment_id, uow, config)` | Validate + persist env-config row, then fan out a redeploy Task to every non-tombstoned, non-internal deployment in the environment whose active instance is not already at the new config. See "Environment-config fanout" below + [ADR-012](../adr/adr-012-environment-config-fanout.md). |
+| `update_environment(environment_id, uow, config)` | Validate + persist env-config row, then fan out a redeploy Task to every non-tombstoned, non-internal deployment in the environment whose active instance is not already at the new config. See "Environment-config fanout" below + [ADR-012](../adr/0012-environment-config-fanout.md). |
 | `delete_environment(environment_id, uow)` | Delete an environment |
 
 #### Environment-config fanout
@@ -159,7 +159,7 @@ Manages environments within clusters.
 
 `update_environment` is the load-bearing write path for environment configuration. The mutation is thin: validate the input through the Pydantic pipeline, commit the env-config row **before** any Task dispatch (FR-009a), then iterate every non-tombstoned, non-internal deployment in the environment, calling `redeploy_for_environment_update(deployment, uow)` for each one whose active instance is not already at the new config.
 
-Per-deployment no-op detection is in `_deployment_already_at_config(deployment, new_config) -> bool` — it compares the canonical Pydantic round-trip of the deployment's active-instance environment-config slice against the canonical round-trip of the new config. This shape handles two cases with one code path: a true environment-wide no-op (every deployment skips, zero Tasks dispatched, zero spurious timeline entries) and partial-fanout recovery (a re-submission of the same input dispatches Tasks only for laggards that didn't reach the new config on a prior attempt). See [ADR-012](../adr/adr-012-environment-config-fanout.md) §1 for the design rationale.
+Per-deployment no-op detection is in `_deployment_already_at_config(deployment, new_config) -> bool` — it compares the canonical Pydantic round-trip of the deployment's active-instance environment-config slice against the canonical round-trip of the new config. This shape handles two cases with one code path: a true environment-wide no-op (every deployment skips, zero Tasks dispatched, zero spurious timeline entries) and partial-fanout recovery (a re-submission of the same input dispatches Tasks only for laggards that didn't reach the new config on a prior attempt). See [ADR-012](../adr/0012-environment-config-fanout.md) §1 for the design rationale.
 
 The fanout helper `redeploy_for_environment_update(deployment, uow) -> Task` lives in `services/deployment.py`. It mirrors the post-version-decision portion of `update_deployment_version` — does NOT change the deployment's `application_version`, `parameters`, or `service_name_overrides`; only regenerates the active instance against the deployment's currently-bound driver and dispatches the resulting Task.
 
@@ -273,7 +273,7 @@ Generates deployment contexts.
 
 <!-- Extracted from specs/001-service-fqdn-context on 2026-05-17 -->
 
-Single source of truth for service-FQDN construction, used by both context generation and the GraphQL resolver path. Backs the `primary_fqdn` / `human_readable_fqdn` fields on `ServiceReference` and the matching `DeployedService` GraphQL fields. See [ADR-022](../adr/adr-022-compute-service-fqdns-at-runtime.md).
+Single source of truth for service-FQDN construction, used by both context generation and the GraphQL resolver path. Backs the `primary_fqdn` / `human_readable_fqdn` fields on `ServiceReference` and the matching `DeployedService` GraphQL fields. See [ADR-022](../adr/0022-compute-service-fqdns-at-runtime.md).
 
 | Function | Signature | Description |
 |----------|-----------|-------------|

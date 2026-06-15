@@ -16,7 +16,7 @@ Three signing models were considered:
 
 Tag-vs-digest is a separate axis: signing by `image:tag` has a TOCTOU window (the tag can be re-pointed between signing and verification), while signing by `image@sha256:<digest>` binds the signature to immutable content.
 
-Multi-arch images (built per [[adr-042-multiarch-via-native-runner-matrix]]) are published as a **manifest list** referencing per-architecture image digests. Signing the per-arch digests separately would force consumers to verify each architecture's signature independently and miss the manifest-list integrity check.
+Multi-arch images (built per [[0042-multiarch-via-native-runner-matrix]]) are published as a **manifest list** referencing per-architecture image digests. Signing the per-arch digests separately would force consumers to verify each architecture's signature independently and miss the manifest-list integrity check.
 
 ## Decision
 
@@ -24,7 +24,7 @@ The release pipeline signs every published image with **cosign keyless via the G
 
 - The signing job uses `sigstore/cosign-installer@v4` and requires `id-token: write` on the job permissions.
 - Signing is done **by digest**, not by tag: `cosign sign --yes image@sha256:<digest>`. The `--yes` flag suppresses the interactive prompt that cosign would otherwise show in CI.
-- The signed digest is the **manifest list digest** (the output of the merge step in [[adr-042-multiarch-via-native-runner-matrix]]), not the per-arch digests. One signature covers the multi-arch manifest, which transitively covers each architecture.
+- The signed digest is the **manifest list digest** (the output of the merge step in [[0042-multiarch-via-native-runner-matrix]]), not the per-arch digests. One signature covers the multi-arch manifest, which transitively covers each architecture.
 - Rekor upload is on by default in cosign 2.0+ (`COSIGN_EXPERIMENTAL` is deprecated). No flag needed.
 - The certificate carries the GitHub Actions workflow identity (`https://github.com/opsmill/styrmin/.github/workflows/<workflow>`) and the OIDC issuer (`https://token.actions.githubusercontent.com`). Consumers verify against those values:
 

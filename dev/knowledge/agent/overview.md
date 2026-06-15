@@ -6,7 +6,7 @@ The agent is the in-cluster process responsible for everything that happens insi
 - **Prefect worker** — executes the internal orchestration flows that the server submits (`apply_state`, `create_instance`, `update_instance`, `upgrade_instance`, `run_job`). The flow definitions live under `agent/tasks/` but the catalogue, manager API, and callback wiring belong to the orchestration layer (see [`../backend/orchestration-flows.md`](../backend/orchestration-flows.md)).
 - **Status reporter** — periodically observes pod and CRD state and reports it back to the server. See [Status Reporter](#status-reporter).
 
-[ADR-002](../../adr/adr-002-shared-async-event-loop-kopf-prefect.md) covers the shared event loop. ADR-004, ADR-005, and ADR-006 cover the operator's responsibility split with Prefect.
+[ADR-002](../../adr/0002-shared-async-event-loop-kopf-prefect.md) covers the shared event loop. ADR-004, ADR-005, and ADR-006 cover the operator's responsibility split with Prefect.
 
 ## Where Prefect lives
 
@@ -93,7 +93,7 @@ Modular building blocks compose into final resource manifests:
 
 ## Combined process
 
-The kopf operator, the Prefect worker, and the status reporter run in a single async process and share one event loop via `asyncio.gather()` (see [ADR-002](../../adr/adr-002-shared-async-event-loop-kopf-prefect.md)).
+The kopf operator, the Prefect worker, and the status reporter run in a single async process and share one event loop via `asyncio.gather()` (see [ADR-002](../../adr/0002-shared-async-event-loop-kopf-prefect.md)).
 
 Graceful shutdown is coordinated through a single `asyncio.Event`: kopf's `@kopf.on.cleanup()` handler signals the event, and both the Prefect worker and the status reporter exit cleanly.
 
@@ -107,7 +107,7 @@ Every poll cycle, the reporter:
 
 1. Calls the `listDeploymentsForStatus` GraphQL query against the server to discover all non-internal deployments grouped by environment.
 2. For each deployment, in its namespace:
-   - Lists pods via `kr8s` and extracts phase, readiness, restart count, container statuses, node, start time, and the `styrmin/component` label (recorded as-is — see [ADR-007](../../adr/adr-007-pod-status-records-observed-state-not-declared-state.md)). Pods without the component label are reported with `component_name = None` rather than dropped.
+   - Lists pods via `kr8s` and extracts phase, readiness, restart count, container statuses, node, start time, and the `styrmin/component` label (recorded as-is — see [ADR-007](../../adr/0007-pod-status-records-observed-state-not-declared-state.md)). Pods without the component label are reported with `component_name = None` rather than dropped.
    - Fetches the `StyrminDeployment` CRD (`styrmin.io/v1alpha1`) and reads `spec.instanceId`, `status.phase`, `status.displayState`, `status.message`, `status.conditions`, and `status.managedResources`. A missing CRD is not an error — that deployment is simply skipped this cycle.
 3. Posts two independent GraphQL mutations to the server's `/graphql` endpoint:
    - `reportPodStatuses(reports: [DeploymentPodStatusReport!]!)` — server upserts pod rows and deletes stale ones (handled by `services/pod_status.py::report_pod_statuses`).

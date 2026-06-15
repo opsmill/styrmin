@@ -6,14 +6,14 @@
 
 ## Context
 
-A resolved `SchedulingConfig` is the result of merging Environment → Deployment → Component (see [[adr-033-scheduling-merge-semantics]]). After the merge, the value of any given field can no longer self-report which level contributed it — an effective `resources.limits.cpu = "2"` looks the same whether it came from the environment-wide default, a deployment-specific override, or a per-component pin.
+A resolved `SchedulingConfig` is the result of merging Environment → Deployment → Component (see [[0033-scheduling-merge-semantics]]). After the merge, the value of any given field can no longer self-report which level contributed it — an effective `resources.limits.cpu = "2"` looks the same whether it came from the environment-wide default, a deployment-specific override, or a per-component pin.
 
 Operators inspecting a deployment need to answer "which level set this value?" to diagnose unexpected scheduling behaviour:
 
 - "Why is this pod getting 4Gi of memory? I never set that on the deployment."
   (Answer: it's a component-level setting in the chart's `values.yaml`.)
 - "Why is this affinity rule in force? My deployment doesn't have it."
-  (Answer: it's accumulated from environment-wide affinity defaults — see [[adr-033-scheduling-merge-semantics]].)
+  (Answer: it's accumulated from environment-wide affinity defaults — see [[0033-scheduling-merge-semantics]].)
 
 FR-012 explicitly requires "enough metadata for a template to determine which level provided each value". The frontend deployment detail page surfaces this as a per-field source-level chip (SC-004: identify the resolved effective value and its source level in under 30 seconds).
 

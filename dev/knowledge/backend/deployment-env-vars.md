@@ -7,7 +7,7 @@ rendering context; the driver consumes it through its Helm chart.
 
 This page is the operator/contributor reference. The decisions behind the
 shape (free-form `dict[str, str]`, three-scope deepest-wins precedence,
-driver-side consumption) live in [ADR-013](../../adr/adr-013-driver-env-var-consumption.md).
+driver-side consumption) live in [ADR-013](../../adr/0013-driver-env-var-consumption.md).
 The full contracts are in [`specs/008-deployment-env-vars/`](../../../specs/008-deployment-env-vars/)
 and [`specs/010-driver-env-var-consumption/`](../../../specs/010-driver-env-var-consumption/).
 
@@ -46,7 +46,7 @@ key). This mirrors the `SchedulingConfig` precedent — see
 <!-- Extracted from specs/009-environment-update on 2026-05-10 -->
 
 **Environment scope** uses the typed `UpdateEnvironmentInput` mutation
-introduced in spec 009 (see [ADR-012](../../adr/adr-012-environment-config-fanout.md)).
+introduced in spec 009 (see [ADR-012](../../adr/0012-environment-config-fanout.md)).
 The mutation full-replaces the env-config row and fans out a redeploy task
 per non-tombstoned, non-internal deployment in the environment:
 
@@ -167,7 +167,7 @@ queryable, and editable, but never reach pods.
 
 The previous **post-render injection** mechanism (008's `EnvVarsPatch`,
 `PostRenderInjection.env_vars`, `EnvVarCollision`) was removed in 010 because
-it clobbered chart-default env entries. See [ADR-013](../../adr/adr-013-driver-env-var-consumption.md)
+it clobbered chart-default env entries. See [ADR-013](../../adr/0013-driver-env-var-consumption.md)
 for the durable record of the pivot, and the
 [driver-author guide](../../guides/driver-env-var-consumption.md) for the
 template-side consumption pattern (single-component, multi-component, and
@@ -207,9 +207,9 @@ foot setting them in the past.
 
 ## Related
 
-- [ADR-013: Driver-Side Env Var Consumption](../../adr/adr-013-driver-env-var-consumption.md) — durable record of the design (free-form `dict[str, str]`, three-scope deepest-wins, driver-side template consumption — no platform post-render injection).
+- [ADR-013: Driver-Side Env Var Consumption](../../adr/0013-driver-env-var-consumption.md) — durable record of the design (free-form `dict[str, str]`, three-scope deepest-wins, driver-side template consumption — no platform post-render injection).
 - [Driver-author guide](../../guides/driver-env-var-consumption.md) — template-side consumption patterns (single-component, multi-component, chart-default combinations) for driver authors.
-- [ADR-004: Embed GlobalContext in StyrminDeployment CRD](../../adr/adr-004-embed-context-in-deployment-crd.md) — the carrier mechanism that flows resolved env vars to the operator/agent.
+- [ADR-004: Embed GlobalContext in StyrminDeployment CRD](../../adr/0004-embed-context-in-deployment-crd.md) — the carrier mechanism that flows resolved env vars to the operator/agent.
 - [`services.md`](services.md) — surrounding service-layer architecture.
 - [`api.md`](api.md) — surrounding GraphQL API surface.
 - [`specs/008-deployment-env-vars/`](../../../specs/008-deployment-env-vars/) — full operator-facing feature spec, plan, contracts, and quickstart.

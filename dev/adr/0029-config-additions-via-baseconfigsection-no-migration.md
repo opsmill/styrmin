@@ -42,7 +42,7 @@ This pattern explicitly **avoids triggering the Constitution's Governance Gates*
 ## When this pattern does NOT apply
 
 - The field needs to be queried/filtered by the database (`WHERE config_xxx = ...`) — JSON-blob storage makes that vendor-specific and slow. Promote to a typed column.
-- The field needs to be a typed input on a non-`config` mutation (e.g., a typed update surface like `UpdateDeploymentInput` per [[adr-018-typed-update-deployment-input]]) — that path *does* require GraphQL schema work, by design.
+- The field needs to be a typed input on a non-`config` mutation (e.g., a typed update surface like `UpdateDeploymentInput` per [[0018-typed-update-deployment-input]]) — that path *does* require GraphQL schema work, by design.
 - The field needs a strongly-typed GraphQL output type so the frontend can drive UI off introspection — JSON scalar hides the structure.
 
 In those cases, take the governance hit and do the migration / schema work. The point of this ADR is that for *most* operator-tunable knobs, you don't have to.

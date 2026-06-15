@@ -6,7 +6,7 @@
 
 ## Context
 
-Observed-state tables (starting with `PodStatus`, later extended by `DeploymentStatus` per [[adr-021-deployment-crd-status-snapshot-table]]) record the latest snapshot of cluster-side resources. Two failure modes accumulate stale rows:
+Observed-state tables (starting with `PodStatus`, later extended by `DeploymentStatus` per [[0021-deployment-crd-status-snapshot-table]]) record the latest snapshot of cluster-side resources. Two failure modes accumulate stale rows:
 
 1. **Resource-level churn within a live deployment**: rolling updates, scaling events, or pod deletions remove individual pods. The corresponding `PodStatus` rows must be cleaned up — leaving them would falsely report dead pods as "last seen running".
 2. **Whole-deployment removal**: when a `Deployment` is removed from the platform, every observed-state row for it must vanish — orphaned rows would point to a non-existent FK.

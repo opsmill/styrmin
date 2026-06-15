@@ -25,9 +25,9 @@ Treat dual-identifier resolution as a **service-layer pattern**, with thin wire 
 3. **Service helper shape**: pattern is `resolve_<resource>(uow, <resource>_id=None, <resource>_name=None) -> <Resource>`. It raises `AmbiguousIdentifierError` (mapped to GraphQL `VALIDATION_ERROR`) when both are provided, neither is provided, or when an environment lookup omits its cluster scope. It raises `<Resource>NotFoundError` when the identifier doesn't match a row.
 4. **Lookup happens server-side**: SDK / CLI just pass the operator's input straight through to GraphQL variables. The name → entity resolution lives once, in the service layer, with the canonical scoping rules.
 5. **Name uniqueness scopes** that back the lookup:
-   - `Cluster.name` — globally unique (single-cluster platform per [[adr-011-scoped-tombstone-aware-name-uniqueness]] is unrelated here — clusters themselves remain globally unique).
+   - `Cluster.name` — globally unique (single-cluster platform per [[0011-scoped-tombstone-aware-name-uniqueness]] is unrelated here — clusters themselves remain globally unique).
    - `Environment.name` — `UniqueConstraint("name", "cluster_id")`. The repository method is `EnvironmentRepository.get_by_name_in_cluster(name, cluster_id)`; the old global `get_by_name` is removed.
-   - `Deployment.name` — `(environment_id, name)` partial unique index (already established by [[adr-011-scoped-tombstone-aware-name-uniqueness]]).
+   - `Deployment.name` — `(environment_id, name)` partial unique index (already established by [[0011-scoped-tombstone-aware-name-uniqueness]]).
 
 ## Consequences
 

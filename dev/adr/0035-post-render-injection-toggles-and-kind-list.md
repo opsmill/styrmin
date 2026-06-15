@@ -29,7 +29,7 @@ class PostRenderInjection(BaseModel):
     runtime_class: bool = True
 ```
 
-A `false` value on any toggle means the post-renderer **leaves that feature untouched** for the scope it applies to. Opt-out is expressible at **deployment** and **component** scopes only — not at environment scope. The component-level flag takes precedence over the deployment-level flag for that component (matching the per-component override semantics of other fields in [[adr-033-scheduling-merge-semantics]]).
+A `false` value on any toggle means the post-renderer **leaves that feature untouched** for the scope it applies to. Opt-out is expressible at **deployment** and **component** scopes only — not at environment scope. The component-level flag takes precedence over the deployment-level flag for that component (matching the per-component override semantics of other fields in [[0033-scheduling-merge-semantics]]).
 
 ### Patch targeting — static list of pod-template-bearing kinds
 
@@ -49,7 +49,7 @@ The injector iterates `kinds × components × enabled-features` to produce one s
 ## Consequences
 
 - Operators who run charts with pre-set scheduling primitives can preserve them surgically — opt out of `pod_affinity` without losing platform-applied `resources` injection, opt out per-component when one component is special.
-- The schema is closed and easy to validate. The booleans-only approach was chosen over an enum (`"inject" | "skip" | "merge"`) because `merge` semantics for arbitrary scheduling shapes are ambiguous (whose key wins in a list merge?) and the `replace: true` per-kind escape in [[adr-033-scheduling-merge-semantics]] already covers the "merge with override" cases.
+- The schema is closed and easy to validate. The booleans-only approach was chosen over an enum (`"inject" | "skip" | "merge"`) because `merge` semantics for arbitrary scheduling shapes are ambiguous (whose key wins in a list merge?) and the `replace: true` per-kind escape in [[0033-scheduling-merge-semantics]] already covers the "merge with override" cases.
 - Environment-scope opt-out is **not** supported (spec clarification Q4). Operators wanting to opt out across an environment must do so at each deployment — by design, to keep the opt-out surface narrow and discoverable.
 - The six-kind list covers every core Kubernetes workload. Custom CRDs that embed `spec.template.spec` (e.g., Argo `Workflow`, Knative Service, batch operator CRDs) are **not** covered by injection in v1. Operators using such CRDs opt out of the relevant feature at deployment scope and inject values themselves via driver templates.
 - Patch list size is bounded by `O(kinds × components × features)`, not `O(resources × components × features)` — iterating kinds rather than concrete rendered resources keeps the Kustomize input small even for charts that render many copies of the same kind.

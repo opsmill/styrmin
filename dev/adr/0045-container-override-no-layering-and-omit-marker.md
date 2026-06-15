@@ -10,9 +10,9 @@
 **Date**: 2026-05-29
 **Source**: specs/014-component-container-overrides/ (spec, plan, research)
 **Relationship**: A faithful port of the deployment env-vars precedent (008/010,
-[ADR-013](adr-013-driver-env-var-consumption.md)) with two deliberate
-divergences recorded here. Reuses [ADR-029](adr-029-config-additions-via-baseconfigsection-no-migration.md)
-(additive config rides existing JSON columns) and [ADR-018](adr-018-typed-update-deployment-input.md)
+[ADR-013](0013-driver-env-var-consumption.md)) with two deliberate
+divergences recorded here. Reuses [ADR-029](0029-config-additions-via-baseconfigsection-no-migration.md)
+(additive config rides existing JSON columns) and [ADR-018](0018-typed-update-deployment-input.md)
 (typed `UpdateDeploymentInput.components` list).
 
 ## Context

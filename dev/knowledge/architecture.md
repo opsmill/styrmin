@@ -32,7 +32,7 @@ turns recorded intent into running Kubernetes resources.
 The Prefect worker and the kopf operator share one event loop via
 `asyncio.gather()`. Graceful shutdown is coordinated through an
 `asyncio.Event` so both halves stop together — see
-[ADR-002](../adr/adr-002-shared-async-event-loop-kopf-prefect.md).
+[ADR-002](../adr/0002-shared-async-event-loop-kopf-prefect.md).
 
 ### 1.2 How the server directs the agent
 
@@ -44,8 +44,8 @@ The server never calls the agent directly. Direction flows through
 2. **Prefect flow → CRD.** The flow runs on the agent. It resolves the
    deployment's full configuration into a `GlobalContext` and writes (or
    updates) a `StyrminDeployment` CRD with that context embedded in its
-   spec — see [ADR-004](../adr/adr-004-embed-context-in-deployment-crd.md)
-   and [ADR-006](../adr/adr-006-prefect-crd-intent-declaration.md).
+   spec — see [ADR-004](../adr/0004-embed-context-in-deployment-crd.md)
+   and [ADR-006](../adr/0006-prefect-crd-intent-declaration.md).
 3. **CRD → operator → Kubernetes.** The kopf operator watches
    `StyrminDeployment` CRDs and reconciles the cluster on its own — no
    back-channel calls to the server are required.
@@ -71,7 +71,7 @@ The agent is a single process but fulfils several distinct functions:
 - **Kubernetes resource reconciliation.** The kopf operator drives
   `StyrminDeployment` resources through ordered phases (prerequisites →
   HelmRelease → services), guaranteeing that dependencies exist before
-  dependents — see [ADR-005](../adr/adr-005-ordered-phase-deployment-sub-handlers.md).
+  dependents — see [ADR-005](../adr/0005-ordered-phase-deployment-sub-handlers.md).
   → details: [`agent/operator.md`](agent/operator.md)
 - **Drift detection and correction.** A timer handler re-checks managed
   resources on a fixed cadence and corrects anything that has drifted from
@@ -224,7 +224,7 @@ reconciled — and would have to deal with the Deployment changing
 mid-reconciliation. By snapshotting the context onto the Instance and the
 CRD at submission time, the agent gets a stable, complete specification it
 can act on autonomously. This is the core motivation in
-[ADR-004](../adr/adr-004-embed-context-in-deployment-crd.md).
+[ADR-004](../adr/0004-embed-context-in-deployment-crd.md).
 
 ### 3.5 Why context is the unit of state
 
@@ -284,7 +284,7 @@ amend the constitution — and update this document accordingly.
   watches `StyrminDeployment` CRDs. See [`agent/operator.md`](agent/operator.md).
 - **Phase-based deployment** — kopf sub-handler ordering that guarantees
   prerequisites land before HelmReleases and services. See
-  [ADR-005](../adr/adr-005-ordered-phase-deployment-sub-handlers.md).
+  [ADR-005](../adr/0005-ordered-phase-deployment-sub-handlers.md).
 - **PrefectManager** — service wrapping the Prefect SDK. Submits flows,
   manages work pools, registers user actions.
 - **Reconciliation** — the act of comparing desired (new Instance) against

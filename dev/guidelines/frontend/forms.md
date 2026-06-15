@@ -98,7 +98,7 @@ discipline prevents (spec 011/US2).
 The mappings are **maintained by hand** next to the form, matched to the
 Pydantic source of truth. Drift is surfaced at code-review time when a
 new enum value lands; codegen-generated mapping tables were rejected in
-[ADR-015](../../adr/adr-015-frontend-value-transform-boundary.md) — the
+[ADR-015](../../adr/0015-frontend-value-transform-boundary.md) — the
 manual table is clearer for the small cardinalities involved.
 
 The pattern generalises beyond enums: any persisted-vs-GraphQL shape
