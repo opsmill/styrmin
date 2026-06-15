@@ -1,0 +1,111 @@
+dev/adr/0045-container-override-no-layering-and-omit-marker.md
+  s_3f3e0bb0370604::t_0fb2db61c9dd8e 13
+  s_3f3e0bb0370604::t_345f2320fb163f 14
+  s_3f3e0bb0370604::t_f5757c557769ec 15
+dev/adr/0023-dedicated-mutation-per-observed-state-channel.md
+  s_3f3e0bb0370604::t_4f83fab525d139 20
+  s_3f3e0bb0370604::t_ab1b7475eb692f 22
+dev/adr/0035-post-render-injection-toggles-and-kind-list.md
+  s_3f3e0bb0370604::t_1206932c6071b8 32-52
+dev/adr/0033-scheduling-merge-semantics.md
+  s_3f3e0bb0370604::t_8106822d8f09ea 9
+dev/knowledge/backend/orchestration-flows.md
+  s_3f3e0bb0370604::t_7e609ac231f2c1 34
+dev/adr/0026-capabilities-recalculation-in-service-layer.md
+  s_3f3e0bb0370604::t_ccea12e4903655 9
+dev/knowledge/agent/overview.md
+  s_3f3e0bb0370604::t_7bd05b577f140b 9,96
+  s_3f3e0bb0370604::t_5377bd15400639 110
+dev/knowledge/architecture.md
+  s_3f3e0bb0370604::t_e0df0a68955733 74,287
+  s_3f3e0bb0370604::t_60721e81a5377f 48
+  s_3f3e0bb0370604::t_2d9df031b6d016 35
+  s_3f3e0bb0370604::t_85dbb62581e345 47,227
+dev/guidelines/frontend/forms.md
+  s_3f3e0bb0370604::t_50fcf119dcc1c9 101
+dev/guidelines/backend/python.md
+  s_3f3e0bb0370604::t_bf4cdd07625a57 189
+  s_3f3e0bb0370604::t_801dfff7ee075d 153
+dev/knowledge/backend/data-models.md
+  s_3f3e0bb0370604::t_79012abc8be64b 522,652
+  s_3f3e0bb0370604::t_e3acfb0a34fb28 585
+  s_3f3e0bb0370604::t_07984cb61dcb68 282
+  s_3f3e0bb0370604::t_23e32eaa1b0d10 529
+  s_3f3e0bb0370604::t_d5ce0138d0b261 601
+  s_3f3e0bb0370604::t_8d038fd3c0a1b6 354
+  s_3f3e0bb0370604::t_a6deae51e37b57 572
+  s_3f3e0bb0370604::t_aac9dc6d1a2d32 597
+  s_3f3e0bb0370604::t_5f1d0d09daa7de 599
+dev/knowledge/backend/deployment-env-vars.md
+  s_3f3e0bb0370604::t_ac0949543e6964 49
+  s_3f3e0bb0370604::t_f5815ed0ba8c5e 212
+  s_3f3e0bb0370604::t_b0730c52d866b8 10,170,210
+dev/guides/driver-container-override-consumption.md
+  s_3f3e0bb0370604::t_a82e79c0033af6 12,103
+dev/knowledge/backend/api.md
+  s_3f3e0bb0370604::t_0ff0e503f70569 89,309,311
+  s_3f3e0bb0370604::t_2ec8ab3e46442f 398
+  s_3f3e0bb0370604::t_ff9245d0ada520 470
+  s_3f3e0bb0370604::t_5b7215b20bf380 342
+  s_3f3e0bb0370604::t_22e7ca9ba23135 322,324,332
+  s_3f3e0bb0370604::t_c515766d33720e 412
+  s_3f3e0bb0370604::t_c17f88b86620c6 418
+  s_3f3e0bb0370604::t_9f49c46f351dd8 464
+  s_3f3e0bb0370604::t_42b800d28d2209 171
+dev/knowledge/frontend/routing.md
+  s_3f3e0bb0370604::t_babd3c15cc7447 129
+dev/adr/0024-two-pronged-stale-data-cleanup.md
+  s_3f3e0bb0370604::t_18f3aa8fb48bb4 9
+dev/adr/0042-multiarch-via-native-runner-matrix.md
+  s_3f3e0bb0370604::t_0bc9776d2acd0a 12-52
+dev/adr/0021-deployment-crd-status-snapshot-table.md
+  s_3f3e0bb0370604::t_e4a5eecc3079c9 16-42
+dev/README.md
+  s_3f3e0bb0370604::t_19f9e767c3098c 50-92
+dev/guides/driver-env-var-consumption.md
+  s_3f3e0bb0370604::t_ccd5d74698cb84 203
+dev/adr/0027-environment-capabilities-computed-independently.md
+  s_3f3e0bb0370604::t_acdc2029376be4 36
+  s_3f3e0bb0370604::t_926793bd80173f 9
+dev/adr/0020-separate-crd-status-reporting-mutation.md
+  s_3f3e0bb0370604::t_f5d0fbbbb9eb07 11
+dev/adr/0018-typed-update-deployment-input.md
+  s_3f3e0bb0370604::t_2bc341ff43d88e 6
+CONTEXT.md
+  s_3f3e0bb0370604::t_69a0ff8e176a48 108
+  s_3f3e0bb0370604::t_fb118e1ae7bc09 172
+  s_3f3e0bb0370604::t_d5b55220a783ba 112
+  s_3f3e0bb0370604::t_ef3b0636d81412 208
+  s_3f3e0bb0370604::t_24c0f103a22963 226
+dev/adr/0029-config-additions-via-baseconfigsection-no-migration.md
+  s_3f3e0bb0370604::t_39ae7571561a40 45
+dev/adr/0031-dual-identifier-resolution-service-layer.md
+  s_3f3e0bb0370604::t_2d83af0e9a069c 28-30
+dev/adr/0040-cosign-keyless-image-signing.md
+  s_3f3e0bb0370604::t_e22bb1d16cafb8 19-27
+dev/adr/0013-driver-env-var-consumption.md
+  s_3f3e0bb0370604::t_fa97d56f1e7938 6-62
+dev/adr/0036-scheduling-provenance-map.md
+  s_3f3e0bb0370604::t_431006ae4114dc 9-16
+dev/knowledge/backend/hooks-and-actions.md
+  s_3f3e0bb0370604::t_6b451e756f1040 247
+dev/knowledge/backend/services.md
+  s_3f3e0bb0370604::t_10929ff66dd6b6 276
+  s_3f3e0bb0370604::t_6980ab7e15a67f 153,162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "a4523d11f9888637b8c02bafad4d028aeea3f6e4",
+  "prompts": {},
+  "sessions": {
+    "s_3f3e0bb0370604": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7c4f3dbe-2b51-42ae-aaa3-59cdff8060d7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Benoit Kohler <bkohler@mbpbenoitkohler.tailc018d.ts.net>"
+    }
+  }
+}
