@@ -56,7 +56,10 @@ jobs:
       contents: read
     with:
       python-versions: '["3.14"]'
-      pytest-args: 'backend/tests/unit'
+      # Match the old `unit-tests` job's scope (unit + functional; e2e and
+      # integration need service containers and stay bespoke). Scoping to
+      # backend/tests/unit alone would silently drop backend/tests/functional.
+      pytest-args: 'backend/tests --ignore=backend/tests/e2e --ignore=backend/tests/integration'
       uv-sync-args: '--all-extras --frozen'
       coverage: false
 
