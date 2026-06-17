@@ -35,7 +35,7 @@ jobs:
 
   publish-docker:
     needs: version
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-docker.yml@efa969ac22c01b81106120420562bd796beac281
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-docker.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
     permissions:
       id-token: write
       contents: read
@@ -50,12 +50,13 @@ jobs:
       extra-tags: latest
       cosign-sign: true
     secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
       REGISTRY_USERNAME: ${{ secrets.HARBOR_USERNAME }}
       REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
 
   publish-helm-agent:
     needs: version
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@efa969ac22c01b81106120420562bd796beac281
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
     permissions:
       id-token: write
       contents: read
@@ -68,6 +69,7 @@ jobs:
       oci-registry: ${{ vars.HARBOR_HOST }}
       dependency-update: true
     secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
       REGISTRY_USERNAME: ${{ secrets.HARBOR_USERNAME }}
       REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
 
@@ -77,7 +79,7 @@ jobs:
     needs:
       - version
       - publish-helm-agent
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@efa969ac22c01b81106120420562bd796beac281
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
     permissions:
       id-token: write
       contents: read
@@ -90,5 +92,6 @@ jobs:
       oci-registry: ${{ vars.HARBOR_HOST }}
       dependency-update: true
     secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
       REGISTRY_USERNAME: ${{ secrets.HARBOR_USERNAME }}
       REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}

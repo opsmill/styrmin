@@ -22,7 +22,7 @@ concurrency:
 jobs:
   # --- Shared catalog callers (opsmill/opsmill-cicd-workflows) -----------
   files-changed:
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/files-changed.yml@efa969ac22c01b81106120420562bd796beac281
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/files-changed.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
     permissions:
       contents: read
       pull-requests: read
@@ -36,22 +36,27 @@ jobs:
           - 'tests/**'
           - 'pyproject.toml'
           - 'uv.lock'
+    secrets:
+      # Read token for the (private) shared repo's side-checkout. Org secret.
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
 
   lint:
     needs: files-changed
     if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/lint.yml@efa969ac22c01b81106120420562bd796beac281
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/lint.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
     permissions:
       contents: read
     with:
       ruff: true
       ty: true
       python-version: '3.14'
+    secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
 
   python-test:
     needs: files-changed
     if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/python-uv.yml@efa969ac22c01b81106120420562bd796beac281
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/python-uv.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
     permissions:
       contents: read
     with:
@@ -62,6 +67,8 @@ jobs:
       pytest-args: 'backend/tests --ignore=backend/tests/e2e --ignore=backend/tests/integration'
       uv-sync-args: '--all-extras --frozen'
       coverage: false
+    secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
 
   # --- Bespoke jobs (kept verbatim from the previous ci.yml) -------------
   non-runtime-gate:
