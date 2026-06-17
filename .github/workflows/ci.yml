@@ -24,7 +24,7 @@ concurrency:
 jobs:
   # --- Shared catalog callers (opsmill/opsmill-cicd-workflows) -----------
   files-changed:
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/files-changed.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/files-changed.yml@6f24d87a06a0571ba475ec8a886f1ac4da85a4c7
     with:
       filters: |
         python:
@@ -57,7 +57,7 @@ jobs:
   lint:
     needs: files-changed
     if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/lint.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/lint.yml@6f24d87a06a0571ba475ec8a886f1ac4da85a4c7
     with:
       ruff: true
       ty: true
@@ -68,7 +68,7 @@ jobs:
   python-test:
     needs: [files-changed, pre-commit-hooks]
     if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/python-uv.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/python-uv.yml@6f24d87a06a0571ba475ec8a886f1ac4da85a4c7
     with:
       python-versions: '["3.14"]'
       # Match the old `unit-tests` job's scope (unit + functional; e2e and
