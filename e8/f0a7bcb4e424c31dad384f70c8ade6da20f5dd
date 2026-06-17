@@ -1,0 +1,20 @@
+.github/dependabot.yml
+  s_6804202d5a20d7::t_96e6891b6fa281 2-9
+  s_6804202d5a20d7::t_d6f5b6d4440b23 17,38,59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "e8f0a7bcb4e424c31dad384f70c8ade6da20f5dd",
+  "prompts": {},
+  "sessions": {
+    "s_6804202d5a20d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dbfa3949-cc7c-49af-9280-e6547f215d8f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Benoit Kohler <bkohler@mbpbenoitkohler.tailc018d.ts.net>"
+    }
+  }
+}
