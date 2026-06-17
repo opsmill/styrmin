@@ -13,19 +13,61 @@ on:
         type: boolean
         default: false
 
+permissions: {}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  pull-requests: read
-
 jobs:
+  # --- Shared catalog callers (opsmill/opsmill-cicd-workflows) -----------
   files-changed:
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/files-changed.yml@efa969ac22c01b81106120420562bd796beac281
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      filters: |
+        python:
+          - 'backend/**'
+          - 'cli/**'
+          - 'driver/**'
+          - 'python_sdk/**'
+          - 'tests/**'
+          - 'pyproject.toml'
+          - 'uv.lock'
+
+  lint:
+    needs: files-changed
+    if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/lint.yml@efa969ac22c01b81106120420562bd796beac281
+    permissions:
+      contents: read
+    with:
+      ruff: true
+      ty: true
+      python-version: '3.14'
+
+  python-test:
+    needs: files-changed
+    if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/python-uv.yml@efa969ac22c01b81106120420562bd796beac281
+    permissions:
+      contents: read
+    with:
+      python-versions: '["3.14"]'
+      pytest-args: 'backend/tests/unit'
+      uv-sync-args: '--all-extras --frozen'
+      coverage: false
+
+  # --- Bespoke jobs (kept verbatim from the previous ci.yml) -------------
+  non-runtime-gate:
     name: Detect which file has changed
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       non_runtime_only: ${{ steps.non-runtime-only.outputs.non_runtime_only }}
     steps:
@@ -55,6 +97,8 @@ jobs:
     # job (tests, build, E2E) waits on it.
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - name: Set up Python
@@ -99,6 +143,8 @@ jobs:
     needs: ["pre-commit-hooks"]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: frontend
@@ -121,6 +167,8 @@ jobs:
     needs: ["pre-commit-hooks", "frontend-test"]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: frontend
@@ -138,33 +186,13 @@ jobs:
       - name: Build frontend (includes tsc)
         run: pnpm build
 
-  unit-tests:
-    name: Unit Tests
-    needs: ["pre-commit-hooks"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - run: uv sync
-      - name: Run unit tests
-        # E2E and integration tests need vcluster — they run in dedicated jobs.
-        run: >-
-          uv run pytest -v
-          --ignore=backend/tests/e2e
-          --ignore=backend/tests/integration
-          backend/tests
-
   cli-tests:
     name: CLI Unit Tests
     needs: ["pre-commit-hooks"]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - name: Set up Python
@@ -182,6 +210,8 @@ jobs:
     needs: ["pre-commit-hooks"]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - name: Set up Python
@@ -196,11 +226,13 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    needs: ["files-changed", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
+    needs: ["non-runtime-gate", "pre-commit-hooks"]
+    if: github.event_name == 'workflow_dispatch' || needs.non-runtime-gate.outputs.non_runtime_only != 'true'
     runs-on:
       group: huge-runners
     timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
@@ -222,11 +254,13 @@ jobs:
 
   e2e-tests:
     name: E2E Tests (${{ matrix.entrypoint }} / ${{ matrix.shard }})
-    needs: ["files-changed", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
+    needs: ["non-runtime-gate", "pre-commit-hooks"]
+    if: github.event_name == 'workflow_dispatch' || needs.non-runtime-gate.outputs.non_runtime_only != 'true'
     runs-on:
       group: huge-runners
     timeout-minutes: 40
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:

@@ -163,83 +163,8 @@ jobs:
         run: |
           echo "::notice::DRY RUN — would create GitHub Release for $TAG with auto-generated notes"
 
-  publish-docker:
-    needs: create-release
-    if: ${{ !inputs.dry_run }}
-    uses: ./.github/workflows/docker-publish.yml
-    with:
-      tag: ${{ needs.create-release.outputs.tag }}
-      push: true
-    secrets: inherit
-
-  publish-helm-agent:
-    needs: create-release
-    if: ${{ !inputs.dry_run }}
-    uses: ./.github/workflows/publish-helm-chart.yml
-    with:
-      chart: agent
-      publish: true
-      branch: ${{ needs.create-release.outputs.tag }}
-    secrets: inherit
-
-  publish-helm-styrmin:
-    needs:
-      - create-release
-      - publish-helm-agent
-    if: ${{ !inputs.dry_run }}
-    uses: ./.github/workflows/publish-helm-chart.yml
-    with:
-      chart: styrmin
-      publish: true
-      branch: ${{ needs.create-release.outputs.tag }}
-    secrets: inherit
-
-  finalize:
-    needs:
-      - create-release
-      - publish-docker
-      - publish-helm-agent
-      - publish-helm-styrmin
-    if: always() && needs.create-release.result == 'success' && !inputs.dry_run
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check publish results
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.create-release.outputs.tag }}
-        run: |
-          DOCKER_RESULT="${{ needs.publish-docker.result }}"
-          HELM_AGENT_RESULT="${{ needs.publish-helm-agent.result }}"
-          HELM_STYRMIN_RESULT="${{ needs.publish-helm-styrmin.result }}"
-
-          echo "Docker: $DOCKER_RESULT"
-          echo "Helm agent: $HELM_AGENT_RESULT"
-          echo "Helm styrmin: $HELM_STYRMIN_RESULT"
-
-          if [ "$DOCKER_RESULT" != "success" ] || [ "$HELM_AGENT_RESULT" != "success" ] || [ "$HELM_STYRMIN_RESULT" != "success" ]; then
-            echo "::warning::One or more publish jobs failed — marking release as draft"
-            gh release edit "$TAG" --draft --repo "$GITHUB_REPOSITORY"
-            exit 1
-          else
-            echo "All publish jobs succeeded — release is published"
-            gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
-          fi
-
-      - name: Download SBOM artifacts
-        if: needs.publish-docker.result == 'success'
-        uses: actions/download-artifact@v8
-        with:
-          name: sbom
-          path: /tmp/sbom
-
-      - name: Attach SBOMs to release
-        if: needs.publish-docker.result == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.create-release.outputs.tag }}
-        run: |
-          gh release upload "$TAG" \
-            /tmp/sbom/styrmin-sbom.spdx.json \
-            /tmp/sbom/styrmin-sbom.cdx.json \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+  # Publish fan-out (Docker + Helm) now lives in publish.yml, triggered by
+  # the `release: published` event this job emits via `gh release create`.
+  # The old `publish-docker` / `publish-helm-agent` / `publish-helm-styrmin`
+  # / `finalize` jobs (and their `secrets: inherit`) were removed here as
+  # part of the migration onto opsmill/opsmill-cicd-workflows.
