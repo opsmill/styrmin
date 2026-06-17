@@ -13,7 +13,9 @@ on:
         type: boolean
         default: false
 
-permissions: {}
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,9 +25,6 @@ jobs:
   # --- Shared catalog callers (opsmill/opsmill-cicd-workflows) -----------
   files-changed:
     uses: opsmill/opsmill-cicd-workflows/.github/workflows/files-changed.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
-    permissions:
-      contents: read
-      pull-requests: read
     with:
       filters: |
         python:
@@ -36,6 +35,21 @@ jobs:
           - 'tests/**'
           - 'pyproject.toml'
           - 'uv.lock'
+        # "runtime" = any changed file that is NOT tooling/docs-only. Negation of
+        # the old non-runtime-gate set, which makes it equivalent to that gate's
+        # `predicate-quantifier: every` non_runtime_only: this filter matches iff
+        # SOME changed file is outside the non-runtime set (i.e. exactly when the
+        # old non_runtime_only was false). The e2e/integration jobs gate on it.
+        runtime:
+          - '**'
+          - '!docs/**'
+          - '!**/*.md'
+          - '!**/*.mdx'
+          - '!.specify/**'
+          - '!.agents/**'
+          - '!.github/prompts/**'
+          - '!LICENSE*'
+          - '!CODEOWNERS'
     secrets:
       # Read token for the (private) shared repo's side-checkout. Org secret.
       SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
@@ -44,8 +58,6 @@ jobs:
     needs: files-changed
     if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
     uses: opsmill/opsmill-cicd-workflows/.github/workflows/lint.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
-    permissions:
-      contents: read
     with:
       ruff: true
       ty: true
@@ -54,11 +66,9 @@ jobs:
       SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
 
   python-test:
-    needs: files-changed
+    needs: [files-changed, pre-commit-hooks]
     if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
     uses: opsmill/opsmill-cicd-workflows/.github/workflows/python-uv.yml@3548fbbb63655c3da6cd7307b02b9b618c17324f
-    permissions:
-      contents: read
     with:
       python-versions: '["3.14"]'
       # Match the old `unit-tests` job's scope (unit + functional; e2e and
@@ -71,35 +81,6 @@ jobs:
       SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
 
   # --- Bespoke jobs (kept verbatim from the previous ci.yml) -------------
-  non-runtime-gate:
-    name: Detect which file has changed
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      non_runtime_only: ${{ steps.non-runtime-only.outputs.non_runtime_only }}
-    steps:
-      - uses: actions/checkout@v6
-      # Returns 'true' only when *every* changed file matches a non-runtime pattern.
-      # Used by the E2E jobs to skip on tooling-only PRs (docs, agent config, etc.).
-      - name: Check if only non-runtime files changed
-        uses: dorny/paths-filter@v3
-        id: non-runtime-only
-        with:
-          predicate-quantifier: every
-          filters: |
-            non_runtime_only:
-              - 'docs/**'
-              - '**/*.md'
-              - '**/*.mdx'
-              - '.specify/**'
-              - '.agents/**'
-              - '.github/prompts/**'
-              - 'LICENSE*'
-              - 'CODEOWNERS'
-
   pre-commit-hooks:
     name: Pre-Commit Hooks
     # Runs both stages of .pre-commit-config.yaml on every PR. This is the
@@ -107,8 +88,6 @@ jobs:
     # job (tests, build, E2E) waits on it.
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v6
       - name: Set up Python
@@ -153,8 +132,6 @@ jobs:
     needs: ["pre-commit-hooks"]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: read
     defaults:
       run:
         working-directory: frontend
@@ -177,8 +154,6 @@ jobs:
     needs: ["pre-commit-hooks", "frontend-test"]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: read
     defaults:
       run:
         working-directory: frontend
@@ -201,8 +176,6 @@ jobs:
     needs: ["pre-commit-hooks"]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v6
       - name: Set up Python
@@ -220,8 +193,6 @@ jobs:
     needs: ["pre-commit-hooks"]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v6
       - name: Set up Python
@@ -236,13 +207,11 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    needs: ["non-runtime-gate", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.non-runtime-gate.outputs.non_runtime_only != 'true'
+    needs: ["files-changed", "pre-commit-hooks"]
+    if: github.event_name == 'workflow_dispatch' || contains(fromJSON(needs.files-changed.outputs.changes), 'runtime')
     runs-on:
       group: huge-runners
     timeout-minutes: 20
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
@@ -264,13 +233,11 @@ jobs:
 
   e2e-tests:
     name: E2E Tests (${{ matrix.entrypoint }} / ${{ matrix.shard }})
-    needs: ["non-runtime-gate", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.non-runtime-gate.outputs.non_runtime_only != 'true'
+    needs: ["files-changed", "pre-commit-hooks"]
+    if: github.event_name == 'workflow_dispatch' || contains(fromJSON(needs.files-changed.outputs.changes), 'runtime')
     runs-on:
       group: huge-runners
     timeout-minutes: 40
-    permissions:
-      contents: read
     strategy:
       fail-fast: false
       matrix:
