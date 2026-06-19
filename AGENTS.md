@@ -109,18 +109,15 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 
 E2E tests in `backend/tests/e2e/` are **self-bootstrapping**. The session-scoped `vcluster` fixture in `conftest.py` creates a disposable virtual Kubernetes cluster per pytest session (via vCluster on Docker) and tears it down on exit. There is **no host cluster, no kind, no k3d, no minikube** involved.
 
-Concretely:
-
 - **Required on PATH**: `vcluster` and `docker` (or any OCI-compatible runtime accessible to `vcluster create --driver=docker`). That's it.
-- **You do NOT need to pre-run `uv run invoke dev`.** That command brings up a long-running dev stack for *interactive* development and manual testing. It is not a test prerequisite, and starting it before running E2E tests will not help — the fixtures ignore it and create their own ephemeral cluster.
-- **A failing E2E is almost never "blocked by missing infrastructure".** The fixture handles cluster lifecycle. If you find yourself about to record an E2E as `❌ blocked` because of a tooling gap, **first verify the alleged missing dependency by reading `backend/tests/e2e/conftest.py`** — most claimed blockers (k3d, kind, port not listening, no running backend) are imaginary. Genuine blockers reduce to: docker daemon down, `vcluster` binary missing from PATH, lockfile out of sync, host disk full. Confirm one of those before deferring the task.
-- **For the long-running stack** (frontend hot-reload against a real backend, manual exploration): use `uv run invoke dev` or the `dev-validate` skill. That stack is separate from the test stack.
+- **You do NOT need to pre-run `uv run invoke dev`.** That command (or the `dev-validate` skill) brings up the long-running dev stack for *interactive* development and manual exploration — frontend hot-reload against a real backend. It is **separate from the test stack** and not a test prerequisite; the E2E fixtures ignore it and create their own ephemeral cluster.
+- **A failing E2E is almost never "blocked by missing infrastructure".** The fixture handles cluster lifecycle. Before recording an E2E as `❌ blocked`, **verify the alleged missing dependency by reading `backend/tests/e2e/conftest.py`** — most claimed blockers (k3d, kind, port not listening, no running backend) are imaginary. Genuine blockers reduce to: docker daemon down, `vcluster` binary missing from PATH, lockfile out of sync, host disk full. Confirm one of those before deferring the task.
 
 See `dev/knowledge/backend/e2e-testing.md` for the full fixture graph, scope rules, and debugging workflow.
 
 ### Running with `--pdb`
 
-**Always run E2E tests in `backend/tests/e2e/` with `--pdb`.** Re-running the suite just to attach a debugger after a failure wastes minutes per iteration; every E2E run should start paused-ready so that if something fails the session is already frozen at the failure line with the vcluster, port-forwards, SDK clients, and test fixtures still alive. If the test passes, `--pdb` costs nothing.
+**Always run E2E tests in `backend/tests/e2e/` with `--pdb`.** On failure the session freezes at the failure line with the vcluster, port-forwards, SDK clients, and fixtures still alive — no re-run needed to attach a debugger. If the test passes, `--pdb` costs nothing.
 
 ```bash
 uv run pytest backend/tests/e2e/<node_id> -v -s --pdb
@@ -140,7 +137,7 @@ kubectl logs -n styrmin-<deployment-id> <pod> --all-containers
 sleep infinity | uv run pytest backend/tests/e2e/<node_id> -v -s --pdb 2>&1 | tee /tmp/pdb.log
 ```
 
-Pytest stays paused indefinitely on failure. Inspect with `kubectl` from a separate shell, then kill the whole process group (`pkill -f pytest` or kill the job) once you're done — pdb can't receive commands over the dummy stdin.
+Pytest stays paused indefinitely; pdb can't receive commands over the dummy stdin, so inspect with `kubectl` from a separate shell, then kill the process group (`pkill -f pytest` or kill the job) when done.
 
 Use `.agents/skills/e2e-troubleshoot/SKILL.md` for the structured multi-iteration variant of this `--pdb` workflow.
 
@@ -152,27 +149,16 @@ The matrix-sharded CI layout (one vcluster per shard) does not change this recip
 
 E2E tests run twice by default: once as `[api-chromium]` (driver = SDK) and once as `[ui-chromium]` (driver = Playwright). Each variant adds ~20 minutes of CI time, so running both should be a deliberate choice tied to actually exercising the UI.
 
-**Use `@pytest.mark.api_only(reason=...)`** when the test only consumes the SDK / GraphQL / Kubernetes APIs and does not drive a UI flow — for example, reading pod statuses, asserting on cluster state, or seeding data through the SDK with no page navigation. These tests would behave identically under `[ui-chromium]` (the SDK call path is the same), so the second variant burns CI time without adding coverage.
+- **`@pytest.mark.api_only(reason=...)`** — the test only consumes the SDK / GraphQL / Kubernetes APIs (e.g. reading pod statuses, asserting on cluster state, seeding via the SDK with no page navigation). It would behave identically under `[ui-chromium]`, so the second variant burns CI time without adding coverage.
+- **`@pytest.mark.ui_only(reason=...)`** — the inverse: assertions on UI-specific behaviour (rendering, click flows, accessibility) with no SDK equivalent.
 
-```python
-@pytest.mark.api_only(
-    reason="Reads pod statuses through the SDK; no UI flow exercised — "
-    "the [ui-chromium] variant would just re-run the same SDK call.",
-)
-@pytest.mark.ci
-async def test_<name>(...):
-    ...
-```
-
-**Use `@pytest.mark.ui_only(reason=...)`** for the inverse — tests that assert on UI-specific behaviour (rendering, click flows, accessibility) that has no SDK equivalent.
-
-**Heuristic for whether a test is `api_only`:** if every action you take in the test goes through `client.X.Y()`, `kubectl`, or `kr8s`, and the test never calls `scenario_driver.create_deployment` / `upgrade_deployment` / `create_backup` / `start_components` / etc. (the dual-entrypoint methods), it's an `api_only` candidate. Tests that *do* call those methods exercise both the UI and API code paths and should run under both variants.
+**Heuristic:** a test is an `api_only` candidate when every action goes through `client.X.Y()`, `kubectl`, or `kr8s` and it never calls a dual-entrypoint `scenario_driver` method (`create_deployment` / `upgrade_deployment` / `create_backup` / `start_components` / etc.) — tests that *do* call those exercise both UI and API paths and MUST run under both variants. The full marker table, the dual-entrypoint method list, the `reason=` discipline, and a decorator example live in [`dev/knowledge/backend/e2e-testing.md`](dev/knowledge/backend/e2e-testing.md) (`## Markers`).
 
 **Shard markers (matrix CI):** Every `@pytest.mark.ci` E2E test ALSO carries exactly one bare-name shard marker (`shard_general`, `shard_env`, `shard_compute`, `shard_backup`, or `shard_configuration`) that routes it to one of five CI matrix shards. The authoritative list lives in `backend/tests/e2e/conftest.py` (`_VALID_SHARDS`). See [`dev/guides/e2e-parallelism.md`](dev/guides/e2e-parallelism.md) for the shard scheme and [`dev/guides/e2e-deployment-sharing.md`](dev/guides/e2e-deployment-sharing.md) for the decision tree. The conftest hook `enforce_shard_markers` fails collection if the marker is missing or duplicated.
 
 ### UI-variant troubleshooting — use the Playwright MCP server
 
-When diagnosing a failure in a `[ui-chromium]` scenario, **always** drive the investigation through the Playwright MCP server rather than adding screenshot/HTML-dump instrumentation to the page object. The MCP server lets you navigate, evaluate, inspect element accessibility trees, and run arbitrary Playwright calls interactively — no round-trip through a 3-minute pytest fixture for each diagnostic iteration, and no throwaway debug code leaking into the test suite.
+When diagnosing a failure in a `[ui-chromium]` scenario, **always** drive the investigation through the Playwright MCP server (navigate, evaluate, inspect accessibility trees, run arbitrary Playwright calls interactively) rather than adding screenshot/HTML-dump instrumentation to the page object — it avoids a 3-minute pytest round-trip per iteration and keeps throwaway debug code out of the suite.
 
 Typical loop:
 
@@ -198,9 +184,9 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 - Regenerate SDK types after any GraphQL schema or query change (`uv run invoke generate`)
 - Write tests for new functionality
 - Use type hints for Python (backend)
-- **For every new feature, ship an E2E test covering the user-visible flow and run it to a pass before declaring the work done.** This applies equally when executing a speckit workflow (``/speckit.implement``, ``/speckit.tasks``, etc.) — the tasks list MUST include E2E coverage and the agent MUST execute it, not defer to a later iteration. E2E is part of the definition of done, not an optional follow-up. See Constitution §V.
+- **For every new feature, ship an E2E test covering the user-visible flow and run it to a pass before declaring the work done.** This applies equally to speckit workflows (``/speckit.implement``, ``/speckit.tasks``, etc.) — the tasks list MUST include E2E coverage and the agent MUST execute it, not defer it. See Constitution §V.
 - **For every GraphQL schema change (new/modified field, argument, input type, or mutation under `backend/styrmin_backend/api/schema/`), ship a propagation test.** See [`dev/guides/graphql-propagation-tests.md`](dev/guides/graphql-propagation-tests.md) for the full recipe; see Constitution §V for the rule.
-- **Keep the documentation accurate in the same change.** Any update that touches user-visible behaviour (CLI/SDK/GraphQL surface, driver format, install or quickstart steps, architecture facts described in `docs/how-it-works/`, default values, screenshots) MUST update the corresponding pages under `docs/`. Architecture, operations, decisions, and vocabulary changes update [`dev/knowledge/`](dev/knowledge/), [`dev/guides/`](dev/guides/), [`dev/adr/`](dev/adr/), and [`CONTEXT.md`](CONTEXT.md) respectively. Speckit workflows MUST include documentation tasks where applicable. Constitution §VII is non-negotiable — "I'll update the docs later" is not acceptable.
+- **Keep the documentation accurate in the same change.** Any update that touches user-visible behaviour (CLI/SDK/GraphQL surface, driver format, install or quickstart steps, architecture facts described in `docs/how-it-works/`, default values, screenshots) MUST update the corresponding pages under `docs/`. Architecture, operations, decisions, and vocabulary changes update [`dev/knowledge/`](dev/knowledge/), [`dev/guides/`](dev/guides/), [`dev/adr/`](dev/adr/), and [`CONTEXT.md`](CONTEXT.md) respectively. Speckit workflows MUST include documentation tasks where applicable. Constitution §VII (non-negotiable) forbids deferring docs.
 
 ### Ask First
 
@@ -211,7 +197,7 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 - Authentication/authorization changes
 - **Skipping E2E coverage for a bug fix, refactor, or small change.** If you believe the existing E2E suite already exercises the affected path (or the change is genuinely too narrow to warrant a new scenario), state which tests cover it and request confirmation before omitting new coverage — don't unilaterally decide the work is "too small".
 - **Skipping a GraphQL propagation unit test for a schema change.** If you believe an existing propagation test already covers the new/modified field, name the test and request confirmation; don't decide unilaterally.
-- **Shipping a change without the matching documentation update.** If you believe an existing page in `docs/`, `dev/knowledge/`, `dev/guides/`, or `CONTEXT.md` already covers the new state, name the page and request confirmation. Don't ship and "do docs later" — Constitution §VII forbids it.
+- **Shipping a change without the matching documentation update.** If you believe an existing page in `docs/`, `dev/knowledge/`, `dev/guides/`, or `CONTEXT.md` already covers the new state, name the page and request confirmation (Constitution §VII).
 
 ### Never Do
 
@@ -222,7 +208,7 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 
 ### Bypassing the pre-commit hooks
 
-Use `git commit --no-verify` only for genuine emergencies — e.g., a hook that needs network when the network is down, or a hotfix to `develop`/`stable` from automation that has already run the equivalent checks. Routine "skip lint" commits are not appropriate; fix the violation and commit normally instead. CI's `Pre-Commit Hooks` job runs the same checks regardless, so bypassing locally only delays the failure. See `dev/guides/pre-commit-hooks.md` for the full bypass policy.
+Use `git commit --no-verify` only for genuine emergencies — e.g., a hook that needs network when the network is down, or a hotfix to `develop`/`stable` from automation that has already run the equivalent checks. Routine "skip lint" commits are not appropriate, and CI's `Pre-Commit Hooks` job runs the same checks regardless, so bypassing locally only delays the failure. See `dev/guides/pre-commit-hooks.md` for the full bypass policy.
 
 ## Navigation
 
