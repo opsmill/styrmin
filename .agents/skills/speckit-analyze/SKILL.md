@@ -8,6 +8,8 @@ metadata:
   source: "templates/commands/analyze.md"
 user-invocable: true
 disable-model-invocation: false
+context: fork
+agent: general-purpose
 ---
 
 
