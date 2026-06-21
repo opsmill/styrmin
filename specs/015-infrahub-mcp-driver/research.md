@@ -28,16 +28,31 @@ All "unknowns" here are confirmations against existing code/drivers rather than 
 
 ## R5 — Helm chart coordinates & pod selector label
 
-- **Decision**: Use `helm.main.location: oci://registry.opsmill.io/opsmill/chart/infrahub-mcp`, `version: 0.1.0`; Component selector `app.kubernetes.io/name: infrahub-mcp`. **Confirm both at implementation** by inspecting the published chart `templates/` (Open Question carried from the PRD).
+- **Decision**: Use `helm.main.location: oci://registry.opsmill.io/opsmill/chart/infrahub-mcp`, `version: 0.1.0`; Component selector `app.kubernetes.io/name: infrahub-mcp`.
+- **Status (T002): ✅ CONFIRMED against the published chart on 2026-06-21.** Verified by pulling the OCI artifact directly from `registry.opsmill.io` (Harbor on OVH) via the OCI distribution API with an anonymous pull token, then extracting and inspecting the chart tarball (`Chart.yaml`, `values.yaml`, `templates/`). `helm`/`oras`/`skopeo` were not on PATH in this environment, so the registry was queried with `curl` against `/v2/.../manifests/0.1.0` and the chart-content blob.
+  - **OCI location**: `oci://registry.opsmill.io/opsmill/chart/infrahub-mcp` — CONFIRMED. `tags/list` returns `["0.1.0"]`.
+  - **Chart version**: `0.1.0` — CONFIRMED (manifest annotation `org.opencontainers.image.version: 0.1.0`; Helm config blob `version: 0.1.0`).
+  - **Pod selector label**: `app.kubernetes.io/name: infrahub-mcp` — CONFIRMED. `templates/_helpers.tpl` defines `infrahub-mcp.selectorLabels` as `app.kubernetes.io/name: {{ include "infrahub-mcp.name" . }}` + `app.kubernetes.io/instance: {{ .Release.Name }}`, and both `deployment.yaml` (`spec.selector.matchLabels` + pod template labels) and `service.yaml` (`spec.selector`) use that helper. `infrahub-mcp.name` resolves to `default .Chart.Name .Values.nameOverride`; the Driver sets `fullnameOverride` (not `nameOverride`), so `app.kubernetes.io/name` resolves to the chart name **`infrahub-mcp`**. The Styrmin Component selector key+value `app.kubernetes.io/name: infrahub-mcp` therefore matches the rendered pods.
 - **Rationale**: Follows the `infrahub` Driver's OCI pattern (`oci://registry.opsmill.io/opsmill/chart/<name>`). `app.kubernetes.io/name: <name>` is the standard Helm label convention and matches `simple-app`'s selector style.
 - **Alternatives considered**: HTTP chart URL — rejected: the OpsMill registry serves OCI, consistent with the `infrahub`/`infrahub-enterprise` Drivers.
-- **Risk/Mitigation**: If the published chart uses different coordinates or a different selector label, the implementation task adjusts the manifest before the deserialize test is finalized. Neither blocks the design; both are verified during implementation.
+- **Risk/Mitigation**: Resolved — coordinates and selector label are confirmed against the live chart; no remaining open question.
 
 ## R6 — `app.version` in the template
 
 - **Decision**: The chart's app version is pinned via `helm.main.version` (chart `0.1.0`, appVersion `v1.1.6`). `values.j2.yml` does not need to template an image tag (the chart's appVersion handles it); only `infrahub.address`, `mcp.readOnly`, `mcp.logLevel`, `mcp.authMode`, and `fullnameOverride` are templated.
+- **Status (T002): ✅ CONFIRMED against the published chart on 2026-06-21.**
+  - **appVersion**: `v1.1.6` — CONFIRMED (Helm config blob `appVersion: v1.1.6`).
+  - **Image default**: `image.repository: registry.opsmill.io/opsmill/infrahub-mcp`, `image.tag: ""` defaulting to `.Chart.AppVersion` via the `infrahub-mcp.image` helper — CONFIRMED. The chart supplies the image tag from appVersion, so the Driver does NOT template `image.tag`.
+  - **Values key paths** (CONFIRMED verbatim from `values.yaml`):
+    - `infrahub.address` (string; default `""`) — Infrahub server address.
+    - `mcp.authMode` (string; chart default `"none"`; the Driver hardcodes `token-passthrough`). Chart-documented options: `none`, `token-passthrough`, `basic-passthrough`, `oidc`.
+    - `mcp.readOnly` (boolean; chart default `false`).
+    - `mcp.logLevel` (string; chart default `"info"`; documented options `debug`/`info`/`warning`/`error` — matches the Driver enum).
+  - **Service port**: chart `service.port: 8001` / `service.targetPort: 8001` — CONFIRMED, matching the Driver's planned `infrahub-mcp` Service on port 8001.
+  - **`fullnameOverride`**: supported top-level key (`values.yaml` `fullnameOverride: ""`) — CONFIRMED; setting it to `styrmin-infrahub-mcp` renames the Deployment/Service but does NOT change the `app.kubernetes.io/name` selector value (which derives from `nameOverride`/chart name; see R5).
+  - **`infrahub.apiToken`**: the chart DOES expose an `infrahub.apiToken` block (`value`/`existingSecret`/`existingSecretKey`), but the Driver MUST NOT set it — token-passthrough mode means no stored credential. The render test (T006) asserts no `apiToken` key appears in the rendered values, which is the relevant guard.
 - **Rationale**: The MCP chart ships its own image/appVersion; unlike `simple-app` (which sets `image.tag: {{ app.version }}`), this Driver pins the chart version and lets the chart's defaults supply the image. Keeps the template minimal and matched to FR-004's required keys.
-- **Alternatives considered**: Templating `image.tag` from `app.version` — deferred: not required by any FR; can be added if implementation finds the chart needs it.
+- **Alternatives considered**: Templating `image.tag` from `app.version` — rejected: confirmed unnecessary, the chart defaults `image.tag` to appVersion `v1.1.6`.
 
 ## R7 — Test approach (E2E substitute)
 

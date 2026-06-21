@@ -28,7 +28,7 @@ Driver artifacts under `driver/examples/infrahub-mcp/`; docs under `driver/DRIVE
 
 **Purpose**: Create the driver directory and pin the external contract before any manifest is written.
 
-- [ ] T001 Create the driver directory `driver/examples/infrahub-mcp/` (empty, ready for the two artifacts).
+- [X] T001 Create the driver directory `driver/examples/infrahub-mcp/` (empty, ready for the two artifacts).
 
 ---
 
@@ -38,7 +38,7 @@ Driver artifacts under `driver/examples/infrahub-mcp/`; docs under `driver/DRIVE
 
 **⚠️ CRITICAL**: T002 MUST complete before any manifest/values task (T004, T010) — the chart coordinates and pod selector label are otherwise unverified and the unit tests would pass against a manifest that cannot actually deploy.
 
-- [ ] T002 Verify the published Helm chart contract for `infrahub-mcp`: confirm the OCI coordinates (`oci://registry.opsmill.io/opsmill/chart/infrahub-mcp`) and chart `version` (assumed `0.1.0`, appVersion `v1.1.6`), and inspect the chart `templates/` to confirm the pod selector label (assumed `app.kubernetes.io/name: infrahub-mcp`) and the values key paths (`mcp.authMode`, `mcp.readOnly`, `mcp.logLevel`, `infrahub.address`). Record the confirmed values in `specs/015-infrahub-mcp-driver/research.md` (update R5/R6). If any differ from the assumptions, the corrected values are what T004/T010 MUST use.
+- [X] T002 Verify the published Helm chart contract for `infrahub-mcp`: confirm the OCI coordinates (`oci://registry.opsmill.io/opsmill/chart/infrahub-mcp`) and chart `version` (assumed `0.1.0`, appVersion `v1.1.6`), and inspect the chart `templates/` to confirm the pod selector label (assumed `app.kubernetes.io/name: infrahub-mcp`) and the values key paths (`mcp.authMode`, `mcp.readOnly`, `mcp.logLevel`, `infrahub.address`). Record the confirmed values in `specs/015-infrahub-mcp-driver/research.md` (update R5/R6). If any differ from the assumptions, the corrected values are what T004/T010 MUST use.
 
 **Checkpoint**: Real chart contract known — manifest authoring can begin.
 
