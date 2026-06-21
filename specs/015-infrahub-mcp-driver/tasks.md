@@ -109,12 +109,12 @@ Driver artifacts under `driver/examples/infrahub-mcp/`; docs under `driver/DRIVE
 
 ### Implementation for User Story 4
 
-- [ ] T012 [P] [US4] Add `infrahub-mcp` to the Examples list in `driver/DRIVERS.md` (the `## Examples` section, alongside `simple-app`, `infrahub`, `slurpit`, `semaphore`, `db-test`) with a one-line description. (FR-007)
-- [ ] T013 [P] [US4] Add `infrahub-mcp` to the example-driver list in `docs/docs/drivers/loading-drivers.md` ("Where to put your own drivers" / reference-repo list), including a one-line note that `infrahub_address` is accepted as a free-form string and is **not URL-validated** — connection failures surface at agent-query time, not deploy time (critique P1; spec Edge Cases). (FR-007)
+- [X] T012 [P] [US4] Add `infrahub-mcp` to the Examples list in `driver/DRIVERS.md` (the `## Examples` section, alongside `simple-app`, `infrahub`, `slurpit`, `semaphore`, `db-test`) with a one-line description. (FR-007)
+- [X] T013 [P] [US4] Add `infrahub-mcp` to the example-driver list in `docs/docs/drivers/loading-drivers.md` ("Where to put your own drivers" / reference-repo list), including a one-line note that `infrahub_address` is accepted as a free-form string and is **not URL-validated** — connection failures surface at agent-query time, not deploy time (critique P1; spec Edge Cases). (FR-007)
 
 ### Tests for User Story 4
 
-- [ ] T014 [US4] Confirm the deserialize test (T005) asserts `spec.actions == []` (clean load with no `actions.py` required — FR-005). Add the assertion if not already present.
+- [X] T014 [US4] Confirm the deserialize test (T005) asserts `spec.actions == []` (clean load with no `actions.py` required — FR-005). Add the assertion if not already present.
 
 **Checkpoint**: Driver is catalogued and confirmed to load cleanly.
 

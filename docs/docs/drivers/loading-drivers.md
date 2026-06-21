@@ -176,8 +176,14 @@ without an explicit pin re-resolves to the latest matching build again.
 
 The reference repository ships several example drivers under
 [`driver/examples/`](https://github.com/opsmill/styrmin/tree/develop/driver/examples)
-(`infrahub`, `semaphore`, `slurpit`). They're a good starting point
-for writing your own.
+(`infrahub`, `infrahub-mcp`, `semaphore`, `slurpit`). They're a good
+starting point for writing your own.
+
+The `infrahub-mcp` example exposes an existing Infrahub instance to AI
+agents over the Model Context Protocol in token-passthrough auth mode.
+Its `infrahub_address` parameter is accepted as a free-form string and
+is **not** URL-validated — connection failures surface at agent-query
+time, not at deploy time.
 
 For your own drivers, the typical layouts are:
 

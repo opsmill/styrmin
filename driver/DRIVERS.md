@@ -455,6 +455,7 @@ See the [`examples/`](examples/) directory for complete driver examples:
 
 - [`examples/simple-app/`](examples/simple-app/) - Simple 3-tier FastAPI application with PostgreSQL
 - [`examples/infrahub/`](examples/infrahub/) - Driver for the Infrahub application
+- [`examples/infrahub-mcp/`](examples/infrahub-mcp/) - Infrahub MCP server Driver — exposes an existing Infrahub instance to AI agents over the Model Context Protocol in token-passthrough auth mode
 - [`examples/slurpit/`](examples/slurpit/) - Driver for the Slurpit application
 - [`examples/semaphore/`](examples/semaphore/) - Driver for Ansible Semaphore
 - [`examples/db-test/`](examples/db-test/) - Database test driver
