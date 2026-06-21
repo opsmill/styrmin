@@ -106,6 +106,22 @@ async def report_deployment_statuses(
                     and deployment.deleted_at is None
                 ):
                     deployment.deleted_at = now
+                    # A tombstoned deployment no longer participates in the
+                    # environment, so its DeployedService rows must go too.
+                    # They are operational discovery/uniqueness state (not
+                    # audit data); leaving them orphaned would (a) block a
+                    # later deployment from reclaiming the same service name
+                    # and (b) leak ghost services into other deployments'
+                    # service-discovery context. The deployment row itself is
+                    # retained for history/backups. Inline import mirrors the
+                    # upgrade path in deployment.py to avoid a circular import.
+                    from styrmin_backend.services.services_discovery import (
+                        delete_services_for_deployment,
+                    )
+
+                    await delete_services_for_deployment(
+                        deployment_id=deployment.id, uow=uow
+                    )
                 deployment.status = target_state
                 await uow.deployments.save(deployment)
                 deployments_updated += 1
