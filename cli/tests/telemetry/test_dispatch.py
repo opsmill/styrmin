@@ -22,6 +22,7 @@ import threading
 import time
 from typing import Self
 
+from styrminctl.telemetry.config import TELEMETRY_BUDGET_MS
 from styrminctl.telemetry.dispatch import dispatch
 
 _ENVELOPE: dict[str, object] = {
@@ -123,6 +124,41 @@ def test_hung_endpoint_returns_within_budget() -> None:
     elapsed = time.monotonic() - start
     # Generous guard: we only assert the bound was *enforced*, not its exact value.
     assert elapsed < 2.0
+    release.set()  # let the abandoned daemon worker unwind cleanly
+
+
+def test_default_budget_is_200ms() -> None:
+    """The single tunable latency knob is fixed at the SC-001 value of 200 ms."""
+    assert TELEMETRY_BUDGET_MS == 200
+
+
+def test_hung_endpoint_at_default_budget_returns_promptly() -> None:
+    """A hung endpoint at the *real* default budget still returns near 200 ms.
+
+    Unlike :func:`test_hung_endpoint_returns_within_budget`, this exercises the
+    production ``TELEMETRY_BUDGET_MS`` default (no injected ``budget_ms``) so the
+    real wall-clock bound — not just an injected tiny one — is proven to hold.
+    The guard is deliberately generous (< 1 s): the point is "bounded near the
+    default, not multi-second", so CI scheduling jitter cannot flake it.
+    """
+    release = threading.Event()
+
+    class _HungClient:
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *_exc: object) -> bool:
+            return False
+
+        def post(self, _url: str, **_kwargs: object) -> object:
+            release.wait()  # block until the test tears down
+            return object()
+
+    start = time.monotonic()
+    # No budget_ms override: this uses the real TELEMETRY_BUDGET_MS default.
+    dispatch(_ENVELOPE, _ENDPOINT, client_factory=_HungClient)
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.0
     release.set()  # let the abandoned daemon worker unwind cleanly
 
 

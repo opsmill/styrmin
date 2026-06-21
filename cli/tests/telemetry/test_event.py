@@ -141,7 +141,7 @@ def test_environment_facts_are_coarse(sample_app: App) -> None:
     assert data["styrminctl_version"] == version("cli")
     # No kernel string / arch / build detail leaks: os_family is a coarse token
     # (e.g. "Linux"), never the kernel release.
-    assert data["os_family"] in {"Linux", "Darwin", "Windows", ""}
+    assert data["os_family"] in {"Linux", "Darwin", "Windows"}
 
 
 def test_outcome_and_error_category_passthrough(sample_app: App) -> None:

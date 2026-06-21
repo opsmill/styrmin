@@ -28,11 +28,36 @@ import pytest
 # command-route closed set used here matches production exactly.
 from styrminctl.cli_commands import app
 from styrminctl.telemetry import eligibility
-from styrminctl.telemetry.eligibility import effective_state, should_emit
+from styrminctl.telemetry.eligibility import effective_state, is_eligible_command, should_emit
 from styrminctl.telemetry.store import TelemetryStore
 
 # An eligible command route (real command, no help/version, not the telemetry group).
 ELIGIBLE_TOKENS = ["clusters", "list"]
+
+
+# -- command-eligibility rung (FR-015), tested directly against the real app ---
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    [
+        ["telemetry", "status"],  # the opt-out command group
+        ["telemetry", "disable"],
+        ["--version"],  # version screen
+        ["--help"],  # help screens
+        ["-h"],
+        [],  # empty route → bare help screen
+        # Shell-completion command registered by register_install_completion_command()
+        # (see cli_commands.py); Cyclopts exposes it as the ``--install-completion`` token.
+        ["--install-completion"],
+    ],
+)
+def test_ineligible_routes_return_false(tokens: list[str]) -> None:
+    assert is_eligible_command(app, tokens) is False
+
+
+def test_eligible_route_returns_true() -> None:
+    assert is_eligible_command(app, ELIGIBLE_TOKENS) is True
 
 
 @pytest.fixture

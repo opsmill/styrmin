@@ -39,9 +39,10 @@ One JSON event per eligible invocation, with **only** these fields:
 
 The event is wrapped in the envelope
 `{"data": {…}, "checksum": "<sha256 hex of data>", "kind": "styrminctl", "payload_format": "1.0"}`.
-The `checksum` is the SHA-256 of the serialised `data`, so the receiving server
-can verify the payload was not corrupted in transit. The client never sends a
-timestamp or any network identifier — the server adds those.
+The `checksum` is the SHA-256 of the serialised `data`, so the server can
+recompute and verify the canonical serialisation of the data (HTTPS already
+covers transport integrity). The client never sends a timestamp or any network
+identifier — the server adds those.
 
 ### What is **never** collected
 

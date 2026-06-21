@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import stat
+import threading
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,43 @@ def test_unwritable_dir_falls_back_to_ephemeral_id(tmp_path: Path) -> None:
     finally:
         # Restore perms so pytest can clean up the tmp tree.
         blocked.chmod(0o700)
+
+
+# -- concurrent writers keep the file valid (FR-017) ------------------------
+
+
+def test_concurrent_writers_keep_file_valid(tmp_path: Path) -> None:
+    """Concurrent ``set_enabled`` / ``install_id`` calls leave valid JSON on disk.
+
+    The atomic temp-file + ``os.rename`` save (unique pid+random temp name per
+    write) means concurrent writers never corrupt the target: the file always
+    parses and carries both keys. Last-write-wins is acceptable for ``enabled``.
+    """
+    store = TelemetryStore(path=tmp_path / "styrminctl" / "telemetry.json")
+    # Mint and persist a stable install_id once up front so all threads observe it.
+    install_id = store.install_id()
+
+    barrier = threading.Barrier(8)
+
+    def _writer(index: int) -> None:
+        barrier.wait()  # release all threads together to maximise contention
+        store.install_id()
+        store.set_enabled(index % 2 == 0)
+
+    threads = [threading.Thread(target=_writer, args=(i,)) for i in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # The target file is still valid JSON with both keys (last-write-wins).
+    raw = json.loads(store.path().read_text())
+    assert set(raw) == {"install_id", "enabled"}
+    assert raw["install_id"] == install_id  # the stable id is preserved
+    assert isinstance(raw["enabled"], bool)
+    # No leftover temp files from any racing save.
+    siblings = [p.name for p in store.path().parent.iterdir()]
+    assert siblings == [store.path().name]
 
 
 def test_corrupt_file_degrades_to_defaults(store: TelemetryStore) -> None:
