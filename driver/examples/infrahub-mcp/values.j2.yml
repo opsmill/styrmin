@@ -5,5 +5,7 @@ mcp:
   # Infrahub (token-passthrough). The driver stores no Infrahub credential, so
   # the chart's `infrahub.apiToken` block is intentionally left unset.
   authMode: token-passthrough
+  readOnly: {{ parameters.mcp_read_only }}
+  logLevel: "{{ parameters.mcp_log_level }}"
 infrahub:
   address: "{{ parameters.infrahub_address }}"

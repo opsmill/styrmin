@@ -204,14 +204,29 @@ def test_deserialize_infrahub_mcp_driver_spec():
     assert params["infrahub_address"].kind == DriverParameterKind.STRING
     assert params["infrahub_address"].default is None
 
+    # `mcp_read_only` is an optional boolean parameter, default False (US2).
+    assert "mcp_read_only" in params
+    assert params["mcp_read_only"].kind == DriverParameterKind.BOOLEAN
+    assert params["mcp_read_only"].default is False
+
+    # `mcp_log_level` is an enum parameter with four levels, default "info" (US3).
+    assert "mcp_log_level" in params
+    assert params["mcp_log_level"].kind == DriverParameterKind.ENUM
+    assert params["mcp_log_level"].values == ["debug", "info", "warning", "error"]
+    assert params["mcp_log_level"].default == "info"
+
 
 def test_render_infrahub_mcp_values():
     """Rendering the real values.j2.yml yields the US1 rendered-values contract."""
     template_text = (_INFRAHUB_MCP_DIR / "values.j2.yml").read_text()
 
+    # Default case: mcp_read_only False, mcp_log_level "info" (validator-applied
+    # defaults — see the parameter-validator tests in test_parameters.py).
     context = {
         "parameters": {
             "infrahub_address": "https://infrahub.example.com",
+            "mcp_read_only": False,
+            "mcp_log_level": "info",
         },
     }
     rendered_text = jinja2.Template(template_text).render(**context)
@@ -223,5 +238,24 @@ def test_render_infrahub_mcp_values():
     assert rendered["mcp"]["authMode"] == "token-passthrough"
     assert rendered["infrahub"]["address"] == "https://infrahub.example.com"
 
+    # mcp_read_only flows to mcp.readOnly; default is False (US2).
+    assert rendered["mcp"]["readOnly"] is False
+    # mcp_log_level flows to mcp.logLevel; default is "info" (US3).
+    assert rendered["mcp"]["logLevel"] == "info"
+
     # token-passthrough stores no credential: no apiToken key anywhere (FR-006).
     assert not _find_key_recursive(rendered, "apiToken")
+
+    # Supplied values flow through: read-only True and a valid enum level (US2/US3).
+    overridden_context = {
+        "parameters": {
+            "infrahub_address": "https://infrahub.example.com",
+            "mcp_read_only": True,
+            "mcp_log_level": "debug",
+        },
+    }
+    overridden = yaml.safe_load(
+        jinja2.Template(template_text).render(**overridden_context)
+    )
+    assert overridden["mcp"]["readOnly"] is True
+    assert overridden["mcp"]["logLevel"] == "debug"

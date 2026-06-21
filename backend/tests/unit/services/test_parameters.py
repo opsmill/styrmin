@@ -146,20 +146,37 @@ INFRAHUB_MCP_DEFINITIONS = [
         label="Infrahub address",
         kind=DriverParameterKind.STRING,
     ),
+    DriverParameterDefinition(
+        name="mcp_read_only",
+        label="Read-only mode",
+        kind=DriverParameterKind.BOOLEAN,
+        default=False,
+    ),
+    DriverParameterDefinition(
+        name="mcp_log_level",
+        label="Log level",
+        kind=DriverParameterKind.ENUM,
+        values=["debug", "info", "warning", "error"],
+        default="info",
+    ),
 ]
 
 
 class TestInfrahubMcpParameters:
-    """Parameter-validation tests for the infrahub-mcp Driver (015, US1).
+    """Parameter-validation tests for the infrahub-mcp Driver (015).
 
-    US1 declares only ``infrahub_address``. Later chunks (US2/US3) extend this
-    class to cover ``mcp_read_only`` and ``mcp_log_level``.
+    Covers US1 (``infrahub_address``), US2 (``mcp_read_only``), and US3
+    (``mcp_log_level``).
     """
 
     def test_infrahub_address_only_resolves(self) -> None:
         values = {"infrahub_address": "https://infrahub.example.com"}
         result = validate_parameter_values(INFRAHUB_MCP_DEFINITIONS, values)
-        assert result == {"infrahub_address": "https://infrahub.example.com"}
+        assert result == {
+            "infrahub_address": "https://infrahub.example.com",
+            "mcp_read_only": False,
+            "mcp_log_level": "info",
+        }
 
     def test_missing_infrahub_address_raises(self) -> None:
         with pytest.raises(
@@ -173,6 +190,29 @@ class TestInfrahubMcpParameters:
             "bogus": 1,
         }
         with pytest.raises(ServiceError, match="Unknown parameter: 'bogus'"):
+            validate_parameter_values(INFRAHUB_MCP_DEFINITIONS, values)
+
+    def test_non_boolean_read_only_raises(self) -> None:
+        """A non-boolean mcp_read_only is rejected (US2)."""
+        values = {
+            "infrahub_address": "https://infrahub.example.com",
+            "mcp_read_only": "yes",
+        }
+        with pytest.raises(
+            ServiceError, match="Parameter 'mcp_read_only': expected boolean, got str"
+        ):
+            validate_parameter_values(INFRAHUB_MCP_DEFINITIONS, values)
+
+    def test_out_of_enum_log_level_raises(self) -> None:
+        """An out-of-enum mcp_log_level is rejected (US3)."""
+        values = {
+            "infrahub_address": "https://infrahub.example.com",
+            "mcp_log_level": "verbose",
+        }
+        with pytest.raises(
+            ServiceError,
+            match="Parameter 'mcp_log_level': value 'verbose' is not in allowed values",
+        ):
             validate_parameter_values(INFRAHUB_MCP_DEFINITIONS, values)
 
 

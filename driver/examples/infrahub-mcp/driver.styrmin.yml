@@ -29,6 +29,15 @@ spec:
       label: "Infrahub address"
       kind: string
       # no default => required
+    - name: mcp_read_only
+      label: "Read-only mode"
+      kind: boolean
+      default: false
+    - name: mcp_log_level
+      label: "Log level"
+      kind: enum
+      values: ["debug", "info", "warning", "error"]
+      default: info
 
   components:
     server:

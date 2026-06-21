@@ -73,11 +73,11 @@ Driver artifacts under `driver/examples/infrahub-mcp/`; docs under `driver/DRIVE
 
 ### Implementation for User Story 2
 
-- [ ] T008 [US2] Add the `mcp_read_only` parameter (kind boolean, `default: false`) to `driver/examples/infrahub-mcp/driver.styrmin.yml`, and map it to `mcp.readOnly` in `driver/examples/infrahub-mcp/values.j2.yml`. (FR-003, FR-004) (depends on T003, T004)
+- [X] T008 [US2] Add the `mcp_read_only` parameter (kind boolean, `default: false`) to `driver/examples/infrahub-mcp/driver.styrmin.yml`, and map it to `mcp.readOnly` in `driver/examples/infrahub-mcp/values.j2.yml`. (FR-003, FR-004) (depends on T003, T004)
 
 ### Tests for User Story 2
 
-- [ ] T009 [US2] Extend the deserialize test (T005) to assert the `mcp_read_only` param exists with `kind=boolean`, `default is False`; extend the render test (T006) to assert `mcp.readOnly is False` by default and `is True` when `mcp_read_only=True` is supplied; extend the parameter-validator test (T007) to assert a non-boolean `mcp_read_only` raises `ServiceError`. (User Story 2 acceptance) (depends on T008)
+- [X] T009 [US2] Extend the deserialize test (T005) to assert the `mcp_read_only` param exists with `kind=boolean`, `default is False`; extend the render test (T006) to assert `mcp.readOnly is False` by default and `is True` when `mcp_read_only=True` is supplied; extend the parameter-validator test (T007) to assert a non-boolean `mcp_read_only` raises `ServiceError`. (User Story 2 acceptance) (depends on T008)
 
 **Checkpoint**: US1 + US2 work; read-only is operator-controllable.
 
@@ -91,11 +91,11 @@ Driver artifacts under `driver/examples/infrahub-mcp/`; docs under `driver/DRIVE
 
 ### Implementation for User Story 3
 
-- [ ] T010 [US3] Add the `mcp_log_level` parameter (kind enum, `values: ["debug","info","warning","error"]`, `default: info`) to `driver/examples/infrahub-mcp/driver.styrmin.yml`, and map it to `mcp.logLevel` in `driver/examples/infrahub-mcp/values.j2.yml`. (FR-003, FR-004) (depends on T003, T004)
+- [X] T010 [US3] Add the `mcp_log_level` parameter (kind enum, `values: ["debug","info","warning","error"]`, `default: info`) to `driver/examples/infrahub-mcp/driver.styrmin.yml`, and map it to `mcp.logLevel` in `driver/examples/infrahub-mcp/values.j2.yml`. (FR-003, FR-004) (depends on T003, T004)
 
 ### Tests for User Story 3
 
-- [ ] T011 [US3] Extend the deserialize test (T005) to assert `mcp_log_level` has `kind=enum`, `values == ["debug","info","warning","error"]`, `default == "info"`; extend the render test (T006) to assert a supplied valid enum value flows to `mcp.logLevel`; extend the parameter-validator test (T007) to assert an out-of-enum `mcp_log_level` raises `ServiceError`. (User Story 3 acceptance) (depends on T010)
+- [X] T011 [US3] Extend the deserialize test (T005) to assert `mcp_log_level` has `kind=enum`, `values == ["debug","info","warning","error"]`, `default == "info"`; extend the render test (T006) to assert a supplied valid enum value flows to `mcp.logLevel`; extend the parameter-validator test (T007) to assert an out-of-enum `mcp_log_level` raises `ServiceError`. (User Story 3 acceptance) (depends on T010)
 
 **Checkpoint**: All three parameters present, validated, and rendered.
 
