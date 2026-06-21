@@ -112,13 +112,13 @@ command against a local sink emits zero requests.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T026 [US1] Write the E2E in `cli/tests/e2e/test_styrminctl_telemetry.py` marked `@pytest.mark.api_only(reason=...)`: spin up a real local HTTP sink, run the **real `styrminctl` subprocess** with `STYRMIN_TELEMETRY_ENDPOINT` pointed at it (NO vCluster fixture), and assert (a) exactly one well-formed envelope with a server-verifiable checksum, (b) no forbidden values with known-sensitive inputs, (c) ≤ 200 ms added latency + unchanged exit behaviour incl. hung endpoint, (d) zero requests under each opt-out lever (Constitution §V)
-- [ ] T027 [US1] Run the E2E to a PASS locally and record the §V evidence (node id, exact pytest command, ISO-8601 timestamp, verbatim `PASSED` line) in the PR/summary
-- [ ] T028 [P] Document telemetry in `cli/README.md`: exactly what is collected, the envelope shape, all opt-out levers (`STYRMIN_TELEMETRY`, `DO_NOT_TRACK`, `telemetry disable`, CI/non-TTY), and `STYRMIN_TELEMETRY_ENDPOINT` (Constitution §VII)
-- [ ] T029 [P] Add a privacy note under `docs/` mirroring the README section (what is collected, why, how to opt out) (Constitution §VII)
-- [ ] T030 [P] Update `CONTEXT.md`: add a **Telemetry** glossary entry and amend the **CLI / styrminctl** entry to note its first non-GraphQL outbound call
-- [ ] T031 [P] Add an ADR under `dev/adr/` recording the external fire-and-forget telemetry call, its constraints (anonymous, best-effort, ≤200 ms, scrub-by-construction), and the default-on/opt-out stance
-- [ ] T032 Run `uv run invoke format lint` and fix any findings; then run the full telemetry unit suite (`cd cli && uv run pytest tests/telemetry -v`) to green
+- [X] T026 [US1] Write the E2E in `cli/tests/e2e/test_styrminctl_telemetry.py` marked `@pytest.mark.api_only(reason=...)`: spin up a real local HTTP sink, run the **real `styrminctl` subprocess** with `STYRMIN_TELEMETRY_ENDPOINT` pointed at it (NO vCluster fixture), and assert (a) exactly one well-formed envelope with a server-verifiable checksum, (b) no forbidden values with known-sensitive inputs, (c) ≤ 200 ms added latency + unchanged exit behaviour incl. hung endpoint, (d) zero requests under each opt-out lever (Constitution §V)
+- [X] T027 [US1] Run the E2E to a PASS locally and record the §V evidence (node id, exact pytest command, ISO-8601 timestamp, verbatim `PASSED` line) in the PR/summary
+- [X] T028 [P] Document telemetry in `cli/README.md`: exactly what is collected, the envelope shape, all opt-out levers (`STYRMIN_TELEMETRY`, `DO_NOT_TRACK`, `telemetry disable`, CI/non-TTY), and `STYRMIN_TELEMETRY_ENDPOINT` (Constitution §VII)
+- [X] T029 [P] Add a privacy note under `docs/` mirroring the README section (what is collected, why, how to opt out) (Constitution §VII)
+- [X] T030 [P] Update `CONTEXT.md`: add a **Telemetry** glossary entry and amend the **CLI / styrminctl** entry to note its first non-GraphQL outbound call
+- [X] T031 [P] Add an ADR under `dev/adr/` recording the external fire-and-forget telemetry call, its constraints (anonymous, best-effort, ≤200 ms, scrub-by-construction), and the default-on/opt-out stance
+- [X] T032 Run `uv run invoke format lint` and fix any findings; then run the full telemetry unit suite (`cd cli && uv run pytest tests/telemetry -v`) to green
 
 ---
 

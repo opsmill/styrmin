@@ -197,3 +197,85 @@ Prefer `STYRMIN_TOKEN` (rung 1) with a **short-lived** token whenever your
 CI platform can mint one for the job. Use `STYRMIN_USERNAME` /
 `STYRMIN_PASSWORD` only when the platform cannot, and rotate the password
 on a cadence that matches your threat model.
+
+## Telemetry
+
+`styrminctl` collects **anonymous, opt-out** usage telemetry so the
+maintainers can see which commands and options are actually used, on which
+platforms, and where they fail — and prioritise the CLI accordingly. It is
+**on by default on interactive workstations** and **silent in CI /
+non-interactive contexts**. There is no first-run prompt and no banner; this
+section is the disclosure.
+
+Dispatch is **best-effort and failure-isolated**: after each eligible command
+finishes, the CLI fire-and-forgets a single anonymous event over HTTPS and
+then exits. It never changes a command's output, exit code, or perceptible
+speed, and it silently drops the event if the endpoint is slow or unreachable
+(hard cap: **≤ 200 ms** added latency for any endpoint state, including a hung
+connection). There is no on-disk spool, no retry, and no batching.
+
+### Exactly what is collected
+
+One JSON event per eligible invocation, with **only** these fields:
+
+| Field | Example | Notes |
+|-------|---------|-------|
+| `event_id` | `a1b2c3d4-deployments_update` | `install_id[:8]` + `-` + command (spaces → `_`) |
+| `install_id` | `a1b2c3d4e5f6…` | random anonymous id, generated once and persisted |
+| `command` | `deployments update` | resolved command route from a **closed set** |
+| `options` | `["--config", "--wait"]` | canonical **long option names** only, deduped + sorted |
+| `outcome` | `success` / `failure` | — |
+| `error_category` | `network` | `null` on success, else one of `auth`, `network`, `validation`, `not_found`, `server`, `usage`, `unknown` — bucketed by error **type**, never a message |
+| `styrminctl_version` | `0.1.0` | — |
+| `python_version` | `3.14.0` | — |
+| `os_family` | `Linux` | OS family only (`Linux` / `Darwin` / `Windows`) — never kernel/version detail |
+
+It is wrapped in the envelope
+`{"data": {…}, "checksum": "<sha256 hex of data>", "kind": "styrminctl", "payload_format": "1.0"}`,
+where `checksum` is the SHA-256 of the JSON-serialised `data` so the server
+can verify integrity. The client never sends a timestamp or any network
+identifier; the server adds those.
+
+**What is never collected** (scrubbed by construction): server addresses,
+hostnames, usernames, tokens, deployment / cluster / environment names,
+**argument and option values**, file paths, and IPs. Deriving the option
+names never reads or converts a value — in particular a `@file` option value
+is never opened, so file contents can never leak onto the telemetry path.
+
+### Opting out
+
+Any **one** of these stops all emission:
+
+| Lever | Effect |
+|-------|--------|
+| `styrminctl telemetry disable` | Persists an opt-out (survives `logout`); `enable` reverts it. |
+| `STYRMIN_TELEMETRY=0` | Disables emission for the process (overrides the persisted flag). |
+| `DO_NOT_TRACK=1` | Honours the [community standard](https://consoledonottrack.com/). |
+| Running in CI (`CI` set/truthy) | Auto-excluded — no configuration needed. |
+| `stderr` is not a TTY (non-interactive / piped) | Auto-excluded. |
+
+Inspect the effective state and the reason at any time:
+
+```bash
+uv run styrminctl telemetry status
+# Telemetry: enabled (default; interactive terminal).
+# Telemetry: disabled (DO_NOT_TRACK=1).
+# Telemetry: disabled (persisted opt-out via 'telemetry disable').
+```
+
+The `telemetry` command group, `--version` / `version`, `--help` / `-h`, and
+the shell-completion command never emit anything themselves.
+
+### Endpoint override
+
+Telemetry POSTs to a fixed production endpoint by default. Set
+`STYRMIN_TELEMETRY_ENDPOINT=<url>` to redirect it — used by the test suite and
+a local sink, and available if you want to point it at your own collector.
+
+### State file
+
+State is `{install_id, enabled}` stored as JSON at
+`${XDG_DATA_HOME:-$HOME/.local/share}/styrminctl/telemetry.json` (the same
+atomic-write, `0600`-file / `0700`-dir pattern as the token store). The
+`install_id` persists even when telemetry is disabled; an unwritable directory
+falls back to an ephemeral in-memory id and never errors.
