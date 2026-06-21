@@ -33,6 +33,7 @@ from .get_backup_schedule import GetBackupSchedule
 from .get_backup_storage_location import GetBackupStorageLocation
 from .get_cluster import GetCluster
 from .get_deployment import GetDeployment
+from .get_deployment_by_name import GetDeploymentByName
 from .get_deployment_component_container_overrides_full import (
     GetDeploymentComponentContainerOverridesFull,
 )
@@ -55,8 +56,10 @@ from .get_user import GetUser
 from .input_types import (
     CreateGroupInput,
     CreateUserInput,
+    DeploymentConfigInput,
     DeploymentPodStatusReport,
     DeploymentStatusReportInput,
+    ParameterValueInput,
     ServiceNameOverride,
     UpdateDeploymentInput,
     UpdateEnvironmentInput,
@@ -594,8 +597,8 @@ class Client(AsyncBaseClient):
         cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
         cluster_name: Union[Optional[str], UnsetType] = UNSET,
         name: Union[Optional[str], UnsetType] = UNSET,
-        config: Union[Optional[Any], UnsetType] = UNSET,
-        parameters: Union[Optional[Any], UnsetType] = UNSET,
+        config: Union[Optional[DeploymentConfigInput], UnsetType] = UNSET,
+        parameters: Union[Optional[list[ParameterValueInput]], UnsetType] = UNSET,
         service_name_overrides: Union[
             Optional[list[ServiceNameOverride]], UnsetType
         ] = UNSET,
@@ -603,7 +606,7 @@ class Client(AsyncBaseClient):
         **kwargs: Any,
     ) -> Deploy:
         query = gql("""
-            mutation Deploy($driver: String!, $version: String, $environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!], $driverVersionId: UUID) {
+            mutation Deploy($driver: String!, $version: String, $environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String, $name: String, $config: DeploymentConfigInput, $parameters: [ParameterValueInput!], $serviceNameOverrides: [ServiceNameOverride!], $driverVersionId: UUID) {
               deploy(
                 driver: $driver
                 version: $version
@@ -805,6 +808,63 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeployment.model_validate(data)
+
+    async def get_deployment_by_name(
+        self, name: str, environment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentByName:
+        query = gql("""
+            query GetDeploymentByName($name: String!, $environmentId: UUID!) {
+              deployment(name: $name, environmentId: $environmentId) {
+                id
+                name
+                status
+                deletedAt
+                config
+                parameters
+                applicationVersion
+                applicationDriverVersionId
+                applicationDriverVersion {
+                  id
+                  applicationDriver {
+                    id
+                    name
+                  }
+                }
+                environmentId
+                applicationInstance {
+                  id
+                  status
+                }
+                components {
+                  id
+                  name
+                  enabled
+                }
+                deployedServices {
+                  id
+                  driverServiceName
+                  resolvedName
+                  kind
+                  scope
+                  port
+                  component
+                  primaryFqdn
+                  humanReadableFqdn
+                  primaryUrl
+                  humanReadableUrl
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"name": name, "environmentId": environment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentByName",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentByName.model_validate(data)
 
     async def get_deployment_component_container_overrides_full(
         self, deployment_id: UUID, **kwargs: Any

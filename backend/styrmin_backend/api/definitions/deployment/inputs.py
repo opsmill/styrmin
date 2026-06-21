@@ -37,6 +37,7 @@ from styrmin_backend.api.definitions.config.inputs import (
     SchedulingInput,
     StandardStorageInput,
     _convert_value,
+    _is_unset_or_none,
 )
 from styrmin_backend.api.definitions.service.model import ServiceNameOverride
 from styrmin_backend.api.scalars import JSON
@@ -110,46 +111,28 @@ class ComponentConfigInput:
 
 
 # ---------------------------------------------------------------------------
-# Top-level input
+# Shared deployment-config input
+#
+# Carries every field of the source-of-truth ``DeploymentConfig`` Pydantic
+# model. Consumed by BOTH the ``deploy`` (create) mutation and — via
+# inheritance — ``UpdateDeploymentInput``, so the two mutations cannot drift
+# on the config shape (the original create/update format mismatch this design
+# closes: create previously took a freeform ``JSON`` config, update took a
+# typed list-based input). ``components`` / ``env_vars`` keep the
+# ``[{name, value}]`` list shape so duplicate-name detection
+# (``DUPLICATE_ENV_VAR_NAME`` / ``DUPLICATE_COMPONENT_NAME``) stays reachable.
 # ---------------------------------------------------------------------------
 
 
 @strawberry.input(
     description=(
-        "Full-replacement input for the ``updateDeployment`` mutation. "
-        "Top-level fields use full-replacement semantics: an omitted "
-        '(``null``) field means "do not touch the corresponding persisted '
-        'state"; an empty list/dict means "explicitly clear". The '
-        "single exception is ``parameters``, which uses merge semantics "
-        "for backwards compatibility — entries in the input merge on top "
-        "of the persisted parameters dict (existing keys not named in the "
-        "input survive)."
+        "Typed deployment-configuration payload shared by the ``deploy`` "
+        "(create) and ``updateDeployment`` mutations. Mirrors the "
+        "source-of-truth ``DeploymentConfig`` Pydantic model field-for-field "
+        "so both mutations accept an identical config shape."
     )
 )
-class UpdateDeploymentInput:
-    name: str | None = strawberry.field(
-        default=None,
-        description=('New name for the deployment. Omitted means "do not rename".'),
-    )
-    parameters: list[ParameterValueInput] | None = strawberry.field(
-        default=None,
-        description=(
-            "Driver-defined parameter assignments. **Merge semantics** "
-            "(asymmetric with the rest of this input): entries in the "
-            "list merge on top of the persisted parameters dict, so "
-            "existing keys not named in the input survive. Duplicate "
-            "``name`` entries within the list raise "
-            "``DUPLICATE_PARAMETER_NAME``."
-        ),
-    )
-    service_name_overrides: list[ServiceNameOverride] | None = strawberry.field(
-        default=None,
-        description=(
-            "Full-replacement list of service-name overrides applied at "
-            "deploy time. Each entry maps a driver-declared service name "
-            "to the operator-chosen override name."
-        ),
-    )
+class DeploymentConfigInput:
     components: list[ComponentConfigInput] | None = strawberry.field(
         default=None,
         description=(
@@ -162,7 +145,7 @@ class UpdateDeploymentInput:
     env_vars: list[EnvVarInput] | None = strawberry.field(
         default=None,
         description=(
-            "Deployment-scoped environment-variable overrides. "
+            "Deployment-scoped environment variables. "
             "Submitted as a list of ``{name, value}`` rows; duplicates "
             'raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` '
             "scope in the payload."
@@ -258,6 +241,52 @@ class UpdateDeploymentInput:
 
 
 # ---------------------------------------------------------------------------
+# Top-level input for updateDeployment
+# ---------------------------------------------------------------------------
+
+
+@strawberry.input(
+    description=(
+        "Full-replacement input for the ``updateDeployment`` mutation. "
+        "Inherits every config field from ``DeploymentConfigInput`` (shared "
+        "with the ``deploy`` create mutation) and adds the update-only "
+        "``name`` / ``parameters`` / ``serviceNameOverrides`` fields. "
+        "Top-level fields use full-replacement semantics: an omitted "
+        '(``null``) field means "do not touch the corresponding persisted '
+        'state"; an empty list/dict means "explicitly clear". The '
+        "single exception is ``parameters``, which uses merge semantics "
+        "for backwards compatibility — entries in the input merge on top "
+        "of the persisted parameters dict (existing keys not named in the "
+        "input survive)."
+    )
+)
+class UpdateDeploymentInput(DeploymentConfigInput):
+    name: str | None = strawberry.field(
+        default=None,
+        description=('New name for the deployment. Omitted means "do not rename".'),
+    )
+    parameters: list[ParameterValueInput] | None = strawberry.field(
+        default=None,
+        description=(
+            "Driver-defined parameter assignments. **Merge semantics** "
+            "(asymmetric with the rest of this input): entries in the "
+            "list merge on top of the persisted parameters dict, so "
+            "existing keys not named in the input survive. Duplicate "
+            "``name`` entries within the list raise "
+            "``DUPLICATE_PARAMETER_NAME``."
+        ),
+    )
+    service_name_overrides: list[ServiceNameOverride] | None = strawberry.field(
+        default=None,
+        description=(
+            "Full-replacement list of service-name overrides applied at "
+            "deploy time. Each entry maps a driver-declared service name "
+            "to the operator-chosen override name."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Conversion to dict (consumed by update_deployment service function)
 # ---------------------------------------------------------------------------
 
@@ -320,6 +349,38 @@ def update_deployment_input_to_dict(input: UpdateDeploymentInput) -> dict[str, A
     return result
 
 
+def deployment_config_input_to_dict(input: DeploymentConfigInput) -> dict[str, Any]:
+    """Convert a :class:`DeploymentConfigInput` into a plain config dict.
+
+    The create (``deploy``) counterpart of
+    :func:`update_deployment_input_to_dict`: it flattens the two list-shaped
+    config fields (``env_vars`` / ``components``) into the maps the service
+    layer and the source-of-truth ``DeploymentConfig`` Pydantic model expect,
+    and passes every other field through :func:`_convert_value` unchanged.
+
+    ``None`` / :data:`strawberry.UNSET` fields are omitted so an unset config
+    field never reaches the service as an explicit ``null``. Duplicate names
+    inside ``env_vars`` / a component's ``env_vars`` raise
+    :class:`DuplicateEnvVarNameError`; duplicate component names raise
+    :class:`DuplicateComponentNameError` — the same typed codes the update
+    path emits.
+    """
+    result: dict[str, Any] = {}
+    converted = _convert_value(input)
+    if not isinstance(converted, dict):
+        return result
+    for key, value in converted.items():
+        if value is None:
+            continue
+        if key == "env_vars":
+            result["env_vars"] = _flatten_env_vars(value, scope="deployment")
+        elif key == "components":
+            result["components"] = _flatten_components(value)
+        else:
+            result[key] = value
+    return result
+
+
 def _flatten_env_vars(rows: list[dict[str, Any]], scope: str) -> dict[str, str]:
     """Flatten a list of ``{name, value}`` rows into ``dict[str, str]``.
 
@@ -337,6 +398,24 @@ def _flatten_env_vars(rows: list[dict[str, Any]], scope: str) -> dict[str, str]:
             raise DuplicateEnvVarNameError(scope=scope, name=name)
         flattened[name] = entry_value
     return flattened
+
+
+def parameter_inputs_to_dict(
+    parameters: list[ParameterValueInput] | None,
+) -> dict[str, Any] | None:
+    """Flatten a ``[ParameterValueInput!]`` list into a ``{name: value}`` map.
+
+    Shared by the ``deploy`` (create) and ``updateDeployment`` resolvers so
+    both accept the identical typed parameter shape. Returns ``None`` when
+    ``parameters`` is ``None`` / unset (the resolver omits parameters in that
+    case); duplicate names raise :class:`DuplicateParameterNameError`.
+    """
+    if _is_unset_or_none(parameters):
+        return None
+    rows = _convert_value(parameters)
+    if not isinstance(rows, list):
+        return None
+    return _flatten_parameters(rows)
 
 
 def _flatten_parameters(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -386,7 +465,10 @@ def _flatten_components(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
 
 __all__ = [
     "ComponentConfigInput",
+    "DeploymentConfigInput",
     "ParameterValueInput",
     "UpdateDeploymentInput",
+    "deployment_config_input_to_dict",
+    "parameter_inputs_to_dict",
     "update_deployment_input_to_dict",
 ]

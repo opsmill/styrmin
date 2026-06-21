@@ -79,6 +79,45 @@ async def test_execute_connection_error() -> None:
         await transport.close()
 
 
+async def test_execute_read_timeout_has_actionable_message() -> None:
+    """A ``ReadTimeout`` stringifies to empty in httpx; the transport must
+    still surface a non-empty, actionable message (kind + target URL +
+    timeout + reachability hint) rather than wrapping an empty string.
+
+    Regression: ``deployments apply`` printed ``failed <name>: manifest
+    <path>:`` with no reason when the server was unreachable.
+    """
+    transport = Transport(server_address="http://test-server:8000", timeout=30.0)
+
+    try:
+        with (
+            patch.object(transport._client, "post", new=AsyncMock(side_effect=httpx.ReadTimeout(""))),
+            pytest.raises(StyrminTransportError) as exc_info,
+        ):
+            await transport.execute("query { clusters { id } }")
+    finally:
+        await transport.close()
+
+    message = str(exc_info.value)
+    assert message.strip()  # never blank
+    assert "ReadTimeout" in message
+    assert "http://test-server:8000/graphql" in message
+    assert "30.0" in message
+
+
+async def test_describe_http_error_preserves_detail_for_connect_error() -> None:
+    """ConnectError keeps the underlying httpx detail AND adds a hint."""
+    transport = Transport(server_address="http://test-server:8000")
+    try:
+        message = transport._describe_http_error(httpx.ConnectError("Connection refused"), "POST", "/graphql")
+    finally:
+        await transport.close()
+
+    assert "ConnectError" in message
+    assert "Connection refused" in message
+    assert "http://test-server:8000" in message
+
+
 async def test_client_context_manager() -> None:
     async with StyrminClient(server_address="http://localhost:9999") as client:
         assert client.clusters is not None

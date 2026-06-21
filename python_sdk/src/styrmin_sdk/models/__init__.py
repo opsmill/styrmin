@@ -27,6 +27,7 @@ from styrmin_sdk.graphql._generated.get_restore import GetRestoreRestore as Rest
 from styrmin_sdk.graphql._generated.get_task import GetTaskTask as Task
 from styrmin_sdk.graphql._generated.input_types import (
     ComponentConfigInput,
+    DeploymentConfigInput,
     EnvVarInput,
     ParameterValueInput,
     ResourceRequirementsInput,
@@ -48,6 +49,14 @@ from styrmin_sdk.graphql._generated.load_remote_application_driver_version impor
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart as HelmChart,
 )
 from styrmin_sdk.models.context import Context
+from styrmin_sdk.models.deployment_manifest import (
+    ApplyEvent,
+    ApplyOutcome,
+    ApplyOverrides,
+    DeploymentManifest,
+    ResolvedManifest,
+    resolve_overrides,
+)
 from styrmin_sdk.models.driver import ApplicationDriver, ApplicationDriverVersionSummary
 
 __all__ = [
@@ -56,6 +65,9 @@ __all__ = [
     "ApplicationDriverVersion",
     "ApplicationDriverVersionSummary",
     "ApplicationInstance",
+    "ApplyEvent",
+    "ApplyOutcome",
+    "ApplyOverrides",
     "Backup",
     "BackupSchedule",
     "BackupStorageLocation",
@@ -66,10 +78,13 @@ __all__ = [
     "ComponentConfigInput",
     "Context",
     "Deployment",
+    "DeploymentConfigInput",
+    "DeploymentManifest",
     "EnvVarInput",
     "Environment",
     "HelmChart",
     "ParameterValueInput",
+    "ResolvedManifest",
     "ResourceRequirementsInput",
     "ResourceSpecInput",
     "Restore",
@@ -77,4 +92,5 @@ __all__ = [
     "StandardStorageInput",
     "Task",
     "UpdateDeploymentInput",
+    "resolve_overrides",
 ]

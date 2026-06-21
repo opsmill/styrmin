@@ -35,7 +35,11 @@ from styrmin_backend.api.definitions.deployment_status.model import (
 )
 from styrmin_backend.api.definitions.cluster.model import Cluster
 from styrmin_backend.api.definitions.deployment.inputs import (
+    DeploymentConfigInput,
+    ParameterValueInput,
     UpdateDeploymentInput,
+    deployment_config_input_to_dict,
+    parameter_inputs_to_dict,
     update_deployment_input_to_dict,
 )
 from styrmin_backend.api.definitions.environment.inputs import (
@@ -723,8 +727,8 @@ class Mutation:
         cluster_name: str | None = None,
         version: str | None = None,
         name: str | None = None,
-        config: JSON | None = None,
-        parameters: JSON | None = None,
+        config: DeploymentConfigInput | None = None,
+        parameters: list[ParameterValueInput] | None = None,
         service_name_overrides: list[ServiceNameOverride] | None = None,
         driver_version_id: UUID | None = None,
     ) -> Task | None:
@@ -733,6 +737,17 @@ class Mutation:
         Without ``driverVersionId`` the deployment is bound to the latest
         loaded driver version supporting the resolved application version;
         with it, the binding is pinned to that specific driver version.
+
+        ``config`` / ``parameters`` use the same typed shapes as
+        :class:`UpdateDeploymentInput` (``config`` shares the
+        ``DeploymentConfigInput`` base, ``parameters`` is the
+        ``[ParameterValueInput!]`` list) so the create and update mutations
+        accept an identical configuration payload. The typed inputs are
+        flattened to the plain dicts ``deploy_application`` expects via the
+        shared converters — list-shaped ``env_vars`` / ``components`` /
+        ``parameters`` carry typed duplicate-name detection
+        (``DUPLICATE_ENV_VAR_NAME`` / ``DUPLICATE_COMPONENT_NAME`` /
+        ``DUPLICATE_PARAMETER_NAME``) intact.
         """
         uow = info.context["uow"]
         current_user = info.context["current_user"]
@@ -754,12 +769,16 @@ class Mutation:
             if service_name_overrides
             else None
         )
+        config_dict = (
+            deployment_config_input_to_dict(config) if config is not None else None
+        )
+        parameters_dict = parameter_inputs_to_dict(parameters)
         task = await deploy_application(
             driver_name=driver,
             version=version,
             environment_id=environment.id,
-            deployment_config=config,
-            deployment_parameters=parameters,
+            deployment_config=config_dict,
+            deployment_parameters=parameters_dict,
             deployment_name=name,
             service_name_overrides=overrides_dict,
             uow=uow,
@@ -809,7 +828,7 @@ class Mutation:
             service_name_overrides=service_name_overrides,
             uow=uow,
         )
-        return Task.from_instance(task)
+        return Task.from_instance(task) if task is not None else None
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def delete_deployment(
@@ -1126,7 +1145,7 @@ class Mutation:
             uow=uow,
             driver_version_id=driver_version_id,
         )
-        return Task.from_instance(task)
+        return Task.from_instance(task) if task is not None else None
 
     # report_pod_statuses is on the documented allow-list (api/auth/allowlist.py).
     # TODO(#188): replace with service-account auth so it can carry RequiresRole(ADMIN).

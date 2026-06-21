@@ -93,6 +93,51 @@ class DedicatedIngressInput(BaseModel):
     service: Optional["IngressServiceConfigInput"] = None
 
 
+class DeploymentConfigInput(BaseModel):
+    """Typed deployment-configuration payload shared by the ``deploy`` (create) and ``updateDeployment`` mutations. Mirrors the source-of-truth ``DeploymentConfig`` Pydantic model field-for-field so both mutations accept an identical config shape."""
+
+    components: Optional[list["ComponentConfigInput"]] = None
+    "Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block."
+    env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
+    'Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.'
+    ip_whitelist: Optional[list[str]] = Field(alias="ipWhitelist", default=None)
+    "CIDR allowlist applied at the ingress layer. An empty list explicitly clears the persisted allowlist."
+    dedicated_ingress: Optional["DedicatedIngressInput"] = Field(
+        alias="dedicatedIngress", default=None
+    )
+    "Dedicated per-environment ingress controller configuration for this deployment."
+    scheduling: Optional["SchedulingInput"] = None
+    "Hierarchical pod scheduling & resource configuration (affinities, tolerations, topology spread, resource requests/limits, runtime class, post-render injection opt-outs)."
+    fqdn_suffix: Optional[str] = Field(alias="fqdnSuffix", default=None)
+    "Suffix appended to the auto-derived FQDN for every service in this deployment."
+    external_url_scheme: Optional[ExternalUrlScheme] = Field(
+        alias="externalUrlScheme", default=None
+    )
+    "URL scheme (``http`` or ``https``) used when constructing external URLs for services in this deployment."
+    external_url_port: Optional[int] = Field(alias="externalUrlPort", default=None)
+    "Port used when constructing external URLs for services in this deployment. Pydantic enforces ``1 <= port <= 65535`` at validation time."
+    external_dns_endpoints_type: Optional[ExternalDnsEndpointsType] = Field(
+        alias="externalDnsEndpointsType", default=None
+    )
+    "Endpoint source type used by external-DNS when publishing records for services in this deployment."
+    ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
+    "Name of the IngressClass used by services in this deployment."
+    db_size: Optional[str] = Field(alias="dbSize", default=None)
+    "Default database size hint applied to managed-database components in this deployment."
+    runtime_class: Optional[str] = Field(alias="runtimeClass", default=None)
+    "Kubernetes RuntimeClass name applied to pods in this deployment."
+    node_selector: Optional[str] = Field(alias="nodeSelector", default=None)
+    "Node-selector expression applied to pods in this deployment."
+    standard_storage: Optional["StandardStorageInput"] = Field(
+        alias="standardStorage", default=None
+    )
+    "Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment."
+    fast_storage: Optional["FastStorageInput"] = Field(
+        alias="fastStorage", default=None
+    )
+    "Fast storage configuration (Kubernetes ``StorageClass`` for the fast / NVMe tier) used by this deployment."
+
+
 class DeploymentPodStatusReport(BaseModel):
     deployment_id: UUID = Field(alias="deploymentId")
     pods: list["PodStatusInput"]
@@ -280,20 +325,12 @@ class TopologySpreadConstraintInput(BaseModel):
 
 
 class UpdateDeploymentInput(BaseModel):
-    """Full-replacement input for the ``updateDeployment`` mutation. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive)."""
+    """Full-replacement input for the ``updateDeployment`` mutation. Inherits every config field from ``DeploymentConfigInput`` (shared with the ``deploy`` create mutation) and adds the update-only ``name`` / ``parameters`` / ``serviceNameOverrides`` fields. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive)."""
 
-    name: Optional[str] = None
-    'New name for the deployment. Omitted means "do not rename".'
-    parameters: Optional[list["ParameterValueInput"]] = None
-    "Driver-defined parameter assignments. **Merge semantics** (asymmetric with the rest of this input): entries in the list merge on top of the persisted parameters dict, so existing keys not named in the input survive. Duplicate ``name`` entries within the list raise ``DUPLICATE_PARAMETER_NAME``."
-    service_name_overrides: Optional[list["ServiceNameOverride"]] = Field(
-        alias="serviceNameOverrides", default=None
-    )
-    "Full-replacement list of service-name overrides applied at deploy time. Each entry maps a driver-declared service name to the operator-chosen override name."
     components: Optional[list["ComponentConfigInput"]] = None
     "Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block."
     env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
-    'Deployment-scoped environment-variable overrides. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.'
+    'Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.'
     ip_whitelist: Optional[list[str]] = Field(alias="ipWhitelist", default=None)
     "CIDR allowlist applied at the ingress layer. An empty list explicitly clears the persisted allowlist."
     dedicated_ingress: Optional["DedicatedIngressInput"] = Field(
@@ -330,6 +367,14 @@ class UpdateDeploymentInput(BaseModel):
         alias="fastStorage", default=None
     )
     "Fast storage configuration (Kubernetes ``StorageClass`` for the fast / NVMe tier) used by this deployment."
+    name: Optional[str] = None
+    'New name for the deployment. Omitted means "do not rename".'
+    parameters: Optional[list["ParameterValueInput"]] = None
+    "Driver-defined parameter assignments. **Merge semantics** (asymmetric with the rest of this input): entries in the list merge on top of the persisted parameters dict, so existing keys not named in the input survive. Duplicate ``name`` entries within the list raise ``DUPLICATE_PARAMETER_NAME``."
+    service_name_overrides: Optional[list["ServiceNameOverride"]] = Field(
+        alias="serviceNameOverrides", default=None
+    )
+    "Full-replacement list of service-name overrides applied at deploy time. Each entry maps a driver-declared service name to the operator-chosen override name."
 
 
 class UpdateEnvironmentInput(BaseModel):
@@ -377,6 +422,7 @@ AffinityBlockInput.model_rebuild()
 AffinityTermInput.model_rebuild()
 ComponentConfigInput.model_rebuild()
 DedicatedIngressInput.model_rebuild()
+DeploymentConfigInput.model_rebuild()
 DeploymentPodStatusReport.model_rebuild()
 DeploymentStatusReportInput.model_rebuild()
 LabelSelectorInput.model_rebuild()

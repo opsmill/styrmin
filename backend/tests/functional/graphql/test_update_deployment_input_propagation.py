@@ -801,37 +801,60 @@ async def test_components_empty_env_vars_clears_component_env_vars(
 
 
 # ---------------------------------------------------------------------------
-# Edge case — empty input (spec.md Edge Cases / Fix-1 regression guard)
+# Edge case — empty input (spec.md Edge Cases / spec 014 no-op)
 #
-# After Fix-1, the resolver routes ``deployment_config={}`` to ``None``
-# so an empty typed input does not silently wipe the persisted config.
-# The service-layer "at least one of …" guard then surfaces a
-# ``VALIDATION_ERROR`` (``InvalidContextError``).
+# The resolver routes ``deployment_config={}`` to ``None`` so an empty
+# typed input does not silently wipe the persisted config. Spec 014
+# removed the service-layer "at least one of …" guard: an empty input
+# that resolves to no change is now a clean no-op (``null``), not a
+# ``VALIDATION_ERROR``. It must still leave the persisted config intact.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_empty_input_rejects_with_validation_error(
+async def test_empty_input_is_noop_and_preserves_config(
     client: AsyncClient,
     session: AsyncSession,
-    prefect_manager_mock,  # noqa: ARG001 — guards against accidental Prefect dispatch
+    prefect_manager_mock,
 ) -> None:
-    """Edge case: submitting ``input: {}`` rejects with ``VALIDATION_ERROR``
-    and does not touch the persisted config.
+    """Edge case: submitting ``input: {}`` against a settled deployment is a
+    no-op — the mutation returns ``null`` (no error) and does not touch the
+    persisted config.
 
-    Without Fix-1, the resolver would forward ``deployment_config={}`` to
-    the service, which would overwrite ``deployment.config`` with the
-    empty dict — silently wiping the operator's persisted state. After
-    Fix-1, an empty typed input collapses to "all four legacy kwargs are
-    None" and the service-layer guard raises ``InvalidContextError``
-    (``VALIDATION_ERROR``).
+    The resolver still routes the empty typed input to
+    ``deployment_config=None`` so the persisted ``deployment.config`` is
+    not overwritten with an empty dict. Spec 014 then resolves the
+    unchanged desired state to the current instance and short-circuits,
+    so the mutation returns ``null`` rather than a ``VALIDATION_ERROR``.
     """
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+
     deployment = await seed_deployment(session)
-    original_config = {"ip_whitelist": ["10.0.0.0/8"]}
-    deployment.config = original_config
-    session.add(deployment)
-    await session.commit()
     deployment_id = deployment.id
+    original_config = {"ipWhitelist": ["10.0.0.0/8"]}
+
+    # First apply the config so the deployment has an active instance; an
+    # empty input is only a no-op against a settled (already-realised)
+    # deployment — with no active instance it is treated as a creation
+    # (spec.md Edge Cases).
+    seed = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": original_config,
+            },
+        },
+    )
+    assert "errors" not in seed.json(), seed.json()
+
+    session.expire_all()
+    settled = await session.get(Deployment, deployment_id)
+    assert settled is not None
+    persisted_config = settled.config
 
     response = await client.post(
         "/graphql",
@@ -845,17 +868,16 @@ async def test_empty_input_rejects_with_validation_error(
     )
     assert response.status_code == 200
     payload = response.json()
-    assert "errors" in payload, f"expected an errors array, got data only: {payload}"
-    extensions = payload["errors"][0].get("extensions") or {}
-    assert extensions.get("code") == "VALIDATION_ERROR", (
-        f"expected VALIDATION_ERROR; got {extensions.get('code')!r}"
+    assert "errors" not in payload, (
+        f"empty input must be a no-op, not an error: {payload}"
     )
+    assert payload["data"]["updateDeployment"] is None
 
-    # Persisted config untouched — Fix-1 guard prevents the silent wipe.
+    # Persisted config untouched — the resolver still routes {} to None.
     session.expire_all()
     db_row = await session.get(Deployment, deployment_id)
     assert db_row is not None
-    assert db_row.config == original_config, (
+    assert db_row.config == persisted_config, (
         f"empty input must not touch persisted config; got {db_row.config!r}"
     )
 

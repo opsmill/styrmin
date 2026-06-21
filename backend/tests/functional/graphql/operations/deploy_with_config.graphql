@@ -3,7 +3,7 @@ mutation DeployWithConfig(
     $environmentId: UUID!
     $version: String!
     $name: String!
-    $config: JSON
+    $config: DeploymentConfigInput
 ) {
     deploy(
         driver: $driver

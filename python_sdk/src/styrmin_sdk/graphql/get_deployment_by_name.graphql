@@ -1,0 +1,42 @@
+query GetDeploymentByName($name: String!, $environmentId: UUID!) {
+    deployment(name: $name, environmentId: $environmentId) {
+        id
+        name
+        status
+        deletedAt
+        config
+        parameters
+        applicationVersion
+        applicationDriverVersionId
+        applicationDriverVersion {
+            id
+            applicationDriver {
+                id
+                name
+            }
+        }
+        environmentId
+        applicationInstance {
+            id
+            status
+        }
+        components {
+            id
+            name
+            enabled
+        }
+        deployedServices {
+            id
+            driverServiceName
+            resolvedName
+            kind
+            scope
+            port
+            component
+            primaryFqdn
+            humanReadableFqdn
+            primaryUrl
+            humanReadableUrl
+        }
+    }
+}

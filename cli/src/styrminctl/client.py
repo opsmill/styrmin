@@ -32,16 +32,21 @@ from styrminctl.auth.token_store import TokenStore
 from styrminctl.auth.types import AuthContext, TokenSource
 
 
-def _build_client(token: str | None) -> StyrminClient:
+def _build_client(token: str | None, *, timeout: float | None = None) -> StyrminClient:
     """Construct a :class:`StyrminClient` from settings + an optional token.
 
     ``_config.SETTINGS`` is read at call time (not module-load time) so tests
     that monkeypatch the attribute on the ``config`` module still see the
     override.
+
+    ``timeout`` overrides the per-request HTTP timeout for this client only;
+    ``None`` falls back to ``SETTINGS.timeout`` (the global default). Used by
+    commands that want to fail fast on an unreachable server rather than
+    waiting out the default budget.
     """
     return StyrminClient(
         server_address=_config.SETTINGS.server_address,
-        timeout=_config.SETTINGS.timeout,
+        timeout=timeout if timeout is not None else _config.SETTINGS.timeout,
         headers=_config.SETTINGS.additional_headers,
         token=token,
     )
@@ -78,15 +83,19 @@ def _resolve_token_sync() -> tuple[str | None, TokenSource]:
     return result[0]
 
 
-def get_client() -> StyrminClient:
+def get_client(*, timeout: float | None = None) -> StyrminClient:
     """Create a configured :class:`StyrminClient` instance.
 
     Runs the credential resolver and returns the resulting authenticated
     client. Signature is sync so existing command modules can keep their
     ``async with client.get_client() as sdk:`` idiom without restructuring.
+
+    ``timeout`` overrides the per-request HTTP timeout for the returned
+    client only (``None`` uses ``SETTINGS.timeout``). Pass a small value to
+    fail fast against an unreachable server.
     """
     token, _source = _resolve_token_sync()
-    return _build_client(token)
+    return _build_client(token, timeout=timeout)
 
 
 async def get_auth_context() -> AuthContext:

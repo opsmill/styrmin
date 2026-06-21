@@ -90,7 +90,7 @@ Because the flow re-reads from the DB at run time, retries see fresh state — D
 For mutations that affect the desired-state context (notably `service_name_overrides`), the server-side `update_deployment` splits its work into two UoW phases:
 
 - **Phase 1** commits the user's intent: validation, name/config/parameter updates, `_ensure_ingress_controller`, and `reconcile_services_on_upgrade`. The DB is then in the post-rename state.
-- **Phase 2** (a fresh `async with uow:` re-entry on the same request-scoped session) reloads the deployment, regenerates the instance via `generate_instance_from_deployment`, sets it active, schedules `apply_state`, and commits.
+- **Phase 2** (a fresh `async with uow:` re-entry on the same request-scoped session) reloads the deployment, regenerates the instance via `generate_instance_from_deployment`, then runs a **server-side no-op guard** before persisting anything realised: it builds a `Comparator(current_instance, new_instance)` and calls `compare()`. If `report.diff is None` (the regenerated instance resolves to the current one), it logs and returns `None` — **no new active instance, no `apply_state`, no status change**. Only when the diff is non-empty does it set the new instance active, schedule `apply_state`, and commit. `update_deployment` therefore returns `Task | None`. This is what makes `apply` idempotent: re-applying an unchanged manifest creates no instance and dispatches no reconcile task.
 
 The phase boundary is enforced by `commit()` between the two blocks. Phase 2's `find()` is a real DB round-trip on the same session and picks up phase-1's committed rows. `SqlModelUnitOfWork` is **not nest-safe** in the sense of opening a new session — the re-entry rebuilds repository handles on the same `AsyncSession`. The phase separation is a logical boundary that relies on the intervening `commit()`, not on session isolation.
 
@@ -308,6 +308,8 @@ When `update_deployment_version()` is called:
 - Diff: `ApplicationVersionChange` + `ApplicationDriverVersionChange` + `ContextChange`
 
 In both cases, `ApplicationVersionChange` is always present when the version changes.
+
+**Same version (no-op):** requesting the deployment's current version applies the same server-side no-op guard as `update_deployment` — the regenerated instance resolves to the current one, `Comparator.compare()` returns no diff, and `update_deployment_version` returns `None` without creating an instance or dispatching a reconcile. The function's return type is `Task | None`.
 
 ## Key Files
 

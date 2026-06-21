@@ -14,6 +14,7 @@ from tests.unit.services.fakes import (
     FakeApplicationInstanceRepository,
     FakeApplicationRepository,
     FakeClusterRepository,
+    FakeDeployedServiceRepository,
     FakeDeploymentStatusRepository,
     FakeDeploymentRepository,
     FakeEnvironmentRepository,
@@ -32,6 +33,7 @@ def _make_instance(instance_id: UUID | None = None) -> Instance:
 def _make_uow(
     deployments: FakeDeploymentRepository | None = None,
     deployment_statuses: FakeDeploymentStatusRepository | None = None,
+    deployed_services: "FakeDeployedServiceRepository | None" = None,
 ) -> FakeUnitOfWork:
     return FakeUnitOfWork(
         clusters=FakeClusterRepository(),
@@ -44,6 +46,7 @@ def _make_uow(
         tasks=FakeTaskRepository(),
         deployments=deployments,
         deployment_statuses=deployment_statuses,
+        deployed_services=deployed_services,
     )
 
 
@@ -60,6 +63,23 @@ def _make_deployment(
         environment_id=uuid4(),
         status=status,
         created_by_user_id=uuid4(),
+    )
+
+
+def _make_deployed_service(deployment_id: UUID, environment_id: UUID, name: str):
+    """Build a minimal DeployedService row owned by a deployment."""
+    from styrmin_backend.db.models import DeployedService
+
+    return DeployedService(
+        id=uuid4(),
+        driver_service_name=name,
+        resolved_name=name,
+        kind="http",
+        scope="internal",
+        port=8080,
+        component="server",
+        deployment_id=deployment_id,
+        environment_id=environment_id,
     )
 
 
@@ -247,6 +267,76 @@ async def test_deleted_does_not_overwrite_deleted_at_on_redundant_report() -> No
     found = await dep_repo.find(dep.id)
     assert found is not None
     assert found.deleted_at == original_ts
+
+
+@pytest.mark.anyio
+async def test_deleted_cleans_up_deployed_services() -> None:
+    """On the terminal DELETED transition, the deployment's DeployedService
+    rows are removed so a later deployment can reclaim the same service name
+    and the deleted deployment's services stop leaking into other
+    deployments' service-discovery context. Other deployments' services
+    are left untouched."""
+    env_id = uuid4()
+    dep = _make_deployment(status=DeploymentState.DELETING)
+    dep.environment_id = env_id
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+
+    other_deployment_id = uuid4()
+    svc_repo = FakeDeployedServiceRepository(
+        [
+            _make_deployed_service(dep.id, env_id, "api"),
+            _make_deployed_service(dep.id, env_id, "worker"),
+            # A different deployment's service in the same environment.
+            _make_deployed_service(other_deployment_id, env_id, "other-api"),
+        ]
+    )
+    uow = _make_uow(deployments=dep_repo, deployed_services=svc_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Deleted",
+            "display_state": "Deleted",
+        }
+    ]
+    _, deployments_updated = await report_deployment_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    # The tombstoned deployment's services are gone...
+    assert await svc_repo.get_by_deployment_id(dep.id) == []
+    # ...but the sibling deployment's service survives.
+    survivors = await svc_repo.get_by_deployment_id(other_deployment_id)
+    assert len(survivors) == 1
+    assert survivors[0].resolved_name == "other-api"
+
+
+@pytest.mark.anyio
+async def test_deleting_does_not_clean_up_deployed_services() -> None:
+    """The non-terminal DELETING transition must NOT remove services — the
+    deployment is still being torn down on the cluster; cleanup is gated on
+    the terminal DELETED transition alongside the deleted_at stamp."""
+    env_id = uuid4()
+    dep = _make_deployment(status=DeploymentState.RUNNING)
+    dep.environment_id = env_id
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+
+    svc_repo = FakeDeployedServiceRepository(
+        [_make_deployed_service(dep.id, env_id, "api")]
+    )
+    uow = _make_uow(deployments=dep_repo, deployed_services=svc_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Deleting",
+            "display_state": "Deleting",
+        }
+    ]
+    await report_deployment_statuses(reports, uow)
+
+    assert len(await svc_repo.get_by_deployment_id(dep.id)) == 1
 
 
 @pytest.mark.anyio

@@ -1,4 +1,4 @@
-mutation Deploy($driver: String!, $version: String, $environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String, $name: String, $config: JSON, $parameters: JSON, $serviceNameOverrides: [ServiceNameOverride!], $driverVersionId: UUID) {
+mutation Deploy($driver: String!, $version: String, $environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String, $name: String, $config: DeploymentConfigInput, $parameters: [ParameterValueInput!], $serviceNameOverrides: [ServiceNameOverride!], $driverVersionId: UUID) {
     deploy(driver: $driver, version: $version, environmentId: $environmentId, environmentName: $environmentName, clusterId: $clusterId, clusterName: $clusterName, name: $name, config: $config, parameters: $parameters, serviceNameOverrides: $serviceNameOverrides, driverVersionId: $driverVersionId) {
         id
         type

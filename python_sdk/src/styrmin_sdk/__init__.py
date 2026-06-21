@@ -3,7 +3,14 @@
 from styrmin_sdk._transport import Transport
 from styrmin_sdk.client import StyrminClient
 from styrmin_sdk.exceptions import (
+    ApplyError,
+    BatchNameConflictError,
     DeploymentRestoringError,
+    DriverMismatchError,
+    EnvironmentAmbiguityError,
+    EnvironmentNotFoundError,
+    ManifestValidationError,
+    MissingRequiredFieldError,
     OperationFailedError,
     ResourceAlreadyExistsError,
     ResourceNotFoundError,
@@ -15,11 +22,17 @@ from styrmin_sdk.exceptions import (
     StyrminTransportError,
 )
 from styrmin_sdk.graphql._generated.enums import Role
+from styrmin_sdk.graphql._generated.get_deployment_by_name import (
+    GetDeploymentByNameDeployment,
+)
 from styrmin_sdk.models import (
     Action,
     ApplicationDriver,
     ApplicationDriverVersion,
     ApplicationInstance,
+    ApplyEvent,
+    ApplyOutcome,
+    ApplyOverrides,
     Backup,
     BackupSchedule,
     Cluster,
@@ -28,10 +41,13 @@ from styrmin_sdk.models import (
     ComponentConfig,
     Context,
     Deployment,
+    DeploymentManifest,
     Environment,
     HelmChart,
+    ResolvedManifest,
     Restore,
     Task,
+    resolve_overrides,
 )
 
 __all__ = [
@@ -39,18 +55,31 @@ __all__ = [
     "ApplicationDriver",
     "ApplicationDriverVersion",
     "ApplicationInstance",
+    "ApplyError",
+    "ApplyEvent",
+    "ApplyOutcome",
+    "ApplyOverrides",
     "Backup",
     "BackupSchedule",
+    "BatchNameConflictError",
     "Cluster",
     "ClusterRef",
     "Component",
     "ComponentConfig",
     "Context",
     "Deployment",
+    "DeploymentManifest",
     "DeploymentRestoringError",
+    "DriverMismatchError",
     "Environment",
+    "EnvironmentAmbiguityError",
+    "EnvironmentNotFoundError",
+    "GetDeploymentByNameDeployment",
     "HelmChart",
+    "ManifestValidationError",
+    "MissingRequiredFieldError",
     "OperationFailedError",
+    "ResolvedManifest",
     "ResourceAlreadyExistsError",
     "ResourceNotFoundError",
     "Restore",
@@ -64,4 +93,5 @@ __all__ = [
     "StyrminTransportError",
     "Task",
     "Transport",
+    "resolve_overrides",
 ]

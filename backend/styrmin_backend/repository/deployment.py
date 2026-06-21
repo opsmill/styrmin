@@ -48,6 +48,17 @@ class DeploymentRepository(BaseRepository[DeploymentModel], ABC):
         )
 
     @abstractmethod
+    async def find_one_by_name_and_environment(
+        self,
+        name: str,
+        environment_id: UUID,
+    ) -> DeploymentEntity | None:
+        raise NotImplementedError(
+            "The find_one_by_name_and_environment method must be implemented "
+            "in the subclass."
+        )
+
+    @abstractmethod
     async def find_names_with_prefix(
         self,
         prefix: str,
@@ -221,6 +232,21 @@ class SQLModelDeploymentRepository(
         if entity is None:
             return None
         return self._to_entity(entity)
+
+    async def find_one_by_name_and_environment(
+        self,
+        name: str,
+        environment_id: UUID,
+    ) -> DeploymentEntity | None:
+        """Find a non-tombstoned deployment by ``(name, environment_id)``.
+
+        Thin wrapper over :meth:`get_by_name` that pins
+        ``include_deleted=False`` and exposes the lookup under the natural
+        identity name used by the GraphQL ``deployment(name, environmentId)``
+        query (spec 009-deployments-apply). Reuses the existing
+        ``unique_deployment_name_per_environment`` index — no new migration.
+        """
+        return await self.get_by_name(name, environment_id, include_deleted=False)
 
     async def find_names_with_prefix(
         self,

@@ -1,0 +1,8 @@
+query GetDeploymentByName($name: String!, $environmentId: UUID!) {
+    deployment(name: $name, environmentId: $environmentId) {
+        id
+        name
+        internal
+        status
+    }
+}

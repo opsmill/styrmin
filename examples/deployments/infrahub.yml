@@ -1,0 +1,31 @@
+---
+apiVersion: styrmin/v1
+kind: Deployment
+metadata:
+  name: infrahub-prod
+spec:
+  driver: infrahub          # required — not overridable
+  version: 1.7.3            # must satisfy the driver's >=1.5,<1.9 range
+  # environment: production   # resolved by name
+  # cluster: us-east        # only needed if the env name is ambiguous across clusters
+
+  # Driver-declared parameters (see driver.styrmin.yml). Omitted ones use
+  # the driver defaults: replicas_server=1, replicas_task_worker=2,
+  # database_storage_size=100, enable_analytics=true.
+  parameters:
+    replicas_server: 1
+    replicas_task_worker: 1
+
+  # Deployment configuration (maps to DeploymentConfig — snake_case keys).
+  # Every field is optional; include only what you want to set.
+  # config:
+  #   ingress_class: traefik
+  #   fqdn_suffix: infrahub.example.com
+  #   ip_whitelist:
+  #     - 10.0.0.0/8
+  #     - 192.168.0.0/16
+  #   env_vars:
+  #     - name: INFRAHUB_LOG_LEVEL
+  #       value: INFO
+  #     - name: INFRAHUB_PRODUCTION
+  #       value: "true"

@@ -68,11 +68,15 @@ from styrmin_backend.services.backup_storage_locations import (
     get_backup_storage_locations,
 )
 from styrmin_backend.services.clusters import get_clusters, resolve_cluster
-from styrmin_backend.services.deployment import get_deployment
+from styrmin_backend.services.deployment import (
+    get_deployment,
+    get_deployment_by_name,
+)
 from styrmin_backend.services.environments import (
     get_environments,
     resolve_environment,
 )
+from styrmin_backend.services.exceptions import InvalidDeploymentLookupArgsError
 from styrmin_backend.api.definitions.deployment_timeline.model import (
     DeploymentTimelineEntry,
 )
@@ -243,12 +247,40 @@ class Query:
 
     @strawberry.field
     async def deployment(
-        self, deployment_id: UUID, info: strawberry.Info
+        self,
+        info: strawberry.Info,
+        deployment_id: UUID | None = None,
+        name: str | None = None,
+        environment_id: UUID | None = None,
     ) -> Deployment | None:
-        """Get a deployment by its ID."""
+        """Look up a deployment by its ID or its natural identity.
+
+        Provide exactly one of:
+
+        - ``deploymentId``, or
+        - ``name`` and ``environmentId``.
+
+        Internal/system-managed deployments are hidden (returns null).
+        Returns null if no matching deployment exists.
+        """
         uow = info.context["uow"]
-        deployment = await get_deployment(deployment_id=deployment_id, uow=uow)
-        if deployment.internal:
+
+        # Exactly one of {deploymentId, (name + environmentId)} must be set.
+        by_id = deployment_id is not None
+        by_name_pair = name is not None and environment_id is not None
+        if by_id == by_name_pair or (name is None) != (environment_id is None):
+            raise InvalidDeploymentLookupArgsError()
+
+        if by_id:
+            deployment = await get_deployment(deployment_id=deployment_id, uow=uow)
+            if deployment.internal:
+                return None
+            return Deployment.from_instance(deployment)
+
+        deployment = await get_deployment_by_name(
+            name=name, environment_id=environment_id, uow=uow
+        )
+        if deployment is None:
             return None
         return Deployment.from_instance(deployment)
 

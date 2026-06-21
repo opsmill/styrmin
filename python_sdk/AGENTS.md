@@ -123,6 +123,26 @@ are mapped to typed exceptions by `_check_graphql_errors`, and the
 generated `GetCluster` outer model is validated and the inner `cluster`
 field is returned as the typed `GetClusterCluster`.
 
+## Looking up a deployment by name
+
+`DeploymentResource.get_by_name(name, *, environment_id)` resolves a
+deployment by its natural identity `(name, environment)`. Internal and
+soft-deleted rows are filtered out; a miss returns `None`. The return
+type, `GetDeploymentByNameDeployment`, is re-exported from the package
+root so callers can import it without reaching into `_generated/`.
+
+```python
+from styrmin_sdk import GetDeploymentByNameDeployment, StyrminClient
+
+async with StyrminClient(server_address="...") as client:
+    deployment: GetDeploymentByNameDeployment | None = (
+        await client.deployments.get_by_name("my-app", environment_id=env_id)
+    )
+```
+
+See [`specs/009-deployments-apply/contracts/sdk-apply.md`](../specs/009-deployments-apply/contracts/sdk-apply.md)
+for the full contract.
+
 ## Always Do / Ask First / Never Do
 
 ### Always Do

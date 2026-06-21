@@ -54,6 +54,9 @@ from styrmin_backend.services.reconciliation import (
     apply_state,
     generate_instance_from_deployment,
 )
+from deepdiff import DeepDiff
+
+from styrmin_backend.domain.models import Instance
 from styrmin_backend.services.services_discovery import (
     create_services_for_deployment,
     parse_service_definitions,
@@ -196,6 +199,59 @@ def _validate_component_container_overrides(
             validate_container_override("args", args, component_name=name)
 
 
+# Volatile / per-generation instance fields that are never part of the desired
+# state and must be ignored when deciding whether an update is a no-op:
+# the instance's own ``id`` / generated ``name`` / runtime ``status``, plus the
+# synthetic ``context.instance.id`` that ``generate_instance_from_deployment``
+# stamps onto every freshly-built candidate.
+_NOOP_EXCLUDE_PATHS = frozenset(
+    {
+        "root['id']",
+        "root['name']",
+        "root['status']",
+        "root['context']['instance']['id']",
+    }
+)
+
+
+def _update_is_noop(
+    *,
+    current_instance: Instance | None,
+    new_instance: Instance,
+) -> bool:
+    """Return True when the freshly-generated candidate resolves to the current
+    realised instance — i.e. the update changes nothing (spec 014, FR-001/002).
+
+    This compares the **raw structural diff** of the two resolved instances
+    (``DeepDiff`` emptiness after excluding the volatile fields above), NOT the
+    remediation-oriented ``Comparator.compare().diff``. The latter is unsafe as
+    a no-op signal: its serializer only renders the ``values_changed`` DeepDiff
+    category, so config *additions* — a first env var, ip-whitelist, or
+    scheduling block, which DeepDiff classifies as ``type_changes``
+    (``None`` → value) or ``dictionary_item_added`` (``{}`` → ``{...}``) —
+    produce empty serialized diffs and would be falsely reported as a no-op,
+    silently dropping a real change. Raw-diff emptiness catches every category.
+
+    A ``None`` current instance means there is no realised state to match
+    against (e.g. a failed initial deploy left none) → treated as a change.
+    """
+    if current_instance is None:
+        return False
+
+    # ``mode="json"`` normalises representation on both sides (UUID/datetime/
+    # enum → their JSON primitives) so that a value persisted+reloaded as a
+    # string and the same value freshly built as a ``UUID`` object (e.g.
+    # ``context.labels.environment_id`` / ``deployment_id``) compare equal
+    # instead of surfacing a spurious ``type_changes`` diff.
+    raw_diff = DeepDiff(
+        t1=current_instance.model_dump(mode="json"),
+        t2=new_instance.model_dump(mode="json"),
+        ignore_order=True,
+        exclude_paths=set(_NOOP_EXCLUDE_PATHS),
+    ).to_dict()
+    return not raw_diff
+
+
 async def get_deployment(
     deployment_id: UUID,
     uow: UnitOfWork,
@@ -207,6 +263,32 @@ async def get_deployment(
             raise DeploymentNotFoundError(
                 f"Deployment with ID {deployment_id} not found"
             )
+        return deployment
+
+
+async def get_deployment_by_name(
+    *,
+    name: str,
+    environment_id: UUID,
+    uow: UnitOfWork,
+) -> Deployment | None:
+    """Look up a deployment by its natural identity ``(name, environment_id)``.
+
+    Returns the matching :class:`Deployment` if and only if it is non-internal
+    and not soft-deleted. Returns ``None`` for not-found, internal-hidden, or
+    tombstoned rows — no exceptions on miss. The repository call is bounded by
+    the existing ``unique_deployment_name_per_environment`` index.
+    """
+    async with uow:
+        deployment = await uow.deployments.find_one_by_name_and_environment(
+            name=name, environment_id=environment_id
+        )
+        if (
+            deployment is None
+            or deployment.internal
+            or deployment.deleted_at is not None
+        ):
+            return None
         return deployment
 
 
@@ -275,7 +357,7 @@ async def update_deployment(
     deployment_parameters: dict | None = None,
     deployment_name: str | None = None,
     service_name_overrides: dict[str, str] | None = None,
-) -> Task:
+) -> Task | None:
     """Update a deployment with the given configuration and/or name.
 
     Args:
@@ -294,19 +376,11 @@ async def update_deployment(
         DeploymentNameConflictError: If the provided name is already in use.
 
     Returns:
-        Task: The task created for the deployment update.
+        Task | None: The task created for the deployment update, or ``None``
+            when the submitted desired state resolves to the current realised
+            instance (a no-op — no instance persisted, no reconcile dispatched).
     """
     logger.info("Updating deployment for deployment_id={}", deployment_id)
-
-    if (
-        deployment_config is None
-        and deployment_name is None
-        and deployment_parameters is None
-        and service_name_overrides is None
-    ):
-        raise InvalidContextError(
-            "At least one of config, parameters, name, or serviceNameOverrides must be provided"
-        )
 
     async with uow:
         deployment = await uow.deployments.find(id=deployment_id)
@@ -442,6 +516,23 @@ async def update_deployment(
             deployment=deployment,
             uow=uow,
         )
+
+        # No-op detection (spec 014 / FR-001): if the freshly-generated
+        # candidate instance resolves to the current realised state, short
+        # circuit before any side effect. The candidate is in-memory only
+        # (generate_instance_from_deployment does not session.add), so
+        # returning here leaves no orphan instance, dispatches no reconcile,
+        # and leaves status + the active-instance pointer untouched.
+        if _update_is_noop(
+            current_instance=current_instance, new_instance=new_instance
+        ):
+            logger.info(
+                "Update is a no-op for deployment_id={}; no instance persisted, "
+                "no reconcile dispatched",
+                deployment.id,
+            )
+            return None
+
         deployment.set_active_instance(instance=new_instance)
         deployment.set_status(DeploymentState.PENDING)
         logger.info("New instance set as active: instance_id={}", new_instance.id)
@@ -549,7 +640,7 @@ async def update_deployment_version(
     uow: UnitOfWork,
     deployment_parameters: dict | None = None,
     driver_version_id: UUID | None = None,
-) -> Task:
+) -> Task | None:
     """Update a deployment's application version and driver-version binding.
 
     The driver binding is always re-resolved: without an explicit pin the
@@ -557,6 +648,10 @@ async def update_deployment_version(
     specifier matches ``version`` is bound — so calling with the deployment's
     current application version moves it onto a newly loaded overlapping
     driver build.
+
+    Returns ``None`` without dispatching a Task when the requested state
+    already matches the persisted deployment (no-op detection, FR-002 /
+    FR-006).
 
     Args:
         deployment_id (UUID): The ID of the deployment to update.
@@ -575,7 +670,8 @@ async def update_deployment_version(
             ``version``, or the pin belongs to a different driver.
 
     Returns:
-        Task: The task created for the deployment update.
+        Task | None: The task created for the deployment update, or ``None``
+            when the requested state matches the persisted deployment (no-op).
     """
 
     logger.info(
@@ -696,6 +792,15 @@ async def update_deployment_version(
             definitions=definitions,
             values=values_to_validate,
         )
+        # Snapshot the pre-mutation desired-state fields so the no-op path can
+        # leave the deployment exactly as it found it (FR-002 / FR-006). The
+        # no-op return happens before save/commit, so the DB row is never
+        # written; restoring the in-memory object too keeps the entity
+        # consistent for any caller that retains the reference.
+        status_before = deployment.status
+        version_before = deployment.application_version
+        parameters_before = deployment.parameters
+
         deployment.parameters = resolved_parameters
 
         # Update the deployment version
@@ -715,6 +820,29 @@ async def update_deployment_version(
             deployment=deployment,
             uow=uow,
         )
+
+        # No-op detection (spec 014 / FR-002): requesting the deployment's
+        # current version (with no other change) resolves to the current
+        # realised instance. Short circuit before any side effect — no new
+        # instance persisted, no reconcile dispatched. The in-memory mutations
+        # above (status -> DEPLOYING, version, parameters) are never saved or
+        # committed on this path, so the persisted deployment is untouched.
+        if _update_is_noop(
+            current_instance=current_instance, new_instance=new_instance
+        ):
+            # Roll back the in-memory desired-state mutations so the entity is
+            # left untouched (status/version/parameters), mirroring the fact
+            # that nothing is saved or committed on this path.
+            deployment.application_version = version_before
+            deployment.parameters = parameters_before
+            deployment.set_status(status_before)
+            logger.info(
+                "Version update is a no-op for deployment_id={} version={}; "
+                "no instance persisted, no reconcile dispatched",
+                deployment.id,
+                version,
+            )
+            return None
 
         # Set the new instance as the active one
         deployment.set_active_instance(instance=new_instance)
