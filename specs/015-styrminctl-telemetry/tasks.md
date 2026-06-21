@@ -19,9 +19,9 @@ CLI package lives at `cli/src/styrminctl/`; tests at `cli/tests/`. New telemetry
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Create the telemetry package skeleton with empty/stub modules and docstrings in `cli/src/styrminctl/telemetry/`: `__init__.py`, `config.py`, `store.py`, `eligibility.py`, `event.py`, `errors.py`, `envelope.py`, `dispatch.py`, `runtime.py`
-- [ ] T002 [P] Promote `httpx` to a direct dependency of the CLI in `cli/pyproject.toml` (already transitive via `styrmin-sdk`; pin `>=0.27.0` to match the SDK) and run `uv sync` to confirm the lockfile is unchanged
-- [ ] T003 [P] Create test package dirs `cli/tests/telemetry/__init__.py` and `cli/tests/e2e/__init__.py`
+- [X] T001 Create the telemetry package skeleton with empty/stub modules and docstrings in `cli/src/styrminctl/telemetry/`: `__init__.py`, `config.py`, `store.py`, `eligibility.py`, `event.py`, `errors.py`, `envelope.py`, `dispatch.py`, `runtime.py`
+- [X] T002 [P] Promote `httpx` to a direct dependency of the CLI in `cli/pyproject.toml` (already transitive via `styrmin-sdk`; pin `>=0.27.0` to match the SDK) and run `uv sync` to confirm the lockfile is unchanged
+- [X] T003 [P] Create test package dirs `cli/tests/telemetry/__init__.py` and `cli/tests/e2e/__init__.py`
 
 ---
 
