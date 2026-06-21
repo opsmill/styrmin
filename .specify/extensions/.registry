@@ -116,37 +116,6 @@
       "registered_skills": [],
       "installed_at": "2026-04-25T14:14:43.947712+00:00"
     },
-    "archive": {
-      "version": "1.0.0",
-      "source": "local",
-      "manifest_hash": "sha256:818720ef80e39cc609f31c0e781096e128276c7e72bca071410127679d8f3209",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "agy": [
-          "speckit.archive.run",
-          "speckit.archive"
-        ],
-        "amp": [
-          "speckit.archive.run",
-          "speckit.archive"
-        ],
-        "claude": [
-          "speckit.archive.run",
-          "speckit.archive"
-        ],
-        "codex": [
-          "speckit.archive.run",
-          "speckit.archive"
-        ],
-        "copilot": [
-          "speckit.archive.run",
-          "speckit.archive"
-        ]
-      },
-      "registered_skills": [],
-      "installed_at": "2026-04-25T14:30:45.870277+00:00"
-    },
     "tinyspec": {
       "version": "1.0.0",
       "source": "local",
@@ -321,68 +290,6 @@
       },
       "registered_skills": [],
       "installed_at": "2026-05-01T12:58:13.359758+00:00"
-    },
-    "auto": {
-      "version": "1.0.0",
-      "source": "local",
-      "manifest_hash": "sha256:b7eb487625814aebfbb7317945b19503124ab99f6ebaca2e96eebf6309d5c4bd",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "agy": [
-          "speckit.auto.run",
-          "speckit.auto.prep",
-          "speckit.auto.implement"
-        ],
-        "amp": [
-          "speckit.auto.run",
-          "speckit.auto.prep",
-          "speckit.auto.implement"
-        ],
-        "claude": [
-          "speckit.auto.run",
-          "speckit.auto.prep",
-          "speckit.auto.implement"
-        ],
-        "codex": [
-          "speckit.auto.run",
-          "speckit.auto.prep",
-          "speckit.auto.implement"
-        ],
-        "copilot": [
-          "speckit.auto.run",
-          "speckit.auto.prep",
-          "speckit.auto.implement"
-        ]
-      },
-      "registered_skills": [],
-      "installed_at": "2026-05-06T04:31:17.052695+00:00"
-    },
-    "extract": {
-      "version": "1.0.0",
-      "source": "local",
-      "manifest_hash": "sha256:54533779172274b4d9614d32673e4a347da801e65aebb3adb1c174ff8350318c",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "agy": [
-          "speckit.extract.run"
-        ],
-        "amp": [
-          "speckit.extract.run"
-        ],
-        "claude": [
-          "speckit.extract.run"
-        ],
-        "codex": [
-          "speckit.extract.run"
-        ],
-        "copilot": [
-          "speckit.extract.run"
-        ]
-      },
-      "registered_skills": [],
-      "installed_at": "2026-05-10T14:40:57.366541+00:00"
     },
     "agent-context": {
       "version": "1.0.0",
