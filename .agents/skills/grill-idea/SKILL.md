@@ -1,12 +1,6 @@
 ---
 name: grill-idea
-description: Relentless interview-style session that stress-tests a raw feature idea against the Styrmin constitution and existing domain, producing a PRD-ready brief that can be handed straight to /speckit-specify. Use when the user has a fuzzy idea and wants to harden it before writing a spec.
-argument-hint: A short description of the idea to grill (optional — if absent, ask once for the seed idea)
-compatibility: Requires `CONTEXT.md`, `dev/constitution.md`, and `.specify/templates/spec-template.md`. Designed as the pre-step before `/speckit-specify`.
-metadata:
-  inspiration: https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md
-user-invocable: true
-disable-model-invocation: false
+description: Use when the user has a fuzzy feature idea — one or two paragraphs, vague on users / scope / success — and wants to harden it before writing a PRD, spec, or ticket. Also use when the user says "grill / stress-test / pressure-test this idea." Do not use for bug fixes, refactors, or ideas already turned into a spec.
 ---
 
 # Grill Idea
@@ -21,73 +15,72 @@ Treat `$ARGUMENTS` as the seed idea. If empty, ask the user for it once before s
 
 ## What this does
 
-Interview the user relentlessly about every aspect of a feature idea until it is ready to be turned into a spec by `/speckit-specify`. Walk down each branch of the idea tree, resolving dependencies between decisions one-by-one. For each question, propose your recommended answer first, then wait for feedback before asking the next one. If a question can be answered by reading the codebase, the constitution, or existing specs, do that instead of asking.
+Interview the user relentlessly about every aspect of a feature idea until it is sharp enough to hand off to whatever comes next (a PRD, a spec, a speckit run, or a ticket). Walk down each branch of the idea tree, resolving dependencies between decisions one-by-one. For each question, propose your recommended answer first, then wait for feedback before asking the next one. If a question can be answered by reading the codebase or the project's own documentation, do that instead of asking.
 
-The output is a written **idea brief** under `.specify/idea-brief.md` that mirrors the structure of `.specify/templates/spec-template.md` closely enough that `/speckit-specify` can consume it as a strong feature description.
+The output is a structured **idea brief** that lives in the conversation by default — no files are written. If the user asks for a written artefact, write it to a temporary path under the system temp directory (e.g. `$(mktemp -t idea-brief.XXXXXX.md)`) and report the path. **Do not write to `.specify/idea-brief.md`** — that location is reserved for a speckit-specific workflow and is out of scope for this skill.
 
 ## When to use
 
-- The user has an idea expressed in one or two paragraphs and wants a spec.
+- The user has an idea expressed in one or two paragraphs and wants a sharper version.
 - The idea is fuzzy on scope, users, success, or how it fits the existing system.
-- The user explicitly says they want to grill / stress-test / pressure-test an idea before specifying it.
+- The user explicitly says they want to grill / stress-test / pressure-test an idea before formalising it.
 
 Do **not** use this skill for:
 
-- A bug fix or refactor with no user-visible behaviour change — go straight to `/speckit-tinyspec-tinyspec` or a regular PR.
-- An idea the user has already turned into a spec — use `/speckit-clarify` instead.
+- A bug fix or refactor with no user-visible behaviour change — go straight to a regular PR or the project's bug pipeline.
+- An idea the user has already turned into a spec or PRD — the grilling moment has passed; refine the existing artefact instead.
 
-## Read before grilling
+## Discover available context (read what exists, skip what doesn't)
 
-Before the first question, read these so your terminology is aligned with the project:
+Before the first question, probe the repository for project-level context files. Read whichever are present. **None of them are required** — the skill must work in a repo that has none of them.
 
-- **[`CONTEXT.md`](../../../CONTEXT.md)** — the project glossary. This is the canonical name for every domain concept (cluster, environment, deployment, instance, driver, context, agent, operator, hook, mode, phase, …) and the synonyms to avoid. Use these terms verbatim throughout the interview and in `.specify/idea-brief.md`. If the user uses a synonym `CONTEXT.md` explicitly avoids ("workflow" instead of "flow", "soft-delete" instead of "tombstone", etc.), surface the canonical term and use it.
-- **[`dev/constitution.md`](../../../dev/constitution.md)** — the principles you will grill against in lens 7.
-- **[`dev/knowledge/architecture.md`](../../../dev/knowledge/architecture.md)** — the descriptive system overview.
+| File | If present, use it for |
+| --- | --- |
+| `AGENTS.md` (or `CLAUDE.md` pointing at it) | Project-wide working agreements, governance gates ("ask first" areas), naming conventions. |
+| `CONTEXT.md` | Project glossary — canonical names for domain concepts and synonyms to avoid. If present, prefer the canonical vocabulary in every turn and in the brief. |
+| `dev/constitution.md` | Non-negotiable principles. Walked through under lens 7 (Governance gates and project rules). |
+| `dev/knowledge/architecture.md` (or similar) | Descriptive system overview — helps you ground "how does this fit today?" questions in real code. |
+| `dev/adr/` directory | Prior architectural decisions. Glance at titles; pull a specific ADR only when the idea touches the same area. |
+| `specs/` directory | In-flight or shipped specs. Use to spot scope overlap or dependencies. |
+
+Probe with a quick `ls`/`test -f` pass rather than reading the whole tree. Read in full only the files that genuinely matter for this idea.
+
+If none of these exist, you fall back to plain interviewing — the lenses below still apply; you just don't have a project-specific frame to test against.
 
 ## How to interview
 
 - **One question at a time.** Do not batch. Wait for an answer before the next question.
 - **Lead with your recommendation.** Format each turn as: short context → question → your recommended answer with reasoning → invite confirmation or redirection.
-- **Explore before asking.** If `CONTEXT.md`, the codebase, `dev/constitution.md`, `dev/knowledge/`, `dev/adr/`, or existing `specs/` can answer the question, read them and report findings rather than asking.
-- **Cross-reference with code.** When the user asserts how something works today, verify against the relevant files in `backend/`, `frontend/`, `python_sdk/`, or `driver/`. Surface contradictions immediately.
-- **Sharpen fuzzy terms against `CONTEXT.md`.** When the user says "deployment", "environment", "cluster", "driver", "instance", "context", "workflow", "delete", "status", etc. — pin down which entry in `CONTEXT.md` they mean. Use the canonical vocabulary, not synonyms. If the user genuinely names a concept that is not in `CONTEXT.md`, treat that as a glossary gap (see "Updating CONTEXT.md when concepts are missing").
-- **Use concrete scenarios.** When relationships are vague, invent a specific example ("imagine a user upgrades driver v1.2 → v1.3 mid-reconciliation — what should happen?") and force a precise answer.
-- **Capture clarifications inline.** Update `.specify/idea-brief.md` as decisions land. Don't batch at the end.
+- **Explore before asking.** If anything in the repo (the context files above, the codebase, ADRs, existing specs/issues) can answer the question, read and report rather than asking.
+- **Cross-reference with code.** When the user asserts how something works today, verify against the relevant files. Surface contradictions immediately.
+- **Sharpen fuzzy terms.** If `CONTEXT.md` exists, pin every domain term the user uses to a canonical entry. If it does not, still push back on synonyms drifting mid-conversation — pick one term and stick to it.
+- **Use concrete scenarios.** When relationships are vague, invent a specific example ("imagine a user upgrades v1.2 → v1.3 mid-operation — what should happen?") and force a precise answer.
+- **Capture clarifications inline in the conversation.** Update the in-session brief as decisions land. Don't batch at the end.
 
-## Updating CONTEXT.md when concepts are missing
+## Glossary drift (only when `CONTEXT.md` is present)
 
-`CONTEXT.md` is the project's living glossary. Grilling regularly exposes concepts that are either undefined or named inconsistently across the codebase. When that happens during the interview, fix it inline — do not defer.
+If `CONTEXT.md` exists, treat it as the project's living glossary and watch for drift during the interview. Surface — and offer to fix — any of:
 
-**You MUST update `CONTEXT.md` in the same session if any of the following happens during grilling:**
+1. A new domain concept the idea introduces that isn't in `CONTEXT.md` yet.
+2. An existing concept used in the codebase but missing from the glossary.
+3. A `CONTEXT.md` entry that is wrong, stale, or ambiguous given what the conversation reveals.
+4. A new ambiguity between two terms.
 
-1. The idea introduces a genuinely new domain concept (a new entity, a new lifecycle slot, a new state, a new orchestration role). Add a bolded glossary entry with a one-sentence definition and an `_Avoid_:` line naming the synonyms it displaces.
-2. You discover an existing concept is used in the codebase but is missing from `CONTEXT.md`. Add it — even if the idea being grilled does not strictly require it — because future grilling sessions need it too.
-3. The user (or the code) reveals that `CONTEXT.md`'s current definition is wrong, stale, or ambiguous. Correct the entry and, if relevant, add the older phrasing to its `_Avoid_:` line.
-4. A new ambiguity emerges between two terms (e.g. "phase" vs "mode" vs "hook"). Add or extend an entry under **Flagged ambiguities**.
-
-When you update `CONTEXT.md`:
-
-- Keep edits surgical — one concept per entry, written in the same voice as the existing entries.
-- Use the canonical structure: `**Term**: definition. _Avoid_: synonyms.`
-- Cross-link to ADRs in `dev/adr/` and knowledge docs in `dev/knowledge/` rather than restating their content.
-- After editing, point at the new/changed entry in your next turn so the user can confirm the wording.
-- Reflect the change in the idea brief: use the canonical term from `CONTEXT.md` everywhere in `.specify/idea-brief.md`.
-
-If you are unsure whether something deserves a glossary entry, ask the user once: "This concept (`<term>`) is not in `CONTEXT.md` — should I add it as a first-class term, or is it a one-off label for this idea?" Default to adding it when in doubt; an over-broad glossary is recoverable, a drifted one is not.
+For each, ask the user once whether to add/update the entry. **Do not silently edit `CONTEXT.md`** — propose the diff, get a yes, then apply it surgically (`**Term**: definition. _Avoid_: synonyms.`). If `CONTEXT.md` does not exist in the repo, skip this section entirely.
 
 ## Grilling lenses
 
-Every idea must be grilled along these lenses, in this order. Skip a lens only if you can justify why it does not apply.
+Every idea should be exercised through these lenses, in this order. Skip a lens only if you can justify why it does not apply.
 
 ### 1. Users and value
 
-- Who is the primary user? (developer, platform engineer, end-user of a deployed app, internal operator?)
+- Who is the primary user? (a developer, an operator, an end-user of a deployed system, an internal stakeholder?)
 - What can they not do today, or what is painful?
 - What is the smallest observable change that would make them say "this is better"?
 
 ### 2. User journeys (P1/P2/P3)
 
-The spec template requires **prioritized, independently testable** user stories. Pin down at least one P1 journey before considering the idea grilled. Each story must be a slice that could ship on its own and still deliver value.
+Pin down at least one P1 journey before considering the idea grilled. Each journey must be a slice that could ship on its own and still deliver value.
 
 - What is the P1 journey end-to-end? (single sentence)
 - Is there a P2 / P3? If yes, can each be developed, tested, deployed, demoed independently?
@@ -101,64 +94,46 @@ The spec template requires **prioritized, independently testable** user stories.
 
 ### 4. Key entities and domain fit
 
-- Which existing entities are touched? Look them up in `CONTEXT.md` and use the canonical name (`Cluster`, `Environment`, `Deployment`, `Instance` / `ApplicationInstance`, `Application Driver`, `Application Driver Version`, `Component`, `Service`, `Action`, `Task`, `Flow`, `GlobalContext`, `StyrminDeployment` CRD, `Utility`, `BackupStorageLocation`, …).
-- Are any new entities required, or can the idea be expressed in terms of existing ones? Strongly prefer the latter.
-- If the idea uses a term that is not yet in `CONTEXT.md`, follow "Updating CONTEXT.md when concepts are missing" — add the entry now, do not defer.
-- If a new entity is needed: what is its lifecycle, who owns it, and what is its relationship to existing entities?
+- Which existing entities or concepts are touched? If `CONTEXT.md` exists, use the canonical names from it. Otherwise infer the vocabulary from the codebase or surrounding docs and stick to one name per concept.
+- Are new entities required, or can the idea be expressed in terms of existing ones? Strongly prefer the latter.
+- If a new entity is needed: what is its lifecycle, who owns it, what is its relationship to existing entities?
 
 ### 5. Edge cases
 
 - Boundary conditions (empty, max, concurrent, partial).
-- Failure modes (network, validation, permission, reconciliation drift).
+- Failure modes (network, validation, permission, drift between desired and actual state).
 - "What happens when … ?" — invent at least three scenarios and force an answer for each.
 
 ### 6. Success criteria
 
-The spec template demands **measurable, technology-agnostic** outcomes (`SC-001`, `SC-002`, …). Push the user past vibes:
+Push the user past vibes. Each criterion must be **measurable** and **technology-agnostic**:
 
 - Replace "faster" with "in under N seconds".
 - Replace "more reliable" with "P99 success rate ≥ X%".
 - Replace "easier" with a task-completion metric or a reduction in support load.
 - Reject criteria that name a framework, library, database, or response-time-in-ms (those are implementation, not user value).
 
-### 7. Constitution alignment
+### 7. Governance gates and project rules
 
-`dev/constitution.md` defines non-negotiable principles. Use them as grilling questions, not as a checklist to ignore. For each principle below, ask: does this idea respect it, or does it push back on it? If it pushes back, surface that explicitly — it may need to become an Assumption, a Governance Gate decision, or a reason to reshape the idea.
+The idea must respect whatever the project has already written down. Two sources to check:
 
-- **§I Declarative state reconciliation.** Can the new behaviour be expressed as desired-vs-current diff, or does it want imperative side effects? Idempotent?
-- **§II Driver-based deployment.** If the idea touches how an app is deployed, does the behaviour belong in a driver, or is it sneaking ad-hoc deployment logic outside drivers?
-- **§III Layered architecture.** Where does each new responsibility sit — GraphQL, service, repository, DB? Any cross-layer shortcuts being proposed?
-- **§IV Type safety & typed errors.** What new `ServiceError` subclasses are needed? What `error_code` values? Any failure mode that currently has no typed error?
-- **§V Test-first / E2E required.** Sketch the E2E scenario name. What user-visible flow does it cover? If the idea is "too small for E2E", challenge that — the constitution treats E2E as definition-of-done for new features and requires explicit reviewer approval to skip.
-- **§V GraphQL ↔ DB propagation tests.** Does the idea introduce any new GraphQL field, argument, input type, or mutation? If yes, a propagation unit test is mandatory.
-- **§VI Format and lint.** (No grilling needed at idea stage.)
+- **Governance gates** — many `AGENTS.md` files list "ask first" areas (database / schema migrations, API or GraphQL changes, new external dependencies, CI/CD changes, auth changes). Read `AGENTS.md` if it exists and use whatever list it names. For each gate the idea crosses, name it in the brief under **Governance Gates Crossed** so it cannot be missed later.
+- **Constitution principles** (only if `dev/constitution.md` is present) — walk its principles and flag any the idea pushes back on. A pushback may need to become an Assumption, a Governance Gate decision, or a reason to reshape the idea. Skip entirely if no constitution document exists.
 
-### 8. Governance gates ("ask first" areas)
-
-Surface these explicitly and confirm the user wants to take them on, because they require explicit discussion before implementation per `AGENTS.md`:
-
-- Database schema or migration changes.
-- GraphQL schema modifications.
-- New dependencies.
-- CI/CD workflow changes.
-- Authentication / authorization changes.
-
-For each gate the idea crosses, name it in the brief under **Governance Gates Crossed** so it is impossible to miss at the spec stage.
-
-### 9. Assumptions and out-of-scope
+### 8. Assumptions and out-of-scope
 
 - What is being assumed about users, environment, data, or existing systems?
-- What is explicitly **out of scope** for v1? (Carve scope aggressively — a small, sharp spec is better than a sprawling one.)
-- What dependencies on other in-flight specs (`specs/*`) exist?
+- What is explicitly **out of scope** for v1? (Carve scope aggressively — a small, sharp brief is better than a sprawling one.)
+- What dependencies on other in-flight work exist?
 
 ## Capture format
 
-Maintain `.specify/idea-brief.md` throughout the session. Create it on the first decision, not before. Use the structure below — it mirrors `.specify/templates/spec-template.md` so `/speckit-specify` can lift sections wholesale.
+Maintain the brief **in the conversation** as decisions land, using the structure below. Update sectionally during the session — when a decision lands, post only the affected section as an inline update (e.g. `**Updated Functional Requirements:** FR-003 …`). Re-paste the **full** brief only at the end of the session, on explicit user request, or when flipping `Status: Ready for next step` — re-pasting it every turn balloons the conversation over a 20-turn grilling.
 
 ```markdown
 # Idea Brief: <short name>
 
-**Status**: Grilling | Ready for /speckit-specify
+**Status**: Grilling | Ready for next step
 **Seed**: <one-paragraph original idea>
 
 ## Users and Value
@@ -184,19 +159,16 @@ Maintain `.specify/idea-brief.md` throughout the session. Create it on the first
 ## Success Criteria (draft)
 - SC-001: <measurable, tech-agnostic>
 
-## Constitution Alignment
-- §I Declarative: <how the idea fits / where it pushes back>
-- §III Layered: …
-- §IV Typed errors: <new ServiceError codes proposed>
-- §V E2E coverage: <one-line description of the E2E scenario this feature will ship with>
-- §V GraphQL propagation: <yes/no — and which fields if yes>
+## Constitution Alignment (only if dev/constitution.md exists)
+- <principle>: <how the idea fits / where it pushes back>
 
 ## Governance Gates Crossed
-- [ ] Database schema change
-- [ ] GraphQL schema change
+- [ ] Database / schema change
+- [ ] API change
 - [ ] New dependency
 - [ ] CI/CD change
 - [ ] Auth change
+- (Replace with the list from AGENTS.md if it names different gates.)
 
 ## Assumptions
 - …
@@ -208,31 +180,65 @@ Maintain `.specify/idea-brief.md` throughout the session. Create it on the first
 - [NEEDS CLARIFICATION: …]
 ```
 
-Mark unresolved items as `[NEEDS CLARIFICATION: <specific question>]`. The next step (`/speckit-specify`) is allowed at most three of these — if the brief has more, keep grilling until you are down to three or fewer.
+Mark unresolved items as `[NEEDS CLARIFICATION: <specific question>]`. Keep grilling until at most three remain.
+
+### Writing the brief to a file (only on explicit user request)
+
+By default, the brief stays in the conversation. If — and only if — the user explicitly asks for a written copy:
+
+1. Write it to a temporary path: `mktemp -t idea-brief.XXXXXX.md` (or the platform equivalent).
+2. Report the absolute path to the user so they can pick it up.
+3. Do **not** write to `.specify/idea-brief.md`, `docs/`, `dev/`, or any other tracked location — those choices belong to the user, not to this skill.
 
 ## Stop conditions
 
-The brief is "Ready for /speckit-specify" when **all** of the following hold:
+The brief is "Ready for next step" when **all** of the following hold:
 
 1. At least one **P1 user journey** with a Given / When / Then acceptance scenario.
 2. Functional requirements are testable — every "MUST" can be paired with a one-line verification idea.
 3. Success criteria are measurable and technology-agnostic.
-4. The constitution alignment section names the **E2E scenario** that will be shipped, even if just as a sentence.
-5. Every Governance Gate the idea crosses is explicitly checked or explicitly ruled out.
-6. No more than three `[NEEDS CLARIFICATION]` markers remain.
-7. Every domain term used in the brief either exists in `CONTEXT.md` or was added to it during this session.
+4. Every Governance Gate the idea crosses is explicitly checked or explicitly ruled out (using whatever list `AGENTS.md` defines, or the generic list above if none). If `dev/constitution.md` exists, principles the idea touches are addressed in the brief.
+5. No more than three `[NEEDS CLARIFICATION]` markers remain.
+6. If `CONTEXT.md` exists, every domain term in the brief is either present in it or was added to it during this session with the user's explicit confirmation.
 
-When all seven hold, flip **Status** to `Ready for /speckit-specify`, tell the user, and recommend running `/speckit-specify` with the brief as input.
+When all of the applicable conditions hold, flip **Status** to `Ready for next step`, tell the user, and suggest the natural follow-up:
+
+- If `.specify/templates/spec-template.md` exists (speckit is set up in this repo) → suggest `/speckit-specify` with the brief as input.
+- Otherwise → suggest whichever the user prefers: opening an issue, drafting a PRD, or starting implementation directly.
 
 ## Anti-patterns
 
-- **Do not grill into implementation.** Stack choices, schema column names, libraries, file paths — those belong in `/speckit-plan`, not here. If a question can only be answered by picking an implementation, defer it.
+- **Do not grill into implementation.** Stack choices, schema column names, libraries, file paths — those belong in a later planning step. If a question can only be answered by picking an implementation, defer it.
 - **Do not invent edge cases the user has not signalled care about.** Stress-test the boundaries the idea actually touches, not a generic checklist.
 - **Do not stall on perfect requirements.** Three crisp testable FRs that ship is better than ten that don't.
-- **Do not skip the constitution lens.** Even if the idea seems UI-only, walk §I–§VI explicitly — the constitution is the project's non-negotiable contract and missing alignment here costs rework at plan time.
-- **Do not drift from `CONTEXT.md` vocabulary.** If you find yourself reaching for a synonym ("workflow" for **flow**, "soft-delete" for **tombstone**, "config" for **GlobalContext**, "K8s agent" for **agent**), stop and use the canonical term. If the canonical term is genuinely missing, add it to `CONTEXT.md` — do not invent a parallel vocabulary in the brief.
-- **Do not write the spec.** This skill produces a brief, not a spec. The spec is `/speckit-specify`'s job.
+- **Do not assume a project frame that isn't there.** If `dev/constitution.md` is missing, skip the constitution check inside lens 7 — don't invent principles. Same for `CONTEXT.md`, `AGENTS.md`, etc.
+- **Do not write files unsolicited.** The brief lives in the conversation. Only write to a temp file when the user explicitly asks.
+- **Do not write to `.specify/idea-brief.md`.** Even if speckit is set up in the repo, that file is the input to a different workflow and is not this skill's to manage.
+
+### Rationalization table
+
+When you catch yourself reaching for one of these excuses, stop:
+
+| Excuse | Reality |
+| --- | --- |
+| "User seems impatient — let me batch the questions." | Batching collapses the dependency graph. One question, one recommended answer, then choose the next question based on what you just learned. |
+| "The P1 journey is obvious — I can skip writing it." | If it's obvious, write it as one sentence. If you can't write it, it isn't obvious. |
+| "Skip the success criteria — they'll emerge in the spec." | Success criteria force scope. Skipping them lets the spec scope drift; that's how this skill stops earning its tokens. |
+| "User said `save it` — I'll write to `docs/` so it's easy to find." | The skill says temp file only. Honour the intent (save) using the path the skill names; the user can move it. |
+
+### Red flags
+
+You are about to violate the skill if you notice yourself:
+
+- Queuing two or three questions in one turn.
+- Flipping `Status: Ready for next step` with no P1 journey written.
+- Reaching to write the brief into `.specify/idea-brief.md`, `docs/`, or `dev/` because the user said "save it".
+- Skipping a lens "for time" without naming a reason it doesn't apply.
 
 ## Expected outcome
 
-`.specify/idea-brief.md` exists, has `Status: Ready for /speckit-specify`, and contains enough sharpened content that `/speckit-specify "$(cat .specify/idea-brief.md)"` (or an equivalent paste) produces a high-quality first-draft `spec.md` with at most three `[NEEDS CLARIFICATION]` markers.
+A sharpened idea brief in the conversation with `Status: Ready for next step`, with enough crisp content (P1 journey + acceptance scenario, testable FRs, measurable SCs, named governance gates, ≤3 open questions) that the user can confidently feed it into whatever comes next — a PRD, a spec, a speckit run, or a ticket — without another round of "what did you mean by …?".
+
+---
+
+*Inspired by [`grill-with-docs`](https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md) by Matt Pocock. Repositioned from sharpening a plan against existing docs to sharpening a raw idea against project context.*

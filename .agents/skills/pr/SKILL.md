@@ -1,10 +1,8 @@
 ---
 name: pr
-description: Take the current branch through to an open, CI-monitored pull request — branch discipline, branch-wide change analysis, doc updates, and required user approval at each step.
+description: Use when the user wants to open a pull request, publish the current branch as a PR, or take the current work through to an open pull request.
 argument-hint: Optional `commit` to stage, commit, and push uncommitted changes before opening the PR
-compatibility: Requires a Git working tree, GitHub access (gh CLI authenticated, GitHub MCP server, or equivalent), and the Styrmin repo layout for documentation cross-references.
-metadata:
-  source: .agents/commands/pr.md
+compatibility: Requires a Git working tree and GitHub access (gh CLI authenticated, GitHub MCP server, or equivalent). Works best alongside the `commit` and `pr-monitor` skills from this plugin.
 ---
 
 # Open Pull Request
@@ -12,6 +10,8 @@ metadata:
 ## Introduction
 
 Handle the full workflow from current branch state to an open, CI-monitored pull request. This skill enforces branch discipline, analyzes all branch changes for a business-value-focused description, ensures documentation is current, and requires user approval at every step.
+
+It is project-agnostic: base branch, validation commands, documentation layout, and labels are all discovered from the repository itself rather than assumed.
 
 ## Arguments
 
@@ -29,102 +29,86 @@ First, verify the agent is on a safe branch and understand the current git state
 
 1. Run `git status` to see uncommitted/staged/untracked files.
 2. Run `git branch --show-current` to identify the current branch.
-3. **If on `develop`, `stable`, or `main`:**
-   - **If `commit` was passed:** proceed to Phase 2; the `commit` skill will refuse the protected branch, propose a feature branch name (`NNN-short-name` when changes match a `specs/` directory, otherwise `dga-short-description`), and ask the user for approval before creating it. Do not pre-create the branch here — let the `commit` skill own that conversation so the rules stay in one place.
+3. Determine the base branch the PR should target:
+   - Prefer the repository's default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` (the name after `origin/`).
+   - If the current branch was clearly forked from a different long-lived branch (e.g. a release branch), use that instead.
+   - When ambiguous, ask the user.
+4. **If on an unsafe branch** — the default branch, a long-standing integration branch, a release branch, or a placeholder/scratch branch (the `commit` skill's step 2 holds the canonical rules; don't re-derive the list here):
+   - **If `commit` was passed:** proceed to Phase 2; the `commit` skill will refuse the unsafe branch, propose a properly named feature branch, and ask the user for approval before creating it. Do not pre-create the branch here — let the `commit` skill own that conversation so the rules stay in one place.
    - **If `commit` was NOT passed:** STOP. There's no feature branch to open a PR from. Tell the user they need to either invoke `/pr commit` (so the `commit` skill creates a branch and captures the changes), or switch to a feature branch first.
-4. If already on a feature branch, continue to the next phase.
+5. If already on a feature branch, continue to the next phase.
 
 ### 2. Commit Changes (only when `commit` argument is provided)
 
 **Skip this phase entirely if `commit` was NOT passed as an argument.** If there are uncommitted changes and `commit` was not provided, warn the user that uncommitted changes exist but will not be included in the PR.
 
-When `commit` IS provided, run the project-specific prep here in `pr` (because it depends on Styrmin's toolchain), then delegate the actual commit + push to the `commit` skill so branch discipline, secret hygiene, and message conventions stay in one place:
+When `commit` IS provided, run any project-specific prep first, then delegate the actual commit + push to the `commit` skill so branch discipline, secret hygiene, and message conventions stay in one place:
 
-1. Run formatters and linters first (required by project conventions):
+1. If the project defines fast validation commands (formatters, linters), run them first. Discover them from the project's own context — `AGENTS.md`/`CLAUDE.md`/`CONTRIBUTING.md`, a `Makefile`/`Taskfile`/`justfile`, `package.json` scripts, `pyproject.toml`/`tox.ini`, or a `pre-commit` config. If the project defines none, skip this step.
 
-   ```bash
-   uv run invoke format lint
-   ```
-
-2. Check if any GraphQL schema files (under `backend/styrmin_backend/api/schema/`) or `.graphql` query files were modified. If so, regenerate and re-stage the regenerated artefacts:
-
-   ```bash
-   uv run styrmin export graphql-schema schema.graphql
-   uv run invoke generate
-   ```
+2. If the project checks in generated artefacts (GraphQL schemas, OpenAPI clients, generated SDK types, protobufs) and their sources were modified, regenerate them using the project's documented commands and include the regenerated files — CI commonly fails on stale generated artefacts.
 
 3. Invoke the `commit` skill with the `push` argument: `/commit push`. The skill will:
-   - Refuse to commit on `develop` / `stable` / `main` and, if needed, propose a feature branch name (spec-prefixed or `dga-…`) for user approval before creating it via `git checkout -b`.
+   - Refuse to commit on protected or placeholder branches and, if needed, propose a conventional feature branch name (`feat/…`, `fix/…`, etc.) for user approval before creating it.
    - Stage changes safely (explicit paths, secret-pattern warnings).
    - Draft a conventional-commit message and confirm it with the user.
    - Run pre-commit hooks (no `--no-verify`); fix violations and create a new commit on hook failure.
    - Push the branch upstream (`git push -u origin <branch>` on first push).
 
-   Do not duplicate any of that logic inline here. If the user has additional commit-message guidance specific to this PR (e.g., spec reference, conventional-commit scope), pass it along when invoking the skill.
+   Do not duplicate any of that logic inline here. If the user has additional commit-message guidance specific to this PR (e.g., spec or issue reference, conventional-commit scope), pass it along when invoking the skill.
 
 4. After `/commit push` returns, confirm the working tree is clean and the branch is published before continuing to Phase 3.
 
 ### 3. Analyze All Branch Changes
 
-Understand the FULL scope of changes in this branch — not just the latest commit, but everything since it diverged from develop. If there's a related spec, use it to understand the business context.
+Understand the FULL scope of changes in this branch — not just the latest commit, but everything since it diverged from the base branch. If there's a related spec or issue, use it to understand the business context.
 
-1. Determine the base branch (default: `develop`).
+1. Use the base branch determined in Phase 1 (referred to as `<base>` below).
 2. View all commits in the branch:
 
    ```bash
-   git log develop..HEAD --oneline
+   git log origin/<base>..HEAD --oneline
    ```
 
 3. View the full diff of all changes:
 
    ```bash
-   git diff develop...HEAD --stat
-   git diff develop...HEAD
+   git diff origin/<base>...HEAD --stat
+   git diff origin/<base>...HEAD
    ```
 
-4. **Check for a related spec:** If the branch name matches a spec directory in `specs/` (e.g., branch `058-frontend-testing` → `specs/058-frontend-testing/`):
-   - Read `spec.md` to understand user scenarios, functional requirements, and success criteria.
-   - This is the primary source for framing the PR's business value.
-5. Categorize changes by area: backend, frontend, documentation, CI/CD, specs, configuration.
+4. **Check for related planning context.** If the repository keeps specs, PRDs, or ADRs (e.g. a `specs/` directory, `docs/adr/`, or locations referenced from `AGENTS.md`/`CONTEXT.md`), look for one matching this branch — by branch name, by files touched, or by a linked issue. When one exists, read it to understand user scenarios, requirements, and success criteria; it is the primary source for framing the PR's business value. If the repo keeps no such context, skip this step.
+5. Categorize changes by area (e.g. application code, tests, documentation, CI/CD, configuration) using the repository's own layout.
 
 ### 4. Documentation Review
 
-Before opening the PR, ensure that developer documentation in `dev/` reflects the changes being introduced. Stale docs are worse than no docs.
+Before opening the PR, ensure that the project's documentation reflects the changes being introduced. Stale docs are worse than no docs.
 
-1. Based on the changes identified in Phase 3, check relevant documentation:
+1. **Discover where this project keeps developer documentation.** Probe in this order, and use what actually exists:
+   - Locations referenced from `AGENTS.md`/`CLAUDE.md`/`CONTEXT.md`/`CONTRIBUTING.md` (these often map code areas to docs).
+   - Conventional directories: `dev/`, `docs/`, `doc/`, ADR directories (`docs/adr/`, `dev/adr/`).
+   - The `README.md` for user-facing behaviour changes.
 
-   | If changes touch... | Check these docs |
-   |---------------------|-----------------|
-   | API routes/resolvers | `dev/knowledge/backend/api.md` |
-   | Data models/migrations | `dev/knowledge/backend/data-models.md` |
-   | Services layer | `dev/knowledge/backend/services.md` |
-   | Orchestration/Prefect flows | `dev/knowledge/backend/orchestration-flows.md` |
-   | Hooks/actions | `dev/knowledge/backend/hooks-and-actions.md` |
-   | Reconciliation | `dev/knowledge/backend/reconciliation.md` |
-   | Agent/K8s agent | `dev/knowledge/backend/agent.md` |
-   | Backup/restore | `dev/knowledge/backend/backup-restore.md` |
-   | E2E tests | `dev/knowledge/backend/e2e-testing.md` |
-   | Frontend | Check if frontend knowledge docs exist; propose creating them if not |
-   | New developer workflows | `dev/guides/` |
+   If the project keeps no developer documentation, note that and skip to Phase 5 — do not invent a documentation structure.
 
-2. For each relevant doc:
-   - Read it and compare against the actual changes.
-   - If the doc is outdated or missing coverage of new functionality, propose updates.
+2. Based on the changes identified in Phase 3, check the docs covering the touched areas:
+   - Read each relevant doc and compare against the actual changes.
+   - If a doc is outdated or missing coverage of new functionality, propose updates.
    - Present proposed doc changes to the user for approval.
-3. Commit any doc updates to the branch (with a `docs:` conventional commit).
+3. Commit any approved doc updates to the branch (with a `docs:` conventional commit, following the repo's commit style).
 4. Push if new commits were added.
 
 ### 5. Draft PR Description
 
-Focus on business value — what problem does this solve, what capability does it add? The reviewer should understand WHY before they look at HOW. Reference the spec if one exists.
+Focus on business value — what problem does this solve, what capability does it add? The reviewer should understand WHY before they look at HOW. Reference the spec or issue if one exists.
 
-**PR Title:** Short, conventional format (under 70 chars). Examples:
+**PR Title:** Short, conventional format (under 70 chars), mirroring the repo's existing PR/commit style. Examples:
 
 - `feat: add environment backup and restore operations`
-- `fix: resolve cluster config drift during reconciliation`
-- `refactor: migrate inline GraphQL queries to dedicated files`
+- `fix: resolve config drift during reconciliation`
+- `refactor: migrate inline queries to dedicated files`
 
-**PR Body Template:**
+**PR Body Template** (adapt to the repository's PR template in `.github/PULL_REQUEST_TEMPLATE.md` if one exists — the repo template wins):
 
 ```markdown
 ## Summary
@@ -134,24 +118,21 @@ Frame as outcomes for users/operators, not as code changes.]
 ## Key Changes
 [Bulleted list of the most important changes, framed as outcomes:
 - "Operators can now back up and restore environments" NOT "Added backup_service.py"
-- "GraphQL queries are validated against the schema in CI" NOT "Moved queries to .graphql files"]
+- "Queries are validated against the schema in CI" NOT "Moved queries to .graphql files"]
 
-## Spec Reference
-[If tied to a spec: link to specs/NNN-name/spec.md, highlight key requirements addressed.
-Omit this section if no spec exists.]
+## Related Context
+[If tied to a spec, PRD, ADR, or issue: link it and highlight the key
+requirements addressed. Omit this section if none exists.]
 
 ## Documentation Updates
-[List any dev/ docs that were added or updated as part of this PR.
+[List any docs that were added or updated as part of this PR.
 Omit this section if no docs were changed.]
 
 ## Test Plan
 [How to verify — test commands to run, manual verification steps, or CI checks to watch]
 ```
 
-**Labels:** Choose from repo labels (e.g., `gh label list`). Common ones:
-
-- `type: enhancement`, `type: bug`, `type: tech-debt`, `type: housekeeping`, `type: documentation`
-- `claude-code-assisted`
+**Labels:** Discover the repository's labels with `gh label list` and pick the ones that fit the change. Don't invent labels; if none fit, omit them.
 
 ### 6. User Validation & PR Creation
 
@@ -166,18 +147,18 @@ Omit this section if no docs were changed.]
 3. After approval, create the PR using the GitHub interface available to the agent. Examples:
 
    ```bash
-   gh pr create --title "[TITLE]" --body "[BODY]" --base develop --label "[LABELS]"
+   gh pr create --title "[TITLE]" --body "[BODY]" --base <base> --label "[LABELS]"
    ```
 
    Or, when using the GitHub MCP server, the equivalent `create_pull_request` call.
 4. Return the PR URL to the user.
 
-### 7. Hand Off to `pr-monitor` as a Background Survey Agent
+### 7. Hand Off to `pr-monitor` as a Background Agent
 
-Don't just open the PR and walk away — but don't re-implement the CI babysitting loop here either, and don't sit blocked in the foreground waiting 30+ minutes for E2E to finish. The `pr-monitor` skill owns the CI workflow (poll, classify, reproduce narrowly, fix, retry up to 5 times, revert on exhaustion), and CI watching is the textbook "long-running, independent of what the user does next" survey task. Spawn it as a background agent so the parent conversation can return control to the user immediately.
+Don't just open the PR and walk away — but don't re-implement the CI babysitting loop here either, and don't sit blocked in the foreground waiting 30+ minutes for CI to finish. The `pr-monitor` skill owns the CI workflow (poll, classify, reproduce narrowly, fix, retry up to 5 times, revert on exhaustion), and CI watching is the textbook "long-running, independent of what the user does next" background task. Spawn it as a background agent so the parent conversation can return control to the user immediately.
 
 1. Confirm the PR was created and you have the PR number / URL / branch name.
-2. **Spawn `pr-monitor` as a background survey agent.** Use the runtime's agent-launching mechanism (Claude Code: the `Agent` tool with `run_in_background: true`; other runtimes: equivalent background-task primitive). The agent must run with a clean context — give it everything it needs in the prompt rather than relying on parent-conversation state.
+2. **Spawn `pr-monitor` as a background agent.** Use the runtime's agent-launching mechanism (Claude Code: the `Agent` tool with `run_in_background: true`; other runtimes: equivalent background-task primitive). The agent must run with a clean context — give it everything it needs in the prompt rather than relying on parent-conversation state.
 
    Recommended invocation (Claude Code, general-purpose subagent):
 
@@ -186,21 +167,22 @@ Don't just open the PR and walk away — but don't re-implement the CI babysitti
      description: "Monitor PR #<N> CI",
      subagent_type: "general-purpose",
      run_in_background: true,
-     prompt: "Run the workflow defined in .agents/skills/pr-monitor/SKILL.md
-              against PR #<N> on branch <branch>. The PR was just opened by
-              the /pr skill at commit <sha>; treat that commit as the
-              baseline_commit for the revert-on-exhaustion logic. Follow
-              every phase of SKILL.md verbatim, including the narrow-
+     prompt: "Invoke the pr-monitor skill and run its workflow against
+              PR #<N> on branch <branch>. The PR was just opened by
+              the /pr skill at commit <sha>; pass that commit as the
+              expected baseline — pr-monitor re-captures and verifies
+              the baseline_commit itself in its Phase 0. Follow every
+              phase of the skill verbatim, including the narrow-
               reproduction-first discipline and the 5-iteration cap.
-              Produce the SKILL.md final report when you finish."
+              Produce the skill's final report when you finish."
    )
    ```
 
-   Adjust the prompt to match your runtime's agent contract, but always (a) name the SKILL.md file as the source of truth, (b) pass the PR number, branch, and baseline commit, and (c) require the SKILL.md final report on completion.
+   Adjust the prompt to match your runtime's agent contract, but always (a) name the `pr-monitor` skill as the source of truth, (b) pass the PR number, branch, and baseline commit, and (c) require the skill's final report on completion.
 
 3. **Tell the user what just happened**, then return control:
    - PR URL.
-   - That `pr-monitor` is now running in the background as a survey agent.
+   - That `pr-monitor` is now running in the background.
    - That CI feedback / fix attempts / a final report will arrive asynchronously when the agent completes.
 
    Do not poll or re-summarize CI here. The agent's final report is the closing status; surface it to the user when it lands.
@@ -211,26 +193,27 @@ If the runtime cannot spawn background agents, fall back to invoking `/pr-monito
 
 **Branch Safety:**
 
-- This skill will NEVER commit to `develop` or `main`.
+- This skill will NEVER commit to the default branch, a long-standing integration branch, or a release branch — the canonical rules live in the `commit` skill's step 2.
 - If uncommitted changes exist and `commit` was not passed, warn but do not commit.
 
 **Business Value Focus:**
 
 - PR descriptions should answer "why does this matter?" before "what changed?".
-- When a spec exists, it is the primary framing device — reference user scenarios and success criteria.
+- When a spec, PRD, or issue exists, it is the primary framing device — reference user scenarios and success criteria.
 - Technical implementation details belong in the diff, not the PR description.
 
 **Documentation Discipline:**
 
 - Stale docs are worse than no docs — always check before opening a PR.
-- New features or changed behavior should be reflected in `dev/knowledge/` or `dev/guides/`.
+- New features or changed behavior should be reflected wherever the project keeps its developer documentation.
+- If the project keeps no developer documentation, don't invent a structure — note it and move on.
 
 ## Expected Outcome
 
 A pull request that:
 
-- Lives on a properly named feature branch (never `develop` or `main`).
-- Has a business-value-focused description referencing specs when available.
-- Includes up-to-date developer documentation.
+- Lives on a properly named feature branch (never a protected or long-lived branch).
+- Has a business-value-focused description referencing specs or issues when available.
+- Includes up-to-date documentation where the project keeps any.
 - Has been reviewed and approved by the user before creation.
-- Has been handed off to a backgrounded `pr-monitor` survey agent, which owns post-creation CI watching and fix-on-failure asynchronously.
+- Has been handed off to a backgrounded `pr-monitor` agent, which owns post-creation CI watching and fix-on-failure asynchronously.

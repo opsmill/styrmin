@@ -1,278 +1,234 @@
 ---
 name: bug-fix
-description: Consume the most recent analyst summary on a bug issue and produce a draft pull request — branch, fix commit, lint-clean diff, and analyst context embedded in the PR body — ready for the test stage.
-argument-hint: Issue number or full GitHub issue URL (e.g., `206` or `https://github.com/opsmill/styrmin/issues/206`)
-compatibility: Requires GitHub access (`gh` CLI authenticated, or equivalent GitHub MCP/API tooling) with write access to issues, pull requests, and contents on the target repository. Assumes the project's default branch is `develop`.
+description: >-
+  Use when a bug has a failing reproduction test and you are ready to implement and validate the
+  fix.
+argument-hint: <issue number or URL, or bug description>
+compatibility: >-
+  Works in any git repo; detects format/lint/test/changelog commands from the project rather
+  than assuming a toolchain. `gh` and a GitHub remote are needed only for the draft-PR path; the
+  fully-local flow (when `/bug-tdd` ran without `pr`) needs neither.
+metadata:
+  pipeline: bug-fixing (3 of 3 — analyze → tdd → fix)
+user-invocable: true
+disable-model-invocation: true
 ---
 
-# Bug Pipeline — Fix
+# Bug fixer
 
-## Introduction
+## User Input
 
-`bug-fix` is the second of four stages in the bug-fixing pipeline (`bug-analyze` → `bug-fix` → `bug-test` → `bug-review`). It **consumes** the structured analyst summary produced by `bug-analyze` and **produces** a draft pull request: a fix branch named `bug/<NNN>-<short_description>`, the actual code change, lint/format-clean against `uv run invoke format lint`, and a PR description that embeds the analyst's machine-readable summary so reviewers have full context without leaving the PR view.
+```text
+$ARGUMENTS
+```
 
-The skill is runnable two ways with **identical** observable side effects:
+## Your role
 
-- Locally from the Claude Code CLI: `/bug-fix <issue>`.
-- From the GitHub UI by typing `/bug-fix <issue>` as an issue comment, which fires the matching `bug-agent-fix.yml` workflow.
+You are a senior engineer implementing a bug fix. Two prior steps have already completed:
+`/bug-analyze` identified the root cause, and `/bug-tdd` wrote a failing test. Your job is to
+fix the root cause. The test is your validation criteria -- it must pass -- but the analyst's
+root cause analysis is what drives your fix, **not** the test.
 
-Stages chain via a hybrid model — every stage is human-triggered, and on success the closing line of this skill's output comment names the next command. This skill never auto-fires the next stage.
+## Tool usage
 
-## Prerequisites
+- Use the `Read` tool to read files -- do NOT use `cat` or `head`/`tail` in Bash.
+- Use the `Glob` tool to find files -- do NOT use `find` or `ls -R` in Bash.
+- Use the `Grep` tool to search file contents -- do NOT use `grep` or `rg` in Bash.
+- Reserve Bash for git commands, `gh` CLI, and commands that require shell execution.
+- *Shell* state (variables, `cd`) does **not** persist across separate Bash calls -- re-derive
+  shell values you reuse. The pipeline's logical flags like `HAS_PR` are decisions you carry in
+  your own reasoning, not shell variables, so they do persist across steps.
 
-- `gh` CLI authenticated against the target repository (or equivalent GitHub MCP/API tooling).
-- Write access to issues, pull requests, and contents on the target repository.
-- A clean git working tree on the project's default branch (`develop`). The skill creates a new branch from `develop` and refuses to proceed if the target branch already exists locally or on `origin`.
-- A prior `bug-analyze` run has posted at least one valid analyst comment with a `schema_version: 1` summary block on the target issue.
+## Input and setup
 
-## Execution contexts
+Start from the analysis artifact, not a reconstructed slug. Discover it with `Glob` for
+`.bug-analysis-*.md` in the repo root:
 
-This skill runs in one of two contexts with **identical** observable side effects:
+- **No match:** inform the developer "Run `/bug-analyze <issue>` first." and **STOP**.
+- **Exactly one match:** use it.
+- **Multiple matches:** pick the one whose `<key>` best matches `$ARGUMENTS`; if still ambiguous,
+  list them and ask which to use.
 
-- **Local CLI**: invoked from Claude Code; the agent uses `gh`/`git` directly with the maintainer's credentials for both reads and writes.
-- **GHAW CI**: invoked from a GitHub issue comment; the workflow's GitHub token is read-only, and write operations route through the GHAW Safe-Outputs MCP tools listed below. The agent uses whichever write tool is available at runtime — there is no context-detection logic in this skill.
+Read it for the root cause and fix strategy, and take the canonical `<key>` and **`Branch:`** from
+its header fields. (If those fields are absent -- an older analysis -- fall back to the key in the
+filename and `ai-bug-pipeline-<key>`.) Using the persisted branch -- rather than re-deriving the
+slug -- is what keeps this step from dead-ending when the slug would have drifted.
 
-For this stage, the available writes are `create_pull_request` (draft) and `add_comment` (issue/PR comments). For operational details and CI-workflow context, see `dev/guides/bug-pipeline.md`.
-
-## Arguments
-
-<arguments> $ARGUMENTS </arguments>
-
-The argument is a reference to a GitHub issue, accepted in either form:
-
-- **Bare integer**: `206` — resolved against the current repository.
-- **Full URL**: `https://github.com/opsmill/styrmin/issues/206` — the issue number is extracted from the path.
-
-Both forms canonicalise to the same `(number, url)` pair internally and produce the same result.
-
-## Main Tasks
-
-### 1. Normalise the argument
-
-Per the slash-command protocol, every stage that takes an issue argument MUST accept either form and normalise both to a canonical `(number, url)` pair.
-
-1. If `$ARGUMENTS` is empty or contains only whitespace, **stop and post a usage comment** (see step 8). Do not guess a value, and do not perform any other side effect.
-2. If the argument starts with `http`, parse it as a URL and extract the trailing integer from `/issues/<N>` (or `/pull/<N>`).
-3. Otherwise, treat the argument as a bare numeric identifier. Resolve the canonical URL by combining it with the repo URL from `gh repo view --json url --jq .url`.
-4. If the result is not a positive integer, treat the input as malformed and post the usage comment per step 8. Do not proceed.
-
-### 2. Locate the analyst summary
-
-The fix stage's contract with `bug-analyze` is the fenced YAML block bracketed by `<!-- bug-pipeline:summary:start -->` / `<!-- bug-pipeline:summary:end -->` markers. The schema is documented verbatim in `specs/010-bug-pipeline-skills/contracts/analyst-summary-schema.md`.
-
-1. Fetch the issue's comments:
-
-   ```bash
-   gh issue view <NNN> --json number,url,title,body,comments
-   ```
-
-2. Iterate the comments **from most recent to oldest** and pick the **first** comment whose body contains both markers. Do not fuzzy-match — the markers are stable anchors and must appear exactly as `<!-- bug-pipeline:summary:start -->` and `<!-- bug-pipeline:summary:end -->` on their own lines.
-3. Extract the YAML between the markers (strip the surrounding ```` ```yaml ```` / ```` ``` ```` fence) and parse it.
-4. **Validate** the parsed object against the schema:
-   - `schema_version` MUST equal `1`. Any other value (or a missing field) is a parse failure.
-   - Required fields: `issue.number`, `issue.url`, `hypothesis`, `affected_files`, `reproduction`, `short_description`. `short_description` MUST match `^[a-z0-9][a-z0-9-]{0,39}$`.
-5. **Failure path** if any of the following hold:
-   - No comment on the issue contains both markers.
-   - The most recent matching comment fails YAML parsing.
-   - `schema_version` is missing or not `1`.
-   - A required field is missing or violates its type/regex constraint.
-
-   In the failure case: post a comment on the issue stating exactly what was looked for (the markers, schema_version 1, the missing/invalid field), and **stop**. Do **not** create a branch, do **not** push, do **not** open a PR. The closing prose should point the maintainer at re-running `/bug-analyze` if no analyst comment exists yet. Post the comment using whichever write capability is available (`gh issue comment` locally / `add_comment` MCP in CI).
-
-The most-recent rule lets a maintainer re-run `/bug-analyze` to supersede a stale or wrong earlier analysis without deleting comments — every stage appends, never edits.
-
-### 3. Resolve the fix-branch name and check for collisions
-
-The fix branch is named `bug/<NNN>-<short_description>` rooted at the project's default branch (`develop`). Per research §R5 the policy is **fail loudly on collision** — never auto-suffix, never reuse-and-amend. The exact name `bug/<NNN>-<short_description>` is required in both execution contexts; it is the load-bearing handle that ties the fix, its tests, and downstream `/bug-review` together.
-
-1. Resolve `<short_description>` as the analyst's `short_description` field, verbatim. It already conforms to `^[a-z0-9][a-z0-9-]{0,39}$` (validated in step 2).
-2. Compose the branch name: `bug/<NNN>-<short_description>`.
-3. Check for remote collision: query the GitHub API for a ref named `refs/heads/bug/<NNN>-<short_description>` on the target repository. Locally this is `git ls-remote --heads origin bug/<NNN>-<short_description>` (empty output = no collision); in CI, equivalent read access is available via the GitHub MCP server's read tools or by listing branches through the API.
-4. Locally also check for a local collision: `git rev-parse --verify --quiet refs/heads/bug/<NNN>-<short_description>`. (In CI the runner's working tree is ephemeral, so a local collision is not possible.)
-5. **Failure path** if either check finds an existing branch: post a comment on the issue naming the colliding branch and the side it lives on (local, remote, or both), and instructing the maintainer to delete or rename the existing branch and re-run `/bug-fix`. Do **not** create a new branch, do **not** push, do **not** open a PR. Do **not** auto-suffix the name. Use the available comment-write tool (`gh issue comment` locally / `add_comment` MCP in CI).
-6. Otherwise, prepare the working tree on a fresh `develop` so the fix can be applied. Locally:
-
-   ```bash
-   git fetch origin develop
-   git checkout -b bug/<NNN>-<short_description> origin/develop
-   ```
-
-   In CI, the runner's working tree starts on `develop` already; no explicit `checkout -b` is needed because the `create_pull_request` Safe-Outputs tool (step 7) takes the desired branch name as a parameter and creates/pushes the branch atomically from the working-tree diff.
-
-### 4. Implement the fix
-
-Apply the actual code change guided by the analyst's `hypothesis`, `affected_files`, and `reproduction`.
-
-1. Read each of the analyst's `affected_files` and the surrounding code. The analyst may have widened or under-localised the search; treat the list as a starting point, not a hard constraint. If `affected_files` is `[]` (empty), broaden the search using the issue body and `hypothesis` as guidance.
-2. Make the change. Keep the diff scoped to the bug — do not refactor adjacent code, do not touch unrelated files.
-3. **Defer all coding-convention questions to the existing `AGENTS.md` files** (root + per-component). Do not paraphrase or duplicate that content here. If you need to know where tests live, what command runs the test suite, or how the layered architecture is organised, read `AGENTS.md` and the relevant `dev/guidelines/` entries.
-4. Stage the change. Locally, also commit it now with a conventional-commit message (e.g., `fix: …`); do **not** push yet — formatting/linting must succeed first (step 5). In CI, leave the change staged in the working tree — the `create_pull_request` Safe-Outputs tool composes the commit and pushes it atomically when the PR is opened (step 7), and you provide the conventional-commit-style message as the PR's commit-message argument at that point.
-
-### 5. Run format and lint
-
-Project formatting and linting are a hard gate before push and PR per FR-010 / FR-012.
-
-1. Run the project's standard format + lint command:
-
-   ```bash
-   uv run invoke format lint
-   ```
-
-2. **If the command exits non-zero, this is the failure path.** It does not matter whether the failure is a format diff, a ruff violation, a `ty` type error, or any other check inside the invoke target — any non-zero exit means the fix stage stops here.
-
-   On lint/format failure:
-   - Post a comment on the issue containing the lint output **verbatim** in a fenced code block (use a triple backtick fence; preserve line breaks). Prepend a one-paragraph prose explanation that the fix was implemented but the format/lint gate failed. Use the available comment-write tool (`gh issue comment` locally / `add_comment` MCP in CI).
-   - **Do NOT push the branch.** (Locally: skip the push step. In CI: do not invoke `create_pull_request`.)
-   - **Do NOT open a PR.**
-   - **Stop.** Locally, the commit on the branch is left in place so the maintainer can `git switch bug/<NNN>-<short_description>` and address the violations manually; the absence of a remote branch makes this unambiguously a failure. In CI the runner is ephemeral, so the staged diff is simply discarded — the maintainer re-runs `/bug-fix <NNN>` after the analyst summary or the underlying code is updated.
-
-3. If `uv run invoke format lint` made formatting changes, ensure the staged/committed diff is lint-clean before continuing — amend the local commit (locally) or restage the formatted files (CI). Re-run the command until it exits zero.
-
-### 6. Open the draft pull request
-
-After format and lint pass, **produce a draft pull request** against `develop` named `bug/<NNN>-<short_description>` and containing the staged fix diff. The PR title is a concise, human-readable summary of the bug being fixed (under ~70 chars). Use the PR-body template from research §R6 (also documented below).
-
-The local-CLI path performs this in two steps: push the branch upstream, then open the PR.
+Find the draft PR opened by `/bug-tdd` on that branch:
 
 ```bash
-git push -u origin bug/<NNN>-<short_description>
-gh pr create --draft \
-  --base develop \
-  --head bug/<NNN>-<short_description> \
-  --title "<concise title>" \
-  --body-file <path-to-body>
+gh pr list --head "<branch>" --json number,title,body,headRefName --jq '.[0]'
 ```
 
-The GHAW-CI path performs this atomically by emitting the `create_pull_request` Safe-Outputs MCP tool with `draft: true`, `base: develop`, `branch: bug/<NNN>-<short_description>`, `title: <concise title>`, and the body from the template below. The Safe-Outputs server commits the staged diff, creates and pushes the branch, and opens the draft PR in a single operation.
+**If a PR exists** (`/bug-tdd` ran with `pr`), set `HAS_PR=true` and validate it:
 
-Both paths produce the same observable outcome: a new draft PR on `develop` from a `bug/<NNN>-<short_description>` branch on `origin`, containing the fix commit and the body below.
+- PR body must contain `AGENT_TEST_COMPLETE`. If not, inform the developer:
+  "No `AGENT_TEST_COMPLETE` marker found. Run `/bug-tdd` first." and **STOP**.
+- PR body must NOT contain `AGENT_FIX_COMPLETE`. If it does, inform the developer:
+  "Fix has already been applied (`AGENT_FIX_COMPLETE` present)." and **STOP**.
 
-**PR body template** (substitute the analyst's verbatim YAML and reproduction list):
+**Bind `<branch>` once, here:** set `<branch>` to the PR's `headRefName`. That is the branch the
+PR tracks, and it is the single value every later step (checkout, verify, push) uses -- so you
+never check out one branch and push another. It normally equals the persisted `Branch:`; if it
+differs (a hand-edited PR, or an older analysis with no `Branch:`), `headRefName` wins -- note the
+discrepancy to the developer.
 
-````markdown
-Closes #<NNN>
-
-## Summary
-
-<2–3 line description of the fix, derived from the analyst's hypothesis and the actual change>
-
-<details>
-<summary>Analyst summary (machine-readable)</summary>
-
-```yaml
-schema_version: 1
-issue:
-  number: <NNN>
-  url: <canonical issue URL>
-hypothesis: |
-  <verbatim from analyst>
-affected_files:
-  - <verbatim>
-reproduction:
-  - "<verbatim>"
-short_description: <verbatim>
-next_command: /bug-fix <NNN>
+```bash
+git fetch origin
+git checkout "<branch>"   # <branch> is now the PR's headRefName
 ```
 
-</details>
+**If no PR exists**, `/bug-tdd` was run without `pr` (fully local). Don't dead-end -- check
+whether the branch itself exists:
 
-## Test plan
-
-- [ ] <reproduction step 1, verbatim from the analyst>
-- [ ] <reproduction step 2, verbatim from the analyst>
-- [ ] <…>
-````
-
-Notes on the body:
-
-- `Closes #<NNN>` is the **first** line of the body — it triggers GitHub's auto-close-on-merge behaviour and is required by FR-011a.
-- The `<details>` block contains the analyst YAML **verbatim** (do not edit, summarise, or reformat it). FR-011b requires reviewers to have full context inside the PR view.
-- The test-plan checkboxes are **unchecked** — the test stage will tick them as it adds tests covering each reproduction step.
-
-### 7. Post the success comment on the issue
-
-Post a single comment on the **issue** (not on the PR) that:
-
-- Names what was changed (1–3 lines, business-value framing).
-- Includes the PR URL.
-- Ends with a final line: `> Next: \`/bug-test <NNN>\``.
-
-Use the available comment-write tool: `gh issue comment <NNN> --body-file <path>` locally, or the `add_comment` Safe-Outputs MCP tool in CI. Do not edit prior comments. The pipeline only ever appends.
-
-### 8. Handle missing or invalid arguments
-
-Per `specs/010-bug-pipeline-skills/contracts/slash-command-protocol.md`, when triggered with no argument, an empty argument, or an argument that does not parse as a positive integer or canonical GitHub URL, the skill MUST:
-
-1. Post a comment on the same issue/PR explaining the expected argument format and giving an example. Use the available comment-write tool (`gh issue comment` locally / `add_comment` MCP in CI).
-2. Stop without performing any other side effects (no branch, no PR, no further comments).
-
-Suggested usage-comment body:
-
-```text
-Usage: `/bug-fix <issue>`
-
-Argument is required and must be either a bare issue number or a full GitHub issue URL. Examples:
-
-- `/bug-fix 206`
-- `/bug-fix https://github.com/opsmill/styrmin/issues/206`
+```bash
+git rev-parse --verify "<branch>" 2>/dev/null || git rev-parse --verify "origin/<branch>" 2>/dev/null
 ```
 
-### 9. Failure path (any other unrecoverable failure)
+- **Branch exists:** set `HAS_PR=false`, check it out (`git checkout "<branch>"`), and read its
+  diff against the default branch to find the test commit. Proceed -- there is no marker to
+  validate in local mode.
+- **Branch does not exist either:** only now is the test genuinely missing. Inform the developer
+  "Run `/bug-tdd <issue>` first." and **STOP**.
 
-If anything outside steps 2, 3, 5, and 8 goes irrecoverably wrong (e.g., the PR-creation step fails after the branch was prepared, the working tree is dirty before step 3, the analyst's `affected_files` are unreadable), post a comment on the issue that:
+## Implement the fix
 
-- Names what the stage was attempting at the point of failure.
-- States plainly where the stage stopped.
-- Describes any partial state — e.g., "a commit was made locally but the branch was not pushed", or "the branch was pushed but the PR was not opened" — so the maintainer can clean up. (In CI the `create_pull_request` Safe-Outputs call is atomic, so the partial-state cases are local-CLI-only; in CI the failure is "the PR was not opened" with no remote branch left behind.)
-- Does **not** include a `> Next:` suggestion line. Failure paths never suggest a next stage.
+Follow steps 1--9.
 
-Use the available comment-write tool (`gh issue comment` locally / `add_comment` MCP in CI). If the partial state (local CLI only) includes a pushed branch with no PR, leave the branch in place; the maintainer can either delete it or open the PR manually. Do **not** silently delete it.
+### Step 1: Read fix strategy
 
-## Examples
+Read the analyst's fix strategy. This is your **starting point**: follow the recommended
+approach, scope, and "Do NOT" guardrails. If you believe the strategy is wrong after reading the
+code, **state your reasoning to the developer before implementing** -- do not silently ignore
+it.
 
-**Success comment on the issue** (≤20 lines):
+### Step 2: Read failing test
 
-```markdown
-### Fix proposed — draft PR opened
+Read the failing test in the PR diff. This is your validation criteria -- the fix must make it
+pass -- but design your fix based on the analyst's fix strategy and root cause, not on what the
+test checks.
 
-Guarded `build_pod_template` against an empty `spec.containers` list and added
-input validation in the GraphQL schema layer. Format and lint pass cleanly.
+### Step 3: Reason about the fix
 
-PR: https://github.com/opsmill/styrmin/pull/231 (draft)
+Before writing any code, reason explicitly about the fix and state it to the developer:
 
-> Next: `/bug-test 206`
+- Is the root cause a shallow symptom (null check, off-by-one) or a deeper design issue?
+- If shallow: a targeted fix is appropriate.
+- If deeper: a proper fix may require refactoring the affected component. Do it -- do NOT paper
+  over a design flaw with a guard clause.
+
+### Step 4: Implement the fix
+
+- Fix the actual root cause, not just the symptom.
+- Do NOT change the test the test-writer wrote.
+- Do NOT refactor code unrelated to the root cause.
+- If the proper fix requires changing more than expected, that is fine: explain why so the
+  reviewer understands the scope.
+- Stage files **by name** (`git add path/to/file`) -- never `git add .` or `git add -A`.
+- Commit the fix with an explicit commit message.
+
+### Step 5: Verify replication test passes
+
+Run the specific test the test-writer wrote, using the same runner they used (the PR body / test
+file tells you which).
+
+- If the test still FAILS, revisit your fix. Do NOT proceed until it passes.
+- Before continuing, verify `git diff` shows **no changes to the test file(s)** from the
+  test-writer's PR. If you accidentally modified a test file, revert those changes.
+
+### Step 6: Pre-CI checks
+
+Run the project's pre-CI checks before pushing. **Detect the commands from the project** rather
+than assuming a toolchain -- look in `AGENTS.md`, a `Makefile`/`invoke`/`tasks` file,
+`pyproject.toml`, or `package.json` scripts. Apply them in this order, fixing and committing
+issues as separate commits (do NOT amend previous commits):
+
+1. **Auto-format** (e.g. `uv run invoke format`, `ruff format`, `npx biome check --write .`,
+   `prettier --write`). If formatting changed source files, re-run the later phases.
+2. **Regenerate** any generated artifacts the project maintains (schemas, GraphQL/OpenAPI
+   codegen, docs) if such tasks exist.
+3. **Lint** (e.g. `ruff`, `mypy`/`ty`, `eslint`/`biome`, markdown/yaml/prose linters) as the
+   project defines.
+4. **Unit tests** for the affected area (e.g. `uv run invoke backend.test-unit`,
+   `npm run test`). Run the broader suite the project expects for a change of this size.
+
+Stage any files changed by generation by name -- never `git add .` / `git add -A`.
+
+**Changelog:** if the project has a changelog mechanism, add an entry for this fix:
+
+- towncrier (a `[tool.towncrier]` config or a `changelog.d`/`newsfragments` dir): create a
+  fragment named after the issue, e.g.
+  `uv run towncrier create -c "<user-facing description>" <issue_number>.fixed.md`. When there is
+  no issue number (free-text bug), towncrier has no number to anchor on -- use its issue-less
+  form with a `+` prefix, e.g. `+<key>.fixed.md` (in the free-text case `<key>` is the slug, with
+  no issue prefix).
+- a `dev/guidelines/changelog.md` describing another process: follow it.
+- otherwise a top-level `CHANGELOG.md`: add a line under the appropriate section.
+
+Write changelog text from the user's perspective, past tense, one sentence, no jargon. Commit
+the generated/edited file. If the project has no changelog mechanism, skip this and note it.
+
+### Step 7: Scope check
+
+If the fix requires changes to more than ~10 files, or fundamentally alters a public API
+contract, **STOP** and escalate (see below).
+
+### Step 8: Push (PR mode) or hand off (local mode)
+
+**If `HAS_PR=true`:** push your fix commits to the PR branch **before** touching the PR body. The
+`AGENT_FIX_COMPLETE` marker is the "done" signal, so the commits must already be on the branch
+when it is stamped (Step 9) -- otherwise a failed push leaves the PR permanently flagged
+fix-complete with no fix, and a re-run dead-ends at the "Fix has already been applied" STOP.
+
+```bash
+git push -u origin "<branch>"
 ```
 
-**Lint-failure comment on the issue** (≤20 lines):
+`<branch>` is the value bound during setup (the PR's `headRefName`) -- the same branch you checked
+out, so the push always lands on the branch the PR tracks.
 
-````markdown
-### Fix stage stopped — `uv run invoke format lint` failed
+If the push fails (protected branch, non-fast-forward, network), **STOP** and report it -- do
+**not** proceed to stamp the marker, so a re-run can retry cleanly. Otherwise continue to Step 9.
 
-The fix was implemented on a local commit, but `uv run invoke format lint`
-reported violations and the branch was **not pushed** and the PR was **not
-opened**. Output below; please address the violations and re-run `/bug-fix 206`.
+**If `HAS_PR=false` (local mode):** do NOT push. Leave the fix committed on the local branch
+`<branch>` and tell the developer it is ready locally -- they can review and open a PR themselves
+(or re-run `/bug-tdd … pr` first if they want the pipeline to manage one). You are done -- skip
+Step 9.
 
-```text
-backend/styrmin_backend/services/cluster.py:142:80:
-  E501 line too long (104 > 99)
-ty error: backend/styrmin_backend/services/cluster.py:140:
-  Argument of type "None" is not assignable to parameter of type "PodSpec"
-```
-````
+### Step 9: Update the PR and mark complete (only if `HAS_PR=true`)
 
-## Notes
+With the commits already pushed, finalize the PR **last**:
 
-- This skill **only** consumes the analyst's machine-readable summary block. It does not re-investigate the issue. If the analyst's hypothesis is wrong, address it by re-running `/bug-analyze` to produce a fresh analyst comment; subsequent `/bug-fix` runs will pick up the most recent valid one.
-- The `<short_description>` field of the analyst summary is the load-bearing input for the branch name. The analyze stage validates its kebab-case shape (`^[a-z0-9][a-z0-9-]{0,39}$`) before posting; the fix stage trusts that validation but re-checks the regex defensively in step 2.
-- Branch-collision policy is "fail loudly, do not auto-suffix". Auto-suffixing was rejected in research §R5 because it pushes branch-discovery complexity into `bug-test` and `bug-review`.
-- The lint-failure path is **the failure path** per FR-010. There is no clearly-flagged-draft-PR variant, no "open the PR with violations and let CI catch it", no "amend and try again silently". The deterministic v1 behaviour is: lint fails → no push, no PR, lint output posted on the issue verbatim.
-- Coding-convention questions (where tests live, what command runs the test suite, layered architecture rules, GraphQL regeneration) defer to `AGENTS.md`. Do not duplicate that content here.
-- The pipeline works on **any** issue regardless of labels (FR-022). Do not gate on labels.
+- Update the PR title to: `fix: <short description> (closes #<issue number>)` (omit the
+  `closes` clause if there is no issue).
+- Update the PR body: if `.github/pull_request_template.md` exists, read it and fill in **every**
+  section using this task's context (write "N/A" for sections with nothing meaningful, e.g.
+  Screenshots -- do not skip or invent). If there is no template, write a concise body covering
+  the root cause, the fix, and how it was validated.
+- Ensure the hidden marker `<!-- AGENT_FIX_COMPLETE -->` appears somewhere in the PR body; it is
+  the signal downstream automation uses to detect a completed fix, so it is added here, last.
+- Use `gh pr edit` to apply the title and body.
+- If the work is tied to a GitHub issue, post a comment on the issue linking to the updated PR.
 
-## Expected Outcome
+## Escalation
 
-On success: a new `bug/<NNN>-<short_description>` branch on `origin`, a **draft** pull request against `develop` whose body starts with `Closes #<NNN>` and embeds the analyst summary in a `<details>` block, and an issue comment on issue `<NNN>` ending with `> Next: /bug-test <NNN>`.
+If at any point you determine that:
 
-On any failure path (missing analyst comment, schema mismatch, branch collision, format/lint failure, or any other irrecoverable error): a comment posted on the issue describing what was attempted and where the stage stopped, **no remote branch**, **no PR**, and **no `> Next:` suggestion**.
+- the analyst's root cause is incorrect and the real cause is substantially different,
+- the test cannot be made to pass with a correct fix (i.e. it tests the wrong behavior), or
+- the fix is beyond the scope an automated agent should handle (step 7),
 
-In neither case does the skill edit or delete prior comments, and in no case does it auto-fire the next stage.
+then inform the developer explaining your findings and **STOP**. Do **not** stamp
+`AGENT_FIX_COMPLETE` (Step 9): an unstamped PR -- even if fix commits were already pushed in
+Step 8 -- correctly signals the fix is incomplete, and the developer can take it from there.
+
+## Common mistakes
+
+| 🚩 Red flag | Do instead |
+| --- | --- |
+| Designing the fix from what the test checks | The analyst's root cause drives the fix; the test is only the validation gate |
+| Editing the test file to make it pass | Never touch the test-writer's test — fix the production code |
+| Papering over a design flaw with a guard clause | If the root cause is structural, fix it properly even if that means a larger change |
+| Refactoring code unrelated to the root cause | Keep the change scoped; escalate if it must exceed ~10 files or change a public API |
+| `git add .` / `git add -A` | Stage changed files by name |
+| Stamping `AGENT_FIX_COMPLETE` before the push lands | In PR mode, push in Step 8 before stamping; the marker is the "done" signal, written last in Step 9 |

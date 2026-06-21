@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "skills": {
+    "bug-analyze": {
+      "source": "opsmill/opsmill-skills",
+      "sourceType": "github",
+      "skillPath": "opsmill-software/skills/bug-analyze/SKILL.md",
+      "computedHash": "92b3197a2cd1e32c04d5b98ea23c9c4abb9265bae6cebd526a0f6180c09b7ef7"
+    },
+    "bug-fix": {
+      "source": "opsmill/opsmill-skills",
+      "sourceType": "github",
+      "skillPath": "opsmill-software/skills/bug-fix/SKILL.md",
+      "computedHash": "cc701c78cda661633754b2c14fd9779b93b498f2170d92aff5b225db9c688a09"
+    },
+    "bug-tdd": {
+      "source": "opsmill/opsmill-skills",
+      "sourceType": "github",
+      "skillPath": "opsmill-software/skills/bug-tdd/SKILL.md",
+      "computedHash": "8b05329d5ed80455b1dd0aff6f58f3f9177fe01422be1ae416859af36b52d65c"
+    },
+    "commit": {
+      "source": "opsmill/opsmill-skills",
+      "sourceType": "github",
+      "skillPath": "opsmill-software/skills/commit/SKILL.md",
+      "computedHash": "eefee4e6b353ba302806c9ce9c99f3194e14bd2450f025d885a5e3272faddcc0"
+    },
+    "create-issue": {
+      "source": "opsmill/opsmill-skills",
+      "sourceType": "github",
+      "skillPath": "opsmill-software/skills/create-issue/SKILL.md",
+      "computedHash": "3b0676012b9813f5eabac4f5e829e1eaff706e820563a2fedabf97041324bf3a"
+    },
+    "grill-idea": {
+      "source": "opsmill/opsmill-skills",
+      "sourceType": "github",
+      "skillPath": "opsmill-software/skills/grill-idea/SKILL.md",
+      "computedHash": "bb7cb5688036cac6afed664700ce9b9252757043b03ec5b7ea742545258c45b2"
+    },
+    "pr": {
+      "source": "opsmill/opsmill-skills",
+      "sourceType": "github",
+      "skillPath": "opsmill-software/skills/pr/SKILL.md",
+      "computedHash": "057328d423cba7a8ba0999e5a53c8c61a3a3a872b8fec2d71c78105f6aad1702"
+    },
+    "pr-monitor": {
+      "source": "opsmill/opsmill-skills",
+      "sourceType": "github",
+      "skillPath": "opsmill-software/skills/pr-monitor/SKILL.md",
+      "computedHash": "02e515412dca40279db9d8bf1bd84a8448b6f00d76c3adb7c5ce4fad2c805eb4"
+    },
+    "rebase": {
+      "source": "opsmill/opsmill-skills",
+      "sourceType": "github",
+      "skillPath": "opsmill-software/skills/rebase/SKILL.md",
+      "computedHash": "16d0c1cc436547150e89ec6ec2996dbe57b4a124f094b9447acf761263d41f84"
+    }
+  }
+}
