@@ -19,6 +19,8 @@ except ImportError as exc:
 from styrmin_sdk.exceptions import StyrminAuthenticationError
 
 from styrminctl.errors import AsymmetricEnvCredentialsError, TokenStoreError
+from styrminctl.telemetry import runtime as _telemetry
+from styrminctl.telemetry.store import TelemetryStore
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -29,6 +31,11 @@ if TYPE_CHECKING:
 class _AuthBoundaryApp:
     """Callable proxy that installs the auth error boundary around the Cyclopts app.
 
+    Telemetry observes the **final** outcome by wrapping the auth boundary: the
+    inner call (boundary included) runs inside ``telemetry.runtime.run``, so a
+    credential failure's ``SystemExit(1)`` is the outcome telemetry classifies.
+    Telemetry is failure-isolated — it never changes stdout/stderr/exit code.
+
     Forwards every other attribute access to the underlying Cyclopts app so
     callers that introspect (e.g. ``app.generate_completion(...)``) keep
     working unchanged.
@@ -36,13 +43,23 @@ class _AuthBoundaryApp:
 
     def __init__(self, inner: App) -> None:
         self._inner = inner
+        self._telemetry_store = TelemetryStore()
 
-    def __call__(self, args: Sequence[str] | None = None) -> object:
+    def _call_with_auth_boundary(self, args: Sequence[str] | None) -> object:
+        """Run the inner app with the credential-failure error boundary."""
         try:
             return self._inner(args)
         except (StyrminAuthenticationError, TokenStoreError, AsymmetricEnvCredentialsError) as exc:
             print(str(exc), file=sys.stderr)
             raise SystemExit(1) from exc
+
+    def __call__(self, args: Sequence[str] | None = None) -> object:
+        return _telemetry.run(
+            self._call_with_auth_boundary,
+            args,
+            app=self._inner,
+            store=self._telemetry_store,
+        )
 
     def generate_completion(
         self,
