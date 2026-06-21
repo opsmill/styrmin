@@ -140,6 +140,42 @@ class TestValidateParameterValues:
         assert result == {}
 
 
+INFRAHUB_MCP_DEFINITIONS = [
+    DriverParameterDefinition(
+        name="infrahub_address",
+        label="Infrahub address",
+        kind=DriverParameterKind.STRING,
+    ),
+]
+
+
+class TestInfrahubMcpParameters:
+    """Parameter-validation tests for the infrahub-mcp Driver (015, US1).
+
+    US1 declares only ``infrahub_address``. Later chunks (US2/US3) extend this
+    class to cover ``mcp_read_only`` and ``mcp_log_level``.
+    """
+
+    def test_infrahub_address_only_resolves(self) -> None:
+        values = {"infrahub_address": "https://infrahub.example.com"}
+        result = validate_parameter_values(INFRAHUB_MCP_DEFINITIONS, values)
+        assert result == {"infrahub_address": "https://infrahub.example.com"}
+
+    def test_missing_infrahub_address_raises(self) -> None:
+        with pytest.raises(
+            ServiceError, match="Missing required parameter: 'infrahub_address'"
+        ):
+            validate_parameter_values(INFRAHUB_MCP_DEFINITIONS, {})
+
+    def test_unknown_parameter_raises(self) -> None:
+        values = {
+            "infrahub_address": "https://infrahub.example.com",
+            "bogus": 1,
+        }
+        with pytest.raises(ServiceError, match="Unknown parameter: 'bogus'"):
+            validate_parameter_values(INFRAHUB_MCP_DEFINITIONS, values)
+
+
 class TestParseParameterDefinitions:
     """Tests for parse_parameter_definitions()."""
 
