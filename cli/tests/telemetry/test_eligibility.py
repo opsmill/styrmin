@@ -1,10 +1,16 @@
-"""Unit tests for the env + persisted rungs of :func:`should_emit` (T019, US2).
+"""Unit tests for the FR-014 config rungs of :func:`should_emit` (T019/US2, T024/US3).
 
 Covers FR-014's configuration rungs — ``STYRMIN_TELEMETRY=0``, ``DO_NOT_TRACK=1``,
-and the persisted ``enabled=false`` flag — each independently suppressing
-emission, plus env opt-out overriding a persisted ``enabled=true``. The
-command-eligibility rung (T016) and the CI/non-TTY rungs (US3/T025) are tested
-elsewhere; here we drive an eligible route and vary only the config levers.
+the persisted ``enabled=false`` flag (US2), and the ``CI`` / non-TTY-``stderr``
+automation rungs (US3) — each independently suppressing emission, plus env
+opt-out overriding a persisted ``enabled=true`` and the FR-014 precedence
+ordering. The command-eligibility rung (T016) is tested elsewhere; here we drive
+an eligible route and vary only the config/automation levers.
+
+The autouse ``_force_interactive_stderr`` fixture (``conftest.py``) makes the
+suite's pre-existing "interactive terminal" assumption explicit; the US3 tests
+inject ``is_tty`` into :func:`effective_state` directly to isolate the CI and
+non-TTY rungs.
 
 ``effective_state`` (the shared reason helper) is exercised directly for reason
 strings; ``should_emit`` is exercised for the boolean ladder.
@@ -21,6 +27,7 @@ import pytest
 # against this inner app (see ``cli._AuthBoundaryApp.__call__``), so the
 # command-route closed set used here matches production exactly.
 from styrminctl.cli_commands import app
+from styrminctl.telemetry import eligibility
 from styrminctl.telemetry.eligibility import effective_state, should_emit
 from styrminctl.telemetry.store import TelemetryStore
 
@@ -108,3 +115,71 @@ def test_styrmin_telemetry_reported_before_do_not_track(store: TelemetryStore) -
     env = {"STYRMIN_TELEMETRY": "0", "DO_NOT_TRACK": "1"}
     # FR-014 order: STYRMIN_TELEMETRY is the first failing rung.
     assert effective_state(store=store, env=env) == (False, "STYRMIN_TELEMETRY=0")
+
+
+# -- rung: CI detected (US3, T024) ------------------------------------------
+#
+# These tests pass ``is_tty=True`` so that an *enabled* result is attributable
+# to the CI rung alone, isolated from the non-TTY rung that follows it.
+
+
+@pytest.mark.parametrize("ci_value", ["true", "1", "True", "yes", "anything"])
+def test_ci_truthy_suppresses_emit(store: TelemetryStore, ci_value: str) -> None:
+    env = {"CI": ci_value}
+    assert should_emit(app=app, tokens=ELIGIBLE_TOKENS, store=store, env=env) is False
+    enabled, reason = effective_state(store=store, env=env, is_tty=True)
+    assert enabled is False
+    assert reason == "non-interactive: CI detected"
+
+
+@pytest.mark.parametrize("ci_value", ["", "0", "false", "False"])
+def test_ci_falsey_does_not_suppress(store: TelemetryStore, ci_value: str) -> None:
+    # Falsey CI values (and unset) are treated as "not CI" and leave emission on.
+    env = {"CI": ci_value}
+    assert should_emit(app=app, tokens=ELIGIBLE_TOKENS, store=store, env=env) is True
+    assert effective_state(store=store, env=env, is_tty=True) == (True, "default; interactive terminal")
+
+
+def test_ci_unset_does_not_suppress(store: TelemetryStore) -> None:
+    assert should_emit(app=app, tokens=ELIGIBLE_TOKENS, store=store, env={}) is True
+    assert effective_state(store=store, env={}, is_tty=True) == (True, "default; interactive terminal")
+
+
+# -- rung: stderr is not a TTY (US3, T024) ----------------------------------
+
+
+def test_non_tty_stderr_suppresses_emit(store: TelemetryStore) -> None:
+    enabled, reason = effective_state(store=store, env={}, is_tty=False)
+    assert enabled is False
+    assert reason == "non-interactive: stderr is not a TTY"
+
+
+def test_should_emit_reads_stderr_isatty(store: TelemetryStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    # ``should_emit`` has no ``is_tty`` knob: it must defer to the real
+    # ``sys.stderr.isatty()`` probe. Force the probe false and assert no emit;
+    # force it true and assert emit (the autouse fixture already forces true,
+    # so we override it explicitly here for both directions).
+    monkeypatch.setattr(eligibility, "_stderr_is_tty", lambda: False)
+    assert should_emit(app=app, tokens=ELIGIBLE_TOKENS, store=store, env={}) is False
+    assert effective_state(store=store, env={}) == (False, "non-interactive: stderr is not a TTY")
+
+    monkeypatch.setattr(eligibility, "_stderr_is_tty", lambda: True)
+    assert should_emit(app=app, tokens=ELIGIBLE_TOKENS, store=store, env={}) is True
+    assert effective_state(store=store, env={}) == (True, "default; interactive terminal")
+
+
+# -- precedence + restoration: both rungs cleared => emit (FR-014) ----------
+
+
+def test_ci_reported_before_non_tty(store: TelemetryStore) -> None:
+    # When both CI is set AND stderr is non-TTY, CI is the first failing rung.
+    env = {"CI": "true"}
+    assert effective_state(store=store, env=env, is_tty=False) == (False, "non-interactive: CI detected")
+
+
+def test_both_automation_rungs_restored_emits(store: TelemetryStore) -> None:
+    # CI unset/falsey AND stderr is a TTY => emit (the US3 happy path).
+    enabled, reason = effective_state(store=store, env={"CI": "0"}, is_tty=True)
+    assert enabled is True
+    assert reason == "default; interactive terminal"
+    assert should_emit(app=app, tokens=ELIGIBLE_TOKENS, store=store, env={"CI": "0"}) is True

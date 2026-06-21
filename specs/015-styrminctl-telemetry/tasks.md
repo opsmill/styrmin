@@ -100,11 +100,11 @@ command against a local sink emits zero requests.
 
 ### Tests for User Story 3
 
-- [ ] T024 [P] [US3] Unit tests for the CI + non-TTY rungs of `should_emit` in `cli/tests/telemetry/test_eligibility.py`: `CI=true` (and other truthy values) yields no emit; `stderr.isatty()` false yields no emit; both restored ⇒ emit (FR-014)
+- [X] T024 [P] [US3] Unit tests for the CI + non-TTY rungs of `should_emit` in `cli/tests/telemetry/test_eligibility.py`: `CI=true` (and other truthy values) yields no emit; `stderr.isatty()` false yields no emit; both restored ⇒ emit (FR-014)
 
 ### Implementation for User Story 3
 
-- [ ] T025 [US3] Extend `should_emit()` in `cli/src/styrminctl/telemetry/eligibility.py` with the `CI` (unset/falsey) and `sys.stderr.isatty()` rungs and fold them into the `status` reason reporting (FR-014)
+- [X] T025 [US3] Extend `should_emit()` in `cli/src/styrminctl/telemetry/eligibility.py` with the `CI` (unset/falsey) and `sys.stderr.isatty()` rungs and fold them into the `status` reason reporting (FR-014)
 
 **Checkpoint**: All three stories complete — full FR-014/FR-015 eligibility ladder enforced.
 
