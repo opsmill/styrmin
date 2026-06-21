@@ -46,6 +46,11 @@ rationale, and the alternatives rejected.
   is a member of that command's declared option set and that **no value** is captured (FR-008, FR-010).
   Scanning tokens for presence (rather than diffing `BoundArguments` against defaults) avoids the
   false-negative where a user explicitly passes a value equal to the default.
+- **Hard constraint (critique E1)**: name extraction MUST NOT trigger Cyclopts value **conversion**.
+  Materializing full `BoundArguments` can invoke converters — e.g. a `@file` value convention would
+  cause Cyclopts to **read the referenced file** (`--config @secrets.json`). Extraction therefore uses
+  token-scan + parameter metadata only; values/files are never read. A unit test passes a secret /
+  `@file` option and asserts the file is never opened and no value appears in the payload.
 - **Alternatives rejected**:
   - *Diffing `BoundArguments` against signature defaults* — a user passing the default value looks
     "unset"; brittle.

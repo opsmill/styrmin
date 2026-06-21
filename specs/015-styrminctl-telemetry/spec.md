@@ -22,6 +22,8 @@ An operator runs everyday commands on an interactive workstation. Each eligible 
 
 **Why this priority**: This is the core value of the feature — without the silent, safe, scrubbed dispatch path there is no telemetry signal at all. It must never degrade the operator's experience, or the feature is unshippable.
 
+> **Measurement note (clarifies "which commands operators actually use")**: because `event_id` is a deterministic function of `(install_id, command)` (FR-012) and events are de-duplicated server-side, the signal measures **per-install reach** ("how many installs have used command X") rather than raw **call frequency**. Dropped repeat-counts are an accepted trade-off (see Assumptions); this story is satisfied by reach, not invocation counts.
+
 **Independent Test**: Run a real command against a local sink with telemetry at defaults and assert exactly one well-formed, scrubbed envelope is received; then point at a hung/blackhole endpoint and assert the command's behaviour and timing are unchanged and nothing is printed.
 
 **Acceptance Scenarios**:
@@ -86,7 +88,7 @@ The same commands run in CI or non-interactive contexts emit nothing without any
 - **FR-007**: `data` MUST contain only these keys: `event_id`, `install_id`, `command`, `options`, `outcome`, `error_category`, `styrminctl_version`, `python_version`, `os_family`.
 - **FR-008**: `data` MUST exclude server address, hostnames, usernames, tokens, deployment/cluster/environment names, argument and option **values**, file paths, and IPs.
 - **FR-009**: `command` MUST be the resolved command-route token from a closed set (e.g. `"deployments update"`), derived from the dispatched route, never from raw process arguments.
-- **FR-010**: `options` MUST be the canonical long-form names of explicitly-passed options, deduplicated and sorted, with positionals excluded and repeat-counts dropped.
+- **FR-010**: `options` MUST be the canonical long-form names of explicitly-passed options, deduplicated and sorted, with positionals excluded and repeat-counts dropped. Deriving the option names MUST NOT read or convert option **values** — in particular it MUST NOT trigger any file-loading convention (e.g. a `@file` argument value), so that no value or file content is ever read on the telemetry path.
 - **FR-011**: `outcome` MUST be `"success"` or `"failure"`; `error_category` MUST be `null` on success and otherwise one of `auth | network | validation | not_found | server | usage | unknown`, bucketed by the typed-error class — never derived from a human-readable message.
 - **FR-012**: `event_id` MUST be `<first 8 chars of install_id>` + `"-"` + `command` with spaces replaced by `_` (e.g. `a1b2c3d4-deployments_update`).
 - **FR-013**: `install_id` MUST be a random anonymous identifier generated once and persisted; `styrminctl_version`, `python_version`, and `os_family` MUST be coarse (OS family only, e.g. `Linux` / `Darwin` / `Windows` — never kernel/version detail).
@@ -128,6 +130,8 @@ The same commands run in CI or non-interactive contexts emit nothing without any
 - The server adds the ingestion timestamp and any geo/IP enrichment; the client never sends a timestamp or any network identifier.
 - `payload_format` is the string `"1.0"` (the server treats it as an opaque string; resolved from the PRD open question).
 - This is the first time `styrminctl` calls a destination other than the Styrmin GraphQL API; a `CONTEXT.md` glossary update and a short ADR recording the external fire-and-forget call are warranted.
+- **Disclosure stance (deliberate)**: telemetry is default-on with **no first-run prompt and no banner** (US5 — completely silent). Trust is provided instead by (a) a one-step persistent opt-out and respect for `DO_NOT_TRACK`, (b) default exclusion of CI / non-interactive contexts, and (c) explicit documentation in `cli/README.md` and a `docs/` privacy note describing exactly what is collected. This mirrors the opt-out telemetry pattern used by comparable developer tools; the silent-plus-documented disclosure is an intentional product choice, not an oversight.
+- **E2E harness**: the feature's E2E exercises the **real `styrminctl` process against a real local HTTP sink** (via `STYRMIN_TELEMETRY_ENDPOINT`). It is `api_only` and **does not require the vCluster/Kubernetes E2E fixture** — it must not depend on a cluster, since telemetry is a side-channel unrelated to deployment infrastructure. "Real infrastructure, not mocks" (Constitution §V) is satisfied by the real CLI subprocess and the real socket/HTTP server.
 
 ## Dependencies
 

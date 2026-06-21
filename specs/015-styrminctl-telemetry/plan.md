@@ -107,8 +107,8 @@ cli/
 ├── pyproject.toml                  # MODIFIED: add httpx as a direct dependency
 └── README.md                       # MODIFIED: telemetry/privacy section
 
-backend/tests/e2e/ (or cli E2E home)
-└── test_styrminctl_telemetry.py    # NEW api_only E2E against a local sink
+cli/tests/e2e/                      # NEW: feature E2E lives with the CLI (no cluster needed)
+└── test_styrminctl_telemetry.py    # NEW api_only E2E: real CLI subprocess -> real local HTTP sink
 
 docs/                               # MODIFIED: privacy note
 CONTEXT.md                          # MODIFIED: Telemetry glossary entry + CLI entry amendment
@@ -127,7 +127,9 @@ command modules untouched (failure isolation).
   (incl. the auth-boundary `SystemExit`), and dispatches one event — re-raising everything unchanged.
 - **Command route** (R2): `app.parse_commands(tokens)` → space-joined closed-set token.
 - **Options** (R3): resolve the dispatched command's argument collection; map supplied `-`-prefixed
-  tokens to canonical long names; dedupe + sort; values never read.
+  tokens to canonical long names; dedupe + sort. **Values are never read or converted** — extraction
+  uses token-scan + parameter metadata only and MUST NOT trigger Cyclopts value conversion (no `@file`
+  loading). (Critique E1.)
 - **Dispatch** (R4): daemon thread runs a sync `httpx` POST; main thread `join`s with the budget; on
   timeout it abandons the (daemon) thread → hard ≤ 200 ms cap for every endpoint state.
 - **State** (R6): `TelemetryStore` mirrors `TokenStore` (atomic write, `0o600`/`0o700`, ephemeral
@@ -146,11 +148,21 @@ command modules untouched (failure isolation).
   `event_id` composition), `categorize_error()` (each exception type → pair), `build_envelope()` +
   fixed checksum round-trip vector, `dispatch()` (hung-endpoint latency budget + failure isolation),
   and the `telemetry` command (set/read round-trip + env-overrides-persisted precedence).
-- **E2E** (`api_only`, Constitution §V): local-sink scenario asserting (a) one well-formed envelope
-  with server-verifiable checksum, (b) no forbidden values with known-sensitive inputs, (c) ≤ 200 ms
-  added latency / unchanged exit behaviour incl. hung endpoint, (d) zero requests under each opt-out
-  lever. Must be observed to PASS locally with recorded evidence (node id, command, timestamp, cluster
-  id, verbatim `PASSED` line).
+- **Hardening from critique**:
+  - *E1 — no value reads*: a test passes a secret-bearing / `@file` option and asserts the file is
+    never opened and the value never appears (extraction is token-scan + metadata only).
+  - *E2 — no at-exit stderr noise*: the dispatch thread target has a top-level catch-all so a hung/
+    dying thread cannot emit `Exception ignored in thread ...` at interpreter teardown; a test asserts
+    **zero stderr bytes** when the process exits with an in-flight/hung dispatch thread (protects SC-003).
+  - *E3 — non-flaky budget test*: assert the bound via an injectable/mocked budget (mechanism), with a
+    generous wall-clock guard rather than a tight `< 200 ms` wall-clock assertion that flakes on CI.
+- **E2E** (`api_only`, Constitution §V) — lives in `cli/tests/e2e/`, runs the **real `styrminctl`
+  subprocess against a real local HTTP sink**, and **does not use the vCluster fixture** (no cluster
+  required). Asserts (a) one well-formed envelope with server-verifiable checksum, (b) no forbidden
+  values with known-sensitive inputs, (c) ≤ 200 ms added latency / unchanged exit behaviour incl. hung
+  endpoint, (d) zero requests under each opt-out lever. Must be observed to PASS locally with recorded
+  evidence (node id, exact command, ISO-8601 timestamp, verbatim `PASSED` line). Real CLI process +
+  real socket satisfies "real infrastructure, not mocks".
 - **GraphQL propagation**: N/A — no schema change.
 
 ## Documentation deliverables (§VII, in this change)

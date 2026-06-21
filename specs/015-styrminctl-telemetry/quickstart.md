@@ -68,8 +68,8 @@ CI=true               ... clusters list     # -> 0 requests (non-interactive)
 
 ## E2E (Constitution §V, non-negotiable)
 
-A single `api_only` E2E in `backend/tests/e2e/` (or the CLI's E2E location) runs `styrminctl` against a
-local sink via `STYRMIN_TELEMETRY_ENDPOINT` and asserts:
+A single `api_only` E2E in `cli/tests/e2e/` runs the **real `styrminctl` subprocess** against a real
+local HTTP sink via `STYRMIN_TELEMETRY_ENDPOINT` (no vCluster/Kubernetes fixture required) and asserts:
 
 - (a) exactly one well-formed envelope with a server-verifiable checksum,
 - (b) no forbidden values in the payload (run with known-sensitive inputs),
