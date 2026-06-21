@@ -29,9 +29,9 @@ CLI package lives at `cli/src/styrminctl/`; tests at `cli/tests/`. New telemetry
 
 **Purpose**: Shared building blocks every user story depends on. MUST complete before Phase 3.
 
-- [ ] T004 Implement telemetry configuration in `cli/src/styrminctl/telemetry/config.py`: the default production endpoint URL, `STYRMIN_TELEMETRY_ENDPOINT` override resolution, and a single tunable budget constant `TELEMETRY_BUDGET_MS = 200` (FR-003, FR-018)
-- [ ] T005 Implement `TelemetryStore` in `cli/src/styrminctl/telemetry/store.py` mirroring `cli/src/styrminctl/auth/token_store.py`: path `${XDG_DATA_HOME:-$HOME/.local/share}/styrminctl/telemetry.json`, atomic temp-file write (`O_CREAT|O_EXCL|O_WRONLY`, mode `0o600`) + `chmod` + `rename`, parent dir `0o700`; lazy `install_id` (uuid4 hex) generated once; load/save `enabled`; absent file ⇒ enabled; unwritable dir ⇒ ephemeral in-memory `install_id`, never raises (FR-013, FR-017)
-- [ ] T006 [P] Unit tests for `TelemetryStore` in `cli/tests/telemetry/test_store.py`: round-trip `{install_id, enabled}`, `install_id` stability across two loads, atomic write + strict perms (`0o600`/`0o700`), unwritable-dir ephemeral fallback (no raise), install_id persists when `enabled=false` (prior art: `cli/tests/auth/test_token_store.py`)
+- [X] T004 Implement telemetry configuration in `cli/src/styrminctl/telemetry/config.py`: the default production endpoint URL, `STYRMIN_TELEMETRY_ENDPOINT` override resolution, and a single tunable budget constant `TELEMETRY_BUDGET_MS = 200` (FR-003, FR-018)
+- [X] T005 Implement `TelemetryStore` in `cli/src/styrminctl/telemetry/store.py` mirroring `cli/src/styrminctl/auth/token_store.py`: path `${XDG_DATA_HOME:-$HOME/.local/share}/styrminctl/telemetry.json`, atomic temp-file write (`O_CREAT|O_EXCL|O_WRONLY`, mode `0o600`) + `chmod` + `rename`, parent dir `0o700`; lazy `install_id` (uuid4 hex) generated once; load/save `enabled`; absent file ⇒ enabled; unwritable dir ⇒ ephemeral in-memory `install_id`, never raises (FR-013, FR-017)
+- [X] T006 [P] Unit tests for `TelemetryStore` in `cli/tests/telemetry/test_store.py`: round-trip `{install_id, enabled}`, `install_id` stability across two loads, atomic write + strict perms (`0o600`/`0o700`), unwritable-dir ephemeral fallback (no raise), install_id persists when `enabled=false` (prior art: `cli/tests/auth/test_token_store.py`)
 
 ---
 
