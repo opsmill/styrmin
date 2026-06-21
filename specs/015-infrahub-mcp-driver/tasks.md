@@ -124,9 +124,9 @@ Driver artifacts under `driver/examples/infrahub-mcp/`; docs under `driver/DRIVE
 
 **Purpose**: Validate the whole feature against the quickstart and project gates.
 
-- [ ] T015 Run `uv run invoke format lint` and fix any issues in the new/changed test code. (Constitution §VI)
-- [ ] T016 Run the full unit suite for the touched modules: `uv run pytest backend/tests/unit/services/driver/test_deserializer.py backend/tests/unit/services/test_parameters.py -v` and confirm all infrahub-mcp tests pass. (quickstart steps 1–3)
-- [ ] T017 Run `uv run invoke validate-graphql` is **not** required (no GraphQL change); instead run the quickstart's doc-reference check (`grep` for `infrahub-mcp` in `driver/DRIVERS.md` and `docs/docs/drivers/loading-drivers.md`) and confirm both surfaces reference the Driver. (quickstart step 5)
+- [X] T015 Run `uv run invoke format lint` and fix any issues in the new/changed test code. (Constitution §VI)
+- [X] T016 Run the full unit suite for the touched modules: `uv run pytest backend/tests/unit/services/driver/test_deserializer.py backend/tests/unit/services/test_parameters.py -v` and confirm all infrahub-mcp tests pass. (quickstart steps 1–3)
+- [X] T017 Run `uv run invoke validate-graphql` is **not** required (no GraphQL change); instead run the quickstart's doc-reference check (`grep` for `infrahub-mcp` in `driver/DRIVERS.md` and `docs/docs/drivers/loading-drivers.md`) and confirm both surfaces reference the Driver. (quickstart step 5)
 
 ---
 
