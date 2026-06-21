@@ -78,14 +78,14 @@ persisted `enabled`).
 
 ### Tests for User Story 2
 
-- [ ] T019 [P] [US2] Unit tests for the env/persisted rungs of `should_emit` in `cli/tests/telemetry/test_eligibility.py`: one assertion per rung — `STYRMIN_TELEMETRY=0`, `DO_NOT_TRACK=1`, persisted `enabled=false` each independently yield no emit; env opt-out overrides a persisted `enabled=true` (FR-014)
-- [ ] T020 [P] [US2] Unit tests for the `telemetry` command in `cli/tests/telemetry/test_telemetry_command.py`: `disable`→`status` shows disabled-with-reason, `enable`→persists, set/read round-trip, status reason precedence (env beats persisted), `enable`/`disable`/`status` succeed under an unwritable dir (pattern: `cli/tests/commands/test_auth_commands.py`)
+- [X] T019 [P] [US2] Unit tests for the env/persisted rungs of `should_emit` in `cli/tests/telemetry/test_eligibility.py`: one assertion per rung — `STYRMIN_TELEMETRY=0`, `DO_NOT_TRACK=1`, persisted `enabled=false` each independently yield no emit; env opt-out overrides a persisted `enabled=true` (FR-014)
+- [X] T020 [P] [US2] Unit tests for the `telemetry` command in `cli/tests/telemetry/test_telemetry_command.py`: `disable`→`status` shows disabled-with-reason, `enable`→persists, set/read round-trip, status reason precedence (env beats persisted), `enable`/`disable`/`status` succeed under an unwritable dir (pattern: `cli/tests/commands/test_auth_commands.py`)
 
 ### Implementation for User Story 2
 
-- [ ] T021 [US2] Extend `should_emit()` in `cli/src/styrminctl/telemetry/eligibility.py` with the env + persisted rungs: `STYRMIN_TELEMETRY ≠ 0` ∧ `DO_NOT_TRACK ≠ 1` ∧ persisted flag ≠ disabled, with env opt-out taking precedence; expose a helper that returns the effective state **and the reason** for `status` (FR-014, FR-016)
-- [ ] T022 [US2] Implement the `telemetry` command group (`enable|disable|status`) in `cli/src/styrminctl/commands/telemetry.py` per `contracts/cli-telemetry-command.md`, persisting via `TelemetryStore`; `status` prints effective state + reason; never crashes on an unwritable dir (FR-016)
-- [ ] T023 [US2] Register the `telemetry` command group on the root app in `cli/src/styrminctl/cli_commands.py` (and ensure the route is in the ineligible set from T016)
+- [X] T021 [US2] Extend `should_emit()` in `cli/src/styrminctl/telemetry/eligibility.py` with the env + persisted rungs: `STYRMIN_TELEMETRY ≠ 0` ∧ `DO_NOT_TRACK ≠ 1` ∧ persisted flag ≠ disabled, with env opt-out taking precedence; expose a helper that returns the effective state **and the reason** for `status` (FR-014, FR-016)
+- [X] T022 [US2] Implement the `telemetry` command group (`enable|disable|status`) in `cli/src/styrminctl/commands/telemetry.py` per `contracts/cli-telemetry-command.md`, persisting via `TelemetryStore`; `status` prints effective state + reason; never crashes on an unwritable dir (FR-016)
+- [X] T023 [US2] Register the `telemetry` command group on the root app in `cli/src/styrminctl/cli_commands.py` (and ensure the route is in the ineligible set from T016)
 
 **Checkpoint**: US2 is independently shippable — a complete, inspectable, persistent opt-out.
 

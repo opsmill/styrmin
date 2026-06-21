@@ -3,6 +3,7 @@ from importlib.metadata import version
 from cyclopts import App
 
 from styrminctl.commands.auth import auth_app, login, logout, whoami
+from styrminctl.commands.telemetry import telemetry_app
 
 app = App(name="styrminctl", help="Styrmin client CLI.", version=version("cli"))
 
@@ -18,6 +19,10 @@ app.command(
 )
 app.command("styrminctl.commands.tasks:tasks_app", name="tasks", help="View tasks.")
 app.command(auth_app)
+# Telemetry opt-out group. Registered under the name ``telemetry`` so it matches
+# the ineligible route in ``telemetry.eligibility._INELIGIBLE_ROOT_COMMANDS`` and
+# never emits an event itself (FR-015).
+app.command(telemetry_app)
 
 # Top-level shorthand: ``styrminctl login`` / ``logout`` / ``whoami``
 # mirror the same functions registered under the ``auth`` subapp so users
