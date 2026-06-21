@@ -1,6 +1,6 @@
 # Session Retrospectives
 
-Use `speckit.retrospect` at the end of an agent session when the session exposed avoidable context-management friction. The command is provided by the SpecKit `retrospect` extension under `.specify/extensions/retrospect/`; it reviews the current conversation and proposes improvements to shared instructions, skills, templates, documentation, and architecture follow-up.
+Use `speckit.opsmill.retrospect` at the end of an agent session when the session exposed avoidable context-management friction. The command is provided by the SpecKit `opsmill` extension under `.specify/extensions/opsmill/`; it reviews the current conversation and proposes improvements to shared instructions, skills, templates, documentation, and architecture follow-up.
 
 ## When to Run
 
@@ -17,14 +17,14 @@ Run a retrospective when one or more of these happened:
 The extension source lives at:
 
 ```text
-.specify/extensions/retrospect/
+.specify/extensions/opsmill/
 ```
 
 The runtime command is registered as:
 
 ```text
-.agents/commands/speckit.retrospect.run.md
-.agents/commands/speckit.retrospect.md
+.agents/commands/speckit.opsmill.retrospect.agent.md
+.agents/commands/speckit.opsmill.retrospect.md
 ```
 
 Update the extension command source first, then refresh the runtime command using the same extension-managed pattern as the other `speckit.*` commands.
