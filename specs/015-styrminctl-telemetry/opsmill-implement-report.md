@@ -79,5 +79,5 @@ Dual-pass review (code, tests, errors, types, comments) over `ca417c8..HEAD`. Hi
 1. **Open a PR** for `015-styrminctl-telemetry` → `develop` (branch is rebased on latest `develop`).
 2. (Optional, recommended) Apply the deferred **TypedDict + `Literal`** type hardening for the `data`/envelope contract and the `outcome`/`error_category` closed sets — the one review item that materially raises compile-time safety.
 3. (Optional) Consider casefolding the `CI` falsey comparison and adding a one-line stderr advisory when `telemetry enable/disable` cannot persist (unwritable dir).
-4. Confirm the production telemetry endpoint URL in `config.py` (`https://telemetry.opsmill.cloud/styrminctl`) matches the actual ingestion endpoint before release.
+4. Confirm the production telemetry endpoint URL in `config.py` (`https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl`) matches the actual ingestion endpoint before release.
 5. Run `speckit.opsmill.extract` when ready to fold durable knowledge (the ADR is already in place at `dev/adr/0047`).

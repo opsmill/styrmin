@@ -14,7 +14,7 @@ from typing import Final
 
 #: Default production ingestion endpoint. Overridable via the
 #: ``STYRMIN_TELEMETRY_ENDPOINT`` environment variable (tests / local sinks).
-DEFAULT_TELEMETRY_ENDPOINT: Final[str] = "https://telemetry.opsmill.cloud/styrminctl"
+DEFAULT_TELEMETRY_ENDPOINT: Final[str] = "https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl"
 
 #: Name of the environment variable that overrides the destination endpoint.
 ENDPOINT_ENV_VAR: Final[str] = "STYRMIN_TELEMETRY_ENDPOINT"
