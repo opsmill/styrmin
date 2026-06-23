@@ -2,6 +2,7 @@ from pathlib import Path
 from types import NoneType
 from typing import Any
 
+import jinja2
 import pytest
 import yaml
 
@@ -13,7 +14,30 @@ from styrmin_backend.services.driver.exceptions import (
     DeserializationError,
 )
 from styrmin_backend.services.driver.models.resources.driver import DriverSpec
+from styrmin_backend.services.driver.models.resources.parameters import (
+    DriverParameterKind,
+)
+from styrmin_backend.services.driver.models.resources.services import (
+    ServiceKind,
+    ServiceScope,
+)
 from styrmin_backend.services.driver.models.structure.resource import Role
+
+# Path to the real infrahub-mcp Driver artifacts (driver/examples/infrahub-mcp/).
+# test file lives at backend/tests/unit/services/driver/, so walk up to repo root.
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+_INFRAHUB_MCP_DIR = _REPO_ROOT / "driver" / "examples" / "infrahub-mcp"
+
+
+def _find_key_recursive(tree: Any, target: str) -> bool:
+    """Return True if ``target`` appears as a dict key anywhere in ``tree``."""
+    if isinstance(tree, dict):
+        if target in tree:
+            return True
+        return any(_find_key_recursive(v, target) for v in tree.values())
+    if isinstance(tree, list):
+        return any(_find_key_recursive(item, target) for item in tree)
+    return False
 
 
 def set_value(obj: dict, path: str, value: Any):
@@ -132,3 +156,106 @@ def test_deserialize_invalid_driver_spec(path, value, driver_spec):
     deserializer = DriverSpecDeserializer()
     with pytest.raises(DeserializationError):
         deserializer.deserialize(data=driver_spec)
+
+
+# ---------------------------------------------------------------------------
+# infrahub-mcp Driver (015) — deserialize + values render contract.
+# Tests load the REAL artifacts under driver/examples/infrahub-mcp/.
+# US1 declares only the `infrahub_address` parameter; later chunks (US2/US3)
+# extend these same functions to add mcp_read_only / mcp_log_level.
+# ---------------------------------------------------------------------------
+
+
+def test_deserialize_infrahub_mcp_driver_spec():
+    """The real infrahub-mcp manifest deserializes to the US1 contract."""
+    with open(_INFRAHUB_MCP_DIR / "driver.styrmin.yml") as f:
+        raw = yaml.safe_load(f)
+
+    result = DriverSpecDeserializer().deserialize(data=raw)
+
+    assert isinstance(result, DriverSpec)
+    assert result.metadata.name == "infrahub-mcp"
+
+    # No actions block => no actions.py required (FR-005).
+    assert result.spec.actions == []
+
+    # Exactly one `server` Component with the confirmed selector label.
+    assert result.spec.components is not None
+    components = result.spec.components.root
+    assert list(components.keys()) == ["server"]
+    assert components["server"].identifier.label.root == {
+        "app.kubernetes.io/name": "infrahub-mcp"
+    }
+
+    # Exactly one Service: infrahub-mcp / http / internal / 8001 / server.
+    assert result.spec.services is not None
+    assert len(result.spec.services) == 1
+    service = result.spec.services[0]
+    assert service.name == "infrahub-mcp"
+    assert service.kind == ServiceKind.HTTP
+    assert service.scope == ServiceScope.INTERNAL
+    assert service.port == 8001
+    assert service.component == "server"
+
+    # `infrahub_address` is a required (no-default) string parameter.
+    assert result.spec.parameters is not None
+    params = {p.name: p for p in result.spec.parameters}
+    assert "infrahub_address" in params
+    assert params["infrahub_address"].kind == DriverParameterKind.STRING
+    assert params["infrahub_address"].default is None
+
+    # `mcp_read_only` is an optional boolean parameter, default False (US2).
+    assert "mcp_read_only" in params
+    assert params["mcp_read_only"].kind == DriverParameterKind.BOOLEAN
+    assert params["mcp_read_only"].default is False
+
+    # `mcp_log_level` is an enum parameter with four levels, default "info" (US3).
+    assert "mcp_log_level" in params
+    assert params["mcp_log_level"].kind == DriverParameterKind.ENUM
+    assert params["mcp_log_level"].values == ["debug", "info", "warning", "error"]
+    assert params["mcp_log_level"].default == "info"
+
+
+def test_render_infrahub_mcp_values():
+    """Rendering the real values.j2.yml yields the US1 rendered-values contract."""
+    template_text = (_INFRAHUB_MCP_DIR / "values.j2.yml").read_text()
+
+    # Default case: mcp_read_only False, mcp_log_level "info" (validator-applied
+    # defaults — see the parameter-validator tests in test_parameters.py).
+    context = {
+        "parameters": {
+            "infrahub_address": "https://infrahub.example.com",
+            "mcp_read_only": False,
+            "mcp_log_level": "info",
+        },
+    }
+    rendered_text = jinja2.Template(template_text).render(**context)
+
+    # Valid YAML.
+    rendered = yaml.safe_load(rendered_text)
+
+    assert rendered["fullnameOverride"] == "styrmin-infrahub-mcp"
+    assert rendered["mcp"]["authMode"] == "token-passthrough"
+    assert rendered["infrahub"]["address"] == "https://infrahub.example.com"
+
+    # mcp_read_only flows to mcp.readOnly; default is False (US2).
+    assert rendered["mcp"]["readOnly"] is False
+    # mcp_log_level flows to mcp.logLevel; default is "info" (US3).
+    assert rendered["mcp"]["logLevel"] == "info"
+
+    # token-passthrough stores no credential: no apiToken key anywhere (FR-006).
+    assert not _find_key_recursive(rendered, "apiToken")
+
+    # Supplied values flow through: read-only True and a valid enum level (US2/US3).
+    overridden_context = {
+        "parameters": {
+            "infrahub_address": "https://infrahub.example.com",
+            "mcp_read_only": True,
+            "mcp_log_level": "debug",
+        },
+    }
+    overridden = yaml.safe_load(
+        jinja2.Template(template_text).render(**overridden_context)
+    )
+    assert overridden["mcp"]["readOnly"] is True
+    assert overridden["mcp"]["logLevel"] == "debug"

@@ -1,0 +1,56 @@
+---
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: infrahub-mcp
+spec:
+  version: "1"
+  supported_versions: ">=1.1,<2.0"
+  info:
+    description: >-
+      Infrahub MCP server — exposes an existing Infrahub instance to AI agents
+      and IDE clients over the Model Context Protocol (token-passthrough auth).
+    authors: [opsmill]
+    license: Apache-2.0
+    links:
+      - link: Homepage
+        url: 'https://www.opsmill.com/'
+      - link: Documentation
+        url: 'https://docs.infrahub.app'
+      - link: Github
+        url: 'https://github.com/opsmill/infrahub'
+  helm:
+    main:
+      location: oci://registry.opsmill.io/opsmill/chart/infrahub-mcp
+      version: 0.1.0
+
+  parameters:
+    - name: infrahub_address
+      label: "Infrahub address"
+      kind: string
+      # no default => required
+    - name: mcp_read_only
+      label: "Read-only mode"
+      kind: boolean
+      default: false
+    - name: mcp_log_level
+      label: "Log level"
+      kind: enum
+      values: ["debug", "info", "warning", "error"]
+      default: info
+
+  components:
+    server:
+      identifier:
+        label:
+          app.kubernetes.io/name: infrahub-mcp
+
+  services:
+    - name: infrahub-mcp
+      kind: http
+      scope: internal
+      port: 8001
+      component: server
+
+  # NO actions block — token-passthrough deploys need no lifecycle hooks and
+  # therefore no actions.py (FR-005).
