@@ -35,7 +35,7 @@ jobs:
 
   publish-docker:
     needs: version
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-docker.yml@cba45b63396baaac764a41499e81bc1ab80c1f39
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-docker.yml@a51bb79fc402a61f88fda054054c21a57e4a05ef
     permissions:
       id-token: write
       contents: read
@@ -56,7 +56,7 @@ jobs:
 
   publish-helm-agent:
     needs: version
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@cba45b63396baaac764a41499e81bc1ab80c1f39
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@a51bb79fc402a61f88fda054054c21a57e4a05ef
     permissions:
       id-token: write
       contents: read
@@ -79,7 +79,7 @@ jobs:
     needs:
       - version
       - publish-helm-agent
-    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@cba45b63396baaac764a41499e81bc1ab80c1f39
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@a51bb79fc402a61f88fda054054c21a57e4a05ef
     permissions:
       id-token: write
       contents: read
