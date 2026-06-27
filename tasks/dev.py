@@ -83,6 +83,7 @@ def _bootstrap_cluster(
         "ingress_class": "traefik",
         "runtime_class": "default",
         "standard_storage": {"storage_class": "local-path"},
+        "fast_storage": {"storage_class": "local-path"},
     }
     if external_url_scheme is not None:
         config["external_url_scheme"] = external_url_scheme
