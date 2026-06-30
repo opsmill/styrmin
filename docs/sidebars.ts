@@ -51,6 +51,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'reference/styrmindeployment',
         'reference/styrminctl',
+        'reference/telemetry',
         'reference/driver-api',
         'reference/configuration',
       ],

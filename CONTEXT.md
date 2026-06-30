@@ -23,8 +23,12 @@ The single container that runs a **Prefect** worker, a **kopf** operator, and a 
 _Avoid_: "worker" (overloaded with **Prefect worker**), "operator" (that is one of its sub-functions), "K8s agent" (legacy README phrasing), "controller".
 
 **CLI / styrminctl**:
-The Cyclopts-based command-line client (`styrminctl`). A thin client over the GraphQL API — never talks to the **database** or the **agent** directly.
+The Cyclopts-based command-line client (`styrminctl`). A thin client over the GraphQL API — never talks to the **database** or the **agent** directly. Its one outbound call to a destination _other_ than the GraphQL API is the anonymous, opt-out **telemetry** POST (see below) — the CLI's first non-GraphQL network egress.
 _Avoid_: "the CLI tool", "styrmin command" (ambiguous with the `styrmin` developer command for schema export).
+
+**Telemetry**:
+The anonymous, opt-out usage signal the **CLI** fire-and-forgets after each _eligible_ invocation — a single best-effort HTTPS POST of a scrubbed event (resolved command route, canonical option _names_, outcome + error category, coarse environment facts) to a fixed endpoint. On by default on interactive workstations, silent in CI / non-interactive contexts; capped at ≤ 200 ms added latency and failure-isolated (never alters output, exit code, or speed). Scrub-by-construction: never carries names, values, paths, tokens, or addresses. Opt out with `styrminctl telemetry disable`, `STYRMIN_TELEMETRY=0`, or `DO_NOT_TRACK=1`. State `{install_id, enabled}` persists next to the token store.
+_Avoid_: "analytics", "tracking", "metrics" (reserved for backend/observability signal).
 
 **SDK / styrmin-sdk**:
 The async Python client SDK that wraps GraphQL operations as typed Pydantic models. Used by **CLI**, **E2E tests**, and external callers. Types are generated from `schema.graphql` via ariadne-codegen.
