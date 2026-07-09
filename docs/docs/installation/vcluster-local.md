@@ -256,7 +256,7 @@ Versions.
 
 ```shell
 export STYRMIN_SERVER_ADDRESS=http://styrmin.local.styrmin.io:8080
-uv run styrminctl login --username admin --password styrmin
+uv run styrminctl login --username admin
 ```
 
 (The seeded admin credentials come from `styrmin.adminUsername` /
@@ -270,7 +270,7 @@ cluster's services — they're what the generated FQDNs are built from.
 
 ```shell
 uv run styrminctl clusters create local \
-  -c '{
+  --config '{
         "fqdn_suffix": "local.styrmin.io",
         "external_url_scheme": "http",
         "external_url_port": 8080
@@ -282,7 +282,7 @@ Record the returned `id` — referred to as `<CLUSTER_ID>` below.
 #### 9c. Create the Environment
 
 ```shell
-uv run styrminctl environments create local <CLUSTER_ID> -c '{}'
+uv run styrminctl environments create local --cluster local -c '{}'
 ```
 
 Record the returned `id` — referred to as `<ENVIRONMENT_ID>` below.
