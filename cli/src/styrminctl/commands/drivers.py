@@ -9,7 +9,6 @@ from cyclopts import App, Parameter
 from styrminctl import client
 from styrminctl.labels import format_driver_version_label
 from styrminctl.output import console, print_success, print_table, styrmin_error_handler
-from styrminctl.types import validate_directory_exists
 
 if TYPE_CHECKING:
     from typing import Any
@@ -80,9 +79,7 @@ async def load_version(
 
 @drivers_app.command(name="load-local-version")
 async def load_local_version(
-    path: Annotated[
-        str, Parameter(help="Local filesystem path to the driver directory.", validator=validate_directory_exists)
-    ],
+    path: Annotated[str, Parameter(help="Local filesystem path to the driver directory.")],
 ) -> None:
     """Load an application driver version from a local directory."""
     with styrmin_error_handler():
