@@ -19,7 +19,7 @@ async def create(
     *,
     cluster: ClusterContextName = "default",
     cluster_id: ClusterContextId = None,
-    config: Annotated[str | None, Parameter(help="JSON config (inline or @filepath).")] = None,
+    config: Annotated[str | None, Parameter(alias="-c", help="JSON config (inline or @filepath).")] = None,
 ) -> None:
     """Create a new environment in a cluster."""
     with styrmin_error_handler():
