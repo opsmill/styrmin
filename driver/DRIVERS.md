@@ -137,12 +137,21 @@ spec:
       identifier:
         label:
           infrahub/service: message-queue
+    task-manager:
+      identifier:
+        label:
+          app.kubernetes.io/name: prefect-server
   services:
     - name: infrahub
       kind: http
       scope: internal
       port: 8000
       component: server
+    - name: task-manager
+      kind: http
+      scope: internal
+      port: 4200
+      component: task-manager
   actions:
     - name: upgrade
       hook: upgrade
