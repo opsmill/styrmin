@@ -179,6 +179,28 @@ The reference repository ships several example drivers under
 (`infrahub`, `infrahub-mcp`, `semaphore`, `slurpit`). They're a good
 starting point for writing your own.
 
+The `infrahub` example declares two services: `infrahub` (the Infrahub
+API and web UI on port 8000) and `task-manager` (the Prefect UI on port
+4200, with the Prefect API under `/api`). Both get a service-discovery
+Service in the deployment's namespace, so other applications in the
+environment reach them by short DNS name (`infrahub`, `task-manager`).
+Both are also exposed through the per-environment ingress: the driver's
+`values.j2.yml` enables each chart's own Ingress and sets its host to
+the computed FQDNs from the template context — the Infrahub server on
+`{{ services.infrahub.primary_fqdn }}` and the Prefect UI on
+`{{ services['task-manager'].human_readable_fqdn }}` (the
+service-scoped name, since `primary_fqdn` is app-scoped and identical
+for every service of a deployment).
+
+Because the Prefect UI is a single-page app whose browser-side code
+calls the Prefect API directly (at `PREFECT_UI_API_URL`, defaulting to
+`http://localhost:4200/api`), the driver also sets the subchart's
+`server.uiConfig.prefectUiApiUrl` to the externally reachable API URL —
+built in the template from the same `human_readable_fqdn` plus
+`instance.config.external_url_scheme` / `external_url_port`, mirroring
+how Styrmin computes user-facing service URLs. Without it, the UI loads
+but reports "Can't connect to Server API at `http://localhost:4200/api`".
+
 The `infrahub-mcp` example exposes an existing Infrahub instance to AI
 agents over the Model Context Protocol in token-passthrough auth mode.
 Its `infrahub_address` parameter is accepted as a free-form string and

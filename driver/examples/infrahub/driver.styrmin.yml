@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: infrahub
 spec:
-  version: "1"
+  version: "2"
   supported_versions: ">=1.5,<2.0"
   info:
     icon: xxxx
@@ -129,6 +129,13 @@ spec:
       scope: internal
       port: 8000
       component: server
+
+    # Prefect UI (and API at /api) served by the task-manager component.
+    - name: task-manager
+      kind: http
+      scope: internal
+      port: 4200
+      component: task-manager
 
   actions:
     - name: upgrade
