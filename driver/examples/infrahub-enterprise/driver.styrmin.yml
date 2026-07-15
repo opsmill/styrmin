@@ -130,6 +130,13 @@ spec:
       port: 8000
       component: server
 
+    # Prefect UI (and API at /api) served by the task-manager component.
+    - name: task-manager
+      kind: http
+      scope: internal
+      port: 4200
+      component: task-manager
+
   actions:
     - name: upgrade
       hook: upgrade
