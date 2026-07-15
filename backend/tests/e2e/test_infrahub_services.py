@@ -4,6 +4,21 @@ The infrahub driver declares a ``task-manager`` service (port 4200, component
 ``task-manager``) so the Prefect UI is reachable through the service-discovery
 ClusterIP Service instead of manual port-forwarding to the chart's own
 ``styrmin-task-manager`` Service.
+
+Deployment reuse
+----------------
+This is a **read-only** assertion on an already-deployed Infrahub stack, so it
+piggybacks on the session-scoped ``deployed_infrahub_enterprise_app`` fixture —
+the same stack that ``test_infrahub_enterprise_backup_and_restore_lifecycle``
+already boots in the ``shard_infrahub`` shard. It deliberately does **not**
+consume ``deployed_infrahub_app`` (the community stack): that fixture's only
+other consumer (the community backup/restore test) is ``@pytest.mark.skip``,
+so depending on it would resurrect a second full Infrahub boot (~600s +
+Neo4j/Prefect/server) in the shard just for these four assertions. The
+community and enterprise drivers share the identical ``task-manager`` →
+``prefect-server`` subchart, so the enterprise deployment exercises the same
+service-discovery + FQDN + ingress machinery this test asserts on. See
+``dev/guides/e2e-deployment-sharing.md`` ("Reuse before you boot").
 """
 
 from __future__ import annotations
@@ -22,7 +37,9 @@ from tests.e2e.conftest import _portforward, _wait_for_http
 # human_readable_fqdn of the task-manager service:
 # {service-name}-{environment}.{cluster fqdn_suffix} (see conftest
 # styrmin_resources: fqdn_suffix="styrmin.com", environment
-# "test-environment").
+# "test-environment"). The enterprise deployment renames only the `infrahub`
+# service to `infrahub-enterprise`; the `task-manager` service keeps its
+# declared name, so the host is identical to the community driver's.
 _PREFECT_UI_HOST = "task-manager-test-environment.styrmin.com"
 
 pytestmark = [
@@ -36,11 +53,11 @@ pytestmark = [
     "the Prefect HTTP endpoints; there is no UI flow to exercise."
 )
 async def test_infrahub_task_manager_service_exposes_prefect_ui(
-    deployed_infrahub_app: dict,
+    deployed_infrahub_enterprise_app: dict,
     vcluster: dict,
 ) -> None:
     """The ``task-manager`` service resolves to the Prefect UI on port 4200."""
-    namespace = deployed_infrahub_app["namespace"]
+    namespace = deployed_infrahub_enterprise_app["namespace"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
     # The service-discovery utility creates the ClusterIP Service
