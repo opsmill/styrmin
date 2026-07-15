@@ -54,6 +54,44 @@ shard.
   shard entry alongside updates to `_VALID_SHARDS` (conftest),
   `pyproject.toml` markers, and both e2e guides.
 
+## Reuse before you boot
+
+A new E2E test that only *reads* state is not free just because it consumes a
+session-scoped fixture. Before adding one, run these checks:
+
+1. **Does an existing test already boot the stack you need?** If so, add your
+   assertion to that test (or a sibling in the same file that shares its session
+   fixture) instead of creating a new test node. Prefer extending an existing
+   E2E over adding a new one whenever the setup is shared and expensive — this
+   is explicitly allowed by Constitution §V ("…or an existing one extended to
+   cover the new behaviour").
+
+2. **Does the session fixture you're about to depend on have an active,
+   non-skipped consumer?** A session-scoped fixture is only booted when a test
+   that actually runs requests it. If every current consumer is
+   `@pytest.mark.skip`, your test becomes its *sole* consumer and silently pays
+   the full boot cost — a heavy boot in disguise, not a reuse. Verify with
+   `grep -rn <fixture_name> backend/tests/e2e/ | grep -v conftest` and confirm
+   at least one consumer is not skipped.
+
+3. **Is there a cheaper already-booted stack that exercises the same
+   machinery?** Driver-format features (service discovery, computed FQDNs,
+   ingress) are shared across driver variants that use the same subchart. If the
+   community and enterprise variants both run the component under test, assert
+   against whichever stack is *already* booted in the shard rather than booting
+   a second one — adding the service/values to that variant's driver for parity
+   if it is missing.
+
+**Worked example (#273 / PR #308).** The Prefect-UI `task-manager` service was
+added to the community `infrahub` driver, and the first draft added a new test
+consuming `deployed_infrahub_app`. But that fixture's only other consumer is the
+community backup test, which is skipped — so the community stack is never booted
+in CI, and the new test would have resurrected a full second Infrahub boot in
+`shard_infrahub` for four read-only assertions. The fix: declare the same
+`task-manager` service on the enterprise driver (identical `prefect-server`
+subchart) and assert against the already-booted `deployed_infrahub_enterprise_app`.
+Net new heavy boots: zero.
+
 ## Decision tree
 
 1. Does it touch the Infrahub stack (full Infrahub server + DB)? → Yes: `infrahub` (isolated).
