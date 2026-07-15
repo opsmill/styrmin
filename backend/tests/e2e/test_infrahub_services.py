@@ -14,7 +14,7 @@ already boots in the ``shard_infrahub`` shard. It deliberately does **not**
 consume ``deployed_infrahub_app`` (the community stack): that fixture's only
 other consumer (the community backup/restore test) is ``@pytest.mark.skip``,
 so depending on it would resurrect a second full Infrahub boot (~600s +
-Neo4j/Prefect/server) in the shard just for these four assertions. The
+Neo4j/Prefect/server) in the shard just for these read-only assertions. The
 community and enterprise drivers share the identical ``task-manager`` →
 ``prefect-server`` subchart, so the enterprise deployment exercises the same
 service-discovery + FQDN + ingress machinery this test asserts on. See
@@ -27,6 +27,7 @@ import asyncio
 import time
 
 import httpx
+import kr8s
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Ingress as AsyncIngress
@@ -54,10 +55,19 @@ pytestmark = [
 )
 async def test_infrahub_task_manager_service_exposes_prefect_ui(
     deployed_infrahub_enterprise_app: dict,
+    styrmin_resources: dict,
     vcluster: dict,
 ) -> None:
-    """The ``task-manager`` service resolves to the Prefect UI on port 4200."""
+    """The ``task-manager`` service resolves to the Prefect UI on port 4200.
+
+    Covers the full #273 exposure path: the service-discovery ClusterIP
+    Service, direct reachability of the Prefect UI/API behind it, the
+    per-environment Ingress object, and — end to end — that the Prefect UI is
+    actually reachable *through the dedicated ingress controller* (Traefik),
+    not just that the Ingress object exists.
+    """
     namespace = deployed_infrahub_enterprise_app["namespace"]
+    environment_id = styrmin_resources["environment_id"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
     # The service-discovery utility creates the ClusterIP Service
@@ -122,3 +132,55 @@ async def test_infrahub_task_manager_service_exposes_prefect_ui(
         f"Expected Prefect UI ingress host '{_PREFECT_UI_HOST}'. "
         f"Ingress hosts found: {sorted(ingress_hosts)}"
     )
+
+    # Finally, prove the Prefect UI is actually reachable *through the
+    # per-environment ingress controller* — not merely that the Ingress object
+    # exists. Styrmin post-render-patches every `kind: Ingress` in the release
+    # with `kubernetes.io/ingress.class: traefik` (see IngressUtility), so the
+    # subchart's Prefect ingress is picked up by the dedicated Traefik. Route
+    # an HTTP request through that Traefik with the Host header set to the
+    # Prefect UI FQDN, mirroring test_traffic_routes_through_dedicated_ingress.
+    #
+    # The Traefik controller runs in its own namespace (one per env using
+    # dedicated_ingress), so search cluster-wide and filter by the
+    # environment_id label the enterprise deployment was created under.
+    traefik_services: list[AsyncService] = [
+        svc
+        async for svc in AsyncService.list(
+            namespace=kr8s.ALL,
+            label_selector={
+                "app.kubernetes.io/name": "traefik",
+                "styrmin/environment_id": environment_id,
+            },
+            api=kr8s_api,
+        )
+        if isinstance(svc, AsyncService)
+    ]
+    assert traefik_services, (
+        f"Traefik Service not found for environment {environment_id}"
+    )
+    traefik_svc = traefik_services[0]
+
+    # Port-forward targets Traefik's "web" container port (8000), not the
+    # Service port; the shared cluster uses external_url_scheme=http. The
+    # Prefect ingress path is `/`, so both the SPA root and the API under
+    # `/api` route through the same host.
+    async with _portforward(traefik_svc, remote_port=8000) as local_port:
+        await _wait_for_http(
+            f"http://localhost:{local_port}/api/health",
+            timeout=120.0,
+            interval=5.0,
+            headers={"Host": _PREFECT_UI_HOST},
+        )
+
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.get(
+                f"http://localhost:{local_port}/",
+                headers={"Host": _PREFECT_UI_HOST},
+                timeout=10,
+            )
+        assert resp.status_code == 200, (
+            "Prefect UI not reachable through the ingress controller "
+            f"(Host: {_PREFECT_UI_HOST}): HTTP {resp.status_code}"
+        )
+        assert "html" in resp.headers.get("content-type", "")
