@@ -82,7 +82,23 @@ infrahub:
   prefect-server:
     enabled: true
     fullnameOverride: styrmin-task-manager
+    # Expose the Prefect UI through the per-environment ingress
+    ingress:
+      enabled: true
+      host:
+        hostname: "{{ services['task-manager'].human_readable_fqdn }}"
+        path: /
     server:
+      # The Prefect UI is a SPA whose browser-side code calls the API at
+      # PREFECT_UI_API_URL (default http://localhost:4200/api). Point it at the
+      # ingress URL computed above so the UI works from outside the cluster,
+      # mirroring compute_external_url: scheme defaults to https, port omitted
+      # when it matches the scheme default (80/http, 443/https).
+      {%- set tm_scheme = instance.config.external_url_scheme or "https" %}
+      {%- set tm_port = instance.config.external_url_port %}
+      {%- set tm_default_port = 80 if tm_scheme == "http" else 443 %}
+      uiConfig:
+        prefectUiApiUrl: "{{ tm_scheme }}://{{ services['task-manager'].human_readable_fqdn }}{% if tm_port and tm_port != tm_default_port %}:{{ tm_port }}{% endif %}/api"
       # Hardcoded analytics flag plus operator-supplied env vars for the
       # `task-manager` component.
       env:

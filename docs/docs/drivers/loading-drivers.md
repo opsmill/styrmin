@@ -190,7 +190,9 @@ the computed FQDNs from the template context — the Infrahub server on
 `{{ services.infrahub.primary_fqdn }}` and the Prefect UI on
 `{{ services['task-manager'].human_readable_fqdn }}` (the
 service-scoped name, since `primary_fqdn` is app-scoped and identical
-for every service of a deployment).
+for every service of a deployment). The `infrahub-enterprise` example
+declares the same `task-manager` service and Prefect UI ingress, since it
+runs the identical `prefect-server` subchart.
 
 Because the Prefect UI is a single-page app whose browser-side code
 calls the Prefect API directly (at `PREFECT_UI_API_URL`, defaulting to
