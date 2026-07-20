@@ -1,165 +1,291 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { Copy, Check } from "lucide-react";
 import { useGetDriverQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
-import { Button } from "@/components/ui/button";
-import { IfRole } from "@/auth/IfRole";
-import { DriverHeader } from "./DriverHeader";
-import { VersionList } from "./driver-detail/VersionList";
-import { VersionDetail } from "./driver-detail/VersionDetail";
-import type { DriverVersionDetail, TabId } from "./driver-detail/types";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabPanel } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
+import { LatestBadge, OlderBadge } from "./VersionStatusBadge";
+import { Tooltip } from "@/components/ui/tooltip";
+import { ParametersTab } from "./driver-detail/tabs/ParametersTab";
+import { ComponentsTab } from "./driver-detail/tabs/ComponentsTab";
+import { formatRelativeTime } from "./driver-detail/relative-time";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import {
+  collidingVersions,
+  compareVersionsLatestFirst,
+  displayDriverVersion,
+  LOADED_SCOPE_NOTE,
+} from "@/lib/driverVersion";
+import { isPlainObject } from "./driver-detail/json-guards";
+import type { DriverVersionDetail } from "./driver-detail/types";
+
+type DetailTab = "overview" | "parameters" | "components";
 
 /**
- * Driver detail page — left-rail version list + right-pane tabbed view.
+ * Driver detail — a single driver version, addressed by the `?version=<id>`
+ * search param (defaults to the newest-by-`createdOn` version).
  *
- * Owns:
- *   - the typed `useGetDriverQuery` poll (10s auto-refresh, toggleable),
- *   - the `selectedVersionId` cursor (initialised after first successful
- *     load to the newest-by-`createdOn` version),
- *   - the `activeTab` cursor (defaults to "overview"; preserved across
- *     version switches per FR-007),
- *   - the EC-002 silent fallback: when the previously-selected version
- *     disappears between refreshes, we drop the cursor and let the
- *     selection effect re-pick the new newest.
+ * Layout follows the resource-detail pattern common to Terraform Registry,
+ * Backstage, Fivetran and Kubernetes dashboards: a persistent header (identity,
+ * version switcher, status) over a tabbed body. The Overview tab is a scannable
+ * summary — stat tiles + a source panel — with the voluminous parameter and
+ * component tables deferred to their own tabs (progressive disclosure).
  */
 export default function DriverDetailPage() {
   const { driverId } = useParams({ from: "/drivers/$driverId" });
+  const { version: versionParam } = useSearch({ from: "/drivers/$driverId" });
   const navigate = useNavigate();
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(
-    null,
-  );
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
 
-  const { data, isLoading, error, refetch, dataUpdatedAt } = useGetDriverQuery(
-    { applicationDriverId: driverId },
-    { refetchInterval: autoRefreshEnabled ? 10_000 : false },
-  );
+  const { data, isLoading, error, refetch } = useGetDriverQuery({
+    applicationDriverId: driverId,
+  });
 
   const driver = data?.applicationDriver;
-  const versions = useMemo(() => driver?.versions ?? [], [driver?.versions]);
-
-  // EC-002 silent fallback + initial selection. Computed during render
-  // (not in an effect) so the right pane never flickers through a
-  // "no selection" frame when the cursor needs reconciling.
-  //
-  // The setState-during-render is guarded by an equality check on a
-  // prior-value cursor (`reconciledVersionId`) — the officially
-  // recommended pattern to avoid the cascading-renders warning under
-  // the React Compiler (`react-hooks/set-state-in-effect`).
-  const reconciledVersionId = reconcileSelectedVersion(
-    versions,
-    selectedVersionId,
+  const versions = useMemo(
+    () => [...(driver?.versions ?? [])].sort(compareVersionsLatestFirst),
+    [driver?.versions],
   );
-  if (reconciledVersionId !== selectedVersionId) {
-    setSelectedVersionId(reconciledVersionId);
-  }
 
   if (isLoading && !data) return <LoadingState message="Loading driver..." />;
-
-  if (error) {
+  if (error)
     return <ErrorState message={error.message} onRetry={() => refetch()} />;
-  }
+  if (!driver) return <ErrorState message="Driver not found" />;
 
-  if (!driver) {
-    return <ErrorState message="Driver not found" />;
-  }
+  const latest = versions[0];
+  const selected =
+    versions.find((v) => v.id === versionParam) ?? latest ?? null;
+  if (!selected) return <ErrorState message="This driver has no versions" />;
 
-  const selectedVersion: DriverVersionDetail | null =
-    versions.find((v) => v.id === reconciledVersionId) ?? null;
+  const isLatest = selected.id === latest?.id;
+  const colliding = collidingVersions(versions);
+
+  const goToVersion = (versionId: string) =>
+    navigate({
+      to: "/drivers/$driverId",
+      params: { driverId },
+      search: { version: versionId },
+    });
 
   return (
     <PageLayout
       title={driver.name}
       breadcrumbs={[
         { label: "Drivers", href: "/drivers" },
-        { label: driver.name },
+        {
+          label: `${driver.name} ${displayDriverVersion(selected, colliding)}`,
+        },
       ]}
-      actions={
-        <DriverHeader
-          driver={driver}
-          autoRefreshEnabled={autoRefreshEnabled}
-          onToggleAutoRefresh={setAutoRefreshEnabled}
-          lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
-          onRefreshNow={() => refetch()}
-          onAddVersion={() => navigate({ to: "/drivers/add" })}
-        />
-      }
     >
       <div
         data-testid="driver-detail"
         data-driver-id={driver.id}
         data-driver-name={driver.name}
+        data-version-id={selected.id}
+        data-version-label={selected.version}
+        className="max-w-4xl"
       >
-        {versions.length === 0 ? (
-          <EmptyVersionsState
-            onAddVersion={() => navigate({ to: "/drivers/add" })}
-          />
-        ) : (
-          <div className="flex gap-6">
-            <VersionList
-              versions={versions}
-              selectedVersionId={reconciledVersionId}
-              onSelect={setSelectedVersionId}
-            />
-            {selectedVersion && (
-              <VersionDetail
-                version={selectedVersion}
-                activeTab={activeTab}
-                onTabChange={setActiveTab}
-              />
+        {/* Header: version identity + status on one row. */}
+        <div className="flex flex-wrap items-center gap-3 pb-5">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">Version</span>
+            {versions.length > 1 ? (
+              <Select value={selected.id} onValueChange={goToVersion}>
+                <SelectTrigger
+                  aria-label="Switch version"
+                  className="h-8 w-auto gap-2 px-2.5 font-mono text-base font-medium"
+                >
+                  {displayDriverVersion(selected, colliding)}
+                </SelectTrigger>
+                <SelectContent>
+                  {versions.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      <span className="flex items-center gap-2.5">
+                        <span className="font-mono">
+                          {displayDriverVersion(v, colliding)}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatRelativeTime(v.createdOn)}
+                        </span>
+                        {v.id === latest?.id && (
+                          <Badge variant="success">Latest</Badge>
+                        )}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="font-mono text-base font-medium">
+                {displayDriverVersion(selected, colliding)}
+              </span>
             )}
+            {isLatest && <LatestBadge />}
           </div>
-        )}
+
+          {/* Older-only notice, kept on the same row (badge + explanation as
+              one unit) so it clearly belongs to the selected version.
+
+              NOTE (v1): the copy is intentionally generic — it states the
+              latest-wins rule only, with no per-version detail. We deliberately
+              do NOT say whether/where this version is in use, because the
+              backend does not expose that (`usedBy` / deployment references on
+              ApplicationDriverVersion were dropped from v1), and computing it
+              purely on the frontend (fetching every deployment and matching
+              driverVersionId) is not an efficient or clean path. A backend
+              follow-up should add deployment references so we can show
+              "used by N deployments" with links and make this message specific.
+              See the drivers-v1 scope note. */}
+          {!isLatest && (
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-border bg-muted/40 px-3.5 py-2">
+              <OlderBadge />
+              <span className="text-[13px] text-muted-foreground">
+                New deployments and upgrades use the{" "}
+                <Tooltip content={LOADED_SCOPE_NOTE}>
+                  <span className="cursor-help underline decoration-dotted underline-offset-2">
+                    newest loaded version
+                  </span>
+                </Tooltip>
+                .
+              </span>
+            </div>
+          )}
+        </div>
+
+        <Tabs
+          tabs={[
+            { id: "overview", label: "Overview" },
+            {
+              id: "parameters",
+              label: "Parameters",
+              badge: String(selected.parameters.length),
+            },
+            {
+              id: "components",
+              label: "Components",
+              badge: String(componentCount(selected.components)),
+            },
+          ]}
+          activeTab={activeTab}
+          onTabChange={(id) => setActiveTab(id as DetailTab)}
+        />
+
+        <div className="pt-5">
+          <TabPanel active={activeTab === "overview"}>
+            <OverviewPanel version={selected} />
+          </TabPanel>
+          <TabPanel active={activeTab === "parameters"}>
+            <ParametersTab version={selected} />
+          </TabPanel>
+          <TabPanel active={activeTab === "components"}>
+            <ComponentsTab components={selected.components} />
+          </TabPanel>
+        </div>
       </div>
     </PageLayout>
   );
 }
 
-function pickNewestVersionId(versions: readonly DriverVersionDetail[]): string {
-  return [...versions].sort(
-    (a, b) => Date.parse(b.createdOn) - Date.parse(a.createdOn),
-  )[0].id;
+function componentCount(components: DriverVersionDetail["components"]): number {
+  if (!isPlainObject(components)) return 0;
+  return Object.values(components).filter((v) => isPlainObject(v)).length;
 }
 
-/**
- * Reconcile the persisted cursor against the freshest versions list.
- *
- * Returns:
- *   - `null` when the list is empty,
- *   - the existing `current` when it still points at a present row,
- *   - the newest-by-`createdOn` id otherwise (initial selection + the
- *     EC-002 silent fallback).
- */
-function reconcileSelectedVersion(
-  versions: readonly DriverVersionDetail[],
-  current: string | null,
-): string | null {
-  if (versions.length === 0) {
-    return null;
-  }
-  if (current !== null && versions.some((v) => v.id === current)) {
-    return current;
-  }
-  return pickNewestVersionId(versions);
-}
+function OverviewPanel({ version }: { version: DriverVersionDetail }) {
+  const isLocal = version.sourceType === "local";
+  const fingerprint = isLocal ? version.contentHash : version.sourceCommitSha;
+  const source = isLocal
+    ? (version.sourcePath ?? "local")
+    : version.sourceBranch
+      ? `${version.sourceRepository} @ ${version.sourceBranch}`
+      : version.sourceRepository;
 
-function EmptyVersionsState({ onAddVersion }: { onAddVersion: () => void }) {
+  const rows: Array<{ label: string; value: React.ReactNode; copy?: string }> =
+    [
+      {
+        label: "Supports app versions",
+        value: mono(version.supportedVersions || "—"),
+      },
+      { label: isLocal ? "Path" : "Source", value: mono(source), copy: source },
+      {
+        label: isLocal ? "Content hash" : "Commit",
+        value: fingerprint ? mono(fingerprint.slice(0, 12)) : "—",
+        copy: fingerprint ?? undefined,
+      },
+    ];
+  if (version.helmChart) {
+    rows.push({
+      label: "Helm chart",
+      value: mono(
+        `${version.helmChart.name}${version.helmChart.version ? ` ${version.helmChart.version}` : ""}`,
+      ),
+    });
+    if (version.helmChart.repository) {
+      rows.push({
+        label: "Chart repository",
+        value: mono(version.helmChart.repository),
+        copy: version.helmChart.repository,
+      });
+    }
+  }
+  rows.push({ label: "Loaded", value: formatRelativeTime(version.createdOn) });
+
   return (
     <div
-      className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border py-12"
-      data-testid="driver-empty-versions"
+      className="overflow-hidden rounded-lg border border-border"
+      data-testid="driver-overview"
     >
-      <p className="text-sm text-muted-foreground">No versions yet</p>
-      <IfRole minimum="READ_WRITE">
-        <Button onClick={onAddVersion} data-testid="driver-empty-add-version">
-          <Plus className="h-4 w-4" />
-          Add Version
-        </Button>
-      </IfRole>
+      <table className="w-full text-sm">
+        <tbody>
+          {rows.map((row, i) => (
+            <tr
+              key={row.label}
+              className={i < rows.length - 1 ? "border-b border-border/60" : ""}
+            >
+              <td className="w-52 border-r border-border/60 bg-muted/30 px-4 py-2.5 align-top text-muted-foreground">
+                {row.label}
+              </td>
+              <td className="px-4 py-2.5">
+                <span className="inline-flex items-center gap-2">
+                  {row.value}
+                  {row.copy && <CopyButton text={row.copy} />}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const { copied, copy } = useCopyToClipboard();
+  return (
+    <button
+      type="button"
+      onClick={() => copy(text)}
+      aria-label="Copy to clipboard"
+      className="text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-success" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+    </button>
+  );
+}
+
+function mono(text: string): React.ReactNode {
+  return <span className="font-mono text-[13px]">{text}</span>;
 }

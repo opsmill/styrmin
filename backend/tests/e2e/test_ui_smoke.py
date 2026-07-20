@@ -167,44 +167,24 @@ async def test_driver_detail_inspects_versions_via_tabs(
     await page.goto(f"/drivers/{driver_id}")
 
     # 2. Page root present with the expected data attributes — confirms the
-    # new orchestrator rendered (vs the legacy single-column layout).
+    # redesigned header + tabs layout rendered, addressing a single version.
     detail_root = page.locator("[data-testid=driver-detail]")
     await expect(detail_root).to_be_visible()
     await expect(detail_root).to_have_attribute("data-driver-id", driver_id)
+    version_id = await detail_root.get_attribute("data-version-id")
+    assert version_id, "detail root should carry the selected data-version-id"
 
-    # 3. Left rail — at least one row present, the first is selected by
-    # default (newest-by-`createdOn` per FR-001).
-    rail = page.locator("[data-testid=driver-version-list]")
-    await expect(rail).to_be_visible()
-    rows = page.locator("[data-testid=driver-version-row]")
-    row_count = await rows.count()
-    assert row_count >= 1, (
-        f"left rail should render at least one version row, got {row_count}"
-    )
-    first_row = rows.first
-    await expect(first_row).to_have_attribute("data-selected", "true")
-    await expect(first_row).to_have_attribute("aria-pressed", "true")
+    # 3. Overview tab is active by default — the Details panel is visible.
+    await expect(page.locator("[data-testid=driver-overview]")).to_be_visible()
 
-    # 4. Right pane — version detail is visible with the Overview tab active
-    # by default (FR-007).
-    version_detail = page.locator("[data-testid=driver-version-detail]")
-    await expect(version_detail).to_be_visible()
-    await expect(
-        page.locator("[data-testid=driver-overview-tiles]"),
-    ).to_be_visible()
+    # 4. Switch to Parameters — the panel renders (table or empty state) and
+    # the Overview panel is unmounted (tabs are wired to distinct panels).
+    await page.get_by_role("button", name="Parameters").click()
+    await expect(page.locator("[data-testid=driver-overview]")).to_have_count(0)
 
-    # 5. Switch to Parameters tab — assert the panel renders (table or empty
-    # state). The crucial behavioural contract is that the tab is wired to a
-    # panel and the previous (Overview) panel is unmounted.
-    await page.get_by_role("button", name="Parameters", exact=True).click()
-    await expect(
-        page.locator("[data-testid=driver-overview-tiles]"),
-    ).to_have_count(0)
-
-    # 6. Switch to Components tab and assert structured rendering — at least
-    # one component row, and ZERO `<pre>` elements anywhere on the page (the
-    # spec's headline assertion: no JSON dumps).
-    await page.get_by_role("button", name="Components", exact=True).click()
+    # 5. Switch to Components — at least one structured component row and ZERO
+    # `<pre>` elements anywhere (headline assertion: no JSON dumps).
+    await page.get_by_role("button", name="Components").click()
     structured_components = page.locator("[data-testid=driver-component-row]")
     component_count = await structured_components.count()
     assert component_count >= 1, (
@@ -215,20 +195,3 @@ async def test_driver_detail_inspects_versions_via_tabs(
     assert pre_count == 0, (
         f"Components tab must render zero <pre> JSON blocks; found {pre_count}"
     )
-
-    # 7. Switch to Source tab — git-sourced driver should expose the
-    # repository URL via the git source layout.
-    await page.get_by_role("button", name="Source", exact=True).click()
-    git_source = page.locator("[data-testid=driver-source-git]")
-    await expect(git_source).to_be_visible()
-    repository = page.locator("[data-testid=driver-source-repository]")
-    repo_text = await repository.text_content()
-    assert repo_text and repo_text.strip(), (
-        f"Source tab should expose a non-empty repository URL; got {repo_text!r}"
-    )
-
-    # 8. Click back to the first (selected) row — selection should be a no-op
-    # and the page should remain on the Source tab, exercising the
-    # "tab persists across version switches" contract (FR-007).
-    await first_row.click()
-    await expect(git_source).to_be_visible()

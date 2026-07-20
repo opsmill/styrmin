@@ -1501,7 +1501,7 @@ export type ListClustersQuery = { __typename?: 'Query', clusters: Array<{ __type
 export type ListDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null }> }> };
+export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, createdOn: any }> }> };
 
 export type ListEnvironmentsQueryVariables = Exact<{
   includeDeleted?: InputMaybe<Scalars['Boolean']['input']>;
@@ -2675,12 +2675,14 @@ export const ListDriversDocument = `
     versions {
       id
       version
+      supportedVersions
       sourceType
       sourceRepository
       sourceBranch
       sourcePath
       sourceCommitSha
       contentHash
+      createdOn
     }
   }
 }

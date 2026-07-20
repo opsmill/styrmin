@@ -1,11 +1,9 @@
-"""Page object for the Add Driver flow (``/drivers/add``)."""
+"""Page object for the Load Driver flow (drawer on ``/drivers``)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
-
-from playwright.async_api import expect
 
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import DriverVersionRef
@@ -15,30 +13,33 @@ if TYPE_CHECKING:
 
 
 class DriversListPage:
-    """Drivers list + the Add Driver form (remote Git flow)."""
+    """Drivers list + the Load Driver drawer (remote Git flow)."""
 
     def __init__(self, page: Page) -> None:
         self._page = page
 
     async def load_remote_version(self, *, git_url: str, ref: str) -> DriverVersionRef:
-        """Drive AddDriverPage (Remote tab) and return the new version ref.
+        """Drive the Load Driver drawer (Git tab) and return the new version ref.
 
-        On success AddDriverPage navigates to ``/drivers/<applicationDriverId>``
-        — the driver detail page. We read the driver id from the URL and the
-        version id from the most recently added version card.
+        The drawer opens from the ``Load driver`` action on ``/drivers``. On
+        success it navigates to ``/drivers/<applicationDriverId>?version=<id>``
+        — the driver detail page — whose root carries the ids we need as data
+        attributes.
         """
-        await self._page.goto("/drivers/add")
-        await expect(
-            self._page.get_by_role("heading", name="Add Driver")
-        ).to_be_visible()
+        await self._page.goto("/drivers")
 
-        await self._page.get_by_role("button", name="Remote", exact=True).click()
+        # Open the drawer (header action). Only one "Load driver" trigger exists
+        # until the drawer mounts its own footer submit button.
+        await self._page.get_by_role("button", name="Load driver").first.click()
+
+        # Git repository is the default tab.
         await self._page.locator("#repositoryUrl").fill(git_url)
-        branch_input = self._page.locator("#branch")
-        await branch_input.fill(ref)
-        await self._page.get_by_role("button", name="Load Driver").click()
+        await self._page.locator("#branch").fill(ref)
 
-        # Navigation to /drivers/<id> is the success signal.
+        # The footer submit is the only button bound to the drawer form.
+        await self._page.locator("button[form=load-driver-form]").click()
+
+        # Navigation to the detail page is the success signal.
         detail_root = self._page.locator("[data-testid=driver-detail]").first
         await detail_root.wait_for()
 
@@ -52,26 +53,19 @@ class DriversListPage:
             raise ScenarioActionError(
                 "driver detail page rendered without data-driver-name"
             )
-
-        # Pick the first version row in the left rail (DriverDetailPage lists
-        # versions newest-first — we just loaded one). The selector changed
-        # from `driver-version-card` to `driver-version-row` when the driver
-        # detail page was rewritten with the tabbed layout (spec 012).
-        row = self._page.locator("[data-testid=driver-version-row]").first
-        await row.wait_for()
-        version_id = await row.get_attribute("data-version-id")
+        version_id = await detail_root.get_attribute("data-version-id")
         if not version_id:
             raise ScenarioActionError(
-                "driver version row rendered without data-version-id"
+                "driver detail page rendered without data-version-id"
             )
-        version = await row.get_attribute("data-version-label")
+        version = await detail_root.get_attribute("data-version-label")
         if not version:
             raise ScenarioActionError(
-                "driver version row rendered without data-version-label"
+                "driver detail page rendered without data-version-label"
             )
 
-        # Also validate the URL matches the detail root, just to catch
-        # layout surprises during refactors.
+        # Validate the URL matches the detail root, to catch layout surprises
+        # during refactors (query string carries ?version=, so compare path).
         path = urlparse(self._page.url).path
         if not path.endswith(application_driver_id):
             raise ScenarioActionError(

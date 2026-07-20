@@ -1,3 +1,4 @@
+import { Box } from "lucide-react";
 import type { DriverVersionDetail } from "../types";
 import { isPlainObject } from "../json-guards";
 
@@ -51,7 +52,10 @@ export function ComponentsTab({ components }: ComponentsTabProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3" data-testid="driver-components-list">
+    <div
+      className="grid gap-3 sm:grid-cols-2"
+      data-testid="driver-components-list"
+    >
       {entries.map(([name, decl]) => (
         <ComponentRow key={name} name={name} decl={decl} />
       ))}
@@ -65,115 +69,82 @@ interface ComponentRowProps {
 }
 
 function ComponentRow({ name, decl }: ComponentRowProps) {
-  const labelDict = extractLabelDict(decl);
-  const otherEntries = Object.entries(decl).filter(
-    ([key]) => key !== "identifier",
-  );
-
+  const fields = flattenDecl(decl);
   return (
     <div
-      className="rounded-lg border border-border bg-card p-4"
+      className="rounded-lg border border-border bg-muted/30 p-4"
       data-testid="driver-component-row"
       data-component-name={name}
     >
-      <h3 className="font-mono text-sm font-semibold text-foreground">
-        {name}
-      </h3>
-      {labelDict && Object.keys(labelDict).length > 0 ? (
-        <div className="mt-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            identifier.label
-          </p>
-          <KeyValueList entries={Object.entries(labelDict)} />
-        </div>
-      ) : null}
-      {otherEntries.length > 0 ? (
-        <div className="mt-3 flex flex-col gap-2">
-          {otherEntries.map(([key, value]) => (
-            <ComponentField key={key} fieldKey={key} value={value} />
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+          <Box className="h-4 w-4 text-muted-foreground" />
+        </span>
+        <span className="font-mono text-[13px] font-medium text-foreground">
+          {name}
+        </span>
+      </div>
+      {fields.length > 0 ? (
+        <dl className="mt-3 grid grid-cols-[165px_1fr] gap-x-4 gap-y-1.5 border-t border-border/60 pt-3">
+          {fields.map(([key, value]) => (
+            <div key={key} className="contents">
+              <dt
+                className="truncate font-mono text-xs text-muted-foreground"
+                title={key}
+              >
+                {key}
+              </dt>
+              <dd
+                className="min-w-0 truncate font-mono text-[13px]"
+                title={value}
+              >
+                {value}
+              </dd>
+            </div>
           ))}
-        </div>
+        </dl>
       ) : null}
     </div>
   );
 }
 
-function ComponentField({
-  fieldKey,
-  value,
-}: {
-  fieldKey: string;
-  value: unknown;
-}) {
-  if (isScalar(value)) {
-    return (
-      <div className="grid grid-cols-[minmax(0,160px)_1fr] gap-2 text-sm">
-        <span className="truncate font-mono text-xs text-muted-foreground">
-          {fieldKey}
-        </span>
-        <span className="break-words">{String(value)}</span>
-      </div>
-    );
+/**
+ * Flatten a component declaration into single-line key/value pairs for display:
+ * the `identifier.label` selectors, top-level scalars, and nested objects
+ * flattened one level (`backup.kind`). Arrays are joined; deeper nesting is
+ * summarised. Keeps every card row on one line with no empty/ragged rows.
+ */
+function flattenDecl(decl: Record<string, unknown>): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  const label = extractLabelDict(decl);
+  if (label) {
+    for (const [k, v] of Object.entries(label)) {
+      if (isScalar(v)) pairs.push([k, String(v)]);
+    }
   }
-  if (isPlainObject(value)) {
-    return (
-      <div>
-        <p className="font-mono text-xs text-muted-foreground">{fieldKey}</p>
-        <KeyValueList entries={Object.entries(value)} />
-      </div>
-    );
+  for (const [key, value] of Object.entries(decl)) {
+    if (key === "identifier") continue;
+    if (isScalar(value)) {
+      pairs.push([key, String(value)]);
+    } else if (isPlainObject(value)) {
+      for (const [k2, v2] of Object.entries(value)) {
+        pairs.push([`${key}.${k2}`, summarizeValue(v2)]);
+      }
+    } else if (Array.isArray(value)) {
+      pairs.push([key, value.filter(isScalar).map(String).join(", ") || "—"]);
+    }
   }
-  if (Array.isArray(value)) {
-    return (
-      <div className="grid grid-cols-[minmax(0,160px)_1fr] gap-2 text-sm">
-        <span className="truncate font-mono text-xs text-muted-foreground">
-          {fieldKey}
-        </span>
-        <span className="text-muted-foreground">[...]</span>
-      </div>
-    );
-  }
-  // null / undefined / other — render as em dash to avoid JSON fallback.
-  return (
-    <div className="grid grid-cols-[minmax(0,160px)_1fr] gap-2 text-sm">
-      <span className="truncate font-mono text-xs text-muted-foreground">
-        {fieldKey}
-      </span>
-      <span className="text-muted-foreground">—</span>
-    </div>
-  );
+  return pairs;
 }
 
-function KeyValueList({ entries }: { entries: Array<[string, unknown]> }) {
-  return (
-    <dl className="mt-1 grid grid-cols-[minmax(0,160px)_1fr] gap-x-2 gap-y-1 text-sm">
-      {entries.map(([k, v]) => (
-        <div className="contents" key={k}>
-          <dt className="truncate font-mono text-xs text-muted-foreground">
-            {k}
-          </dt>
-          <dd className="break-words">{renderValue(v)}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-function renderValue(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  if (isScalar(value)) {
-    return String(value);
-  }
+function summarizeValue(value: unknown): string {
+  if (isScalar(value)) return String(value);
   if (Array.isArray(value)) {
-    return "[...]";
+    return value.filter(isScalar).map(String).join(", ") || "—";
   }
-  // Plain object one-level-deeper: show a compact "{ k1, k2 }" summary
-  // without JSON-stringifying values.
   if (isPlainObject(value)) {
     const keys = Object.keys(value);
-    return keys.length === 0 ? "{}" : `{ ${keys.join(", ")} }`;
+    return keys.length === 0 ? "—" : `{ ${keys.join(", ")} }`;
   }
   return "—";
 }
