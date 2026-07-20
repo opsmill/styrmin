@@ -1,17 +1,18 @@
 /**
- * DriverDetailPage orchestration tests (T021).
+ * DriverDetailPage tests.
  *
- * Each test mocks `useGetDriverQuery` so we can fully control the data
- * the page receives without standing up a fake transport.
+ * The redesigned detail is a persistent header (identity + version switcher +
+ * status) over a tabbed body (Overview / Parameters / Components). A single
+ * version is addressed by the `?version=<id>` search param, defaulting to the
+ * newest by `createdOn`. `useGetDriverQuery` is mocked so each test controls
+ * the data.
  *
  * Cases:
- *   (a) tab switching preserves the selected version (FR-007),
- *   (b) version switching preserves the active tab (FR-007),
- *   (c) empty-versions branch renders the role-gated empty state
- *       (Add Version visible for READ_WRITE+, hidden for READ_ONLY) (FR-020 + FR-015),
- *   (d) EC-002 silent-fallback — after a refetch removes the
- *       previously-selected version, the page silently falls back to
- *       the new newest version.
+ *   (a) defaults to the newest version and marks it "Latest",
+ *   (b) `?version` selects an older version and flags "Update available",
+ *   (c) tabs switch between Overview / Parameters / Components,
+ *   (d) a driver with no versions renders an error (not a crash),
+ *   (e) no <pre> JSON-dump fallback renders across tabs (SC-002).
  */
 import {
   describe,
@@ -42,7 +43,6 @@ import { ThemeProvider } from "@/hooks/use-theme";
 import DriverDetailPage from "@/pages/drivers/DriverDetailPage";
 import type { GetDriverQuery } from "@/generated/graphql";
 
-// Mock the generated hook so each test can fully control the query state.
 const useGetDriverQueryMock = vi.fn();
 vi.mock("@/generated/graphql", async () => {
   const actual = await vi.importActual<typeof import("@/generated/graphql")>(
@@ -87,12 +87,12 @@ function makeVersion(
   },
 ): VersionShape {
   const base = {
-    supportedVersions: "*",
+    supportedVersions: ">=1.0,<2.0",
     sourceType: "git",
     sourceRepository: "https://github.com/example/repo.git",
     sourceBranch: "main" as string | null,
     sourcePath: null as string | null,
-    sourceCommitSha: null as string | null,
+    sourceCommitSha: "abcdef1234567890" as string | null,
     contentHash: null as string | null,
     components: null,
     parameters: [],
@@ -136,7 +136,7 @@ function makeQueryResult(driver: DriverShape | null): QueryResult {
   };
 }
 
-function makeTestRouter() {
+function makeTestRouter(initialEntry = "/drivers/driver-1") {
   const rootRoute = createRootRoute();
   const driversRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -146,12 +146,10 @@ function makeTestRouter() {
   const driverDetailRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/drivers/$driverId",
+    validateSearch: (search: Record<string, unknown>) => ({
+      version: typeof search.version === "string" ? search.version : undefined,
+    }),
     component: () => <DriverDetailPage />,
-  });
-  const addDriverRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/drivers/add",
-    component: () => <div>add driver</div>,
   });
   const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -162,10 +160,9 @@ function makeTestRouter() {
     routeTree: rootRoute.addChildren([
       indexRoute,
       driversRoute,
-      addDriverRoute,
       driverDetailRoute,
     ]),
-    history: createMemoryHistory({ initialEntries: ["/drivers/driver-1"] }),
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
   });
 }
 
@@ -179,9 +176,10 @@ function makeQueryClient(): QueryClient {
 }
 
 async function renderPage(
+  initialEntry = "/drivers/driver-1",
   role: Role = "READ_WRITE",
 ): Promise<{ container: HTMLElement }> {
-  const router = makeTestRouter();
+  const router = makeTestRouter(initialEntry);
   await router.load();
   const qc = makeQueryClient();
   let result: { container: HTMLElement } | undefined;
@@ -199,7 +197,21 @@ async function renderPage(
   return result!;
 }
 
-describe("DriverDetailPage (T021)", () => {
+const twoVersions = () =>
+  makeDriver([
+    makeVersion({
+      id: "old",
+      version: "1.0.0",
+      createdOn: "2026-01-01T00:00:00Z",
+    }),
+    makeVersion({
+      id: "new",
+      version: "2.0.0",
+      createdOn: "2026-03-01T00:00:00Z",
+    }),
+  ]);
+
+describe("DriverDetailPage", () => {
   beforeEach(() => {
     useGetDriverQueryMock.mockReset();
   });
@@ -208,246 +220,104 @@ describe("DriverDetailPage (T021)", () => {
     vi.restoreAllMocks();
   });
 
-  it("preserves the selected version when the user switches tabs (FR-007)", async () => {
+  it("defaults to the newest version and marks it Latest", async () => {
+    useGetDriverQueryMock.mockReturnValue(makeQueryResult(twoVersions()));
+
+    await renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("driver-detail").getAttribute("data-version-id"),
+      ).toBe("new");
+    });
+    expect(screen.getByText("Latest")).toBeInTheDocument();
+    // A version switcher is offered because there is more than one version.
+    expect(screen.getByLabelText("Switch version")).toBeInTheDocument();
+  });
+
+  it("selects the ?version version and flags Update available on an older one", async () => {
+    useGetDriverQueryMock.mockReturnValue(makeQueryResult(twoVersions()));
+
+    await renderPage("/drivers/driver-1?version=old");
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("driver-detail").getAttribute("data-version-id"),
+      ).toBe("old");
+    });
+    expect(screen.getByText("Older version")).toBeInTheDocument();
+    expect(screen.getByText(/newest loaded version/i)).toBeInTheDocument();
+  });
+
+  it("switches between Overview, Parameters and Components tabs", async () => {
     const driver = makeDriver([
       makeVersion({
-        id: "old",
+        id: "v1",
         version: "1.0.0",
-        createdOn: "2026-01-01T00:00:00Z",
-      }),
-      makeVersion({
-        id: "new",
-        version: "2.0.0",
         createdOn: "2026-03-01T00:00:00Z",
+        parameters: [
+          { name: "host", label: "Host", kind: "string", default: null },
+        ] as unknown as VersionShape["parameters"],
+        components: {
+          server: { identifier: { label: { app: "server" } }, cpu: 2 },
+        } as unknown as VersionShape["components"],
       }),
     ]);
     useGetDriverQueryMock.mockReturnValue(makeQueryResult(driver));
 
+    const user = userEvent.setup();
     await renderPage();
 
-    // Newest-by-createdOn should be selected by default.
+    // Overview is the default tab: the Details panel is visible.
+    expect(screen.getByTestId("driver-overview")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /parameters/i }));
     await waitFor(() => {
-      const detail = screen.getByTestId("driver-version-detail");
-      expect(detail.getAttribute("data-version-id")).toBe("new");
+      expect(screen.getByTestId("driver-parameters-table")).toBeInTheDocument();
     });
 
-    // Switch to Parameters; selection must NOT change.
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Parameters" }));
-
-    const detail = screen.getByTestId("driver-version-detail");
-    expect(detail.getAttribute("data-version-id")).toBe("new");
-    expect(screen.getByTestId("driver-parameters-empty")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /components/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId("driver-components-list")).toBeInTheDocument();
+    });
   });
 
-  it("preserves the active tab when the user switches versions (FR-007)", async () => {
+  it("renders an error (not a crash) when the driver has no versions", async () => {
+    useGetDriverQueryMock.mockReturnValue(makeQueryResult(makeDriver([])));
+
+    await renderPage();
+
+    expect(screen.getByText(/no versions/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("driver-detail")).not.toBeInTheDocument();
+  });
+
+  it("renders no <pre> JSON dump across tabs (SC-002)", async () => {
     const driver = makeDriver([
       makeVersion({
-        id: "old",
-        version: "1.0.0",
-        createdOn: "2026-01-01T00:00:00Z",
-      }),
-      makeVersion({
-        id: "new",
-        version: "2.0.0",
-        createdOn: "2026-03-01T00:00:00Z",
-      }),
-    ]);
-    useGetDriverQueryMock.mockReturnValue(makeQueryResult(driver));
-
-    await renderPage();
-
-    const user = userEvent.setup();
-    // Switch to Parameters first.
-    await user.click(screen.getByRole("button", { name: "Parameters" }));
-    await waitFor(() => {
-      expect(screen.getByTestId("driver-parameters-empty")).toBeInTheDocument();
-    });
-
-    // Now click the older version row.
-    const rows = screen.getAllByTestId("driver-version-row");
-    const oldRow = rows.find(
-      (r) => r.getAttribute("data-version-id") === "old",
-    )!;
-    await user.click(oldRow);
-
-    // Version detail should now reflect the older version, and the
-    // Parameters panel must still be the visible one.
-    await waitFor(() => {
-      expect(
-        screen
-          .getByTestId("driver-version-detail")
-          .getAttribute("data-version-id"),
-      ).toBe("old");
-    });
-    expect(screen.getByTestId("driver-parameters-empty")).toBeInTheDocument();
-  });
-
-  describe("empty-versions branch (FR-020)", () => {
-    it("renders the empty state with Add Version visible for a READ_WRITE user", async () => {
-      const driver = makeDriver([]);
-      useGetDriverQueryMock.mockReturnValue(makeQueryResult(driver));
-
-      await renderPage("READ_WRITE");
-
-      expect(screen.getByTestId("driver-empty-versions")).toBeInTheDocument();
-      expect(
-        screen.getByTestId("driver-empty-add-version"),
-      ).toBeInTheDocument();
-      // No tabs / version-detail rendered when versions are empty.
-      expect(
-        screen.queryByTestId("driver-version-detail"),
-      ).not.toBeInTheDocument();
-    });
-
-    it("hides the Add Version CTA for a READ_ONLY user (FR-015)", async () => {
-      const driver = makeDriver([]);
-      useGetDriverQueryMock.mockReturnValue(makeQueryResult(driver));
-
-      await renderPage("READ_ONLY");
-
-      expect(screen.getByTestId("driver-empty-versions")).toBeInTheDocument();
-      expect(
-        screen.queryByTestId("driver-empty-add-version"),
-      ).not.toBeInTheDocument();
-      // The header-actions Add Version is also gated; must be absent.
-      expect(
-        screen.queryByTestId("driver-add-version"),
-      ).not.toBeInTheDocument();
-    });
-  });
-
-  it("silently falls back to the new newest version when the selected version disappears (EC-002)", async () => {
-    const driverBefore = makeDriver([
-      makeVersion({
-        id: "old",
-        version: "1.0.0",
-        createdOn: "2026-01-01T00:00:00Z",
-      }),
-      makeVersion({
-        id: "current",
-        version: "2.0.0",
-        createdOn: "2026-03-01T00:00:00Z",
-      }),
-    ]);
-
-    // First render returns both versions; "current" is selected by default.
-    useGetDriverQueryMock.mockReturnValue(makeQueryResult(driverBefore));
-
-    await renderPage();
-
-    await waitFor(() => {
-      expect(
-        screen
-          .getByTestId("driver-version-detail")
-          .getAttribute("data-version-id"),
-      ).toBe("current");
-    });
-
-    // Simulate a refetch that removes "current" — only "old" remains.
-    const driverAfter = makeDriver([
-      makeVersion({
-        id: "old",
-        version: "1.0.0",
-        createdOn: "2026-01-01T00:00:00Z",
-      }),
-    ]);
-    useGetDriverQueryMock.mockReturnValue(makeQueryResult(driverAfter));
-
-    // Trigger a re-render so the hook returns the new value. Clicking any
-    // existing row is sufficient (it forces a setState); but since the
-    // previously-selected id is no longer in the list, the page must
-    // silently fall back to the new newest ("old") without showing an
-    // error or toast.
-    const user = userEvent.setup();
-    // Re-clicking the old row (still rendered from the new mock data) is
-    // a deterministic way to force the surrounding render cycle that
-    // re-reads the mocked hook result.
-    const rows = screen.getAllByTestId("driver-version-row");
-    const oldRow = rows.find(
-      (r) => r.getAttribute("data-version-id") === "old",
-    )!;
-    await user.click(oldRow);
-
-    await waitFor(() => {
-      expect(
-        screen
-          .getByTestId("driver-version-detail")
-          .getAttribute("data-version-id"),
-      ).toBe("old");
-    });
-
-    // No error UI must be present.
-    expect(screen.queryByText(/Driver not found/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("renders zero <pre> blocks across all five tabs for a fully-populated driver version (SC-002)", async () => {
-    const driver = makeDriver([
-      makeVersion({
-        id: "fully-populated",
+        id: "full",
         version: "1.0.0",
         createdOn: "2026-03-01T00:00:00Z",
-        sourceType: "git",
-        sourceRepository: "https://github.com/acme/repo.git",
-        sourceBranch: "main",
         sourcePath: "/charts/web",
         components: {
           server: {
             identifier: { label: { "app.kubernetes.io/name": "server" } },
             cpu: "500m",
-          },
-          worker: {
-            identifier: { label: { role: "primary" } },
+            backup: { enabled: true, kind: "disk" },
           },
         } as unknown as VersionShape["components"],
         parameters: [
           { name: "host", label: "Host", kind: "string", default: null },
-          {
-            name: "port",
-            label: "Port",
-            kind: "string",
-            default: "8080" as unknown as Record<string, unknown>,
-          },
-          {
-            name: "config",
-            label: "Config",
-            kind: "object",
-            default: { nested: 1 },
-          },
-        ],
-        actions: [
-          {
-            id: "act-1",
-            name: "flush-cache",
-            description: "Flush",
-            location: "cache/flush",
-          },
-        ],
+          { name: "cfg", label: "Config", kind: "object", default: { a: 1 } },
+        ] as unknown as VersionShape["parameters"],
       }),
     ]);
     useGetDriverQueryMock.mockReturnValue(makeQueryResult(driver));
 
+    const user = userEvent.setup();
     const { container } = await renderPage();
 
-    // Tabs are clicked in declaration order so that every panel renders
-    // at least once. After each click we assert SC-002 globally: no
-    // <pre> JSON-dump fallback anywhere in the page.
-    const user = userEvent.setup();
-    const tabSentinels: Array<[string, string]> = [
-      ["Overview", "driver-overview-tiles"],
-      ["Parameters", "driver-parameters-table"],
-      ["Components", "driver-components-list"],
-      ["Actions", "driver-actions-list"],
-      ["Source", "driver-source-git"],
-    ];
-    for (const [tabName, sentinelTestId] of tabSentinels) {
-      await user.click(screen.getByRole("button", { name: tabName }));
-      await waitFor(() => {
-        // Sanity-check: each click must actually mount the corresponding
-        // panel (otherwise the no-<pre> assertion is vacuous).
-        expect(screen.getByTestId(sentinelTestId)).toBeInTheDocument();
-      });
+    for (const tab of [/overview/i, /parameters/i, /components/i]) {
+      await user.click(screen.getByRole("button", { name: tab }));
       expect(container.querySelector("pre")).toBeNull();
     }
   });

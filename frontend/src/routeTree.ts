@@ -8,7 +8,6 @@ import { deploymentDetailRoute } from "./routes/deploymentDetail";
 import { backupStorageLocationListRoute } from "./routes/backupStorageLocationList";
 import { backupStorageLocationDetailRoute } from "./routes/backupStorageLocationDetail";
 import { driverListRoute } from "./routes/driverList";
-import { addDriverRoute } from "./routes/addDriver";
 import { driverDetailRoute } from "./routes/driverDetail";
 import { settingsRoute } from "./routes/settings";
 import { clusterListRoute } from "./routes/clusterList";
@@ -28,7 +27,6 @@ export const routeTree = rootRoute.addChildren([
   backupStorageLocationListRoute,
   backupStorageLocationDetailRoute,
   driverListRoute,
-  addDriverRoute,
   driverDetailRoute,
   settingsRoute,
   clusterListRoute,

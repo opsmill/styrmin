@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 
-import { formatDriverVersionLabel } from "@/lib/driverVersion";
+import {
+  formatDriverVersionLabel,
+  collidingVersions,
+  displayDriverVersion,
+} from "@/lib/driverVersion";
 
 describe("formatDriverVersionLabel", () => {
   it("renders the first 7 chars of contentHash for a local row", () => {
@@ -51,5 +55,40 @@ describe("formatDriverVersionLabel", () => {
         sourceCommitSha: "",
       }),
     ).toBe("1.2.3");
+  });
+});
+
+describe("collidingVersions", () => {
+  it("returns only version strings that appear more than once", () => {
+    const set = collidingVersions([
+      { version: "1" },
+      { version: "1" },
+      { version: "2" },
+    ]);
+    expect(set.has("1")).toBe(true);
+    expect(set.has("2")).toBe(false);
+    expect(set.size).toBe(1);
+  });
+
+  it("is empty when every version is unique", () => {
+    expect(collidingVersions([{ version: "1" }, { version: "2" }]).size).toBe(
+      0,
+    );
+  });
+});
+
+describe("displayDriverVersion", () => {
+  const v = {
+    version: "1",
+    contentHash: "a".repeat(64),
+    sourceCommitSha: null,
+  };
+
+  it("shows the bare version when it does not collide", () => {
+    expect(displayDriverVersion(v, new Set())).toBe("1");
+  });
+
+  it("appends the fingerprint only when the version collides", () => {
+    expect(displayDriverVersion(v, new Set(["1"]))).toBe("1@aaaaaaa");
   });
 });

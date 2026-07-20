@@ -121,7 +121,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       <aside
         className={cn(
           "flex flex-col border-r border-border bg-sidebar transition-all duration-200",
@@ -158,7 +158,7 @@ export function AppShell() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-1 px-3">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3">
           {navItems.map(renderNavLink)}
         </nav>
 

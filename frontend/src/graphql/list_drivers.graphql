@@ -5,12 +5,14 @@ query ListDrivers {
     versions {
       id
       version
+      supportedVersions
       sourceType
       sourceRepository
       sourceBranch
       sourcePath
       sourceCommitSha
       contentHash
+      createdOn
     }
   }
 }
