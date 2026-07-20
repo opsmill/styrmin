@@ -21,9 +21,11 @@ class DriversListPage:
     async def load_remote_version(self, *, git_url: str, ref: str) -> DriverVersionRef:
         """Drive the Load Driver drawer (Git tab) and return the new version ref.
 
-        The drawer opens from the ``Load driver`` action on ``/drivers``. On
-        success it navigates to ``/drivers/<applicationDriverId>?version=<id>``
-        — the driver detail page — whose root carries the ids we need as data
+        The drawer opens from the ``Load driver`` action on ``/drivers``. There
+        is no scan/preview step, so submitting loads the version directly and the
+        drawer shows a success step (it does NOT auto-navigate); its "View driver"
+        action then opens ``/drivers/<applicationDriverId>?version=<id>`` — the
+        driver detail page — whose root carries the ids we need as data
         attributes.
         """
         await self._page.goto("/drivers")
@@ -38,6 +40,11 @@ class DriversListPage:
 
         # The footer submit is the only button bound to the drawer form.
         await self._page.locator("button[form=load-driver-form]").click()
+
+        # On success the drawer swaps to a confirmation step; follow its
+        # "View driver" action to reach the detail page (click auto-waits for
+        # the load mutation to resolve and the button to appear).
+        await self._page.get_by_role("button", name="View driver").click()
 
         # Navigation to the detail page is the success signal.
         detail_root = self._page.locator("[data-testid=driver-detail]").first
