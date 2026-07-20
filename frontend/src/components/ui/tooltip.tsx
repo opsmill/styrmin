@@ -22,21 +22,25 @@ export function Tooltip({
   className,
 }: TooltipProps) {
   return (
-    <TooltipPrimitive.Root delay={delay}>
-      <TooltipPrimitive.Trigger render={children} />
-      <TooltipPrimitive.Portal>
-        <TooltipPrimitive.Positioner sideOffset={6} className="z-50">
-          <TooltipPrimitive.Popup
-            className={cn(
-              "max-w-xs rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs leading-relaxed text-popover-foreground shadow-md",
-              "data-[open]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[open]:fade-in-0",
-              className,
-            )}
-          >
-            {content}
-          </TooltipPrimitive.Popup>
-        </TooltipPrimitive.Positioner>
-      </TooltipPrimitive.Portal>
-    </TooltipPrimitive.Root>
+    // Base UI 1.3 moved the open delay to Provider (Root no longer accepts it);
+    // a per-tooltip Provider keeps the short delay local to this hint.
+    <TooltipPrimitive.Provider delay={delay}>
+      <TooltipPrimitive.Root>
+        <TooltipPrimitive.Trigger render={children} />
+        <TooltipPrimitive.Portal>
+          <TooltipPrimitive.Positioner sideOffset={6} className="z-50">
+            <TooltipPrimitive.Popup
+              className={cn(
+                "max-w-xs rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs leading-relaxed text-popover-foreground shadow-md",
+                "data-[open]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[open]:fade-in-0",
+                className,
+              )}
+            >
+              {content}
+            </TooltipPrimitive.Popup>
+          </TooltipPrimitive.Positioner>
+        </TooltipPrimitive.Portal>
+      </TooltipPrimitive.Root>
+    </TooltipPrimitive.Provider>
   );
 }
