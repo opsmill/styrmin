@@ -16,6 +16,7 @@ import {
   type CurrentUser,
 } from "@/auth/AuthProvider";
 import { ThemeProvider } from "@/hooks/use-theme";
+import { Toaster } from "@/components/ui/toast";
 import DriverListPage from "@/pages/drivers/DriverListPage";
 import type { ListDriversQuery } from "@/generated/graphql";
 
@@ -124,7 +125,9 @@ async function renderPage(role: Role = "READ_WRITE") {
       <ThemeProvider>
         <QueryClientProvider client={qc}>
           <AuthContext.Provider value={makeAuthValue(role)}>
-            <RouterProvider router={router} />
+            <Toaster>
+              <RouterProvider router={router} />
+            </Toaster>
           </AuthContext.Provider>
         </QueryClientProvider>
       </ThemeProvider>,
