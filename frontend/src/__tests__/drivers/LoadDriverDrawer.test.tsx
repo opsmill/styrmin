@@ -11,6 +11,7 @@ import {
 } from "@tanstack/react-router";
 
 import { ThemeProvider } from "@/hooks/use-theme";
+import { Toaster } from "@/components/ui/toast";
 import { LoadDriverDrawer } from "@/pages/drivers/LoadDriverDrawer";
 
 const loadRemoteMutateAsync = vi.fn();
@@ -58,7 +59,9 @@ async function renderDrawer() {
     render(
       <ThemeProvider>
         <QueryClientProvider client={qc}>
-          <RouterProvider router={router} />
+          <Toaster>
+            <RouterProvider router={router} />
+          </Toaster>
         </QueryClientProvider>
       </ThemeProvider>,
     );
@@ -120,7 +123,7 @@ describe("LoadDriverDrawer", () => {
     });
   });
 
-  it("shows a success confirmation after loading, with a View driver action", async () => {
+  it("navigates to the new version's detail page and toasts on success", async () => {
     loadRemoteMutateAsync.mockResolvedValue({
       loadRemoteApplicationDriverVersion: {
         id: "v1",
@@ -135,12 +138,13 @@ describe("LoadDriverDrawer", () => {
       "https://github.com/org/repo",
     );
     await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+
+    // The drawer auto-navigates to the detail route (rendered as "detail")…
     await waitFor(() => {
-      expect(screen.getByText("Driver loaded")).toBeInTheDocument();
+      expect(screen.getByText("detail")).toBeInTheDocument();
     });
-    expect(screen.getByText("2.1.0")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /view driver/i }),
-    ).toBeInTheDocument();
+    // …and raises a success toast naming the loaded version.
+    expect(screen.getByText("Driver loaded")).toBeInTheDocument();
+    expect(screen.getByText(/version 2\.1\.0/i)).toBeInTheDocument();
   });
 });

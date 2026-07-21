@@ -5,13 +5,16 @@ import { queryClient } from "@/lib/query-client";
 import { router } from "@/router";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { AuthProvider } from "@/auth/AuthProvider";
+import { Toaster } from "@/components/ui/toast";
 
 export default function App() {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <RouterProvider router={router} />
+          <Toaster>
+            <RouterProvider router={router} />
+          </Toaster>
         </AuthProvider>
         {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
       </QueryClientProvider>

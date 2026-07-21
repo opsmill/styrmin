@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, Check } from "lucide-react";
+import { AlertCircle } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const localSchema = z.object({
@@ -54,7 +55,9 @@ interface LoadDriverDrawerProps {
  * the centered-dialog pattern is reserved for shorter create/confirm flows.
  *
  * One-shot load: the backend has no scan/preview step, so submitting calls the
- * load mutation directly, then navigates to the new version's detail page.
+ * load mutation directly. On success the drawer closes, a success toast
+ * confirms which version was loaded, and we navigate to the new version's
+ * detail page.
  */
 export function LoadDriverDrawer({
   open,
@@ -62,17 +65,12 @@ export function LoadDriverDrawer({
 }: LoadDriverDrawerProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [tab, setTab] = useState<SourceTab>("git");
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const loadLocalMutation = useLoadLocalDriverMutation();
   const loadRemoteMutation = useLoadRemoteDriverMutation();
-
-  const [loaded, setLoaded] = useState<{
-    driverId: string;
-    versionId: string;
-    version: string;
-  } | null>(null);
 
   const handleLoaded = (v: {
     applicationDriverId: string;
@@ -80,20 +78,16 @@ export function LoadDriverDrawer({
     version: string;
   }) => {
     queryClient.invalidateQueries({ queryKey: ["ListDrivers"] });
-    setLoaded({
-      driverId: v.applicationDriverId,
-      versionId: v.id,
-      version: v.version,
-    });
-  };
-
-  const viewDriver = () => {
-    if (!loaded) return;
     onOpenChange(false);
+    toast.add({
+      title: "Driver loaded",
+      description: `Version ${v.version} is now selectable when deploying or upgrading.`,
+      type: "success",
+    });
     navigate({
       to: "/drivers/$driverId",
-      params: { driverId: loaded.driverId },
-      search: { version: loaded.versionId },
+      params: { driverId: v.applicationDriverId },
+      search: { version: v.id },
     });
   };
 
@@ -135,7 +129,6 @@ export function LoadDriverDrawer({
     if (open) {
       setTab("git");
       setSubmitError(null);
-      setLoaded(null);
       remoteForm.reset();
       localForm.reset();
     }
@@ -195,165 +188,124 @@ export function LoadDriverDrawer({
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
-            {loaded ? (
-              <div className="flex flex-col items-center gap-3 py-10 text-center">
-                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
-                  <Check className="h-6 w-6 text-success" />
-                </span>
-                <div className="space-y-1">
-                  <p className="text-[15px] font-medium">Driver loaded</p>
-                  <p className="text-sm text-muted-foreground">
-                    Version <span className="font-mono">{loaded.version}</span>{" "}
-                    is now selectable when deploying or upgrading.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <>
-                <Tabs
-                  tabs={[
-                    { id: "git", label: "Git repository" },
-                    { id: "local", label: "Local directory" },
-                  ]}
-                  activeTab={tab}
-                  onTabChange={(id) => {
-                    setTab(id as SourceTab);
-                    setSubmitError(null);
-                  }}
-                />
+            <Tabs
+              tabs={[
+                { id: "git", label: "Git repository" },
+                { id: "local", label: "Local directory" },
+              ]}
+              activeTab={tab}
+              onTabChange={(id) => {
+                setTab(id as SourceTab);
+                setSubmitError(null);
+              }}
+            />
 
-                {submitError && (
-                  <Alert variant="destructive" className="mt-4">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Couldn't load the driver</AlertTitle>
-                    <AlertDescription>{submitError}</AlertDescription>
-                  </Alert>
-                )}
-
-                <form
-                  id={FORM_ID}
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    submitActiveForm();
-                  }}
-                  className="mt-6 space-y-5"
-                >
-                  {tab === "git" ? (
-                    <>
-                      <remoteForm.Field name="repositoryUrl">
-                        {(field) => (
-                          <div className="space-y-2">
-                            <Label htmlFor="repositoryUrl">
-                              Repository URL
-                            </Label>
-                            <Input
-                              id="repositoryUrl"
-                              placeholder="https://github.com/org/repo"
-                              className="font-mono text-xs"
-                              value={field.state.value}
-                              onChange={(e) =>
-                                field.handleChange(e.target.value)
-                              }
-                              onBlur={field.handleBlur}
-                            />
-                            {field.state.meta.errors.length > 0 && (
-                              <p className="text-sm text-destructive">
-                                {fieldError(field.state.meta.errors[0])}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </remoteForm.Field>
-                      <remoteForm.Field name="branch">
-                        {(field) => (
-                          <div className="space-y-2">
-                            <Label htmlFor="branch">Branch</Label>
-                            <Input
-                              id="branch"
-                              placeholder="main"
-                              className="font-mono text-xs"
-                              value={field.state.value}
-                              onChange={(e) =>
-                                field.handleChange(e.target.value)
-                              }
-                              onBlur={field.handleBlur}
-                            />
-                            {field.state.meta.errors.length > 0 && (
-                              <p className="text-sm text-destructive">
-                                {fieldError(field.state.meta.errors[0])}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </remoteForm.Field>
-                    </>
-                  ) : (
-                    <localForm.Field name="path">
-                      {(field) => (
-                        <div className="space-y-2">
-                          <Label htmlFor="path">Directory path</Label>
-                          <Input
-                            id="path"
-                            placeholder="/path/to/driver"
-                            className="font-mono text-xs"
-                            value={field.state.value}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            onBlur={field.handleBlur}
-                          />
-                          {field.state.meta.errors.length > 0 && (
-                            <p className="text-sm text-destructive">
-                              {fieldError(field.state.meta.errors[0])}
-                            </p>
-                          )}
-                          <p className="text-xs text-muted-foreground">
-                            Path inside the Styrmin server container (a bundled
-                            or mounted driver) — not your local machine.
-                          </p>
-                        </div>
-                      )}
-                    </localForm.Field>
-                  )}
-                </form>
-              </>
+            {submitError && (
+              <Alert variant="destructive" className="mt-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Couldn't load the driver</AlertTitle>
+                <AlertDescription>{submitError}</AlertDescription>
+              </Alert>
             )}
+
+            <form
+              id={FORM_ID}
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                submitActiveForm();
+              }}
+              className="mt-6 space-y-5"
+            >
+              {tab === "git" ? (
+                <>
+                  <remoteForm.Field name="repositoryUrl">
+                    {(field) => (
+                      <div className="space-y-2">
+                        <Label htmlFor="repositoryUrl">Repository URL</Label>
+                        <Input
+                          id="repositoryUrl"
+                          placeholder="https://github.com/org/repo"
+                          className="font-mono text-xs"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          onBlur={field.handleBlur}
+                        />
+                        {field.state.meta.errors.length > 0 && (
+                          <p className="text-sm text-destructive">
+                            {fieldError(field.state.meta.errors[0])}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </remoteForm.Field>
+                  <remoteForm.Field name="branch">
+                    {(field) => (
+                      <div className="space-y-2">
+                        <Label htmlFor="branch">Branch</Label>
+                        <Input
+                          id="branch"
+                          placeholder="main"
+                          className="font-mono text-xs"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          onBlur={field.handleBlur}
+                        />
+                        {field.state.meta.errors.length > 0 && (
+                          <p className="text-sm text-destructive">
+                            {fieldError(field.state.meta.errors[0])}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </remoteForm.Field>
+                </>
+              ) : (
+                <localForm.Field name="path">
+                  {(field) => (
+                    <div className="space-y-2">
+                      <Label htmlFor="path">Directory path</Label>
+                      <Input
+                        id="path"
+                        placeholder="/path/to/driver"
+                        className="font-mono text-xs"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                      />
+                      {field.state.meta.errors.length > 0 && (
+                        <p className="text-sm text-destructive">
+                          {fieldError(field.state.meta.errors[0])}
+                        </p>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Path inside the Styrmin server container (a bundled or
+                        mounted driver) — not your local machine.
+                      </p>
+                    </div>
+                  )}
+                </localForm.Field>
+              )}
+            </form>
           </div>
 
           <footer className="sticky bottom-0 z-10 flex items-center gap-3 border-t border-border bg-background px-7 py-4">
-            {loaded ? (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => onOpenChange(false)}
-                >
-                  Close
-                </Button>
-                <Button type="button" className="flex-1" onClick={viewDriver}>
-                  View driver
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => onOpenChange(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  form={FORM_ID}
-                  className="flex-1"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? "Loading..." : "Load driver"}
-                </Button>
-              </>
-            )}
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form={FORM_ID}
+              className="flex-1"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? "Loading..." : "Load driver"}
+            </Button>
           </footer>
         </Dialog.Popup>
       </Dialog.Portal>
