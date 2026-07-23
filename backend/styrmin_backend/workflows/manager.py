@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import Any, Literal
 from uuid import UUID
 
@@ -5,6 +6,10 @@ from prefect import flow, task
 from prefect.client.orchestration import PrefectClient, get_client
 from prefect.client.schemas.actions import WorkPoolCreate
 from prefect.client.schemas.filters import DeploymentFilter, DeploymentFilterTags
+from prefect.client.schemas.objects import StateType
+from prefect.events.actions import ChangeFlowRunState
+from prefect.events.schemas.automations import AutomationCore, EventTrigger, Posture
+from prefect.events.schemas.events import ResourceSpecification
 from prefect.exceptions import ObjectAlreadyExists
 from prefect.logging import get_run_logger
 from prefect_github import GitHubCredentials
@@ -174,6 +179,72 @@ class PrefectManager:
             )
             log.info(f"Flow {workflow.name}, created successfully ... ")
 
+    @task(
+        name="task-manager-setup-zombie-flow-run-automation",
+        task_run_name="Setup Zombie Flow Run Automation",
+        cache_policy=NO_CACHE,
+    )
+    async def setup_zombie_flow_run_automation(self, client: PrefectClient) -> None:
+        """Register the Automation that crashes zombie flow runs (#312).
+
+        A worker process that dies while a flow run's subprocess is still
+        alive recovers correctly on its own (the surviving parent observes
+        the subprocess's non-zero exit and proposes ``Crashed``). But if the
+        *worker process itself* dies -- an OOM-killed pod, a
+        ``kubectl rollout restart``, a node eviction -- nothing else in
+        Prefect ever notices; the flow run stays claimed by the dead worker
+        in RUNNING/PENDING forever. Confirmed by direct reproduction.
+
+        Prefect flow runs emit heartbeat events by default since 3.6.22
+        (``PREFECT_FLOWS_HEARTBEAT_FREQUENCY``, 180s default). This
+        Automation is Prefect's own documented mechanism for reacting to
+        missed heartbeats -- see
+        https://docs.prefect.io/v3/advanced/detect-zombie-flows -- and
+        works against a self-hosted server (no Prefect Cloud required).
+        Verified live: catches a worker killed mid-flow-run in ~80s, with
+        no dependency on worker-offline detection or a worker restart.
+
+        Idempotent: upserts by name so repeated calls (every server start)
+        don't create duplicate Automations.
+        """
+        log = get_run_logger()
+        name = "Crash zombie flow runs"
+        automation = AutomationCore(
+            name=name,
+            description="Marks flow runs Crashed after their worker stops sending heartbeats (#312).",
+            trigger=EventTrigger(
+                after={"prefect.flow-run.heartbeat"},
+                expect={"prefect.flow-run.*"},
+                match=ResourceSpecification(
+                    {"prefect.resource.id": ["prefect.flow-run.*"]}
+                ),
+                for_each={"prefect.resource.id"},
+                posture=Posture.Proactive,
+                threshold=1,
+                within=timedelta(seconds=90),
+            ),
+            actions=[
+                ChangeFlowRunState(
+                    state=StateType.CRASHED,
+                    message=(
+                        "Flow run's worker stopped sending heartbeats "
+                        "(worker likely died mid-execution). Reconciled by "
+                        f"the {name!r} Automation. See #312."
+                    ),
+                )
+            ],
+        )
+
+        existing = await client.read_automations_by_name(name=name)
+        if existing:
+            await client.update_automation(
+                automation_id=existing[0].id, automation=automation
+            )
+            log.info(f"Automation {name!r} already present, updated ... ")
+        else:
+            await client.create_automation(automation=automation)
+            log.info(f"Automation {name!r} created successfully ... ")
+
     @staticmethod
     @task(name="task-manager-setup-blocks", task_run_name="Setup Blocks")
     async def setup_blocks() -> None:
@@ -192,3 +263,4 @@ class PrefectManager:
             await self.setup_blocks()
             await self.setup_work_pools(client=client)  # type: ignore  # Prefect Task.__call__ overload resolution
             await self.setup_deployments(client=client)  # type: ignore  # Prefect Task.__call__ overload resolution
+            await self.setup_zombie_flow_run_automation(client=client)  # type: ignore  # Prefect Task.__call__ overload resolution
