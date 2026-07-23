@@ -172,11 +172,15 @@ async def test_worker_death_recovers_orphaned_flow_run(
             await target_pod.delete(force=True, grace_period=0)
 
             # Recovery: the zombie-flow-run Automation reacts to the missed
-            # heartbeat and marks the run Crashed. Observed live at
-            # 70-130s across repeated manual runs (heartbeat frequency 180s
-            # default, 90s detection window) -- generous timeout for CI
-            # variance.
-            deadline = time.monotonic() + 240
+            # heartbeat and marks the run Crashed. The detection window is
+            # 3x the configured heartbeat frequency (180s default here ->
+            # 540s), matching setup_zombie_flow_run_automation's own
+            # calculation -- a shorter window flags every healthy in-flight
+            # flow run as a false positive (see
+            # test_detection_window_is_a_multiple_of_configured_heartbeat_frequency).
+            # Padded generously for CI scheduling variance.
+            recovery_timeout = 600
+            deadline = time.monotonic() + recovery_timeout
             state_type = None
             run = None
             while time.monotonic() < deadline:
@@ -188,8 +192,9 @@ async def test_worker_death_recovers_orphaned_flow_run(
 
             assert state_type == "CRASHED", (
                 "Orphaned flow run was never recovered by the zombie-flow-run "
-                f"Automation within 240s (last state: {state_type}). Without "
-                "the fix, this run stays stuck in RUNNING forever."
+                f"Automation within {recovery_timeout}s (last state: "
+                f"{state_type}). Without the fix, this run stays stuck in "
+                "RUNNING forever."
             )
             assert run is not None and run.state is not None
             assert "heartbeat" in (run.state.message or "").lower()

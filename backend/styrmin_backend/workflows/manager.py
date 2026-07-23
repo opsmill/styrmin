@@ -12,6 +12,7 @@ from prefect.events.schemas.automations import AutomationCore, EventTrigger, Pos
 from prefect.events.schemas.events import ResourceSpecification
 from prefect.exceptions import ObjectAlreadyExists
 from prefect.logging import get_run_logger
+from prefect.settings import get_current_settings
 from prefect_github import GitHubCredentials
 from prefect.cache_policies import NO_CACHE
 
@@ -196,19 +197,31 @@ class PrefectManager:
         in RUNNING/PENDING forever. Confirmed by direct reproduction.
 
         Prefect flow runs emit heartbeat events by default since 3.6.22
-        (``PREFECT_FLOWS_HEARTBEAT_FREQUENCY``, 180s default). This
+        (``PREFECT_FLOWS_HEARTBEAT_FREQUENCY``, 180s default here). This
         Automation is Prefect's own documented mechanism for reacting to
         missed heartbeats -- see
         https://docs.prefect.io/v3/advanced/detect-zombie-flows -- and
         works against a self-hosted server (no Prefect Cloud required).
-        Verified live: catches a worker killed mid-flow-run in ~80s, with
-        no dependency on worker-offline detection or a worker restart.
+
+        The detection window (``within``) must be a multiple of the actual
+        configured heartbeat frequency -- Prefect's own docs recommend 3x to
+        avoid false positives, and a window shorter than one full heartbeat
+        interval flags every in-flight flow run as unresponsive, since a
+        healthy run's heartbeats are naturally spaced that far apart. A
+        first version of this shipped with a hardcoded 90s window (copied
+        from Prefect's docs example, which assumes a 30s heartbeat interval,
+        not this codebase's 180s default) and crashed real, healthy
+        long-running flows in CI (backup/restore, infrahub deploys) --
+        reading the interval from settings instead of hardcoding it prevents
+        this class of bug from recurring if the setting ever changes.
 
         Idempotent: upserts by name so repeated calls (every server start)
         don't create duplicate Automations.
         """
         log = get_run_logger()
         name = "Crash zombie flow runs"
+        heartbeat_frequency = get_current_settings().flows.heartbeat_frequency or 180
+        detection_window = timedelta(seconds=heartbeat_frequency * 3)
         automation = AutomationCore(
             name=name,
             description="Marks flow runs Crashed after their worker stops sending heartbeats (#312).",
@@ -221,7 +234,7 @@ class PrefectManager:
                 for_each={"prefect.resource.id"},
                 posture=Posture.Proactive,
                 threshold=1,
-                within=timedelta(seconds=90),
+                within=detection_window,
             ),
             actions=[
                 ChangeFlowRunState(

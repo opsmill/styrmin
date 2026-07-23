@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -53,6 +54,41 @@ async def test_creates_automation_when_none_exists(mocker):
     action = automation_arg.actions[0]
     assert isinstance(action, ChangeFlowRunState)
     assert action.state == StateType.CRASHED
+
+
+async def test_detection_window_is_a_multiple_of_configured_heartbeat_frequency(
+    mocker,
+):
+    """Regression test: a first version of this shipped with a hardcoded
+    90s `within` window, copied from Prefect's docs example (which assumes
+    a 30s heartbeat interval), without adapting it to this codebase's actual
+    180s default. Since 90s < 180s, that window was shorter than a single
+    heartbeat interval and crashed every real, healthy in-flight flow run in
+    CI (backup/restore, infrahub deploys) -- not just genuinely dead ones.
+    `within` must scale with whatever heartbeat_frequency is actually
+    configured, never a hardcoded constant."""
+    mocker.patch(
+        "styrmin_backend.workflows.manager.get_current_settings"
+    ).return_value.flows.heartbeat_frequency = 180
+
+    client = mocker.Mock()
+    client.read_automations_by_name = AsyncMock(return_value=[])
+    client.create_automation = AsyncMock(return_value=uuid4())
+    client.update_automation = AsyncMock()
+
+    await PrefectManager.setup_zombie_flow_run_automation.fn(
+        _fake_manager(), client=client
+    )
+
+    (automation_arg,) = client.create_automation.call_args.kwargs.values()
+    within = automation_arg.trigger.within
+    assert within >= timedelta(seconds=180), (
+        f"within ({within}) must be at least one full heartbeat interval "
+        "(180s) or every healthy flow run gets falsely flagged as a zombie "
+        "during the normal gap between its own heartbeats"
+    )
+    # Prefect's own docs recommend >= 3x the heartbeat frequency.
+    assert within >= timedelta(seconds=180 * 3)
 
 
 async def test_updates_existing_automation_by_id(mocker):
