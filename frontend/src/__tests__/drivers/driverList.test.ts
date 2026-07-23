@@ -3,10 +3,12 @@ import { describe, it, expect } from "vitest";
 import {
   type DriverListItem,
   type DriverListVersion,
+  type FilteredDriver,
   versionSource,
   latestVersion,
   filterDrivers,
   flattenVersions,
+  showsLatestBadge,
 } from "@/pages/drivers/lib/driverList";
 
 function mkVersion(
@@ -111,26 +113,96 @@ describe("filterDrivers", () => {
   it("returns nothing when there is no match", () => {
     expect(filterDrivers(drivers, "postgres")).toHaveLength(0);
   });
+
+  it("keeps the unfiltered latest identity when narrowing to an older version", () => {
+    const res = filterDrivers(drivers, "2.0.3");
+    expect(res).toHaveLength(1);
+    // only the older version is displayed…
+    expect(res[0].versions.map((v) => v.id)).toEqual(["i1"]);
+    // …but the latest-wins winner is still the hidden i2, over all 2 versions
+    expect(res[0].latestVersionId).toBe("i2");
+    expect(res[0].totalVersions).toBe(2);
+    expect(showsLatestBadge(res[0], res[0].versions[0])).toBe(false);
+  });
+});
+
+describe("showsLatestBadge", () => {
+  it("flags only the latest-wins winner of a multi-version driver", () => {
+    const [grafana, infrahub] = filterDrivers(
+      [
+        mkDriver("grafana", [
+          mkVersion({
+            id: "g1",
+            version: "1.4.2",
+            createdOn: "2026-02-01T00:00:00Z",
+          }),
+        ]),
+        mkDriver("infrahub", [
+          mkVersion({
+            id: "i1",
+            version: "2.0.3",
+            createdOn: "2026-01-01T00:00:00Z",
+          }),
+          mkVersion({
+            id: "i2",
+            version: "2.1.0",
+            createdOn: "2026-03-01T00:00:00Z",
+          }),
+        ]),
+      ],
+      "",
+    );
+    const version = (d: FilteredDriver, id: string) =>
+      d.versions.find((v) => v.id === id)!;
+    expect(showsLatestBadge(infrahub, version(infrahub, "i2"))).toBe(true);
+    expect(showsLatestBadge(infrahub, version(infrahub, "i1"))).toBe(false);
+    // single-version driver: its only version is trivially latest — no badge
+    expect(showsLatestBadge(grafana, version(grafana, "g1"))).toBe(false);
+  });
 });
 
 describe("flattenVersions", () => {
   it("flattens to per-version rows and flags the latest of each driver", () => {
-    const rows = flattenVersions([
-      mkDriver("infrahub", [
-        mkVersion({
-          id: "i1",
-          version: "2.0.3",
-          createdOn: "2026-01-01T00:00:00Z",
-        }),
-        mkVersion({
-          id: "i2",
-          version: "2.1.0",
-          createdOn: "2026-03-01T00:00:00Z",
-        }),
-      ]),
-    ]);
+    const rows = flattenVersions(
+      filterDrivers(
+        [
+          mkDriver("infrahub", [
+            mkVersion({
+              id: "i1",
+              version: "2.0.3",
+              createdOn: "2026-01-01T00:00:00Z",
+            }),
+            mkVersion({
+              id: "i2",
+              version: "2.1.0",
+              createdOn: "2026-03-01T00:00:00Z",
+            }),
+          ]),
+        ],
+        "",
+      ),
+    );
     expect(rows.map((r) => r.version.id)).toEqual(["i2", "i1"]);
     expect(rows.find((r) => r.version.id === "i2")?.isLatest).toBe(true);
     expect(rows.find((r) => r.version.id === "i1")?.isLatest).toBe(false);
+  });
+
+  it("never flags the only version of a single-version driver", () => {
+    const rows = flattenVersions(
+      filterDrivers(
+        [
+          mkDriver("grafana", [
+            mkVersion({
+              id: "g1",
+              version: "1.4.2",
+              createdOn: "2026-02-01T00:00:00Z",
+            }),
+          ]),
+        ],
+        "",
+      ),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].isLatest).toBe(false);
   });
 });

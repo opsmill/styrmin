@@ -173,6 +173,22 @@ describe("DriverListPage", () => {
     expect(mark.tagName).toBe("MARK");
   });
 
+  it("shows the Latest badge only on a multi-version driver's latest-wins winner", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
+    await renderPage();
+    // exactly one badge: infrahub's 2.1.0 — grafana has a single version, so
+    // its only (trivially latest) version carries no badge
+    expect(screen.getAllByText("Latest")).toHaveLength(1);
+
+    // narrowing the filter to the older version must not transfer the badge
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Filter drivers"), "2.0.3");
+    await waitFor(() => {
+      expect(screen.queryByText("2.1.0")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText("Latest")).not.toBeInTheDocument();
+  });
+
   it("navigates to the version detail when a row is clicked", async () => {
     useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
     await renderPage();
