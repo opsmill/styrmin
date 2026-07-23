@@ -223,6 +223,7 @@ docs/.docusaurus/
 
 # Claude Code transient runtime state
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
 
-# Local bug-pipeline analysis artifacts (never committed)
+# Bug analysis working-tree artifacts
 .bug-analysis-*.md

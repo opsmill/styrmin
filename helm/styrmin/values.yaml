@@ -122,11 +122,26 @@ resources:
     cpu: 100m
     memory: 256Mi
 
-# Resource requests for task-worker
+# Resource requests/limits for task-worker.
+#
+# task-worker runs `apply_state`, `create_instance_crd`, and every other
+# INTERNAL-type Prefect flow as a subprocess of the worker process
+# (WorkflowType.INTERNAL -> styrmin-work-pool -> ProcessWorker). The old
+# 128Mi request had no accompanying limit, so a concurrent-flow-run memory
+# spike could OOM-kill the worker outright rather than just the offending
+# subprocess -- reproduced directly. This is hardening only: it reduces one
+# trigger for the worker dying, it does not by itself recover a flow run
+# left orphaned by a dead worker (see PrefectManager's zombie-flow-run
+# Automation for that, #312). Matches Prefect's own official prefect-worker
+# Helm chart defaults (256Mi request / 1Gi limit) rather than a
+# Styrmin-specific guess.
 taskWorkerResources:
   requests:
-    cpu: 50m
-    memory: 128Mi
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
 
 # Liveness probe for styrmin-server
 livenessProbe:
