@@ -112,7 +112,8 @@ function ComponentRow({ name, decl }: ComponentRowProps) {
  * Flatten a component declaration into single-line key/value pairs for display:
  * the `identifier.label` selectors, top-level scalars, and nested objects
  * flattened one level (`backup.kind`). Arrays are joined; deeper nesting is
- * summarised. Keeps every card row on one line with no empty/ragged rows.
+ * summarised; declared-but-unset (`null`) values render as an em dash rather
+ * than being dropped. Keeps every card row on one line with no ragged rows.
  */
 function flattenDecl(decl: Record<string, unknown>): Array<[string, string]> {
   const pairs: Array<[string, string]> = [];
@@ -120,12 +121,15 @@ function flattenDecl(decl: Record<string, unknown>): Array<[string, string]> {
   if (label) {
     for (const [k, v] of Object.entries(label)) {
       if (isScalar(v)) pairs.push([k, String(v)]);
+      else if (v === null) pairs.push([k, "—"]);
     }
   }
   for (const [key, value] of Object.entries(decl)) {
     if (key === "identifier") continue;
     if (isScalar(value)) {
       pairs.push([key, String(value)]);
+    } else if (value === null) {
+      pairs.push([key, "—"]);
     } else if (isPlainObject(value)) {
       for (const [k2, v2] of Object.entries(value)) {
         pairs.push([`${key}.${k2}`, summarizeValue(v2)]);
