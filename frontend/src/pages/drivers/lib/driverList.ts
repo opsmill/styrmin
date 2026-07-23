@@ -4,6 +4,19 @@ import { compareVersionsLatestFirst } from "@/lib/driverVersion";
 export type DriverListItem = ListDriversQuery["applicationDrivers"][number];
 export type DriverListVersion = DriverListItem["versions"][number];
 
+/**
+ * A driver group as the list displays it: `versions` may be narrowed by the
+ * filter, while `latestVersionId` / `totalVersions` are always computed from
+ * the full loaded set — so filtering can never change which version reads as
+ * "Latest" (it must stay the latest-wins winner deployments actually bind).
+ */
+export type FilteredDriver = DriverListItem & {
+  /** id of the latest-wins winner across ALL loaded versions. */
+  latestVersionId: string | undefined;
+  /** Count of all loaded versions, before filtering. */
+  totalVersions: number;
+};
+
 /** Human-readable source: `repo @ branch` for git, the path for local. */
 export function versionSource(v: DriverListVersion): string {
   if (v.sourceType === "local") return v.sourcePath ?? "local";
@@ -42,43 +55,73 @@ function versionMatches(v: DriverListVersion, q: string): boolean {
 export function filterDrivers(
   drivers: readonly DriverListItem[],
   query: string,
-): DriverListItem[] {
+): FilteredDriver[] {
   const q = query.trim().toLowerCase();
   const byName = [...drivers].sort((a, b) => a.name.localeCompare(b.name));
 
   if (!q) {
-    return byName.map((d) => ({
-      ...d,
-      versions: versionsLatestFirst(d.versions),
-    }));
+    return byName.map((d) => {
+      const versions = versionsLatestFirst(d.versions);
+      return {
+        ...d,
+        versions,
+        latestVersionId: versions[0]?.id,
+        totalVersions: versions.length,
+      };
+    });
   }
 
-  const result: DriverListItem[] = [];
+  const result: FilteredDriver[] = [];
   for (const driver of byName) {
     const nameMatches = driver.name.toLowerCase().includes(q);
-    const versions = versionsLatestFirst(driver.versions).filter(
+    const allVersions = versionsLatestFirst(driver.versions);
+    const versions = allVersions.filter(
       (v) => nameMatches || versionMatches(v, q),
     );
-    if (versions.length > 0) result.push({ ...driver, versions });
+    if (versions.length > 0) {
+      result.push({
+        ...driver,
+        versions,
+        latestVersionId: allVersions[0]?.id,
+        totalVersions: allVersions.length,
+      });
+    }
   }
   return result;
 }
 
+/**
+ * Whether a version carries the "Latest" pill in the list. Two conditions:
+ * it is the latest-wins winner across ALL loaded versions (not just the ones
+ * the filter left visible), and the driver has more than one loaded version —
+ * a single-version driver's only version is trivially latest, so the pill
+ * would be noise.
+ */
+export function showsLatestBadge(
+  driver: FilteredDriver,
+  version: DriverListVersion,
+): boolean {
+  return driver.totalVersions > 1 && version.id === driver.latestVersionId;
+}
+
 /** Flatten a (already-filtered) driver set into per-version rows for the flat view. */
-export function flattenVersions(drivers: readonly DriverListItem[]): Array<{
-  driver: DriverListItem;
+export function flattenVersions(drivers: readonly FilteredDriver[]): Array<{
+  driver: FilteredDriver;
   version: DriverListVersion;
   isLatest: boolean;
 }> {
   const rows: Array<{
-    driver: DriverListItem;
+    driver: FilteredDriver;
     version: DriverListVersion;
     isLatest: boolean;
   }> = [];
   for (const driver of drivers) {
-    const latestId = latestVersion(driver)?.id;
     for (const version of driver.versions) {
-      rows.push({ driver, version, isLatest: version.id === latestId });
+      rows.push({
+        driver,
+        version,
+        isLatest: showsLatestBadge(driver, version),
+      });
     }
   }
   return rows.sort(

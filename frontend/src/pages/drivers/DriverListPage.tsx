@@ -18,11 +18,11 @@ import { collidingVersions, displayDriverVersion } from "@/lib/driverVersion";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/pages/drivers/driver-detail/relative-time";
 import {
-  type DriverListItem,
   type DriverListVersion,
+  type FilteredDriver,
   filterDrivers,
   flattenVersions,
-  latestVersion,
+  showsLatestBadge,
   versionSource,
 } from "@/pages/drivers/lib/driverList";
 import { Package, Plus, Search, X } from "lucide-react";
@@ -247,7 +247,7 @@ function VersionRow({
   query,
   onOpen,
 }: {
-  driver: DriverListItem;
+  driver: FilteredDriver;
   version: DriverListVersion;
   isLatest: boolean;
   colliding: Set<string>;
@@ -294,11 +294,10 @@ function AppGroup({
   query,
   onOpen,
 }: {
-  driver: DriverListItem;
+  driver: FilteredDriver;
   query: string;
   onOpen: (driverId: string, versionId: string) => void;
 }) {
-  const latest = latestVersion(driver);
   const colliding = collidingVersions(driver.versions);
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-background">
@@ -320,7 +319,7 @@ function AppGroup({
           key={version.id}
           driver={driver}
           version={version}
-          isLatest={version.id === latest?.id}
+          isLatest={showsLatestBadge(driver, version)}
           colliding={colliding}
           query={query}
           onOpen={onOpen}
@@ -335,7 +334,7 @@ function FlatTable({
   query,
   onOpen,
 }: {
-  drivers: DriverListItem[];
+  drivers: FilteredDriver[];
   query: string;
   onOpen: (driverId: string, versionId: string) => void;
 }) {

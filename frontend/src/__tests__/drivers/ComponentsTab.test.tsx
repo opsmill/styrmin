@@ -50,4 +50,18 @@ describe("ComponentsTab", () => {
     const { baseElement } = render(<span />);
     expect(baseElement.querySelector("pre")).toBeNull();
   });
+
+  it("renders declared-but-unset (null) fields as an em dash instead of dropping them", () => {
+    renderComponents({
+      server: {
+        identifier: { label: { service: null } },
+        chartVersion: null,
+        cpu: 4,
+      },
+    });
+    // both the top-level null and the null label selector keep their rows
+    expect(screen.getByText("chartVersion")).toBeInTheDocument();
+    expect(screen.getByText("service")).toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(2);
+  });
 });
