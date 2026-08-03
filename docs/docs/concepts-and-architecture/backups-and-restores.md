@@ -105,6 +105,125 @@ deployment. That gives you a few useful properties:
 - **A BSL is shared infrastructure.** Setting it up once per environment
   is cheaper than setting it up per deployment.
 
+### Retention: how long a backup lives
+
+Every Velero backup Styrmin creates carries a **TTL** — the duration
+Velero keeps it before garbage-collecting the backup and the data behind
+it. Left alone, that's **`720h`** (30 days).
+
+Set `backup_ttl` in config to choose your own. It takes a Go duration
+string in `h`, `m`, or `s` units: `2160h` (90 days), `8760h` (a year),
+`1h30m`, `1.5h`. There is deliberately **no day unit** — `30d` is not a
+Go duration and is rejected, as are `0h`, `-24h`, and a bare `720`. A
+malformed value is refused the moment you submit it, with an error that
+names `backup_ttl` and hints the `720h` syntax; nothing is stored and no
+backup is affected.
+
+#### Three scopes, deepest wins
+
+`backup_ttl` sits on the same shared config as knobs like `db_size`, so
+you can set it at three scopes. When a backup is created, the deepest
+scope that sets it wins:
+
+| Scope | Where you set it | Use it for |
+|-------|----------------|------------|
+| **Deployment** | `deploy`'s `config`, or `updateDeployment`'s `input` | One application that needs to keep its backups longer (or shorter) than its neighbours. |
+| **Environment** | `createEnvironment`'s `config`, or `updateEnvironment`'s `input` | The usual place — one policy for everything in the environment. |
+| **Cluster** | `createCluster`'s `config` | An org-wide baseline. |
+
+A scope that leaves `backup_ttl` unset is transparent: resolution falls
+through to the next-shallower scope, and down to the built-in `720h`
+when no scope sets a policy. A cluster that never sets it behaves
+exactly as before.
+
+Every backup records the TTL that was applied **and the scope it came
+from**, so each backup can answer "what retention did this get, and
+why?" on its own. The resulting expiry date is in the backup list in the
+web UI and in `styrminctl backups list` — no cluster access needed.
+
+:::note Cluster scope is set at registration
+
+There is no cluster-update mutation, so the cluster-scope value is
+whatever you passed to `createCluster`'s `config`. To change a broad
+default afterwards, set it at environment scope instead.
+
+:::
+
+#### Setting a retention policy
+
+There is no form field or CLI flag for `backup_ttl` — the web UI and
+`styrminctl` _show_ you when a backup expires, they don't set the
+policy. Set it through the GraphQL API (or the Python SDK, which wraps
+the same mutations).
+
+`updateEnvironment` takes the **complete desired configuration**, so
+read the environment's current config first:
+
+```graphql
+query ReadEnvironmentConfig {
+  environment(environmentName: "production", clusterName: "default") {
+    id
+    config
+  }
+}
+```
+
+(Looking an environment up by name needs cluster context — pass
+`clusterName` or `clusterId` alongside it, or just use `environmentId`.)
+
+Then submit it back with `backupTtl` added:
+
+```graphql
+mutation SetEnvironmentRetention {
+  updateEnvironment(
+    environmentId: "<environment-id>"
+    input: {
+      backupTtl: "2160h"
+      ingressClass: "nginx"
+      fqdnSuffix: "example.com"
+    }
+  ) {
+    id
+    config
+  }
+}
+```
+
+:::caution `updateEnvironment` replaces the whole config
+
+`UpdateEnvironmentInput` is a **full-replacement** input: every field you
+omit is persisted as its unset state. Carry the fields you want to keep
+in the same call, or you'll clear them. This cuts both ways — the web UI
+does the round-trip for you, so editing an environment variable in the
+UI will not wipe a retention policy you set here.
+
+:::
+
+For a single application, set it in the deployment's config instead —
+`backupTtl` on `deploy`'s `config` or `updateDeployment`'s `input`, or
+`backupTtl` under `spec.config` in a `styrminctl` deployment manifest.
+`updateDeployment` is full-replacement in the same way.
+
+#### A change applies to future backups only
+
+Velero fixes a backup's expiration at creation time, so changing
+`backup_ttl` **does not** move the expiry of backups that already exist,
+and Styrmin deliberately does not try to rewrite them. The new value
+takes effect on the next backup you create. Shorten retention and the
+existing backups still disappear on their original schedule; lengthen it
+and the ones already taken are not rescued.
+
+:::caution Restoring from an expired backup fails
+
+When a backup's TTL elapses, Velero garbage-collects its data but
+Styrmin's record of the backup stays in the list. A restore from an
+expired backup fails at the Velero step. A short `backup_ttl` surfaces
+this sooner, so check the expiry column before picking a backup to
+restore from. Related:
+[opsmill/styrmin#304](https://github.com/opsmill/styrmin/issues/304).
+
+:::
+
 ### What you set up vs what Styrmin handles
 
 | Step | What it covers |

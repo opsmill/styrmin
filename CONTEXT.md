@@ -52,6 +52,10 @@ _Avoid_: "env" (in prose; the abbreviation is fine in code), "deployment environ
 An S3-compatible object store registered as a destination for **Velero** backups. Assigned to an **environment**; all deployments in that environment back up there.
 _Avoid_: "bucket" (implementation detail), "backup destination".
 
+**Backup retention TTL** (`backup_ttl`):
+How long **Velero** keeps a backup before garbage-collecting it, as a strictly positive Go duration in `h`/`m`/`s` units (e.g. `"2160h"`). An optional `backup_ttl` on the **cluster**, **environment**, or **deployment** **config**, resolved deepest-wins at backup time — deployment → environment → cluster → the built-in `720h` — with the applied value and its source scope recorded on the backup record. Applies only to backups created afterwards; an already-created Velero backup keeps the expiration fixed at its creation. Distinct from `BackupSchedule.retention_count`, which caps _how many_ backups a schedule keeps rather than how long each one lives (and is currently unenforced — scheduled backups do not execute yet). See [016-backup-retention-ttl] and [issue #305](https://github.com/opsmill/styrmin/issues/305).
+_Avoid_: "retention policy" unqualified (ambiguous with `retention_count`), "backup expiry" (that is the resulting timestamp, `Backup.expiresAt`), bare "TTL" (overloaded with the Velero polling timeout).
+
 ### Application drivers
 
 **Application driver**:
