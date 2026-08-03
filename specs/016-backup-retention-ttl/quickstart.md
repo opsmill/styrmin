@@ -46,18 +46,32 @@ Expected after committing regenerated artifacts: empty diff. `schema.graphql` sh
 ## 3. Client surfaces
 
 ```bash
-cd frontend && pnpm test -- BackupExpiry     # expiry cell renders date / "—", tooltip carries TTL (FR-008)
-uv run pytest cli/tests/test_backups.py -v   # "Expires" column, "—" when null (FR-010)
+cd frontend && pnpm test BackupExpiry        # expiry cell renders date / "—", TTL exposed accessibly (FR-008)
+uv run pytest cli/tests/test_backups.py -v   # expiry column, "—" when null (FR-010)
 ```
+
+Pass the vitest name filter **without** `--` — `pnpm test -- BackupExpiry` drops
+the filter and runs the whole suite (58 files) instead of the one file.
 
 ## 4. E2E — the definition-of-done gate (Constitution §V)
 
-Extended existing node (no new node, `shard_backup`):
+Extended existing node (no new node, `shard_backup`). Run the two entrypoint
+variants as **two separate pytest sessions**, exactly as CI drives them:
 
 ```bash
 sleep infinity | uv run pytest "backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle" \
-  -v -s --pdb 2>&1 | tee /tmp/backup-ttl-e2e.log
+  -k api-chromium -v -s --pdb 2>&1 | tee /tmp/backup-ttl-e2e-api.log
+
+sleep infinity | uv run pytest "backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle" \
+  -k ui-chromium -v -s --pdb 2>&1 | tee /tmp/backup-ttl-e2e-ui.log
 ```
+
+One session cannot run both: `styrmin_resources` depends on the parametrised
+`driver_mode` fixture, so it re-runs per mode and calls
+`create_cluster(name="test-cluster")` a second time — `[api-chromium]` passes and
+`[ui-chromium]` then errors in fixture setup on the duplicate. `-k` splitting is
+why `backend/tests/e2e/conftest.py` (`driver_mode`, ~line 669) gives each mode its
+own CI job with a fresh vcluster.
 
 The extended test must: set `backup_ttl` (e.g. `"2160h"`) on the scenario environment → create a backup via the dual-entrypoint scenario driver → assert the Velero Backup CRD `spec.ttl == "2160h"` (next to the existing `assert_velero_backup_uses_bsl` storage-location assertion) → after completion, assert `Backup.ttl == "2160h"` and `expiresAt` non-null via the SDK.
 

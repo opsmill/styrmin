@@ -123,11 +123,12 @@
 
 **Purpose**: Documentation (Constitution §VII — same-change, non-negotiable), final regression, evidence.
 
-- [ ] T028 [P] Add a **Retention** section to `docs/docs/concepts-and-architecture/backups-and-restores.md`: the `backup_ttl` knob, three scopes + deepest-wins, `720h` default, applies-to-future-backups-only limitation (FR-009), expired-backup restore warning (cross-ref #304 behaviour), cluster-scope-is-set-at-create note, and a concrete `updateEnvironment` GraphQL example (critique P1 — the docs are the setter's UX; there is no first-party UI/CLI setter)
-- [ ] T029 [P] Update `dev/knowledge/backend/backup-restore.md`: `metadata_` keys (`ttl`, `ttl_source`, `expires_at`), the `services/backup/ttl.py` resolver, the required-TTL builder signature, the `status.expiration` plumbing, and the new `Backup.ttl`/`expiresAt` GraphQL fields
-- [ ] T030 [P] Add a **Backup retention TTL** glossary entry to `CONTEXT.md` after **Backup storage location** (line ~53), following the `**Term**:` / description / `_Avoid_:` three-line house convention, explicitly distinguished from `BackupSchedule.retention_count` (count-based, currently unenforced)
-- [ ] T031 Full regression + gates: `uv run invoke format lint`; `uv run pytest backend/tests/unit backend/tests/functional -q`; `cd frontend && pnpm test`; `uv run pytest cli/tests -q`; confirm SC-004 (no assertion changes beyond the relocated pinned default) and that `git diff --exit-code` is clean after a fresh `uv run invoke generate`
-- [ ] T032 Run the remaining `quickstart.md` scenarios (sections 1-3, 6; section 4 already executed in T017) and fill the Evidence block below
+- [X] T028 [P] Add a **Retention** section to `docs/docs/concepts-and-architecture/backups-and-restores.md`: the `backup_ttl` knob, three scopes + deepest-wins, `720h` default, applies-to-future-backups-only limitation (FR-009), expired-backup restore warning (cross-ref #304 behaviour), cluster-scope-is-set-at-create note, and a concrete `updateEnvironment` GraphQL example (critique P1 — the docs are the setter's UX; there is no first-party UI/CLI setter)
+- [X] T029 [P] Update `dev/knowledge/backend/backup-restore.md`: `metadata_` keys (`ttl`, `ttl_source`, `expires_at`), the `services/backup/ttl.py` resolver, the required-TTL builder signature, the `status.expiration` plumbing, and the new `Backup.ttl`/`expiresAt` GraphQL fields
+- [X] T030 [P] Add a **Backup retention TTL** glossary entry to `CONTEXT.md` after **Backup storage location** (line ~53), following the `**Term**:` / description / `_Avoid_:` three-line house convention, explicitly distinguished from `BackupSchedule.retention_count` (count-based, currently unenforced)
+- [X] T031 Full regression + gates: `uv run invoke format lint`; `uv run pytest backend/tests/unit backend/tests/functional -q`; `cd frontend && pnpm test`; `uv run pytest cli/tests -q`; confirm SC-004 (no assertion changes beyond the relocated pinned default) and that `git diff --exit-code` is clean after a fresh `uv run invoke generate`
+- [X] T032 Run the remaining `quickstart.md` scenarios (sections 1-3, 6; section 4 already executed in T017) and fill the Evidence block below
+- [X] T033 Correct the local E2E recipe in `quickstart.md` §4 (documentation accuracy, Constitution §VII): the bare node id cannot pass in one session — `styrmin_resources` depends on the parametrised `driver_mode` fixture, so it re-runs per mode and `[ui-chromium]` errors in fixture setup on a duplicate `create_cluster('test-cluster')`. Prescribe the two-session `-k api-chromium` / `-k ui-chromium` form (as CI drives it per `backend/tests/e2e/conftest.py` `driver_mode`, ~line 669) with a one-line note on why
 
 ---
 
@@ -159,6 +160,48 @@ resolved backup TTL 2160h from environment scope for backup 47c0e77c-da80-4ce1-a
 
 `spec.ttl` reads back byte-identical to the submitted `"2160h"` (the API server stores CRD strings verbatim — no Go duration normalisation to `2160h0m0s`), and `status.expiration` is exactly 90 days after creation.
 
+### T031 — full regression + gates
+
+All four suites run on 2026-08-03, `uv` workspace on Python 3.14, Node v22.16.0 for the frontend (default `node` is v18 and cannot start Vitest).
+
+| Suite | Command | Timestamp (ISO 8601) | Verbatim summary line |
+|---|---|---|---|
+| Backend unit + functional | `uv run pytest backend/tests/unit backend/tests/functional -q` | started `2026-08-03T13:28:21+00:00`, finished `2026-08-03T13:33:47+00:00` | `12 failed, 1802 passed, 2 skipped, 1 warning in 326.59s (0:05:26)` |
+| Frontend | `pnpm test` (in `frontend/`) | `2026-08-03T13:28:48+00:00` → `2026-08-03T13:28:52+00:00` | `Test Files  58 passed (58)` / `Tests  408 passed (408)` |
+| CLI | `uv run pytest cli/tests -q` | `2026-08-03T13:28:58+00:00` → `2026-08-03T13:29:20+00:00` | `2 failed, 271 passed in 21.78s` |
+| Format + lint gate | `uv run invoke format lint` | `2026-08-03T13:38:14+00:00` → `2026-08-03T13:38:19+00:00` | exit `0`; `681 files left unchanged` (ruff format), `All checks passed!` (ruff check), `All checks passed!` (ty, 776 files), `Success: No issues found in 74 files` (rumdl), `197/197 .graphql files passed validation.` |
+
+**Pre-existing failures, not introduced by this feature** (both documented before this chunk began, both reproduced unchanged):
+
+- 12 backend failures, all `RuntimeError: Timed out while attempting to connect to ephemeral Prefect API server` (24 occurrences in the log) in `backend/tests/unit/agent/test_render_value_template_env_vars.py`, `test_render_value_template_container_overrides.py`, and `backend/tests/unit/agent/tasks/test_apply_state_flow.py`. No backup/TTL test among them.
+- 2 CLI failures in `cli/tests/telemetry/` (`test_store.py::test_unwritable_dir_falls_back_to_ephemeral_id`, `test_telemetry_command.py::test_commands_succeed_under_unwritable_dir`) — they `chmod` a directory unwritable and the suite runs as uid 0, so the write succeeds anyway.
+
+**SC-004 confirmed.** Across `9a12085..HEAD` the only assertions *removed* from pre-existing tests are the two that pinned the builder default — `assert rendered["spec"]["ttl"] == "720h"` (`test_backup_builders.py`) and `assert result["spec"]["ttl"] == "720h"` (`test_velero_resources.py`) — both replaced by pass-through assertions on an explicitly supplied TTL, with the pinned default relocated to `backend/tests/unit/services/test_backup_ttl_resolution.py`. Everything else in the test diff is additive: new required `ttl=` arguments, new test functions, and one `capsys.readouterr()` hoist in `cli/tests/test_backups.py` that preserves the original `assert BACKUP_UUID in output`. The E2E's `assert_velero_backup_uses_bsl` storage-location assertion survives verbatim alongside the new `spec.ttl` assertion.
+
+**Regeneration clean.** After a fresh `uv run styrmin export graphql-schema schema.graphql` + `uv run invoke generate` (`2026-08-03T13:37:00+00:00`), `git diff --exit-code schema.graphql python_sdk/src/styrmin_sdk/graphql/_generated frontend/src/generated` exited `0`. Re-verified after `invoke format lint` (whose `generate-validate` step reverts generated drift) — still `0`.
+
+### T032 — quickstart scenarios
+
+Section 4 was executed and evidenced under T017 above and was not re-run (≈7 min per variant, boots a vcluster).
+
+| Quickstart section | Command | Timestamp | Verbatim summary line |
+|---|---|---|---|
+| 1 — validator + resolution | `uv run pytest backend/tests/unit/context/test_base_config_section.py backend/tests/unit/services/test_backup_ttl_resolution.py -q` | `2026-08-03T13:34:17+00:00` | `73 passed in 0.05s` |
+| 1 — builder pass-through | `uv run pytest backend/tests/unit/agent/test_velero_resources.py backend/tests/unit/agent/test_backup_builders.py -q` | `2026-08-03T13:34:20+00:00` | `23 passed in 0.02s` |
+| 1 — GraphQL ↔ DB propagation | `uv run pytest .../test_environment_update_propagation.py .../test_update_deployment_input_propagation.py .../test_deploy_input_propagation.py -q` | `2026-08-03T13:34:27+00:00` | `63 passed in 3.85s` |
+| 1 — backup-filtered functional | `uv run pytest backend/tests/functional/graphql/ -k backup -q` | `2026-08-03T13:35:50+00:00` | `30 passed, 206 deselected in 62.58s (0:01:02)` |
+| 2 — regeneration is clean | `uv run styrmin export graphql-schema schema.graphql` + `uv run invoke generate` + `git diff --exit-code …` | `2026-08-03T13:37:00+00:00` | `git diff --exit-code` → exit `0` (empty diff) |
+| 3 — frontend expiry cell | `pnpm test BackupExpiry` (in `frontend/`) | `2026-08-03T13:37:23+00:00` | `Test Files  1 passed (1)` / `Tests  5 passed (5)` |
+| 3 — CLI expiry column | `uv run pytest cli/tests/test_backups.py -q` | `2026-08-03T13:37:31+00:00` | `30 passed in 0.25s` |
+| 6 — regression guard | see the T031 table (same two commands) | — | `12 failed, 1802 passed, 2 skipped …` + `invoke format lint` exit `0` |
+
+Section 5 (manual smoke against a full `uv run invoke dev` stack) is marked optional in quickstart.md and was not run; its assertions are covered non-manually by the section-1 propagation tests (`30d` rejection, `backup_ttl` round-trip) and by the T017 E2E (`ttl` / `expiresAt` on a real backup).
+
+**Two quickstart commands did not work as written and were corrected in the same change** (Constitution §VII doc accuracy):
+
+1. §4's single-session E2E recipe — see T033.
+2. §3's `pnpm test -- BackupExpiry` silently dropped the filter and ran all 58 files / 408 tests. The working form is `pnpm test BackupExpiry` (1 file, 5 tests); quickstart.md now says so.
+
 ---
 
 ## Dependencies & Execution Order
@@ -171,7 +214,7 @@ resolved backup TTL 2160h from environment scope for backup 47c0e77c-da80-4ce1-a
 - **US2 (Phase 4)**: after Phase 2; independent of US1 for T018/T019/T020, but its end-to-end meaning rides US1's workflow wiring (T014). Run after US1.
 - **US4 (Phase 5)**: after Phase 2 (fields exist); expiry *values* need US1's T012/T014 for live data — component/CLI tests use seeded/mocked data, so the story is independently testable.
 - **US3 (Phase 6)**: after Phase 2 only (validator is foundational); placed last by priority.
-- **Polish (Phase 7)**: after all stories. T028/T029/T030 parallel; T031 → T032 last.
+- **Polish (Phase 7)**: after all stories. T028/T029/T030/T033 parallel (four different files); T031 → T032 last.
 
 ### Parallel Opportunities
 
@@ -179,7 +222,7 @@ resolved backup TTL 2160h from environment scope for backup 47c0e77c-da80-4ce1-a
 - US1: T009 ∥ T010; T011 ∥ T012 ∥ T013; T016 ∥ any backend task.
 - US2: T018 ∥ T019.
 - US4: T021 ∥ T022 ∥ T023, then T024 ∥ T025.
-- Polish: T028 ∥ T029 ∥ T030.
+- Polish: T028 ∥ T029 ∥ T030 ∥ T033.
 
 ## Implementation Strategy
 

@@ -75,9 +75,23 @@ class Backup(StyrminModel, table=True):
     size_bytes: int | None
     error_message: str | None
     component_statuses: dict      # JSON: {component_name: {status, size_bytes, error}}
-    metadata_: dict               # JSON: operation metadata (timeout, etc.)
+    metadata_: dict               # JSON: operation metadata (see below)
     restores: list[Restore]       # One-to-many relationship
 ```
+
+`metadata_` is a plain `JSON` column carrying per-operation metadata:
+
+| Key | Written by | Meaning |
+|-----|-----------|---------|
+| `timeout` | `create_backup` | Velero polling timeout in seconds (default 3600). |
+| `ttl` | `execute_backup_workflow`, before the Velero object is built | The resolved retention applied to this backup, e.g. `"2160h"`. |
+| `ttl_source` | same | Which scope supplied it — `deployment`, `environment`, `cluster`, or `default`. |
+| `expires_at` | `execute_backup_workflow`, on a terminal Velero phase | Velero's own `status.expiration` ISO timestamp. Absent when Velero reported none. |
+
+Because the column is plain `JSON` with no change tracking, writes MUST
+**reassign** the dict (`backup.metadata_ = {**(backup.metadata_ or {}), **updates}`)
+— in-place mutation is not flushed. `update_backup_status(metadata_updates=...)`
+is the only supported writer and merges this way, so pre-existing keys survive.
 
 ### Restore
 
@@ -116,7 +130,7 @@ class BackupSchedule(StyrminModel, table=True):
 | `get_backup(backup_id, uow)` | Get backup by ID |
 | `get_backups(instance_id, uow, status)` | List backups for instance |
 | `delete_backup(backup_id, uow)` | Delete backup (cascades to restores) |
-| `update_backup_status(backup_id, status, uow, ...)` | Update overall backup status |
+| `update_backup_status(backup_id, status, uow, ...)` | Update overall backup status; `metadata_updates` merges keys into `Backup.metadata_` by reassignment |
 | `update_backup_component_status(backup_id, component_name, ...)` | Update component status, derives overall status |
 
 ### Restore Operations (`services/backup/service.py`)
@@ -139,6 +153,60 @@ class BackupSchedule(StyrminModel, table=True):
 | `update_backup_schedule(schedule_id, uow, ...)` | Update schedule configuration |
 | `delete_backup_schedule(schedule_id, uow)` | Delete schedule |
 
+## Retention TTL (`services/backup/ttl.py`)
+
+Every Velero Backup carries a `spec.ttl`. This module is the single home of the
+retention rule — the default literal, its validation, and its scope resolution:
+
+| Symbol | Purpose |
+|--------|---------|
+| `DEFAULT_BACKUP_TTL` | The built-in `"720h"`. The only place the literal is spelled out; pinned by `backend/tests/unit/services/test_backup_ttl_resolution.py`. |
+| `BACKUP_TTL_PATTERN` | `^(\d+(\.\d+)?(h\|m\|s))+$` — strictly positive Go duration, `h`/`m`/`s` units only, case-sensitive. |
+| `validate_backup_ttl(value)` | Returns the value unchanged or raises `ValueError`. Also rejects all-zero durations (`0h`, `0h0m0s`) that match the pattern but express no retention. |
+| `resolve_backup_ttl(deployment_config, environment_config, cluster_config)` | Pure function returning `(ttl, source_scope)`. |
+| `BackupTtlSource` | `Literal["deployment", "environment", "cluster", "default"]`. |
+
+### Validation surface
+
+`BaseConfigSection.backup_ttl: str | None` (`context/models/config.py`) carries a
+field validator delegating to `validate_backup_ttl`, so all five config input
+surfaces — cluster create, environment create/update, deploy, deployment update
+— reject a malformed value through the existing `validate_*_config` →
+`Invalid*ContextError` path before anything is written. The validator is imported
+lazily inside the field validator so the config models keep no module-load-time
+dependency on the services layer.
+
+### Resolution
+
+Precedence is **deepest-wins**: deployment → environment → cluster → built-in
+default. A scope contributes only when its persisted config dict carries a
+non-null `backup_ttl`; a scope that omits the key is transparent and resolution
+falls through.
+
+`execute_backup_workflow` calls it **outside** the `try/except` that makes BSL
+resolution best-effort — that block swallows every exception, and retention must
+never be quietly reduced to the default by a failure it hid. On a failed config
+read all three scopes are `None`, resolution yields the built-in default, and an
+extra WARNING records that the configured policy was invisible to this backup.
+The successful path logs at INFO:
+
+```text
+resolved backup TTL 2160h from environment scope for backup <uuid>
+```
+
+### Plumbing
+
+1. `execute_backup_workflow` resolves the TTL, records `{"ttl", "ttl_source"}`
+   via `update_backup_status(metadata_updates=...)` **before** the Velero object
+   is built (so the audit trail survives a later failure), then passes `ttl=` to
+   `build_velero_backup`.
+2. `execute_velero_backup_flow` includes Velero's `status.expiration` in the
+   Prefect Variable result payload alongside the phase.
+3. Back in `execute_backup_workflow`, `status.expiration` is recorded as
+   `expires_at` on **both** terminal branches — a `PartiallyFailed` backup is
+   stored and does expire, and the workflow folds that phase into the FAILED
+   branch. A `Failed` backup carries no expiration, so the key is simply absent.
+
 ## Two-Worker Architecture
 
 Backup workflows use a two-worker model:
@@ -154,8 +222,8 @@ Results are passed between workers via **Prefect Variables** (a cross-worker com
 
 **Backup:**
 
-1. `execute_backup_workflow` (INTERNAL) — marks backup IN_PROGRESS, builds Velero CRD, dispatches to USER flow, updates status from result
-2. `execute_velero_backup_flow` (USER) — creates Velero Backup CRD, polls completion, stores result in Prefect Variable
+1. `execute_backup_workflow` (INTERNAL) — marks backup IN_PROGRESS, resolves the retention TTL and records it (see [Retention TTL](#retention-ttl-servicesbackupttlpy)), builds Velero CRD, dispatches to USER flow, updates status and `expires_at` from result
+2. `execute_velero_backup_flow` (USER) — creates Velero Backup CRD, polls completion, stores result (phase + `status.expiration`) in Prefect Variable
 
 **Restore:**
 
@@ -212,6 +280,27 @@ updateBackupSchedule(scheduleId: UUID!, name: String, cronExpression: String, re
 deleteBackupSchedule(scheduleId: UUID!): String!
 ```
 
+### Retention fields on `Backup`
+
+```graphql
+type Backup {
+  ttl: String        # the applied retention, e.g. "2160h"
+  expiresAt: DateTime
+}
+```
+
+Both are `@strawberry.field` resolvers over `metadata_` in
+`api/definitions/backup/backup.py`, and both are nullable — a pre-existing row
+(or one whose `metadata_` is `None`) reports `null`, as does a `Failed` backup
+for which Velero reported no expiration. `expiresAt` parses the stored ISO string
+with `datetime.fromisoformat`, returning `null` when the key is absent or
+unparseable.
+
+The setter side is `backupTtl: String` on `UpdateEnvironmentInput` and on
+`DeploymentConfigInput` (which `UpdateDeploymentInput` inherits, covering both
+`deploy` and `updateDeployment`). Cluster and environment **create** take it
+through their existing `config: JSON` argument.
+
 ## Component Status Tracking
 
 Backups and restores track status at the component level. The overall status is derived from component statuses:
@@ -224,7 +313,7 @@ Backups and restores track status at the component level. The overall status is 
 
 ### Builders (`agent/service/kubernetes/resources/builders/backup.py`)
 
-- `build_velero_backup()` — Creates Velero Backup CRD spec with labels, hooks, and TTL
+- `build_velero_backup()` — Creates Velero Backup CRD spec with labels, hooks, and TTL. `ttl` is a **required** parameter (as it is on the `VeleroBackup` dataclass in `agent/service/kubernetes/velero/resources.py`): neither layer carries a fallback literal, so `services/backup/ttl.py` stays the single home of the default
 - `build_velero_restore()` — Creates Velero Restore CRD spec with namespace mapping and hooks
 
 ### Volume Annotations (`agent/service/kubernetes/resources/builders/backup_annotations.py`)
@@ -243,6 +332,7 @@ Backups and restores track status at the component level. The overall status is 
 | File | Purpose |
 |------|---------|
 | [services/backup/service.py](backend/styrmin_backend/services/backup/service.py) | Backup and restore service functions |
+| [services/backup/ttl.py](backend/styrmin_backend/services/backup/ttl.py) | Retention default, validation, and deepest-wins scope resolution |
 | [services/backup/scheduler.py](backend/styrmin_backend/services/backup/scheduler.py) | Backup schedule management |
 | [services/backup/strategies/](backend/styrmin_backend/services/backup/strategies/) | Backup strategy implementations |
 | [workflows/templates/backup.py](backend/styrmin_backend/workflows/templates/backup.py) | Prefect workflow templates for backup/restore |
