@@ -155,6 +155,17 @@ export function diff(
     before.nodeSelector,
     after.nodeSelector,
   );
+  // Backup retention TTL (016). Storage-adjacent: it governs how long the
+  // deployment's backup data is kept, so it belongs with the other
+  // data-lifecycle knobs rather than in networking or scheduling.
+  diffScalar(
+    entries,
+    "storageRuntime",
+    "backupTtl",
+    "Backup retention TTL",
+    before.backupTtl,
+    after.backupTtl,
+  );
 
   // Service Overrides (keyed by `driverServiceName`)
   diffServiceOverrides(

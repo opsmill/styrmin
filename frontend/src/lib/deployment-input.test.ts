@@ -24,7 +24,17 @@ describe("deploymentConfigToInput", () => {
       runtimeClass: undefined,
       nodeSelector: undefined,
       standardStorage: undefined,
+      backupTtl: undefined,
     });
+  });
+
+  it("carries backup_ttl through to backupTtl", () => {
+    // 016 / FR-005: the full-replacement update builders assemble their
+    // input from the persisted config, so a deployment-scope retention
+    // override that this projection drops would be silently wiped by the
+    // next unrelated save.
+    const input = deploymentConfigToInput({ backup_ttl: "8760h" });
+    expect(input.backupTtl).toBe("8760h");
   });
 
   it("translates the env_vars dict into a list of {name, value} rows", () => {

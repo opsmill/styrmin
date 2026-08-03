@@ -97,6 +97,39 @@ async def test_deploy_env_vars_list_propagates_to_config(
 
 
 @pytest.mark.asyncio
+async def test_deploy_backup_ttl_propagates_to_config(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """``config.backupTtl`` at create time lands on ``Deployment.config``.
+
+    016 / FR-005 (US2): the deployment scope is the deepest hop of the
+    retention precedence chain, so an operator must be able to pin a
+    longer-than-environment retention on a critical deployment at the
+    moment it is deployed — not only via a follow-up update.
+    """
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+
+    await seed_application_driver_version(session, driver_name="deploy-ttl-driver")
+    env = await seed_environment(session)
+
+    payload = await _deploy(
+        client,
+        driver="deploy-ttl-driver",
+        environment_id=env.id,
+        config={"backupTtl": "8760h"},
+    )
+    assert "errors" not in payload, payload
+    assert payload["data"]["deploy"] is not None
+
+    deployment = await _created_deployment(session)
+    assert deployment.config == {"backup_ttl": "8760h"}
+
+
+@pytest.mark.asyncio
 async def test_deploy_parameters_list_propagates(
     client: AsyncClient,
     session: AsyncSession,
