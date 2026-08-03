@@ -623,6 +623,9 @@ export default function DeploymentDetailPage() {
                 <span className="w-[100px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Size
                 </span>
+                <span className="w-[150px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Expires
+                </span>
                 <span className="flex-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Actions
                 </span>
@@ -1005,6 +1008,10 @@ function BackupRow({
     createdOn: string;
     sizeBytes?: number | null;
     errorMessage?: string | null;
+    /** Retention TTL applied when the backup was taken, e.g. `"2160h"`. */
+    ttl?: string | null;
+    /** Expiration Velero reported for the backup. */
+    expiresAt?: string | null;
   };
   index: number;
   onRestore: (backupId: string) => void;
@@ -1037,6 +1044,14 @@ function BackupRow({
     ? "This deployment is retired"
     : undefined;
 
+  // The applied retention TTL explains *why* the expiry date is what it is.
+  // It rides a native `title` for pointer users, but is also rendered as
+  // assistive-only text so it reaches the accessibility tree without any
+  // hover interaction (spec 016 critique P2).
+  const retentionHint = backup.ttl
+    ? `Retention TTL ${backup.ttl}`
+    : undefined;
+
   const bc = getStatusColor(backup.status);
 
   return (
@@ -1065,6 +1080,16 @@ function BackupRow({
         </span>
         <span className="w-[100px] text-[13px] text-muted-foreground">
           {backup.sizeBytes != null ? formatBytes(backup.sizeBytes) : "—"}
+        </span>
+        <span
+          className="w-[150px] text-[13px] text-muted-foreground"
+          data-testid="backup-expires"
+          title={retentionHint}
+        >
+          {backup.expiresAt
+            ? new Date(backup.expiresAt).toLocaleDateString()
+            : "—"}
+          {retentionHint && <span className="sr-only"> ({retentionHint})</span>}
         </span>
         <div className="flex flex-1 items-center gap-2">
           <IfRole minimum="READ_WRITE">

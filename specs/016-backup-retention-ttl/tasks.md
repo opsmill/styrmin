@@ -91,14 +91,14 @@
 
 ### Tests for User Story 4 (write first)
 
-- [ ] T021 [P] [US4] Create `backend/tests/functional/graphql/test_backup_fields.py`: seed a `Backup` row with `metadata_ = {"ttl": "2160h", "expires_at": "<ISO>"}` and assert `Backup.ttl`/`Backup.expiresAt` project through GraphQL **reading back via a fresh session/UoW** (critique E4 — catches the JSON change-tracking class); seed `metadata_ = None` (pre-existing row) and a Failed-style row without `expires_at` → both fields / `expiresAt` null
-- [ ] T022 [P] [US4] Extend `cli/tests/test_backups.py` (model on `test_backups_list_by_deployment_name`, line 144): mock backups with and without `expires_at`; assert the `Expires` column shows the value and `—` respectively; assert `backups get` output includes TTL/Expires lines
-- [ ] T023 [P] [US4] Create `frontend/src/__tests__/deployment-detail/BackupExpiry.test.tsx` (mocking pattern from `DeploymentDetailHeader.test.tsx` lines 57-67): backup with `expiresAt` renders the localized date and its TTL is exposed via the tooltip/title; backup without renders `—`
+- [X] T021 [P] [US4] Create `backend/tests/functional/graphql/test_backup_fields.py`: seed a `Backup` row with `metadata_ = {"ttl": "2160h", "expires_at": "<ISO>"}` and assert `Backup.ttl`/`Backup.expiresAt` project through GraphQL **reading back via a fresh session/UoW** (critique E4 — catches the JSON change-tracking class); seed `metadata_ = None` (pre-existing row) and a Failed-style row without `expires_at` → both fields / `expiresAt` null
+- [X] T022 [P] [US4] Extend `cli/tests/test_backups.py` (model on `test_backups_list_by_deployment_name`, line 144): mock backups with and without `expires_at`; assert the `Expires` column shows the value and `—` respectively; assert `backups get` output includes TTL/Expires lines
+- [X] T023 [P] [US4] Create `frontend/src/__tests__/deployment-detail/BackupExpiry.test.tsx` (mocking pattern from `DeploymentDetailHeader.test.tsx` lines 57-67): backup with `expiresAt` renders the localized date and its TTL is exposed via the tooltip/title; backup without renders `—`
 
 ### Implementation for User Story 4
 
-- [ ] T024 [P] [US4] `cli/src/styrminctl/commands/backups.py`: add `"expires_at"` to the row dicts and an `Expires` column to `print_table` in `list_backups` (line 121-132), rendering `—` when null; add `TTL` / `Expires` lines to the `get` command's per-field block (lines 81-89)
-- [ ] T025 [P] [US4] `frontend/src/pages/deployments/DeploymentDetailPage.tsx`: add an `Expires` header to the backups-tab column row (lines 613-629) and an expiry cell to `BackupRow` (line 993; extend its inline prop type with `ttl`/`expiresAt`) — localized date via the file's `new Date(x).toLocaleDateString()` convention, `—` when null, applied TTL exposed accessibly (Base UI Tooltip or `title` attribute per page convention — critique P2, not hover-only-invisible to keyboard/screen readers)
+- [X] T024 [P] [US4] `cli/src/styrminctl/commands/backups.py`: add `"expires_at"` to the row dicts and an `Expires` column to `print_table` in `list_backups` (line 121-132), rendering `—` when null; add `TTL` / `Expires` lines to the `get` command's per-field block (lines 81-89)
+- [X] T025 [P] [US4] `frontend/src/pages/deployments/DeploymentDetailPage.tsx`: add an `Expires` header to the backups-tab column row (lines 613-629) and an expiry cell to `BackupRow` (line 993; extend its inline prop type with `ttl`/`expiresAt`) — localized date via the file's `new Date(x).toLocaleDateString()` convention, `—` when null, applied TTL exposed accessibly (Base UI Tooltip or `title` attribute per page convention — critique P2, not hover-only-invisible to keyboard/screen readers)
 
 **Checkpoint**: SC-005 satisfied end-to-end — expiry readable from UI and CLI with no cluster access.
 
