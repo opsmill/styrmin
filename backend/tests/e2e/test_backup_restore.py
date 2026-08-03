@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import AsyncIterator
 
 import httpx
@@ -146,9 +146,12 @@ async def assert_velero_backup_ttl(
 async def set_environment_backup_ttl(
     client: StyrminClient,
     environment_id: str,
-    ttl: str,
+    ttl: str | None,
 ) -> None:
     """Set ``backup_ttl`` on an environment without dropping its other config.
+
+    Passing ``ttl=None`` clears the policy, which is how the lifecycle test
+    reverts the session-shared environment to its pre-test state.
 
     ``updateEnvironment`` is full-replacement (009-environment-update): every
     field omitted from the input is persisted as its unset state. The scenario
@@ -322,95 +325,128 @@ async def test_backup_and_restore_lifecycle(
     pre_timeline_length = len(
         await client.deployments.get_timeline(deployment_id=deployment_id)
     )
-    await set_environment_backup_ttl(
-        client,
-        environment_id=scenario_environment_id,
-        ttl=ENVIRONMENT_BACKUP_TTL,
-    )
-    stored_environment = await client.environments.get(
-        environment_id=scenario_environment_id
-    )
-    assert (stored_environment.config or {}).get("backup_ttl") == (
-        ENVIRONMENT_BACKUP_TTL
-    ), (
-        "Environment config should carry the retention policy, got "
-        f"{stored_environment.config!r}"
-    )
-    await wait_for_env_fanout_steady_state(
-        client,
-        deployment_id=deployment_id,
-        pre_timeline_length=pre_timeline_length,
-    )
-    await wait_for_pods_ready(kubeconfig_path, namespace)
+    # The scenario environment is session-scoped, so the policy set below is
+    # reverted in the ``finally``: leaving a 2160h retention behind would
+    # silently hand that policy to every later ``shard_backup`` test that
+    # reuses this environment.
+    previous_backup_ttl = (
+        (await client.environments.get(environment_id=scenario_environment_id)).config
+        or {}
+    ).get("backup_ttl")
 
-    # 1. Write test data (increment counter N times)
-    async with portforward_simple_app(kubeconfig_path, namespace) as port:
-        async with httpx.AsyncClient() as http_client:
-            for _ in range(5):
-                await http_client.get(f"http://localhost:{port}/count", timeout=10)
-            resp = await http_client.get(f"http://localhost:{port}/count", timeout=10)
-            pre_backup_count = resp.json()["counter"]  # 6
+    try:
+        await set_environment_backup_ttl(
+            client,
+            environment_id=scenario_environment_id,
+            ttl=ENVIRONMENT_BACKUP_TTL,
+        )
+        stored_environment = await client.environments.get(
+            environment_id=scenario_environment_id
+        )
+        assert (stored_environment.config or {}).get("backup_ttl") == (
+            ENVIRONMENT_BACKUP_TTL
+        ), (
+            "Environment config should carry the retention policy, got "
+            f"{stored_environment.config!r}"
+        )
+        await wait_for_env_fanout_steady_state(
+            client,
+            deployment_id=deployment_id,
+            pre_timeline_length=pre_timeline_length,
+        )
+        await wait_for_pods_ready(kubeconfig_path, namespace)
 
-    # 2. Create backup via scenario_driver, wait for completion
-    created_backup = await scenario_driver.create_backup(instance_id=instance_id)
-    assert created_backup.status in {"pending", "in_progress", "completed"}
-    backup = await scenario_driver.wait_for_backup(
-        backup_id=created_backup.id, max_wait=180
-    )
-    assert backup.status == "completed"
+        # 1. Write test data (increment counter N times)
+        async with portforward_simple_app(kubeconfig_path, namespace) as port:
+            async with httpx.AsyncClient() as http_client:
+                for _ in range(5):
+                    await http_client.get(f"http://localhost:{port}/count", timeout=10)
+                resp = await http_client.get(
+                    f"http://localhost:{port}/count", timeout=10
+                )
+                pre_backup_count = resp.json()["counter"]  # 6
 
-    # 2b. Verify backup targets the assigned BSL and carries the
-    #     environment-scope retention (016 / FR-002).
-    await assert_velero_backup_uses_bsl(
-        kubeconfig_path=kubeconfig_path,
-        backup_name=backup.name,
-        expected_bsl_name=styrmin_resources["bsl_name"],
-    )
-    await assert_velero_backup_ttl(
-        kubeconfig_path=kubeconfig_path,
-        backup_name=backup.name,
-        expected_ttl=ENVIRONMENT_BACKUP_TTL,
-    )
+        # 2. Create backup via scenario_driver, wait for completion
+        created_backup = await scenario_driver.create_backup(instance_id=instance_id)
+        assert created_backup.status in {"pending", "in_progress", "completed"}
+        backup = await scenario_driver.wait_for_backup(
+            backup_id=created_backup.id, max_wait=180
+        )
+        assert backup.status == "completed"
 
-    # 2c. The applied retention and Velero's own expiry are readable off the
-    #     backup record — no cluster access required (016 / FR-006, FR-008).
-    recorded_backup = await client.backups.get_backup(backup.id)
-    assert recorded_backup.ttl == ENVIRONMENT_BACKUP_TTL, (
-        f"Backup record should report the applied TTL {ENVIRONMENT_BACKUP_TTL!r}, "
-        f"got {recorded_backup.ttl!r}"
-    )
-    assert recorded_backup.expires_at is not None, (
-        "A completed backup must record Velero's expiration timestamp"
-    )
+        # 2b. Verify backup targets the assigned BSL and carries the
+        #     environment-scope retention (016 / FR-002).
+        await assert_velero_backup_uses_bsl(
+            kubeconfig_path=kubeconfig_path,
+            backup_name=backup.name,
+            expected_bsl_name=styrmin_resources["bsl_name"],
+        )
+        await assert_velero_backup_ttl(
+            kubeconfig_path=kubeconfig_path,
+            backup_name=backup.name,
+            expected_ttl=ENVIRONMENT_BACKUP_TTL,
+        )
 
-    # 3. Write more data (counter goes higher)
-    async with portforward_simple_app(kubeconfig_path, namespace) as port:
-        async with httpx.AsyncClient() as http_client:
-            for _ in range(5):
-                await http_client.get(f"http://localhost:{port}/count", timeout=10)
+        # 2c. The applied retention and Velero's own expiry are readable off the
+        #     backup record — no cluster access required (016 / FR-006, FR-008).
+        recorded_backup = await client.backups.get_backup(backup.id)
+        assert recorded_backup.ttl == ENVIRONMENT_BACKUP_TTL, (
+            f"Backup record should report the applied TTL {ENVIRONMENT_BACKUP_TTL!r}, "
+            f"got {recorded_backup.ttl!r}"
+        )
+        assert recorded_backup.expires_at is not None, (
+            "A completed backup must record Velero's expiration timestamp"
+        )
 
-    # 4. Restore from backup via scenario_driver (same namespace)
-    created_restore = await scenario_driver.create_restore(
-        backup_id=backup.id, target_namespace=namespace
-    )
-    assert created_restore.status in {"pending", "in_progress", "completed"}
-    restore = await scenario_driver.wait_for_restore(
-        restore_id=created_restore.id, max_wait=300
-    )
-    assert restore.status == "completed"
+        # 3. Write more data (counter goes higher)
+        async with portforward_simple_app(kubeconfig_path, namespace) as port:
+            async with httpx.AsyncClient() as http_client:
+                for _ in range(5):
+                    await http_client.get(f"http://localhost:{port}/count", timeout=10)
 
-    # 5. Wait for pods to recover, verify data restored
-    await wait_for_pods_ready(kubeconfig_path, namespace)
-    async with portforward_simple_app(kubeconfig_path, namespace) as port:
-        async with httpx.AsyncClient() as http_client:
-            resp = await http_client.get(f"http://localhost:{port}/count", timeout=10)
-            # Counter should be back near pre-backup value
-            assert resp.json()["counter"] == pre_backup_count + 1
+        # 4. Restore from backup via scenario_driver (same namespace)
+        created_restore = await scenario_driver.create_restore(
+            backup_id=backup.id, target_namespace=namespace
+        )
+        assert created_restore.status in {"pending", "in_progress", "completed"}
+        restore = await scenario_driver.wait_for_restore(
+            restore_id=created_restore.id, max_wait=300
+        )
+        assert restore.status == "completed"
 
-    # 6. Delete backup and verify
-    await scenario_driver.delete_backup(backup_id=backup.id)
-    with pytest.raises(ResourceNotFound):
-        await scenario_driver.get_backup(backup_id=backup.id)
+        # 5. Wait for pods to recover, verify data restored
+        await wait_for_pods_ready(kubeconfig_path, namespace)
+        async with portforward_simple_app(kubeconfig_path, namespace) as port:
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.get(
+                    f"http://localhost:{port}/count", timeout=10
+                )
+                # Counter should be back near pre-backup value
+                assert resp.json()["counter"] == pre_backup_count + 1
+
+        # 6. Delete backup and verify
+        await scenario_driver.delete_backup(backup_id=backup.id)
+        with pytest.raises(ResourceNotFound):
+            await scenario_driver.get_backup(backup_id=backup.id)
+    finally:
+        # Restore the session-shared environment's retention policy. The
+        # revert itself must succeed (a leak is exactly what we are guarding
+        # against); the fanout wait afterwards is best-effort so a cleanup
+        # timeout can never mask the test's own failure.
+        revert_timeline_length = len(
+            await client.deployments.get_timeline(deployment_id=deployment_id)
+        )
+        await set_environment_backup_ttl(
+            client,
+            environment_id=scenario_environment_id,
+            ttl=previous_backup_ttl,
+        )
+        with suppress(AssertionError):
+            await wait_for_env_fanout_steady_state(
+                client,
+                deployment_id=deployment_id,
+                pre_timeline_length=revert_timeline_length,
+            )
 
 
 # ---------------------------------------------------------------------------

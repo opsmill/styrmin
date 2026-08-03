@@ -100,7 +100,7 @@ export type Backup = {
   componentStatuses?: Maybe<Array<ComponentBackupStatus>>;
   createdOn: Scalars['DateTime']['output'];
   errorMessage?: Maybe<Scalars['String']['output']>;
-  /** Expiration reported by Velero for this backup. Null for backups taken before expiry was recorded and for failed backups, which never receive an expiration. */
+  /** Expiration reported by Velero for this backup. Null when no expiration was recorded — a backup Velero stored nothing for, or a backup taken before expiry was recorded. A backup whose status is FAILED can still carry an expiration: Velero's PartiallyFailed phase is stored, does expire, and is reported as FAILED here. */
   expiresAt?: Maybe<Scalars['DateTime']['output']>;
   id: Scalars['UUID']['output'];
   instance: ApplicationInstance;

@@ -420,6 +420,12 @@ class ApiScenarioDriver:
             ),
             ingressClass=validated.ingress_class,
             dbSize=validated.db_size,
+            # 016: carried for the same reason the UI's
+            # ``buildFullReplacementInput`` carries it — ``updateEnvironment``
+            # is full-replacement, so omitting the retention policy here would
+            # clear it on every env-var save and break the api/ui parity this
+            # dual-entrypoint driver pair exists to check.
+            backupTtl=validated.backup_ttl,
         )
 
         try:

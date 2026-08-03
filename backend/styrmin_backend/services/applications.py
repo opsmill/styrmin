@@ -437,7 +437,7 @@ async def instantiate_application(
     try:
         validate_deployment_config(context=instance_config)
     except InvalidDeploymentContextError as e:
-        raise InvalidContextError() from e
+        raise InvalidContextError(str(e)) from e
 
     async with uow:
         # Get the application

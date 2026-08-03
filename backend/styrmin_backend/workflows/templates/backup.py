@@ -147,8 +147,9 @@ async def execute_velero_backup_flow(
                     # Velero's own expiration timestamp (creation + spec.ttl),
                     # recorded on the backup record so operators can read
                     # "when does this disappear?" without cluster access.
-                    # Absent on Failed/PartiallyFailed backups — Velero
-                    # reports no expiration for them.
+                    # Set for every backup Velero actually stored, which
+                    # includes the PartiallyFailed phase. Absent on a Failed
+                    # backup — nothing was stored, so nothing expires.
                     "expiration": status.get("expiration"),
                 }
             },
@@ -367,16 +368,23 @@ async def execute_backup_workflow(
                     env = await uow.environments.get(deployment.environment_id)
                     if env:
                         environment_config = env.config
+                        # Assign the BSL from the environment BEFORE reading the
+                        # cluster. This block swallows every exception, so a
+                        # failing cluster read (pool timeout, connection reset)
+                        # would otherwise skip a not-yet-executed assignment and
+                        # silently divert the backup to the cluster-default BSL
+                        # even though the environment's BSL was already known.
+                        if env.backup_storage_location:
+                            storage_location = (
+                                f"styrmin-bsl-{env.backup_storage_location.name}"
+                            )
+                            logger.info(
+                                f"Using BSL '{storage_location}' "
+                                f"for backup {backup_uuid}"
+                            )
                         cluster = await uow.clusters.get(env.cluster_id)
                         if cluster:
                             cluster_config = cluster.config
-                    if env and env.backup_storage_location:
-                        storage_location = (
-                            f"styrmin-bsl-{env.backup_storage_location.name}"
-                        )
-                        logger.info(
-                            f"Using BSL '{storage_location}' for backup {backup_uuid}"
-                        )
         except Exception as exc:
             config_read_failed = True
             logger.warning(
@@ -395,11 +403,22 @@ async def execute_backup_workflow(
             environment_config=environment_config,
             cluster_config=cluster_config,
         )
-        if config_read_failed:
+        if config_read_failed and ttl_source == "default":
             logger.warning(
                 f"Backup {backup_uuid}: config read failed, so any configured "
                 f"backup_ttl policy was invisible to this backup — applying "
                 f"the built-in {DEFAULT_BACKUP_TTL} default instead"
+            )
+        elif config_read_failed:
+            # The read got far enough to hand us a scope value before it threw,
+            # so the built-in default was NOT applied. Say which scope supplied
+            # the TTL and flag that a deeper scope may have been missed, rather
+            # than claiming a default that the INFO line below contradicts.
+            logger.warning(
+                f"Backup {backup_uuid}: config read failed part-way, so a "
+                f"deeper backup_ttl policy may have been invisible to this "
+                f"backup — applying {ttl} from {ttl_source} scope, which was "
+                f"read before the failure"
             )
         logger.info(
             f"resolved backup TTL {ttl} from {ttl_source} scope "
@@ -503,6 +522,16 @@ async def execute_backup_workflow(
                 size_bytes=size_bytes,
                 metadata_updates=metadata_updates,
             )
+            if not expiration:
+                # A stored backup always expires, so a Completed phase without
+                # ``status.expiration`` means we silently lost FR-006's expiry
+                # record. Say so — the Failed case below is expected and stays
+                # quiet, this one is not.
+                logger.warning(
+                    f"Backup {backup_uuid} completed but Velero reported no "
+                    "status.expiration, so no expiry was recorded — the UI and "
+                    "CLI will show no expiry date for a backup that does expire"
+                )
             logger.info(f"Backup {backup_uuid} completed successfully")
         else:
             error_msg = status.get(

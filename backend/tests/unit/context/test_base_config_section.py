@@ -22,7 +22,10 @@ from styrmin_backend.context.models.config import (
     DeploymentConfig,
     EnvironmentConfig,
 )
-from styrmin_backend.services.backup.ttl import validate_backup_ttl
+from styrmin_backend.services.backup.ttl import (
+    MAX_BACKUP_TTL_HOURS,
+    validate_backup_ttl,
+)
 
 # Every concrete config model that inherits ``backup_ttl`` from
 # ``BaseConfigSection``. Parametrising over all three is what proves the rule
@@ -50,7 +53,31 @@ VALID_BACKUP_TTLS = (
 #   "720"     — bare integer, ambiguous unit
 #   ""        — empty
 #   "0h0m0s"  — all-zero compound (the multi-component form of "0h")
-INVALID_BACKUP_TTLS = ("30d", "0h", "-24h", "720", "", "0h0m0s")
+#   "720h\n"  — trailing newline; ``$`` matches before it, so a ``match``-based
+#               check would accept this and hand Velero an unparseable ttl
+#   "٧٢٠h"    — Arabic-Indic digits; ``\d`` is Unicode-aware and would accept
+#               them even though Go's ParseDuration only reads ASCII digits
+#   " 720h"   — leading whitespace
+INVALID_BACKUP_TTLS = (
+    "30d",
+    "0h",
+    "-24h",
+    "720",
+    "",
+    "0h0m0s",
+    "720h\n",
+    "٧٢٠h",
+    " 720h",
+)
+
+# Durations whose syntax is fine but whose magnitude overflows Go's int64-
+# nanosecond duration, so ``time.ParseDuration`` (and therefore Velero's
+# ``metav1.Duration`` unmarshal of ``spec.ttl``) cannot decode them.
+TOO_LARGE_BACKUP_TTLS = (
+    f"{MAX_BACKUP_TTL_HOURS + 1}h",
+    "8760000h",
+    f"{MAX_BACKUP_TTL_HOURS}h1s",
+)
 
 
 def test_validation_rejects_invalid_endpoints_type() -> None:
@@ -131,3 +158,49 @@ def test_config_models_accept_unset_backup_ttl(model: type) -> None:
     """``None`` means "no policy at this scope" and skips validation entirely."""
     assert model().backup_ttl is None
     assert model(backup_ttl=None).backup_ttl is None
+
+
+# ---------------------------------------------------------------------------
+# 016 fix F5 — magnitudes Go's duration parser cannot represent
+# ---------------------------------------------------------------------------
+
+
+def test_validate_backup_ttl_accepts_the_largest_representable_duration() -> None:
+    """The ceiling itself is accepted — the bound is inclusive.
+
+    ``MAX_BACKUP_TTL_HOURS`` is Go's int64-nanosecond limit rounded *down* to
+    whole hours, so the boundary value is safely inside what
+    ``time.ParseDuration`` decodes and must not be rejected.
+    """
+    value = f"{MAX_BACKUP_TTL_HOURS}h"
+    assert validate_backup_ttl(value) == value
+
+
+@pytest.mark.parametrize("value", TOO_LARGE_BACKUP_TTLS)
+def test_validate_backup_ttl_rejects_durations_go_cannot_represent(
+    value: str,
+) -> None:
+    """Overflowing durations are refused at submission, not by Velero later.
+
+    FR-004 / SC-003: a value Velero cannot decode must be rejected when it is
+    submitted. Without the ceiling these match the syntax, persist, and only
+    fail asynchronously when Velero unmarshals ``spec.ttl``.
+    """
+    with pytest.raises(ValueError) as exc_info:
+        validate_backup_ttl(value)
+
+    message = str(exc_info.value)
+    assert "backup_ttl" in message
+    assert str(MAX_BACKUP_TTL_HOURS) in message
+
+
+@pytest.mark.parametrize("model", CONFIG_MODELS, ids=lambda m: m.__name__)
+@pytest.mark.parametrize("value", TOO_LARGE_BACKUP_TTLS)
+def test_config_models_reject_backup_ttl_go_cannot_represent(
+    model: type, value: str
+) -> None:
+    """Every scope enforces the ceiling, so nothing overflowing is persisted."""
+    with pytest.raises(ValidationError) as exc_info:
+        model(backup_ttl=value)
+
+    assert "backup_ttl" in str(exc_info.value)

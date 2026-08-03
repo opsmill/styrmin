@@ -136,10 +136,12 @@ through to the next-shallower scope, and down to the built-in `720h`
 when no scope sets a policy. A cluster that never sets it behaves
 exactly as before.
 
-Every backup records the TTL that was applied **and the scope it came
-from**, so each backup can answer "what retention did this get, and
-why?" on its own. The resulting expiry date is in the backup list in the
-web UI and in `styrminctl backups list` — no cluster access needed.
+Every backup records the TTL that was applied, and the resulting expiry
+date is in the backup list in the web UI and in `styrminctl backups
+list` — no cluster access needed. The scope the value came from is
+recorded internally alongside it and reported in the backup workflow's
+log; it is not part of the backup's API surface, so answering "why this
+retention?" means reading the workflow log or the scopes' config.
 
 :::note Cluster scope is set at registration
 
@@ -151,10 +153,21 @@ default afterwards, set it at environment scope instead.
 
 #### Setting a retention policy
 
-There is no form field or CLI flag for `backup_ttl` — the web UI and
-`styrminctl` _show_ you when a backup expires, they don't set the
-policy. Set it through the GraphQL API (or the Python SDK, which wraps
-the same mutations).
+There is no **dedicated** form field or CLI flag for `backup_ttl` — the
+web UI's environment form and `styrminctl` have no retention control of
+their own. You set it through the generic config surfaces: the GraphQL
+API (or the Python SDK, which wraps the same mutations), or
+`styrminctl`'s `--config` payloads and deployment manifests.
+
+Watch the key casing — it follows the surface, not the feature:
+
+| Surface | Key |
+|---------|-----|
+| `updateEnvironment` / `updateDeployment` `input`, `deploy`'s `config` | `backupTtl` (GraphQL input types are camelCase) |
+| `createEnvironment`'s / `createCluster`'s `config` | `backup_ttl` (raw JSON, persisted as-is) |
+| `styrminctl deployments update --config` | `backupTtl` or `backup_ttl` (both accepted) |
+| `spec.config` in a `styrminctl deployments apply` manifest | `backupTtl` |
+| `styrminctl environments create --config`, `styrminctl clusters create --config` | `backup_ttl` |
 
 `updateEnvironment` takes the **complete desired configuration**, so
 read the environment's current config first:
@@ -219,8 +232,7 @@ When a backup's TTL elapses, Velero garbage-collects its data but
 Styrmin's record of the backup stays in the list. A restore from an
 expired backup fails at the Velero step. A short `backup_ttl` surfaces
 this sooner, so check the expiry column before picking a backup to
-restore from. Related:
-[opsmill/styrmin#304](https://github.com/opsmill/styrmin/issues/304).
+restore from.
 
 :::
 
