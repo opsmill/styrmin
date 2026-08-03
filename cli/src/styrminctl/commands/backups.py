@@ -29,6 +29,11 @@ from styrminctl.types import (
 
 backups_app = App(name="backups", help="Manage backups and restores.")
 
+#: Placeholder for retention values that were never recorded — backups taken
+#: before retention tracking, and failed backups, which Velero never gives an
+#: expiration. An em-dash reads as "nothing here" rather than "zero"/"now".
+NOT_RECORDED = "—"
+
 
 @backups_app.command
 async def create(
@@ -85,6 +90,8 @@ async def get(backup_id: BackupId) -> None:
     console.print(f"  Started at: {backup.started_at or ''}")
     console.print(f"  Completed at: {backup.completed_at or ''}")
     console.print(f"  Size (bytes): {backup.size_bytes or ''}")
+    console.print(f"  TTL: {backup.ttl or NOT_RECORDED}")
+    console.print(f"  Expires at: {backup.expires_at or NOT_RECORDED}")
     if backup.error_message:
         console.print(f"  Error: {backup.error_message}")
 
@@ -126,10 +133,15 @@ async def list_backups(
             "started_at": str(b.started_at or ""),
             "completed_at": str(b.completed_at or ""),
             "size_bytes": str(b.size_bytes or ""),
+            "expires_at": str(b.expires_at) if b.expires_at else NOT_RECORDED,
         }
         for b in backups
     ]
-    print_table(rows, columns=["id", "name", "status", "started_at", "completed_at", "size_bytes"], title="Backups")
+    print_table(
+        rows,
+        columns=["id", "name", "status", "started_at", "completed_at", "size_bytes", "expires_at"],
+        title="Backups",
+    )
 
 
 @backups_app.command

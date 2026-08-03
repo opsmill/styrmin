@@ -1,0 +1,9 @@
+query GetBackupTtl($backupId: UUID!) {
+    backup(backupId: $backupId) {
+        id
+        name
+        status
+        ttl
+        expiresAt
+    }
+}

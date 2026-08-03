@@ -143,7 +143,14 @@ def test_backups_create_ambiguous_name_errors(mock_client: MagicMock, capsys: py
 
 def test_backups_list_by_deployment_name(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
     _seed_name_lookup(mock_client, deployments=[_make_deployment(name="demo")])
-    mock_backup = MagicMock(id=BACKUP_UUID, status="completed", started_at="x", completed_at="y", size_bytes=1)
+    mock_backup = MagicMock(
+        id=BACKUP_UUID,
+        status="completed",
+        started_at="x",
+        completed_at="y",
+        size_bytes=1,
+        expires_at="2026-11-01T12:04:06+00:00",
+    )
     mock_backup.name = "backup-1"
     mock_client.backups.list_backups = AsyncMock(return_value=[mock_backup])
 
@@ -152,6 +159,56 @@ def test_backups_list_by_deployment_name(mock_client: MagicMock, capsys: pytest.
     assert exc.value.code == 0
     mock_client.backups.list_backups.assert_called_once_with(instance_id=INSTANCE_UUID, status=None)
     assert "backup-1" in capsys.readouterr().out
+
+
+def test_backups_list_shows_expiry_column(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recorded expiration renders in the ``expires_at`` column (SC-005)."""
+    # Rich ellipsizes cells that do not fit; widen the console so the header
+    # and the full ISO timestamp are asserted verbatim instead of truncated.
+    monkeypatch.setenv("COLUMNS", "200")
+    mock_backup = MagicMock(
+        id=BACKUP_UUID,
+        status="completed",
+        started_at="x",
+        completed_at="y",
+        size_bytes=1,
+        expires_at="2026-11-01T12:04:06+00:00",
+    )
+    mock_backup.name = "backup-1"
+    mock_client.backups.list_backups = AsyncMock(return_value=[mock_backup])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "list", "--instance-id", INSTANCE_UUID])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "expires_at" in output
+    assert "2026-11-01T12:04:06+00:00" in output
+
+
+def test_backups_list_renders_dash_without_expiry(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backup with no recorded expiration renders the em-dash placeholder."""
+    monkeypatch.setenv("COLUMNS", "200")
+    mock_backup = MagicMock(
+        id=BACKUP_UUID,
+        status="failed",
+        started_at="x",
+        completed_at="y",
+        size_bytes=None,
+        expires_at=None,
+    )
+    mock_backup.name = "backup-1"
+    mock_client.backups.list_backups = AsyncMock(return_value=[mock_backup])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "list", "--instance-id", INSTANCE_UUID])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "expires_at" in output
+    assert "—" in output
 
 
 def test_backups_list_by_instance_id_escape_hatch(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
@@ -177,6 +234,8 @@ def test_backups_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str])
         completed_at="2024-01-01",
         size_bytes=1024,
         error_message=None,
+        ttl="2160h",
+        expires_at="2026-11-01T12:04:06+00:00",
     )
     mock_client.backups.get_backup = AsyncMock(return_value=mock_backup)
 
@@ -184,7 +243,34 @@ def test_backups_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str])
         app(["backups", "get", BACKUP_UUID])
     assert exc.value.code == 0
     mock_client.backups.get_backup.assert_called_once_with(BACKUP_UUID)
-    assert BACKUP_UUID in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert BACKUP_UUID in output
+    assert "TTL: 2160h" in output
+    assert "Expires at: 2026-11-01T12:04:06+00:00" in output
+
+
+def test_backups_get_without_retention_metadata(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    """``get`` still prints the retention lines with the em-dash placeholder."""
+    mock_backup = MagicMock(
+        id=BACKUP_UUID,
+        name="backup-1",
+        status="failed",
+        instance_id=INSTANCE_UUID,
+        started_at="2024-01-01",
+        completed_at=None,
+        size_bytes=None,
+        error_message=None,
+        ttl=None,
+        expires_at=None,
+    )
+    mock_client.backups.get_backup = AsyncMock(return_value=mock_backup)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "get", BACKUP_UUID])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "TTL: —" in output
+    assert "Expires at: —" in output
 
 
 def test_backups_delete(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
