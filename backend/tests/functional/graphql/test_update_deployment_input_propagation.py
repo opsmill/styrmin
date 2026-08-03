@@ -165,6 +165,7 @@ _STANDARD_STORAGE_ROW: dict[str, Any] = {
     "standardStorage": {"storageClass": "fast-ssd"}
 }
 _FAST_STORAGE_ROW: dict[str, Any] = {"fastStorage": {"storageClass": "nvme-local"}}
+_BACKUP_TTL_ROW: dict[str, Any] = {"backupTtl": "8760h"}
 
 
 # Each row: (id, input_var, kind, expected)
@@ -330,6 +331,13 @@ _PROPAGATION_ROWS: list[tuple[str, dict[str, Any], str, Any]] = [
         _FAST_STORAGE_ROW,
         "config",
         {"fast_storage": {"storage_class": "nvme-local"}},
+    ),
+    # Row 24 — backup_ttl, the deployment-scope retention override (016 / US2)
+    (
+        "backup_ttl",
+        _BACKUP_TTL_ROW,
+        "config",
+        {"backup_ttl": "8760h"},
     ),
 ]
 
@@ -798,6 +806,102 @@ async def test_components_empty_env_vars_clears_component_env_vars(
     assert db_row.config.get("components") == {"api": {"env_vars": {}}}, (
         f"expected env_vars cleared on api; got {db_row.config!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 016 / FR-005 — backup_ttl survives (or is deliberately dropped by) a
+# full-replacement update.
+#
+# The deployment-scope retention override is only useful if a client that
+# re-submits the persisted config keeps it; the mirror case (a submission
+# without the field) must read as an explicit "drop the policy", which is
+# exactly why the web UI's input builders have to carry it through.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_backup_ttl_preserved_when_resubmitted(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """Re-submitting ``backupTtl`` alongside another field keeps the policy."""
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+    deployment = await seed_deployment(session)
+    deployment.config = {"backup_ttl": "8760h"}
+    session.add(deployment)
+    await session.commit()
+    deployment_id = deployment.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {
+                    "backupTtl": "8760h",
+                    "envVars": [{"name": "LOG_LEVEL", "value": "debug"}],
+                },
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+
+    session.expire_all()
+    db_row = await session.get(Deployment, deployment_id)
+    assert db_row is not None
+    assert db_row.config == {
+        "backup_ttl": "8760h",
+        "env_vars": {"LOG_LEVEL": "debug"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_omitting_backup_ttl_clears_it(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """Omitting ``backupTtl`` drops it — full-replacement semantics.
+
+    A deployment that loses its override falls back to the environment /
+    cluster / built-in hop on the next backup, so the clear has to be
+    visible in the persisted config rather than silently retained.
+    """
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+    deployment = await seed_deployment(session)
+    deployment.config = {"backup_ttl": "8760h"}
+    session.add(deployment)
+    await session.commit()
+    deployment_id = deployment.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {"envVars": [{"name": "LOG_LEVEL", "value": "debug"}]},
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+
+    session.expire_all()
+    db_row = await session.get(Deployment, deployment_id)
+    assert db_row is not None
+    assert db_row.config is not None
+    assert db_row.config == {"env_vars": {"LOG_LEVEL": "debug"}}
+    assert "backup_ttl" not in db_row.config
 
 
 # ---------------------------------------------------------------------------

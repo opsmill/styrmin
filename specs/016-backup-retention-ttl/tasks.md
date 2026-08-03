@@ -72,12 +72,12 @@
 
 ### Tests for User Story 2 (write first)
 
-- [ ] T018 [P] [US2] Extend `backend/tests/unit/services/test_backup_ttl_resolution.py`: deployment hop beats environment and cluster; cluster hop applies when deployment+environment unset; null-at-scope skips to the next hop (one test per precedence hop, FR-001)
-- [ ] T019 [P] [US2] Add `backup_ttl` round-trips to `backend/tests/functional/graphql/test_deploy_input_propagation.py` (set at deploy → `Deployment.config["backup_ttl"]`) and `backend/tests/functional/graphql/test_update_deployment_input_propagation.py` (update-with preserves, update-omitting clears); add the field to `backend/tests/functional/graphql/test_update_deployment_input_introspection.py` if it enumerates input fields explicitly
+- [X] T018 [P] [US2] Extend `backend/tests/unit/services/test_backup_ttl_resolution.py`: deployment hop beats environment and cluster; cluster hop applies when deployment+environment unset; null-at-scope skips to the next hop (one test per precedence hop, FR-001)
+- [X] T019 [P] [US2] Add `backup_ttl` round-trips to `backend/tests/functional/graphql/test_deploy_input_propagation.py` (set at deploy → `Deployment.config["backup_ttl"]`) and `backend/tests/functional/graphql/test_update_deployment_input_propagation.py` (update-with preserves, update-omitting clears); add the field to `backend/tests/functional/graphql/test_update_deployment_input_introspection.py` if it enumerates input fields explicitly — **no change needed**: `test_update_deployment_input_field_coverage` derives its expected set from `DeploymentConfig.model_fields`, so `backup_ttl` is covered automatically by the schema walk
 
 ### Implementation for User Story 2
 
-- [ ] T020 [US2] Frontend deployment round-trip (FR-005): map `backup_ttl` ↔ `backupTtl` in `deploymentConfigToInput` in `frontend/src/lib/deployment-input.ts` and register `backupTtl` in the scalar registry of `frontend/src/lib/config-diff.ts` (section: the backup/storage-adjacent group; makes the field visible in config diffs); update any registry-enumerating tests
+- [X] T020 [US2] Frontend deployment round-trip (FR-005): map `backup_ttl` ↔ `backupTtl` in `deploymentConfigToInput` in `frontend/src/lib/deployment-input.ts` and register `backupTtl` in the scalar registry of `frontend/src/lib/config-diff.ts` (section: `storageRuntime`, the backup/storage-adjacent group; makes the field visible in config diffs); update any registry-enumerating tests
 
 **Checkpoint**: Precedence proven at every hop; deployment-scope value settable via typed input, preserved by the UI, visible in diffs. (Backend resolution logic itself shipped in US1 — this story adds the deployment/cluster hops' proof and client plumbing.)
 

@@ -301,6 +301,37 @@ describe("config-diff: diff()", () => {
     });
   });
 
+  it("attributes backupTtl changes to the storageRuntime section", () => {
+    // 016 / FR-005: a retention change must be visible in the pre-save diff,
+    // otherwise an operator cannot tell that the deployment's backup
+    // lifetime is about to change.
+    const before: UpdateDeploymentInput = { backupTtl: "720h" };
+    const after: UpdateDeploymentInput = { backupTtl: "8760h" };
+    const result = diff(before, after, emptySchema);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).toMatchObject({
+      section: "storageRuntime",
+      path: "backupTtl",
+      label: "Backup retention TTL",
+      before: "720h",
+      after: "8760h",
+      kind: "change",
+    });
+    expect(result.sectionsChanged).toEqual(["storageRuntime"]);
+  });
+
+  it("emits an add entry when backupTtl goes from unset to set", () => {
+    const result = diff({}, { backupTtl: "2160h" }, emptySchema);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).toMatchObject({
+      section: "storageRuntime",
+      path: "backupTtl",
+      before: "",
+      after: "2160h",
+      kind: "add",
+    });
+  });
+
   it("orders sectionsChanged according to SECTION_ORDER", () => {
     const before: UpdateDeploymentInput = {};
     const after: UpdateDeploymentInput = {

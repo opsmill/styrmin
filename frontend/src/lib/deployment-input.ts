@@ -384,5 +384,9 @@ export function deploymentConfigToInput(
       | StandardStorageInput
       | undefined,
     fastStorage: config.fast_storage as FastStorageInput | undefined,
+    // Backup retention policy at deployment scope (016). Carried through so a
+    // full-replacement update built from the persisted config cannot silently
+    // drop the override — omitting the field means "drop the policy".
+    backupTtl: config.backup_ttl as string | undefined,
   };
 }

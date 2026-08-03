@@ -1,4 +1,4 @@
-"""Unit tests for backup retention TTL resolution (016 / US1).
+"""Unit tests for backup retention TTL resolution (016 / US1 + US2).
 
 Covers the deepest-wins scope resolution and the built-in fallback in
 ``styrmin_backend.services.backup.ttl``. This module is the single home of
@@ -45,6 +45,69 @@ def test_environment_scope_applies_when_deployment_unset() -> None:
         cluster_config=None,
     )
     assert (ttl, source) == ("2160h", "environment")
+
+
+def test_deployment_scope_wins_over_environment_and_cluster() -> None:
+    """The deepest hop wins outright (016 / US2, FR-001).
+
+    A single critical deployment overrides its environment's policy while
+    siblings keep following the environment — the deployment hop must beat
+    both shallower scopes even when all three carry a value.
+    """
+    ttl, source = resolve_backup_ttl(
+        deployment_config={"backup_ttl": "8760h"},
+        environment_config={"backup_ttl": "2160h"},
+        cluster_config={"backup_ttl": "720h"},
+    )
+    assert (ttl, source) == ("8760h", "deployment")
+
+
+def test_cluster_scope_applies_when_deployment_and_environment_unset() -> None:
+    """The cluster hop is the org-wide baseline (016 / US2, FR-001).
+
+    With neither deployment nor environment setting a policy, the value set
+    at cluster-create time applies rather than the built-in default.
+    """
+    ttl, source = resolve_backup_ttl(
+        deployment_config={"db_size": "10Gi"},
+        environment_config={"ingress_class": "nginx"},
+        cluster_config={"backup_ttl": "4320h"},
+    )
+    assert (ttl, source) == ("4320h", "cluster")
+
+
+def test_null_at_deployment_scope_skips_to_the_environment_hop() -> None:
+    """An explicit ``backup_ttl: None`` is transparent, not a clear (FR-001).
+
+    Full-replacement clients omit-or-null the field; a stored ``None`` must
+    fall through to the next scope rather than resolve to the default and
+    shadow the environment policy.
+    """
+    ttl, source = resolve_backup_ttl(
+        deployment_config={"backup_ttl": None},
+        environment_config={"backup_ttl": "2160h"},
+        cluster_config={"backup_ttl": "720h"},
+    )
+    assert (ttl, source) == ("2160h", "environment")
+
+
+def test_null_at_deployment_and_environment_skips_to_the_cluster_hop() -> None:
+    """Two consecutive null hops fall through to cluster scope (FR-001)."""
+    ttl, source = resolve_backup_ttl(
+        deployment_config={"backup_ttl": None},
+        environment_config={"backup_ttl": None},
+        cluster_config={"backup_ttl": "8760h"},
+    )
+    assert (ttl, source) == ("8760h", "cluster")
+
+
+def test_null_at_every_scope_falls_back_to_the_built_in_default() -> None:
+    """All three scopes storing ``None`` is indistinguishable from unset."""
+    assert resolve_backup_ttl(
+        deployment_config={"backup_ttl": None},
+        environment_config={"backup_ttl": None},
+        cluster_config={"backup_ttl": None},
+    ) == ("720h", "default")
 
 
 def test_all_scopes_unset_falls_back_to_the_built_in_default() -> None:
