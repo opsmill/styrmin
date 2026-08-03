@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 import strawberry
+from loguru import logger
 
 from styrmin_backend.api.definitions.deployment.model import (
     ApplicationInstance as ApplicationInstanceType,
@@ -63,6 +64,48 @@ class Backup:
             )
             for name, data in statuses.items()
         ]
+
+    @strawberry.field(
+        description=(
+            "Retention TTL applied to this backup when it was created "
+            '(e.g. ``"2160h"``). Null for backups taken before retention was '
+            "recorded."
+        )
+    )
+    def ttl(self) -> str | None:
+        metadata = self.db_model.metadata_
+        if not metadata:
+            return None
+        value = metadata.get("ttl")
+        return str(value) if value is not None else None
+
+    @strawberry.field(
+        description=(
+            "Expiration reported by Velero for this backup. Null for backups "
+            "taken before expiry was recorded and for failed backups, which "
+            "never receive an expiration."
+        )
+    )
+    def expires_at(self) -> datetime | None:
+        metadata = self.db_model.metadata_
+        if not metadata:
+            return None
+        raw = metadata.get("expires_at")
+        if not isinstance(raw, str):
+            return None
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            # A malformed stored timestamp must not fail the whole backup
+            # query — the field is nullable precisely so partial metadata
+            # degrades to "unknown" rather than an error.
+            logger.warning(
+                "Backup {backup_id} has an unparseable expires_at metadata "
+                "value {raw!r}; reporting null",
+                backup_id=self.id,
+                raw=raw,
+            )
+            return None
 
     @classmethod
     def from_instance(cls, instance: BackupModel) -> Backup:

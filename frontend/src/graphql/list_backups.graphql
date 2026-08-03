@@ -7,5 +7,7 @@ query ListBackups($instanceId: UUID!) {
     completedAt
     sizeBytes
     errorMessage
+    ttl
+    expiresAt
   }
 }

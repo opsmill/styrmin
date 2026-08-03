@@ -10,5 +10,7 @@ mutation CreateBackup($instanceId: UUID!, $name: String) {
         sizeBytes
         createdOn
         updatedOn
+        ttl
+        expiresAt
     }
 }

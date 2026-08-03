@@ -10,5 +10,7 @@ query GetBackup($backupId: UUID!) {
         sizeBytes
         createdOn
         updatedOn
+        ttl
+        expiresAt
     }
 }

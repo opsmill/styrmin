@@ -379,6 +379,13 @@ class BaseConfigSection(BaseModel):
     Attributes:
         ingress_class (str): The ingress class name.
         db_size (str): The database size.
+        backup_ttl (str | None): Retention applied to backups taken for this
+            scope, as a strictly positive Go duration in ``h``/``m``/``s``
+            units (e.g. ``"720h"``). Resolved deepest-wins across cluster,
+            environment, and deployment scope at backup time; ``None`` means
+            "no policy at this scope" and falls through to the next shallower
+            one, ultimately the built-in
+            :data:`~styrmin_backend.services.backup.ttl.DEFAULT_BACKUP_TTL`.
         fqdn_suffix (str): The fully qualified domain name suffix.
         external_url_scheme (str): Scheme used for user-facing service URLs
             ("http" or "https"). Defaults to "https" when not set.
@@ -400,6 +407,7 @@ class BaseConfigSection(BaseModel):
 
     ingress_class: str | None = None
     db_size: str | None = None
+    backup_ttl: str | None = None
     fqdn_suffix: str | None = None
     external_url_scheme: Literal["http", "https"] | None = None
     external_url_port: int | None = Field(default=None, ge=1, le=65535)
@@ -416,6 +424,19 @@ class BaseConfigSection(BaseModel):
         ),
     )
     scheduling: SchedulingConfig | None = None
+
+    @field_validator("backup_ttl")
+    @classmethod
+    def _validate_backup_ttl(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        # Imported lazily, mirroring ``_validate_env_vars`` below: the rule
+        # lives with the resolver in ``services.backup.ttl`` (single home for
+        # the retention contract) and the config models stay free of
+        # module-load-time dependencies on the services layer.
+        from styrmin_backend.services.backup.ttl import validate_backup_ttl
+
+        return validate_backup_ttl(v)
 
 
 class ClusterConfig(BaseConfigSection):
