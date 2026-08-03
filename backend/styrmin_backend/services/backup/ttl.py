@@ -41,9 +41,11 @@ DEFAULT_BACKUP_TTL = "720h"
 # ``24H`` is not a Go duration. ``[0-9]`` rather than ``\d`` because ``\d`` is
 # Unicode-aware and would admit non-ASCII digits (``"٧٢٠h"``,
 # Arabic-Indic 720h) that ``float()`` parses but Go's ``ParseDuration`` does
-# not. Always applied with ``fullmatch``: ``$`` also matches before a trailing
-# newline, so ``"720h\n"`` would otherwise slip through and reach Velero.
-BACKUP_TTL_PATTERN: re.Pattern[str] = re.compile(r"([0-9]+(\.[0-9]+)?(h|m|s))+")
+# not. Anchored with ``\A``/``\Z`` rather than ``^``/``$`` because ``$`` also
+# matches immediately before a trailing newline, which let ``"720h\n"`` through
+# to Velero as an unparseable ``spec.ttl``. The anchors make the pattern
+# self-contained, so a caller reaching for ``.match`` cannot reopen that hole.
+BACKUP_TTL_PATTERN: re.Pattern[str] = re.compile(r"\A([0-9]+(\.[0-9]+)?(h|m|s))+\Z")
 
 # Individual ``<number><unit>`` components, used to reject all-zero durations
 # (``0h``, ``0h0m0s``) that match the syntax but express no retention, and to
@@ -92,8 +94,8 @@ def validate_backup_ttl(value: str) -> str:
             names the field and hints the syntax so it stays actionable after
             the config validators wrap it into an ``Invalid*ContextError``.
     """
-    # ``fullmatch``, not ``match``: ``$`` also matches immediately before a
-    # trailing newline, so ``match`` would accept ``"720h\n"``.
+    # ``fullmatch`` on top of the pattern's own ``\A``/``\Z`` anchors — either
+    # alone rejects the trailing-newline case that ``match`` + ``$`` admitted.
     if not isinstance(value, str) or not BACKUP_TTL_PATTERN.fullmatch(value):
         raise ValueError(_INVALID_BACKUP_TTL_MESSAGE)
     components = _BACKUP_TTL_COMPONENT_RE.findall(value)
