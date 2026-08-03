@@ -112,8 +112,8 @@
 
 ### Tests for User Story 3 (validator shipped in Phase 2 — these prove it)
 
-- [ ] T026 [P] [US3] Extend `backend/tests/unit/context/test_base_config_section.py` with parametrised cases (FR-004): accept `720h`, `2160h`, `8760h`, `1h`, `90m`, `3600s`, `1h30m`, `1.5h`; reject `30d`, `0h`, `-24h`, `720`, `""`, `0h0m0s`; assert the message names `backup_ttl` and contains the `720h` hint; assert the field is accepted by `ClusterConfig`, `EnvironmentConfig`, and `DeploymentConfig` alike
-- [ ] T027 [US3] Add a mutation-level rejection test (extend `backend/tests/functional/graphql/test_environment_update_propagation.py` or the deployment errors suite `test_update_deployment_input_errors.py`): `updateEnvironment` with `backupTtl: "30d"` returns a typed error (`extensions.code` from the `Invalid*ContextError` family) whose message names the field and hints the syntax, and the environment's stored config is unchanged (SC-003)
+- [X] T026 [P] [US3] Extend `backend/tests/unit/context/test_base_config_section.py` with parametrised cases (FR-004): accept `720h`, `2160h`, `8760h`, `1h`, `90m`, `3600s`, `1h30m`, `1.5h`; reject `30d`, `0h`, `-24h`, `720`, `""`, `0h0m0s`; assert the message names `backup_ttl` and contains the `720h` hint; assert the field is accepted by `ClusterConfig`, `EnvironmentConfig`, and `DeploymentConfig` alike
+- [X] T027 [US3] Add a mutation-level rejection test (extend `backend/tests/functional/graphql/test_environment_update_propagation.py` or the deployment errors suite `test_update_deployment_input_errors.py`): `updateEnvironment` with `backupTtl: "30d"` returns a typed error (`extensions.code` from the `Invalid*ContextError` family) whose message names the field and hints the syntax, and the environment's stored config is unchanged (SC-003)
 
 **Checkpoint**: All four user stories independently proven.
 

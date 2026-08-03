@@ -591,6 +591,62 @@ async def test_update_environment_omitting_backup_ttl_clears_it(
 
 
 # ---------------------------------------------------------------------------
+# 016 / T027 — malformed backup_ttl rejected at the mutation boundary
+# (US3, FR-004, SC-003)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_environment_rejects_malformed_backup_ttl(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``backupTtl: "30d"`` is rejected loudly and persists nothing.
+
+    016 / FR-004 + SC-003. Two halves, both load-bearing:
+
+    1. The mutation returns a typed error — ``extensions.code`` set by the
+       ``Invalid*ContextError`` family — whose message names ``backup_ttl``
+       and hints the ``720h`` syntax, so the operator can fix the value
+       without reading our source.
+    2. The environment's stored config is byte-identical to what it was
+       before the call. ``30d`` looks like a plausible retention but Go has
+       no day unit, so Velero would reject it asynchronously at apply time,
+       long after the operator walked away — hence "rejected at submission".
+    """
+    environment = await seed_environment(session)
+    stored_config = {"backup_ttl": "2160h", "ingress_class": "nginx"}
+    environment.config = stored_config
+    session.add(environment)
+    await session.commit()
+    environment_id = environment.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_environment"),
+            "variables": {
+                "environmentId": str(environment_id),
+                "input": {"backupTtl": "30d", "ingressClass": "nginx"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    error = payload["errors"][0]
+    assert error["extensions"]["code"] == "VALIDATION_ERROR", payload
+    assert "backup_ttl" in error["message"], payload
+    assert "720h" in error["message"], payload
+
+    # SC-003: nothing malformed reached storage — the prior policy survives.
+    session.expire_all()
+    db_row = await session.get(Environment, environment_id)
+    assert db_row is not None
+    assert db_row.config == stored_config
+
+
+# ---------------------------------------------------------------------------
 # 011 / T005 — schema-walking input completeness check (FR-002)
 # ---------------------------------------------------------------------------
 
