@@ -51,7 +51,7 @@ async def create_cluster(
         try:
             validate_cluster_config(config)
         except InvalidClusterContextError as e:
-            raise InvalidContextError() from e
+            raise InvalidContextError(str(e)) from e
 
         cluster = Cluster(name=name, config=config)
         cluster.capabilities = compute_cluster_capabilities(cluster)

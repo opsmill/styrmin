@@ -199,7 +199,7 @@ async def create_environment(
         try:
             validate_environment_config(config)
         except InvalidEnvironmentContextError as e:
-            raise InvalidContextError from e
+            raise InvalidContextError(str(e)) from e
 
         environment = Environment(name=name, cluster_id=cluster_id, config=config)
         environment.capabilities = compute_environment_capabilities(environment)
@@ -307,7 +307,7 @@ async def update_environment(
         try:
             validate_environment_config(config)
         except InvalidEnvironmentContextError as e:
-            raise InvalidContextError from e
+            raise InvalidContextError(str(e)) from e
 
         # Persist the env-config row. Per FR-009a this commit MUST run
         # before any Task dispatch so a crash mid-fanout never reverts

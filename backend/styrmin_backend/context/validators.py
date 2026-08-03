@@ -22,7 +22,10 @@ def validate_cluster_config(context: dict) -> None:
     try:
         ClusterConfig(**context)
     except ValidationError as e:
-        raise InvalidClusterContextError from e
+        # Carry Pydantic's message forward: field-level rules (e.g.
+        # ``backup_ttl``, 016 / FR-004) state which field failed and how to
+        # fix it, and that hint is the whole value of the error to the caller.
+        raise InvalidClusterContextError(str(e)) from e
 
 
 def validate_environment_config(context: dict) -> None:
@@ -35,7 +38,7 @@ def validate_environment_config(context: dict) -> None:
     try:
         EnvironmentConfig(**context)
     except ValidationError as e:
-        raise InvalidEnvironmentContextError from e
+        raise InvalidEnvironmentContextError(str(e)) from e
 
 
 def validate_deployment_config(context: dict) -> None:

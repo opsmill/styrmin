@@ -429,7 +429,7 @@ async def update_deployment(
             try:
                 validate_deployment_config(context=deployment_config)
             except InvalidDeploymentContextError as e:
-                raise InvalidContextError() from e
+                raise InvalidContextError(str(e)) from e
 
         if deployment_name is not None:
             try:
