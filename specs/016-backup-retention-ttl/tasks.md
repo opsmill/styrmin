@@ -58,7 +58,7 @@
 - [X] T014 [US1] Wire resolution into `execute_backup_workflow` (`backend/styrmin_backend/workflows/templates/backup.py`): load deployment/environment/cluster configs in the existing UoW block, call `resolve_backup_ttl` **outside** the BSL `try/except` (research R3 caveat — a config-read failure must fall back loudly to `("720h", "default")`, never silently); log `resolved backup TTL <ttl> from <source_scope> scope`; record `{"ttl": ..., "ttl_source": ...}` via `update_backup_status(metadata_updates=...)` before building; pass `ttl=` to `build_velero_backup`; on completion, record `{"expires_at": <ISO>}` from the Velero result payload when present (Failed/PartiallyFailed report none)
 - [X] T015 [US1] Update builder suites to the required-TTL signature: `backend/tests/unit/agent/test_velero_resources.py` (line 247 area) and `backend/tests/unit/agent/test_backup_builders.py` (line 27 area) supply an explicit `ttl` and assert pass-through of the supplied value (no other assertion changes — SC-004)
 - [X] T016 [US1] Carry `backup_ttl` through `buildFullReplacementInput` in `frontend/src/pages/environments/EnvironmentConfigurationTab.helpers.ts` (string scalar pass-through like `dbSize`; critique M1) and add a preservation assertion to the tab's existing test coverage (`frontend/src/__tests__/EnvironmentConfigurationTab.test.tsx` or the helpers test): persisted `backup_ttl` survives an env-var-only save
-- [ ] T017 [US1] Extend `backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle`: set `backup_ttl: "2160h"` on the scenario environment via the SDK (`sdk.environments.update_environment`, round-tripping existing config fields), **wait for the update fanout to reach steady state before backing up** (critique E3 — the env update triggers a Helm-no-op redeploy on the session-shared environment); assert the Velero Backup CRD `spec.ttl == "2160h"` alongside the existing `assert_velero_backup_uses_bsl` assertion (helper at lines 81-108); after completion, assert `backup.ttl == "2160h"` and `backup.expires_at` is non-null via the SDK. Run to PASS: `sleep infinity | uv run pytest "backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle" -v -s --pdb 2>&1 | tee /tmp/backup-ttl-e2e.log` and record Constitution §V evidence (node ID, command, ISO timestamp, vcluster id + kubeconfig path, verbatim `PASSED` line) in this file under Evidence below
+- [X] T017 [US1] Extend `backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle`: set `backup_ttl: "2160h"` on the scenario environment via the SDK (`sdk.environments.update_environment`, round-tripping existing config fields), **wait for the update fanout to reach steady state before backing up** (critique E3 — the env update triggers a Helm-no-op redeploy on the session-shared environment); assert the Velero Backup CRD `spec.ttl == "2160h"` alongside the existing `assert_velero_backup_uses_bsl` assertion (helper at lines 81-108); after completion, assert `backup.ttl == "2160h"` and `backup.expires_at` is non-null via the SDK. Run to PASS: `sleep infinity | uv run pytest "backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle" -v -s --pdb 2>&1 | tee /tmp/backup-ttl-e2e.log` and record Constitution §V evidence (node ID, command, ISO timestamp, vcluster id + kubeconfig path, verbatim `PASSED` line) in this file under Evidence below
 
 **Checkpoint**: US1 fully functional — environment policy lands on the Velero object, is recorded, logged, and E2E-proven. MVP deliverable.
 
@@ -133,13 +133,31 @@
 
 ## Evidence (Constitution §V — fill during T017/T032)
 
-| Item | Value |
-|---|---|
-| E2E node ID | `backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle` (variants as parametrised) |
-| Exact command | _(record)_ |
-| PASS timestamp (ISO 8601) | _(record)_ |
-| Cluster id + kubeconfig | _(record: vcluster<N>, /tmp/pytest-of-*/pytest-*/...)_ |
-| Verbatim PASSED line | _(record)_ |
+### T017 — `test_backup_and_restore_lifecycle`, both entrypoint variants
+
+Environment: docker server `29.2.1`, `vcluster` `0.33.0` on `/usr/local/bin/vcluster`; self-bootstrapping session `vcluster` fixture (`backend/tests/conftest.py`).
+
+| Item | `[api-chromium]` | `[ui-chromium]` |
+|---|---|---|
+| E2E node ID | `backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle[api-chromium]` | `backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle[ui-chromium]` |
+| Exact command | `sleep infinity \| uv run pytest "backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle" -k api-chromium -v -s --pdb 2>&1 \| tee /tmp/backup-ttl-e2e-api.log` | `sleep infinity \| uv run pytest "backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle" -k ui-chromium -v -s --pdb 2>&1 \| tee /tmp/backup-ttl-e2e-ui.log` |
+| PASS timestamp (ISO 8601) | started `2026-08-03T12:13:13+00:00`, passed `2026-08-03T12:20:32+00:00` (438.78s) | started `2026-08-03T12:07:11+00:00`, passed `2026-08-03T12:12:34+00:00` (322.81s) |
+| Cluster id + kubeconfig | vcluster `pytest-f7bd2cd8-f23f-414a-8ef6-389756b88097`, `/tmp/pytest-of-root/pytest-1108/vcluster0/kubeconfig` | vcluster `pytest-6d156b52-360f-47a7-a9cb-8b8b315917c8`, `/tmp/pytest-of-root/pytest-1107/vcluster0/kubeconfig` |
+| Verbatim PASSED line | `backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle[api-chromium] … PASSED` (`-s` interleaves captured output between the node id and the verdict) | `backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle[ui-chromium] … PASSED` |
+| Final summary line | `============ 1 passed, 1 deselected, 1 warning in 438.78s (0:07:18) ============` | `============ 1 passed, 1 deselected, 1 warning in 322.81s (0:05:22) ============` |
+
+The two variants ran as separate pytest sessions (`-k api-chromium` / `-k ui-chromium`), which is how CI drives them — `backend/tests/e2e/conftest.py` (`driver_mode`, line ~669) notes each mode gets its own job with a fresh vcluster because `styrmin_resources` re-creates `test-cluster` per mode. Running the bare node id in one session passes `[api-chromium]` and then errors `[ui-chromium]` in fixture setup on the duplicate `create_cluster('test-cluster')` — a pre-existing property of the suite, unrelated to this feature.
+
+Cluster-side confirmation captured from the live vcluster of the first (combined) run while pytest was paused in `--pdb`:
+
+```text
+NAME                                           TTL     PHASE       EXPIRATION
+styrmin-47c0e77c-da80-4ce1-a0ab-c9cc96218611   2160h   Completed   2026-11-01T12:04:06Z
+
+resolved backup TTL 2160h from environment scope for backup 47c0e77c-da80-4ce1-a0ab-c9cc96218611
+```
+
+`spec.ttl` reads back byte-identical to the submitted `"2160h"` (the API server stores CRD strings verbatim — no Go duration normalisation to `2160h0m0s`), and `status.expiration` is exactly 90 days after creation.
 
 ---
 
