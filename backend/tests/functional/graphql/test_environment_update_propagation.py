@@ -499,6 +499,97 @@ async def test_update_environment_input_db_size_round_trip(
     assert db_row.config == {"db_size": "10Gi"}
 
 
+@pytest.mark.asyncio
+async def test_update_environment_input_backup_ttl_round_trip(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``input.backupTtl`` round-trips to ``Environment.config.backup_ttl``.
+
+    016 / FR-005 — the environment scope is the feature's primary setter, so
+    the typed input must actually land the value on the persisted config.
+    """
+    environment = await seed_environment(session)
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment.id),
+            "input": {"backupTtl": "2160h"},
+        },
+    )
+    db_row = await session.get(Environment, environment.id)
+    assert db_row is not None
+    assert db_row.config == {"backup_ttl": "2160h"}
+
+
+@pytest.mark.asyncio
+async def test_update_environment_input_backup_ttl_preserved_when_resubmitted(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Re-submitting ``backupTtl`` alongside other fields keeps the policy.
+
+    016 / FR-005 — a client that carries the stored value through its
+    full-replacement input keeps the environment-scope policy intact.
+    """
+    environment = await seed_environment(session)
+    environment.config = {"backup_ttl": "2160h"}
+    session.add(environment)
+    await session.commit()
+    environment_id = environment.id
+
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment_id),
+            "input": {
+                "backupTtl": "2160h",
+                "envVars": [{"name": "LOG_LEVEL", "value": "debug"}],
+            },
+        },
+    )
+    session.expire_all()
+    db_row = await session.get(Environment, environment_id)
+    assert db_row is not None
+    assert db_row.config == {
+        "backup_ttl": "2160h",
+        "env_vars": {"LOG_LEVEL": "debug"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_environment_omitting_backup_ttl_clears_it(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Omitting ``backupTtl`` clears it — full-replacement semantics.
+
+    016 / FR-005 — this is exactly why every client that hand-assembles an
+    ``UpdateEnvironmentInput`` (e.g. the web UI's
+    ``buildFullReplacementInput``) MUST carry the stored value through:
+    a submission without the field is a request to drop the policy.
+    """
+    environment = await seed_environment(session)
+    environment.config = {"backup_ttl": "2160h"}
+    session.add(environment)
+    await session.commit()
+    environment_id = environment.id
+
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment_id),
+            "input": {"envVars": [{"name": "LOG_LEVEL", "value": "debug"}]},
+        },
+    )
+    session.expire_all()
+    db_row = await session.get(Environment, environment_id)
+    assert db_row is not None
+    assert db_row.config == {"env_vars": {"LOG_LEVEL": "debug"}}
+    assert db_row.config is not None
+    assert "backup_ttl" not in db_row.config
+
+
 # ---------------------------------------------------------------------------
 # 011 / T005 — schema-walking input completeness check (FR-002)
 # ---------------------------------------------------------------------------

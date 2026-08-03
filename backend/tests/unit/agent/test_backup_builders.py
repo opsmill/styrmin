@@ -16,6 +16,7 @@ class TestBuildVeleroBackup:
             target_namespace="app-ns",
             instance_id="inst-123",
             driver_name="mydriver",
+            ttl="2160h",
         )
         rendered = backup.render()
         assert rendered["metadata"]["name"] == "test-backup"
@@ -24,7 +25,9 @@ class TestBuildVeleroBackup:
         assert rendered["spec"]["includeClusterResources"] is False
         assert "labelSelector" not in rendered["spec"]
         assert rendered["metadata"]["labels"]["styrmin.io/driver"] == "mydriver"
-        assert rendered["spec"]["ttl"] == "720h"
+        # ``ttl`` is a required argument with no default (016): the builder
+        # passes the caller's resolved retention straight through.
+        assert rendered["spec"]["ttl"] == "2160h"
 
     def test_backup_with_hooks(self) -> None:
         from styrmin_backend.agent.service.kubernetes.velero.resources import (
@@ -44,6 +47,7 @@ class TestBuildVeleroBackup:
             target_namespace="app-ns",
             instance_id="inst-123",
             driver_name="mydriver",
+            ttl="720h",
             hooks=[hook],
         )
         rendered = backup.render()

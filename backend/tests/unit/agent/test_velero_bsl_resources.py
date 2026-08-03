@@ -12,6 +12,7 @@ def test_velero_backup_without_storage_location():
         name="test-backup",
         namespace="styrmin",
         included_namespaces=["styrmin-deployment-1"],
+        ttl="720h",
     )
     rendered = backup.render()
     assert "storageLocation" not in rendered["spec"]
@@ -23,6 +24,7 @@ def test_velero_backup_with_storage_location():
         name="test-backup",
         namespace="styrmin",
         included_namespaces=["styrmin-deployment-1"],
+        ttl="720h",
         storage_location="styrmin-bsl-my-location",
     )
     rendered = backup.render()

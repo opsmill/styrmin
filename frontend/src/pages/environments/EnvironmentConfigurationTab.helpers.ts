@@ -119,6 +119,11 @@ export function buildFullReplacementInput(
   const ingressClass =
     typeof config?.ingress_class === "string" ? config.ingress_class : null;
   const dbSize = typeof config?.db_size === "string" ? config.db_size : null;
+  // 016: the environment is the primary scope for the backup retention
+  // policy. ``updateEnvironment`` is full-replacement, so omitting this
+  // would clear the stored TTL on every env-var save.
+  const backupTtl =
+    typeof config?.backup_ttl === "string" ? config.backup_ttl : null;
 
   return {
     envVars: envVars.map((v) => ({ name: v.name, value: v.value })),
@@ -129,6 +134,7 @@ export function buildFullReplacementInput(
     externalDnsEndpointsType,
     ingressClass,
     dbSize,
+    backupTtl,
     dedicatedIngress: null,
     scheduling: null,
   };

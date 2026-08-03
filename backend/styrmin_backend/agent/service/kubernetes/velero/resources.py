@@ -47,9 +47,13 @@ class VeleroBackup:
     name: str
     namespace: str
     included_namespaces: list[str]
+    # Retention is policy, not a rendering concern: the caller resolves it
+    # (deployment → environment → cluster → built-in default) and passes it
+    # in. Deliberately has no default so this renderer cannot silently
+    # disagree with the resolved policy — see services/backup/ttl.py.
+    ttl: str
     labels: dict[str, str] = field(default_factory=dict)
     hooks: list[VeleroBackupHook] = field(default_factory=list)
-    ttl: str = "720h"
     include_cluster_resources: bool = False
     storage_location: str | None = None
 

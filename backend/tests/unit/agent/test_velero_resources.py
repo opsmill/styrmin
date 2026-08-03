@@ -238,13 +238,16 @@ class TestVeleroBackup:
             name="my-backup",
             namespace="velero",
             included_namespaces=["app-ns"],
+            ttl="2160h",
         )
         result = backup.render()
         assert result["apiVersion"] == "velero.io/v1"
         assert result["kind"] == "Backup"
         assert result["spec"]["includedNamespaces"] == ["app-ns"]
         assert result["spec"]["includeClusterResources"] is False
-        assert result["spec"]["ttl"] == "720h"
+        # ``ttl`` is a required input with no default (016): the renderer
+        # passes through whatever retention the caller resolved.
+        assert result["spec"]["ttl"] == "2160h"
         assert "labelSelector" not in result["spec"]
 
     def test_render_with_hooks(self) -> None:
@@ -263,6 +266,7 @@ class TestVeleroBackup:
             name="my-backup",
             namespace="velero",
             included_namespaces=["ns1"],
+            ttl="720h",
             hooks=[hook],
         )
         result = backup.render()
