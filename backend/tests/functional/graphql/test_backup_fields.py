@@ -4,10 +4,15 @@
 ``metadata`` JSON column (keys ``ttl`` / ``expires_at``), not stored columns.
 Every assertion here therefore reads back through a **second session bound to
 the same engine** — a fresh unit of work with its own identity map — so the
-values must have survived a real DB round-trip. Asserting against the seeding
-session would pass even if the JSON payload never reached the database, which
-is exactly the in-place-mutation failure mode this suite has to catch
-(spec 016 critique E4 / M2).
+values must have survived a real DB round-trip rather than being served out of
+the seeding session's identity map.
+
+Scope: this file proves the *read* path — that a persisted ``metadata`` payload
+projects onto the GraphQL fields. It seeds ``metadata_`` through the ``Backup``
+constructor and never calls ``update_backup_status``, so it does **not** cover
+the *write* path's in-place-mutation trap (spec 016 critique E4 / M2). That is
+pinned by ``TestUpdateBackupStatus`` in
+``backend/tests/unit/services/backup/test_backup_service.py``.
 """
 
 from __future__ import annotations

@@ -30,8 +30,10 @@ from styrminctl.types import (
 backups_app = App(name="backups", help="Manage backups and restores.")
 
 #: Placeholder for retention values that were never recorded — backups taken
-#: before retention tracking, and failed backups, which Velero never gives an
-#: expiration. An em-dash reads as "nothing here" rather than "zero"/"now".
+#: before retention tracking, and backups Velero stored nothing for, which get
+#: no expiration. A failed backup can still show an expiry: Velero's
+#: PartiallyFailed phase is stored, does expire, and is reported as FAILED.
+#: An em-dash reads as "nothing here" rather than "zero"/"now".
 NOT_RECORDED = "—"
 
 

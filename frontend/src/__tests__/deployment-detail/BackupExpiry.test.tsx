@@ -254,12 +254,28 @@ describe("DeploymentDetailPage backups tab expiry column", () => {
 
   it("renders an em-dash when no expiry was recorded", async () => {
     await renderBackupsTab([
-      makeBackup({ id: "backup-2", name: "backup-2", ttl: null, expiresAt: null }),
+      makeBackup({
+        id: "backup-2",
+        name: "backup-2",
+        ttl: null,
+        expiresAt: null,
+      }),
     ]);
 
     const cell = screen.getByTestId("backup-expires");
     expect(cell.textContent).toContain("—");
     expect(cell.getAttribute("title")).toBeNull();
+  });
+
+  it("renders an em-dash rather than 'Invalid Date' for an unparseable expiry", async () => {
+    // `new Date("not-a-timestamp")` never throws — it yields an Invalid Date
+    // whose toLocaleDateString() is the literal string "Invalid Date". A
+    // corrupt stored value must read as "unknown", not leak the JS artefact.
+    await renderBackupsTab([makeBackup({ expiresAt: "not-a-timestamp" })]);
+
+    const cell = screen.getByTestId("backup-expires");
+    expect(cell.textContent).not.toContain("Invalid Date");
+    expect(cell.textContent).toContain("—");
   });
 
   it("keeps the expiry date when only the TTL is missing", async () => {

@@ -81,9 +81,12 @@ class Backup:
 
     @strawberry.field(
         description=(
-            "Expiration reported by Velero for this backup. Null for backups "
-            "taken before expiry was recorded and for failed backups, which "
-            "never receive an expiration."
+            "Expiration reported by Velero for this backup. Null when no "
+            "expiration was recorded — a backup Velero stored nothing for, or "
+            "a backup taken before expiry was recorded. A backup whose status "
+            "is FAILED can still carry an expiration: Velero's "
+            "PartiallyFailed phase is stored, does expire, and is reported as "
+            "FAILED here."
         )
     )
     def expires_at(self) -> datetime | None:
@@ -91,7 +94,19 @@ class Backup:
         if not metadata:
             return None
         raw = metadata.get("expires_at")
+        if raw is None:
+            return None
         if not isinstance(raw, str):
+            # Same degrade-to-null contract as the unparseable case below, but
+            # it means something different: the stored value is not even a
+            # timestamp, so it never came from the backup workflow.
+            logger.warning(
+                "Backup {backup_id} has a non-string expires_at metadata "
+                "value {raw!r} ({type_name}); reporting null",
+                backup_id=self.id,
+                raw=raw,
+                type_name=type(raw).__name__,
+            )
             return None
         try:
             return datetime.fromisoformat(raw)

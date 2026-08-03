@@ -399,6 +399,92 @@ class TestUpdateBackupStatus:
 
         assert result.component_statuses == component_statuses
 
+    @pytest.mark.anyio
+    async def test_metadata_updates_merge_and_preserve_existing_keys(self) -> None:
+        """``metadata_updates`` merges — it must not overwrite the whole dict.
+
+        ``create_backup`` stores the Velero poll ``timeout`` in ``metadata_``,
+        and the backup workflow later writes the resolved retention through
+        this parameter. A bare assignment (``backup.metadata_ =
+        metadata_updates``) would drop ``timeout``, so the workflow's own
+        ``metadata_.get("timeout", 3600)`` read would silently fall back to the
+        default for every custom-timeout backup (016 / FR-006).
+        """
+        backup = Backup(
+            name="test-backup",
+            status=BackupStatus.PENDING,
+            instance_id=uuid4(),
+            metadata_={"timeout": 1800},
+        )
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup_status(
+            backup_id=backup.id,
+            status=BackupStatus.IN_PROGRESS,
+            uow=uow,
+            metadata_updates={"ttl": "2160h", "ttl_source": "environment"},
+        )
+
+        assert result.metadata_ == {
+            "timeout": 1800,
+            "ttl": "2160h",
+            "ttl_source": "environment",
+        }
+
+    @pytest.mark.anyio
+    async def test_metadata_updates_reassign_the_attribute_not_mutate_it(
+        self,
+    ) -> None:
+        """The merge must produce a NEW dict, not mutate the stored one.
+
+        ``metadata`` is a plain JSON column with no ``MutableDict`` wrapper, so
+        SQLAlchemy only marks it dirty on attribute *assignment*. An in-place
+        ``backup.metadata_.update(...)`` would pass an equality assertion while
+        never reaching the database — this asserts the object identity changed
+        so that failure mode cannot hide (016 critique E4 / M2).
+        """
+        original: dict = {"timeout": 1800}
+        backup = Backup(
+            name="test-backup",
+            status=BackupStatus.IN_PROGRESS,
+            instance_id=uuid4(),
+            metadata_=original,
+        )
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup_status(
+            backup_id=backup.id,
+            status=BackupStatus.COMPLETED,
+            uow=uow,
+            metadata_updates={"expires_at": "2026-08-03T00:00:00+00:00"},
+        )
+
+        assert result.metadata_ is not original
+        assert original == {"timeout": 1800}, (
+            "the pre-existing metadata dict must not be mutated in place"
+        )
+        assert result.metadata_["expires_at"] == "2026-08-03T00:00:00+00:00"
+        assert result.metadata_["timeout"] == 1800
+
+    @pytest.mark.anyio
+    async def test_metadata_updates_on_a_row_with_no_metadata(self) -> None:
+        """``metadata_`` is None on pre-existing rows; the merge must cope."""
+        backup = Backup(
+            name="test-backup",
+            status=BackupStatus.IN_PROGRESS,
+            instance_id=uuid4(),
+        )
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup_status(
+            backup_id=backup.id,
+            status=BackupStatus.COMPLETED,
+            uow=uow,
+            metadata_updates={"ttl": "720h", "ttl_source": "default"},
+        )
+
+        assert result.metadata_ == {"ttl": "720h", "ttl_source": "default"}
+
 
 class TestCreateBackupTimeout:
     @pytest.mark.anyio

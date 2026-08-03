@@ -8,13 +8,27 @@ required input, so no other layer asserts a default.
 
 from __future__ import annotations
 
-from typing import get_args
+import io
+from typing import Iterator, get_args
+
+import pytest
+from loguru import logger
 
 from styrmin_backend.services.backup.ttl import (
     DEFAULT_BACKUP_TTL,
+    MAX_BACKUP_TTL_HOURS,
     BackupTtlSource,
     resolve_backup_ttl,
 )
+
+
+@pytest.fixture
+def warn_sink() -> Iterator[io.StringIO]:
+    """Capture loguru WARNING output for the fallthrough assertions."""
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{level}|{message}")
+    yield sink
+    logger.remove(handler_id)
 
 
 def test_default_backup_ttl_is_pinned_to_720h() -> None:
@@ -155,3 +169,93 @@ def test_every_resolvable_source_is_a_declared_source_scope() -> None:
         resolve_backup_ttl(None, None, None)[1],
     }
     assert observed == declared
+
+
+# ---------------------------------------------------------------------------
+# 016 fix F7 — a persisted value that never crossed a config validator
+# ---------------------------------------------------------------------------
+
+
+def test_non_string_scope_value_falls_through_loudly(
+    warn_sink: io.StringIO,
+) -> None:
+    """A JSON number never becomes ``spec.ttl`` (defence in depth).
+
+    Pydantic's ``str`` field makes this unreachable through the mutations, but
+    a hand-edited row or a restored dump can hold ``720``. Coercing it with
+    ``str()`` would hand Velero ``spec.ttl: "720"`` — a bare integer it
+    rejects, failing the backup asynchronously. Skip the scope instead, and
+    say so.
+    """
+    ttl, source = resolve_backup_ttl(
+        deployment_config={"backup_ttl": 720},
+        environment_config={"backup_ttl": "2160h"},
+        cluster_config=None,
+    )
+
+    assert (ttl, source) == ("2160h", "environment")
+    warnings = warn_sink.getvalue()
+    assert "deployment" in warnings
+    assert "720" in warnings
+
+
+def test_invalid_string_scope_value_falls_through_loudly(
+    warn_sink: io.StringIO,
+) -> None:
+    """A syntactically invalid stored string is skipped, not forwarded."""
+    ttl, source = resolve_backup_ttl(
+        deployment_config={"backup_ttl": "30d"},
+        environment_config=None,
+        cluster_config={"backup_ttl": "4320h"},
+    )
+
+    assert (ttl, source) == ("4320h", "cluster")
+    warnings = warn_sink.getvalue()
+    assert "deployment" in warnings
+    assert "30d" in warnings
+
+
+def test_overflowing_scope_value_falls_through_loudly(
+    warn_sink: io.StringIO,
+) -> None:
+    """A stored duration Go cannot represent is skipped like any other invalid one."""
+    overflowing = f"{MAX_BACKUP_TTL_HOURS + 1}h"
+
+    ttl, source = resolve_backup_ttl(
+        deployment_config=None,
+        environment_config={"backup_ttl": overflowing},
+        cluster_config={"backup_ttl": "720h"},
+    )
+
+    assert (ttl, source) == ("720h", "cluster")
+    assert "environment" in warn_sink.getvalue()
+
+
+def test_unusable_value_at_every_scope_falls_back_to_the_built_in_default(
+    warn_sink: io.StringIO,
+) -> None:
+    """A corrupt row must never make backups impossible — never raise.
+
+    Every scope unusable degrades to the built-in default rather than an
+    exception: refusing to back up is strictly worse than backing up with the
+    default retention and a loud log.
+    """
+    assert resolve_backup_ttl(
+        deployment_config={"backup_ttl": 720},
+        environment_config={"backup_ttl": ""},
+        cluster_config={"backup_ttl": ["2160h"]},
+    ) == (DEFAULT_BACKUP_TTL, "default")
+
+    warnings = warn_sink.getvalue()
+    for scope in ("deployment", "environment", "cluster"):
+        assert scope in warnings
+
+
+def test_valid_scope_value_is_returned_verbatim() -> None:
+    """The validity re-check must not normalise the operator's value."""
+    ttl, source = resolve_backup_ttl(
+        deployment_config={"backup_ttl": "1h30m"},
+        environment_config=None,
+        cluster_config=None,
+    )
+    assert (ttl, source) == ("1h30m", "deployment")

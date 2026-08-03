@@ -1048,9 +1048,17 @@ function BackupRow({
   // It rides a native `title` for pointer users, but is also rendered as
   // assistive-only text so it reaches the accessibility tree without any
   // hover interaction (spec 016 critique P2).
-  const retentionHint = backup.ttl
-    ? `Retention TTL ${backup.ttl}`
-    : undefined;
+  const retentionHint = backup.ttl ? `Retention TTL ${backup.ttl}` : undefined;
+
+  // `new Date(...)` never throws — an unparseable value yields an Invalid Date
+  // whose `toLocaleDateString()` is the literal string "Invalid Date". Fall
+  // back to the same em-dash placeholder used for a missing expiry so a
+  // corrupt stored timestamp reads as "unknown" rather than as an error.
+  const expiresAtLabel = ((): string => {
+    if (!backup.expiresAt) return "—";
+    const parsed = new Date(backup.expiresAt);
+    return isNaN(parsed.getTime()) ? "—" : parsed.toLocaleDateString();
+  })();
 
   const bc = getStatusColor(backup.status);
 
@@ -1086,9 +1094,7 @@ function BackupRow({
           data-testid="backup-expires"
           title={retentionHint}
         >
-          {backup.expiresAt
-            ? new Date(backup.expiresAt).toLocaleDateString()
-            : "—"}
+          {expiresAtLabel}
           {retentionHint && <span className="sr-only"> ({retentionHint})</span>}
         </span>
         <div className="flex flex-1 items-center gap-2">
