@@ -100,6 +100,8 @@ export type Backup = {
   componentStatuses?: Maybe<Array<ComponentBackupStatus>>;
   createdOn: Scalars['DateTime']['output'];
   errorMessage?: Maybe<Scalars['String']['output']>;
+  /** Expiration reported by Velero for this backup. Null for backups taken before expiry was recorded and for failed backups, which never receive an expiration. */
+  expiresAt?: Maybe<Scalars['DateTime']['output']>;
   id: Scalars['UUID']['output'];
   instance: ApplicationInstance;
   instanceId: Scalars['UUID']['output'];
@@ -107,6 +109,8 @@ export type Backup = {
   sizeBytes?: Maybe<Scalars['Int']['output']>;
   startedAt?: Maybe<Scalars['DateTime']['output']>;
   status: Scalars['String']['output'];
+  /** Retention TTL applied to this backup when it was created (e.g. ``"2160h"``). Null for backups taken before retention was recorded. */
+  ttl?: Maybe<Scalars['String']['output']>;
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };
 
@@ -326,6 +330,8 @@ export type Deployment = {
 
 /** Typed deployment-configuration payload shared by the ``deploy`` (create) and ``updateDeployment`` mutations. Mirrors the source-of-truth ``DeploymentConfig`` Pydantic model field-for-field so both mutations accept an identical config shape. */
 export type DeploymentConfigInput = {
+  /** Retention applied to backups taken for this deployment, as a strictly positive Go duration in ``h``/``m``/``s`` units (e.g. ``"720h"``). Overrides the environment- and cluster-scope policy (deepest scope wins). Omitted means this deployment sets no policy and inherits the shallower scope, ultimately the built-in 720h default. */
+  backupTtl?: InputMaybe<Scalars['String']['input']>;
   /** Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block. */
   components?: InputMaybe<Array<ComponentConfigInput>>;
   /** Default database size hint applied to managed-database components in this deployment. */
@@ -1183,6 +1189,8 @@ export type TopologySpreadConstraintInput = {
 
 /** Full-replacement input for the ``updateDeployment`` mutation. Inherits every config field from ``DeploymentConfigInput`` (shared with the ``deploy`` create mutation) and adds the update-only ``name`` / ``parameters`` / ``serviceNameOverrides`` fields. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive). */
 export type UpdateDeploymentInput = {
+  /** Retention applied to backups taken for this deployment, as a strictly positive Go duration in ``h``/``m``/``s`` units (e.g. ``"720h"``). Overrides the environment- and cluster-scope policy (deepest scope wins). Omitted means this deployment sets no policy and inherits the shallower scope, ultimately the built-in 720h default. */
+  backupTtl?: InputMaybe<Scalars['String']['input']>;
   /** Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block. */
   components?: InputMaybe<Array<ComponentConfigInput>>;
   /** Default database size hint applied to managed-database components in this deployment. */
@@ -1223,6 +1231,7 @@ export type UpdateDeploymentInput = {
 
 /** Full-replacement input for environment configuration updates. Submit the complete desired configuration; any field omitted (``null``) is persisted as its unset state on the underlying EnvironmentConfig. */
 export type UpdateEnvironmentInput = {
+  backupTtl?: InputMaybe<Scalars['String']['input']>;
   dbSize?: InputMaybe<Scalars['String']['input']>;
   dedicatedIngress?: InputMaybe<DedicatedIngressInput>;
   envVars?: InputMaybe<Array<EnvVarInput>>;
@@ -1491,7 +1500,7 @@ export type ListBackupsQueryVariables = Exact<{
 }>;
 
 
-export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null }> };
+export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null, ttl?: string | null, expiresAt?: any | null }> };
 
 export type ListClustersQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2617,6 +2626,8 @@ export const ListBackupsDocument = `
     completedAt
     sizeBytes
     errorMessage
+    ttl
+    expiresAt
   }
 }
     `;

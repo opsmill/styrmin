@@ -214,6 +214,17 @@ class DeploymentConfigInput:
             "components in this deployment."
         ),
     )
+    backup_ttl: str | None = strawberry.field(
+        default=None,
+        description=(
+            "Retention applied to backups taken for this deployment, as a "
+            "strictly positive Go duration in ``h``/``m``/``s`` units "
+            '(e.g. ``"720h"``). Overrides the environment- and cluster-scope '
+            "policy (deepest scope wins). Omitted means this deployment sets "
+            "no policy and inherits the shallower scope, ultimately the "
+            "built-in 720h default."
+        ),
+    )
     runtime_class: str | None = strawberry.field(
         default=None,
         description=(

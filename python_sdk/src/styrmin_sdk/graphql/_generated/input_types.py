@@ -124,6 +124,8 @@ class DeploymentConfigInput(BaseModel):
     "Name of the IngressClass used by services in this deployment."
     db_size: Optional[str] = Field(alias="dbSize", default=None)
     "Default database size hint applied to managed-database components in this deployment."
+    backup_ttl: Optional[str] = Field(alias="backupTtl", default=None)
+    'Retention applied to backups taken for this deployment, as a strictly positive Go duration in ``h``/``m``/``s`` units (e.g. ``"720h"``). Overrides the environment- and cluster-scope policy (deepest scope wins). Omitted means this deployment sets no policy and inherits the shallower scope, ultimately the built-in 720h default.'
     runtime_class: Optional[str] = Field(alias="runtimeClass", default=None)
     "Kubernetes RuntimeClass name applied to pods in this deployment."
     node_selector: Optional[str] = Field(alias="nodeSelector", default=None)
@@ -355,6 +357,8 @@ class UpdateDeploymentInput(BaseModel):
     "Name of the IngressClass used by services in this deployment."
     db_size: Optional[str] = Field(alias="dbSize", default=None)
     "Default database size hint applied to managed-database components in this deployment."
+    backup_ttl: Optional[str] = Field(alias="backupTtl", default=None)
+    'Retention applied to backups taken for this deployment, as a strictly positive Go duration in ``h``/``m``/``s`` units (e.g. ``"720h"``). Overrides the environment- and cluster-scope policy (deepest scope wins). Omitted means this deployment sets no policy and inherits the shallower scope, ultimately the built-in 720h default.'
     runtime_class: Optional[str] = Field(alias="runtimeClass", default=None)
     "Kubernetes RuntimeClass name applied to pods in this deployment."
     node_selector: Optional[str] = Field(alias="nodeSelector", default=None)
@@ -396,6 +400,7 @@ class UpdateEnvironmentInput(BaseModel):
     )
     ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
     db_size: Optional[str] = Field(alias="dbSize", default=None)
+    backup_ttl: Optional[str] = Field(alias="backupTtl", default=None)
 
 
 class UpdateGroupInput(BaseModel):

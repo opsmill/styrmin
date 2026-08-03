@@ -25,6 +25,8 @@ class ListBackupsBackups(BaseModel):
     size_bytes: Optional[int] = Field(alias="sizeBytes")
     created_on: datetime = Field(alias="createdOn")
     updated_on: Optional[datetime] = Field(alias="updatedOn")
+    ttl: Optional[str]
+    expires_at: Optional[datetime] = Field(alias="expiresAt")
 
 
 ListBackups.model_rebuild()

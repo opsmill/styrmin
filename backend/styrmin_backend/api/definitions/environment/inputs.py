@@ -77,6 +77,7 @@ class UpdateEnvironmentInput:
     external_dns_endpoints_type: ExternalDnsEndpointsType | None = None
     ingress_class: str | None = None
     db_size: str | None = None
+    backup_ttl: str | None = None
 
 
 # ---------------------------------------------------------------------------

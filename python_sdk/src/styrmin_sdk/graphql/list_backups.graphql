@@ -10,5 +10,7 @@ query ListBackups($instanceId: UUID!, $status: BackupStatus) {
         sizeBytes
         createdOn
         updatedOn
+        ttl
+        expiresAt
     }
 }

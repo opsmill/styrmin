@@ -165,6 +165,8 @@ class Client(AsyncBaseClient):
                 sizeBytes
                 createdOn
                 updatedOn
+                ttl
+                expiresAt
               }
             }
             """)
@@ -690,6 +692,8 @@ class Client(AsyncBaseClient):
                 sizeBytes
                 createdOn
                 updatedOn
+                ttl
+                expiresAt
               }
             }
             """)
@@ -1451,6 +1455,8 @@ class Client(AsyncBaseClient):
                 sizeBytes
                 createdOn
                 updatedOn
+                ttl
+                expiresAt
               }
             }
             """)

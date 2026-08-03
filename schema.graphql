@@ -90,6 +90,16 @@ type Backup {
   instanceId: UUID!
   instance: ApplicationInstance!
   componentStatuses: [ComponentBackupStatus!]
+
+  """
+  Retention TTL applied to this backup when it was created (e.g. ``"2160h"``). Null for backups taken before retention was recorded.
+  """
+  ttl: String
+
+  """
+  Expiration reported by Velero for this backup. Null for backups taken before expiry was recorded and for failed backups, which never receive an expiration.
+  """
+  expiresAt: DateTime
 }
 
 type BackupSchedule {
@@ -395,6 +405,11 @@ input DeploymentConfigInput {
   Default database size hint applied to managed-database components in this deployment.
   """
   dbSize: String = null
+
+  """
+  Retention applied to backups taken for this deployment, as a strictly positive Go duration in ``h``/``m``/``s`` units (e.g. ``"720h"``). Overrides the environment- and cluster-scope policy (deepest scope wins). Omitted means this deployment sets no policy and inherits the shallower scope, ultimately the built-in 720h default.
+  """
+  backupTtl: String = null
 
   """Kubernetes RuntimeClass name applied to pods in this deployment."""
   runtimeClass: String = null
@@ -949,6 +964,11 @@ input UpdateDeploymentInput {
   """
   dbSize: String = null
 
+  """
+  Retention applied to backups taken for this deployment, as a strictly positive Go duration in ``h``/``m``/``s`` units (e.g. ``"720h"``). Overrides the environment- and cluster-scope policy (deepest scope wins). Omitted means this deployment sets no policy and inherits the shallower scope, ultimately the built-in 720h default.
+  """
+  backupTtl: String = null
+
   """Kubernetes RuntimeClass name applied to pods in this deployment."""
   runtimeClass: String = null
 
@@ -993,6 +1013,7 @@ input UpdateEnvironmentInput {
   externalDnsEndpointsType: ExternalDnsEndpointsType = null
   ingressClass: String = null
   dbSize: String = null
+  backupTtl: String = null
 }
 
 input UpdateGroupInput {
