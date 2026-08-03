@@ -31,7 +31,7 @@ New keys (all optional; absent on pre-existing backups):
 | `ttl_source` | string | Same moment as `ttl` | Same | Provenance: `"deployment"` \| `"environment"` \| `"cluster"` \| `"default"`. |
 | `expires_at` | string (ISO 8601) | On workflow completion, from Velero `status.expiration` | Same | Absent for Failed/PartiallyFailed backups (Velero reports no expiration) and for pre-existing backups. |
 
-Merge semantics: `metadata_updates` merges into the existing dict (preserves `timeout`); never replaces the column value.
+Merge semantics: `metadata_updates` merges into the existing dict (preserves `timeout`); never replaces the column value wholesale. **Binding implementation constraint (critique M2)**: the column is plain `JSON` (no `MutableDict`), so the merge MUST reassign the attribute — `backup.metadata_ = {**(backup.metadata_ or {}), **metadata_updates}` — never mutate in place (change would not be tracked and would silently not persist); `metadata_ is None` (pre-existing rows) must be handled.
 
 ### TTL resolution (pure function, not an entity)
 

@@ -103,6 +103,8 @@ frontend/src/
 ├── graphql/list_backups.graphql         # + ttl expiresAt
 ├── generated/graphql.ts                 # regenerated
 ├── pages/deployments/DeploymentDetailPage.tsx  # backups tab: + Expires column; BackupRow: expiry cell + TTL tooltip
+├── pages/environments/EnvironmentConfigurationTab.helpers.ts  # buildFullReplacementInput: carry backup_ttl
+│                                        # through (FR-005 — else UI env-var edits wipe the stored policy)
 └── lib/
     ├── deployment-input.ts              # deploymentConfigToInput: map backup_ttl (FR-005 round-trip)
     └── config-diff.ts                   # register backupTtl scalar (diff visibility)
@@ -120,6 +122,7 @@ backend/tests/
 
 cli/tests/test_backups.py                          # + Expires column cases (value and "—")
 frontend/src/__tests__/deployment-detail/BackupExpiry.test.tsx  # NEW: expiry cell renders date / "—", tooltip shows TTL
+frontend/src/__tests__/EnvironmentConfigurationTab.test.tsx     # + backup_ttl preservation through buildFullReplacementInput
 
 docs/docs/concepts-and-architecture/backups-and-restores.md  # + Retention section
 dev/knowledge/backend/backup-restore.md                      # metadata keys, TTL resolution, Velero integration
