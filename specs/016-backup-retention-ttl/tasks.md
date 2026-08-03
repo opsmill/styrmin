@@ -17,7 +17,7 @@
 
 **Purpose**: Baseline before touching shared surface — no project scaffolding needed (all four workspaces exist).
 
-- [ ] T001 Install workspaces and record a green baseline: `uv sync`; `cd frontend && pnpm install`; then run `uv run pytest backend/tests/unit/agent/test_velero_resources.py backend/tests/unit/agent/test_backup_builders.py backend/tests/unit/context/test_base_config_section.py -q` and confirm all pass (these suites change later; baseline proves any failure is ours)
+- [X] T001 Install workspaces and record a green baseline: `uv sync`; `cd frontend && pnpm install`; then run `uv run pytest backend/tests/unit/agent/test_velero_resources.py backend/tests/unit/agent/test_backup_builders.py backend/tests/unit/context/test_base_config_section.py -q` and confirm all pass (these suites change later; baseline proves any failure is ours)
 
 ---
 
