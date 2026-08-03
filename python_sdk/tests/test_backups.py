@@ -27,6 +27,8 @@ class TestBackupResource:
                     "startedAt": None,
                     "completedAt": None,
                     "sizeBytes": None,
+                    "ttl": None,
+                    "expiresAt": None,
                     "createdOn": "2026-01-01T00:00:00",
                     "updatedOn": None,
                 }
@@ -36,6 +38,10 @@ class TestBackupResource:
         backup = await client.backups.create_backup(instance_id="00000000-0000-0000-0000-000000000010")
         assert backup.name == "test-backup"
         assert backup.status == "pending"
+        # A just-created backup has no retention recorded yet: the workflow
+        # resolves the TTL and Velero reports the expiration only once it runs.
+        assert backup.ttl is None
+        assert backup.expires_at is None
 
     @staticmethod
     @pytest.mark.asyncio
@@ -70,6 +76,8 @@ class TestBackupResource:
                     "startedAt": "2026-01-01T00:00:00",
                     "completedAt": "2026-01-01T00:05:00",
                     "sizeBytes": 1024,
+                    "ttl": "2160h",
+                    "expiresAt": "2026-04-01T00:00:00",
                     "createdOn": "2026-01-01T00:00:00",
                     "updatedOn": "2026-01-01T00:05:00",
                 }
@@ -79,6 +87,9 @@ class TestBackupResource:
         backup = await client.backups.get_backup("00000000-0000-0000-0000-000000000001")
         assert backup.status == "completed"
         assert backup.size_bytes == 1024
+        assert backup.ttl == "2160h"
+        assert backup.expires_at is not None
+        assert backup.expires_at.isoformat() == "2026-04-01T00:00:00"
 
     @staticmethod
     @pytest.mark.asyncio
@@ -106,6 +117,22 @@ class TestBackupResource:
                         "startedAt": None,
                         "completedAt": None,
                         "sizeBytes": None,
+                        "ttl": "2160h",
+                        "expiresAt": "2026-04-01T00:00:00",
+                        "createdOn": "2026-01-01T00:00:00",
+                        "updatedOn": None,
+                    },
+                    {
+                        "id": "00000000-0000-0000-0000-000000000002",
+                        "name": "backup-2",
+                        "status": "failed",
+                        "instanceId": "00000000-0000-0000-0000-000000000010",
+                        "errorMessage": "velero reported Failed",
+                        "startedAt": None,
+                        "completedAt": None,
+                        "sizeBytes": None,
+                        "ttl": "2160h",
+                        "expiresAt": None,
                         "createdOn": "2026-01-01T00:00:00",
                         "updatedOn": None,
                     },
@@ -114,8 +141,13 @@ class TestBackupResource:
         }
 
         backups = await client.backups.list_backups(instance_id="00000000-0000-0000-0000-000000000010")
-        assert len(backups) == 1
+        assert len(backups) == 2
         assert backups[0].name == "backup-1"
+        # A list mixes both retention shapes — the CLI and web UI render the
+        # second as "—" while still reporting the TTL that was applied.
+        assert backups[0].expires_at is not None
+        assert backups[1].ttl == "2160h"
+        assert backups[1].expires_at is None
 
     @staticmethod
     @pytest.mark.asyncio
