@@ -25,10 +25,7 @@ import {
 } from "@/auth/AuthProvider";
 import { ThemeProvider } from "@/hooks/use-theme";
 import DeploymentDetailPage from "@/pages/deployments/DeploymentDetailPage";
-import type {
-  GetDeploymentQuery,
-  ListBackupsQuery,
-} from "@/generated/graphql";
+import type { GetDeploymentQuery, ListBackupsQuery } from "@/generated/graphql";
 
 type BackupItem = ListBackupsQuery["backups"][number];
 
