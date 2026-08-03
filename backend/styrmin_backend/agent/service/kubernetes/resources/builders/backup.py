@@ -14,11 +14,16 @@ def build_velero_backup(
     target_namespace: str,
     instance_id: str,
     driver_name: str,
+    ttl: str,
     hooks: list[VeleroBackupHook] | None = None,
-    ttl: str = "720h",
     storage_location: str | None = None,
 ) -> VeleroBackup:
-    """Build a VeleroBackup resource for an Styrmin instance."""
+    """Build a VeleroBackup resource for an Styrmin instance.
+
+    ``ttl`` is required: retention is resolved by the caller from the
+    deployment/environment/cluster config chain (``services/backup/ttl.py``),
+    and this builder stays a pure renderer with no policy of its own.
+    """
     return VeleroBackup(
         name=name,
         namespace=velero_namespace,

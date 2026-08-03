@@ -39,6 +39,10 @@ from styrmin_backend.services.backup.service import (
     update_backup_status,
     update_restore_status,
 )
+from styrmin_backend.services.backup.ttl import (
+    DEFAULT_BACKUP_TTL,
+    resolve_backup_ttl,
+)
 from styrmin_backend.services.unit_of_work import get_unit_of_work
 
 
@@ -140,6 +144,12 @@ async def execute_velero_backup_flow(
                     "backupItemOperationsCompleted": status.get(
                         "backupItemOperationsCompleted"
                     ),
+                    # Velero's own expiration timestamp (creation + spec.ttl),
+                    # recorded on the backup record so operators can read
+                    # "when does this disappear?" without cluster access.
+                    # Absent on Failed/PartiallyFailed backups — Velero
+                    # reports no expiration for them.
+                    "expiration": status.get("expiration"),
                 }
             },
             overwrite=True,
@@ -341,14 +351,25 @@ async def execute_backup_workflow(
         target_namespace = f"styrmin-{deployment_uuid}"
         velero_namespace = "styrmin"
 
-        # Resolve BSL from deployment -> environment -> backup_storage_location
+        # Resolve BSL from deployment -> environment -> backup_storage_location,
+        # and read the three scopes' config for retention resolution below.
         storage_location: str | None = None
+        deployment_config: dict[str, Any] | None = None
+        environment_config: dict[str, Any] | None = None
+        cluster_config: dict[str, Any] | None = None
+        config_read_failed = False
         try:
             uow = await get_unit_of_work()
             async with uow:
                 deployment = await uow.deployments.find(deployment_uuid)
                 if deployment:
+                    deployment_config = deployment.config
                     env = await uow.environments.get(deployment.environment_id)
+                    if env:
+                        environment_config = env.config
+                        cluster = await uow.clusters.get(env.cluster_id)
+                        if cluster:
+                            cluster_config = cluster.config
                     if env and env.backup_storage_location:
                         storage_location = (
                             f"styrmin-bsl-{env.backup_storage_location.name}"
@@ -357,11 +378,43 @@ async def execute_backup_workflow(
                             f"Using BSL '{storage_location}' for backup {backup_uuid}"
                         )
         except Exception as exc:
+            config_read_failed = True
             logger.warning(
                 f"Failed to resolve BSL for backup {backup_uuid}, "
                 "using cluster default",
                 exc_info=exc,
             )
+
+        # Resolve retention deliberately OUTSIDE the block above: that block
+        # swallows every exception to keep BSL resolution best-effort, and
+        # retention must never be quietly reduced to the built-in default by a
+        # failure it hid. On a failed config read the scopes are all None, so
+        # resolution yields the built-in default — and says so at WARNING.
+        ttl, ttl_source = resolve_backup_ttl(
+            deployment_config=deployment_config,
+            environment_config=environment_config,
+            cluster_config=cluster_config,
+        )
+        if config_read_failed:
+            logger.warning(
+                f"Backup {backup_uuid}: config read failed, so any configured "
+                f"backup_ttl policy was invisible to this backup — applying "
+                f"the built-in {DEFAULT_BACKUP_TTL} default instead"
+            )
+        logger.info(
+            f"resolved backup TTL {ttl} from {ttl_source} scope "
+            f"for backup {backup_uuid}"
+        )
+
+        # Record the applied retention + its provenance before the Velero
+        # object is built, so the audit trail survives a later failure.
+        uow = await get_unit_of_work()
+        await update_backup_status(
+            backup_id=backup_uuid,
+            status=BackupStatus.IN_PROGRESS,
+            uow=uow,
+            metadata_updates={"ttl": ttl, "ttl_source": ttl_source},
+        )
 
         # Build hooks from component configs
         hooks: list[VeleroBackupHook] = []
@@ -382,6 +435,7 @@ async def execute_backup_workflow(
             target_namespace=target_namespace,
             instance_id=str(backup.instance_id),
             driver_name="styrmin",
+            ttl=ttl,
             hooks=hooks,
             storage_location=storage_location,
         )
@@ -431,6 +485,14 @@ async def execute_backup_workflow(
         status = result.get("status", {})
         velero_phase = status.get("phase", "")
 
+        # Velero reports an expiration only for backups it actually stored, so
+        # a Failed one carries none and the record simply has no
+        # ``expires_at`` (GraphQL null → "—" in the UI and CLI). Recorded on
+        # both branches: a PartiallyFailed backup is stored and does expire,
+        # and this workflow folds it into the FAILED branch.
+        expiration = status.get("expiration")
+        metadata_updates = {"expires_at": expiration} if expiration else None
+
         uow = await get_unit_of_work()
         if velero_phase == "Completed":
             size_bytes = status.get("backupItemOperationsCompleted")
@@ -439,6 +501,7 @@ async def execute_backup_workflow(
                 status=BackupStatus.COMPLETED,
                 uow=uow,
                 size_bytes=size_bytes,
+                metadata_updates=metadata_updates,
             )
             logger.info(f"Backup {backup_uuid} completed successfully")
         else:
@@ -450,6 +513,7 @@ async def execute_backup_workflow(
                 status=BackupStatus.FAILED,
                 uow=uow,
                 error_message=error_msg,
+                metadata_updates=metadata_updates,
             )
             logger.error(f"Backup {backup_uuid} failed: {error_msg}")
 

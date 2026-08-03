@@ -153,8 +153,21 @@ async def update_backup_status(
     error_message: str | None = None,
     size_bytes: int | None = None,
     component_statuses: dict | None = None,
+    metadata_updates: dict | None = None,
 ) -> Backup:
-    """Update backup status after Velero operation completes."""
+    """Update backup status after Velero operation completes.
+
+    Args:
+        backup_id: The backup record to update.
+        status: The status to move the backup to.
+        uow: Unit of work supplying the session.
+        error_message: Failure detail, when the backup failed.
+        size_bytes: Reported backup size, when known.
+        component_statuses: Replacement per-component status map.
+        metadata_updates: Keys to merge into ``Backup.metadata_`` (e.g. the
+            resolved retention ``ttl`` / ``ttl_source``, or ``expires_at``).
+            Merged, so pre-existing keys such as ``timeout`` survive.
+    """
     async with uow:
         backup = await uow.backups.get(backup_id)
         if backup is None:
@@ -174,6 +187,13 @@ async def update_backup_status(
             backup.size_bytes = size_bytes
         if component_statuses is not None:
             backup.component_statuses = component_statuses
+        if metadata_updates:
+            # ``metadata`` is a plain JSON column with no ``MutableDict``
+            # wrapper, so SQLAlchemy does not track in-place mutation of the
+            # dict. Reassigning the attribute is what marks it dirty — an
+            # ``update()``/``[k] = v`` here would be silently dropped on
+            # commit. ``metadata_`` is None on pre-existing rows.
+            backup.metadata_ = {**(backup.metadata_ or {}), **metadata_updates}
 
         await uow.commit()
         await uow.session.refresh(backup)  # Load server-generated fields

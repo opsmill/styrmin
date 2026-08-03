@@ -355,6 +355,7 @@ describe("buildFullReplacementInput (011/US2)", () => {
       externalDnsEndpointsType: "NODE_EXTERNAL_IP",
       ingressClass: "nginx",
       dbSize: "10Gi",
+      backupTtl: null,
       dedicatedIngress: null,
       scheduling: null,
     });
@@ -381,6 +382,7 @@ describe("buildFullReplacementInput (011/US2)", () => {
       externalDnsEndpointsType: null,
       ingressClass: null,
       dbSize: null,
+      backupTtl: null,
       dedicatedIngress: null,
       scheduling: null,
     });
@@ -398,5 +400,27 @@ describe("buildFullReplacementInput (011/US2)", () => {
     expect(() => buildFullReplacementInput(config, [])).toThrow(
       /externalUrlScheme.*wss/,
     );
+  });
+
+  // 016/US1 (critique M1): ``updateEnvironment`` is full-replacement, so a
+  // builder that dropped ``backup_ttl`` would silently clear the backup
+  // retention policy every time an operator saved an env var — silent loss
+  // on the feature's primary scope.
+  it("preserves a persisted backup_ttl across an env-var-only save (016)", () => {
+    const config: Record<string, unknown> = {
+      env_vars: { LOG_LEVEL: "info" },
+      backup_ttl: "2160h",
+    };
+    const input = buildFullReplacementInput(config, [
+      { name: "LOG_LEVEL", value: "debug" },
+    ]);
+    expect(input.backupTtl).toBe("2160h");
+    expect(input.envVars).toEqual([{ name: "LOG_LEVEL", value: "debug" }]);
+  });
+
+  it("emits null backupTtl for a non-string persisted value (016)", () => {
+    expect(
+      buildFullReplacementInput({ backup_ttl: 720 }, []).backupTtl,
+    ).toBeNull();
   });
 });
