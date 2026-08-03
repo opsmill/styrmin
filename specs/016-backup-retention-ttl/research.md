@@ -55,6 +55,8 @@ All Technical Context unknowns resolved. Research was performed against the live
 
 Plumbing: extend the `Variable.set` payload in `execute_velero_backup_flow` (`workflows/templates/backup.py:132-146`) to include `expiration` (available from `poll_backup_status`, `velero/client.py:243`), and extend `update_backup_status` (`services/backup/service.py:149`) with an optional `metadata_updates: dict | None` parameter that merges into `metadata_` (never replaces — preserves `timeout`).
 
+**Merge semantics (critique M2 — binding)**: `Backup.metadata_` is a plain `Column("metadata", JSON)` with no `MutableDict` wrapper, so in-place dict mutation is **not change-tracked** by SQLAlchemy. The merge MUST reassign the attribute — `backup.metadata_ = {**(backup.metadata_ or {}), **metadata_updates}` — and handle `metadata_ is None` (pre-existing rows). The `Backup.ttl`/`expiresAt` propagation test MUST read back through a fresh session/UnitOfWork (DB round-trip), not the in-memory object, so a change-tracking regression cannot pass.
+
 **Rationale**: FR-006/FR-007 with zero schema migration, exactly the PRD's "existing metadata" decision; the `timeout` key already proves the read/write pattern. Failed/PartiallyFailed backups simply never get `expires_at` → GraphQL null → "—" in UI/CLI (spec edge case, overlaps issue #263).
 
 **Alternatives considered**: dedicated columns (`ttl`, `expires_at`) — rejected: Alembic revision + crosses the DB governance gate for two audit fields; the analysis for #305 explicitly recommends against it.
@@ -76,6 +78,7 @@ Plumbing: extend the `Variable.set` payload in `execute_velero_backup_flow` (`wo
 - `frontend/src/graphql/list_backups.graphql`: select `ttl expiresAt`.
 - Backups tab in `DeploymentDetailPage.tsx` (lines 580-652): add an "Expires" column to the header row and an expiry cell in `BackupRow` (line 993) rendering the localized date, with the applied TTL shown in a tooltip/title on the cell; null → "—". Date formatting follows the file's existing inline `new Date(x).toLocaleDateString()` convention.
 - FR-005 round-trip: map `backup_ttl` ↔ `backupTtl` in `deploymentConfigToInput` (`frontend/src/lib/deployment-input.ts:355`) so UI-driven full-replacement deployment updates preserve a stored value, and register `backupTtl` in the `config-diff.ts` scalar registry so config diffs display it. Without the mapping, any UI config edit would silently wipe `backup_ttl` — the exact failure FR-005 exists to prevent, extended to the UI client.
+- FR-005 round-trip, environment side (critique M1 — binding): `buildFullReplacementInput` (`frontend/src/pages/environments/EnvironmentConfigurationTab.helpers.ts:98`) hand-assembles `UpdateEnvironmentInput` from the persisted config; it MUST carry `backup_ttl` through as a plain string scalar (same pattern as `dbSize`), with a preservation assertion in its test coverage. Otherwise any env-var save from the UI clears the stored environment-scope policy — silent loss on the feature's primary scope.
 - New test `frontend/src/__tests__/deployment-detail/BackupExpiry.test.tsx` (no backup-list component test exists today; `DeploymentDetailHeader.test.tsx` provides the mocking pattern for `useListBackupsQuery`).
 
 **Rationale**: FR-008 + SC-005; the PRD's "no new routes, extend the existing list". The `deployment-input.ts`/`config-diff.ts` additions are a small necessary extension beyond the PRD's literal frontend list, forced by FR-005's own logic (flagged for the critique phase).
@@ -105,7 +108,7 @@ Plumbing: extend the `Variable.set` payload in `execute_velero_backup_flow` (`wo
 ## R10. Documentation set
 
 **Decision**: Same-change updates (Constitution §VII):
-- `docs/docs/concepts-and-architecture/backups-and-restores.md`: new **Retention** section — the `backup_ttl` knob, three scopes + deepest-wins, `720h` default, applies-to-future-backups-only limitation, expired-backup restore warning (cross-ref #304 behaviour), cluster-scope-is-create-only note.
+- `docs/docs/concepts-and-architecture/backups-and-restores.md`: new **Retention** section — the `backup_ttl` knob, three scopes + deepest-wins, `720h` default, applies-to-future-backups-only limitation, expired-backup restore warning (cross-ref #304 behaviour), cluster-scope-is-create-only note, and a concrete "how to set it" `updateEnvironment` GraphQL example (critique P1: there is no first-party UI/CLI setter, so the docs are the setter's UX).
 - `dev/knowledge/backend/backup-restore.md`: metadata keys (`ttl`, `ttl_source`, `expires_at`), the resolution helper, the builder's required-TTL signature, `status.expiration` plumbing.
 - `CONTEXT.md`: **Backup retention TTL** glossary entry placed after **Backup storage location** (line 53), three-line house convention, explicitly distinguished from `BackupSchedule.retention_count` (count-based, currently unenforced).
 

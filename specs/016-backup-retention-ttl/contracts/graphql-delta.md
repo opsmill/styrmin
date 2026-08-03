@@ -38,6 +38,7 @@ input DeploymentConfigInput {
 
 Semantics:
 - `UpdateEnvironmentInput` is full-replacement (spec 009-environment-update): an update that omits `backupTtl` clears a stored value, which is why the field MUST exist on the typed input (FR-005) — clients that round-trip the current config preserve it.
+- First-party client obligation (FR-005): the web UI's full-replacement builders — `EnvironmentConfigurationTab.helpers.ts` `buildFullReplacementInput` (environment) and `lib/deployment-input.ts` `deploymentConfigToInput` (deployment) — MUST carry `backup_ttl` through from persisted config, or UI edits silently clear the policy.
 - Cluster **create** and environment **create** accept the key through the existing `config: JSON` argument (`{"backup_ttl": "720h"}`) — no schema change on those paths (ADR-029).
 - Converters: the generic `_convert_value` handles the scalar; snake_case `backup_ttl` ↔ camelCase `backupTtl` via Strawberry's auto-casing.
 
