@@ -291,8 +291,8 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     # 014 / US6: doc-only container-override declarations parsed from
     # ``spec.container_overrides``. Each entry shape matches
     # :class:`DriverContainerOverrideDoc` (component, description, container,
-    # command, args). Additive JSON column (no Alembic — metadata.create_all);
-    # existing rows deserialize the absent key to ``None``.
+    # command, args). Nullable JSON column added by revision ``a8b9c0d1e2f3``;
+    # rows pre-dating it carry NULL and deserialize to ``None``.
     container_overrides: list | None = Field(default=None, sa_column=Column(JSON))
     component_configs: list[ComponentConfig] = Relationship(
         back_populates="application_driver_version",
