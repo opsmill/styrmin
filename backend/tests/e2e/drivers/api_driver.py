@@ -435,6 +435,112 @@ class ApiScenarioDriver:
         except StyrminError as exc:
             raise _normalise(exc) from exc
 
+    async def set_environment_backup_ttl(
+        self,
+        *,
+        environment_id: str,
+        ttl: str | None,
+    ) -> None:
+        """API-side parallel of the retention form's save flow (016 / FR-001).
+
+        ``updateEnvironment`` is full-replacement (009-environment-update):
+        every field omitted from the input is persisted as its unset state.
+        Scenario environments are session-shared, so read the persisted config
+        back, round-trip it through ``EnvironmentConfig`` (which coerces the
+        ``Literal``-typed scalars), and resubmit it with only ``backup_ttl``
+        replaced — the api-side equivalent of the frontend's
+        ``buildFullReplacementInput`` called with a ``backupTtl`` override.
+
+        ``ttl=None`` clears the policy, which is how a scenario reverts a
+        shared environment to its pre-test state.
+        """
+        # Imported lazily for the same reason ``update_environment_via_form``
+        # does: keep the backend graph and the regenerated SDK enums off the
+        # module import path (many fixtures import this driver).
+        from styrmin_backend.context.models.config import EnvironmentConfig
+        from styrmin_sdk.graphql._generated.enums import (
+            ExternalDnsEndpointsType,
+            ExternalUrlScheme,
+        )
+        from styrmin_sdk.graphql._generated.input_types import (
+            EnvVarInput,
+            UpdateEnvironmentInput,
+        )
+
+        # ``EnvironmentConfig`` holds the backend-side Literal values ("http",
+        # "NodeExternalIP") whereas the GraphQL input types use the codegen
+        # enum names — the same mapping ``update_environment_via_form`` and
+        # the frontend's ``transformEnumValue`` perform.
+        url_scheme_map: dict[str, ExternalUrlScheme] = {
+            "http": ExternalUrlScheme.HTTP,
+            "https": ExternalUrlScheme.HTTPS,
+        }
+        dns_endpoints_type_map: dict[str, ExternalDnsEndpointsType] = {
+            "NodeExternalIP": ExternalDnsEndpointsType.NODE_EXTERNAL_IP,
+            "ClusterIP": ExternalDnsEndpointsType.CLUSTER_IP,
+        }
+
+        try:
+            existing = await self._client.environments.get(
+                environment_id=environment_id
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+
+        raw_config = existing.config or {}
+        if not isinstance(raw_config, dict):
+            raise ScenarioActionError(
+                "set_environment_backup_ttl: existing Environment.config is "
+                f"not a dict (got {type(raw_config).__name__})"
+            )
+        validated = EnvironmentConfig.model_validate(raw_config)
+
+        # ``dedicated_ingress`` / ``scheduling`` would need a nested-input
+        # round-trip that no scenario sets on these environments — and the UI
+        # form refuses to submit at all when either is present. Fail loudly
+        # rather than silently clearing them if that ever changes, so the two
+        # entrypoints stay honest about the same limitation.
+        assert validated.dedicated_ingress is None, (
+            "scenario environment gained a dedicated_ingress block; this "
+            "driver method would silently clear it — extend it with the "
+            "nested input"
+        )
+        assert validated.scheduling is None, (
+            "scenario environment gained a scheduling block; this driver "
+            "method would silently clear it — extend it with the nested input"
+        )
+
+        input_obj = UpdateEnvironmentInput(
+            envVars=[
+                EnvVarInput(name=name, value=value)
+                for name, value in (validated.env_vars or {}).items()
+            ]
+            or None,
+            ipWhitelist=validated.ip_whitelist,
+            fqdnSuffix=validated.fqdn_suffix,
+            externalUrlScheme=(
+                url_scheme_map[validated.external_url_scheme]
+                if validated.external_url_scheme is not None
+                else None
+            ),
+            externalUrlPort=validated.external_url_port,
+            externalDnsEndpointsType=(
+                dns_endpoints_type_map[validated.external_dns_endpoints_type]
+                if validated.external_dns_endpoints_type is not None
+                else None
+            ),
+            ingressClass=validated.ingress_class,
+            dbSize=validated.db_size,
+            backupTtl=ttl,
+        )
+
+        try:
+            await self._client.environments.update(
+                environment_id=environment_id, input=input_obj
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+
     async def get_deployment_timeline(
         self, *, deployment_id: str
     ) -> list[TimelineEntry]:

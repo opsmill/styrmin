@@ -170,6 +170,48 @@ class ScenarioDriver(Protocol):
         parity check (per critique E1+E2 of 011-env-config-input-hardening).
         """
 
+    async def set_environment_backup_ttl(
+        self,
+        *,
+        environment_id: str,
+        ttl: str | None,
+    ) -> None:
+        """Set — or clear — an environment's ``backup_ttl`` retention policy.
+
+        ``ttl=None`` means "no policy at this scope": resolution falls
+        through to the cluster scope and then to the built-in default
+        (016-backup-retention-ttl / FR-001, deepest scope wins). Scenarios
+        that borrow a session-shared environment use ``None`` to restore the
+        pre-test state, so implementations MUST treat it as an explicit clear
+        rather than "leave unchanged".
+
+        UI driver: drives the ``BackupRetentionForm`` on the Configuration
+        tab — navigates to ``/environments/{environment_id}``, opens the
+        Configuration tab, types the duration (blank input for ``None``),
+        clicks Save, and confirms the redeploy dialog.
+
+        API driver: reads the persisted ``Environment.config``, round-trips
+        it through ``EnvironmentConfig.model_validate(config)`` so Pydantic
+        coerces the ``Literal``-typed scalars, and resubmits a typed
+        ``UpdateEnvironmentInput`` carrying every persisted field unchanged
+        with only ``backup_ttl`` replaced — ``updateEnvironment`` is
+        full-replacement per FR-003 / FR-020, so anything omitted would be
+        persisted as its unset state.
+
+        Both implementations result in the same persisted state and the same
+        per-deployment redeploy fanout per 009. The parametrisation across
+        ``[api-chromium]``/``[ui-chromium]`` IS the dual-entrypoint parity
+        check for the retention setter — there is no separate assertion
+        comparing the two.
+
+        Ordering note: the UI driver leaves its page on the environment
+        detail page, so a scenario that follows this with a deployment-scoped
+        action must re-establish deployment context first
+        (``attach_to_deployment`` + ``wait_for_deployment_running``). Both
+        calls are no-ops/cheap for the API driver, so the scenario needs no
+        ``driver_mode`` branch.
+        """
+
     # --- Backup / Restore -------------------------------------------------
 
     async def create_backup(self, *, instance_id: str) -> BackupRef: ...
