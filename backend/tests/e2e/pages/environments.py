@@ -76,6 +76,8 @@ class EnvironmentsListPage:
                 await dialog.locator("#env-ingress-class").fill(config["ingress_class"])
             if config.get("db_size"):
                 await dialog.locator("#env-db-size").fill(config["db_size"])
+            if config.get("backup_ttl"):
+                await dialog.locator("#env-backup-ttl").fill(config["backup_ttl"])
             if config.get("fqdn_suffix"):
                 await dialog.locator("#env-fqdn-suffix").fill(config["fqdn_suffix"])
             ip_list = config.get("ip_whitelist")
@@ -357,6 +359,7 @@ def _needs_advanced(config: dict[str, Any]) -> bool:
     keys = (
         "ingress_class",
         "db_size",
+        "backup_ttl",
         "fqdn_suffix",
         "ip_whitelist",
         "dedicated_ingress",
