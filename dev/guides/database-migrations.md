@@ -99,6 +99,35 @@ command.downgrade(_get_alembic_config(), "<one_parent_revision>")
 '
 ```
 
+## Writing portable migrations
+
+Every revision must apply on **both** backends: PostgreSQL (`asyncpg`) is
+production, SQLite is the default dev backend. SQLite is the more permissive of
+the two, so a revision that only ever ran there can still be broken.
+
+- **Order `create_table` calls by dependency.** PostgreSQL rejects a
+  `REFERENCES` clause naming a table that does not exist yet; SQLite accepts it.
+  Autogenerate emits the correct order only when the foreign keys form a DAG —
+  when they contain a cycle SQLAlchemy's topological sort gives up and falls
+  back to alphabetical order, which is almost always wrong.
+- **Break foreign-key cycles with a deferred `create_foreign_key`.** Create both
+  tables first, omitting one side's foreign key, then add it inside
+  `op.batch_alter_table` (PostgreSQL gets `ALTER TABLE ... ADD CONSTRAINT`,
+  SQLite rebuilds the table). Always **name** the constraint so `downgrade` can
+  drop it without relying on a naming convention — and it must drop it, because
+  neither table can be dropped while the cycle is closed.
+  `4586e6747b1d_initial_schema.py` is the worked example
+  (`applicationinstance` ↔ `deployment`).
+  `sa.ForeignKeyConstraint(..., use_alter=True)` does *not* help here:
+  `use_alter` is honoured by `metadata.create_all()`, not by `op.create_table`.
+- **Drop enum types explicitly in `downgrade`.** `op.create_table` emits
+  `CREATE TYPE` for every PostgreSQL enum column, but `op.drop_table` builds a
+  bare `Table` with no columns and therefore never emits the matching
+  `DROP TYPE`. A downgrade that forgets this leaves the type behind and the next
+  upgrade fails with `DuplicateObjectError: type "..." already exists`. Call
+  `sa.Enum(..., name="...").drop(op.get_bind(), checkfirst=True)`, which is a
+  no-op on SQLite.
+
 ## Transitioning an Existing Database
 
 If you have a database created with the old `create_all()` method:
