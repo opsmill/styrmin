@@ -20,7 +20,14 @@ from tests.e2e.drivers.ui_driver import UiScenarioDriver
 
 
 def _protocol_methods() -> list[str]:
-    """Return the names of async methods declared on the ScenarioDriver protocol."""
+    """Return the names of the methods declared on the ScenarioDriver protocol.
+
+    The protocol's surface is *not* async-only — ``attach_to_deployment`` is a
+    plain ``def`` — so this deliberately covers both ``async def`` and ``def``
+    members. Anything comparing driver surfaces against this list must do the
+    same, or every sync member reads as "missing" (see
+    ``_public_methods`` / ``_is_async``).
+    """
     # Protocols store their members on ``__protocol_attrs__``; fall back to
     # walking __dict__ for Python versions where the attribute isn't exposed.
     raw = getattr(ScenarioDriver, "__protocol_attrs__", None)
@@ -31,6 +38,25 @@ def _protocol_methods() -> list[str]:
             if not name.startswith("_") and inspect.isfunction(value)
         ]
     return sorted(raw)
+
+
+def _public_methods(cls: type) -> set[str]:
+    """Public methods defined directly on ``cls`` — sync and async alike.
+
+    ``inspect.isfunction`` is true for ``async def`` as well as ``def``, so a
+    driver's whole public surface is captured regardless of how the protocol
+    declares each member.
+    """
+    return {
+        name
+        for name, value in cls.__dict__.items()
+        if not name.startswith("_") and inspect.isfunction(value)
+    }
+
+
+def _is_async(cls: type, name: str) -> bool:
+    """Whether ``cls.name`` is a coroutine function."""
+    return inspect.iscoroutinefunction(getattr(cls, name))
 
 
 @pytest.mark.parametrize(
@@ -91,17 +117,15 @@ def test_protocol_methods_match_both_drivers() -> None:
     A divergence here means one driver gained a public method the other
     doesn't — scenarios using that method would silently work on one
     entrypoint and fail on the other.
+
+    Async-ness is part of that surface: awaiting a sync implementation (or
+    forgetting to await an async one) breaks scenarios just as loudly as a
+    missing method. The expectation is read off each protocol member's own
+    declaration rather than an exempt-by-name list, so a sync member added to
+    the protocol tomorrow is covered without touching this test.
     """
-
-    def _public_async_methods(cls: type) -> set[str]:
-        return {
-            name
-            for name, value in cls.__dict__.items()
-            if not name.startswith("_") and inspect.iscoroutinefunction(value)
-        }
-
-    api_methods = _public_async_methods(ApiScenarioDriver)
-    ui_methods = _public_async_methods(UiScenarioDriver)
+    api_methods = _public_methods(ApiScenarioDriver)
+    ui_methods = _public_methods(UiScenarioDriver)
     protocol = set(_protocol_methods())
 
     assert api_methods >= protocol, (
@@ -111,10 +135,24 @@ def test_protocol_methods_match_both_drivers() -> None:
         f"UiScenarioDriver is missing: {protocol - ui_methods}"
     )
 
-    extra_api = api_methods - ui_methods - {"_normalise"}
+    extra_api = api_methods - ui_methods
     extra_ui = ui_methods - api_methods
     assert not extra_api and not extra_ui, (
         f"Driver surface divergence — api-only: {extra_api}, ui-only: {extra_ui}"
+    )
+
+    mismatched: list[str] = []
+    for name in sorted(protocol):
+        expected_async = _is_async(ScenarioDriver, name)
+        for driver_cls in (ApiScenarioDriver, UiScenarioDriver):
+            if _is_async(driver_cls, name) is not expected_async:
+                kind = "async def" if expected_async else "def"
+                mismatched.append(
+                    f"{driver_cls.__name__}.{name} should be declared "
+                    f"`{kind}` to match ScenarioDriver.{name}"
+                )
+    assert not mismatched, "Sync/async divergence from the protocol: " + "; ".join(
+        mismatched
     )
 
 
