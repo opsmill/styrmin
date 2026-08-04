@@ -71,3 +71,27 @@ Actions UI as the cell that takes longer than its siblings):
    marker list, conftest `_VALID_SHARDS`, CI matrix `shard:` list, and
    the test's `@pytest.mark.shard_*` marker), or split the shard in half.
 3. Re-run; confirm the new slowest cell is faster than the old one.
+
+Before reaching for any of that, check the two things that dominate a
+shard's wall-clock — reshuffling tests between shards only moves time
+around, it does not remove it:
+
+- **Is `STYRMIN_OPERATOR_RECONCILE_INTERVAL` reaching the agent pod?**
+  It is set to `5` in `backend/tests/e2e/fixtures/styrmin-values.yaml`
+  via the agent subchart's `agent.extraEnv`. At its 60s production
+  default, every create / upgrade / delete in the shard sleeps a full
+  ~60s after Kubernetes has already finished, because the kopf timer is
+  the only path that advances a deployment to `Running` or `Deleted`.
+  This one value is worth ~50% of the shard.
+- **How many deploy / upgrade / delete cycles does the shard perform?**
+  Each deploy is ~40s and each full delete-to-tombstone ~25-60s, and
+  that is irreducible. Cutting cycles (per the read-only tier in
+  [`e2e-deployment-sharing.md`](e2e-deployment-sharing.md)) is the only
+  other real lever. Environment fixtures are *not* a lever — the
+  per-environment dedicated-ingress controller is dispatched
+  asynchronously and overlaps the application install.
+
+See [`dev/knowledge/backend/e2e-testing.md`](../knowledge/backend/e2e-testing.md)
+(§ "Where the wall-clock actually goes") for the measurements behind
+both points, including two environment-sharing optimisations that were
+measured and rejected.
