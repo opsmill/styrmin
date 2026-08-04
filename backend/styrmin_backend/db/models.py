@@ -8,7 +8,7 @@ from enum import Enum, IntEnum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, Index, LargeBinary, UniqueConstraint, text
+from sqlalchemy import ForeignKey, Index, LargeBinary, UniqueConstraint, text, true
 from sqlmodel import JSON, Column, DateTime, Field, Relationship, SQLModel, func
 from sqlmodel import Enum as SQLModelEnum
 
@@ -68,10 +68,21 @@ class User(StyrminModel, table=True):
     username: str = Field(unique=True)
     password_hash: str
     display_name: str
-    active: bool = Field(default=True, nullable=False)
+    # ``server_default`` mirrors revision ``a1b2c3d4e5f7`` so a fresh
+    # ``create_all()`` database and a migrated one agree: an INSERT that omits
+    # the column defaults to active in both.
+    active: bool = Field(
+        default=True,
+        nullable=False,
+        sa_column_kwargs={"server_default": true()},
+    )
+    # ``server_default`` mirrors revision ``c0d1e2f3a4b5``: least privilege at
+    # the database level, so a row inserted outside the ORM is READ_ONLY.
     role: Role = Field(
         default=Role.READ_ONLY,
-        sa_column=Column(SQLModelEnum(Role), nullable=False),
+        sa_column=Column(
+            SQLModelEnum(Role), nullable=False, server_default=Role.READ_ONLY.name
+        ),
     )
 
     sessions: list["Session"] = Relationship(
@@ -93,9 +104,12 @@ class Group(StyrminModel, table=True):
     """
 
     name: str = Field(unique=True)
+    # ``server_default`` mirrors revision ``c0d1e2f3a4b5`` — see ``User.role``.
     role: Role = Field(
         default=Role.READ_ONLY,
-        sa_column=Column(SQLModelEnum(Role), nullable=False),
+        sa_column=Column(
+            SQLModelEnum(Role), nullable=False, server_default=Role.READ_ONLY.name
+        ),
     )
 
     users: list["User"] = Relationship(
@@ -601,7 +615,10 @@ class PodStatus(StyrminModel, table=True):
 
     pod_name: str
     namespace: str
-    phase: PodPhase = Field(sa_column=Column(SQLModelEnum(PodPhase)))
+    # Non-optional in Python, so the column must be NOT NULL. The bare
+    # ``Column(SQLModelEnum(PodPhase))`` used to default to nullable, which
+    # contradicted the annotation and diverged from revision ``a1b2c3d4e5f6``.
+    phase: PodPhase = Field(sa_column=Column(SQLModelEnum(PodPhase), nullable=False))
     ready: bool = Field(default=False)
     restart_count: int = Field(default=0)
     container_statuses: list[dict] | None = Field(default=None, sa_column=Column(JSON))
