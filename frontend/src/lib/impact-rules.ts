@@ -115,6 +115,12 @@ export const impactRules: ImpactRule[] = [
     severity: "warning",
   },
   {
+    matcher: "backupTtl",
+    consequence:
+      "Retention change applies to future backups only; backups already created keep the expiration fixed at their creation",
+    severity: "informational",
+  },
+  {
     matcher: "standardStorage.storageClass",
     consequence:
       "Standard storage class change applies to newly-provisioned volumes only; existing volumes are unaffected",
