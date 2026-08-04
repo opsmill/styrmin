@@ -28,10 +28,11 @@ interface ProviderProps {
  *
  * Why: previously SectionNav, DrawerFooter, ConfigDiffDialog, and every
  * edit section each subscribed to the form store and ran their own
- * `diff()` on every keystroke. The diff function is O(fields) and the
- * worst-case bound (50 components × 50 fields) sits just under the
- * 5 ms perf budget — running it 8× per keystroke compounded the cost
- * 8× live. A single shared subscription + memoised diff fixes that.
+ * `diff()` on every keystroke. The diff function is linear in the number
+ * of fields (asserted in `config-diff.test.ts`) but the worst case —
+ * 50 components × 50 fields — is a lot of fields, and running it 8× per
+ * keystroke compounded that 8× live. A single shared subscription +
+ * memoised diff fixes that.
  *
  * Consumers that need a per-section count filter the shared `entries`
  * array; that filter is O(entries) — cheap relative to a re-run of
