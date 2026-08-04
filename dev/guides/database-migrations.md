@@ -163,6 +163,20 @@ the two, so a revision that only ever ran there can still be broken.
   **inspect the live schema** for the reflected name rather than assume either
   — `sa.inspect(bind).get_foreign_keys(table)`, falling back to the
   `naming_convention` name when reflection reports `name=None`.
+- **Mirror every `server_default` in the model.** `compare_server_default` is
+  on, so a default that exists only in a revision shows up as a permanent
+  `modify_default` entry in every future autogenerate diff, and an INSERT that
+  bypasses the ORM behaves differently on a migrated database than on a
+  `create_all()` one. When a revision sets `server_default=...`, declare the
+  same default on the SQLModel field (`sa_column_kwargs={"server_default": ...}`
+  or `Column(..., server_default=...)`).
+  `CURRENT_TIMESTAMP` versus `now()` is the one benign difference — identical on
+  PostgreSQL, and Alembic's comparator already treats them as equal.
+- **Give an enum column `nullable=False` explicitly.** A bare
+  `Column(SQLModelEnum(X))` is nullable even when the Python annotation is
+  non-optional (`phase: PodPhase`), because SQLModel cannot infer nullability
+  through an explicit `sa_column`. The revision that created the table will have
+  emitted `NOT NULL`, so the two build paths silently disagree.
 
 ## Transitioning an Existing Database
 
