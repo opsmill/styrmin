@@ -39,10 +39,11 @@ securityContext:
     drop:
     - "ALL"
 
+# Requests only -- this chart never ships resource *limits*. A CPU limit
+# throttles the agent instead of letting it burst, and a memory limit turns a
+# transient spike into an OOM kill. See `dev/guidelines/helm.md`
+# ("Never configure resource limits").
 resources:
-  limits:
-    cpu: "1"
-    memory: 1Gi
   requests:
     cpu: 100m
     memory: 512Mi

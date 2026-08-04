@@ -166,6 +166,38 @@ only).
 The local demo (`dev/local/demo-values.yaml`) and the E2E suite
 (`backend/tests/e2e/fixtures/styrmin-values.yaml`) follow this pattern.
 
+### Resource Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `resources.requests.cpu` | CPU request for `styrmin-server` | `100m` |
+| `resources.requests.memory` | Memory request for `styrmin-server` | `256Mi` |
+| `taskWorkerResources.requests.cpu` | CPU request for `task-worker` | `100m` |
+| `taskWorkerResources.requests.memory` | Memory request for `task-worker` | `256Mi` |
+| `styrmin-agent.resources.requests.cpu` | CPU request for `styrmin-agent` | `100m` |
+| `styrmin-agent.resources.requests.memory` | Memory request for `styrmin-agent` | `512Mi` |
+
+**This chart ships resource requests only — never limits.** A CPU limit
+throttles Styrmin's bursty workloads (reconcile loops, Helm renders, Prefect
+flow-run subprocesses) instead of letting them burst above their request, and a
+memory limit turns a transient spike into an OOM kill — which is how a
+`task-worker` or agent pod dies mid-flow and leaves a Prefect flow run
+orphaned. Limits are a cluster-policy decision that depends on node shape and
+overcommit tolerance, so they are left to the operator.
+
+If your cluster policy requires them, set them in your own values file:
+
+```yaml
+taskWorkerResources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 2Gi     # opt in deliberately; size for peak, not steady state
+```
+
+Sizing guidance is in [`dev/guidelines/helm.md`](../../dev/guidelines/helm.md).
+
 ### Styrmin Configuration
 
 | Parameter | Description | Default |

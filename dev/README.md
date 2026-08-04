@@ -48,6 +48,7 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [frontend/forms.md](guidelines/frontend/forms.md) - TanStack Form + Zod: field bindings, subscriptions, dynamic fields
 - [frontend/ui-primitives.md](guidelines/frontend/ui-primitives.md) - Base UI wrapper layer, data-attribute selectors, polymorphic Button
 - [cyclopts.md](guidelines/cyclopts.md) - Cyclopts CLI conventions: parameters, validators, type aliases, lazy loading
+- [helm.md](guidelines/helm.md) - Styrmin chart rules: requests only, never resource limits
 - [markdown.md](guidelines/markdown.md) - Markdown conventions and document structure
 
 ## Current ADRs

@@ -173,6 +173,7 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 
 - Python: `dev/guidelines/backend/python.md`
 - Markdown: `dev/guidelines/markdown.md`
+- Helm charts: `dev/guidelines/helm.md`
 
 ## Boundaries
 
@@ -207,6 +208,7 @@ Only fall back to screenshot/HTML dumps inside the page object when the MCP serv
 - Edit generated files manually
 - Skip linting in CI
 - Force push to `stable` or `develop`
+- **Configure resource limits in the Styrmin Helm charts.** `helm/styrmin/` and `helm/agent/` ship `resources.requests` only — never `resources.limits`, in default values, templates, or any committed values overlay (demo, E2E fixtures, CI). CPU limits throttle bursty workloads and memory limits turn a transient spike into an OOM kill, which is how a worker pod dies mid-flow and orphans a flow run (#312). Operators may set limits in their own values files; we do not ship them. Enforced by `backend/tests/unit/test_helm_resource_limits.py`; rationale in [`dev/guidelines/helm.md`](dev/guidelines/helm.md).
 
 ### Bypassing the pre-commit hooks
 
