@@ -31,6 +31,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, ChevronRight, Plus } from "lucide-react";
 import { useState } from "react";
+import { DEFAULT_BACKUP_TTL, validateBackupTtl } from "@/lib/backup-ttl";
 
 const createEnvironmentSchema = z
   .object({
@@ -38,6 +39,7 @@ const createEnvironmentSchema = z
     clusterId: z.string().min(1, "Cluster is required"),
     ingress_class: z.string().optional(),
     db_size: z.string().optional(),
+    backup_ttl: z.string().optional(),
     fqdn_suffix: z.string().optional(),
     ip_whitelist: z.string().optional(),
     dedicated_ingress_enabled: z.boolean(),
@@ -84,7 +86,26 @@ const createEnvironmentSchema = z
       message: "NodePort is only valid when Service Type is NodePort",
       path: ["dedicated_ingress_service_node_port"],
     },
-  );
+  )
+  // Backup retention (016). `superRefine` rather than `refine` so the exact
+  // reason from `validateBackupTtl` reaches the field — the shared validator
+  // distinguishes "not a positive h/m/s duration" from "above the Go
+  // int64-nanosecond ceiling", and collapsing both into one static message
+  // would tell an operator who typed `30d` the wrong thing.
+  .superRefine((data, ctx) => {
+    // Blank is not an invalid value, it is the absence of a policy: the key
+    // is omitted from the built config and the environment inherits the
+    // cluster's (or the built-in) retention.
+    if (!data.backup_ttl) return;
+    const reason = validateBackupTtl(data.backup_ttl);
+    if (reason) {
+      ctx.addIssue({
+        code: "custom",
+        message: reason,
+        path: ["backup_ttl"],
+      });
+    }
+  });
 
 type CreateEnvironmentValues = z.infer<typeof createEnvironmentSchema>;
 
@@ -94,6 +115,10 @@ function buildEnvironmentConfig(
   const config: Record<string, unknown> = {};
   if (values.ingress_class) config.ingress_class = values.ingress_class;
   if (values.db_size) config.db_size = values.db_size;
+  // Blank omits the key entirely — an environment that sets no retention
+  // policy must inherit the cluster's, and writing `""` or `null` here would
+  // be a different (and invalid) statement.
+  if (values.backup_ttl) config.backup_ttl = values.backup_ttl;
   if (values.fqdn_suffix) config.fqdn_suffix = values.fqdn_suffix;
   if (values.ip_whitelist) {
     const list = values.ip_whitelist
@@ -156,6 +181,7 @@ export function CreateEnvironmentDialog({
       clusterId: "",
       ingress_class: "",
       db_size: "",
+      backup_ttl: "",
       fqdn_suffix: "",
       ip_whitelist: "",
       dedicated_ingress_enabled: false,
@@ -355,6 +381,31 @@ export function CreateEnvironmentDialog({
                       onChange={(e) => field.handleChange(e.target.value)}
                       onBlur={field.handleBlur}
                     />
+                  </div>
+                )}
+              </form.Field>
+
+              <form.Field name="backup_ttl">
+                {(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor="env-backup-ttl">Backup Retention TTL</Label>
+                    <Input
+                      id="env-backup-ttl"
+                      placeholder={`e.g. ${DEFAULT_BACKUP_TTL}`}
+                      value={field.state.value ?? ""}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                    />
+                    {field.state.meta.errors.length > 0 && (
+                      <p className="text-sm text-destructive">
+                        {field.state.meta.errors[0]?.toString()}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      How long backups are kept, as a Go duration using h/m/s
+                      units. Leave blank to inherit the cluster&apos;s policy
+                      (default {DEFAULT_BACKUP_TTL}).
+                    </p>
                   </div>
                 )}
               </form.Field>
