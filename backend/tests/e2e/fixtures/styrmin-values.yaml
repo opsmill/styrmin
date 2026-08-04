@@ -40,6 +40,25 @@ styrmin-agent:
     requests:
       cpu: 100m
       memory: 512Mi
+  agent:
+    extraEnv:
+      # The kopf timer in `operator/handlers/styrmin_deployment.py` is the
+      # ONLY path that advances a deployment past
+      # `phase: CreatingHelmRelease` — phase 3 (Services -> Ready ->
+      # `displayState: Running`) and the terminal `phase: Deleted` both
+      # happen on a tick, never on a HelmRelease status event. With the
+      # 60s production default (and `initial_delay` equal to it), every
+      # create / upgrade / delete in the suite waited a full ~60s after
+      # Kubernetes was already done: measured 10:23:45 "Phase 1 complete"
+      # -> 10:24:45 "reached Ready state" while the Helm install itself
+      # finished at 10:23:57. That dead wait, not the cluster, was the
+      # bulk of E2E wall-clock.
+      #
+      # 5s keeps the drift-detection sweep in the `phase: Ready` branch
+      # (a list+diff over NetworkPolicy/Secret/Service per CRD per tick)
+      # to a sane rate while cutting ~55s off every lifecycle transition.
+      - name: STYRMIN_OPERATOR_RECONCILE_INTERVAL
+        value: "5"
   prefect-worker:
     worker:
       config:
