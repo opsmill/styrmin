@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { diff } from "./config-diff";
 import { evaluateImpact, matchPath } from "./config-impact";
 import type {
   ConfigurationDiff,
@@ -298,6 +299,11 @@ const ruleCases: RuleCase[] = [
     negative: diffEntry("nodeSelector", { section: "storageRuntime" }),
   },
   {
+    matcher: "backupTtl",
+    positive: diffEntry("backupTtl", { section: "storageRuntime" }),
+    negative: diffEntry("dbSize", { section: "storageRuntime" }),
+  },
+  {
     matcher: "standardStorage.storageClass",
     positive: diffEntry("standardStorage.storageClass", {
       section: "storageRuntime",
@@ -362,4 +368,48 @@ describe("impact-rules.ts: every shipped rule has positive + negative coverage",
       expect(summary.entries).toEqual([]);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// End-to-end: every path `diff()` can emit must be explicable by a rule
+// ---------------------------------------------------------------------------
+
+describe("impact-rules.ts: backup retention TTL (016)", () => {
+  it("attaches a consequence to a real backupTtl diff entry", () => {
+    // Regression guard: `config-diff` emits a `storageRuntime`/`backupTtl`
+    // entry, but no rule matched it, so the drawer rendered a diff row with
+    // an empty consequence list. Drive the full pipeline — real `diff()`
+    // output through the shipped rule table — rather than a hand-built
+    // DiffEntry, so a future rename of either side is caught.
+    const result = diff({ backupTtl: "720h" }, { backupTtl: "2160h" }, []);
+    expect(result.entries.map((e) => e.path)).toContain("backupTtl");
+
+    const summary = evaluateImpact(result, impactRules);
+    expect(summary.entries).toHaveLength(1);
+    expect(summary.entries[0].triggeringPaths).toEqual(["backupTtl"]);
+  });
+
+  it("states that the change affects future backups only (FR-009)", () => {
+    // Velero freezes a backup's expiration at creation time, so an operator
+    // shortening retention must not be led to believe existing backups will
+    // be culled sooner. The consequence text carries that guarantee.
+    const rule = impactRules.find((r) => r.matcher === "backupTtl");
+    expect(rule).toBeDefined();
+    expect(rule!.consequence).toMatch(/future backups only/);
+    expect(rule!.consequence).toMatch(/already created/);
+  });
+
+  it("is informational — no workload disruption", () => {
+    // Retention is metadata on future Velero Backup objects: no pod is
+    // recreated, no volume reprovisioned, nothing is deleted that would
+    // not have been deleted anyway. That is the same blast radius as
+    // `standardStorage.storageClass`, which is likewise informational.
+    const rule = impactRules.find((r) => r.matcher === "backupTtl");
+    expect(rule!.severity).toBe("informational");
+    const summary = evaluateImpact(
+      asDiff([diffEntry("backupTtl", { section: "storageRuntime" })]),
+      impactRules,
+    );
+    expect(summary.topSeverity).toBe("informational");
+  });
 });
