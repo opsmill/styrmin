@@ -120,6 +120,16 @@ the two, so a revision that only ever ran there can still be broken.
   (`applicationinstance` ↔ `deployment`).
   `sa.ForeignKeyConstraint(..., use_alter=True)` does *not* help here:
   `use_alter` is honoured by `metadata.create_all()`, not by `op.create_table`.
+- **Create each PostgreSQL enum type exactly once.** `op.create_table` emits
+  `CREATE TYPE` for every enum column it sees (with `checkfirst=False`), while
+  `op.add_column` emits none — so a revision that adds an enum column to one
+  table and creates another table using the same enum will try to create the
+  type twice and abort with `DuplicateObjectError`. Create the type explicitly
+  up front with `sa.Enum(...).create(op.get_bind(), checkfirst=True)`, then give
+  the columns a type that will not redeclare it:
+  `postgresql.ENUM(..., create_type=False)` on PostgreSQL, plain `sa.Enum` on
+  SQLite (which has no enum types — it renders `VARCHAR` plus a per-table CHECK
+  constraint). `c0d1e2f3a4b5_add_role_and_groups.py` is the worked example.
 - **Drop enum types explicitly in `downgrade`.** `op.create_table` emits
   `CREATE TYPE` for every PostgreSQL enum column, but `op.drop_table` builds a
   bare `Table` with no columns and therefore never emits the matching
