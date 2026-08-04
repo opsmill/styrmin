@@ -72,6 +72,14 @@ export function ConfigurationTab({ deployment }: Props) {
     [deployment.environment.config],
   );
 
+  // Cluster scope, for the summaries that resolve a full deepest-wins chain
+  // (backup retention). Projected through the same helper so every scope is
+  // the one typed shape.
+  const cluster = useMemo<UpdateDeploymentInput>(
+    () => deploymentConfigToInput(deployment.environment.cluster.config),
+    [deployment.environment.cluster.config],
+  );
+
   const driverSchema = useMemo<DriverParameterSchema>(
     () => deployment.applicationDriverVersion?.parameters ?? [],
     [deployment.applicationDriverVersion?.parameters],
@@ -134,7 +142,11 @@ export function ConfigurationTab({ deployment }: Props) {
         environmentConfig={deployment.environment.config}
         clusterConfig={deployment.environment.cluster.config}
       />
-      <StorageRuntimeSummary current={current} environment={environment} />
+      <StorageRuntimeSummary
+        current={current}
+        environment={environment}
+        cluster={cluster}
+      />
 
       {canEdit ? (
         <ConfigEditDrawer
