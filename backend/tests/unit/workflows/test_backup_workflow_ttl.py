@@ -34,6 +34,7 @@ import pytest
 from prefect.client.schemas.objects import StateType
 
 from styrmin_backend.services.backup.ttl import DEFAULT_BACKUP_TTL
+from styrmin_backend.services.exceptions import BackupNotFoundError
 from styrmin_backend.workflows.templates.backup import execute_backup_workflow
 
 MODULE = "styrmin_backend.workflows.templates.backup"
@@ -54,6 +55,8 @@ class WorkflowRun:
     velero_kwargs: dict[str, Any] | None = None
     #: Ordered trace of the two operations whose relative order is a contract.
     events: list[str] = field(default_factory=list)
+    #: What the flow body raised, when the caller asked for it to be captured.
+    raised: BaseException | None = None
 
     def metadata_writes(self) -> list[dict[str, Any]]:
         return [
@@ -82,6 +85,8 @@ async def _run_backup_workflow(
     backup_storage_location_name: str | None = None,
     velero_phase: str = "Completed",
     velero_expiration: str | None = VELERO_EXPIRATION,
+    record_deleted_after_status_writes: int | None = None,
+    capture_exception: bool = False,
 ) -> WorkflowRun:
     """Drive the flow body once with every boundary faked.
 
@@ -104,6 +109,13 @@ async def _run_backup_workflow(
             or None for "no BSL assigned".
         velero_phase: ``status.phase`` the USER flow reports back.
         velero_expiration: ``status.expiration`` the USER flow reports back.
+        record_deleted_after_status_writes: Simulate the backup row being
+            deleted after this many successful ``update_backup_status`` calls —
+            every call from then on raises ``BackupNotFoundError``, including the
+            one the flow's own ``except`` handler makes. Each raised error names
+            its call index so a test can tell which write's failure propagated.
+        capture_exception: Store what the body raised on ``run.raised`` instead
+            of letting it escape, so the run record stays inspectable.
 
     Returns:
         A :class:`WorkflowRun` recording what the body did.
@@ -152,6 +164,14 @@ async def _run_backup_workflow(
         run.status_calls.append(kwargs)
         if kwargs.get("metadata_updates"):
             run.events.append("metadata_write")
+        if (
+            record_deleted_after_status_writes is not None
+            and len(run.status_calls) > record_deleted_after_status_writes
+        ):
+            raise BackupNotFoundError(
+                f"Backup {backup_uuid} not found (status write "
+                f"#{len(run.status_calls)})"
+            )
 
     def _record_build(**kwargs: Any) -> MagicMock:
         run.velero_kwargs = kwargs
@@ -189,10 +209,19 @@ async def _run_backup_workflow(
         patch(f"{MODULE}.arun_deployment", AsyncMock(return_value=flow_run)),
         patch(f"{MODULE}.Variable", variable),
     ):
-        await execute_backup_workflow.fn(
-            backup_id=str(backup_uuid),
-            deployment_id=str(deployment_uuid),
-        )
+        if capture_exception:
+            try:
+                await execute_backup_workflow.fn(
+                    backup_id=str(backup_uuid),
+                    deployment_id=str(deployment_uuid),
+                )
+            except BaseException as exc:  # noqa: BLE001 - the test inspects it
+                run.raised = exc
+        else:
+            await execute_backup_workflow.fn(
+                backup_id=str(backup_uuid),
+                deployment_id=str(deployment_uuid),
+            )
 
     return run
 
@@ -496,3 +525,63 @@ async def test_a_genuinely_unconfigured_deployment_does_not_warn() -> None:
         "ttl_source": "default",
     } in run.metadata_writes()
     assert run.logger.warning.call_args_list == [], run.warnings()
+
+
+# ---------------------------------------------------------------------------
+# A record deleted mid-flight must not lose the real failure
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_a_record_deleted_mid_flight_propagates_the_original_failure() -> None:
+    """The handler's own status write must not replace the cause of the failure.
+
+    Retention is recorded in a second ``update_backup_status`` round-trip, ~70
+    lines after the IN_PROGRESS one. If the backup row is deleted between the
+    two, that second write raises ``BackupNotFoundError`` — and lands in the
+    flow's ``except`` handler, which *also* calls ``update_backup_status``. That
+    call raises too, from inside the handler, so what escapes the flow is the
+    handler's bookkeeping error and the original cause is gone.
+
+    Here the row disappears after the first write, so write #2 (retention) and
+    write #3 (the handler's FAILED) both raise. What must propagate is #2.
+    """
+    run = await _run_backup_workflow(
+        environment_config={"backup_ttl": "2160h"},
+        record_deleted_after_status_writes=1,
+        capture_exception=True,
+    )
+
+    assert isinstance(run.raised, BackupNotFoundError), run.raised
+    assert "#2" in str(run.raised), (
+        f"the handler's own write failure replaced the original cause: {run.raised!r}"
+    )
+
+    # The handler still tried, and said why it could not report the failure.
+    assert len(run.status_calls) == 3
+    assert "no longer exists" in run.warnings(), run.warnings()
+
+    # Nothing was dispatched to Velero, so no orphan backup is left in the
+    # cluster for a record that no longer exists.
+    assert run.velero_kwargs is None
+
+
+@pytest.mark.anyio
+async def test_the_in_progress_write_precedes_the_config_read() -> None:
+    """IN_PROGRESS is marked before the config read, not after — on purpose.
+
+    ``has_in_progress_backup`` (the guard that rejects a second concurrent
+    backup of the same instance) matches only ``IN_PROGRESS``, never
+    ``PENDING``. Collapsing the two writes by hoisting the config read above the
+    first one would leave the record PENDING across three DB reads this flow
+    explicitly anticipates can hang, and a ``createBackup`` arriving in that
+    window would be accepted. So the first write must carry no metadata and must
+    happen before any scope is read.
+    """
+    run = await _run_backup_workflow(environment_config={"backup_ttl": "2160h"})
+
+    assert run.status_calls[0].get("metadata_updates") is None, run.status_calls
+    assert run.status_calls[1]["metadata_updates"] == {
+        "ttl": "2160h",
+        "ttl_source": "environment",
+    }, run.status_calls
