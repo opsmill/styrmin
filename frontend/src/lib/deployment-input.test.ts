@@ -24,6 +24,7 @@ describe("deploymentConfigToInput", () => {
       runtimeClass: undefined,
       nodeSelector: undefined,
       standardStorage: undefined,
+      fastStorage: undefined,
       backupTtl: undefined,
     });
   });

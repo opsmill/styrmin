@@ -139,6 +139,14 @@ export function diff(
     before.standardStorage ?? null,
     after.standardStorage ?? null,
   );
+  diffJsonObject(
+    entries,
+    "storageRuntime",
+    "fastStorage",
+    "Fast storage",
+    before.fastStorage ?? null,
+    after.fastStorage ?? null,
+  );
   diffScalar(
     entries,
     "storageRuntime",
