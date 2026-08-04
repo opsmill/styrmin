@@ -42,6 +42,7 @@ from styrmin_backend.context.models.input import (
     ContextInput,
     UtilityInput,
 )
+from styrmin_backend.context.validators import format_config_validation_error
 
 
 def _resolve_cluster_context(cluster_config: ClusterConfig) -> ClusterContext:
@@ -558,8 +559,14 @@ def resolve_global_context(context_input: ContextInput) -> GlobalContext:
                 }
             )
         except ValidationError as e:
+            # Same treatment as the ``validate_*_config`` surfaces (563610b):
+            # keep the field path and the validator's message, drop Pydantic's
+            # repr. It matters more here than anywhere else — a component's
+            # ``config`` is an arbitrary section, so ``input_value`` would echo
+            # a whole driver-defined submodel back at the caller.
             raise ContextError(
-                f"The components context validation failed. {e!s}"
+                f"The components context validation failed. "
+                f"{format_config_validation_error(e)}"
             ) from e
     else:
         components_context = None
