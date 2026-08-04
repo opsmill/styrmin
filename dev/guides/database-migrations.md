@@ -160,6 +160,7 @@ Migrations use the same database configuration as the application via `STYRMIN_D
 
 - **env.py**: Configures Alembic for async operation using `asyncio.run()` and `connection.run_sync()` to bridge the async engine with Alembic's synchronous migration API.
 - **render_as_batch=True**: Enabled unconditionally to support SQLite's limited `ALTER TABLE` capabilities. Harmless on PostgreSQL.
+- **compare_type=True / compare_server_default=True**: Both enabled so autogenerate reports column type and `server_default` drift instead of silently ignoring it. Without them a changed column type or default never shows up in a diff.
 - **SQLModel.metadata**: Used as `target_metadata` for autogeneration, ensuring migrations stay in sync with model definitions.
 
 ## Testing
