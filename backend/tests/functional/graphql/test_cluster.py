@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import Cluster, Environment
@@ -114,6 +115,124 @@ async def test_cluster_projects_environments_relation(
     assert len(envs) == 1
     assert envs[0]["id"] == str(env.id)
     assert envs[0]["name"] == "env-a"
+
+
+# ---------------------------------------------------------------------------
+# 016 — backup_ttl through the cluster surface (FR-004, SC-003)
+# ---------------------------------------------------------------------------
+#
+# ``backup_ttl`` lives on ``BaseConfigSection``, so one validator governs the
+# cluster, environment, and deployment scopes. The environment surface is proven
+# end-to-end by ``test_update_environment_rejects_malformed_backup_ttl``; these
+# two cover the cluster one, which reaches the validator by a different route —
+# an untyped ``config: JSON`` argument rather than a typed Strawberry input.
+#
+# That difference is visible in the casing. Raw-JSON ``config`` surfaces
+# (``createCluster``, ``createEnvironment``) take **snake_case** ``backup_ttl``,
+# because ``BaseConfigSection`` sets ``extra="forbid"`` with no alias generator.
+# The typed-input surfaces (``deploy``, ``updateDeployment``,
+# ``updateEnvironment``) take camelCase ``backupTtl``, which Strawberry converts.
+
+
+@pytest.mark.asyncio
+async def test_create_cluster_accepts_snake_case_backup_ttl(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """A cluster-scope retention policy persists through ``createCluster``.
+
+    The cluster is the shallowest scope, so this value is what a backup falls
+    back to when neither its deployment nor its environment sets one.
+    """
+    data = await gql(
+        client,
+        "create_cluster",
+        {
+            "name": "ttl-cluster",
+            "config": {**VALID_CLUSTER_CONFIG, "backup_ttl": "2160h"},
+        },
+    )
+    cluster_id = UUID(data["createCluster"]["id"])
+
+    db_row = await session.get(Cluster, cluster_id)
+    assert db_row is not None
+    assert db_row.config is not None
+    assert db_row.config["backup_ttl"] == "2160h"
+
+
+@pytest.mark.asyncio
+async def test_create_cluster_rejects_malformed_backup_ttl(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``backup_ttl: "30d"`` is rejected at the cluster boundary, and nothing persists.
+
+    ``30d`` looks like a plausible retention, but Go has no day unit — Velero
+    would reject it asynchronously at apply time, long after the operator walked
+    away. Hence "rejected at submission" (SC-003).
+
+    The message contract is the same one FR-004 sets for every surface: name the
+    field, hint the syntax. The cluster surface goes through
+    ``validate_cluster_config`` → ``InvalidClusterContextError`` →
+    ``InvalidContextError``, a longer chain than the environment's, so the hint
+    has to survive two re-wrappings to get here.
+    """
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("create_cluster"),
+            "variables": {
+                "name": "bad-ttl-cluster",
+                "config": {**VALID_CLUSTER_CONFIG, "backup_ttl": "30d"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    error = payload["errors"][0]
+    assert error["extensions"]["code"] == "VALIDATION_ERROR", payload
+    assert "backup_ttl" in error["message"], payload
+    assert "720h" in error["message"], payload
+
+    # Nothing malformed reached storage — and since a cluster is created in one
+    # shot, "nothing persisted" means no row at all.
+    session.expire_all()
+    rows = (await session.exec(select(Cluster))).all()
+    assert rows == [], f"a rejected createCluster left rows behind: {rows}"
+
+
+@pytest.mark.asyncio
+async def test_create_cluster_rejects_camel_case_backup_ttl(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """``backupTtl`` is not a key on this surface — raw JSON is snake_case only.
+
+    ``BaseConfigSection`` sets ``extra="forbid"`` and declares no alias
+    generator, so a client that copies the camelCase spelling from the typed
+    input surfaces gets an unknown-key rejection rather than a silently ignored
+    retention policy. Pinned because silent acceptance is the dangerous
+    outcome: the operator would believe a policy was set.
+    """
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("create_cluster"),
+            "variables": {
+                "name": "camel-ttl-cluster",
+                "config": {**VALID_CLUSTER_CONFIG, "backupTtl": "2160h"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    error = payload["errors"][0]
+    assert error["extensions"]["code"] == "VALIDATION_ERROR", payload
+    assert "backupTtl" in error["message"], payload
+
+    session.expire_all()
+    assert (await session.exec(select(Cluster))).all() == []
 
 
 @pytest.mark.asyncio
