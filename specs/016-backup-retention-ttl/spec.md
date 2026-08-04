@@ -64,7 +64,7 @@ An operator typos `30d`; the mutation fails immediately with a typed validation 
 
 ### User Story 4 - Expiry visible in the web UI and CLI (Priority: P2)
 
-An application owner sees when each backup expires in the web UI backup list (with the applied TTL in the detail/tooltip); a CLI user sees an "Expires" column in `styrminctl backups list`. Neither needs cluster access or calendar math.
+An application owner sees when each backup expires in the web UI backup list (with the applied TTL in the detail/tooltip); a CLI user sees an `expires_at` column in `styrminctl backups list`. Neither needs cluster access or calendar math.
 
 **Why this priority**: Visibility is what makes retention trustworthy — operators can verify a restore point is still available before they need it. It rides on the recorded metadata from User Story 1.
 
@@ -74,7 +74,7 @@ An application owner sees when each backup expires in the web UI backup list (wi
 
 1. **Given** a backup with recorded TTL and expiration, **When** the user opens the web UI backup list, **Then** the expiry date is shown in the list and the applied TTL is available in the detail/tooltip.
 2. **Given** a pre-existing backup with no recorded TTL/expiration (or a Failed/PartiallyFailed backup with no reported expiration), **When** the backup list is rendered in the web UI or via `styrminctl backups list`, **Then** the expiry renders as "—".
-3. **Given** backups with recorded expiry, **When** the CLI user runs `styrminctl backups list`, **Then** an "Expires" column shows the expiry, "—" when null.
+3. **Given** backups with recorded expiry, **When** the CLI user runs `styrminctl backups list`, **Then** an `expires_at` column shows the expiry, "—" when null.
 
 ---
 
@@ -99,7 +99,7 @@ An application owner sees when each backup expires in the web UI backup list (wi
 - **FR-007**: Users MUST be able to read `ttl` and `expiresAt` on the GraphQL `Backup` type; both nullable for pre-existing backups. *(verify: GraphQL propagation test)*
 - **FR-008**: Users MUST see the expiry date in the web UI backup list, with the applied TTL in the detail/tooltip; null renders as "—". *(verify: frontend component test)*
 - **FR-009**: A `backup_ttl` change MUST apply only to backups created afterwards; the system MUST NOT attempt to modify existing Velero backups' expiration. *(verify: documented limitation + the E2E naturally proves the "next backup" half)*
-- **FR-010**: `styrminctl backups list` MUST display an "Expires" column, "—" when null. *(verify: CLI unit test)*
+- **FR-010**: `styrminctl backups list` MUST display an `expires_at` column, "—" when null. The header is the snake_case field name, matching the sibling timestamp columns in that same table (`started_at`, `completed_at`) — every column in `backups list` is named after its field, so a prose label like "Expires" would be the odd one out. Do not "fix" it back. *(verify: CLI unit test asserting the `expires_at` header)*
 
 ### Key Entities
 
