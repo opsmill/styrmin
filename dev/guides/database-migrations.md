@@ -141,6 +141,28 @@ the two, so a revision that only ever ran there can still be broken.
   upgrade fails with `DuplicateObjectError: type "..." already exists`. Call
   `sa.Enum(..., name="...").drop(op.get_bind(), checkfirst=True)`, which is a
   no-op on SQLite.
+- **Renaming a table does not rename its constraints.** `op.rename_table` emits
+  `ALTER TABLE ... RENAME TO`, which leaves every constraint carrying the name
+  PostgreSQL derived from the *old* table name — so the renamed table
+  permanently disagrees with `create_all()`. Fix it in the same revision with
+  `ALTER TABLE ... RENAME CONSTRAINT` (there is no `op.rename_constraint`; use
+  `op.execute`). That statement also renames the index backing a PRIMARY KEY or
+  UNIQUE constraint, so no separate index rename is needed. SQLite emits both
+  anonymously and has nothing to rename.
+  `b9c0d1e2f3a4_align_status_constraints_with_models.py` is the worked example.
+- **Changing a foreign key's `ON DELETE` means dropping and recreating it**, on
+  both backends — neither supports altering the referential action in place. On
+  SQLite that is a `op.batch_alter_table` table rebuild, which brings two traps.
+  First, batch mode **refuses to create an unnamed constraint** ("Constraint
+  must have a name"), so the replacement must be named even where the original
+  was anonymous — prefer the name PostgreSQL would generate
+  (`<table>_<column>_fkey`) so one canonical name identifies the constraint on
+  both backends. Second, that makes the constraint's name differ between a
+  database built by the original `create_table` (anonymous) and one that has
+  been through this revision's own `downgrade` (named), so a re-upgrade must
+  **inspect the live schema** for the reflected name rather than assume either
+  — `sa.inspect(bind).get_foreign_keys(table)`, falling back to the
+  `naming_convention` name when reflection reports `name=None`.
 
 ## Transitioning an Existing Database
 

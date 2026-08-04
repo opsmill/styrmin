@@ -22,12 +22,26 @@ Server-side cleanup runs in two coordinated passes:
 
 The same two-pronged pattern is the prescribed shape for future observed-state tables.
 
+> **Note — amended implementation (revision `b9c0d1e2f3a4`).** Prong 2 is
+> realised by the SQLAlchemy `delete-orphan` alternative only, not by
+> `ON DELETE CASCADE`. The database-level cascade was declared in revisions
+> `a1b2c3d4e5f6` / `b2c3d4e5f6a7` but never actually existed in any database:
+> the schema was built by `metadata.create_all()` from the models, which never
+> declared it, and the migration chain did not apply end-to-end until
+> 2026-08-04. `b9c0d1e2f3a4` drops the never-applied cascade so the two build
+> paths converge on the models. Nothing changes behaviourally — deployment
+> deletion is *soft* ([[0008-deployment-soft-delete-tombstoning]]), so no
+> `DELETE FROM deployment` ever reaches the database for a cascade to act on,
+> and `cascade="all, delete-orphan"` on `Deployment.pod_statuses` /
+> `Deployment.crd_status` remains the delete path. The prescribed shape for
+> future observed-state tables is therefore the ORM relationship cascade.
+
 ## Consequences
 
 - The agent's wire contract stays "send the active set"; it never has to compute deltas. This is robust to agent restarts, missed cycles, and partial outages — the next successful cycle re-converges the server to whatever the cluster actually shows.
 - Stale rows have a bounded lifetime equal to the polling interval. There is no TTL knob to tune and no janitor to babysit.
-- Deployment teardown atomically reclaims every observed-state row through standard FK cascade — no orphans, no separate cleanup pass to schedule.
-- The pattern composes: new observed-state tables (CRD status, future kinds) follow the same recipe — server-side stale-set diff + FK cascade — without inventing per-table cleanup logic.
+- Deployment teardown atomically reclaims every observed-state row through the relationship cascade — no orphans, no separate cleanup pass to schedule.
+- The pattern composes: new observed-state tables (CRD status, future kinds) follow the same recipe — server-side stale-set diff + relationship cascade — without inventing per-table cleanup logic.
 
 ## Alternatives Considered
 
