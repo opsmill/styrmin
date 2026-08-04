@@ -31,6 +31,7 @@ import { EnvVarsSection } from "./sections/edit/EnvVarsSection";
 import { IdentitySection } from "./sections/edit/IdentitySection";
 import { SchedulingSection } from "./sections/edit/scheduling";
 import { ServiceOverridesSection } from "./sections/edit/ServiceOverridesSection";
+import { StorageRuntimeSection } from "./sections/edit/StorageRuntimeSection";
 import { ComponentOverridesSection } from "./sections/edit/ComponentOverridesSection";
 
 type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
@@ -227,9 +228,8 @@ export function ConfigEditDrawer({
    * focused on layout/grouping rather than per-section prop plumbing.
    *
    * Only sections currently present in `DRAWER_SECTION_GROUPS` are reachable
-   * — `networking` and `storageRuntime` deliberately fall through and render
-   * nothing in the drawer (their summaries still appear on the Settings tab
-   * read view).
+   * — `networking` deliberately falls through and renders nothing in the
+   * drawer (its summary still appears on the Settings tab read view).
    */
   const renderSection = (sectionId: SectionId) => {
     switch (sectionId) {
@@ -313,9 +313,18 @@ export function ConfigEditDrawer({
             components={deployment.components}
           />
         );
-      // Networking + Storage & Runtime intentionally fall through.
-      case "networking":
       case "storageRuntime":
+        return (
+          <StorageRuntimeSection
+            key={sectionId}
+            form={form}
+            initial={initialValues}
+            environment={environmentValues}
+            anchorId={sectionId}
+          />
+        );
+      // Networking intentionally falls through.
+      case "networking":
         return null;
     }
   };
