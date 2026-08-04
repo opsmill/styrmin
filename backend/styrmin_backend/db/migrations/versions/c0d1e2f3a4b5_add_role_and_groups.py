@@ -3,6 +3,18 @@
 Revision ID: c0d1e2f3a4b5
 Revises: a1b2c3d4e5f7
 Create Date: 2026-05-06 00:00:00.000000
+
+The ``role`` enum has to be created exactly once. ``op.add_column`` does
+not emit ``CREATE TYPE``, so the type must be created explicitly before
+``user.role`` is added — but ``op.create_table`` *does* emit it (with
+``checkfirst=False``), so a plain ``sa.Enum`` on ``group.role`` used to
+issue a second ``CREATE TYPE role`` and abort with
+``DuplicateObjectError``. On PostgreSQL the column type is therefore
+``postgresql.ENUM(..., create_type=False)``, which references the
+already-created type without redeclaring it. SQLite has no standalone
+enum types (``sa.Enum`` renders as ``VARCHAR`` plus a CHECK constraint
+per table), so it keeps the generic type and the explicit ``create`` is a
+no-op there.
 """
 
 from typing import Sequence, Union
@@ -10,6 +22,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 import sqlmodel
 from alembic import op
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import Connection
 
 
 revision: str = "c0d1e2f3a4b5"
@@ -18,17 +32,31 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-_ROLE_ENUM = sa.Enum("READ_ONLY", "READ_WRITE", "ADMIN", name="role")
+_ROLE_ENUM_NAME = "role"
+_ROLE_VALUES = ("READ_ONLY", "READ_WRITE", "ADMIN")
+
+
+def _role_enum() -> sa.Enum:
+    """Return the dialect-agnostic ``role`` enum used to create/drop the type."""
+    return sa.Enum(*_ROLE_VALUES, name=_ROLE_ENUM_NAME)
+
+
+def _role_column_type(bind: Connection) -> sa.types.TypeEngine:
+    """Return the column type for ``role``, never re-creating the enum type."""
+    if bind.dialect.name == "postgresql":
+        return postgresql.ENUM(*_ROLE_VALUES, name=_ROLE_ENUM_NAME, create_type=False)
+    return _role_enum()
 
 
 def upgrade() -> None:
-    _ROLE_ENUM.create(op.get_bind(), checkfirst=True)
+    bind = op.get_bind()
+    _role_enum().create(bind, checkfirst=True)
 
     with op.batch_alter_table("user") as batch:
         batch.add_column(
             sa.Column(
                 "role",
-                _ROLE_ENUM,
+                _role_column_type(bind),
                 nullable=False,
                 server_default="READ_ONLY",
             )
@@ -50,7 +78,12 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("name", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("role", _ROLE_ENUM, nullable=False, server_default="READ_ONLY"),
+        sa.Column(
+            "role",
+            _role_column_type(bind),
+            nullable=False,
+            server_default="READ_ONLY",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name"),
     )
@@ -70,4 +103,4 @@ def downgrade() -> None:
     op.drop_table("group")
     with op.batch_alter_table("user") as batch:
         batch.drop_column("role")
-    _ROLE_ENUM.drop(op.get_bind(), checkfirst=True)
+    _role_enum().drop(op.get_bind(), checkfirst=True)
