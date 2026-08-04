@@ -10,7 +10,7 @@ All migration commands accept an optional `--config-file` parameter.
 |---------|-------------|
 | `styrmin db init` | Initialize a new database (applies all migrations) |
 | `styrmin db migrate` | Apply all pending migrations |
-| `styrmin db downgrade` | Rollback the most recent migration |
+| `styrmin db downgrade [REVISION]` | Rollback to `REVISION` (default `-1`, one step back; `base` un-applies everything) |
 | `styrmin db status` | Show current migration version |
 | `styrmin db stamp` | Mark database at latest version without running migrations |
 
@@ -84,20 +84,16 @@ examples: each merges two heads while also adding new schema.
 Do **not** "resolve" by branching from one head and ignoring the other — the
 ignored migration's changes will not be applied on a fresh database.
 
-`styrmin db downgrade` hardcodes `-1`, which Alembic cannot resolve across a
-merge point (`CommandError: Ambiguous walk`). To un-apply a merge revision, name
-either parent explicitly — that un-applies only the merge and restores both
-heads:
+`styrmin db downgrade` defaults to `-1`, which Alembic cannot resolve across a
+merge point (`CommandError: Ambiguous walk`) — a merge revision has more than
+one predecessor. Pass the target explicitly instead. Naming either parent
+un-applies only the merge and restores both heads:
 
 ```bash
-uv run python -c '
-from alembic import command
-from styrmin_backend import config
-from styrmin_backend.cli.db import _get_alembic_config
-config.SETTINGS.initialize()
-command.downgrade(_get_alembic_config(), "<one_parent_revision>")
-'
+styrmin db downgrade <one_parent_revision>
 ```
+
+`styrmin db downgrade base` un-applies the whole chain regardless of merges.
 
 ## Writing portable migrations
 
