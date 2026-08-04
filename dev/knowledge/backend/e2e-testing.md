@@ -145,6 +145,63 @@ Most cluster, image, and platform fixtures are session-scoped so the expensive s
 - `_dump_k8s_logs_on_failure` is **function-scoped** and `autouse` — it dumps pod logs after every failing test (see Debugging below).
 - `scenario_driver` is **function-scoped** so each test gets a fresh driver. It inherits its mode (`api` vs `ui`) from the session-scoped `driver_mode` fixture.
 
+### Where the wall-clock actually goes
+
+Shared fixture bootstrap is **not** the bottleneck. Measured on the
+`general` / `api` shard (32 CPU host, warm Docker cache), the whole
+session-scoped setup — vcluster, `docker compose build`, the Helm
+install, chart/git servers, CSI driver, cluster/env/BSL/driver — costs
+**~76s**, about 4% of the run. Everything else is the per-test
+deployment lifecycle.
+
+The dominant cost is the **operator reconcile tick**. The kopf timer in
+`operator/handlers/styrmin_deployment.py` is the only path that advances
+a deployment past `phase: CreatingHelmRelease`: phase 3
+(Services → Ready → `displayState: Running`) and the terminal
+`phase: Deleted` both happen on a tick. HelmRelease status changes are
+never watched — only `on.create` / `on.delete` handlers exist. At the
+60s production default (with `initial_delay` equal to it), every create,
+upgrade and delete slept ~60s *after* Kubernetes had finished:
+
+```
+10:23:45  Phase 1 complete, HelmRelease created
+10:23:57  InstallSucceeded          <- app is up, 12s in
+10:24:45  reached Ready state       <- +48s of pure tick latency
+```
+
+`backend/tests/e2e/fixtures/styrmin-values.yaml` therefore pins
+`STYRMIN_OPERATOR_RECONCILE_INTERVAL: "5"` through the agent subchart's
+`agent.extraEnv`. That one value took the shard from **1940s to 924s
+(−52%)** with identical pass/skip counts. If a shard suddenly doubles in
+duration, check this value reached the agent pod before looking anywhere
+else.
+
+**Two plausible fixture optimisations that do *not* pay** — both were
+measured and rejected, so don't re-derive them:
+
+1. *"Share one environment across the `apply` scenarios instead of a
+   fresh one per test, to avoid N dedicated-ingress boots."*
+   `_ensure_ingress_controller` (`services/deployment.py`) dispatches the
+   internal Traefik deployment and returns immediately — it never blocks
+   on it, so the ingress install overlaps the application install and
+   costs ~0 wall clock. Proof: `deployed_simple_app` (env already has
+   Traefik) takes **40.4s**; `typed_input_deployment` (brand-new env, so
+   it also boots Traefik) takes **40.5s**. Worse, sharing the env would
+   force each test to delete its deployment and wait for the tombstone
+   before the next could claim the `simple-app` service name — namespace
+   finalisers make that far more expensive than the boot it saves.
+2. *"Point `typed_input_environment` at the session `scenario_environment_id`."*
+   Same reasoning — the environment itself is cheap; only deployments
+   cost time.
+
+What *is* still expensive is irreducible: each deploy is ~40s and each
+full delete-to-tombstone is ~25-60s (namespace finalisers), so the way
+to speed a shard up further is to **reduce the number of
+deploy/upgrade/delete cycles**, not to reshuffle environment fixtures.
+That is what the read-only tier in
+[`e2e-deployment-sharing.md`](../../guides/e2e-deployment-sharing.md)
+is for.
+
 ## Dual-entrypoint architecture
 
 Every E2E scenario can be driven through either the SDK or the UI without changing the test code. The driver protocol lives in `tests/e2e/drivers/protocol.py`:
