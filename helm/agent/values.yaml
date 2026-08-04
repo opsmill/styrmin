@@ -7,7 +7,10 @@ image:
   # from the cluster's image store.
   registry: registry.opsmill.io/opsmill
   repository: styrmin
-  tag: latest
+  # Image tag (defaults to appVersion if not set). The release workflow
+  # keeps this chart's appVersion in lockstep with the `styrmin` chart,
+  # so an untouched install pulls the image built for that release.
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

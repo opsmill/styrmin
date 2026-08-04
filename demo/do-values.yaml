@@ -7,6 +7,12 @@ image:
   registry: registry.opsmill.io/opsmill
   tag: latest
 
+# The agent subchart defaults to its own appVersion; pin it to the same
+# floating tag the server uses so both roll together on the demo cluster.
+styrmin-agent:
+  image:
+    tag: latest
+
 # --- Ingress ---
 ingress:
   enabled: true
