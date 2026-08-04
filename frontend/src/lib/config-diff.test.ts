@@ -332,6 +332,57 @@ describe("config-diff: diff()", () => {
     });
   });
 
+  it("attributes fastStorage changes to the storageRuntime section", () => {
+    // Pre-existing gap: `fastStorage` was never diffed, so changing the fast
+    // storage class produced an empty diff — the review dialog told the
+    // operator "no changes" while a real change was queued for save.
+    const before: UpdateDeploymentInput = {
+      fastStorage: { storageClass: "local-nvme" },
+    };
+    const after: UpdateDeploymentInput = {
+      fastStorage: { storageClass: "premium-ssd" },
+    };
+    const result = diff(before, after, emptySchema);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).toMatchObject({
+      section: "storageRuntime",
+      path: "fastStorage",
+      label: "Fast storage",
+      kind: "change",
+    });
+    expect(result.entries[0].before).toContain("local-nvme");
+    expect(result.entries[0].after).toContain("premium-ssd");
+    expect(result.sectionsChanged).toEqual(["storageRuntime"]);
+  });
+
+  it("emits an add entry when fastStorage goes from unset to set", () => {
+    const result = diff(
+      {},
+      { fastStorage: { storageClass: "local-nvme" } },
+      emptySchema,
+    );
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).toMatchObject({
+      section: "storageRuntime",
+      path: "fastStorage",
+      before: "",
+      kind: "add",
+    });
+  });
+
+  it("emits no fastStorage entry when the block is unchanged", () => {
+    // `diffJsonObject` compares deeply, so an identical block re-submitted by
+    // a form binding must not manufacture a phantom change.
+    const block = { storageClass: "local-nvme" };
+    const result = diff(
+      { fastStorage: { ...block } },
+      { fastStorage: { ...block } },
+      emptySchema,
+    );
+    expect(result.entries).toEqual([]);
+    expect(result.hasChanges).toBe(false);
+  });
+
   it("orders sectionsChanged according to SECTION_ORDER", () => {
     const before: UpdateDeploymentInput = {};
     const after: UpdateDeploymentInput = {

@@ -127,6 +127,17 @@ export const impactRules: ImpactRule[] = [
     severity: "informational",
   },
   {
+    // Matches the bare `fastStorage` path because `config-diff` reports the
+    // whole block as one entry (`diffJsonObject`) rather than descending into
+    // `storageClass`. Note the neighbouring `standardStorage.storageClass`
+    // matcher above expects a sub-path the diff never emits, so it is
+    // currently dead — see this commit's message.
+    matcher: "fastStorage",
+    consequence:
+      "Fast storage class change applies to newly-provisioned volumes only; existing volumes are unaffected",
+    severity: "informational",
+  },
+  {
     matcher: "nodeSelector",
     consequence: "Pods will be rescheduled to match new node selector",
     severity: "warning",

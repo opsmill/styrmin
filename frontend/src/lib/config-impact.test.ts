@@ -311,6 +311,11 @@ const ruleCases: RuleCase[] = [
     negative: diffEntry("standardStorage", { section: "storageRuntime" }),
   },
   {
+    matcher: "fastStorage",
+    positive: diffEntry("fastStorage", { section: "storageRuntime" }),
+    negative: diffEntry("standardStorage", { section: "storageRuntime" }),
+  },
+  {
     matcher: "nodeSelector",
     positive: diffEntry("nodeSelector", { section: "storageRuntime" }),
     negative: diffEntry("dbSize", { section: "storageRuntime" }),
