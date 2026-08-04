@@ -363,14 +363,26 @@ async def execute_backup_workflow(
         environment_config: dict[str, Any] | None = None
         cluster_config: dict[str, Any] | None = None
         config_read_failed = False
+        # The first of the three lookups that came back empty, if any. A
+        # ``None`` row is NOT an exception, so without this the flag above stays
+        # False, every scope stays None, and the backup silently takes the
+        # built-in default with ``ttl_source: "default"`` — indistinguishable
+        # from a deployment that genuinely has no retention policy anywhere.
+        # Each lookup reaches the next one *through* its result, so a missing
+        # row hides its own scope and every shallower scope with it.
+        missing_scope: str | None = None
         try:
             uow = await get_unit_of_work()
             async with uow:
                 deployment = await uow.deployments.find(deployment_uuid)
-                if deployment:
+                if deployment is None:
+                    missing_scope = "deployment"
+                else:
                     deployment_config = deployment.config
                     env = await uow.environments.get(deployment.environment_id)
-                    if env:
+                    if env is None:
+                        missing_scope = "environment"
+                    else:
                         environment_config = env.config
                         # Assign the BSL from the environment BEFORE reading the
                         # cluster. This block swallows every exception, so a
@@ -387,7 +399,9 @@ async def execute_backup_workflow(
                                 f"for backup {backup_uuid}"
                             )
                         cluster = await uow.clusters.get(env.cluster_id)
-                        if cluster:
+                        if cluster is None:
+                            missing_scope = "cluster"
+                        else:
                             cluster_config = cluster.config
         except Exception as exc:
             config_read_failed = True
@@ -423,6 +437,19 @@ async def execute_backup_workflow(
                 f"deeper backup_ttl policy may have been invisible to this "
                 f"backup — applying {ttl} from {ttl_source} scope, which was "
                 f"read before the failure"
+            )
+        if missing_scope is not None:
+            # Reported independently of ``config_read_failed``: a row that is
+            # simply not there raises nothing, so the flag above never sees it.
+            # Without this line the only trace is the routine INFO below, which
+            # reads exactly like a deployment that never set a policy — e.g. a
+            # deployment row deleted between backup-record creation and workflow
+            # start silently ignores the environment's configured retention.
+            logger.warning(
+                f"Backup {backup_uuid}: the {missing_scope} lookup returned no "
+                f"row, so no backup_ttl policy at {missing_scope} scope or "
+                f"shallower could be read for this backup — applying {ttl} "
+                f"from {ttl_source} scope"
             )
         logger.info(
             f"resolved backup TTL {ttl} from {ttl_source} scope "

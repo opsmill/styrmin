@@ -76,6 +76,9 @@ async def _run_backup_workflow(
     deployment_read_error: Exception | None = None,
     environment_read_error: Exception | None = None,
     cluster_read_error: Exception | None = None,
+    deployment_missing: bool = False,
+    environment_missing: bool = False,
+    cluster_missing: bool = False,
     backup_storage_location_name: str | None = None,
     velero_phase: str = "Completed",
     velero_expiration: str | None = VELERO_EXPIRATION,
@@ -92,6 +95,11 @@ async def _run_backup_workflow(
             *partial* read that already yielded the deployment scope.
         cluster_read_error: Raised by the cluster lookup, the read the feature
             added to the pre-existing best-effort block.
+        deployment_missing: The deployment lookup returns ``None`` — a row that
+            is simply not there, which raises nothing. Distinct from
+            ``deployment_read_error`` and the case the flow used to swallow.
+        environment_missing: The environment lookup returns ``None``.
+        cluster_missing: The cluster lookup returns ``None``.
         backup_storage_location_name: Name of the environment's assigned BSL,
             or None for "no BSL assigned".
         velero_phase: ``status.phase`` the USER flow reports back.
@@ -128,12 +136,17 @@ async def _run_backup_workflow(
 
     uow = MagicMock()
     uow.deployments.find = AsyncMock(
-        return_value=deployment, side_effect=deployment_read_error
+        return_value=None if deployment_missing else deployment,
+        side_effect=deployment_read_error,
     )
     uow.environments.get = AsyncMock(
-        return_value=environment, side_effect=environment_read_error
+        return_value=None if environment_missing else environment,
+        side_effect=environment_read_error,
     )
-    uow.clusters.get = AsyncMock(return_value=cluster, side_effect=cluster_read_error)
+    uow.clusters.get = AsyncMock(
+        return_value=None if cluster_missing else cluster,
+        side_effect=cluster_read_error,
+    )
 
     def _record_status(**kwargs: Any) -> None:
         run.status_calls.append(kwargs)
@@ -390,3 +403,96 @@ async def test_cluster_read_failure_keeps_the_environment_bsl() -> None:
     # The environment scope was read before the failure, so retention still
     # comes from it rather than the built-in default.
     assert run.velero_kwargs["ttl"] == "2160h"
+
+
+# ---------------------------------------------------------------------------
+# A missing row is not an exception — and must not read as "no policy set"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("missing", "scopes", "expected_ttl", "expected_source"),
+    [
+        pytest.param(
+            {"deployment_missing": True},
+            {"environment_config": {"backup_ttl": "2160h"}},
+            DEFAULT_BACKUP_TTL,
+            "default",
+            id="deployment-row-gone",
+        ),
+        pytest.param(
+            {"environment_missing": True},
+            {
+                "deployment_config": {"backup_ttl": "8760h"},
+                "environment_config": {"backup_ttl": "2160h"},
+            },
+            "8760h",
+            "deployment",
+            id="environment-row-gone",
+        ),
+        pytest.param(
+            {"cluster_missing": True},
+            {
+                "environment_config": {"backup_ttl": "2160h"},
+                "cluster_config": {"backup_ttl": "720h"},
+            },
+            "2160h",
+            "environment",
+            id="cluster-row-gone",
+        ),
+    ],
+)
+async def test_a_missing_row_warns_and_names_the_lookup(
+    missing: dict[str, Any],
+    scopes: dict[str, Any],
+    expected_ttl: str,
+    expected_source: str,
+) -> None:
+    """An empty lookup raises nothing, so it needs its own signal.
+
+    All three lookups are guarded by a truthiness check, so a deleted row leaves
+    ``config_read_failed`` False, every scope None, and only the routine INFO
+    line — which reads exactly like a deployment that never set a policy. The
+    concrete case: a deployment row deleted between backup-record creation and
+    workflow start silently discards the environment's configured retention.
+
+    Each lookup reaches the next one through its own result, so the warning has
+    to name *which* lookup came back empty for the operator to know how much of
+    the chain was invisible.
+    """
+    scope_name = next(iter(missing)).removesuffix("_missing")
+    run = await _run_backup_workflow(**missing, **scopes)
+
+    warnings = run.warnings()
+    assert scope_name in warnings, warnings
+    assert str(run.backup_id) in warnings, warnings
+    assert "backup_ttl" in warnings, warnings
+
+    # Not fatal: the backup still runs, with whatever retention was readable.
+    assert run.velero_kwargs is not None
+    assert run.velero_kwargs["ttl"] == expected_ttl
+    assert {
+        "ttl": expected_ttl,
+        "ttl_source": expected_source,
+    } in run.metadata_writes()
+
+
+@pytest.mark.anyio
+async def test_a_genuinely_unconfigured_deployment_does_not_warn() -> None:
+    """The other half of "distinguishable": no policy anywhere is not a problem.
+
+    Every row is present and none carries ``backup_ttl``, so the built-in
+    default is the correct, expected outcome. Warning here would fire on every
+    backup of every deployment that never set a retention policy — which is
+    most of them — and drown the signal the test above depends on.
+    """
+    run = await _run_backup_workflow()
+
+    assert run.velero_kwargs is not None
+    assert run.velero_kwargs["ttl"] == DEFAULT_BACKUP_TTL
+    assert {
+        "ttl": DEFAULT_BACKUP_TTL,
+        "ttl_source": "default",
+    } in run.metadata_writes()
+    assert run.logger.warning.call_args_list == [], run.warnings()
