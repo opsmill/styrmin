@@ -398,43 +398,101 @@ describe("config-diff: diff()", () => {
     ]);
   });
 
-  it("worst-case 50 components x 50 fields completes in under 5ms", () => {
-    const before: UpdateDeploymentInput = {
-      components: Array.from(
-        { length: 50 },
-        (_, i): ComponentConfigInput => ({
-          name: `c${i}`,
-          envVars: Array.from({ length: 50 }, (__, j) => ({
-            name: `E${j}`,
-            value: `v${j}`,
-          })),
+  /**
+   * Build a `components` block whose env-var entries count how many times
+   * `diff()` reads them.
+   *
+   * The count is the complexity probe: `diffComponents`/`diffEnvVars` key
+   * their lookups by name, so each entry is visited a fixed number of times
+   * regardless of input size. A regression to a nested scan — the O(n²) shape
+   * this guard exists to catch — would read each entry once per sibling, and
+   * the count would grow with the square of the input.
+   */
+  function countingComponents(
+    componentCount: number,
+    envVarCount: number,
+    counter: { reads: number },
+    mutate: boolean,
+  ): ComponentConfigInput[] {
+    return Array.from(
+      { length: componentCount },
+      (_, i): ComponentConfigInput => ({
+        name: `c${i}`,
+        envVars: Array.from({ length: envVarCount }, (__, j): EnvVarInput => {
+          // Mutate roughly 10% of values so the diff actually does work.
+          const resolved = mutate && j % 10 === 0 ? `mutated-${j}` : `v${j}`;
+          return {
+            // Both fields are counted. `name` is the important one: a nested
+            // `find`-per-key scan reads it once per sibling, so it is where a
+            // quadratic regression shows up, whereas `value` would still be
+            // read only once per entry.
+            get name() {
+              counter.reads += 1;
+              return `E${j}`;
+            },
+            get value() {
+              counter.reads += 1;
+              return resolved;
+            },
+          };
         }),
+      }),
+    );
+  }
+
+  /** Total env-var field reads `diff()` performs for a block of this size. */
+  function envVarReads(componentCount: number, envVarCount: number): number {
+    const counter = { reads: 0 };
+    const before: UpdateDeploymentInput = {
+      components: countingComponents(
+        componentCount,
+        envVarCount,
+        counter,
+        false,
       ),
     };
     const after: UpdateDeploymentInput = {
-      components: Array.from(
-        { length: 50 },
-        (_, i): ComponentConfigInput => ({
-          name: `c${i}`,
-          envVars: Array.from({ length: 50 }, (__, j) => ({
-            name: `E${j}`,
-            // mutate roughly 10% of values so the diff actually does work
-            value: j % 10 === 0 ? `mutated-${j}` : `v${j}`,
-          })),
-        }),
+      components: countingComponents(
+        componentCount,
+        envVarCount,
+        counter,
+        true,
       ),
     };
-
-    // Warm the engine to remove JIT cost from the measurement window.
     diff(before, after, emptySchema);
+    return counter.reads;
+  }
 
-    const start = performance.now();
-    const iterations = 5;
-    for (let i = 0; i < iterations; i += 1) {
-      diff(before, after, emptySchema);
-    }
-    const elapsedAverage = (performance.now() - start) / iterations;
+  // Replaces an `expect(elapsedAverage).toBeLessThan(5)` wall-clock assertion
+  // that flaked on loaded machines. The intent worth keeping was never "the
+  // diff takes under 5ms" — that measures the box, not the code — but "the
+  // diff stays linear in the number of entries". These two tests assert that
+  // directly and deterministically: no clock, no warm-up, no JIT sensitivity.
+  it("visits each env-var entry a bounded number of times", () => {
+    // 50 components x 50 env vars, the documented worst case.
+    const entries = 50 * 50;
+    const reads = envVarReads(50, 50);
 
-    expect(elapsedAverage).toBeLessThan(5);
+    // Both sides are walked and both fields read, so a linear implementation
+    // lands at ~4 reads per entry. The ceiling is deliberately loose: it
+    // tolerates a refactor that reads an entry a few extra times, while a
+    // nested scan over 50 siblings cannot fit under it.
+    expect(reads).toBeGreaterThan(0);
+    expect(reads).toBeLessThanOrEqual(entries * 12);
+  });
+
+  it("scales linearly, not quadratically, as the input doubles", () => {
+    // Double the number of entries *within* each keyed list, holding the
+    // component count fixed. That is the dimension the keyed lookup protects:
+    // a nested scan compares every entry against every sibling, so its work
+    // grows with the square of the list length. Doubling the component count
+    // instead would not expose it — each component's list would stay 50 long.
+    const single = envVarReads(50, 25);
+    const double = envVarReads(50, 50);
+
+    const ratio = double / single;
+    // Linear ≈ 2.0, quadratic ≈ 4.0. A 3.0 ceiling separates them with room
+    // to spare and, being a pure operation count, cannot drift under load.
+    expect(ratio).toBeLessThan(3);
   });
 });
