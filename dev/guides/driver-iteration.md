@@ -138,13 +138,22 @@ Application driver version '1.0.0@e9f0a1b' loaded (id: 2)
 
 ## Migration / backfill
 
-Styrmin is not yet deployed in production. The two fingerprint columns
-were added as nullable via the existing `metadata.create_all()` startup
-flow — no Alembic migration was written. Legacy rows in pre-013 dev
-databases keep `content_hash = NULL` / `source_commit_sha = NULL` and
-fall through to the legacy label (bare `version`); reloading any such
-driver produces a new row with the fingerprint populated. Operators who
-want clean labels everywhere should reload each driver once.
+Both fingerprint columns are nullable, so no backfill is required.
+
+The schema is versioned with **Alembic** — every model change ships a
+revision in `backend/styrmin_backend/db/migrations/versions/`, applied
+via `styrmin db migrate` (see
+[ADR-001](../adr/0001-alembic-database-migrations.md) and
+[`dev/guides/database-migrations.md`](database-migrations.md)).
+`metadata.create_all()` only builds a *fresh* database at startup and in
+test fixtures; it never evolves an existing one, so a green test suite is
+not evidence that a revision is unnecessary.
+
+Legacy rows in pre-013 dev databases keep `content_hash = NULL` /
+`source_commit_sha = NULL` and fall through to the legacy label (bare
+`version`); reloading any such driver produces a new row with the
+fingerprint populated. Operators who want clean labels everywhere should
+reload each driver once.
 
 ## Related work
 
