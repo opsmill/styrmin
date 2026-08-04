@@ -188,6 +188,76 @@ except StyrminError as e:
     raise SystemExit(1) from e
 ```
 
+<!-- Extracted from specs/011-styrminctl-auth on 2026-08-04 -->
+
+### One line, never a traceback
+
+Every error a user can provoke renders as **a single line on stderr plus a
+non-zero exit**. A traceback reaching a user is a bug.
+
+- Own the wording in the command module or the top-level boundary — not in the
+  layer that raised. `whoami` formats the `TokenSource`; the resolver returns the
+  enum. `TokenStore` raises with the file path in the message; it does not print.
+- Errors that can surface from *any* command belong in the top-level boundary in
+  `cli.py`, not repeated in each command. `_AuthBoundaryApp` catches
+  `StyrminAuthenticationError`, `TokenStoreError`, and
+  `AsymmetricEnvCredentialsError`, prints `str(exc)`, and raises `SystemExit(1)`.
+  Adding a command inherits that for free.
+- Name the actionable thing. A missing credential says
+  ``Not logged in. Run `styrminctl login` or set STYRMIN_TOKEN.``; a store problem
+  names the file path; an asymmetric env-var pair names the *missing* variable.
+
+### CLI-local errors are not service-layer errors
+
+Define CLI control-flow errors in `cli/src/styrminctl/errors.py` as plain
+`Exception` subclasses. Constitution §IV's typed-error rule is about the backend
+service layer — "the token file is corrupt" or "you set `STYRMIN_USERNAME` without
+`STYRMIN_PASSWORD`" are not service concerns and must not be modelled as
+`ServiceError`s or given backend-style error codes.
+
+Do **not** invent new exception types to carry information an existing typed error
+already carries. `styrminctl`'s telemetry buckets failures by exception **type**
+using the SDK hierarchy plus `styrminctl.errors` as-is; adding classes for
+categorisation would be a governance gate for no benefit.
+
+## CLI-local persisted state
+
+Both the token store and the telemetry store follow one contract. Copy it for any
+new file the CLI writes; do not invent a second scheme.
+
+- **Path**: `${XDG_DATA_HOME:-$HOME/.local/share}/styrminctl/<name>`. Never
+  `~/.styrminctl`, never next to the config.
+- **Permissions**: file `0600`, parent directory `0700`, **reasserted on every
+  save** (chmod after open). A save that cannot reassert them fails rather than
+  proceeding — a credential file that silently became world-readable is worse than
+  a failed write.
+- **Atomic writes**: serialise → write a temp file in the *same directory* with the
+  target mode → `os.rename()` over the target. `os.rename()` is atomic on POSIX, so
+  a reader sees the old or the new content, never a partial file. Include pid +
+  random in the temp name so two concurrent writers do not collide on it.
+
+  ```python
+  tmp = path.with_suffix(f".tmp.{os.getpid()}.{secrets.token_hex(4)}")
+  # open with O_CREAT|O_EXCL|O_WRONLY at 0o600, write, close, chmod
+  os.rename(tmp, path)
+  ```
+
+- **Version the shape**: store an integer `schema_version` and check it on load.
+  An unrecognised value is an error naming the file — never a best-effort guess at
+  the shape. One integer now beats shape-sniffing heuristics later.
+- **Missing file is not an error.** Absent means "empty" / "default", and the file
+  is created on first write. Emptying a store rewrites it with an empty collection
+  rather than unlinking it.
+- **Corrupt content raises**, naming the path, so the user can inspect or delete
+  it. Do not silently reset a file the user may want to look at.
+- **Degrade, do not crash, when the directory is unwritable** — but only where the
+  data is genuinely optional. The telemetry store falls back to an ephemeral
+  in-memory `install_id`; the token store raises, because silently not saving a
+  token the user just obtained would be a lie.
+
+See [ADR-051](../adr/0051-styrminctl-credential-resolution-and-token-store.md) and
+[`dev/knowledge/cli/overview.md`](../knowledge/cli/overview.md).
+
 ## Key Files
 
 | File | Purpose |
@@ -196,4 +266,8 @@ except StyrminError as e:
 | `cli/src/styrminctl/output.py` | Output formatting utilities |
 | `cli/src/styrminctl/cli_commands.py` | Root app and command group registration |
 | `cli/src/styrminctl/commands/*.py` | Command implementations |
+| `cli/src/styrminctl/cli.py` | Entry point; top-level error boundary + telemetry wrapper |
+| `cli/src/styrminctl/errors.py` | CLI-local exception types |
+| `cli/src/styrminctl/client.py` | `get_client()` — the single credential chokepoint |
+| `cli/src/styrminctl/auth/token_store.py` | Reference implementation of the persisted-state contract |
 | `cli/tests/test_types.py` | Validator unit tests |

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `009-deployments-apply`
 **Created**: 2026-05-08
-**Status**: Draft
+**Status**: Extracted
 **Input**: PRD from [opsmill/styrmin#194 (comment 4403612642)](https://github.com/opsmill/styrmin/issues/194#issuecomment-4403612642) — "Declarative Deployment Management via YAML Manifests"
 
 ## User Scenarios & Testing *(mandatory)*

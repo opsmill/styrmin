@@ -4,7 +4,7 @@
 
 **Created**: 2026-06-21
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: User description: "PRD: Infrahub MCP server Application Driver" (https://github.com/opsmill/styrmin/issues/271#issuecomment-4762259894)
 

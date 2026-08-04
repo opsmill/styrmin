@@ -2,7 +2,7 @@
 
 **Feature Branch**: `009-deployments-apply` (redesign lands on the existing branch before merge)
 **Created**: 2026-05-27
-**Status**: Draft
+**Status**: Extracted
 **Input**: User description: "Make `styrminctl deployments apply` idempotent without putting change-detection logic in the CLI. The CLI sends the full desired state every time; the backend decides whether anything actually changed and only then creates a new ApplicationInstance + dispatches a reconcile Task. A no-op update must not error and must not produce side effects." (full grilled brief in `.specify/idea-brief.md`)
 
 ## User Scenarios & Testing *(mandatory)*

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `012-driver-detail-tabs`
 **Created**: 2026-05-21
-**Status**: Draft
+**Status**: Extracted
 **Input**: User description: "Redesign the application driver detail page using a tabbed layout — left rail of driver versions + vertical divider + right pane with Overview / Parameters / Components / Actions / Source tabs. Replace raw JSON dumps with structured rendering."
 
 ## User Scenarios & Testing *(mandatory)*

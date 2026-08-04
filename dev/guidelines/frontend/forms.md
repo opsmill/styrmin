@@ -155,6 +155,49 @@ The canonical reference is `frontend/src/lib/deployment-input.test.ts`.
 
 - For forms inside dialogs, call `form.reset()` from the dialog's `onOpenChange` when transitioning to closed. This restores defaults and clears errors and matches the long-standing UX expectation that closing a dialog discards in-flight edits.
 
+<!-- Extracted from specs/011-unified-deployment-config on 2026-08-04 -->
+
+### Multi-section drawers: one form instance, per-section schemas
+
+For a drawer or wizard covering several config sections, use **one** `useForm`
+instance scoped to the container, with each section's Zod schema colocated
+alongside its section component.
+
+- **Do not create a form per section with a parent aggregator.** A single instance
+  is what makes "5 pending changes across 4 sections" computable from form state
+  alone, and it keeps one submit handler instead of N that can diverge.
+- Nested field arrays (env vars, tolerations, components) use
+  `<form.Field mode="array">` with **stable keys** — the entry's own identifier
+  (env-var name, component name), never the array index. Positional keys make a
+  reorder look like an edit everywhere downstream.
+- Snapshot the initial values at mount and keep that snapshot **frozen**. It is
+  both the diff baseline and the source of every "was X" annotation; mutating it
+  destroys the ability to tell edited from untouched.
+
+### Discard confirmation instead of autosave
+
+When a dirty multi-section form is closed (X, Escape, or backdrop), raise an
+`AlertDialog` — "Discard pending changes?", with *Keep editing* as the default and
+*Discard* as the explicit action. Close immediately when clean.
+
+- **Do not autosave drafts to `sessionStorage` / `localStorage`.** A synchronous
+  editing surface is not an email compose window; a draft resurrected on next open
+  surprises operators more often than it saves them.
+- **Do not use `beforeunload`.** It fires unreliably on tab close and conflates
+  closing the drawer with closing the browser.
+
+### Beware the unset-array normalisation
+
+TanStack Form normalises an unset array in `defaultValues` (`undefined`) into `[]`
+in `state.values` on first render. Any logic comparing current form state against a
+frozen baseline — dirty detection, conflict merging, diffing — must tolerate
+`undefined ↔ []` or it will report untouched array fields as edited.
+
+Scope that tolerance to the comparison that needs it (see
+`configuration/conflictMerge.ts`) and do **not** promote it to a general equality
+helper: an operator clearing a list from `["FOO"]` to `[]` is a real edit that must
+still register.
+
 ### Tests
 
 - New form components should ship with at least one happy-path test using `customRender` from `src/test/utils.tsx`. The previous codebase had no form-level tests; that is a debt to close, not a precedent to copy.

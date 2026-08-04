@@ -125,7 +125,7 @@ The enum value on `Deployment.status`: `PENDING`, `DEPLOYING`, `RUNNING`, `RESTO
 _Avoid_: "deployment status" (use this for the _record_ `DeploymentStatus`, not the state value), "phase" (that is the operator's `.status.phase`).
 
 **Declarative deployment manifest**:
-A YAML document with `apiVersion: styrmin/v1` and `kind: Deployment` that describes the desired state of one **deployment** (`metadata.name`, `spec.driver`, `spec.version`, `spec.environment`, optional `spec.cluster`, `spec.config`, `spec.parameters`). The input format for **declarative apply**. A single file may contain multiple manifests separated by `---`. `config` and `parameters` are fully replaced on update, not deep-merged. Full schema in `specs/009-deployments-apply/contracts/manifest-schema.md`.
+A YAML document with `apiVersion: styrmin/v1` and `kind: Deployment` that describes the desired state of one **deployment** (`metadata.name`, `spec.driver`, `spec.version`, `spec.environment`, optional `spec.cluster`, `spec.config`, `spec.parameters`). The input format for **declarative apply**. A single file may contain multiple manifests separated by `---`. `config` and `parameters` are fully replaced on update, not deep-merged. Full schema in `specs/archive/009-deployments-apply/contracts/manifest-schema.md`; the format's design decisions are recorded in [ADR-049](dev/adr/0049-styrmin-v1-manifest-contract.md).
 _Avoid_: "deployment spec" (overloaded — `Deployment.spec` also refers to the cluster-side CR), "k8s manifest" (these are not Kubernetes objects), "yaml file".
 
 **Declarative apply**:

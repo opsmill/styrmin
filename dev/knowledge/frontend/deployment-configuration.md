@@ -1,0 +1,205 @@
+<!-- Extracted from specs/011-unified-deployment-config on 2026-08-04 -->
+
+## Deployment Configuration Surface
+
+### Overview
+
+Deployment configuration is read and edited through one surface: a **Configuration
+tab** of read-only summary cards on the deployment detail page, and a right-side
+**edit drawer** covering all eight config sections. This replaced a
+scheduling-only modal, a raw JSON dump, and per-field edit affordances scattered
+across the page.
+
+Everything here is client-side. There is no GraphQL schema change, no new query,
+and no backend involvement beyond the existing `updateDeployment` mutation — which
+has **full-replacement** semantics, so the UI is responsible for showing the
+operator what a submit will change before it fires.
+
+Design rationale and rejected alternatives:
+[ADR-052](../../adr/0052-client-side-config-diff-impact-and-conflict-detection.md).
+
+### File layout
+
+```text
+frontend/src/components/deployment/configuration/
+├── ConfigurationTab.tsx        # read view: summary cards + Edit entry point
+├── ConfigSummaryCard.tsx       # one card per section, with inheritance badge
+├── ConfigEditDrawer.tsx        # the drawer: form instance, section nav, footer
+├── SectionNav.tsx              # nav rail with per-section change dots
+├── DrawerFooter.tsx            # pending-change count + Review & apply
+├── ConfigDiffDialog.tsx        # diff + impact + conflict panel + Apply
+├── DiffEntryRow.tsx            # one rendered DiffEntry
+├── ImpactList.tsx              # rendered ImpactSummary
+├── ChangedFieldFrame.tsx       # per-field "changed, was X" affordance
+├── InheritanceBadge.tsx        # inherited / overridden badge
+├── ParameterField.tsx          # shared driver-parameter renderer (also used by create)
+├── conflictMerge.ts            # scoped equality helper for the reload-merge path
+├── DeploymentContextDialog.tsx # resolved-context viewer
+└── sections/
+    ├── edit/                   # one editor per section (+ scheduling/ subtree)
+    └── read/                   # one summary per section
+
+frontend/src/lib/
+├── configuration-types.ts      # SectionId, ConfigurationDraft, DiffEntry, ImpactRule, …
+├── config-diff.ts              # structural diff → ConfigurationDiff
+├── impact-rules.ts             # the declarative rule table
+├── config-impact.ts            # rule evaluation → ImpactSummary
+├── config-inheritance.ts       # per-section inherited / overridden state
+├── effective-config.ts         # merged view of environment + deployment values
+└── deployment-input.ts         # persisted config ↔ UpdateDeploymentInput transform (ADR-015)
+```
+
+### The eight sections
+
+`SectionId` is the single attribution key used by the diff, the impact rules, the
+nav rail, and the summary cards:
+
+`identity` · `driverParameters` · `scheduling` · `networking` · `envVars` ·
+`storageRuntime` · `serviceOverrides` · `componentOverrides`
+
+`SECTION_ORDER` in `configuration-types.ts` fixes nav order and the order of
+`sectionsChanged`. The read view renders seven cards — Identity's non-editable
+parts (driver, application version) live in the page header.
+
+### Draft lifecycle
+
+The drawer's working state is a `ConfigurationDraft`:
+
+```ts
+interface ConfigurationDraft {
+  initial: UpdateDeploymentInput;      // frozen snapshot at mount; never mutated
+  current: UpdateDeploymentInput;      // what TanStack Form binds to
+  driverSchema: DriverParameterSchema; // ParameterDefinition[] from the pinned driver version
+}
+```
+
+`initial` comes from `deploymentConfigToInput(deployment.config)` — the same
+submit-boundary transform documented in
+[ADR-015](../../adr/0015-frontend-value-transform-boundary.md). `initial` is both
+the diff baseline and the source of every "was X" annotation.
+
+**One TanStack Form instance for the whole drawer**, not one per section. That is
+what lets the footer compute "N pending changes across M sections" without a
+parent aggregator, and it keeps a single submit handler. Zod validators are
+colocated per section. See
+[`dev/guidelines/frontend/forms.md`](../../guidelines/frontend/forms.md).
+
+```text
+closed → open (idle) → open (dirty) → reviewing → applying → applied → closed
+                            ↑              ↓
+                            └── Back to edit
+         open (dirty) + close attempt → confirming-discard → closed | open (dirty)
+```
+
+Closing while dirty raises an `AlertDialog` ("Discard pending changes?", default
+Keep editing). There is no `sessionStorage` autosave — the drawer is a synchronous
+workflow, and a resurrected draft on next open would surprise more than it saves.
+
+### Diff → impact → apply
+
+`config-diff.ts` walks `initial` against `current` once and returns:
+
+```ts
+interface ConfigurationDiff {
+  entries: DiffEntry[];          // { section, path, label, before, after, kind }
+  sectionsChanged: SectionId[];  // unique, in SECTION_ORDER
+  hasChanges: boolean;
+}
+```
+
+Paths are dotted, with **array entries keyed by stable identifier, never by
+position**: `envVars[LOG_LEVEL]`, `tolerations[1].effect`,
+`components[rate-limiter].resources.cpu.limit`, `scheduling.resources.cpu.request`.
+Reordering env vars is therefore not a change — the property a generic diff
+library cannot provide.
+
+`impact-rules.ts` is an array of `{matcher, consequence, severity}`. Matchers glob
+over the dotted path (`*` = one segment, `**` = many) with an optional `value:X`
+qualifier for value-sensitive rules, e.g.
+`scheduling.tolerations[*].effect value:NO_EXECUTE`. `config-impact.ts` evaluates
+them into an `ImpactSummary` with deduplicated consequences and a `topSeverity`;
+`topSeverity === "high"` flips the dialog into its disruptive treatment.
+
+> **The rules are advisory and deliberately approximate.** They encode what we
+> believe restarts pods and nothing verifies them against real behaviour. They
+> style the dialog; they never gate or alter the mutation. **Adding a config field
+> means updating `config-diff.ts` and — if the field can disrupt pods — the rule
+> table**, or the field will change with no diff entry and no impact line.
+> `config-impact.ts` is shaped so a future backend `previewUpdateDeployment` query
+> can replace rule evaluation without changing the `ImpactSummary` consumers see.
+
+Payload construction respects the `parameters` asymmetry from
+[ADR-018](../../adr/0018-typed-update-deployment-input.md): full-replacement fields
+always submit their complete current list, while `parameters` merges server-side so
+only changed parameters are included. **The diff is display-only — it is never used
+to assemble a partial payload.**
+
+### Inheritance state
+
+`config-inheritance.ts` compares the deployment's config against
+`deployment.environment.config` (already selected by the existing `get_deployment`
+query) and returns per-section:
+
+```ts
+type InheritanceState =
+  | { kind: 'inherited' }
+  | { kind: 'overridden'; overrideCount: number };
+```
+
+A section is *overridden* when at least one field differs from the environment's
+value, or is set where the environment has none. Two special cases: **Driver
+Parameters** has no environment equivalent, so it compares against the driver's
+declared defaults; **Component Overrides** is inherited exactly when no
+per-component block exists.
+
+This drives the `InheritanceBadge` on each card and the drawer's "from X (env)"
+per-field annotations.
+
+### Concurrent edits
+
+The drawer is a long-lived surface over a mutable row, so Apply re-checks before
+mutating. `ConfigDiffDialog`:
+
+1. Re-fetches `GetDeployment` in the foreground.
+2. Hashes `{name, parameters, config}` on the refreshed row and compares against
+   the same hash captured at drawer-open time.
+3. **Unchanged** → dispatch `updateDeployment`, then invalidate `GetDeployment`.
+4. **Changed** → render `ConflictPanel`; the mutation does not proceed.
+
+Reload hands the refreshed deployment back to `ConfigEditDrawer`, which **swaps its
+baseline to the new persisted state while keeping the operator's pending edits**.
+The draft is never discarded — only what it is measured against moves. There is no
+"overwrite anyway" affordance.
+
+Two caveats:
+
+- **The window is narrow, not closed.** A write landing between the re-fetch and
+  the mutation still wins silently. Closing it needs the deferred server-side
+  path — expose the existing `Deployment.updated_on` column and return a typed
+  `STALE_DEPLOYMENT_WRITE` error. That change can land without touching dialog
+  code, because the same `ConflictPanel` path is driven by a typed error as
+  readily as by a hash mismatch.
+- **`conflictMerge.ts` exists for one normalisation quirk.** TanStack Form turns an
+  unset array `defaultValues` into `[]` on first render, which would diverge from
+  an `undefined` baseline and make the reload-merge treat an untouched field as
+  edited. The helper tolerates exactly that `undefined ↔ []` case and is **not** a
+  general equality helper — an operator clearing a list to `[]` is a real edit.
+
+### Env-var values are plaintext
+
+Env-var values render in plaintext in both the summary card and the drawer,
+matching what `View JSON`, the SDK, and the Kubernetes ConfigMap already expose.
+The surface introduces no new exposure but does make the values more discoverable.
+Masking behind a Reveal toggle was rejected: it would imply the UI is the trust
+boundary when the GraphQL response carries the plaintext anyway. `EnvVar.value` is
+documented as not being for secret material; a real secrets facility is a separate
+workstream.
+
+### Testing
+
+Section editors carry Vitest component tests alongside them. Behavioural coverage
+is `[ui-chromium]`-only E2E under `backend/tests/e2e/configuration/`, marked
+`@pytest.mark.ui_only` — the SDK could call `updateDeployment` directly, so an
+`[api-chromium]` variant would exercise none of this surface. Each test seeds a
+deployment, opens the tab, edits a section, verifies the diff entries, applies,
+and asserts the persisted config (and, where relevant, that pods restarted).

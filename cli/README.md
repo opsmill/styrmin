@@ -128,7 +128,8 @@ uv run styrminctl deployments list
 
 When more than one credential source is present, the CLI resolves them in
 this fixed order — highest rung wins (see
-[`specs/011-styrminctl-auth/contracts/credential-precedence.md`](../specs/011-styrminctl-auth/contracts/credential-precedence.md)
+[`specs/archive/011-styrminctl-auth/contracts/credential-precedence.md`](../specs/archive/011-styrminctl-auth/contracts/credential-precedence.md)
+and [ADR-051](../dev/adr/0051-styrminctl-credential-resolution-and-token-store.md)
 for the authoritative version):
 
 | Rung | Condition | Action | Source label |

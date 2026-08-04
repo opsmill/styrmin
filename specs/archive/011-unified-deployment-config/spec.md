@@ -2,7 +2,7 @@
 
 **Feature Branch**: `011-unified-deployment-config`
 **Created**: 2026-05-16
-**Status**: Draft
+**Status**: Extracted
 **Input**: User description: "Unified deployment configuration surface — Configuration tab + Edit drawer. Show every config knob applied to a deployment on the detail page, and let operators edit any subset of them through a single drawer ending in diff + impact review."
 
 ## User Scenarios & Testing *(mandatory)*

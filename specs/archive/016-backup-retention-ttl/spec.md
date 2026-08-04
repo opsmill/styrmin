@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-03
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: User description: "PRD: Configurable backup retention TTL — an optional `backup_ttl` config field at cluster/environment/deployment scopes (deepest wins, default 720h), validation of Go-duration h/m/s syntax with typed errors, recording applied TTL + Velero expiration on the backup record, GraphQL `Backup.ttl`/`expiresAt` fields, typed environment-update and deployment-config inputs carrying `backup_ttl`, web UI expiry column, and `styrminctl backups list` Expires column." (Full PRD sourced from a grilled idea-brief session on issue #305.)
 

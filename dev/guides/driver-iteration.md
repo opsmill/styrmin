@@ -1,6 +1,7 @@
 # Driver iteration — the no-bump loop
 
-**Status**: shipped in feature 013 (`specs/013-driver-fingerprint/spec.md`).
+**Status**: shipped in feature 013 (`specs/archive/013-driver-fingerprint/spec.md`).
+Design rationale: [ADR-053](../adr/0053-driver-version-provenance-fingerprint.md).
 
 Iterating on an application driver no longer requires bumping the
 `spec.version` field in `driver.styrmin.yml`. Reload the driver as often
@@ -157,7 +158,8 @@ reload each driver once.
 
 ## Related work
 
-- Spec: [`specs/013-driver-fingerprint/spec.md`](../../specs/013-driver-fingerprint/spec.md)
+- ADR: [`0053-driver-version-provenance-fingerprint.md`](../adr/0053-driver-version-provenance-fingerprint.md)
+- Spec: [`specs/archive/013-driver-fingerprint/spec.md`](../../specs/archive/013-driver-fingerprint/spec.md)
 - Issue: [opsmill/styrmin#262](https://github.com/opsmill/styrmin/issues/262)
 - Glossary: [`CONTEXT.md`](../../CONTEXT.md) — "Provenance fingerprint"
 - Future: `styrminctl drivers prune` (planned)

@@ -62,7 +62,7 @@ The full list, in the order they appear on `type Query` in `schema.graphql`:
 | `tasks` | — | `[Task!]!` |
 | `environments` | — | `[Environment!]!` |
 | `environment` | `environmentId?, environmentName?, clusterId?, clusterName?` | `Environment` |
-| `deployment` | `deploymentId` | `Deployment` |
+| `deployment` | `deploymentId?` **or** `(name?, environmentId?)` | `Deployment` (two argument shapes, never mixed — see below) |
 | `backup` | `backupId` | `Backup` |
 | `backups` | `instanceId, status?` | `[Backup!]!` |
 | `restore` | `restoreId` | `Restore` |
@@ -76,6 +76,39 @@ The full list, in the order they appear on `type Query` in `schema.graphql`:
 | `deploymentTimeline` | `deploymentId` | `[DeploymentTimelineEntry!]!` |
 | `podStatuses` | `deploymentId?, environmentId?, clusterId?` | `[PodStatus!]!` |
 | `ok` | — | `Boolean!` (health probe) |
+
+<!-- Extracted from specs/009-deployments-apply on 2026-08-04 -->
+
+### `deployment` — two argument shapes
+
+`deployment` accepts either a surrogate ID or the composite natural key, never
+both:
+
+```graphql
+deployment(deploymentId: UUID = null, name: String = null, environmentId: UUID = null): Deployment
+```
+
+- `deployment(deploymentId:)` — the original lookup.
+- `deployment(name:, environmentId:)` — natural-key lookup, added for declarative
+  apply's create-or-update decision. `(name, environment_id)` is already unique
+  per [ADR-011](../../adr/0011-scoped-tombstone-aware-name-uniqueness.md), so this
+  is one indexed read.
+
+All three arguments are nullable because Strawberry cannot express "exactly one
+of these argument groups". The resolver enforces it at **runtime**: exactly one
+of `(deploymentId)` or `(name AND environmentId)` must be supplied, else a
+`ServiceError` naming both valid shapes. Passing `name` without `environmentId`
+type-checks and fails at execution.
+
+Both shapes return `null` on not-found rather than raising, and both apply the
+same `internal=True` guard — a lookup landing on a platform-internal deployment
+returns `null`. Resolution itself lives in
+`services/deployment.py::get_deployment_by_name`.
+
+See [ADR-050](../../adr/0050-composite-natural-key-deployment-lookup.md) for why this
+departs from the [ADR-031](../../adr/0031-dual-identifier-resolution-service-layer.md)
+`<resource>Id` / `<resource>Name` pattern (a deployment's natural key is
+composite, so a bare `deploymentName` would not be resolvable).
 
 ## Mutations
 
@@ -96,7 +129,7 @@ Defined on `type Mutation`:
 | `loadLocalApplicationDriverVersion` | `path` | `ApplicationDriverVersion` (identity-aware per spec 013: same content → idempotent, new content → new row alongside existing) |
 | `loadRemoteApplicationDriverVersion` | `repositoryUrl, branch` | `ApplicationDriverVersion` (identity-aware: keyed on resolved git commit SHA) |
 | `deploy` | `driver, environmentId?, environmentName?, clusterId?, clusterName?, version?, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
-| `updateDeployment` | `deploymentId, input: UpdateDeploymentInput!` | `Task` |
+| `updateDeployment` | `deploymentId, input: UpdateDeploymentInput!` | `Task` — **`null` on a no-op** (see below) |
 | `deleteDeployment` | `deploymentId` | `Task!` (born-complete `DELETE_DEPLOYMENT` audit record; patches `spec.deletionRequested` on the CR — operator drives teardown asynchronously) |
 | `createBackup` | `instanceId, name?` | `Backup` |
 | `deleteBackup` | `backupId` | `String` |
@@ -108,9 +141,44 @@ Defined on `type Mutation`:
 | `stopComponents` | `deploymentId, components` | `Task` |
 | `startComponents` | `deploymentId, components` | `Task` |
 | `runJob` | `deploymentId, commands, env, image` | `Task` |
-| `updateDeploymentVersion` | `deploymentId, version, parameters?` | `Task` |
+| `updateDeploymentVersion` | `deploymentId, version, parameters?` | `Task` — **`null` on a no-op** (see below) |
 | `reportPodStatuses` | `reports: [DeploymentPodStatusReport!]!` | `ReportPodStatusesResponse!` (agent → server) |
 | `reportDeploymentStatuses` | `reports: [DeploymentStatusReportInput!]!` | `ReportDeploymentStatusesResponse!` (agent → server) |
+
+<!-- Extracted from specs/014-deployment-update-noop on 2026-08-04 -->
+
+### `null` Task means "no work needed", not "error"
+
+`updateDeployment` and `updateDeploymentVersion` return **`null` when the
+submitted state resolves to what is already deployed**. Both fields were always
+nullable, so this is a behaviour contract rather than a schema change — but it
+overloads `null`, which previously only appeared on error paths. **A client that
+treats a null task as failure is wrong.**
+
+The service regenerates a candidate instance and runs `Comparator.compare()`
+*before* persisting or dispatching anything. An empty diff means: zero
+`ApplicationInstance` rows, zero `Task` rows, no status transition, no timeline
+entry, no reconcile. Service signatures are `-> Task | None`.
+
+The comparison is against the **fully-resolved** instance, so a config payload
+that is byte-identical but whose inherited environment or cluster config moved is
+correctly detected as a change.
+
+Two consequences worth knowing:
+
+- Submitting no editable fields at all is a no-op returning `null`. The former
+  `InvalidContextError("At least one of config, parameters, name, or
+  serviceNameOverrides must be provided")` guard is gone. Validation of
+  *malformed* input still fires before instance generation.
+- `Comparator` excludes `status` from the diff, so **resubmitting the same config
+  will not retry a `FAILED` deployment** — it is a no-op. Recovery needs an
+  explicit redeploy path.
+
+Clients map the null to "unchanged": the SDK returns
+`ApplyOutcome(action="unchanged")`. See
+[ADR-054](../../adr/0054-backend-authoritative-noop-detection.md), and
+[reconciliation.md](reconciliation.md) for the guard's placement inside the
+two-UoW `update_deployment` flow.
 
 The agent callbacks (`callback`, `reportPodStatuses`, `reportDeploymentStatuses`) are documented in [`../agent/overview.md`](../agent/overview.md) and [`reconciliation.md`](reconciliation.md).
 

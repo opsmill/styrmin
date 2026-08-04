@@ -140,8 +140,9 @@ async with StyrminClient(server_address="...") as client:
     )
 ```
 
-See [`specs/009-deployments-apply/contracts/sdk-apply.md`](../specs/009-deployments-apply/contracts/sdk-apply.md)
-for the full contract.
+See [`specs/archive/009-deployments-apply/contracts/sdk-apply.md`](../specs/archive/009-deployments-apply/contracts/sdk-apply.md)
+for the full contract, and [ADR-048](../dev/adr/0048-declarative-apply-client-side-orchestration.md)
+for why the upsert lives in the SDK.
 
 ## Always Do / Ask First / Never Do
 
