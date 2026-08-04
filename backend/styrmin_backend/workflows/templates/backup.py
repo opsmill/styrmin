@@ -47,6 +47,7 @@ from styrmin_backend.services.backup.ttl import (
     DEFAULT_BACKUP_TTL,
     resolve_backup_ttl,
 )
+from styrmin_backend.services.exceptions import BackupNotFoundError
 from styrmin_backend.services.unit_of_work import get_unit_of_work
 
 
@@ -458,6 +459,17 @@ async def execute_backup_workflow(
 
         # Record the applied retention + its provenance before the Velero
         # object is built, so the audit trail survives a later failure.
+        #
+        # A second round-trip rather than metadata carried on the IN_PROGRESS
+        # write above, deliberately: ``has_in_progress_backup`` — the guard that
+        # stops a second concurrent backup of the same instance — matches only
+        # ``IN_PROGRESS``, not ``PENDING``. Hoisting the config read above that
+        # first write would leave the record PENDING for the duration of three
+        # DB reads that this flow explicitly anticipates can hang (pool timeout,
+        # connection reset), and a ``createBackup`` arriving in that window
+        # would be accepted. The failure hazard the second write used to carry —
+        # a record deleted between the two calls raising inside the ``except``
+        # handler, which itself writes status — is fixed in the handler instead.
         uow = await get_unit_of_work()
         await update_backup_status(
             backup_id=backup_uuid,
@@ -588,12 +600,25 @@ async def execute_backup_workflow(
     except Exception as e:
         logger.error(f"Backup {backup_uuid} failed: {e}")
         uow = await get_unit_of_work()
-        await update_backup_status(
-            backup_id=backup_uuid,
-            status=BackupStatus.FAILED,
-            uow=uow,
-            error_message=str(e),
-        )
+        try:
+            await update_backup_status(
+                backup_id=backup_uuid,
+                status=BackupStatus.FAILED,
+                uow=uow,
+                error_message=str(e),
+            )
+        except BackupNotFoundError:
+            # The record was deleted mid-flight, so every ``update_backup_status``
+            # in this flow raises — including the one right here, whose whole job
+            # is to report why the flow failed. Letting that surface would raise
+            # a bookkeeping error *from inside the handler*, replacing the real
+            # cause with "Backup <id> not found" and losing it. There is nothing
+            # left to mark FAILED, so record why and re-raise the original below.
+            logger.warning(
+                f"Backup {backup_uuid} could not be marked FAILED: the record no "
+                f"longer exists (deleted while the backup was running). "
+                f"Re-raising the original failure instead"
+            )
         raise
 
 
