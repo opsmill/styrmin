@@ -47,7 +47,10 @@ from styrmin_backend.services.backup.ttl import (
     DEFAULT_BACKUP_TTL,
     resolve_backup_ttl,
 )
-from styrmin_backend.services.exceptions import BackupNotFoundError
+from styrmin_backend.services.exceptions import (
+    BackupNotFoundError,
+    RestoreNotFoundError,
+)
 from styrmin_backend.services.unit_of_work import get_unit_of_work
 
 
@@ -781,12 +784,28 @@ async def execute_restore_workflow(
     except Exception as e:
         logger.error(f"Restore {restore_uuid} failed: {e}")
         uow = await get_unit_of_work()
-        await update_restore_status(
-            restore_id=restore_uuid,
-            status=RestoreStatus.FAILED,
-            uow=uow,
-            error_message=str(e),
-        )
+        try:
+            await update_restore_status(
+                restore_id=restore_uuid,
+                status=RestoreStatus.FAILED,
+                uow=uow,
+                error_message=str(e),
+            )
+        except RestoreNotFoundError:
+            # The record was deleted mid-flight, so every ``update_restore_status``
+            # in this flow raises — including the one right here, whose whole job
+            # is to report why the flow failed. Letting that surface would raise
+            # a bookkeeping error *from inside the handler*, replacing the real
+            # cause with "Restore <id> not found" and losing it. There is nothing
+            # left to mark FAILED, so record why and re-raise the original below.
+            # Swallowing it here also keeps the deployment write below reachable:
+            # the deployment outlives the restore record, and leaving it stuck in
+            # RESTORING would be a second, longer-lived symptom.
+            logger.warning(
+                f"Restore {restore_uuid} could not be marked FAILED: the record no "
+                f"longer exists (deleted while the restore was running). "
+                f"Re-raising the original failure instead"
+            )
         await _set_deployment_status_failed(
             deployment_id=UUID(deployment_id),
             uow=uow,
