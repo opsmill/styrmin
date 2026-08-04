@@ -20,12 +20,25 @@ When you modify models in `backend/styrmin_backend/db/models.py`:
 
 1. Make your model changes (add columns, modify types, add indexes, etc.)
 
-2. Generate a migration from the `backend/` directory:
+2. Generate a migration. There is **no `alembic.ini`** in this repo and
+   `styrmin db` exposes no autogenerate subcommand, so drive Alembic's
+   programmatic API with the same `Config` that
+   `backend/styrmin_backend/cli/db.py` builds:
 
    ```bash
-   cd backend
-   PYTHONPATH=. uv run --project /path/to/repo alembic revision --autogenerate -m "describe your change"
+   STYRMIN_DB_TYPE=postgres STYRMIN_DB_NAME=styrmin \
+   uv run python -c '
+   from alembic import command
+   from styrmin_backend import config
+   from styrmin_backend.cli.db import _get_alembic_config
+   config.SETTINGS.initialize()
+   command.revision(_get_alembic_config(), message="describe your change", autogenerate=True)
+   '
    ```
+
+   Autogenerate diffs `SQLModel.metadata` against a **live database already at
+   head**, so point `STYRMIN_DB_*` at one before running it. An empty diff means
+   no drift; a non-empty diff is the list of revisions you still owe.
 
 3. Review the generated file in `backend/styrmin_backend/db/migrations/versions/`
 
@@ -41,14 +54,18 @@ When you modify models in `backend/styrmin_backend/db/models.py`:
 
 If two parallel branches each landed a migration, the chain ends up with two
 heads sharing a parent. Adding a third migration that points at one of them
-leaves the other dangling — alembic detects this as multiple heads and the
-DB will silently apply only one chain.
+leaves the other dangling. A multi-head chain is not a soft problem: `styrmin db
+init` and `styrmin db migrate` both target `head` (singular) and fail outright
+with `Multiple head revisions are present for given argument 'head'`.
 
 To check the current state:
 
 ```bash
-cd backend
-uv run --project .. alembic --config styrmin_backend/db/migrations/alembic.ini heads
+uv run python -c '
+from alembic import command
+from styrmin_backend.cli.db import _get_alembic_config
+command.heads(_get_alembic_config(), verbose=True)
+'
 ```
 
 (Or grep `down_revision` across `backend/styrmin_backend/db/migrations/versions/*.py` to spot two files sharing the same parent — that's the head split.)
@@ -60,12 +77,27 @@ revision: str = "<your-rev>"
 down_revision: Union[str, Sequence[str], None] = ("<head_a>", "<head_b>")
 ```
 
-`b8c9d0e1f2a3_deployment_deletion.py` is a worked example: it merges the
-`a7b8c9d0e1f2` (`add_restoring_deploymentstate`) and `a7b8c9d0e1f3`
-(`add_component_name_to_pod_status`) heads while also adding new schema.
+`b8c9d0e1f2a3_deployment_deletion.py` and
+`a8b9c0d1e2f3_add_driver_fingerprint_and_container_overrides.py` are worked
+examples: each merges two heads while also adding new schema.
 
 Do **not** "resolve" by branching from one head and ignoring the other — the
 ignored migration's changes will not be applied on a fresh database.
+
+`styrmin db downgrade` hardcodes `-1`, which Alembic cannot resolve across a
+merge point (`CommandError: Ambiguous walk`). To un-apply a merge revision, name
+either parent explicitly — that un-applies only the merge and restores both
+heads:
+
+```bash
+uv run python -c '
+from alembic import command
+from styrmin_backend import config
+from styrmin_backend.cli.db import _get_alembic_config
+config.SETTINGS.initialize()
+command.downgrade(_get_alembic_config(), "<one_parent_revision>")
+'
+```
 
 ## Transitioning an Existing Database
 
@@ -79,7 +111,7 @@ This records the database as being at the latest migration version without re-ru
 
 ## Configuration
 
-Migrations use the same database configuration as the application via `STYRMIN_DB_*` environment variables. The `alembic.ini` file at `backend/` contains logging configuration but the database URL is set programmatically from application config.
+Migrations use the same database configuration as the application via `STYRMIN_DB_*` environment variables. There is no `alembic.ini`: `backend/styrmin_backend/cli/db.py` constructs the Alembic `Config` in code and sets only `script_location`, and `migrations/env.py` initializes the app settings and calls `get_database_url()`. Do not add an `alembic.ini` — nothing reads one.
 
 ## Architecture
 
