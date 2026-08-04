@@ -14,6 +14,7 @@ from styrmin_backend.db.models import (
     Restore,
     RestoreStatus,
 )
+from styrmin_backend.services.backup.metadata import BackupMetadata
 from styrmin_backend.services.backup.strategies.action import ActionBackupStrategy
 from styrmin_backend.services.backup.strategies.base import BackupStrategy
 from styrmin_backend.services.backup.strategies.disk import DiskSnapshotStrategy
@@ -86,7 +87,7 @@ async def create_backup(
                 hooks.extend(comp_hooks)
                 component_statuses[comp_name] = {"status": "pending", **comp_config}
 
-        metadata = {"timeout": timeout}
+        metadata: BackupMetadata = {"timeout": timeout}
 
         backup = Backup(
             name=name or "placeholder",
@@ -153,7 +154,7 @@ async def update_backup_status(
     error_message: str | None = None,
     size_bytes: int | None = None,
     component_statuses: dict | None = None,
-    metadata_updates: dict | None = None,
+    metadata_updates: BackupMetadata | None = None,
 ) -> Backup:
     """Update backup status after Velero operation completes.
 
@@ -166,7 +167,11 @@ async def update_backup_status(
         component_statuses: Replacement per-component status map.
         metadata_updates: Keys to merge into ``Backup.metadata_`` (e.g. the
             resolved retention ``ttl`` / ``ttl_source``, or ``expires_at``).
-            Merged, so pre-existing keys such as ``timeout`` survive.
+            Merged, so pre-existing keys such as ``timeout`` survive. Typed as
+            :class:`~styrmin_backend.services.backup.metadata.BackupMetadata`
+            rather than a bare ``dict`` so a key the readers do not look up —
+            Velero's own ``expiration`` spelling being the live hazard — fails
+            type checking here instead of persisting into a blob nothing reads.
     """
     async with uow:
         backup = await uow.backups.get(backup_id)

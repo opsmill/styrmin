@@ -33,6 +33,10 @@ from styrmin_backend.agent.service.kubernetes.velero.resources import (
     VeleroRestoreHook,
 )
 from styrmin_backend.db.models import BackupStatus, RestoreStatus
+from styrmin_backend.services.backup.metadata import (
+    BackupMetadata,
+    read_backup_metadata,
+)
 from styrmin_backend.services.backup.service import (
     get_backup,
     get_strategy,
@@ -463,7 +467,7 @@ async def execute_backup_workflow(
         # Determine timeout
         timeout = 3600
         if backup.metadata_ and isinstance(backup.metadata_, dict):
-            timeout = backup.metadata_.get("timeout", 3600)
+            timeout = read_backup_metadata(backup.metadata_).get("timeout", 3600)
 
         # Dispatch to USER flow (K8s Job with in-cluster access)
         flow_run = await arun_deployment(
@@ -509,8 +513,16 @@ async def execute_backup_workflow(
         # ``expires_at`` (GraphQL null → "—" in the UI and CLI). Recorded on
         # both branches: a PartiallyFailed backup is stored and does expire,
         # and this workflow folds it into the FAILED branch.
+        #
+        # The rename is deliberate and is why ``metadata_updates`` is typed:
+        # Velero spells this ``expiration`` (and so does the Prefect Variable
+        # payload above), the persisted key is ``expires_at``, and carrying the
+        # upstream spelling through here would leave ``Backup.expiresAt`` null
+        # forever. ``BackupMetadata`` turns that into a type error.
         expiration = status.get("expiration")
-        metadata_updates = {"expires_at": expiration} if expiration else None
+        metadata_updates: BackupMetadata | None = (
+            {"expires_at": expiration} if expiration else None
+        )
 
         uow = await get_unit_of_work()
         if velero_phase == "Completed":

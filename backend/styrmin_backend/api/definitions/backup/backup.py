@@ -12,6 +12,7 @@ from styrmin_backend.api.definitions.deployment.model import (
 from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.db.models import Backup as BackupModel
 from styrmin_backend.db.models import BackupStatus as BackupStatusDB
+from styrmin_backend.services.backup.metadata import read_backup_metadata
 from styrmin_backend.services.exceptions import InstanceNotFoundError
 
 BackupStatusType = strawberry.enum(BackupStatusDB, name="BackupStatus")
@@ -73,10 +74,14 @@ class Backup:
         )
     )
     def ttl(self) -> str | None:
-        metadata = self.db_model.metadata_
-        if not metadata:
+        # ``read_backup_metadata`` narrows the untyped JSON column to the
+        # writer's key contract, so the subscript below is the same key the
+        # backup workflow wrote — a misspelling here is a type error, not a
+        # field that silently reports null.
+        metadata = read_backup_metadata(self.db_model.metadata_)
+        if "ttl" not in metadata:
             return None
-        value = metadata.get("ttl")
+        value = metadata["ttl"]
         return str(value) if value is not None else None
 
     @strawberry.field(
@@ -90,10 +95,10 @@ class Backup:
         )
     )
     def expires_at(self) -> datetime | None:
-        metadata = self.db_model.metadata_
-        if not metadata:
+        metadata = read_backup_metadata(self.db_model.metadata_)
+        if "expires_at" not in metadata:
             return None
-        raw = metadata.get("expires_at")
+        raw = metadata["expires_at"]
         if raw is None:
             return None
         if not isinstance(raw, str):
