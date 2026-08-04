@@ -11,6 +11,23 @@ Conventions for adding and modifying routes with TanStack Router. See [knowledge
 - Use the `$paramId` syntax (e.g. `/environments/$environmentId`). `:paramId` is React Router and must not appear in new code.
 - Always go through `lazyRouteComponent(() => import("..."))` for page components. Do not introduce ad-hoc `React.lazy` + `<Suspense>` for page code-splitting; the router owns pending state.
 
+<!-- Extracted from specs/012-driver-detail-tabs on 2026-08-04 -->
+
+### In-page state stays out of the URL
+
+Detail-page tab selection and sub-selections (which driver version, which row is
+expanded) are **component-local `useState`**, not URL search params. Every detail
+page does it this way — `DeploymentDetailPage`, `DriverDetailPage` — and a new page
+must match.
+
+- **Do not add `validateSearch` + `useSearch` for tab state on one page.** URL
+  persistence is genuinely better (shareable and bookmarkable links, state that
+  survives a reload), but it is a **uniform** change across every detail page in one
+  spec, not something adopted page by page. One page behaving differently from its
+  siblings is worse than all of them lacking the feature.
+- Keep the state in the page component that owns both the tab strip and the panels,
+  so switching versions preserves the active tab and vice versa.
+
 ### Type Registration
 
 - The `declare module "@tanstack/react-router"` block in `src/router.ts` is **not optional**. Without it, `Link to=` and `useNavigate({ to })` accept arbitrary strings and lose type safety silently. If you split the router into multiple files, keep the augmentation in the file that exports the live `router` instance.

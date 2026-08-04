@@ -2,7 +2,7 @@
 
 **Feature Branch**: `013-driver-fingerprint`
 **Created**: 2026-05-25
-**Status**: Draft
+**Status**: Extracted
 **Source**: [`/.specify/idea-brief.md`](../../.specify/idea-brief.md), [opsmill/styrmin#262](https://github.com/opsmill/styrmin/issues/262)
 **Input**: User description: "Driver reload identity via content hash and git commit provenance fingerprint per issue #262"
 

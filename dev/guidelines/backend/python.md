@@ -114,6 +114,37 @@ Raise with exception chaining:
 raise InvalidContextError() from e
 ```
 
+<!-- Extracted from specs/016-backup-retention-ttl on 2026-08-04 -->
+
+### Never add new logic inside a swallow-and-proceed block
+
+When an existing block catches broadly and continues with a fallback —
+
+```python
+try:
+    bsl = await resolve_storage_location(...)
+except Exception as exc:                    # noqa: BLE001
+    logger.warning("BSL resolution failed: {}", exc)
+    bsl = None                              # proceed with the default
+```
+
+— **do not put a new resolution step inside it**, however convenient the already-loaded
+rows are. Its failure would be absorbed by a warning written about something else, and
+the new step's fallback would be applied invisibly. That is how a configured policy
+silently becomes a hard-coded default.
+
+Give the new work its own step with its own handling, so its fallback is logged as its
+own event, naming the value used and where it came from:
+
+```python
+ttl, ttl_source = resolve_backup_ttl(deployment.config, env.config, cluster.config)
+logger.info("Resolved backup TTL {ttl} from {scope} scope for backup {id}", ...)
+```
+
+The rule generalises: **a fallback is only acceptable when it is observable.** If code
+substitutes a default, the log line must say so and say why — otherwise the silent path
+is indistinguishable from the configured one during an incident.
+
 <!-- Extracted from specs/011-env-config-input-hardening on 2026-05-10 -->
 
 ### Validator entry-point type guards
@@ -253,6 +284,50 @@ Companion conventions for the surrounding code:
 - The migration that introduces the partial index SHOULD include a defensive pre-flight: refuse to apply if any pair of currently-active rows already collide on the index columns. This catches corrupt input before the index is created. See migration `c9d0e1f2a3b4_deployment_name_scoped_uniqueness` for the worked pattern.
 
 Worked example: `Deployment.name` (ADR-011). Rationale: ADR-008 (soft-delete tombstoning).
+
+<!-- Extracted from specs/016-backup-retention-ttl on 2026-08-04 -->
+
+### Plain `JSON` columns are not change-tracked — reassign, never mutate
+
+A `Field(sa_column=Column(JSON))` has **no `MutableDict` wrapper**, so SQLAlchemy
+does not observe in-place mutation of the dict or list it holds. `obj.col[k] = v`
+and `obj.col.update(...)` leave the attribute clean, and the change is **silently
+dropped at commit** — no error, no warning, no write.
+
+Always **reassign the attribute**, which is what marks it dirty:
+
+```python
+# Wrong — silently does not persist
+backup.metadata_["ttl"] = ttl
+
+# Right — reassignment marks the attribute dirty
+backup.metadata_ = {**(backup.metadata_ or {}), **metadata_updates}
+```
+
+Two details the worked example (`services/backup/service.py::update_backup_status`)
+gets right and that are easy to miss:
+
+- **Merge, do not replace.** The column is shared by more than one writer
+  (`Backup.metadata_` carries `timeout` from one path and `ttl` / `ttl_source` /
+  `expires_at` from another). Spreading the existing dict preserves keys you do not
+  own.
+- **Handle `None`.** Pre-existing rows have a null column, so `or {}` is required —
+  not defensive noise.
+
+Prefer a **typed** payload over a bare `dict` for the update keys (a `TypedDict` such
+as `BackupMetadata`) so a key no reader looks up — a differently-spelled variant of a
+field, say — fails type checking rather than persisting into a blob nothing reads.
+
+**Test through a DB round-trip, not the in-memory object.** A propagation test that
+asserts against the same instance it just mutated passes even when the write was
+dropped. Read back through a fresh session or `UnitOfWork` so a change-tracking
+regression actually fails:
+
+```python
+async with UnitOfWork() as uow:            # fresh session, not the writer's
+    reloaded = await uow.backups.get(backup_id)
+    assert reloaded.metadata_["ttl"] == "2160h"
+```
 
 ## Domain Models (Pydantic)
 

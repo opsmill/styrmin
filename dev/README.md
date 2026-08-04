@@ -15,11 +15,16 @@ Internal documentation for contributors. For user-facing docs, see `/docs/`.
 
 ## Directory Guide
 
-- **specs/**: Approved designs at repo root (`../specs/`). Living during development, then archived.
+- **specs/**: Approved designs at repo root (`../specs/`). Living during development, then extracted into `knowledge/` / `guidelines/` / `adr/` and moved to `../specs/archive/` with an `EXTRACTED.md` record.
 - **guidelines/**: Prescriptive rules. How code should be written.
   - `backend/` - Python backend standards
+  - `frontend/` - React/TypeScript standards
+  - `cyclopts.md` - CLI authoring standards
 - **knowledge/**: Descriptive reference. How the system works.
-  - `backend/` - Backend architecture and patterns
+  - `backend/` - Backend (server) architecture and patterns
+  - `agent/` - In-cluster agent and operator
+  - `frontend/` - Frontend architecture
+  - `cli/` - `styrminctl` internals
 - **guides/**: Step-by-step procedures for specific tasks.
 - **adr/**: Architecture Decision Records. Why we chose what we chose.
 - **prompts/**: Prompt templates for common thinking tasks. Currently empty.
@@ -90,6 +95,17 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [0041-release-workflow-orchestration.md](adr/0041-release-workflow-orchestration.md) - Release pipeline split into `release.yml` orchestrator + reusable child workflows (`docker-publish.yml`, `publish-helm-chart.yml`); static concurrency group with `cancel-in-progress: false` so an in-flight release is never killed mid-write
 - [0042-multiarch-via-native-runner-matrix.md](adr/0042-multiarch-via-native-runner-matrix.md) - Multi-arch Docker built on native runners (`ubuntu-24.04` + `ubuntu-24.04-arm64`) via a matrix + `imagetools` manifest merge, not QEMU emulation; per-arch pushes by digest only, manifest signed as one
 - [0043-docs-site-and-documentation-lifecycle.md](adr/0043-docs-site-and-documentation-lifecycle.md) - User-facing docs live in Docusaurus at `docs/`; `dev/knowledge/`, `dev/guides/`, `dev/adr/` stay contributor-internal; promotion from `dev/` to `docs/` is a deliberate authoring step, not automatic extraction
+- [0044-e2e-matrix-sharding.md](adr/0044-e2e-matrix-sharding.md) - E2E parallelism via CI matrix shards (one vCluster per shard, bare-name shard markers enforced at collection), not pytest-xdist
+- [0045-container-override-no-layering-and-omit-marker.md](adr/0045-container-override-no-layering-and-omit-marker.md) - Component-scope `command`/`args`: no layering, empty-list marker with a chart `{{- with }}` guard (the omit-marker broke clearing under merge-patch), per-field typed errors
+- [0046-tombstone-cleanup-of-deployed-services.md](adr/0046-tombstone-cleanup-of-deployed-services.md) - Delete `DeployedService` rows when a deployment is tombstoned so a redeploy does not collide on service name
+- [0047-styrminctl-anonymous-fire-and-forget-telemetry.md](adr/0047-styrminctl-anonymous-fire-and-forget-telemetry.md) - Anonymous opt-out CLI telemetry: closed key set scrubbed by construction, daemon-thread dispatch with a hard 200 ms cap, default-on but silent with CI/non-TTY exclusion
+- [0048-declarative-apply-client-side-orchestration.md](adr/0048-declarative-apply-client-side-orchestration.md) - Declarative apply is orchestrated client-side in the SDK over the existing `deploy`/`updateDeployment`/`updateDeploymentVersion` mutations; config before version, one re-lookup on a duplicate-name race
+- [0049-styrmin-v1-manifest-contract.md](adr/0049-styrmin-v1-manifest-contract.md) - The `styrmin/v1` manifest: strict `extra="forbid"` parsing, full replacement of `config`/`parameters`, flag > env > manifest precedence, `cluster` as a disambiguation hint, deliberately not kubectl-compatible
+- [0050-composite-natural-key-deployment-lookup.md](adr/0050-composite-natural-key-deployment-lookup.md) - `deployment(name, environmentId)` composite natural-key shape with a runtime argument-group guard; the bounded carve-out from ADR-031's `<resource>Id`/`<resource>Name` pattern
+- [0051-styrminctl-credential-resolution-and-token-store.md](adr/0051-styrminctl-credential-resolution-and-token-store.md) - CLI credential ladder (env > auto-login > file > none) resolved at one chokepoint, plus the versioned, canonical-URL-keyed, atomically-written token store
+- [0052-client-side-config-diff-impact-and-conflict-detection.md](adr/0052-client-side-config-diff-impact-and-conflict-detection.md) - Deployment config drawer: hand-rolled stable-key structural diff, declarative impact rule table behind a swappable interface, client-side fingerprint conflict detection with reload-keeping-edits
+- [0053-driver-version-provenance-fingerprint.md](adr/0053-driver-version-provenance-fingerprint.md) - Driver-version identity widens to include a provenance fingerprint (`content_hash` for local, `source_commit_sha` for git); no load ever deletes a row; labels always render `<version>@<short7>`
+- [0054-backend-authoritative-noop-detection.md](adr/0054-backend-authoritative-noop-detection.md) - No-op detection runs in the service layer before any write and is signalled by returning `null` from the already-nullable `Task` field; reverts the SDK-side stopgap
 
 ## Current Knowledge
 
@@ -104,8 +120,9 @@ Backend (server) architecture documentation in [knowledge/backend/](knowledge/ba
 - [reconciliation.md](knowledge/backend/reconciliation.md) - Reconciliation engine, diff computation, remediation strategies
 - [hooks-and-actions.md](knowledge/backend/hooks-and-actions.md) - Hook system, driver actions, setup/upgrade hooks
 - [orchestration-flows.md](knowledge/backend/orchestration-flows.md) - Prefect orchestration flows, callbacks, execution patterns (the agent runs the Prefect worker that executes these flows)
-- [backup-restore.md](knowledge/backend/backup-restore.md) - Backup/restore system, Velero integration, strategies
-- [e2e-testing.md](knowledge/backend/e2e-testing.md) - E2E testing architecture, vCluster fixture graph, debugging workflow
+- [backup-restore.md](knowledge/backend/backup-restore.md) - Backup/restore system, Velero integration, strategies, retention TTL
+- [deployment-env-vars.md](knowledge/backend/deployment-env-vars.md) - Deployment env vars: when to use them, three-scope precedence, driver-side consumption
+- [e2e-testing.md](knowledge/backend/e2e-testing.md) - E2E testing architecture, vCluster fixture graph, markers, debugging workflow
 - [dead-code.md](knowledge/backend/dead-code.md) - Remaining dead code and cleanup tracking
 
 Agent (in-cluster) architecture documentation in [knowledge/agent/](knowledge/agent/):
@@ -119,12 +136,25 @@ Frontend architecture documentation in [knowledge/frontend/](knowledge/frontend/
 - [data-fetching.md](knowledge/frontend/data-fetching.md) - TanStack Query + codegen pipeline, fetcher, cache invalidation, polling
 - [forms.md](knowledge/frontend/forms.md) - TanStack Form architecture, Zod integration, field bindings, dynamic fields
 - [ui-primitives.md](knowledge/frontend/ui-primitives.md) - Base UI wrapper layer, Slot utility, data-attribute conventions
+- [deployment-configuration.md](knowledge/frontend/deployment-configuration.md) - Configuration tab and edit drawer: draft lifecycle, diff → impact → apply, inheritance state, conflict detection
+
+CLI (`styrminctl`) internals in [knowledge/cli/](knowledge/cli/):
+
+- [overview.md](knowledge/cli/overview.md) - Invocation pipeline, credential chokepoint, token store, error boundary, telemetry wrapper
 
 ## Current Guides
 
 - [database-migrations.md](guides/database-migrations.md) - Alembic migration workflow: creating, applying, and rolling back migrations
 - [graphql-propagation-tests.md](guides/graphql-propagation-tests.md) - How to write the unit test that proves a GraphQL field is wired through every layer to the database
+- [pre-commit-hooks.md](guides/pre-commit-hooks.md) - Installing the `prek` hooks, what each one runs, and the bypass policy
+- [bug-pipeline.md](guides/bug-pipeline.md) - End-to-end bug workflow: analyse, reproduce, fix, verify
 - [local-demo.md](guides/local-demo.md) - Local vCluster demo lifecycle
+- [driver-iteration.md](guides/driver-iteration.md) - The no-bump loop: editing a driver and reloading without changing its version string
+- [driver-env-var-consumption.md](guides/driver-env-var-consumption.md) - How a driver template consumes resolved deployment env vars
+- [driver-container-override-consumption.md](guides/driver-container-override-consumption.md) - How a driver template consumes `command`/`args` overrides, and the chart guard it requires
 - [pod-scheduling.md](guides/pod-scheduling.md) - Pod scheduling configuration reference
+- [ingress-ipv6-dual-stack-validation.md](guides/ingress-ipv6-dual-stack-validation.md) - Validating ingress and NodePort behaviour on dual-stack clusters
+- [e2e-parallelism.md](guides/e2e-parallelism.md) - The five-shard CI matrix scheme and how shard markers route tests
+- [e2e-deployment-sharing.md](guides/e2e-deployment-sharing.md) - Decision tree for reusing an existing E2E deployment instead of booting a new one
 - [session-retrospectives.md](guides/session-retrospectives.md) - End-of-session workflow for turning agent friction into approved context-management improvements
 - [users-and-groups.md](guides/users-and-groups.md) - Operator guide to users, groups, roles, the bootstrap admin, the Settings → Access UI, lockout recovery, and v1 limitations

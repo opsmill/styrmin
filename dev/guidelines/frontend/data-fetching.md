@@ -95,3 +95,61 @@ useGetDeploymentPodsQuery(
 - Gating with `enabled: isActive` alone is also acceptable when the previous data should disappear when the tab is inactive. Keep `refetchInterval: false` in the inactive branch either way; otherwise an interval timer keeps firing against a stale `enabled: false` state and refreshes the data the moment the tab reactivates.
 
 The Pods tab on the deployment detail page is the canonical example.
+
+<!-- Extracted from specs/012-driver-detail-tabs on 2026-08-04 -->
+
+### Reconcile local selection against every refresh
+
+When a polled query feeds a list the user selects from (a version rail, a row
+table), the selected id is local state and the list is not — a refresh can remove
+the selected entry out from under the component. Reconcile in a `useEffect` keyed on
+the fetched collection:
+
+- Selected entry still present → **keep the selection unchanged.** Do not re-derive
+  it from the list on every poll; that resets the user's choice every interval.
+- Selected entry gone → **fall back silently** to the natural default (newest
+  first, or the first row).
+
+Silently, because the trigger was a background poll the user did not initiate — a
+toast for something they did not do erodes trust in the page. Enumerate the
+fallback as a named test case; it is the branch that rots.
+
+```ts
+useEffect(() => {
+  if (!versions?.length) return;
+  setSelectedId((current) =>
+    current && versions.some((v) => v.id === current) ? current : versions[0].id,
+  );
+}, [versions]);
+```
+
+Note the current behaviour on a **failed** poll: any `error` from the query
+replaces the page with `<ErrorState>`, including a transient failure mid-refresh.
+That is consistent across detail pages and is a known limitation, not a
+per-feature bug — retaining the last-good snapshot behind a non-blocking banner is
+a project-wide change, not something to fix in one page.
+
+### Rendering `JSON` scalar fields
+
+A GraphQL `JSON` scalar arrives as `unknown`. It carries a shape the backend does
+not validate on the way out (driver-declared `components` is the canonical case), so
+**treat it as untrusted input and guard before iterating**:
+
+```ts
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+if (!isPlainObject(components)) return <EmptyState />;
+```
+
+- Check the container, then each value you descend into. Skip an
+  unexpectedly-shaped entry rather than failing the whole render.
+- Degrade to the section's empty state; never throw and never render `[object
+  Object]`.
+- **Do not mirror the payload in a hand-written TypeScript interface or a strict
+  Zod schema** for read-only display. Runtime guards plus optional chaining absorb
+  new fields the producer adds without a frontend change — which is the point, since
+  driver authors extend these blobs freely.
+- Render known keys explicitly and unknown scalar keys generically, so a driver that
+  declares something new shows up instead of disappearing.

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `014-component-container-overrides`
 **Created**: 2026-05-28
-**Status**: Draft
+**Status**: Extracted
 **Input**: Idea brief — component-scope overrides for a container's `command` and `args` on application deployments, following the deployment env-vars precedent (#4 / #209). Source issue: [opsmill/styrmin#283](https://github.com/opsmill/styrmin/issues/283).
 
 ## User Scenarios & Testing *(mandatory)*

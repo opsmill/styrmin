@@ -4,7 +4,7 @@
 
 **Created**: 2026-06-21
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: User description: "Anonymous opt-out telemetry for `styrminctl`" (PRD from https://github.com/opsmill/styrmin/issues/275#issuecomment-4762258122)
 

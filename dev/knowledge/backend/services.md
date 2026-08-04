@@ -323,6 +323,40 @@ Domain models representing driver resources:
 - `Code` - Code resource references
 - `Component` - Component definitions
 
+<!-- Extracted from specs/015-infrahub-mcp-driver on 2026-08-04 -->
+
+#### Parameter declarations: requiredness and kinds
+
+Two conventions in `models/resources/parameters.py` surprise driver authors,
+because `driver/DRIVERS.md` documents the `parameters` block without stating
+either:
+
+**A parameter is required iff it has no `default`.** There is no `required` field
+on `DriverParameterDefinition`. `validate_parameter_values`
+(`services/parameters/validator.py`) treats any parameter without a default as
+mandatory and raises `Missing required parameter: '<name>'` when it is omitted at
+deploy time. Because the model is `extra="forbid"`, writing `required: true` does
+not add a constraint — it fails driver-load validation as an unknown key.
+
+```yaml
+parameters:
+  - name: infrahub_address        # required — no default
+    kind: string
+  - name: mcp_read_only           # optional — has a default
+    kind: boolean
+    default: false
+```
+
+**`DriverParameterKind` is `string | integer | boolean | enum` — there is no
+`secret` kind.** Credentials must not be modelled as parameters. Drivers that need
+a token either use a passthrough auth mode hardcoded in `values.j2.yml`, or
+consume a Kubernetes Secret the chart already references. An `enum` parameter
+requires a non-empty `values` list and its `default`, if present, must be a
+member; the deploy-time validator rejects out-of-set values before any render.
+
+Values that must not vary per deployment belong as literals in `values.j2.yml`,
+not as parameters with a default — a default is an invitation to change it.
+
 ## Reconciliation Engine (`services/reconciliation/`)
 
 Implements declarative state management by comparing desired state (deployment) with current state (instance). See [reconciliation.md](reconciliation.md) for full details.
