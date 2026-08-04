@@ -1,6 +1,7 @@
 """Tests for the database management commands."""
 
 import pytest
+from alembic.util.exc import CommandError
 from pytest_mock import MockerFixture
 
 from styrmin_backend.cli.db import db_app
@@ -123,6 +124,53 @@ def test_db_downgrade_calls_alembic_downgrade(mocker: MockerFixture) -> None:
     mock_config.SETTINGS.initialize.assert_called_once_with()
     mock_downgrade.assert_called_once()
     assert mock_downgrade.call_args[0][1] == "-1"
+
+
+def test_db_downgrade_accepts_explicit_revision(mocker: MockerFixture) -> None:
+    """An explicit target is forwarded to Alembic instead of the default -1."""
+    mock_downgrade = mocker.patch("styrmin_backend.cli.db.alembic_command.downgrade")
+    mocker.patch("styrmin_backend.cli.db.config")
+    mocker.patch("styrmin_backend.cli.db._get_alembic_config")
+
+    with pytest.raises(SystemExit) as exc_info:
+        db_app(["downgrade", "base"])
+
+    assert exc_info.value.code == 0
+    mock_downgrade.assert_called_once()
+    assert mock_downgrade.call_args[0][1] == "base"
+
+
+def test_db_downgrade_accepts_revision_as_option(mocker: MockerFixture) -> None:
+    """The target is also settable as a named option."""
+    mock_downgrade = mocker.patch("styrmin_backend.cli.db.alembic_command.downgrade")
+    mocker.patch("styrmin_backend.cli.db.config")
+    mocker.patch("styrmin_backend.cli.db._get_alembic_config")
+
+    with pytest.raises(SystemExit) as exc_info:
+        db_app(["downgrade", "--revision", "d0e1f2a3b4c5"])
+
+    assert exc_info.value.code == 0
+    mock_downgrade.assert_called_once()
+    assert mock_downgrade.call_args[0][1] == "d0e1f2a3b4c5"
+
+
+def test_db_downgrade_hints_on_ambiguous_walk(
+    capsys: pytest.CaptureFixture[str], mocker: MockerFixture
+) -> None:
+    """A relative walk across a merge revision explains how to recover."""
+    mock_downgrade = mocker.patch("styrmin_backend.cli.db.alembic_command.downgrade")
+    mock_downgrade.side_effect = CommandError("Ambiguous walk")
+    mocker.patch("styrmin_backend.cli.db.config")
+    mocker.patch("styrmin_backend.cli.db._get_alembic_config")
+
+    with pytest.raises(SystemExit) as exc_info:
+        db_app(["downgrade"])
+
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().out
+    assert "Ambiguous walk" in output
+    assert "merge revision" in output
+    assert "styrmin db downgrade base" in output
 
 
 def test_db_downgrade_handles_error(

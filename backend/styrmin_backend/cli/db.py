@@ -4,6 +4,7 @@ from pathlib import Path
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
+from alembic.util.exc import CommandError
 from cyclopts import App
 from rich.console import Console
 
@@ -11,6 +12,9 @@ from styrmin_backend import config
 
 db_app = App(name="db", help="Database management commands.")
 console = Console()
+
+#: Default downgrade target: one revision back.
+RELATIVE_ONE_STEP = "-1"
 
 
 def _get_alembic_config() -> AlembicConfig:
@@ -74,11 +78,18 @@ def migrate(
 
 @db_app.command
 def downgrade(
+    revision: str = RELATIVE_ONE_STEP,
     config_file: Path | None = None,
 ) -> None:
-    """Rollback the most recent database migration.
+    """Rollback database migrations to a target revision.
 
     Args:
+        revision: Target revision to downgrade to. Defaults to ``-1`` (roll
+            back a single revision). A relative target cannot be resolved
+            across a merge revision — a merge has more than one predecessor,
+            so Alembic raises ``Ambiguous walk``. Pass an explicit target in
+            that case: one of the merge's parent revisions to un-apply only
+            the merge, or ``base`` to un-apply the whole chain.
         config_file: Path to configuration file.
     """
     if config_file:
@@ -86,12 +97,26 @@ def downgrade(
     else:
         config.SETTINGS.initialize()
 
-    console.print("[bold blue]Rolling back last migration...[/bold blue]")
+    if revision == RELATIVE_ONE_STEP:
+        console.print("[bold blue]Rolling back last migration...[/bold blue]")
+    else:
+        console.print(f"[bold blue]Downgrading to {revision}...[/bold blue]")
 
     try:
         alembic_cfg = _get_alembic_config()
-        alembic_command.downgrade(alembic_cfg, "-1")
+        alembic_command.downgrade(alembic_cfg, revision)
         console.print("[bold green]Migration rolled back successfully.[/bold green]")
+    except CommandError as exc:
+        console.print(f"[bold red]Downgrade failed: {exc}[/bold red]")
+        if "ambiguous walk" in str(exc).lower():
+            console.print(
+                "[yellow]The database is at a merge revision, which has more "
+                "than one predecessor. Name the target explicitly, e.g. "
+                "'styrmin db downgrade <parent-revision>' to un-apply only the "
+                "merge, or 'styrmin db downgrade base' to un-apply "
+                "everything.[/yellow]"
+            )
+        raise SystemExit(1) from exc
     except Exception as exc:
         console.print(f"[bold red]Downgrade failed: {exc}[/bold red]")
         raise SystemExit(1) from exc
