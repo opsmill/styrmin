@@ -42,11 +42,15 @@ export const SECTION_ORDER: readonly SectionId[] = [
  * helper, the inheritance helper, and the read view — this constant is a
  * UI-only structure that:
  *
- *  1. **Excludes Networking and Storage & Runtime.** Those sections remain in
- *     the read view (Settings tab) so operators can still inspect inherited
- *     values, but are not currently editable through the drawer. Re-introduce
- *     them by adding their `SectionId` back into a group when the editing flow
- *     is restored.
+ *  1. **Excludes Networking.** That section remains in the read view (Settings
+ *     tab) so operators can still inspect inherited values, but is not
+ *     currently editable through the drawer. Re-introduce it by adding its
+ *     `SectionId` back into a group when the editing flow is restored.
+ *
+ *     Storage & Runtime *is* included, but its editor covers only
+ *     `backupTtl` (016-backup-retention-ttl). `dbSize`,
+ *     `standardStorage.storageClass`, and `nodeSelector` stay read-only on the
+ *     Settings tab — see `StorageRuntimeSection`.
  *  2. **Names two visible groupings** — "Global settings" and "Components" —
  *     to distinguish deployment-wide knobs from component-scoped ones.
  *  3. **Treats Identity as its own un-labelled group** so the deployment-name
@@ -71,6 +75,7 @@ export const DRAWER_SECTION_GROUPS: readonly DrawerSectionGroup[] = [
       "envVars",
       "serviceOverrides",
       "driverParameters",
+      "storageRuntime",
       "scheduling",
     ],
   },
