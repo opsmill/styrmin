@@ -275,6 +275,37 @@ describe("DeploymentDetailPage backups tab expiry column", () => {
     expect(cell.textContent).toContain("—");
   });
 
+  it("keeps the TTL hint when a failed backup never got an expiry", async () => {
+    // The real shape of a backup Velero accepted but never completed: the
+    // requested `ttl` was recorded at creation, but no `expiresAt` was ever
+    // computed because nothing was stored to expire. The em-dash case above
+    // nulls *both* fields, so it cannot catch a regression that ties the
+    // retention hint to the presence of an expiry date — an operator
+    // diagnosing the failure would silently lose the one field that says
+    // which policy was applied.
+    await renderBackupsTab([
+      makeBackup({
+        id: "backup-failed",
+        name: "backup-failed",
+        status: "failed",
+        completedAt: null,
+        sizeBytes: null,
+        errorMessage: "backup storage location unavailable",
+        ttl: "2160h",
+        expiresAt: null,
+      }),
+    ]);
+
+    const cell = screen.getByTestId("backup-expires");
+    // No expiry to render...
+    expect(cell.textContent).toContain("—");
+    expect(cell.textContent).not.toContain("Invalid Date");
+    // ...but the applied retention survives in both the tooltip and the
+    // accessibility tree.
+    expect(cell.getAttribute("title")).toContain("2160h");
+    expect(cell.textContent).toContain("2160h");
+  });
+
   it("keeps the expiry date when only the TTL is missing", async () => {
     await renderBackupsTab([makeBackup({ ttl: null })]);
 
