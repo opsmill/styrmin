@@ -285,6 +285,28 @@ class UiScenarioDriver:
                 environment_id=environment_id, env_vars=env_vars
             )
 
+    async def set_environment_backup_ttl(
+        self,
+        *,
+        environment_id: str,
+        ttl: str | None,
+    ) -> None:
+        """Drive the BackupRetentionForm on the Configuration tab (016).
+
+        Per 016-backup-retention-ttl / US1: goto
+        ``/environments/{environment_id}``, open the Configuration tab, type
+        the duration into the retention input (blank for ``ttl=None``, the
+        form's "clear the policy" gesture), click Save, and confirm the
+        redeploy dialog. The page object owns the selector details so this
+        driver method stays a thin coordinator.
+        """
+        async with _ui_errors(
+            f"setting backup retention {ttl!r} on environment {environment_id}"
+        ):
+            await self._environment_detail.set_backup_ttl_via_form(
+                environment_id=environment_id, ttl=ttl
+            )
+
     async def get_deployment_timeline(
         self, *, deployment_id: str
     ) -> list[TimelineEntry]:

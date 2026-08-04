@@ -143,91 +143,6 @@ async def assert_velero_backup_ttl(
     )
 
 
-async def set_environment_backup_ttl(
-    client: StyrminClient,
-    environment_id: str,
-    ttl: str | None,
-) -> None:
-    """Set ``backup_ttl`` on an environment without dropping its other config.
-
-    Passing ``ttl=None`` clears the policy, which is how the lifecycle test
-    reverts the session-shared environment to its pre-test state.
-
-    ``updateEnvironment`` is full-replacement (009-environment-update): every
-    field omitted from the input is persisted as its unset state. The scenario
-    environment is session-shared, so read the persisted config back, round-trip
-    it through ``EnvironmentConfig`` (which coerces the ``Literal``-typed
-    scalars), and resubmit it with only ``backup_ttl`` added — the api-side
-    equivalent of the frontend's ``buildFullReplacementInput``.
-    """
-    # Imported lazily for the same reason ``ApiScenarioDriver`` does: keep the
-    # backend graph and the regenerated SDK enums off the module import path.
-    from styrmin_backend.context.models.config import EnvironmentConfig
-    from styrmin_sdk.graphql._generated.enums import (
-        ExternalDnsEndpointsType,
-        ExternalUrlScheme,
-    )
-    from styrmin_sdk.graphql._generated.input_types import (
-        EnvVarInput,
-        UpdateEnvironmentInput,
-    )
-
-    # ``EnvironmentConfig`` holds the backend-side Literal values ("http",
-    # "NodeExternalIP") whereas the GraphQL input types use the codegen enum
-    # names — same mapping ``ApiScenarioDriver.update_environment_via_form``
-    # and the frontend's ``transformEnumValue`` perform.
-    url_scheme_map = {
-        "http": ExternalUrlScheme.HTTP,
-        "https": ExternalUrlScheme.HTTPS,
-    }
-    dns_endpoints_type_map = {
-        "NodeExternalIP": ExternalDnsEndpointsType.NODE_EXTERNAL_IP,
-        "ClusterIP": ExternalDnsEndpointsType.CLUSTER_IP,
-    }
-
-    existing = await client.environments.get(environment_id=environment_id)
-    validated = EnvironmentConfig.model_validate(existing.config or {})
-
-    # ``dedicated_ingress`` / ``scheduling`` would need a nested-input
-    # round-trip that no scenario sets on this environment. Fail loudly rather
-    # than silently clearing them if that ever changes.
-    assert validated.dedicated_ingress is None, (
-        "scenario environment gained a dedicated_ingress block; this helper "
-        "would silently clear it — extend it with the nested input"
-    )
-    assert validated.scheduling is None, (
-        "scenario environment gained a scheduling block; this helper would "
-        "silently clear it — extend it with the nested input"
-    )
-
-    await client.environments.update(
-        environment_id,
-        input=UpdateEnvironmentInput(
-            envVars=[
-                EnvVarInput(name=name, value=value)
-                for name, value in (validated.env_vars or {}).items()
-            ]
-            or None,
-            ipWhitelist=validated.ip_whitelist,
-            fqdnSuffix=validated.fqdn_suffix,
-            externalUrlScheme=(
-                url_scheme_map[validated.external_url_scheme]
-                if validated.external_url_scheme is not None
-                else None
-            ),
-            externalUrlPort=validated.external_url_port,
-            externalDnsEndpointsType=(
-                dns_endpoints_type_map[validated.external_dns_endpoints_type]
-                if validated.external_dns_endpoints_type is not None
-                else None
-            ),
-            ingressClass=validated.ingress_class,
-            dbSize=validated.db_size,
-            backupTtl=ttl,
-        ),
-    )
-
-
 async def wait_for_env_fanout_steady_state(
     client: StyrminClient,
     deployment_id: str,
@@ -335,8 +250,11 @@ async def test_backup_and_restore_lifecycle(
     ).get("backup_ttl")
 
     try:
-        await set_environment_backup_ttl(
-            client,
+        # Driven through the dual-entrypoint driver method so the retention
+        # policy is set via the typed SDK under ``[api-chromium]`` and via the
+        # BackupRetentionForm on the Configuration tab under ``[ui-chromium]``
+        # — the parametrisation IS the parity check (016 / US1).
+        await scenario_driver.set_environment_backup_ttl(
             environment_id=scenario_environment_id,
             ttl=ENVIRONMENT_BACKUP_TTL,
         )
@@ -355,6 +273,15 @@ async def test_backup_and_restore_lifecycle(
             pre_timeline_length=pre_timeline_length,
         )
         await wait_for_pods_ready(kubeconfig_path, namespace)
+
+        # The retention write left the UI driver on the environment detail
+        # page, but every backup/restore step below acts on whichever
+        # deployment detail page is open. Re-bind the driver and re-enter that
+        # page. For the API driver ``attach_to_deployment`` is a no-op and the
+        # wait is one SDK read on an already-running deployment, so this needs
+        # no ``driver_mode`` branch.
+        scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
+        await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
 
         # 1. Write test data (increment counter N times)
         async with portforward_simple_app(kubeconfig_path, namespace) as port:
@@ -436,8 +363,7 @@ async def test_backup_and_restore_lifecycle(
         revert_timeline_length = len(
             await client.deployments.get_timeline(deployment_id=deployment_id)
         )
-        await set_environment_backup_ttl(
-            client,
+        await scenario_driver.set_environment_backup_ttl(
             environment_id=scenario_environment_id,
             ttl=previous_backup_ttl,
         )
@@ -446,6 +372,15 @@ async def test_backup_and_restore_lifecycle(
                 client,
                 deployment_id=deployment_id,
                 pre_timeline_length=revert_timeline_length,
+            )
+        # Leave the driver back on the deployment detail page: the UI driver's
+        # page is session-scoped, and the sibling backup tests that follow act
+        # on whatever page is open. Best-effort like the wait above — a cleanup
+        # hiccup must never mask the test's own failure.
+        scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
+        with suppress(Exception):
+            await scenario_driver.wait_for_deployment_running(
+                deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
             )
 
 

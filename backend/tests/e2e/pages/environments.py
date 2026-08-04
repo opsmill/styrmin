@@ -18,6 +18,13 @@ from tests.e2e.drivers.refs import EnvironmentRef
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
 
+# An ``updateEnvironment`` write queues a redeploy Task on every deployment in
+# the environment inside the same transaction, so the mutation the retention
+# form awaits can take noticeably longer than Playwright's 5s expect default.
+# Generous enough to absorb that; short enough that a form which never settles
+# still fails inside the test's own budget.
+_SAVE_SETTLE_TIMEOUT_MS = 60_000
+
 
 class EnvironmentsListPage:
     def __init__(self, page: Page) -> None:
@@ -226,6 +233,90 @@ class EnvironmentDetailPage:
         # text until it matches (or times out), giving the urql cache
         # invalidation room to land without a hardcoded sleep.
         await expect(save).to_have_text("Save")
+
+    async def set_backup_ttl_via_form(
+        self,
+        *,
+        environment_id: str,
+        ttl: str | None,
+    ) -> None:
+        """Drive the BackupRetentionForm on the Configuration tab (016 / US1).
+
+        Implements the UI side of the
+        ``ScenarioDriver.set_environment_backup_ttl`` contract. ``ttl=None``
+        is submitted as a blank input, which the form reads as "clear the
+        environment policy" and sends as ``backupTtl: null``.
+        """
+        await self.goto(environment_id=environment_id)
+
+        # Same caveat as ``update_env_vars_via_form``: the project's ``Tabs``
+        # primitive does not set ``role="tab"``, so the Configuration tab has
+        # to be matched as a button with the exact label.
+        await self._page.get_by_role("button", name="Configuration", exact=True).click()
+
+        form = self._page.locator("[data-testid=backup-retention-form]").first
+        await form.wait_for(state="visible")
+
+        # The form blocks submission outright when the persisted config
+        # carries nested overrides a full-replacement write would clear.
+        # Surface that as a driver error instead of timing out on a
+        # permanently-disabled Save button.
+        blocked = form.locator("[data-testid=backup-retention-blocked-warning]")
+        if await blocked.count() > 0:
+            raise ScenarioActionError(
+                "BackupRetentionForm refuses to save on environment "
+                f"{environment_id!r}: {(await blocked.inner_text()).strip()}"
+            )
+
+        await form.locator("[data-testid=backup-retention-input]").fill(ttl or "")
+
+        # Client-side validation renders on keystroke (no blur needed) and
+        # disables Save, so an invalid duration must fail loudly here rather
+        # than hang on the click.
+        client_error = form.locator("[data-testid=backup-retention-error]")
+        if await client_error.count() > 0:
+            raise ScenarioActionError(
+                f"BackupRetentionForm rejected ttl={ttl!r}: "
+                f"{(await client_error.inner_text()).strip()}"
+            )
+
+        save = form.locator("[data-testid=backup-retention-save-button]")
+        await save.click()
+
+        dialog = self._page.locator("[data-testid=redeploy-confirm-dialog]")
+        await dialog.wait_for(state="visible")
+        await self._page.locator("[data-testid=redeploy-confirm-redeploy]").click()
+
+        # The dialog closes synchronously on confirm — before the mutation is
+        # even issued — so "dialog hidden" is NOT a completion signal. Settle
+        # on the Save button leaving its "Saving..." pending state first (as
+        # the env-vars form does), then on the read-state span below. No
+        # hardcoded sleeps.
+        await expect(save).to_have_text("Save", timeout=_SAVE_SETTLE_TIMEOUT_MS)
+
+        # The input keeps its own state and never re-seeds from the server, so
+        # the ``backup-retention-current`` span is the only in-page evidence
+        # that the write landed: it renders from the environment refetched by
+        # ``invalidateQueries(['GetEnvironment'])`` after the mutation.
+        expected = (
+            "No environment policy set" if ttl is None else f"Environment policy: {ttl}"
+        )
+        current = form.locator("[data-testid=backup-retention-current]")
+        try:
+            await expect(current).to_contain_text(
+                expected, timeout=_SAVE_SETTLE_TIMEOUT_MS
+            )
+        except AssertionError:
+            # A rejected mutation leaves the read state untouched and renders
+            # the server's message; report that rather than the bare
+            # text-mismatch, which says nothing about why.
+            submit_error = form.locator("[data-testid=backup-retention-submit-error]")
+            if await submit_error.count() > 0:
+                raise ScenarioActionError(
+                    f"BackupRetentionForm save failed for ttl={ttl!r}: "
+                    f"{(await submit_error.inner_text()).strip()}"
+                ) from None
+            raise
 
     async def assign_bsl(self, *, environment_id: str, bsl_id: str) -> None:
         """Open the Parameters tab and pick the BSL from the selector."""
