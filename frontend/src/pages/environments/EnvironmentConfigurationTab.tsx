@@ -1,25 +1,27 @@
 /**
  * Environment Configuration tab (009 / US3 + US4).
  *
- * Renders an environment's full configuration: env vars (editable form
- * embedded in the Environment Variables section), IP allowlist,
- * dedicated ingress, scheduling overrides, and FQDN / external-URL
- * settings. Each non-env-var section either renders the configured
- * values or an explicit empty-state message per FR-015.
+ * Renders an environment's full configuration: env vars, backup
+ * retention, IP allowlist, dedicated ingress, scheduling overrides, and
+ * FQDN / external-URL settings. The first two sections embed an editable
+ * widget (``EnvVarsForm``, ``BackupRetentionForm``); each read-only
+ * section either renders the configured values or an explicit empty-state
+ * message per FR-015.
  *
  * The GraphQL `Environment.config` projection is currently a `JSON`
  * scalar (typed `Record<string, unknown>` on the frontend). This
  * component reads it defensively via `?.` / `??` so partially populated
  * configs render without crashing.
  *
- * Env-var editing follows the FR-003 full-replacement contract: the
- * submit handler rebuilds a typed ``UpdateEnvironmentInput`` carrying
- * every other persisted field unchanged, with only ``envVars`` replaced
- * by the form's edited rows.
+ * Both editable sections follow the FR-003 full-replacement contract:
+ * the submit handler rebuilds a typed ``UpdateEnvironmentInput`` carrying
+ * every other persisted field unchanged, with only the field that section
+ * owns replaced by the form's edited value.
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { BackupRetentionForm } from "@/components/environment/BackupRetentionForm";
 import {
   EnvVarsForm,
   type EnvVarPayload,
@@ -68,6 +70,17 @@ function readIpWhitelist(
   config: Record<string, unknown> | null | undefined,
 ): string[] {
   return asStringArray(config?.ip_whitelist);
+}
+
+/**
+ * Read the persisted ``backup_ttl`` (016). A non-string value is treated
+ * as "no policy at this scope", matching ``resolve_backup_ttl``, which
+ * logs and falls through rather than trusting it.
+ */
+function readBackupTtl(
+  config: Record<string, unknown> | null | undefined,
+): string | null {
+  return typeof config?.backup_ttl === "string" ? config.backup_ttl : null;
 }
 
 function readDedicatedIngress(
@@ -247,6 +260,60 @@ function EnvVarsSection({
   );
 }
 
+/**
+ * Backup retention policy editor (016). Saves through the same
+ * full-replacement contract as ``EnvVarsSection``: the persisted env vars
+ * and every other scalar ride along unchanged, with only ``backupTtl``
+ * replaced by the form's value. Passing the *persisted* env vars (rather
+ * than whatever the sibling env-var form currently shows) is deliberate —
+ * each widget commits its own field and leaves the rest of the config as
+ * last saved, so an unsaved env-var edit is not smuggled into a retention
+ * save.
+ */
+function BackupRetentionSection({
+  environmentId,
+  backupTtl,
+  deployments,
+  config,
+}: {
+  environmentId: string;
+  backupTtl: string | null;
+  deployments: Array<{ id: string; name: string; internal: boolean }>;
+  config: Record<string, unknown> | null | undefined;
+}) {
+  const queryClient = useQueryClient();
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const mutation = useUpdateEnvironmentMutation();
+  const blockedReason = detectNestedOverridesBlock(config);
+
+  const handleSubmit = async (nextBackupTtl: string | null) => {
+    setSubmitError(null);
+    try {
+      const input = buildFullReplacementInput(config, readEnvVars(config), {
+        backupTtl: { value: nextBackupTtl },
+      });
+      await mutation.mutateAsync({ environmentId, input });
+      // Refetch the environment so the page reflects the new state.
+      await queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Update failed.");
+      // Rethrow so callers (e.g. tests) can detect the failure if needed.
+      throw err;
+    }
+  };
+
+  return (
+    <BackupRetentionForm
+      initialBackupTtl={backupTtl}
+      deployments={deployments}
+      onSubmit={handleSubmit}
+      submitError={submitError}
+      isSubmitting={mutation.isPending}
+      blockedReason={blockedReason}
+    />
+  );
+}
+
 function IpAllowlistSection({ cidrs }: { cidrs: string[] }) {
   if (cidrs.length === 0) {
     return <EmptySectionMessage message="No IP allowlist configured." />;
@@ -345,6 +412,7 @@ export default function EnvironmentConfigurationTab({
   deployments,
 }: EnvironmentConfigurationTabProps) {
   const envVars = readEnvVars(config);
+  const backupTtl = readBackupTtl(config);
   const ipWhitelist = readIpWhitelist(config);
   const dedicatedIngress = readDedicatedIngress(config);
   const scheduling = readScheduling(config);
@@ -363,6 +431,19 @@ export default function EnvironmentConfigurationTab({
         <EnvVarsSection
           environmentId={environmentId}
           vars={envVars}
+          deployments={deployments}
+          config={config}
+        />
+      </Section>
+
+      <Section
+        title="Backup Retention"
+        description="How long Velero keeps backups taken for deployments in this environment. A deployment-scope policy overrides this one."
+        testId="section-backup-retention"
+      >
+        <BackupRetentionSection
+          environmentId={environmentId}
+          backupTtl={backupTtl}
           deployments={deployments}
           config={config}
         />

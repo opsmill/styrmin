@@ -12,11 +12,12 @@
  *   data via TypeScript-only ``as`` casts.
  * - ``buildFullReplacementInput``: assembles the full
  *   ``UpdateEnvironmentInput`` from a persisted JSON config + the
- *   form's edited env-var rows. Carries every ``EnvironmentConfig``
- *   scalar field through unchanged; nests stay ``null`` (the form
- *   blocks submission upstream when the persisted config has nested
- *   overrides — see ``detectNestedOverridesBlock`` in the component
- *   file).
+ *   form's edited env-var rows, plus the optional explicit
+ *   ``FullReplacementOverrides`` (016 — the retention form edits
+ *   ``backupTtl``). Carries every ``EnvironmentConfig`` scalar field
+ *   through unchanged; nests stay ``null`` (the form blocks submission
+ *   upstream when the persisted config has nested overrides — see
+ *   ``detectNestedOverridesBlock`` in the component file).
  */
 import type { EnvVarPayload } from "@/components/environment/EnvVarsForm";
 import type {
@@ -85,12 +86,39 @@ function asStringArray(value: unknown): string[] {
 }
 
 /**
+ * An explicitly edited field value, boxed.
+ *
+ * Full-replacement semantics make "no override — keep whatever is
+ * persisted" and "override to null — clear the policy" two different
+ * instructions, and a bare ``string | null`` parameter cannot tell them
+ * apart (``null`` has to mean one of them). Boxing the value in an object
+ * moves the presence signal to the box: the box being absent means "keep
+ * persisted", the box being present means "use ``value``", including when
+ * ``value`` is ``null``. A ``"field" in overrides`` check would carry the
+ * same information but silently misread ``{ backupTtl: undefined }`` as
+ * an override to ``undefined``; the box cannot be spelled that way.
+ */
+export interface FieldOverride<T> {
+  value: T;
+}
+
+/** Explicit per-field overrides for {@link buildFullReplacementInput}. */
+export interface FullReplacementOverrides {
+  /**
+   * Set by ``BackupRetentionSection`` when the operator edits the
+   * retention policy. ``{ value: null }`` clears it; omitted keeps the
+   * persisted value (which is what every other section's save does).
+   */
+  backupTtl?: FieldOverride<string | null>;
+}
+
+/**
  * Build the full-replacement ``UpdateEnvironmentInput`` from the
  * persisted JSON config + the edited env-var rows.
  *
  * Every public ``EnvironmentConfig`` scalar field is carried through
- * unchanged; the two enum-valued fields go through
- * ``transformEnumValue``. The two nested input types
+ * unchanged unless *overrides* names it; the two enum-valued fields go
+ * through ``transformEnumValue``. The two nested input types
  * (``dedicatedIngress`` / ``scheduling``) stay ``null`` — the form
  * blocks submission upstream when either is set on the persisted
  * config, so this builder is only reached when both are absent.
@@ -98,6 +126,7 @@ function asStringArray(value: unknown): string[] {
 export function buildFullReplacementInput(
   config: Record<string, unknown> | null | undefined,
   envVars: EnvVarPayload[],
+  overrides: FullReplacementOverrides = {},
 ): UpdateEnvironmentInput {
   const ipWhitelist = asStringArray(config?.ip_whitelist);
   const fqdnSuffix =
@@ -121,9 +150,15 @@ export function buildFullReplacementInput(
   const dbSize = typeof config?.db_size === "string" ? config.db_size : null;
   // 016: the environment is the primary scope for the backup retention
   // policy. ``updateEnvironment`` is full-replacement, so omitting this
-  // would clear the stored TTL on every env-var save.
+  // would clear the stored TTL on every env-var save. The retention form
+  // is the one caller that edits it, and it says so explicitly through
+  // ``overrides.backupTtl``.
   const backupTtl =
-    typeof config?.backup_ttl === "string" ? config.backup_ttl : null;
+    overrides.backupTtl !== undefined
+      ? overrides.backupTtl.value
+      : typeof config?.backup_ttl === "string"
+        ? config.backup_ttl
+        : null;
 
   return {
     envVars: envVars.map((v) => ({ name: v.name, value: v.value })),

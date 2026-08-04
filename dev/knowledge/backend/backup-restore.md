@@ -176,6 +176,14 @@ surfaces — cluster create, environment create/update, deploy, deployment updat
 lazily inside the field validator so the config models keep no module-load-time
 dependency on the services layer.
 
+The frontend keeps a deliberate port of the same rule in
+`frontend/src/lib/backup-ttl.ts` (`validateBackupTtl`, plus the `720h` default
+and the hour ceiling) so the environment Configuration tab can reject a
+malformed value without a round-trip. It is a UX affordance, not a second
+boundary — this module stays authoritative — but a change to the rule here must
+be mirrored there, and `frontend/src/lib/backup-ttl.test.ts` repeats the
+accept/reject matrix to make a divergence visible.
+
 ### Resolution
 
 Precedence is **deepest-wins**: deployment → environment → cluster → built-in
@@ -300,6 +308,12 @@ The setter side is `backupTtl: String` on `UpdateEnvironmentInput` and on
 `DeploymentConfigInput` (which `UpdateDeploymentInput` inherits, covering both
 `deploy` and `updateDeployment`). Cluster and environment **create** take it
 through their existing `config: JSON` argument.
+
+The only UI setter is the environment scope: the Configuration tab's **Backup
+Retention** section (`frontend/src/components/environment/BackupRetentionForm.tsx`)
+drives `updateEnvironment` through `buildFullReplacementInput`, which carries
+every other persisted field along. A blank input submits `backupTtl: null`, which
+clears the environment policy and hands resolution back to the cluster scope.
 
 ## Component Status Tracking
 
