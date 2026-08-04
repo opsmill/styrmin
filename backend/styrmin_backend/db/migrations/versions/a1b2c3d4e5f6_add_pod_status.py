@@ -19,6 +19,16 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+#: Enum type created implicitly by ``CREATE TABLE podstatus``. ``op.drop_table``
+#: builds a bare ``Table`` with no columns, so it never emits the matching
+#: ``DROP TYPE``; leaving the type behind makes the next upgrade fail with
+#: ``DuplicateObjectError``. ``Enum.drop`` is a no-op on SQLite, which has no
+#: standalone enum types.
+_POD_PHASE_ENUM = sa.Enum(
+    "PENDING", "RUNNING", "SUCCEEDED", "FAILED", "UNKNOWN", name="podphase"
+)
+
+
 def upgrade() -> None:
     op.create_table(
         "podstatus",
@@ -66,3 +76,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("podstatus")
+    _POD_PHASE_ENUM.drop(op.get_bind(), checkfirst=True)
