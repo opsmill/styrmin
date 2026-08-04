@@ -29,12 +29,21 @@ Introduce a new `DeploymentCrdStatus` SQLModel with a one-to-one relationship to
 
 Conditions and managed resource counts are stored as JSON, not normalized.
 
+> **Note — amended implementation (revision `b9c0d1e2f3a4`).** The cascade is
+> the SQLAlchemy `cascade="all, delete-orphan"` on `Deployment.crd_status`, not
+> a database-level `ON DELETE CASCADE`. The FK-level cascade was declared in
+> revision `b2c3d4e5f6a7` but never existed in any database, because the schema
+> was built by `metadata.create_all()` from the models — which never declared
+> it — and the migration chain did not apply end-to-end until 2026-08-04.
+> `b9c0d1e2f3a4` drops it so both build paths agree. See
+> [[0024-two-pronged-stale-data-cleanup]] for the full rationale.
+
 ## Consequences
 
 - The `Deployment` model stays free of Kubernetes-specific observed fields; declared-state and observed-state remain cleanly separated, consistent with [[0007-pod-status-records-observed-state-not-declared-state]].
 - Upsert semantics on `deployment_id` keep the table size O(deployments) — no historical accumulation, no janitor needed.
 - JSON storage is appropriate here because conditions and resource counts are **read-only snapshots**: the backend never queries `WHERE condition.type = X` or aggregates across deployments. The whole blob is read together, displayed, and replaced on the next poll.
-- Cascade DELETE means cleanup is automatic when a deployment is removed (FR-009).
+- The relationship cascade means cleanup is automatic when a deployment is removed (FR-009).
 - Future evolution of the CRD status structure (new condition types, new resource kinds) requires no migrations.
 
 ## Alternatives Considered
