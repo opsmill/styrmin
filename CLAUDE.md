@@ -4,7 +4,7 @@
 
 - Python 3.14+ (backend, SDK, CLI); TypeScript 5.9.3 (frontend, Node 22) + Strawberry GraphQL, SQLModel + SQLAlchemy (async, asyncpg), Pydantic, Cyclopts (CLI), httpx (SDK), `dulwich` (git driver provider). Frontend: React 19, TanStack Query/Router, Radix UI, Tailwind. (013-driver-fingerprint)
 
-- PostgreSQL via SQLModel/SQLAlchemy. Schema managed by `metadata.create_all()` — no Alembic migration required since Styrmin is not yet deployed in production. (013-driver-fingerprint)
+- PostgreSQL via SQLModel/SQLAlchemy. Schema is versioned with **Alembic** — every model change ships a revision in `backend/styrmin_backend/db/migrations/versions/`, applied via `styrmin db migrate` (see [ADR-001](dev/adr/0001-alembic-database-migrations.md) and [`dev/guides/database-migrations.md`](dev/guides/database-migrations.md)). `metadata.create_all()` only builds a *fresh* database at startup and in test fixtures; it never evolves an existing one. (013-driver-fingerprint)
 
 - TypeScript (Docusaurus config), Markdown/MDX (content), Node.js 22+ + Docusaurus v3, `@easyops-ci/docusaurus-search-local`, pnpm (003-docs-site)
 
@@ -32,7 +32,7 @@
 
 - Python 3.14+ (backend, SDK, CLI) + Strawberry GraphQL, SQLModel, SQLAlchemy (async), Pydantic, Cyclopts (CLI), httpx (SDK transport) (001-graphql-name-lookup)
 
-- PostgreSQL via SQLModel/SQLAlchemy (async). No Alembic -- schema managed via `metadata.create_all()`. (001-graphql-name-lookup)
+- PostgreSQL via SQLModel/SQLAlchemy (async). Schema changes ship as Alembic revisions per ADR-001; `metadata.create_all()` covers only fresh-database startup and test fixtures. (001-graphql-name-lookup)
 
 - Python 3.14+ (backend), TypeScript 5.9.3 (frontend) + Strawberry GraphQL, SQLModel, Pydantic (backend); React 19, urql, React Hook Form, Zod, Radix UI (frontend) (002-single-cluster-limit)
 
