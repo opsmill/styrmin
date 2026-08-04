@@ -128,7 +128,7 @@ scope that sets it wins:
 | Scope | Where you set it | Use it for |
 |-------|----------------|------------|
 | **Deployment** | `deploy`'s `config`, or `updateDeployment`'s `input` | One application that needs to keep its backups longer (or shorter) than its neighbours. |
-| **Environment** | `createEnvironment`'s `config`, or `updateEnvironment`'s `input` | The usual place — one policy for everything in the environment. |
+| **Environment** | The environment's **Configuration** tab in the web UI, `createEnvironment`'s `config`, or `updateEnvironment`'s `input` | The usual place — one policy for everything in the environment. |
 | **Cluster** | `createCluster`'s `config` | An org-wide baseline. |
 
 A scope that leaves `backup_ttl` unset is transparent: resolution falls
@@ -153,11 +153,25 @@ default afterwards, set it at environment scope instead.
 
 #### Setting a retention policy
 
-There is no **dedicated** form field or CLI flag for `backup_ttl` — the
-web UI's environment form and `styrminctl` have no retention control of
-their own. You set it through the generic config surfaces: the GraphQL
-API (or the Python SDK, which wraps the same mutations), or
-`styrminctl`'s `--config` payloads and deployment manifests.
+The environment scope has a form field. Open the environment, go to the
+**Configuration** tab, and edit **Retention (`backup_ttl`)** in the
+**Backup Retention** section. It takes the same Go duration string,
+refuses a malformed one before it is submitted, and carries the rest of
+the environment's configuration back unchanged. Saving is an
+`updateEnvironment` like any other, so it fans out a redeploy to the
+environment's deployments — the confirmation dialog names them before
+anything happens. Leave the field empty and save to **clear** the
+environment policy: retention then falls through to the cluster scope, or
+to the built-in `720h`. An environment that carries `dedicated_ingress` or
+`scheduling` overrides is the exception — the form cannot map those yet, so
+it disables Save rather than clear them, and you set retention for that
+environment through the API instead.
+
+The other two scopes have no dedicated control, and `styrminctl` has no
+retention flag at any scope. You set those through the generic config
+surfaces: the GraphQL API (or the Python SDK, which wraps the same
+mutations), or `styrminctl`'s `--config` payloads and deployment
+manifests.
 
 Watch the key casing — it follows the surface, not the feature:
 
@@ -208,7 +222,8 @@ mutation SetEnvironmentRetention {
 omit is persisted as its unset state. Carry the fields you want to keep
 in the same call, or you'll clear them. This cuts both ways — the web UI
 does the round-trip for you, so editing an environment variable in the
-UI will not wipe a retention policy you set here.
+UI will not wipe a retention policy you set here, and saving the
+retention field will not wipe the settings you set through the API.
 
 :::
 

@@ -14,12 +14,13 @@ const noDeployments: Array<{ id: string; name: string; internal: boolean }> =
   [];
 
 describe("EnvironmentConfigurationTab", () => {
-  it("renders all five sections with populated values", async () => {
+  it("renders all six sections with populated values", async () => {
     const config: Record<string, unknown> = {
       env_vars: {
         OTEL_EXPORTER_OTLP_ENDPOINT: "https://otel.staging",
         LOG_LEVEL: "debug",
       },
+      backup_ttl: "2160h",
       ip_whitelist: ["10.0.0.0/8", "192.168.0.0/16"],
       dedicated_ingress: {
         class_name: "nginx-staging",
@@ -44,6 +45,7 @@ describe("EnvironmentConfigurationTab", () => {
 
     // Every section card is present.
     expect(screen.getByTestId("section-env-vars")).toBeInTheDocument();
+    expect(screen.getByTestId("section-backup-retention")).toBeInTheDocument();
     expect(screen.getByTestId("section-ip-allowlist")).toBeInTheDocument();
     expect(screen.getByTestId("section-dedicated-ingress")).toBeInTheDocument();
     expect(screen.getByTestId("section-scheduling")).toBeInTheDocument();
@@ -83,6 +85,11 @@ describe("EnvironmentConfigurationTab", () => {
     expect(screen.getByText("443")).toBeInTheDocument();
     expect(screen.getByText("INGRESS")).toBeInTheDocument();
 
+    // Backup retention is seeded from the persisted policy (016).
+    expect(
+      (screen.getByTestId("backup-retention-input") as HTMLInputElement).value,
+    ).toBe("2160h");
+
     // No empty-state messages should render when every section is populated.
     expect(screen.queryAllByTestId("empty-section-message")).toHaveLength(0);
   });
@@ -109,6 +116,15 @@ describe("EnvironmentConfigurationTab", () => {
     // No populated lists.
     expect(screen.queryByTestId("env-vars-form-rows")).toBeNull();
     expect(screen.queryByTestId("ip-allowlist-list")).toBeNull();
+
+    // Retention: blank input, and the inherited notice instead of a value
+    // — the section stays informative when the environment sets no policy.
+    expect(
+      (screen.getByTestId("backup-retention-input") as HTMLInputElement).value,
+    ).toBe("");
+    expect(screen.getByTestId("backup-retention-current")).toHaveTextContent(
+      /no environment policy set/i,
+    );
   });
 
   it("does not crash on a partially-populated config (env_vars only)", async () => {
@@ -422,5 +438,46 @@ describe("buildFullReplacementInput (011/US2)", () => {
     expect(
       buildFullReplacementInput({ backup_ttl: 720 }, []).backupTtl,
     ).toBeNull();
+  });
+
+  // 016 (UI setter): the retention form needs to *change* backupTtl while
+  // still carrying every other persisted field. The override is boxed so
+  // "no override, keep persisted" stays distinguishable from "override to
+  // null, clear the policy".
+  describe("backupTtl override (016 UI setter)", () => {
+    const config: Record<string, unknown> = {
+      env_vars: { LOG_LEVEL: "info" },
+      db_size: "10Gi",
+      backup_ttl: "2160h",
+    };
+
+    it("keeps the persisted value when no override is passed", () => {
+      expect(buildFullReplacementInput(config, []).backupTtl).toBe("2160h");
+      expect(buildFullReplacementInput(config, [], {}).backupTtl).toBe("2160h");
+    });
+
+    it("applies an explicit override value", () => {
+      const input = buildFullReplacementInput(config, [], {
+        backupTtl: { value: "8760h" },
+      });
+      expect(input.backupTtl).toBe("8760h");
+      // Every other field still rides through unchanged.
+      expect(input.dbSize).toBe("10Gi");
+    });
+
+    it("clears the policy when the boxed override value is null", () => {
+      const input = buildFullReplacementInput(config, [], {
+        backupTtl: { value: null },
+      });
+      expect(input.backupTtl).toBeNull();
+      expect(input.dbSize).toBe("10Gi");
+    });
+
+    it("can set a policy on a config that had none", () => {
+      expect(
+        buildFullReplacementInput({}, [], { backupTtl: { value: "720h" } })
+          .backupTtl,
+      ).toBe("720h");
+    });
   });
 });
