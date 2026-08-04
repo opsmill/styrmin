@@ -105,10 +105,16 @@ async def _wait_for_persisted_db_size(
 
 @pytest.mark.skip(
     reason=(
-        "Storage & Runtime section is not currently rendered in the edit "
-        "drawer (see frontend/src/lib/configuration-types.ts::DRAWER_SECTION_GROUPS). "
-        "The Settings tab read view still shows storage & runtime; re-enable "
-        "this test when the section is re-introduced in the drawer."
+        "``db_size`` is still read-only. d688d20 re-introduced the Storage & "
+        "Runtime section in the edit drawer, so section-nav-storageRuntime now "
+        "exists — but that section edits only ``backup_ttl``. ``db_size``, "
+        "``standard_storage.storage_class`` and ``node_selector`` were "
+        "deliberately left read-only on the Settings tab, so there is no "
+        "``storage-db-size`` control for this test to drive. Re-enable when "
+        "``db_size`` becomes editable (a product decision, not a follow-up), or "
+        "retarget the scenario at ``backup_ttl`` — note the impact assertion "
+        "would change too: ``backup_ttl`` is a metadata-only change with no "
+        "database resize."
     ),
 )
 @pytest.mark.ci
