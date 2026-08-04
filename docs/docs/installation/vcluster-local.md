@@ -202,6 +202,13 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+# The agent subchart defaults its tag to the released appVersion, so the
+# locally-built tag has to be pinned there too.
+styrmin-agent:
+  image:
+    tag: latest
+    pullPolicy: IfNotPresent
+
 ingress:
   enabled: true
   className: traefik

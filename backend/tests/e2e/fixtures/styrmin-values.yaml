@@ -25,11 +25,14 @@ styrmin:
     interval: 1
 
 styrmin-agent:
-  # The agent subchart defaults to `tag: latest`, matching the local
-  # `docker compose build` output. CI overrides this via
-  # `--set styrmin-agent.image.tag=$STYRMIN_IMAGE_VER` (see
-  # `backend/tests/e2e/conftest.py::styrmin_deployment`).
-  #
+  image:
+    # The agent subchart defaults `tag` to its own appVersion (the released
+    # image), so pin it to `latest` to match the local `docker compose build`
+    # output. CI overrides this via
+    # `--set styrmin-agent.image.tag=$STYRMIN_IMAGE_VER` (see
+    # `backend/tests/e2e/conftest.py::styrmin_deployment`).
+    tag: latest
+
   # The e2e suite runs multiple deployments and Prefect subprocesses inside
   # the agent pod. The default 1Gi limit OOMs under that load, which leaves
   # tasks stuck in RUNNING and blocks downstream status transitions.

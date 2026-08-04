@@ -109,13 +109,16 @@ jobs:
           yq -i ".appVersion = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
           yq -i "(.dependencies[] | select(.name == \"styrmin-agent\")).version = \"$NEW_VERSION\"" helm/styrmin/Chart.yaml
           yq -i ".version = \"$NEW_VERSION\"" helm/agent/Chart.yaml
+          # The agent chart's appVersion is its default `image.tag` -- keep it
+          # in lockstep with the styrmin chart so both pull the same image.
+          yq -i ".appVersion = \"$NEW_VERSION\"" helm/agent/Chart.yaml
 
           echo "Updated pyproject.toml:"
           uv version --short
           echo "Updated helm/styrmin/Chart.yaml:"
           yq '.version, .appVersion' helm/styrmin/Chart.yaml
           echo "Updated helm/agent/Chart.yaml:"
-          yq '.version' helm/agent/Chart.yaml
+          yq '.version, .appVersion' helm/agent/Chart.yaml
 
       - name: Commit and tag
         if: ${{ !inputs.dry_run }}

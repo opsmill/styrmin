@@ -132,9 +132,14 @@ helm install styrmin ./helm/styrmin -n styrmin --create-namespace -f values-prod
 | `imagePullSecrets` | Image pull secrets | `[]` |
 
 The agent subchart exposes the same `image.registry` / `image.repository` /
-`image.tag` / `image.pullPolicy` surface under the `styrmin-agent` key.
-Setting `global.imageRegistry` overrides the registry for both charts at
-once; per-chart overrides remain available for asymmetric setups.
+`image.tag` / `image.pullPolicy` surface under the `styrmin-agent` key, and
+defaults `image.tag` to its own `appVersion` the same way — the release
+workflow keeps both charts' `appVersion` in lockstep, so an untouched
+install pulls one image version for the server and the agent. Setting
+`global.imageRegistry` overrides the registry for both charts at once;
+per-chart overrides remain available for asymmetric setups. There is no
+equivalent global for the tag: overriding `image.tag` only affects the
+parent chart, so set `styrmin-agent.image.tag` alongside it.
 
 ### Running against a locally-built image
 
@@ -144,21 +149,25 @@ image with the chart's exact reference and let `pullPolicy: IfNotPresent`
 short-circuit the registry pull — kubelet name-matches the locally-stored
 image and never contacts the registry. The repo's `invoke build` and
 `docker compose build` already tag the image as
-`registry.opsmill.io/opsmill/styrmin:latest`, so no chart override is
-needed beyond pinning the tag to `latest`:
+`registry.opsmill.io/opsmill/styrmin:latest`, so pin the tag to `latest`
+on both the chart and the agent subchart (each otherwise defaults to its
+`appVersion`, which resolves to the released image):
 
 ```yaml
 # local-image-values.yaml
 image:
   tag: latest       # match the locally-built tag
+styrmin-agent:
+  image:
+    tag: latest     # the subchart has its own default
 ```
 
 ```bash
 helm install styrmin ./helm/styrmin -f local-image-values.yaml
 ```
 
-If you build with a different tag, set `image.tag` (and
-`styrmin-agent.image.tag`) to match. If you build under a different
+If you build with a different tag, set both `image.tag` and
+`styrmin-agent.image.tag` to match. If you build under a different
 registry path entirely, override `image.registry` / `image.repository`
 on both charts (or use `global.imageRegistry` for the registry portion
 only).

@@ -19,3 +19,14 @@ All notable changes to this project will be documented in this file.
   as `client.deployments.get_by_name(name, environment_id=...)`, with the
   generated `GetDeploymentByNameDeployment` type re-exported from
   `styrmin_sdk` for external callers.
+
+### Changed
+
+- The `styrmin-agent` Helm chart now defaults `image.tag` to the chart's
+  `appVersion` instead of the hardcoded `latest`, matching the `styrmin`
+  chart. A default install of a released chart now pins the agent to that
+  release's image rather than tracking a floating tag. The release workflow
+  bumps the agent chart's `appVersion` alongside the parent's. Installs that
+  need a locally-built or otherwise floating image must now set
+  `styrmin-agent.image.tag` explicitly — see `helm/styrmin/README.md`
+  ("Running against a locally-built image").

@@ -38,7 +38,13 @@ def build_agent(context: Context) -> None:
 def install(context: Context) -> None:
     """Install the agent."""
     print_header("Installing the agent Helm chart...")
-    context.run(f"helm install agent helm/agent -n {KUBERNETES_ROOT_NAMESPACE} --create-namespace", pty=True)
+    # The chart defaults `image.tag` to its appVersion (the released image);
+    # pin it to the tag `build_image` just produced so the pod picks up the
+    # local build instead of pulling the release.
+    context.run(
+        f"helm install agent helm/agent -n {KUBERNETES_ROOT_NAMESPACE} --create-namespace --set image.tag={IMAGE_VER}",
+        pty=True,
+    )
 
 
 @task(pre=[build_image, build_agent, install])
