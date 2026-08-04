@@ -130,6 +130,14 @@ the two, so a revision that only ever ran there can still be broken.
   `postgresql.ENUM(..., create_type=False)` on PostgreSQL, plain `sa.Enum` on
   SQLite (which has no enum types — it renders `VARCHAR` plus a per-table CHECK
   constraint). `c0d1e2f3a4b5_add_role_and_groups.py` is the worked example.
+- **Never hardcode an auto-generated constraint name.** PostgreSQL derives
+  `<table>_<column>_key` for an unnamed `UniqueConstraint`; SQLite emits a bare
+  `UNIQUE (col)` and reflects it with `name=None`, so batch mode cannot target
+  it. Inspect the live schema
+  (`sa.inspect(bind).get_unique_constraints(...)`), skip when the constraint is
+  absent, and pass a `naming_convention` to `op.batch_alter_table` to name the
+  unnamed reflected constraint.
+  `c9d0e1f2a3b4_deployment_name_scoped_uniqueness.py` is the worked example.
 - **Drop enum types explicitly in `downgrade`.** `op.create_table` emits
   `CREATE TYPE` for every PostgreSQL enum column, but `op.drop_table` builds a
   bare `Table` with no columns and therefore never emits the matching
