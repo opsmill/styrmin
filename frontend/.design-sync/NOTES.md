@@ -3,12 +3,14 @@
 Repo-specific gotchas for `/design-sync` (package shape). Read before every re-sync.
 
 ## The core reality: `frontend` is an app, not a packaged component library
+
 - `frontend/package.json` is `private`, `version: 0.0.0`, **no `exports`**, and its
   `dist/` is the **Vite app build** (assets + index.html), not importable components.
 - The package-shape converter assumes the DS is an installed package at
   `node_modules/<pkg>` and reads its shipped `.d.ts`. Neither exists here.
 
 ## Workarounds applied (to make the run go at all)
+
 - **Self-symlink** `node_modules/frontend -> frontend` so `PKG_DIR` resolves
   (`ln -sfn "$(pwd)" node_modules/frontend` from `frontend/`). Types are absent, so
   the export scan returns empty (no crash) and synth-entry takes over.
@@ -26,6 +28,7 @@ Repo-specific gotchas for `/design-sync` (package shape). Read before every re-s
   commit the resolved hash back.
 
 ## Quality limitations of the current output (honest)
+
 - **Weak prop contracts.** synth-entry + no shipped types → `<Name>Props` extracts to
   `{ [key: string]: unknown }` (e.g. `ButtonProps`). The design agent's API contract is
   effectively empty. Not fixable without a real lib build that emits `.d.ts`.
@@ -34,16 +37,19 @@ Repo-specific gotchas for `/design-sync` (package shape). Read before every re-s
 - **No docs matched (0/49)** → minimal `.prompt.md`. **Floor cards only** (no authored previews).
 
 ## Re-sync risks
+
 - `cfg.cssEntry` hash is build-specific — stale after any `pnpm build`.
 - Prop contracts stay weak until the components are a real buildable package.
 
 ## Recommendation (for the team)
+
 To make `/design-sync` first-class, extract `frontend/src/components/ui` into a real
 buildable package with `dist/` + `exports` + emitted `.d.ts` (and ideally Storybook for
 verification). That removes the self-symlink hack, the synth-entry weak types, and the
 compiled-CSS-hash fragility all at once.
 
 ## Update — authored previews + page naming (fixes empty floor cards)
+
 - Authored `.design-sync/previews/<Name>.tsx` for all 16 components (import from
   bare `'frontend'` — the story-imports shim maps it to `window.StyrminUI.*`).
   Cards now render live, styled components with realistic Styrmin content.
@@ -58,6 +64,7 @@ compiled-CSS-hash fragility all at once.
 - Durable/committable now includes `.design-sync/previews/*.tsx` (16) + config + NOTES.
 
 ## Fixes — checkbox collapse + overlay cropping
+
 - **Checkbox** (Base UI) collapses to a ~1px sliver when rendered bare in a cell.
   Fix: author each cell inside `<div style={{display:'inline-flex',alignItems:'center',gap:8}}>`
   with a Label sibling — then it renders as a proper 16px box. (A lone `<Checkbox/>` in a
