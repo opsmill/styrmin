@@ -4,7 +4,8 @@
 **Date**: 2026-08-06
 **Source**: specs/001-env-backup-restore/ (research.md D1-D11, data-model.md, spec.md)
 **Related**: [ADR-012](0012-environment-config-fanout.md) (the fan-out convention this
-replicates, and the umbrella-record rejection this deviates from),
+replicates, and two of its rejections this deviates from — the umbrella record and
+the per-environment serialisation primitive),
 [ADR-017](0017-authorization-model.md) (the role model the restore asymmetry follows),
 [ADR-053](0053-driver-version-provenance-fingerprint.md) (the fingerprint the snapshot
 records), [ADR-027](0027-environment-capabilities-computed-independently.md)
@@ -23,9 +24,11 @@ The mechanics were never the hard part: one constituent backup per eligible
 deployment is a loop over the existing `create_backup` service, and
 [ADR-012](0012-environment-config-fanout.md) already established exactly how an
 environment-scope change fans out to deployments — per-item `try/except`
-isolation, commit before dispatch, a structured audit line with outcome
-counters, and its consequences section explicitly nominates that shape as "the
-convention to replicate for any future environment-scope change".
+isolation, commit before dispatch (its decision 4), a structured audit line with
+outcome counters. ADR-012's own "convention to replicate" bullets nominate two
+*other* things — per-deployment no-op detection, and structured GraphQL input
+mirrors of Pydantic configuration models — so that fan-out shape is a precedent
+this feature chose to follow because it fits, not an instruction ADR-012 issued.
 
 Three questions were not answered by that precedent, and one of them puts this
 feature in direct tension with it:
@@ -37,6 +40,11 @@ feature in direct tension with it:
    stored alongside the children can contradict them.
 3. **In what order does a restore revert config and restore data?** Both
    converge the same namespaces, and the naive ordering races them.
+
+A second, independent deviation from ADR-012 surfaced while answering those:
+ADR-012 rejected a per-environment serialisation primitive for its own fan-out,
+and this feature needs one. It is disclosed and argued in decision 5 rather than
+folded into decision 1.
 
 ## Decision
 
@@ -50,7 +58,8 @@ backup; nothing about existing rows changes.
 
 ADR-012's "Alternatives Considered" rejected a dedicated umbrella for its
 fan-out, and that rejection has to be addressed rather than quietly stepped
-over. Four reasons this is a genuine exception and not a reversal:
+over. Three reasons this is a genuine exception and not a reversal, plus the
+narrow rule that generalises:
 
 - **What ADR-012 rejected was a `Task` *type*, not a record.** The proposal
   there was a new member of the `Task` type enum for the umbrella event. That
@@ -59,18 +68,22 @@ over. Four reasons this is a genuine exception and not a reversal:
   feature adds no `Task` type. Constituent backups remain ordinary `Backup`
   rows, driven by the ordinary `EXECUTE_BACKUP` flow, tracked by ordinary
   `Task` rows. The per-deployment work-item model is untouched.
-- **ADR-012's reason was "no consumer needs it".** Its umbrella event was an
-  audit fact about one mutation, and a structured log line served that fact
-  completely. Here the grouping *is* the deliverable: operators list snapshots,
-  inspect per-constituent outcomes, restore from a snapshot, and delete one
-  with cascade. A log line cannot be queried, listed, restored from, or
-  cascade-deleted. The requirement changed; the judgment did not.
-- **Everything else about ADR-012 is replicated verbatim.** Fan-out lives in
+- **ADR-012's umbrella was an audit fact; this grouping is the deliverable.**
+  ADR-012's stated reason is that "the structured log line (FR-023) is the
+  umbrella audit record; the per-deployment Tasks remain the authoritative
+  work-items" — a log line served its umbrella completely. Here the grouping
+  *is* the deliverable: operators list snapshots, inspect per-constituent
+  outcomes, restore from a snapshot, and delete one with cascade. A log line
+  cannot be queried, listed, restored from, or cascade-deleted. The requirement
+  changed; the judgment did not.
+- **The rest of ADR-012's fan-out shape is replicated.** Fan-out lives in
   the service layer, not a new Prefect flow. Per-constituent `try/except`
   isolation: one conflicted constituent becomes a recorded error and its peers
   proceed. Commit before dispatch. A structured audit line with outcome
   counters (`env_backup_fanout_dispatched`, `env_restore_fanout_dispatched`)
-  alongside `env_config_fanout_dispatched`. This extends the convention.
+  alongside `env_config_fanout_dispatched`. This extends the convention. The
+  one further departure — an environment-level concurrency guard, which ADR-012
+  refused for its own fan-out — is disclosed and argued in decision 5.
 - **The narrow rule that generalises**: add an umbrella record when the
   grouping is itself a user-facing artifact with its own lifecycle — listable,
   inspectable, restorable-from, deletable-with-cascade. Keep the log line when
@@ -109,25 +122,48 @@ all**, which is why this feature changed no existing flow.
 lifts the derivation, adds the mixed state as a first-class outcome, and drops
 the storage.
 
-The derivation only ever sees a *complete* capture, which is why the whole
-capture — parent row, every constituent row, every recorded error — commits in
-**one transaction** before any dispatch (decision 4). The first draft committed
-the parent on its own and its children afterwards, which opened a window where
-a committed snapshot had zero children and zero errors and therefore derived
-`COMPLETED`: a cancelled request (`CancelledError` escapes the per-constituent
+The derivation only ever sees a *complete* capture. That is not a property of
+the derivation but of the transaction boundary, so it is pinned here:
+
+**The whole capture commits in one transaction, before any dispatch.** The parent
+row, every constituent `Backup` row and every recorded `ConstituentError` are
+written together; the dispatch loop then consumes a list of already-committed
+ids. After that commit, either the snapshot does not exist or its constituents
+and recorded errors exist with it — there is no readable intermediate. Reusing
+`create_backup` inside that transaction needs one accommodation,
+`_SharedTransaction`: a `UnitOfWork` view that forwards every repository to the
+real unit of work and turns `commit`/`rollback` into no-ops, so the reused
+service joins the caller's transaction instead of publishing a half-built
+capture — and so `UnitOfWork.__aexit__` cannot roll the parent snapshot back
+because one constituent's instance happened to be busy, which would invert
+FR-005's per-constituent isolation. `restore_environment_backup` commits the same
+way (decision 4).
+
+The first draft committed the parent on its own and created its children
+afterwards. That opened a window in which a committed snapshot had zero children
+and zero errors and therefore derived `COMPLETED`, and two defects lived in it: a
+cancelled request (`CancelledError` escapes the per-constituent
 `except Exception`) published that state permanently, and the D6 guard of
 decision 5 — an `EXISTS` over non-terminal *children* — did not hold the
-environment while it was open. Committing once removes both by construction.
+environment while the window was open, so a second `createEnvironmentBackup`
+passed it (FR-009). Committing once removes both by construction: a fresh
+snapshot now derives `PENDING`/`IN_PROGRESS` when it has constituents,
+`FAILED` when every constituent was blocked at creation, and `COMPLETED` only
+when there was genuinely nothing to capture (the config-only case above).
 
 Two honest costs remain, documented rather than engineered away:
 
-- **Terminal status is still not proof of convergence.** For a restore, the
-  constituent data restores can be done while the reverted config is still
-  propagating to the deployments that did not receive one; and a snapshot whose
-  constituents were individually deleted afterwards legitimately reads
-  `COMPLETED` with fewer children than `deployment_snapshots` (FR-014). The
-  constituent count against `deployment_snapshots`, not the status, is what
-  says whether the snapshot still covers the whole environment.
+- **Terminal status is still not proof of coverage or convergence.** For a
+  restore, the constituent data restores can be done while the reverted config
+  is still propagating to the deployments that did not receive one. And a
+  snapshot whose constituents were individually deleted afterwards legitimately
+  reads `COMPLETED` with fewer children than `deployment_snapshots` (FR-014).
+  Coverage is a count, not a status: the capture commits
+  `len(backups) + len(constituent_errors) == len(deployment_snapshots)`, and a
+  later shortfall against that identity is exactly the gap left by an
+  individually deleted constituent. Comparing linked backups alone against
+  `deployment_snapshots` is *not* the check — a constituent that failed at
+  creation never got a row, so it is a legitimate permanent shortfall.
 - **Status is O(children) per read.** Acceptable at tens of deployments per
   environment; the derivation is a list comprehension over already-loaded
   relationship rows.
@@ -181,9 +217,11 @@ Steps 2, 3 and step 5's row creation share one transaction for the same reason
 the parent's commit and the constituent rows would otherwise publish a restore
 that silently dropped its late skips and did not hold the environment.
 Reusing `create_backup` / `create_restore` inside that shared transaction needs
-one accommodation — a `UnitOfWork` view whose `commit`/`rollback` are no-ops, so
-those services join the caller's transaction instead of committing a half-built
-capture or rolling the parent back when one constituent's instance is busy.
+the same `_SharedTransaction` accommodation decision 2 describes. It also
+forced a second change in those two services: each now generates its row id up
+front so the auto-generated name is final before the `INSERT`. Writing a shared
+sentinel and renaming after the fact violates the `unique=True` index as soon as
+two rows are created inside one transaction.
 
 The exclusion in step 4 is the load-bearing part. A deployment receiving a
 Velero data restore is being returned to its backup-time state, and its restored
@@ -225,12 +263,39 @@ the per-instance guards are unchanged.
 
 This reuses decision 2's philosophy: "in progress" is a fact about the children,
 so the guard can never disagree with reality and there is no lock row to leak if
-a process dies. Two accepted limitations:
+a process dies.
+
+**This is the second deliberate deviation from ADR-012.** ADR-012 rejected a
+"per-environment lock to serialise overlapping fanouts" outright, on the grounds
+that "the existing per-deployment Task machinery already serialises reconciles
+per deployment; environment-level locking would add a second serialisation
+primitive without a clear payoff", and accepted that "whichever lands second
+wins". Two things make the payoff clear here that were not true there:
+
+- **Its fan-out converges under overlap; this one does not.** An env-config
+  fan-out is last-write-wins against a single persisted row, and a re-submission
+  picks up the laggards — two overlapping fan-outs reach the same end state. Two
+  overlapping environment backups instead produce two snapshots covering
+  different subsets of the environment: whichever `create_backup` arrives second
+  for a given instance loses to the per-instance in-progress guard and is
+  recorded as a constituent error. And two overlapping restores drive the same
+  namespaces towards two different points in time with an undefined result.
+  "Whichever lands second wins" has no meaning for an operation whose output is
+  a record.
+- **It is not the primitive ADR-012 refused.** There is no lock row, no
+  advisory lock, and no new serialisation machinery: the guard is an `EXISTS`
+  over the same non-terminal children decision 2 already reads to derive
+  status. It adds no state that can leak and nothing to release, which is
+  precisely why ADR-012's objection — a second serialisation *primitive* —
+  does not attach to it.
+
+Two accepted limitations:
 
 - **Two racing create calls can both pass the check.** The per-instance
   `has_in_progress_backup` guard then turns the loser's constituents into
   recorded errors — a `PARTIAL` outcome, not corruption. A DB advisory lock was
-  rejected as disproportionate machinery for the window.
+  rejected as disproportionate machinery for the window, which is also ADR-012's
+  own conclusion about locks at this scope.
 - **A stuck constituent pins the environment.** Dispatch is fire-and-forget, so
   a constituent whose flow never ran stays `PENDING` forever, its parent stays
   non-terminal, and the guard blocks every new operation. Decision 6 is the
@@ -276,10 +341,17 @@ environment's config through the back door. No new roles or permission concepts
 - **Easier**: one action backs up or restores an environment of any size, and
   the "which backups belong together?" bookkeeping is the platform's problem
   now. The snapshot is a queryable artifact with its own lifecycle.
-- **Easier**: no existing backup/restore code changed. No new Prefect flows, no
-  strategy changes, no writer for the parent status, no modification to
+- **Easier**: nothing downstream of row creation changed. No new Prefect flows,
+  no strategy changes, no writer for the parent status, no modification to
   `execute_backup_workflow` / `execute_restore_workflow`. Constituents are
-  ordinary backups for retention, listing, and deletion.
+  ordinary backups for retention, listing, and deletion. The existing *service*
+  layer did change, additively, in four places: `create_backup` /
+  `create_restore` take the new parent-FK kwarg and generate their row id up
+  front so the auto-generated name is final before the `INSERT` (decision 4),
+  `createBackup`'s target resolution moved into the shared
+  `resolve_backup_target` in `services/backup/service.py` so both entry points
+  build identical constituents, and `delete_environment` gained the snapshot
+  cascade (decision 6).
 - **Easier**: `PARTIAL` makes a half-covered snapshot legible instead of
   rounding it to success or failure, and every non-restored constituent is
   attributed with a deployment name and reason. There are no silent skips to
@@ -289,12 +361,13 @@ environment's config through the back door. No new roles or permission concepts
   the answer when it is an audit fact about one mutation. Future
   environment-scope features should still start from ADR-012's fan-out shape
   and add a record only against this test.
-- **Harder**: terminal parent status is not proof of convergence, in two
-  directions — a just-created snapshot reads `COMPLETED` before its
-  constituents exist, and a terminal restore leaves the reverted config still
-  propagating to non-restored deployments. Both are documented on the user
-  surfaces and in `dev/knowledge/backend/backup-restore.md`; neither is
-  fixable without the stored status decision 2 exists to avoid.
+- **Harder**: terminal parent status is not proof of coverage or convergence. A
+  `COMPLETED` snapshot can be missing a constituent that was deleted
+  individually afterwards (coverage is the count identity in decision 2, not the
+  status), and a terminal restore leaves the reverted config still propagating
+  to non-restored deployments. Both are documented on the user surfaces and in
+  `dev/knowledge/backend/backup-restore.md`; neither is fixable without the
+  stored status decision 2 exists to avoid.
 - **Harder**: status and in-progress checks cost O(children) per read, and the
   constituent-outcome projection joins `deployment_snapshots` against linked
   backups on every query. Fine at tens of deployments; a very large environment
@@ -347,7 +420,10 @@ environment's config through the back door. No new roles or permission concepts
   releases a fire-and-forget dispatch that never landed.
 - **A DB advisory lock for the environment-level concurrency guard**: rejected
   as new machinery disproportionate to the race window, whose worst outcome is
-  a `PARTIAL` snapshot.
+  a `PARTIAL` snapshot. ADR-012 reached the same conclusion about a
+  per-environment lock for its own fan-out ("a second serialisation primitive
+  without a clear payoff"); decision 5 explains why the derived `EXISTS` guard
+  it *does* add is not that primitive.
 - **A stored DB enum for skip reasons**: rejected. The set is expected to grow,
   and each addition would force a migration and a client-visible schema change
   for what is a human-readable explanation.

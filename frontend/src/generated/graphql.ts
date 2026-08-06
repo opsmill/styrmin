@@ -1255,7 +1255,7 @@ export type ServiceNameOverride = {
   overrideName: Scalars['String']['input'];
 };
 
-/** A constituent that was not restored, attributed by deployment name and reason. Reasons come from a fixed vocabulary: backup failed at creation, backup not completed, backup deleted, backup expired, deployment no longer exists, deployment busy with another restore. */
+/** A constituent that was not restored, attributed by deployment name and reason. `reason` is open text, not a closed vocabulary — render it, do not switch on it. Six values are conventional: backup failed at creation, backup not completed, backup deleted, backup expired, deployment no longer exists, deployment busy with another restore. Any other constituent-creation failure is reported verbatim as 'restore could not be created: <error>', and the set is expected to grow without a schema change. */
 export type SkippedConstituent = {
   __typename?: 'SkippedConstituent';
   deploymentId: Scalars['UUID']['output'];

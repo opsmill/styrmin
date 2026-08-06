@@ -141,6 +141,17 @@ class EnvironmentBackupResource(BaseResource):
     ) -> GetEnvironmentBackupEnvironmentBackup:
         """Poll :meth:`get` until the derived parent status is terminal.
 
+        The whole capture — the record and every constituent — is committed in
+        one transaction before any backup work is dispatched, so the first poll
+        already sees the snapshot's full constituent list. A snapshot with work
+        to do polls from ``PENDING``/``IN_PROGRESS``; an immediate ``COMPLETED``
+        means there was nothing eligible to back up (a config-only snapshot).
+
+        A terminal status is still not proof the snapshot *covers* the
+        environment: a constituent deleted individually afterwards leaves a
+        ``constituents`` entry with neither a ``backup`` nor an ``error``, and
+        the snapshot legitimately stays ``COMPLETED``.
+
         Returns the last observed snapshot when ``max_wait`` elapses first, so
         callers always get a value and can inspect the non-terminal status
         themselves rather than catching a timeout.
@@ -218,10 +229,16 @@ class EnvironmentBackupResource(BaseResource):
     ) -> GetEnvironmentRestoreEnvironmentRestore:
         """Poll :meth:`get_restore` until the derived parent status is terminal.
 
-        The default ``max_wait`` is longer than :meth:`wait_for_backup`'s:
-        restoring an environment reverts its config and redeploys, so the
-        constituent restores start behind a reconciliation the backup path does
-        not have to wait for.
+        The default ``max_wait`` is longer than :meth:`wait_for_backup`'s
+        because a Velero restore takes longer than the backup it came from: it
+        deletes and recreates the target namespace, waits for the restored
+        resources, then runs the post-restore recovery (the backend's own
+        per-operation defaults are 2h for a restore against 1h for a backup).
+
+        It is *not* waiting on the config fan-out. Deployments receiving a
+        constituent restore are deliberately excluded from that redeploy — it
+        would race the Velero restore on the same namespace — and the fan-out
+        only dispatches, so it is never in front of a constituent restore.
 
         Returns the last observed record when ``max_wait`` elapses first, so
         callers always get a value and can inspect the non-terminal status

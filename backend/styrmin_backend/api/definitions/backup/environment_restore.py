@@ -6,8 +6,11 @@ not a column** (research.md D2), recomputed on every read from the constituent
 its constituents is structurally impossible (spec FR-004 / SC-003).
 
 ``skippedConstituents`` is the other half of the contract: every constituent
-that was *not* restored is listed here with its deployment name and one of the
-uniform skip reasons — zero silent skips (spec FR-007 / SC-004).
+that was *not* restored is listed here with its deployment name and a reason —
+zero silent skips (spec FR-007 / SC-004). The reason is a free string on the
+wire, not a closed vocabulary: :class:`~styrmin_backend.services.backup.environment.SkipReason`
+holds the conventional values, and an unexpected constituent-creation failure is
+recorded verbatim alongside them (ADR-0055).
 """
 
 from __future__ import annotations
@@ -63,9 +66,13 @@ class EnvironmentRestoreStatus(str, Enum):
 @strawberry.type(
     description=(
         "A constituent that was not restored, attributed by deployment name "
-        "and reason. Reasons come from a fixed vocabulary: backup failed at "
-        "creation, backup not completed, backup deleted, backup expired, "
-        "deployment no longer exists, deployment busy with another restore."
+        "and reason. `reason` is open text, not a closed vocabulary — render "
+        "it, do not switch on it. Six values are conventional: backup failed "
+        "at creation, backup not completed, backup deleted, backup expired, "
+        "deployment no longer exists, deployment busy with another restore. "
+        "Any other constituent-creation failure is reported verbatim as "
+        "'restore could not be created: <error>', and the set is expected to "
+        "grow without a schema change."
     )
 )
 class SkippedConstituent:

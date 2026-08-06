@@ -615,20 +615,25 @@ async def wait_for_constituent_outcomes(
 ) -> EnvironmentBackupRef:
     """Block until every named constituent reports its expected outcome.
 
-    Needed for two independent reasons, and both are properties of the feature
-    rather than of this test:
+    Waiting on the children rather than on the parent status, for two reasons
+    that are both properties of the feature rather than of this test:
 
-    * ``constituents`` is projected from the parent's ``deployment_snapshots``,
-      which is committed *before* the fan-out dispatches anything (ADR-0012), so
-      a constituent whose ``Backup`` row does not exist yet legitimately reads as
-      ``missing`` for the duration of the fan-out — and while every constituent
-      is in that state the *derived* parent status reads ``COMPLETED`` (no
-      children, no errors). Waiting on the children rather than on the parent is
-      therefore the only sound "the backup is done" signal.
+    * the derived parent status only says that every constituent row which
+      *exists* is terminal. It cannot express the per-constituent outcomes these
+      assertions are about — which deployment completed, and which one is the
+      gap left by an individually deleted constituent — and a ``COMPLETED``
+      parent is compatible with both. The ``constituents`` projection
+      (``deployment_snapshots`` ⋈ linked backups ⋈ ``constituent_errors``) is
+      what carries them.
     * the UI entrypoint reads a list that refetches on a 10s interval, so a
       change made out-of-band (deleting one constituent) needs a poll to become
       visible. The API entrypoint re-reads on every call, so the same poll is a
       no-op there.
+
+    Note that a constituent no longer reads ``missing`` merely because the
+    fan-out has not reached it yet: the parent row, every constituent ``Backup``
+    row and every recorded creation error now commit in one transaction before
+    anything is dispatched, so ``missing`` means the row was deleted.
     """
     deadline = asyncio.get_event_loop().time() + timeout
     observed: dict[str, str] = {}
