@@ -440,6 +440,21 @@ input DeploymentReferenceInput {
   components: [String!] = null
 }
 
+"""
+The declared state of one deployment captured at backup time — enough to recreate it later (clone readiness).
+"""
+type DeploymentSnapshot {
+  deploymentId: UUID!
+  deploymentName: String!
+  instanceId: UUID!
+  driverName: String!
+  driverVersion: String!
+  driverFingerprint: String
+  applicationVersion: String!
+  config: JSON
+  parameters: JSON
+}
+
 input DeploymentStatusReportInput {
   deploymentId: UUID!
   phase: String!
@@ -530,6 +545,51 @@ type Environment {
   """
   envVars: [EnvVar!]!
   deployments(includeDeleted: Boolean! = false): [Deployment!]!
+}
+
+type EnvironmentBackup {
+  id: UUID!
+  name: String!
+  createdOn: DateTime!
+  updatedOn: DateTime
+  environmentId: UUID!
+
+  """
+  Derived from the constituent backups and recorded creation errors on every read — never stored, so it cannot contradict its constituents. An environment with no eligible deployments yields a config-only snapshot that is COMPLETED immediately.
+  """
+  status: EnvironmentBackupStatus!
+
+  """Environment config captured at backup time."""
+  environmentConfig: JSON
+
+  """
+  Per-deployment declared state captured at backup time (clone readiness).
+  """
+  deploymentSnapshots: [DeploymentSnapshot!]!
+
+  """
+  One entry per eligible deployment: its constituent backup, its creation error, or neither when the constituent was deleted.
+  """
+  constituents: [EnvironmentBackupConstituent!]!
+  environment: Environment!
+}
+
+"""
+One eligible deployment's outcome in the snapshot. ``backup`` is set when a constituent backup exists, ``error`` when creation failed. Both null means the constituent was deleted individually after the snapshot was taken — the gap is deliberately visible.
+"""
+type EnvironmentBackupConstituent {
+  deploymentId: UUID!
+  deploymentName: String!
+  backup: Backup
+  error: String
+}
+
+enum EnvironmentBackupStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  PARTIAL
+  FAILED
 }
 
 enum ExternalDnsEndpointsType {
@@ -650,6 +710,7 @@ type Mutation {
   updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!): Task @requiresRole
   deleteDeployment(deploymentId: UUID!): Task! @requiresRole
   createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
+  createEnvironmentBackup(environmentId: UUID!, name: String = null): EnvironmentBackup! @requiresRole
   deleteBackup(backupId: UUID!): String @requiresRole
   createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore @requiresRole
   createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int! = 10, enabled: Boolean! = true): BackupSchedule @requiresRole
@@ -751,6 +812,8 @@ type Query {
   backups(instanceId: UUID!, status: BackupStatus = null): [Backup!]!
   restore(restoreId: UUID!): Restore
   restores(backupId: UUID!, status: RestoreStatus = null): [Restore!]!
+  environmentBackup(environmentBackupId: UUID!): EnvironmentBackup
+  environmentBackups(environmentId: UUID!): [EnvironmentBackup!]!
   backupSchedule(scheduleId: UUID!): BackupSchedule
   backupSchedules(deploymentId: UUID!): [BackupSchedule!]!
   applicationDrivers: [ApplicationDriver!]!

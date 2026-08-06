@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, NamedTuple, Sequence
 from uuid import UUID
 
 from loguru import logger
@@ -55,6 +55,67 @@ def get_strategy(kind: str) -> BackupStrategy:
     return strategy_cls()
 
 
+class BackupTarget(NamedTuple):
+    """The ``create_backup`` arguments derived from an application instance.
+
+    ``deployment_id`` is what the caller needs to dispatch ``EXECUTE_BACKUP``;
+    it is ``None`` when the instance could not be resolved at all.
+    """
+
+    deployment_id: UUID | None
+    target_namespace: str
+    component_configs: dict[str, dict[str, Any]] | None
+
+
+async def resolve_backup_target(instance_id: UUID, uow: UnitOfWork) -> BackupTarget:
+    """Resolve an instance's namespace and backup-enabled component configs.
+
+    Walks instance → deployment (for the namespace) and instance → driver
+    version → component configs, keeping only the components whose driver
+    config declares ``backup.enabled``. Those become the Velero hooks
+    ``create_backup`` installs.
+
+    Resolution is best-effort by design: any failure degrades to a hookless
+    backup rather than failing the request, because a backup without
+    application-aware hooks is still a useful disk-level backup. The failure
+    is logged at ``warning``.
+
+    Shared by the ``createBackup`` mutation and the environment-level backup
+    fan-out so both produce identical constituent backups (spec FR-014 —
+    constituents behave as ordinary backups).
+    """
+    try:
+        async with uow:
+            instance = await uow.application_instances.get(instance_id)
+            if instance is None:
+                return BackupTarget(None, "", None)
+
+            deployment_id = instance.deployment_id
+            target_namespace = f"styrmin-{deployment_id}" if deployment_id else ""
+
+            driver_version = await uow.application_driver_versions.get(
+                instance.application_driver_version_id
+            )
+            component_configs: dict[str, dict[str, Any]] | None = None
+            if driver_version and driver_version.component_configs:
+                resolved: dict[str, dict[str, Any]] = {}
+                for component_config in driver_version.component_configs:
+                    backup_raw = component_config.config.get("backup")
+                    if isinstance(backup_raw, dict) and backup_raw.get("enabled"):
+                        resolved[component_config.name] = backup_raw
+                if resolved:
+                    component_configs = resolved
+
+            return BackupTarget(deployment_id, target_namespace, component_configs)
+    except Exception as exc:  # noqa: BLE001 — degrade to a hookless backup
+        logger.warning(
+            f"Failed to resolve component configs for instance {instance_id}, "
+            "backup will be created without hooks",
+            exc_info=exc,
+        )
+        return BackupTarget(None, "", None)
+
+
 async def create_backup(
     instance_id: UUID,
     uow: UnitOfWork,
@@ -63,8 +124,16 @@ async def create_backup(
     target_namespace: str = "",
     component_configs: dict[str, dict[str, Any]] | None = None,
     timeout: int = DEFAULT_BACKUP_TIMEOUT,
+    environment_backup_id: UUID | None = None,
 ) -> Backup:
-    """Create a new on-demand backup for an application instance."""
+    """Create a new on-demand backup for an application instance.
+
+    Args:
+        environment_backup_id: Links the backup to an environment backup as
+            one of its constituents. ``None`` (the default) for a standalone
+            per-instance backup; the constituent's own lifecycle is otherwise
+            identical (spec FR-014).
+    """
     async with uow:
         existing = await uow.backups.has_in_progress_backup(instance_id)
         if existing:
@@ -95,6 +164,7 @@ async def create_backup(
             instance_id=instance_id,
             component_statuses=component_statuses or None,
             metadata_=metadata,
+            environment_backup_id=environment_backup_id,
         )
 
         backup = await uow.backups.create(backup)

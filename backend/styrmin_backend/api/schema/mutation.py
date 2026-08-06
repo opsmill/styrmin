@@ -5,7 +5,6 @@ This is where the different routes and their types are defined.
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
 import strawberry
@@ -14,6 +13,9 @@ from strawberry.permission import PermissionExtension
 
 from styrmin_backend.api.auth.permissions import RequiresRole
 from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
+from styrmin_backend.api.definitions.backup.environment_backup import (
+    EnvironmentBackup as EnvironmentBackupType,
+)
 from styrmin_backend.api.definitions.backup.restore import Restore as RestoreType
 from styrmin_backend.api.definitions.backup.schedule import (
     BackupSchedule as BackupScheduleType,
@@ -114,10 +116,14 @@ from styrmin_backend.services.backup.scheduler import (
     delete_backup_schedule as delete_backup_schedule_service,
     update_backup_schedule as update_backup_schedule_service,
 )
+from styrmin_backend.services.backup.environment import (
+    create_environment_backup as create_environment_backup_service,
+)
 from styrmin_backend.services.backup.service import (
     create_backup as create_backup_service,
     create_restore as create_restore_service,
     delete_backup as delete_backup_service,
+    resolve_backup_target,
 )
 from styrmin_backend.services.deployment import get_deployment
 from styrmin_backend.services.exceptions import (
@@ -865,41 +871,14 @@ class Mutation:
         """Create a new on-demand backup for an instance."""
         uow = info.context["uow"]
 
-        # Step 1: Resolve component backup configs from the instance's driver version
-        component_configs: dict[str, dict[str, Any]] | None = None
-        target_namespace = ""
-        deployment_id = None
-
-        try:
-            from styrmin_backend.db.models import ApplicationInstance
-
-            async with uow:
-                instance = await uow.session.get(ApplicationInstance, instance_id)
-                if instance:
-                    deployment_id = instance.deployment_id
-                    target_namespace = (
-                        f"styrmin-{deployment_id}" if deployment_id else ""
-                    )
-
-                    driver_version = await uow.application_driver_versions.get(
-                        instance.application_driver_version_id
-                    )
-                    if driver_version and driver_version.component_configs:
-                        resolved: dict[str, dict[str, Any]] = {}
-                        for cc in driver_version.component_configs:
-                            backup_raw = cc.config.get("backup")
-                            if isinstance(backup_raw, dict) and backup_raw.get(
-                                "enabled"
-                            ):
-                                resolved[cc.name] = backup_raw
-                        if resolved:
-                            component_configs = resolved
-        except Exception as exc:
-            logger.warning(
-                f"Failed to resolve component configs for instance {instance_id}, "
-                "backup will be created without hooks",
-                exc_info=exc,
-            )
+        # Step 1: Resolve component backup configs from the instance's driver
+        # version. Shared with the environment-level backup fan-out so both
+        # produce identical constituent backups.
+        (
+            deployment_id,
+            target_namespace,
+            component_configs,
+        ) = await resolve_backup_target(instance_id, uow)
 
         # Step 2: Create backup with resolved configs
         backup = await create_backup_service(
@@ -929,6 +908,35 @@ class Mutation:
             )
 
         return BackupType.from_instance(backup)
+
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
+    async def create_environment_backup(
+        self,
+        environment_id: UUID,
+        info: strawberry.Info,
+        name: str | None = None,
+    ) -> EnvironmentBackupType:
+        """Snapshot an environment and back up every eligible deployment.
+
+        Captures the environment config plus each eligible deployment's
+        declared state, then fans out one constituent backup per eligible
+        deployment. Returns as soon as the constituents are created and
+        dispatched, so the returned ``status`` is normally ``PENDING`` /
+        ``IN_PROGRESS`` — or ``COMPLETED`` immediately for an environment with
+        no eligible deployments (spec FR-011).
+
+        A per-instance conflict during the fan-out becomes a
+        ``constituents[].error`` entry and never fails the mutation (FR-005);
+        a second concurrent environment-level operation is rejected with
+        ``ALREADY_IN_PROGRESS`` (FR-009).
+        """
+        uow = info.context["uow"]
+        environment_backup = await create_environment_backup_service(
+            environment_id=environment_id,
+            name=name,
+            uow=uow,
+        )
+        return EnvironmentBackupType.from_instance(environment_backup)
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def delete_backup(

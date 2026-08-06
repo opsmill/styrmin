@@ -15,6 +15,8 @@ from styrmin_backend.db.models import (
     DeployedService,
     DeploymentStatus,
     Environment,
+    EnvironmentBackup,
+    EnvironmentRestore,
     HelmChart,
     HelmRepository,
     PodStatus,
@@ -42,6 +44,10 @@ from styrmin_backend.repository.backup_schedule import BackupScheduleRepository
 from styrmin_backend.repository.base import BaseRepository
 from styrmin_backend.repository.cluster import ClusterRepository
 from styrmin_backend.repository.environment import EnvironmentRepository
+from styrmin_backend.repository.environment_backup import (
+    EnvironmentBackupRepository,
+    EnvironmentRestoreRepository,
+)
 from styrmin_backend.repository.deployment_status import (
     DeploymentStatusRepository,
 )
@@ -296,6 +302,88 @@ class FakeRestoreRepository(FakeRepository[Restore], RestoreRepository):
         return results
 
 
+class FakeEnvironmentBackupRepository(
+    FakeRepository[EnvironmentBackup], EnvironmentBackupRepository
+):
+    """In-memory environment backup repository.
+
+    ``constituent_source`` is wired by :class:`FakeUnitOfWork` so the guard
+    derives "in progress" from the constituent ``Backup`` rows exactly as the
+    real EXISTS subquery does. Without it the fake could report a state the
+    production query can never produce.
+    """
+
+    def __init__(
+        self,
+        models: list[EnvironmentBackup] | None = None,
+        constituent_source: "FakeBackupRepository | None" = None,
+    ) -> None:
+        super().__init__(models)
+        self.constituent_source = constituent_source
+
+    async def get_by_environment_id(
+        self, environment_id: UUID
+    ) -> list[EnvironmentBackup]:
+        return [m for m in self.models if m.environment_id == environment_id][::-1]
+
+    async def has_in_progress_environment_backup(
+        self, environment_id: UUID
+    ) -> EnvironmentBackup | None:
+        constituents = self.constituent_source.models if self.constituent_source else []
+        for parent in self.models:
+            if parent.environment_id != environment_id:
+                continue
+            if any(
+                backup.environment_backup_id == parent.id
+                and backup.status in (BackupStatus.PENDING, BackupStatus.IN_PROGRESS)
+                for backup in constituents
+            ):
+                return parent
+        return None
+
+
+class FakeEnvironmentRestoreRepository(
+    FakeRepository[EnvironmentRestore], EnvironmentRestoreRepository
+):
+    """In-memory environment restore repository (see the backup fake above)."""
+
+    def __init__(
+        self,
+        models: list[EnvironmentRestore] | None = None,
+        constituent_source: "FakeRestoreRepository | None" = None,
+        parent_source: "FakeEnvironmentBackupRepository | None" = None,
+    ) -> None:
+        super().__init__(models)
+        self.constituent_source = constituent_source
+        self.parent_source = parent_source
+
+    async def get_by_environment_backup_id(
+        self, environment_backup_id: UUID
+    ) -> list[EnvironmentRestore]:
+        return [
+            m for m in self.models if m.environment_backup_id == environment_backup_id
+        ][::-1]
+
+    async def has_in_progress_environment_restore(
+        self, environment_id: UUID
+    ) -> EnvironmentRestore | None:
+        constituents = self.constituent_source.models if self.constituent_source else []
+        parents = self.parent_source.models if self.parent_source else []
+        # ``EnvironmentRestore`` has no environment_id of its own; the real
+        # query joins through the parent snapshot, so the fake does too.
+        parent_ids = {p.id for p in parents if p.environment_id == environment_id}
+        for environment_restore in self.models:
+            if environment_restore.environment_backup_id not in parent_ids:
+                continue
+            if any(
+                restore.environment_restore_id == environment_restore.id
+                and restore.status in (RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS)
+                for restore in constituents
+            ):
+                return environment_restore
+        return None
+
+
 class FakePodStatusRepository(FakeRepository[PodStatus], PodStatusRepository):
     """Fake pod status repository for testing purposes."""
 
@@ -518,6 +606,8 @@ class FakeUnitOfWork(UnitOfWork):
     deployed_services: FakeDeployedServiceRepository  # type: ignore[assignment]
     backups: FakeBackupRepository  # type: ignore[assignment]
     restores: FakeRestoreRepository  # type: ignore[assignment]
+    environment_backups: FakeEnvironmentBackupRepository  # type: ignore[assignment]
+    environment_restores: FakeEnvironmentRestoreRepository  # type: ignore[assignment]
     backup_schedules: FakeBackupScheduleRepository  # type: ignore[assignment]
     pod_statuses: FakePodStatusRepository  # type: ignore[assignment]
     deployment_statuses: FakeDeploymentStatusRepository  # type: ignore[assignment]
@@ -538,6 +628,8 @@ class FakeUnitOfWork(UnitOfWork):
         deployed_services: FakeDeployedServiceRepository | None = None,
         backups: FakeBackupRepository | None = None,
         restores: FakeRestoreRepository | None = None,
+        environment_backups: FakeEnvironmentBackupRepository | None = None,
+        environment_restores: FakeEnvironmentRestoreRepository | None = None,
         backup_schedules: FakeBackupScheduleRepository | None = None,
         backup_storage_locations: FakeBackupStorageLocationRepository | None = None,
         pod_statuses: FakePodStatusRepository | None = None,
@@ -565,6 +657,18 @@ class FakeUnitOfWork(UnitOfWork):
         self.deployed_services = deployed_services or FakeDeployedServiceRepository()
         self.backups = backups or FakeBackupRepository()
         self.restores = restores or FakeRestoreRepository()
+        # The two environment-level guards are EXISTS queries over the
+        # constituent rows, so the fakes are handed the constituent repos
+        # rather than tracking a status of their own (research.md D6).
+        self.environment_backups = (
+            environment_backups or FakeEnvironmentBackupRepository()
+        )
+        self.environment_backups.constituent_source = self.backups
+        self.environment_restores = (
+            environment_restores or FakeEnvironmentRestoreRepository()
+        )
+        self.environment_restores.constituent_source = self.restores
+        self.environment_restores.parent_source = self.environment_backups
         self.backup_schedules = backup_schedules or FakeBackupScheduleRepository()
         self.pod_statuses = pod_statuses or FakePodStatusRepository()
         self.deployment_statuses = (

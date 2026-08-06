@@ -7,9 +7,10 @@ guard can therefore never disagree with reality.
 """
 
 from abc import ABC, abstractmethod
-from typing import Sequence
+from typing import Any, Sequence
 from uuid import UUID
 
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from styrmin_backend.db.models import (
@@ -73,6 +74,29 @@ class SQLModelEnvironmentBackupRepository(
 
     model_class = EnvironmentBackup
 
+    def _eager_load_options(self) -> list[Any]:
+        """Eager-load the relationships every read of a parent needs.
+
+        The parent's status is *derived* from its constituents, so any caller
+        that reads an ``EnvironmentBackup`` also reads ``backups``. Loading it
+        lazily would raise ``MissingGreenlet`` inside the async GraphQL
+        resolvers, so it is loaded up front rather than left to the caller.
+        """
+        return [
+            selectinload(self.model_class.backups),  # type: ignore[arg-type]
+            selectinload(self.model_class.environment),  # type: ignore[arg-type]
+        ]
+
+    async def get(self, id: UUID) -> EnvironmentBackup | None:
+        """Get an environment backup with its constituents eagerly loaded."""
+        statement = (
+            select(self.model_class)
+            .where(self.model_class.id == id)
+            .options(*self._eager_load_options())
+        )
+        result = await self.session.exec(statement)
+        return result.first()
+
     async def get_by_environment_id(
         self, environment_id: UUID
     ) -> Sequence[EnvironmentBackup]:
@@ -80,6 +104,7 @@ class SQLModelEnvironmentBackupRepository(
         statement = (
             select(self.model_class)
             .where(self.model_class.environment_id == environment_id)
+            .options(*self._eager_load_options())
             .order_by(self.model_class.created_on.desc())  # type: ignore[union-attr]
         )
         result = await self.session.exec(statement)
