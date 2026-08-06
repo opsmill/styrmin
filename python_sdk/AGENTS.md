@@ -2,7 +2,8 @@
 
 Async Python client for the Styrmin GraphQL API. The SDK exposes one resource
 per backend area (auth, clusters, environments, deployments, drivers, tasks,
-backups, schedules, backup-storage-locations, users, groups) on a single
+backups, environment-backups, schedules, backup-storage-locations, users,
+groups) on a single
 `StyrminClient`. The `users` and `groups` namespaces are admin-only — non-admin
 sessions receive `FORBIDDEN`.
 

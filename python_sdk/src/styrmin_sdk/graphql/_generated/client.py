@@ -13,6 +13,7 @@ from .create_backup_schedule import CreateBackupSchedule
 from .create_backup_storage_location import CreateBackupStorageLocation
 from .create_cluster import CreateCluster
 from .create_environment import CreateEnvironment
+from .create_environment_backup import CreateEnvironmentBackup
 from .create_group import CreateGroup
 from .create_restore import CreateRestore
 from .create_user import CreateUser
@@ -47,6 +48,7 @@ from .get_deployment_timeline_context_diff import GetDeploymentTimelineContextDi
 from .get_driver_container_override_docs import GetDriverContainerOverrideDocs
 from .get_driver_env_var_docs import GetDriverEnvVarDocs
 from .get_environment import GetEnvironment
+from .get_environment_backup import GetEnvironmentBackup
 from .get_environment_services import GetEnvironmentServices
 from .get_group import GetGroup
 from .get_pod_statuses import GetPodStatuses
@@ -71,6 +73,7 @@ from .list_backup_storage_locations import ListBackupStorageLocations
 from .list_backups import ListBackups
 from .list_clusters import ListClusters
 from .list_deployments import ListDeployments
+from .list_environment_backups import ListEnvironmentBackups
 from .list_environments import ListEnvironments
 from .list_groups import ListGroups
 from .list_restores import ListRestores
@@ -284,6 +287,61 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return CreateEnvironment.model_validate(data)
+
+    async def create_environment_backup(
+        self,
+        environment_id: UUID,
+        name: Union[Optional[str], UnsetType] = UNSET,
+        **kwargs: Any,
+    ) -> CreateEnvironmentBackup:
+        query = gql("""
+            mutation CreateEnvironmentBackup($environmentId: UUID!, $name: String) {
+              createEnvironmentBackup(environmentId: $environmentId, name: $name) {
+                id
+                name
+                status
+                createdOn
+                updatedOn
+                environmentId
+                environmentConfig
+                deploymentSnapshots {
+                  deploymentId
+                  deploymentName
+                  instanceId
+                  driverName
+                  driverVersion
+                  driverFingerprint
+                  applicationVersion
+                  config
+                  parameters
+                }
+                constituents {
+                  deploymentId
+                  deploymentName
+                  error
+                  backup {
+                    id
+                    name
+                    status
+                    instanceId
+                    errorMessage
+                    sizeBytes
+                    startedAt
+                    completedAt
+                  }
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"environmentId": environment_id, "name": name}
+        response = await self.execute(
+            query=query,
+            operation_name="CreateEnvironmentBackup",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return CreateEnvironmentBackup.model_validate(data)
 
     async def create_group(self, input: CreateGroupInput, **kwargs: Any) -> CreateGroup:
         query = gql("""
@@ -1224,6 +1282,58 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetEnvironment.model_validate(data)
 
+    async def get_environment_backup(
+        self, environment_backup_id: UUID, **kwargs: Any
+    ) -> GetEnvironmentBackup:
+        query = gql("""
+            query GetEnvironmentBackup($environmentBackupId: UUID!) {
+              environmentBackup(environmentBackupId: $environmentBackupId) {
+                id
+                name
+                status
+                createdOn
+                updatedOn
+                environmentId
+                environmentConfig
+                deploymentSnapshots {
+                  deploymentId
+                  deploymentName
+                  instanceId
+                  driverName
+                  driverVersion
+                  driverFingerprint
+                  applicationVersion
+                  config
+                  parameters
+                }
+                constituents {
+                  deploymentId
+                  deploymentName
+                  error
+                  backup {
+                    id
+                    name
+                    status
+                    instanceId
+                    errorMessage
+                    sizeBytes
+                    startedAt
+                    completedAt
+                  }
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"environmentBackupId": environment_backup_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetEnvironmentBackup",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetEnvironmentBackup.model_validate(data)
+
     async def get_environment_services(
         self, environment_id: UUID, **kwargs: Any
     ) -> GetEnvironmentServices:
@@ -1511,6 +1621,42 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return ListDeployments.model_validate(data)
+
+    async def list_environment_backups(
+        self, environment_id: UUID, **kwargs: Any
+    ) -> ListEnvironmentBackups:
+        query = gql("""
+            query ListEnvironmentBackups($environmentId: UUID!) {
+              environmentBackups(environmentId: $environmentId) {
+                id
+                name
+                status
+                createdOn
+                updatedOn
+                environmentId
+                constituents {
+                  deploymentId
+                  deploymentName
+                  error
+                  backup {
+                    id
+                    name
+                    status
+                    instanceId
+                  }
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"environmentId": environment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="ListEnvironmentBackups",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return ListEnvironmentBackups.model_validate(data)
 
     async def list_environments(self, **kwargs: Any) -> ListEnvironments:
         query = gql("""

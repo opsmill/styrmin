@@ -1,0 +1,37 @@
+query GetEnvironmentBackup($environmentBackupId: UUID!) {
+    environmentBackup(environmentBackupId: $environmentBackupId) {
+        id
+        name
+        status
+        createdOn
+        updatedOn
+        environmentId
+        environmentConfig
+        deploymentSnapshots {
+            deploymentId
+            deploymentName
+            instanceId
+            driverName
+            driverVersion
+            driverFingerprint
+            applicationVersion
+            config
+            parameters
+        }
+        constituents {
+            deploymentId
+            deploymentName
+            error
+            backup {
+                id
+                name
+                status
+                instanceId
+                errorMessage
+                sizeBytes
+                startedAt
+                completedAt
+            }
+        }
+    }
+}

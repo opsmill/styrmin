@@ -72,6 +72,34 @@ same deployment name exists in more than one. When you restore to a raw
 `--target-instance-id`, `--target-namespace` is required (there is no deployment
 to derive it from).
 
+## Environment-level backups
+
+`env-backups` is the coordinated counterpart one level up: one action captures
+the environment config plus one constituent backup per eligible deployment, all
+grouped under a single snapshot. Target the environment by name (cluster-scoped
+with `--cluster` / `--cluster-id`) or by `--id`.
+
+```bash
+# Snapshot a whole environment
+uv run styrminctl env-backups create prod
+uv run styrminctl env-backups create prod --cluster edge --name nightly
+uv run styrminctl env-backups create --id <environment-id> --wait
+
+# List an environment's snapshots (newest first), with ok/failed/total counts
+uv run styrminctl env-backups list prod
+
+# Inspect one snapshot, including per-constituent outcomes
+uv run styrminctl env-backups get <environment-backup-id>
+```
+
+The snapshot `status` is **derived** from its constituents on every read, so it
+can never contradict them: `COMPLETED` (all constituents completed), `PARTIAL`
+(some did not), `FAILED`, or a non-terminal `PENDING` / `IN_PROGRESS`. An
+environment with no eligible deployments yields a config-only snapshot that is
+`COMPLETED` immediately. `--wait` polls until the derived status is terminal and
+exits non-zero on `PARTIAL` or `FAILED`, printing the deployment name and reason
+for every constituent that did not complete.
+
 ## Authentication
 
 `styrminctl` supports three credential flows. Pick one per environment.

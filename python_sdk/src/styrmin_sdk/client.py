@@ -12,6 +12,7 @@ from styrmin_sdk.resources.backups import BackupResource
 from styrmin_sdk.resources.clusters import ClusterResource
 from styrmin_sdk.resources.deployments import DeploymentResource
 from styrmin_sdk.resources.drivers import DriverResource
+from styrmin_sdk.resources.environment_backups import EnvironmentBackupResource
 from styrmin_sdk.resources.environments import EnvironmentResource
 from styrmin_sdk.resources.groups import GroupResource
 from styrmin_sdk.resources.schedules import ScheduleResource
@@ -56,6 +57,7 @@ class StyrminClient:
         self.deployments = DeploymentResource(self._transport)
         self.tasks = TaskResource(self._transport)
         self.backups = BackupResource(self._transport)
+        self.environment_backups = EnvironmentBackupResource(self._transport)
         self.schedules = ScheduleResource(self._transport)
         self.users = UserResource(self._transport)
         self.groups = GroupResource(self._transport)
