@@ -12,6 +12,9 @@ from styrmin_backend.context.models.config import EnvironmentConfig
 from styrmin_backend.context.validators import validate_environment_config
 from styrmin_backend.db.models import Environment
 from styrmin_backend.domain.models import Deployment
+from styrmin_backend.services.backup.environment import (
+    delete_environment_backups_for_environment,
+)
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.clusters import resolve_cluster
 from styrmin_backend.services.deployment import redeploy_for_environment_update
@@ -394,12 +397,38 @@ async def update_environment(
 
 
 async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
-    """Delete an environment by its id."""
+    """Delete an environment, cascading through its environment backups first.
+
+    ``environmentbackup.environment_id`` is a non-nullable FK, so a snapshot
+    outliving its environment is not representable: the environment's snapshots
+    (and their environment restores, constituent backups, and constituent
+    restores) are deleted with the same cascade as deleting a snapshot directly
+    before the environment row goes (spec FR-015). Skipping the cascade would
+    turn every delete of an environment that has ever been snapshotted into a
+    constraint violation surfacing as an opaque ``INTERNAL_ERROR``.
+
+    Raises:
+        EnvironmentNotFoundError: When ``environment_id`` does not exist.
+    """
     async with uow:
         environment = await uow.environments.get(environment_id)
         if environment is None:
             raise EnvironmentNotFoundError(
                 f"Environment with id {environment_id} not found."
             )
+
+    cascaded = await delete_environment_backups_for_environment(environment_id, uow)
+
+    async with uow:
+        environment = await uow.environments.get(environment_id)
+        if environment is None:
+            # A concurrent delete won the race; the requested end state holds.
+            return
         await uow.environments.delete(environment)
         await uow.commit()
+
+    logger.info(
+        "environment_deleted environment_id={} environment_backups_deleted={}",
+        environment_id,
+        cascaded,
+    )

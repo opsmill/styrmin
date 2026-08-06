@@ -55,10 +55,12 @@ from styrmin_backend.services.backup.environment import (
     SkipReason,
     SkippedConstituent,
     create_environment_backup,
+    delete_environment_backup,
     derive_environment_operation_status,
     restore_environment_backup,
 )
 from styrmin_backend.services.backup.service import create_restore
+from styrmin_backend.services.environments import delete_environment
 from styrmin_backend.services.exceptions import (
     EnvironmentBackupNotFoundError,
     EnvironmentBackupNotRestorableError,
@@ -1804,6 +1806,365 @@ async def test_a_dispatch_failure_leaves_the_constituent_restore_pending(
     assert environment_restore.skipped_constituents is None
     assert len(uow.restores.models) == 1
     assert uow.restores.models[0].status == RestoreStatus.PENDING
+
+
+# ---------------------------------------------------------------------------
+# delete_environment_backup — cascade (US3 / FR-010)
+# ---------------------------------------------------------------------------
+
+
+def _constituent_restore(
+    parent_restore: EnvironmentRestore,
+    backup: Backup,
+    *,
+    status: RestoreStatus = RestoreStatus.COMPLETED,
+) -> Restore:
+    """A constituent restore linked to both its backup and its parent record.
+
+    Both FKs are set explicitly on top of the relationship appends: nothing
+    flushes in these tests, so SQLAlchemy never syncs them, and the cascade
+    reads the FKs through the repositories.
+    """
+    restore = Restore(
+        name=f"restore-{uuid4().hex[:6]}",
+        status=status,
+        target_namespace="styrmin-ns",
+        backup_id=backup.id,
+    )
+    parent_restore.restores.append(restore)
+    restore.environment_restore_id = parent_restore.id
+    return restore
+
+
+def _environment_restore(
+    parent: EnvironmentBackup,
+    *,
+    skipped: list[dict] | None = None,
+) -> EnvironmentRestore:
+    environment_restore = EnvironmentRestore(
+        environment_backup_id=parent.id, skipped_constituents=skipped
+    )
+    parent.restores.append(environment_restore)
+    return environment_restore
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_snapshot_cascades_to_constituents_and_their_restores(
+    environment: Environment,
+) -> None:
+    """FR-010: the constituent backups and any restores of them go with it."""
+    adv = _driver_version()
+    infrahub = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    netbox = _deployment(environment_id=environment.id, adv=adv, name="netbox")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub), _snapshot_of(netbox)],
+        environment_config={"dns_zone": "captured.example.com"},
+    )
+    constituents = [_constituent(parent, infrahub), _constituent(parent, netbox)]
+    environment_restore = _environment_restore(parent)
+    constituent_restores = [
+        _constituent_restore(environment_restore, backup) for backup in constituents
+    ]
+    uow = _make_uow(
+        environment=environment,
+        deployments=[infrahub, netbox],
+        driver_versions=[adv],
+        backups=constituents,
+        restores=constituent_restores,
+        environment_backups=[parent],
+        environment_restores=[environment_restore],
+    )
+
+    await delete_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    assert uow.environment_backups.models == []
+    assert uow.environment_restores.models == []
+    assert uow.backups.models == []
+    assert uow.restores.models == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_snapshot_leaves_sibling_snapshots_untouched(
+    environment: Environment,
+) -> None:
+    """The cascade is scoped to one snapshot, not to the environment."""
+    adv = _driver_version()
+    infrahub = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    doomed = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub)],
+        environment_config=None,
+    )
+    keeper = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub)],
+        environment_config=None,
+    )
+    doomed_constituent = _constituent(doomed, infrahub)
+    keeper_constituent = _constituent(keeper, infrahub)
+    uow = _make_uow(
+        environment=environment,
+        deployments=[infrahub],
+        driver_versions=[adv],
+        backups=[doomed_constituent, keeper_constituent],
+        environment_backups=[doomed, keeper],
+    )
+
+    await delete_environment_backup(environment_backup_id=doomed.id, uow=uow)
+
+    assert [parent.id for parent in uow.environment_backups.models] == [keeper.id]
+    assert [backup.id for backup in uow.backups.models] == [keeper_constituent.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [BackupStatus.PENDING, BackupStatus.IN_PROGRESS])
+async def test_an_in_progress_snapshot_can_still_be_deleted(
+    environment: Environment, status: BackupStatus
+) -> None:
+    """FR-010 escape hatch: deletion has no status guard.
+
+    A constituent whose work was never picked up pins the snapshot
+    non-terminal forever; deletion is the only way out.
+    """
+    adv = _driver_version()
+    infrahub = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub)],
+        environment_config=None,
+    )
+    stuck = _constituent(parent, infrahub, status=status)
+    uow = _make_uow(
+        environment=environment,
+        deployments=[infrahub],
+        driver_versions=[adv],
+        backups=[stuck],
+        environment_backups=[parent],
+    )
+
+    await delete_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    assert uow.environment_backups.models == []
+    assert uow.backups.models == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_stuck_snapshot_releases_the_environment(
+    environment: Environment, prefect_manager_mock
+) -> None:
+    """The escape hatch has to actually unblock the D6 concurrency guard.
+
+    A snapshot pinned ``IN_PROGRESS`` blocks every new environment-level
+    operation (FR-009). Deleting it must let the next one through — that is
+    the whole point of allowing deletion regardless of status.
+    """
+    adv = _driver_version()
+    infrahub = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    stuck_parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub)],
+        environment_config=None,
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[infrahub],
+        driver_versions=[adv],
+        backups=[_constituent(stuck_parent, infrahub, status=BackupStatus.PENDING)],
+        environment_backups=[stuck_parent],
+    )
+
+    with pytest.raises(EnvironmentOperationInProgressError):
+        await create_environment_backup(environment_id=environment.id, uow=uow)
+
+    await delete_environment_backup(environment_backup_id=stuck_parent.id, uow=uow)
+
+    replacement = await create_environment_backup(
+        environment_id=environment.id, uow=uow
+    )
+    assert replacement.id != stuck_parent.id
+    assert len(uow.backups.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_snapshot_tolerates_an_individually_deleted_constituent(
+    environment: Environment,
+) -> None:
+    """A gap left by an individually deleted child is not an error (US3).
+
+    The parent survives an individual constituent deletion with a visible gap,
+    so the cascade must reach the same end state whether or not the child is
+    still there.
+    """
+    adv = _driver_version()
+    infrahub = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    netbox = _deployment(environment_id=environment.id, adv=adv, name="netbox")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub), _snapshot_of(netbox)],
+        environment_config=None,
+    )
+    surviving = _constituent(parent, infrahub)
+    # Appended to the parent's relationship but never stored: the operator
+    # deleted this constituent individually after the snapshot was taken.
+    _constituent(parent, netbox)
+    uow = _make_uow(
+        environment=environment,
+        deployments=[infrahub, netbox],
+        driver_versions=[adv],
+        backups=[surviving],
+        environment_backups=[parent],
+    )
+
+    await delete_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    assert uow.environment_backups.models == []
+    assert uow.backups.models == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_unknown_snapshot_raises_not_found(
+    environment: Environment,
+) -> None:
+    uow = _make_uow(environment=environment, deployments=[], driver_versions=[])
+
+    with pytest.raises(EnvironmentBackupNotFoundError):
+        await delete_environment_backup(environment_backup_id=uuid4(), uow=uow)
+
+
+# ---------------------------------------------------------------------------
+# delete_environment — cascade through the environment's snapshots (FR-015)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_environment_cascades_its_environment_backups(
+    environment: Environment,
+) -> None:
+    """FR-015: snapshots do not outlive their environment in v1.
+
+    ``environmentbackup.environment_id`` is a non-nullable FK, so without the
+    cascade this delete is a constraint violation rather than a delete.
+    """
+    adv = _driver_version()
+    infrahub = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    first = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub)],
+        environment_config=None,
+    )
+    second = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub)],
+        environment_config=None,
+    )
+    constituents = [_constituent(first, infrahub), _constituent(second, infrahub)]
+    environment_restore = _environment_restore(first)
+    uow = _make_uow(
+        environment=environment,
+        deployments=[infrahub],
+        driver_versions=[adv],
+        backups=constituents,
+        restores=[_constituent_restore(environment_restore, constituents[0])],
+        environment_backups=[first, second],
+        environment_restores=[environment_restore],
+    )
+
+    await delete_environment(environment_id=environment.id, uow=uow)
+
+    assert uow.environments.models == []
+    assert uow.environment_backups.models == []
+    assert uow.environment_restores.models == []
+    assert uow.backups.models == []
+    assert uow.restores.models == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_environment_cascades_an_in_progress_snapshot(
+    environment: Environment,
+) -> None:
+    """The environment cascade inherits the escape hatch: no status guard."""
+    adv = _driver_version()
+    infrahub = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub)],
+        environment_config=None,
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[infrahub],
+        driver_versions=[adv],
+        backups=[_constituent(parent, infrahub, status=BackupStatus.IN_PROGRESS)],
+        environment_backups=[parent],
+    )
+
+    await delete_environment(environment_id=environment.id, uow=uow)
+
+    assert uow.environments.models == []
+    assert uow.environment_backups.models == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_environment_leaves_another_environments_snapshots(
+    environment: Environment,
+) -> None:
+    """The cascade is scoped by ``environment_id``, per spec FR-015."""
+    other = Environment(name="production", cluster_id=environment.cluster_id)
+    adv = _driver_version()
+    infrahub = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    doomed = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub)],
+        environment_config=None,
+    )
+    keeper = _environment_backup(
+        environment=other, snapshots=[], environment_config=None
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[infrahub],
+        driver_versions=[adv],
+        backups=[_constituent(doomed, infrahub)],
+        environment_backups=[doomed, keeper],
+    )
+    await uow.environments.create(other)
+
+    await delete_environment(environment_id=environment.id, uow=uow)
+
+    assert [parent.id for parent in uow.environment_backups.models] == [keeper.id]
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_environment_without_snapshots_still_deletes_it(
+    environment: Environment,
+) -> None:
+    uow = _make_uow(environment=environment, deployments=[], driver_versions=[])
+
+    await delete_environment(environment_id=environment.id, uow=uow)
+
+    assert uow.environments.models == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_unknown_environment_raises_before_any_cascade(
+    environment: Environment,
+) -> None:
+    """The guard fires first, so a typo cannot delete another env's snapshots."""
+    parent = _environment_backup(
+        environment=environment, snapshots=[], environment_config=None
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[],
+        driver_versions=[],
+        environment_backups=[parent],
+    )
+
+    with pytest.raises(EnvironmentNotFoundError):
+        await delete_environment(environment_id=uuid4(), uow=uow)
+
+    assert uow.environment_backups.models == [parent]
 
 
 # ---------------------------------------------------------------------------

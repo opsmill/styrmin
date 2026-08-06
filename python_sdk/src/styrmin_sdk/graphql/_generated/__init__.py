@@ -40,6 +40,7 @@ from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_deployment import DeleteDeployment, DeleteDeploymentDeleteDeployment
 from .delete_environment import DeleteEnvironment
+from .delete_environment_backup import DeleteEnvironmentBackup
 from .delete_group import DeleteGroup
 from .delete_user import DeleteUser
 from .deploy import Deploy, DeployDeploy
@@ -355,6 +356,7 @@ __all__ = [
     "DeleteDeployment",
     "DeleteDeploymentDeleteDeployment",
     "DeleteEnvironment",
+    "DeleteEnvironmentBackup",
     "DeleteGroup",
     "DeleteUser",
     "Deploy",

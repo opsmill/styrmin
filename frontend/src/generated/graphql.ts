@@ -646,6 +646,7 @@ export type Mutation = {
   deleteCluster?: Maybe<Scalars['String']['output']>;
   deleteDeployment: Task;
   deleteEnvironment?: Maybe<Scalars['String']['output']>;
+  deleteEnvironmentBackup: Scalars['Boolean']['output'];
   deleteGroup: Scalars['Boolean']['output'];
   deleteUser: Scalars['Boolean']['output'];
   deploy?: Maybe<Task>;
@@ -784,6 +785,11 @@ export type MutationDeleteEnvironmentArgs = {
   clusterName?: InputMaybe<Scalars['String']['input']>;
   environmentId?: InputMaybe<Scalars['UUID']['input']>;
   environmentName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationDeleteEnvironmentBackupArgs = {
+  environmentBackupId: Scalars['UUID']['input'];
 };
 
 
@@ -1508,6 +1514,13 @@ export type DeleteDeploymentMutationVariables = Exact<{
 
 export type DeleteDeploymentMutation = { __typename?: 'Mutation', deleteDeployment: { __typename?: 'Task', id: string, type: string, status: string, deploymentId?: string | null } };
 
+export type DeleteEnvironmentBackupMutationVariables = Exact<{
+  environmentBackupId: Scalars['UUID']['input'];
+}>;
+
+
+export type DeleteEnvironmentBackupMutation = { __typename?: 'Mutation', deleteEnvironmentBackup: boolean };
+
 export type DeleteGroupMutationVariables = Exact<{
   id: Scalars['UUID']['input'];
 }>;
@@ -2148,6 +2161,25 @@ export const useDeleteDeploymentMutation = <
       {
     mutationKey: ['DeleteDeployment'],
     mutationFn: (variables?: DeleteDeploymentMutationVariables) => graphqlFetcher<DeleteDeploymentMutation, DeleteDeploymentMutationVariables>(DeleteDeploymentDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const DeleteEnvironmentBackupDocument = `
+    mutation DeleteEnvironmentBackup($environmentBackupId: UUID!) {
+  deleteEnvironmentBackup(environmentBackupId: $environmentBackupId)
+}
+    `;
+
+export const useDeleteEnvironmentBackupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<DeleteEnvironmentBackupMutation, TError, DeleteEnvironmentBackupMutationVariables, TContext>) => {
+    
+    return useMutation<DeleteEnvironmentBackupMutation, TError, DeleteEnvironmentBackupMutationVariables, TContext>(
+      {
+    mutationKey: ['DeleteEnvironmentBackup'],
+    mutationFn: (variables?: DeleteEnvironmentBackupMutationVariables) => graphqlFetcher<DeleteEnvironmentBackupMutation, DeleteEnvironmentBackupMutationVariables>(DeleteEnvironmentBackupDocument, variables)(),
     ...options
   }
     )};
