@@ -12,6 +12,8 @@ All unknowns from the Technical Context are resolved below. Each decision is gro
 
 **Alternatives considered**: (a) A new `EXECUTE_ENVIRONMENT_BACKUP` INTERNAL flow doing the fan-out — rejected: moves the eligibility/snapshot logic out of the service layer (Constitution §III), duplicates the mutation-side component-config resolution, and makes the typed concurrency error unreachable synchronously (the caller could no longer get `ALREADY_IN_PROGRESS` at request time). (b) `asyncio.gather` parallel dispatch — unnecessary; sequential dispatch of N fire-and-forget submissions is fast enough and keeps ADR-0012's per-item isolation semantics simple.
 
+**Amendment (critique E5)**: both fan-outs emit the ADR-0012-style structured audit log line with outcome counters — `env_backup_fanout_dispatched environment_id=… evaluated=… dispatched=… conflict=… dispatch_failed=…` and `env_restore_fanout_dispatched … restored=… skipped=…` — for parity with `env_config_fanout_dispatched`.
+
 ## D2 — Parent status is derived at read time; no stored status column
 
 **Decision**: `EnvironmentBackup` and `EnvironmentRestore` have **no status column**. Status is computed by a pure service function from (a) the statuses of linked constituent rows and (b) the recorded constituent errors/skips: any non-terminal child → `IN_PROGRESS` (all-`PENDING` → `PENDING`); otherwise all completed and no errors → `COMPLETED`; at least one completed → `PARTIAL`; else `FAILED`. Zero children and zero errors → `COMPLETED` (config-only backup). Exposed as a GraphQL field resolver.
@@ -41,11 +43,17 @@ All unknowns from the Technical Context are resolved below. Each decision is gro
 
 **Alternatives considered**: (a) Full fan-out then restores — rejected: apply-state redeploy racing Velero restore in the same namespace has undefined outcome. (b) Restores first, config later — rejected: `redeploy_for_environment_update` doesn't check `RESTORING` status, same race from the other side, plus a window where restored data runs under wrong env config. (c) Sequential wait-for-fanout-then-restore — rejected: fan-out completion is not observable synchronously without new polling machinery; violates the no-new-machinery reuse constraint.
 
+**Amendment (critique E3)**: the config revert must NOT delegate to `update_environment` — that service treats `config is None` as an idempotent no-op (`services/environments.py:296-302`), which would make a captured `None` config unrestorable. The restore service sets `Environment.config` directly (including `None`), recomputes capabilities, commits, then runs the exclusion-aware fan-out loop itself, reusing `redeploy_for_environment_update` per non-restored deployment.
+
+**Amendment (critique P2)**: constituents whose deployment is already mid-restore at classification time (`RestoreAlreadyInProgressError` from an individual restore) are classified as skipped with reason "deployment busy with another restore" — the uniform skip rule, never an abort.
+
 ## D5 — Cascade delete reuses `delete_backup` per constituent
 
 **Decision**: `delete_environment_backup` loops constituents calling the existing `delete_backup` service (which already deletes each backup's restores), deletes `EnvironmentRestore` rows referencing the parent, then deletes the parent row. The `Backup.environment_backup_id` FK is nullable; individually deleting a child backup leaves the parent with a visible gap (spec US3).
 
 **Rationale**: Full reuse; `delete_backup`'s semantics (DB-row deletion; Velero object lifecycle governed by TTL) carry over unchanged, keeping FR-014's "constituents behave as ordinary backups" true for deletion too.
+
+**Amendments (critique E1, E2)**: (1) Deletion is legal **regardless of derived status** — no in-progress guard — because it is the escape hatch for an environment backup pinned in progress by a stuck-`PENDING` constituent (fire-and-forget dispatch means no janitor will rescue it; ADR-0024 cleanup covers observed-state tables only). (2) `delete_environment` (`services/environments.py:396-405`) gains the same cascade: deleting an environment deletes its environment backups (and their environment restores) before deleting the row, otherwise the new `environmentbackup.environment_id` FK turns environment deletion into an FK violation masked as `INTERNAL_ERROR` (spec FR-015).
 
 ## D6 — Concurrency guard: repository EXISTS query over non-terminal constituents
 
