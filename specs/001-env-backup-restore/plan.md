@@ -74,6 +74,7 @@ backend/styrmin_backend/
 ├── services/
 │   ├── unit_of_work.py                    # register environment_backups / environment_restores repos
 │   ├── exceptions.py                      # + 3 typed errors
+│   ├── environments.py                    # delete_environment: cascade env backups before row delete (FR-015)
 │   └── backup/
 │       └── environment.py                 # NEW: create/restore/delete env backup, snapshot builder, status derivation, guards
 └── api/

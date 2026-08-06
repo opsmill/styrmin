@@ -53,7 +53,9 @@ Relationships: `environment_backup` (many-to-one); `restores` (one-to-many via n
 |---|---|---|
 | `deployment_id` | UUID | |
 | `deployment_name` | str | |
-| `reason` | str | One of the uniform skip reasons: `backup failed at creation`, `backup not completed`, `backup deleted`, `backup expired`, `deployment no longer exists` |
+| `reason` | str | One of the uniform skip reasons: `backup failed at creation`, `backup not completed`, `backup deleted`, `backup expired`, `deployment no longer exists`, `deployment busy with another restore` |
+
+**Expiry classification input (critique E4)**: Velero garbage-collects expired backup data cluster-side but never updates the DB row — an expired constituent still reads `COMPLETED`. Classification computes expiry from the backup's recorded TTL metadata (`expiresAt < now`), the same derivation the existing `Backup.expiresAt` resolver uses. Unit tests must cover an expired-but-`COMPLETED` constituent.
 
 ## Modified table: `Backup`
 
@@ -95,7 +97,8 @@ For `EnvironmentRestore`: children = linked `Restore` rows; errors = `skipped_co
 
 - Create backup: environment must exist (`EnvironmentNotFoundError`); no environment-level operation in progress for the environment (`EnvironmentOperationInProgressError`, `ALREADY_IN_PROGRESS`) — research.md D6.
 - Restore: environment backup must exist (`EnvironmentBackupNotFoundError`, `NOT_FOUND`); derived status must be `COMPLETED` or `PARTIAL` (`EnvironmentBackupNotRestorableError`, `OPERATION_DENIED`); same concurrency guard.
-- Delete: parent must exist; cascade = per-constituent `delete_backup` + delete `EnvironmentRestore` rows + delete parent (research.md D5).
+- Delete: parent must exist; cascade = per-constituent `delete_backup` + delete `EnvironmentRestore` rows + delete parent (research.md D5). **No status guard** — deletion is legal for an in-progress environment backup (escape hatch, FR-010).
+- Environment deletion: `delete_environment` cascades through the environment's environment backups (same per-parent cascade) before deleting the environment row (FR-015) — otherwise the new FK turns environment deletion into a constraint violation.
 
 ## Eligibility query (FR-001)
 
