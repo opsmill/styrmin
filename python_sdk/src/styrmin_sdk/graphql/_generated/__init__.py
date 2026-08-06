@@ -39,6 +39,7 @@ from .deploy import Deploy, DeployDeploy
 from .enums import (
     BackupStatus,
     DriverEnvVarLevel,
+    EnvironmentBackupStatus,
     ExternalDnsEndpointsType,
     ExternalUrlScheme,
     LabelSelectorOperator,
@@ -320,6 +321,7 @@ __all__ = [
     "DeploymentStatusReportInput",
     "DriverEnvVarLevel",
     "EnvVarInput",
+    "EnvironmentBackupStatus",
     "ExternalDnsEndpointsType",
     "ExternalUrlScheme",
     "FastStorageInput",

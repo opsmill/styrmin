@@ -15,6 +15,9 @@ from styrmin_backend.api.definitions.backup.backup import (
     Backup as BackupType,
     BackupStatusType,
 )
+from styrmin_backend.api.definitions.backup.environment_backup import (
+    EnvironmentBackup as EnvironmentBackupType,
+)
 from styrmin_backend.api.definitions.backup_storage_location.model import (
     BackupStorageLocation as BackupStorageLocationType,
 )
@@ -56,6 +59,10 @@ from styrmin_backend.services.auth.users import (
 from styrmin_backend.services.backup.scheduler import (
     get_backup_schedule,
     get_backup_schedules,
+)
+from styrmin_backend.services.backup.environment import (
+    get_environment_backup,
+    get_environment_backups,
 )
 from styrmin_backend.services.backup.service import (
     get_backup,
@@ -323,6 +330,31 @@ class Query:
         uow = info.context["uow"]
         restores = await get_restores(backup_id=backup_id, uow=uow, status=status)
         return [RestoreType.from_instance(r) for r in restores]
+
+    @strawberry.field
+    async def environment_backup(
+        self, environment_backup_id: UUID, info: strawberry.Info
+    ) -> EnvironmentBackupType | None:
+        """Get a specific environment backup by ID."""
+        uow = info.context["uow"]
+        environment_backup = await get_environment_backup(
+            environment_backup_id=environment_backup_id, uow=uow
+        )
+        return EnvironmentBackupType.from_instance(environment_backup)
+
+    @strawberry.field
+    async def environment_backups(
+        self, environment_id: UUID, info: strawberry.Info
+    ) -> list[EnvironmentBackupType]:
+        """List an environment's environment backups, newest first."""
+        uow = info.context["uow"]
+        environment_backups = await get_environment_backups(
+            environment_id=environment_id, uow=uow
+        )
+        return [
+            EnvironmentBackupType.from_instance(environment_backup)
+            for environment_backup in environment_backups
+        ]
 
     @strawberry.field
     async def backup_schedule(

@@ -1,0 +1,34 @@
+mutation CreateEnvironmentBackup($environmentId: UUID!, $name: String) {
+    createEnvironmentBackup(environmentId: $environmentId, name: $name) {
+        id
+        name
+        status
+        environmentConfig
+        environment {
+            id
+            name
+        }
+        deploymentSnapshots {
+            deploymentId
+            deploymentName
+            instanceId
+            driverName
+            driverVersion
+            driverFingerprint
+            applicationVersion
+            config
+            parameters
+        }
+        constituents {
+            deploymentId
+            deploymentName
+            error
+            backup {
+                id
+                name
+                status
+                instanceId
+            }
+        }
+    }
+}
