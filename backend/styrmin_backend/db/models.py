@@ -181,6 +181,9 @@ class Environment(StyrminModel, table=True):
     )
 
     deployments: list["Deployment"] = Relationship(back_populates="environment")
+    environment_backups: list["EnvironmentBackup"] = Relationship(
+        back_populates="environment"
+    )
 
 
 # Note: Can be handled in application repository
@@ -515,6 +518,48 @@ class RestoreStatus(str, Enum):
     FAILED = "failed"
 
 
+class EnvironmentBackup(StyrminModel, table=True):
+    """A coordinated snapshot of an environment.
+
+    Groups one constituent :class:`Backup` per eligible application instance
+    together with the environment config and per-deployment declared state
+    captured at backup time.
+
+    There is deliberately **no status column**: the parent status is derived
+    at read time from the constituent backups plus ``constituent_errors``, so
+    a stored parent status can never contradict its children.
+    """
+
+    name: str = Field(unique=True)
+
+    environment_id: UUID = Field(foreign_key="environment.id")
+    environment: Environment = Relationship(back_populates="environment_backups")
+
+    environment_config: dict | None = Field(default=None, sa_column=Column(JSON))
+    deployment_snapshots: list | None = Field(default=None, sa_column=Column(JSON))
+    constituent_errors: list | None = Field(default=None, sa_column=Column(JSON))
+
+    backups: list["Backup"] = Relationship(back_populates="environment_backup")
+    restores: list["EnvironmentRestore"] = Relationship(
+        back_populates="environment_backup"
+    )
+
+
+class EnvironmentRestore(StyrminModel, table=True):
+    """One coordinated in-place restore of an :class:`EnvironmentBackup`.
+
+    Like its parent snapshot it carries **no status column** — the status is
+    derived from the constituent restores plus ``skipped_constituents``.
+    """
+
+    environment_backup_id: UUID = Field(foreign_key="environmentbackup.id")
+    environment_backup: EnvironmentBackup = Relationship(back_populates="restores")
+
+    skipped_constituents: list | None = Field(default=None, sa_column=Column(JSON))
+
+    restores: list["Restore"] = Relationship(back_populates="environment_restore")
+
+
 class Backup(StyrminModel, table=True):
     name: str = Field(unique=True)
     status: BackupStatus = Field(sa_column=Column(SQLModelEnum(BackupStatus)))
@@ -530,6 +575,13 @@ class Backup(StyrminModel, table=True):
     instance: ApplicationInstance = Relationship()
 
     schedule_id: UUID | None = Field(default=None, foreign_key="backupschedule.id")
+
+    environment_backup_id: UUID | None = Field(
+        default=None, foreign_key="environmentbackup.id"
+    )
+    environment_backup: Optional["EnvironmentBackup"] = Relationship(
+        back_populates="backups"
+    )
 
     restores: list["Restore"] = Relationship(back_populates="backup")
 
@@ -550,6 +602,13 @@ class Restore(StyrminModel, table=True):
 
     target_instance_id: UUID | None = Field(
         default=None, foreign_key="applicationinstance.id"
+    )
+
+    environment_restore_id: UUID | None = Field(
+        default=None, foreign_key="environmentrestore.id"
+    )
+    environment_restore: Optional["EnvironmentRestore"] = Relationship(
+        back_populates="restores"
     )
 
 
