@@ -1123,6 +1123,397 @@ async def test_environment_restores_lists_newest_first_and_scopes_by_snapshot(
     assert rows[0]["skippedConstituents"][0]["reason"] == "backup deleted"
 
 
+# ---------------------------------------------------------------------------
+# deleteEnvironmentBackup — cascade propagation (US3 / FR-010, FR-015)
+# ---------------------------------------------------------------------------
+
+
+async def _ids(session: AsyncSession, statement) -> set[UUID]:
+    """Read primary keys through the *seeding* session, after ``expire_all()``.
+
+    The mutation ran in a different session, so this one still holds the
+    pre-delete objects in its identity map. Expiring first forces a real SELECT
+    and makes "the row is gone" mean gone from the database rather than gone
+    from the response payload.
+
+    Only ids come back on purpose: an ORM instance handed to a caller *after*
+    ``expire_all()`` would re-query the row on first attribute access and raise
+    ``ObjectDeletedError`` for exactly the rows these tests expect to be gone.
+    Callers therefore capture the ids they care about *before* the mutation and
+    compare id sets afterwards.
+    """
+    session.expire_all()
+    return {row.id for row in (await session.exec(statement)).all()}
+
+
+@pytest.mark.asyncio
+async def test_delete_environment_backup_cascades_to_constituents_and_restores(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """FR-010: the parent, its constituents, and their restores all leave the DB."""
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    deployment_a, instance_a = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="infrahub"
+    )
+    deployment_b, instance_b = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="netbox"
+    )
+    parent = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[
+            (deployment_a, instance_a, BackupStatus.COMPLETED),
+            (deployment_b, instance_b, BackupStatus.COMPLETED),
+        ],
+    )
+    parent_id = parent.id
+    environment_id = environment.id
+    deployment_a_id = deployment_a.id
+    deployment_ids = {deployment_a.id, deployment_b.id}
+    constituent_ids = await _ids(
+        session, select(Backup).where(Backup.environment_backup_id == parent_id)
+    )
+    assert len(constituent_ids) == 2
+    environment_restore = EnvironmentRestore(environment_backup_id=parent_id)
+    session.add(environment_restore)
+    await session.commit()
+    environment_restore_id = environment_restore.id
+    for constituent_id in constituent_ids:
+        session.add(
+            Restore(
+                name=f"restore-{uuid4().hex[:8]}",
+                status=RestoreStatus.COMPLETED,
+                target_namespace=f"styrmin-{deployment_a_id}",
+                backup_id=constituent_id,
+                environment_restore_id=environment_restore_id,
+            )
+        )
+    await session.commit()
+
+    data = await gql(
+        fresh_client,
+        "delete_environment_backup",
+        {"environmentBackupId": str(parent_id)},
+    )
+
+    assert data["deleteEnvironmentBackup"] is True
+    # --- Everything the snapshot owned left the database ---------------
+    assert (
+        await _ids(
+            session, select(EnvironmentBackup).where(EnvironmentBackup.id == parent_id)
+        )
+        == set()
+    )
+    assert (
+        await _ids(
+            session,
+            select(EnvironmentRestore).where(
+                EnvironmentRestore.environment_backup_id == parent_id
+            ),
+        )
+        == set()
+    )
+    assert (
+        await _ids(
+            session,
+            select(Backup).where(Backup.id.in_(constituent_ids)),  # type: ignore[attr-defined]
+        )
+        == set()
+    )
+    assert (
+        await _ids(
+            session,
+            select(Restore).where(
+                Restore.environment_restore_id == environment_restore_id
+            ),
+        )
+        == set()
+    )
+    # --- The deployments themselves are untouched ----------------------
+    assert (
+        await _ids(
+            session,
+            select(Deployment).where(Deployment.environment_id == environment_id),
+        )
+        == deployment_ids
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_environment_backup_spares_sibling_snapshots(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """The cascade is scoped to one snapshot, not to the environment."""
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    deployment, instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="infrahub"
+    )
+    doomed = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[(deployment, instance, BackupStatus.COMPLETED)],
+        name="doomed",
+    )
+    keeper = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[(deployment, instance, BackupStatus.COMPLETED)],
+        name="keeper",
+    )
+    environment_id = environment.id
+    doomed_id = doomed.id
+    keeper_id = keeper.id
+    keeper_constituent_ids = await _ids(
+        session, select(Backup).where(Backup.environment_backup_id == keeper_id)
+    )
+
+    await gql(
+        fresh_client,
+        "delete_environment_backup",
+        {"environmentBackupId": str(doomed_id)},
+    )
+
+    assert await _ids(
+        session,
+        select(EnvironmentBackup).where(
+            EnvironmentBackup.environment_id == environment_id
+        ),
+    ) == {keeper_id}
+    assert (
+        await _ids(
+            session, select(Backup).where(Backup.environment_backup_id == keeper_id)
+        )
+        == keeper_constituent_ids
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [BackupStatus.PENDING, BackupStatus.IN_PROGRESS])
+async def test_delete_environment_backup_works_while_in_progress(
+    fresh_client: AsyncClient, session: AsyncSession, status: BackupStatus
+) -> None:
+    """FR-010 escape hatch: no status guard, at the API boundary too.
+
+    Read the derived status back through GraphQL first, so the test proves the
+    snapshot really was non-terminal at the moment it was deleted rather than
+    assuming the seed produced one.
+    """
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    deployment, instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="infrahub"
+    )
+    parent = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[(deployment, instance, status)],
+    )
+    parent_id = parent.id
+    before = await gql(
+        fresh_client, "get_environment_backup", {"environmentBackupId": str(parent_id)}
+    )
+    assert before["environmentBackup"]["status"] in ("PENDING", "IN_PROGRESS")
+
+    data = await gql(
+        fresh_client,
+        "delete_environment_backup",
+        {"environmentBackupId": str(parent_id)},
+    )
+
+    assert data["deleteEnvironmentBackup"] is True
+    assert (
+        await _ids(
+            session, select(EnvironmentBackup).where(EnvironmentBackup.id == parent_id)
+        )
+        == set()
+    )
+    assert (
+        await _ids(
+            session, select(Backup).where(Backup.environment_backup_id == parent_id)
+        )
+        == set()
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_environment_backup_rejects_an_unknown_snapshot(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """A missing snapshot is ``NOT_FOUND``, not a silent success."""
+    response = await fresh_client.post(
+        "/graphql",
+        json={
+            "query": load_query("delete_environment_backup"),
+            "variables": {"environmentBackupId": str(uuid4())},
+        },
+    )
+
+    assert response.status_code == 200
+    errors = response.json()["errors"]
+    assert errors[0]["extensions"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_delete_environment_backup_is_allowed_at_read_write(
+    session: AsyncSession, read_write_client: AsyncClient
+) -> None:
+    """Deleting a snapshot is READ_WRITE — parity with ``deleteBackup``.
+
+    The sibling ``restoreEnvironmentBackup`` is ADMIN because it reverts the
+    environment's config; deletion does not, so it must not inherit that gate.
+    """
+    environment = await seed_environment(session)
+    parent = await seed_environment_backup(session, environment=environment, entries=[])
+    parent_id = parent.id
+
+    response = await read_write_client.post(
+        "/graphql",
+        json={
+            "query": load_query("delete_environment_backup"),
+            "variables": {"environmentBackupId": str(parent_id)},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+    assert payload["data"]["deleteEnvironmentBackup"] is True
+    assert (
+        await _ids(
+            session, select(EnvironmentBackup).where(EnvironmentBackup.id == parent_id)
+        )
+        == set()
+    )
+
+
+@pytest.mark.asyncio
+async def test_individually_deleting_a_constituent_leaves_a_visible_gap(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """US3: the parent survives, and the missing child shows as a gap.
+
+    Deleting a constituent through the ordinary per-instance ``deleteBackup``
+    must not take the snapshot with it — the entry stays in
+    ``deploymentSnapshots`` and resolves to a constituent with neither a
+    ``backup`` nor an ``error``.
+    """
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    survivor, survivor_instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="survivor"
+    )
+    doomed, doomed_instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="doomed-constituent"
+    )
+    parent = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[
+            (survivor, survivor_instance, BackupStatus.COMPLETED),
+            (doomed, doomed_instance, BackupStatus.COMPLETED),
+        ],
+    )
+    parent_id = parent.id
+    doomed_backup_id = (
+        await session.exec(
+            select(Backup.id).where(Backup.instance_id == doomed_instance.id)
+        )
+    ).first()
+    assert doomed_backup_id is not None
+
+    await gql(fresh_client, "delete_backup", {"backupId": str(doomed_backup_id)})
+
+    # --- The parent survived the child's deletion ----------------------
+    assert await _ids(
+        session, select(EnvironmentBackup).where(EnvironmentBackup.id == parent_id)
+    ) == {parent_id}
+    data = await gql(
+        fresh_client, "get_environment_backup", {"environmentBackupId": str(parent_id)}
+    )
+    row = data["environmentBackup"]
+    by_name = {c["deploymentName"]: c for c in row["constituents"]}
+    assert set(by_name) == {"survivor", "doomed-constituent"}
+    # The gap: captured in the snapshot, but no backup and no error.
+    assert by_name["doomed-constituent"]["backup"] is None
+    assert by_name["doomed-constituent"]["error"] is None
+    assert by_name["survivor"]["backup"] is not None
+    # One surviving completed child, no recorded errors -> still COMPLETED.
+    assert row["status"] == "COMPLETED"
+    assert {s["deploymentName"] for s in row["deploymentSnapshots"]} == set(by_name)
+
+
+@pytest.mark.asyncio
+async def test_delete_environment_cascades_its_environment_backups(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """FR-015: snapshots do not outlive their environment.
+
+    ``environmentbackup.environment_id`` is a non-nullable FK and
+    ``Environment.environment_backups`` is an ordinary relationship, so without
+    the cascade ``session.delete(environment)`` tries to null the FK out and
+    the mutation fails with ``INTERNAL_ERROR`` instead of deleting anything.
+
+    The snapshots here are config-only by necessity, not by preference: a
+    constituent backup needs an application instance, which needs a deployment,
+    and ``deleteEnvironment`` already refuses an environment that still has
+    deployment rows (the same nullify-a-NOT-NULL-FK failure, predating this
+    feature). The constituent leg of the cascade is proven at DB level by
+    ``test_delete_environment_backup_cascades_to_constituents_and_restores``
+    above — ``delete_environment`` reaches it through the very same
+    ``delete_environment_backup`` call.
+    """
+    environment = await seed_environment(session)
+    environment_id = environment.id
+    parents = [
+        await seed_environment_backup(
+            session, environment=environment, entries=[], name=f"snapshot-{index}"
+        )
+        for index in range(2)
+    ]
+    parent_ids = {parent.id for parent in parents}
+    environment_restore = EnvironmentRestore(
+        environment_backup_id=parents[0].id,
+        skipped_constituents=[
+            {
+                "deployment_id": str(uuid4()),
+                "deployment_name": "gone-app",
+                "reason": "deployment no longer exists",
+            }
+        ],
+    )
+    session.add(environment_restore)
+    await session.commit()
+    environment_restore_id = environment_restore.id
+
+    data = await gql(
+        fresh_client, "delete_environment", {"environmentId": str(environment_id)}
+    )
+
+    assert data["deleteEnvironment"] is not None
+    assert (
+        await _ids(session, select(Environment).where(Environment.id == environment_id))
+        == set()
+    )
+    assert (
+        await _ids(
+            session,
+            select(EnvironmentBackup).where(EnvironmentBackup.id.in_(parent_ids)),  # type: ignore[attr-defined]
+        )
+        == set()
+    )
+    assert (
+        await _ids(
+            session,
+            select(EnvironmentRestore).where(
+                EnvironmentRestore.id == environment_restore_id
+            ),
+        )
+        == set()
+    )
+
+
 @pytest.mark.asyncio
 async def test_environment_backup_projects_its_restores(
     fresh_client: AsyncClient, session: AsyncSession

@@ -193,6 +193,28 @@ class TestEnvironmentBackupResource:
 
     @staticmethod
     @pytest.mark.asyncio
+    async def test_delete(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {"data": {"deleteEnvironmentBackup": True}}
+
+        assert await client.environment_backups.delete(ENV_BACKUP_ID) is None
+
+        query, variables = mock_transport.execute.call_args.args
+        assert "deleteEnvironmentBackup" in query
+        assert variables == {"environmentBackupId": ENV_BACKUP_ID}
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_delete_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [{"message": "Environment backup not found", "extensions": {"code": "NOT_FOUND"}}],
+        }
+
+        with pytest.raises(ResourceNotFoundError):
+            await client.environment_backups.delete(ENV_BACKUP_ID)
+
+    @staticmethod
+    @pytest.mark.asyncio
     async def test_list_projects_constituent_outcomes(client: StyrminClient, mock_transport: AsyncMock) -> None:
         mock_transport.execute.return_value = {
             "data": {

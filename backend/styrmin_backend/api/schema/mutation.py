@@ -121,6 +121,7 @@ from styrmin_backend.services.backup.scheduler import (
 )
 from styrmin_backend.services.backup.environment import (
     create_environment_backup as create_environment_backup_service,
+    delete_environment_backup as delete_environment_backup_service,
     restore_environment_backup as restore_environment_backup_service,
 )
 from styrmin_backend.services.backup.service import (
@@ -970,6 +971,34 @@ class Mutation:
             uow=uow,
         )
         return EnvironmentRestoreType.from_instance(environment_restore)
+
+    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
+    async def delete_environment_backup(
+        self,
+        environment_backup_id: UUID,
+        info: strawberry.Info,
+    ) -> bool:
+        """Delete an environment snapshot and everything that hangs off it.
+
+        Cascades through the constituent backups (and any restores of them)
+        and the snapshot's own environment restores before deleting the parent
+        (spec FR-010).
+
+        Succeeds **regardless of the snapshot's derived status**: deleting one
+        whose constituents are still in flight is the documented escape hatch
+        for an environment pinned in progress by a constituent whose work was
+        never picked up. Constituent backups stay individually deletable, and
+        doing so leaves the parent alive with a visible gap.
+
+        Gated at ``READ_WRITE`` for parity with ``deleteBackup`` — deleting a
+        snapshot removes backups, it does not mutate the environment's config.
+        """
+        uow = info.context["uow"]
+        await delete_environment_backup_service(
+            environment_backup_id=environment_backup_id,
+            uow=uow,
+        )
+        return True
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def delete_backup(

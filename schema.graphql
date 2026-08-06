@@ -747,6 +747,7 @@ type Mutation {
   createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
   createEnvironmentBackup(environmentId: UUID!, name: String = null): EnvironmentBackup! @requiresRole
   restoreEnvironmentBackup(environmentBackupId: UUID!): EnvironmentRestore! @requiresRole
+  deleteEnvironmentBackup(environmentBackupId: UUID!): Boolean! @requiresRole
   deleteBackup(backupId: UUID!): String @requiresRole
   createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore @requiresRole
   createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int! = 10, enabled: Boolean! = true): BackupSchedule @requiresRole
