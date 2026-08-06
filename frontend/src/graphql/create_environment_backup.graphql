@@ -1,0 +1,8 @@
+mutation CreateEnvironmentBackup($environmentId: UUID!, $name: String) {
+  createEnvironmentBackup(environmentId: $environmentId, name: $name) {
+    id
+    name
+    status
+    createdOn
+  }
+}

@@ -34,6 +34,10 @@ const statusConfig: Record<string, StatusConfig> = {
   restoring: { label: "Restoring", variant: "warning" },
   deleting: { label: "Deleting", variant: "warning" },
   stopping: { label: "Stopping", variant: "warning" },
+  // Terminal, but degraded: an environment backup/restore where some
+  // constituents succeeded and some did not. Amber rather than green so a
+  // half-covered snapshot never reads as a clean one.
+  partial: { label: "Partial", variant: "warning" },
 
   // Error / failure states
   FAILED: { label: "Failed", variant: "destructive" },
@@ -111,7 +115,8 @@ export function getStatusColor(status: string): {
     s === "reconciling" ||
     s === "restoring" ||
     s === "deleting" ||
-    s === "stopping"
+    s === "stopping" ||
+    s === "partial"
   ) {
     return {
       dot: "bg-warning",

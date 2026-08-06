@@ -29,12 +29,13 @@ import { IfRole } from "@/auth/IfRole";
 import { useEffectiveRole } from "@/auth/useEffectiveRole";
 import EnvironmentConfigurationTab from "./EnvironmentConfigurationTab";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { EnvironmentBackupsTab } from "@/components/environment/EnvironmentBackupsTab";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "parameters", label: "Parameters" },
   { id: "configuration", label: "Configuration" },
-  { id: "backups", label: "Backups", badge: "SOON" },
+  { id: "backups", label: "Backups" },
 ];
 
 export default function EnvironmentDetailPage() {
@@ -382,14 +383,9 @@ export default function EnvironmentDetailPage() {
         />
       </TabPanel>
 
-      {/* Backups Tab (Coming Soon) */}
+      {/* Backups Tab */}
       <TabPanel active={activeTab === "backups"}>
-        <EmptyState
-          title="Environment Backups"
-          description="Schedule and manage backups across all deployments in this environment. Configure retention policies and restore points from a single place."
-          icon="package"
-          comingSoon
-        />
+        <EnvironmentBackupsTab environmentId={environmentId} />
       </TabPanel>
     </div>
   );
