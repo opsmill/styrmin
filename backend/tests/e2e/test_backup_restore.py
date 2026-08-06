@@ -11,9 +11,14 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
+from styrmin_sdk.exceptions import ResourceNotFoundError
 
 from tests.e2e.conftest import _portforward, _wait_for_http
-from tests.e2e.drivers import ResourceNotFound, ScenarioDriver
+from tests.e2e.drivers import (
+    EnvironmentBackupRef,
+    ResourceNotFound,
+    ScenarioDriver,
+)
 
 pytestmark = [
     pytest.mark.shard_backup,
@@ -23,6 +28,12 @@ pytestmark = [
 # (016-backup-retention-ttl / US1). Deliberately different from the built-in
 # ``DEFAULT_BACKUP_TTL`` ("720h") so the assertions cannot pass on the default.
 ENVIRONMENT_BACKUP_TTL = "2160h"
+
+# The environment-config mutation the environment-level lifecycle test writes
+# between backup and restore (spec SC-005). Distinct from both
+# ``ENVIRONMENT_BACKUP_TTL`` above and the built-in default so "config equals
+# the captured value" cannot pass by coincidence.
+ENVIRONMENT_SNAPSHOT_MUTATED_TTL = "1440h"
 
 # The env-config write fans out a redeploy Task to every deployment in the
 # environment; the same budget the 009 fanout E2E allows for a deployment to
@@ -381,6 +392,397 @@ async def test_backup_and_restore_lifecycle(
         with suppress(Exception):
             await scenario_driver.wait_for_deployment_running(
                 deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
+            )
+
+
+# ---------------------------------------------------------------------------
+# Environment-level backup and restore (spec 001-env-backup-restore)
+# ---------------------------------------------------------------------------
+
+
+async def eligible_deployment_ids(
+    client: StyrminClient, environment_id: str
+) -> set[str]:
+    """Deployment ids that must contribute a constituent to a snapshot.
+
+    Mirrors the service's ``is_eligible_for_environment_backup``: non-tombstoned
+    (``ListDeployments`` already excludes tombstones) and carrying an active
+    application instance. ``internal`` is not projected on the read API; the
+    scenario environment never holds an internal deployment, and if one ever
+    appeared this set would become a strict superset and the SC-001 assertion
+    would fail loudly rather than silently weaken.
+    """
+    deployments = await client.deployments.list(environment_id=environment_id)
+    return {
+        str(deployment.id)
+        for deployment in deployments
+        if deployment.application_instance is not None
+    }
+
+
+async def wait_for_constituent_outcomes(
+    driver: ScenarioDriver,
+    *,
+    environment_backup_id: str,
+    expected: dict[str, str],
+    timeout: float,
+) -> EnvironmentBackupRef:
+    """Block until every named constituent reports its expected outcome.
+
+    Needed for two independent reasons, and both are properties of the feature
+    rather than of this test:
+
+    * ``constituents`` is projected from the parent's ``deployment_snapshots``,
+      which is committed *before* the fan-out dispatches anything (ADR-0012), so
+      a constituent whose ``Backup`` row does not exist yet legitimately reads as
+      ``missing`` for the duration of the fan-out — and while every constituent
+      is in that state the *derived* parent status reads ``COMPLETED`` (no
+      children, no errors). Waiting on the children rather than on the parent is
+      therefore the only sound "the backup is done" signal.
+    * the UI entrypoint reads a list that refetches on a 10s interval, so a
+      change made out-of-band (deleting one constituent) needs a poll to become
+      visible. The API entrypoint re-reads on every call, so the same poll is a
+      no-op there.
+    """
+    deadline = asyncio.get_event_loop().time() + timeout
+    observed: dict[str, str] = {}
+    ref: EnvironmentBackupRef | None = None
+    while asyncio.get_event_loop().time() < deadline:
+        ref = await driver.get_environment_backup(
+            environment_backup_id=environment_backup_id
+        )
+        observed = {
+            constituent.deployment_id: constituent.outcome
+            for constituent in ref.constituents
+        }
+        if all(observed.get(did) == outcome for did, outcome in expected.items()):
+            return ref
+        await asyncio.sleep(5)
+    raise AssertionError(
+        f"environment backup {environment_backup_id} constituents did not reach "
+        f"{expected!r} within {timeout}s — observed {observed!r} "
+        f"(parent status {ref.status if ref else '<unread>'!r})"
+    )
+
+
+@pytest.mark.ci
+async def test_environment_backup_and_restore_lifecycle(
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    styrmin_resources: dict,
+    deployed_simple_app: dict,
+    velero_ready: None,  # noqa: ARG001 — ensures Velero is up before backup/restore
+    vcluster: dict,
+) -> None:
+    """One coordinated snapshot of a multi-deployment environment, then restore.
+
+    Covers the whole 001-env-backup-restore feature in one dual-entrypoint node
+    (Constitution §V "reuse before you boot"): US1 (coordinated backup), US2
+    (coordinated in-place restore with attributed skips) and US3 (per-constituent
+    visibility + cascade delete).
+
+    Success criteria asserted here:
+
+    * **SC-001** — one action produces one constituent per eligible deployment,
+      for N > 1: ``deployed_simple_app`` plus a second deployment created below.
+    * **SC-002** — the restored deployment's application data is back to its
+      backup-time value, with no further operator input.
+    * **SC-003** — the derived parent status matches its constituents at each
+      step: ``COMPLETED`` once every constituent completed, and ``PARTIAL`` for a
+      restore that restored one constituent and skipped another.
+    * **SC-004** — the skipped constituent is attributed by deployment *name*
+      and reason. Zero silent skips.
+    * **SC-005** — after the restore, the environment's config equals the config
+      captured at backup time (an env-config write happens in between).
+
+    The environment is session-shared, so the config write is deliberately the
+    retention policy (a Helm-level no-op that still walks the whole reconcile
+    path) and the ``finally`` block restores the pre-test policy.
+    """
+    from uuid import uuid4
+
+    client: StyrminClient = styrmin_resources["client"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+
+    primary_deployment_id = deployed_simple_app["deployment_id"]
+    primary_namespace = deployed_simple_app["namespace"]
+
+    # A second deployment makes SC-001's "for any N" meaningful and gives the
+    # restore something to skip. The shared environment enforces per-env service
+    # name uniqueness, hence the override (see ``scenario_environment_id``).
+    suffix = uuid4().hex[:8]
+    secondary = await scenario_driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+        name=f"env-snapshot-{suffix}",
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": f"envsnap{suffix}"}
+        ],
+    )
+    secondary_deployment_id = secondary.id
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=secondary_deployment_id,
+        timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS,
+    )
+    secondary_name = (await client.deployments.get(secondary_deployment_id)).name
+
+    previous_backup_ttl = (
+        (await client.environments.get(environment_id=scenario_environment_id)).config
+        or {}
+    ).get("backup_ttl")
+
+    try:
+        # 1. Write data into the primary deployment so the restore has something
+        #    observable to bring back (SC-002).
+        scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
+        async with portforward_simple_app(kubeconfig_path, primary_namespace) as port:
+            async with httpx.AsyncClient() as http_client:
+                for _ in range(5):
+                    await http_client.get(f"http://localhost:{port}/count", timeout=10)
+                resp = await http_client.get(
+                    f"http://localhost:{port}/count", timeout=10
+                )
+                pre_backup_count = resp.json()["counter"]
+
+        # 2. One action snapshots the whole environment (SC-001).
+        expected_constituents = await eligible_deployment_ids(
+            client, scenario_environment_id
+        )
+        assert {primary_deployment_id, secondary_deployment_id} <= (
+            expected_constituents
+        ), (
+            "both deployments must be eligible before the snapshot, got "
+            f"{expected_constituents!r}"
+        )
+
+        created = await scenario_driver.create_environment_backup(
+            environment_id=scenario_environment_id
+        )
+        environment_backup_id = created.id
+        assert created.status in {"PENDING", "IN_PROGRESS", "COMPLETED"}, (
+            f"unexpected derived status right after creation: {created.status!r}"
+        )
+        constituent_ids = [c.deployment_id for c in created.constituents]
+        assert set(constituent_ids) == expected_constituents, (
+            "one constituent per eligible deployment (SC-001): expected "
+            f"{expected_constituents!r}, got {set(constituent_ids)!r}"
+        )
+        assert len(constituent_ids) == len(set(constituent_ids)), (
+            f"a deployment appears twice in the snapshot: {constituent_ids!r}"
+        )
+
+        # 3. Every constituent completes, and the derived parent status agrees
+        #    with its constituents (SC-003).
+        await wait_for_constituent_outcomes(
+            scenario_driver,
+            environment_backup_id=environment_backup_id,
+            expected=dict.fromkeys(expected_constituents, "completed"),
+            timeout=600.0,
+        )
+        completed = await scenario_driver.wait_for_environment_backup(
+            environment_backup_id=environment_backup_id, max_wait=120.0
+        )
+        assert completed.status == "COMPLETED", (
+            "every constituent completed, so the derived parent status must be "
+            f"COMPLETED (SC-003); got {completed.status!r}"
+        )
+
+        # 4. The snapshot captured the environment config and each deployment's
+        #    declared state including the ADR-0053 driver fingerprint
+        #    (FR-002/FR-003). Read through the SDK on both entrypoints — the
+        #    frontend does not surface the captured payload, and it is the
+        #    snapshot's *content*, not a UI affordance, that is under test.
+        persisted = await client.environment_backups.get(environment_backup_id)
+        captured_config = persisted.environment_config
+        assert captured_config is not None, (
+            "the snapshot must capture the environment config (FR-002)"
+        )
+        snapshots_by_deployment = {
+            str(snapshot.deployment_id): snapshot
+            for snapshot in persisted.deployment_snapshots
+        }
+        assert set(snapshots_by_deployment) == expected_constituents
+        for deployment_id, snapshot in snapshots_by_deployment.items():
+            assert snapshot.driver_name == "simple-app", (
+                f"{deployment_id}: captured driver name {snapshot.driver_name!r}"
+            )
+            assert snapshot.application_version == "0.1.0"
+            assert snapshot.driver_fingerprint, (
+                f"{deployment_id}: declared state must record the driver "
+                "provenance fingerprint (FR-003 / ADR-0053)"
+            )
+
+        secondary_backup_id = next(
+            c.backup_id
+            for c in completed.constituents
+            if c.deployment_id == secondary_deployment_id
+        )
+        primary_backup_id = next(
+            c.backup_id
+            for c in completed.constituents
+            if c.deployment_id == primary_deployment_id
+        )
+        assert secondary_backup_id and primary_backup_id
+
+        # 5. US3 — delete one constituent individually. The parent survives and
+        #    the gap is visible, which is also what makes the restore below skip
+        #    that deployment with an attributable reason. Done through the SDK
+        #    rather than the scenario driver on purpose: the UI's per-backup
+        #    delete lives on the *deployment* detail page, and this is snapshot
+        #    setup, not the environment-level flow under test.
+        await client.backups.delete_backup(secondary_backup_id)
+        with_gap = await wait_for_constituent_outcomes(
+            scenario_driver,
+            environment_backup_id=environment_backup_id,
+            expected={
+                primary_deployment_id: "completed",
+                secondary_deployment_id: "missing",
+            },
+            timeout=120.0,
+        )
+        assert len(with_gap.constituents) == len(expected_constituents), (
+            "deleting a constituent must leave the parent's snapshot list intact "
+            "so the gap stays visible (US3)"
+        )
+        assert with_gap.status == "COMPLETED", (
+            "the surviving constituent completed, so the snapshot is still "
+            f"restorable; got {with_gap.status!r}"
+        )
+
+        # 6. Mutate the environment config and the application data, so the
+        #    restore has both to revert (SC-005 / SC-002).
+        pre_write_timeline = {
+            deployment_id: len(
+                await client.deployments.get_timeline(deployment_id=deployment_id)
+            )
+            for deployment_id in (primary_deployment_id, secondary_deployment_id)
+        }
+        await scenario_driver.set_environment_backup_ttl(
+            environment_id=scenario_environment_id,
+            ttl=ENVIRONMENT_SNAPSHOT_MUTATED_TTL,
+        )
+        mutated = await client.environments.get(environment_id=scenario_environment_id)
+        assert (mutated.config or {}).get("backup_ttl") == (
+            ENVIRONMENT_SNAPSHOT_MUTATED_TTL
+        ), f"env config should carry the mutation, got {mutated.config!r}"
+        assert mutated.config != captured_config, (
+            "the config write must actually diverge from the captured snapshot, "
+            "otherwise SC-005 would pass without a revert happening"
+        )
+        for deployment_id, length in pre_write_timeline.items():
+            await wait_for_env_fanout_steady_state(
+                client, deployment_id=deployment_id, pre_timeline_length=length
+            )
+        await wait_for_pods_ready(kubeconfig_path, primary_namespace)
+
+        async with portforward_simple_app(kubeconfig_path, primary_namespace) as port:
+            async with httpx.AsyncClient() as http_client:
+                for _ in range(5):
+                    await http_client.get(f"http://localhost:{port}/count", timeout=10)
+
+        # 7. US2 — one action restores the environment. Classification is
+        #    synchronous, so the skips are complete on the returned record.
+        environment_restore = await scenario_driver.restore_environment_backup(
+            environment_backup_id=environment_backup_id
+        )
+        skipped_by_deployment = {
+            skip.deployment_id: skip for skip in environment_restore.skipped
+        }
+        assert set(skipped_by_deployment) == {secondary_deployment_id}, (
+            "exactly the constituent whose backup was deleted must be skipped, "
+            f"got {set(skipped_by_deployment)!r}"
+        )
+        skip = skipped_by_deployment[secondary_deployment_id]
+        assert skip.deployment_name == secondary_name, (
+            "a skip is attributed by deployment name (SC-004); got "
+            f"{skip.deployment_name!r}, expected {secondary_name!r}"
+        )
+        # Free text by contract, not a closed enum — asserted as text.
+        assert skip.reason == "backup deleted", (
+            f"unexpected skip reason {skip.reason!r} (SC-004)"
+        )
+        assert len(environment_restore.restore_ids) == (
+            len(expected_constituents) - 1
+        ), (
+            "every usable constituent must be restored without further operator "
+            f"input (SC-002); got {environment_restore.restore_ids!r}"
+        )
+
+        finished = await scenario_driver.wait_for_environment_restore(
+            environment_restore_id=environment_restore.id, max_wait=900.0
+        )
+        assert finished.status == "PARTIAL", (
+            "one constituent restored and one skipped derives to PARTIAL "
+            f"(SC-003); got {finished.status!r}"
+        )
+
+        # 8. SC-005 — the config is back to the captured value, exactly.
+        reverted = await client.environments.get(environment_id=scenario_environment_id)
+        assert reverted.config == captured_config, (
+            "after the restore the environment config must equal the config "
+            f"captured at backup time (SC-005): {reverted.config!r} != "
+            f"{captured_config!r}"
+        )
+
+        # 9. SC-002 — the restored deployment's data is back, and the deployment
+        #    count is unchanged (FR-008: restore never creates or deletes one).
+        await wait_for_pods_ready(kubeconfig_path, primary_namespace)
+        async with portforward_simple_app(kubeconfig_path, primary_namespace) as port:
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.get(
+                    f"http://localhost:{port}/count", timeout=10
+                )
+                assert resp.json()["counter"] == pre_backup_count + 1, (
+                    "restored application data should be back at its backup-time "
+                    "value (the +1 is this read itself)"
+                )
+        assert (
+            await eligible_deployment_ids(client, scenario_environment_id)
+        ) == expected_constituents, (
+            "an environment restore must not create or delete deployments (FR-008)"
+        )
+
+        # 10. US3 — deleting the snapshot cascades through its constituents and
+        #     its restores.
+        await scenario_driver.delete_environment_backup(
+            environment_backup_id=environment_backup_id
+        )
+        with pytest.raises(ResourceNotFound):
+            await scenario_driver.get_environment_backup(
+                environment_backup_id=environment_backup_id
+            )
+        with pytest.raises(ResourceNotFoundError):
+            await client.backups.get_backup(primary_backup_id)
+        with pytest.raises(ResourceNotFoundError):
+            await client.environment_backups.get_restore(environment_restore.id)
+    finally:
+        # The environment is session-shared. The restore above already reverts
+        # the config, but a failure before that point would leave the mutated
+        # retention policy behind for every later ``shard_backup`` test — so the
+        # revert runs unconditionally. The waits afterwards are best-effort so a
+        # cleanup timeout can never mask the test's own failure.
+        revert_timeline = {
+            deployment_id: len(
+                await client.deployments.get_timeline(deployment_id=deployment_id)
+            )
+            for deployment_id in (primary_deployment_id, secondary_deployment_id)
+        }
+        await scenario_driver.set_environment_backup_ttl(
+            environment_id=scenario_environment_id, ttl=previous_backup_ttl
+        )
+        for deployment_id, length in revert_timeline.items():
+            with suppress(AssertionError):
+                await wait_for_env_fanout_steady_state(
+                    client, deployment_id=deployment_id, pre_timeline_length=length
+                )
+        # The UI driver's page is session-scoped and the sibling backup tests act
+        # on whatever page is open, so hand it back on a deployment detail page.
+        scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
+        with suppress(Exception):
+            await scenario_driver.wait_for_deployment_running(
+                deployment_id=primary_deployment_id,
+                timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS,
             )
 
 

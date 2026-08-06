@@ -28,14 +28,18 @@ from tests.e2e.drivers.refs import (
     ClusterRef,
     DeploymentRef,
     DriverVersionRef,
+    EnvironmentBackupRef,
     EnvironmentRef,
+    EnvironmentRestoreRef,
     RestoreRef,
+    TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
     TimelineEntry,
 )
 from tests.e2e.pages.deploy_form import DeployFormPage
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 from tests.e2e.pages.drivers_list import DriversListPage
 from tests.e2e.pages.environments import (
+    EnvironmentBackupsTabPage,
     EnvironmentDetailPage,
     EnvironmentsListPage,
 )
@@ -91,10 +95,19 @@ class UiScenarioDriver:
         self._drivers_list = DriversListPage(page)
         self._environments_list = EnvironmentsListPage(page)
         self._environment_detail = EnvironmentDetailPage(page)
+        self._environment_backups = EnvironmentBackupsTabPage(page)
         # environment_id passed into create_deployment — stashed so
         # wait_for_deployment_running can build the detail URL without
         # re-receiving it (matches ApiScenarioDriver's signature).
         self._environment_id: str | None = None
+        # environment_backup_id -> environment_id, and
+        # environment_restore_id -> environment_backup_id. The
+        # environment-level read methods only carry the child's id, but the UI
+        # flow lives inside the owning environment's Backups tab (and, for a
+        # restore, inside its snapshot row's expansion), so the owner has to be
+        # remembered from the call that created it.
+        self._environment_backup_owners: dict[str, str] = {}
+        self._environment_restore_owners: dict[str, str] = {}
 
     def attach_to_deployment(self, *, environment_id: str) -> None:
         """Bind this driver to an environment without going through create_deployment.
@@ -402,3 +415,117 @@ class UiScenarioDriver:
                 f"backup {backup_id} is not listed on the deployment detail page"
             )
         return ref
+
+    # --- Environment-level backup / restore -------------------------------
+    #
+    # Driven from the Backups tab on the environment detail page. The tab's
+    # ``data-*`` hooks carry the raw derived-status enum values and the
+    # free-text skip reasons, so these refs are identical to the API driver's.
+
+    def _owning_environment(self, *, environment_backup_id: str) -> str:
+        """Resolve which environment's Backups tab holds a snapshot."""
+        environment_id = (
+            self._environment_backup_owners.get(environment_backup_id)
+            or self._environment_id
+        )
+        if environment_id is None:
+            raise ScenarioActionError(
+                "UI driver has no environment context for environment backup "
+                f"{environment_backup_id!r}; call create_environment_backup or "
+                "attach_to_deployment first"
+            )
+        return environment_id
+
+    async def create_environment_backup(
+        self, *, environment_id: str
+    ) -> EnvironmentBackupRef:
+        async with _ui_errors(f"creating environment backup on {environment_id}"):
+            ref = await self._environment_backups.create_backup(
+                environment_id=environment_id
+            )
+        self._environment_backup_owners[ref.id] = environment_id
+        return ref
+
+    async def get_environment_backup(
+        self, *, environment_backup_id: str
+    ) -> EnvironmentBackupRef:
+        environment_id = self._owning_environment(
+            environment_backup_id=environment_backup_id
+        )
+        async with _ui_errors(f"reading environment backup {environment_backup_id}"):
+            ref = await self._environment_backups.read_backup(
+                environment_id=environment_id,
+                environment_backup_id=environment_backup_id,
+            )
+        if ref is None:
+            raise ResourceNotFound(
+                f"environment backup {environment_backup_id} is not listed on the "
+                f"Backups tab of environment {environment_id}"
+            )
+        return ref
+
+    async def wait_for_environment_backup(
+        self, *, environment_backup_id: str, max_wait: float = 600.0
+    ) -> EnvironmentBackupRef:
+        environment_id = self._owning_environment(
+            environment_backup_id=environment_backup_id
+        )
+        async with _ui_errors(
+            f"waiting for environment backup {environment_backup_id}"
+        ):
+            return await self._environment_backups.wait_for_backup_status(
+                environment_id=environment_id,
+                environment_backup_id=environment_backup_id,
+                terminal_statuses=TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
+                max_wait=max_wait,
+            )
+
+    async def restore_environment_backup(
+        self, *, environment_backup_id: str
+    ) -> EnvironmentRestoreRef:
+        environment_id = self._owning_environment(
+            environment_backup_id=environment_backup_id
+        )
+        async with _ui_errors(f"restoring environment backup {environment_backup_id}"):
+            ref = await self._environment_backups.restore_backup(
+                environment_id=environment_id,
+                environment_backup_id=environment_backup_id,
+            )
+        self._environment_restore_owners[ref.id] = environment_backup_id
+        return ref
+
+    async def wait_for_environment_restore(
+        self, *, environment_restore_id: str, max_wait: float = 900.0
+    ) -> EnvironmentRestoreRef:
+        environment_backup_id = self._environment_restore_owners.get(
+            environment_restore_id
+        )
+        if environment_backup_id is None:
+            raise ScenarioActionError(
+                "UI driver has no snapshot context for environment restore "
+                f"{environment_restore_id!r}; the restore panel lives inside its "
+                "snapshot row, so restore_environment_backup must have created it"
+            )
+        environment_id = self._owning_environment(
+            environment_backup_id=environment_backup_id
+        )
+        async with _ui_errors(
+            f"waiting for environment restore {environment_restore_id}"
+        ):
+            return await self._environment_backups.wait_for_restore_status(
+                environment_id=environment_id,
+                environment_backup_id=environment_backup_id,
+                environment_restore_id=environment_restore_id,
+                terminal_statuses=TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
+                max_wait=max_wait,
+            )
+
+    async def delete_environment_backup(self, *, environment_backup_id: str) -> None:
+        environment_id = self._owning_environment(
+            environment_backup_id=environment_backup_id
+        )
+        async with _ui_errors(f"deleting environment backup {environment_backup_id}"):
+            await self._environment_backups.delete_backup(
+                environment_id=environment_id,
+                environment_backup_id=environment_backup_id,
+            )
