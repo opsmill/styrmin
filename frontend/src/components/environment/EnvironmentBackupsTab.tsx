@@ -20,6 +20,13 @@ const REFRESH_INTERVAL_MS = 10_000;
 
 interface EnvironmentBackupsTabProps {
   environmentId: string;
+  /**
+   * Mirrors the environment detail page's auto-refresh toggle. The page renders
+   * an `AutoRefreshIndicator` above every tab, so a hardcoded interval here
+   * would keep polling after the operator paused refresh — the indicator would
+   * be lying.
+   */
+  autoRefreshEnabled: boolean;
 }
 
 /**
@@ -32,15 +39,29 @@ interface EnvironmentBackupsTabProps {
  */
 export function EnvironmentBackupsTab({
   environmentId,
+  autoRefreshEnabled,
 }: EnvironmentBackupsTabProps) {
   const [createError, setCreateError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const query = useListEnvironmentBackupsQuery(
     { environmentId },
-    { refetchInterval: REFRESH_INTERVAL_MS },
+    { refetchInterval: autoRefreshEnabled ? REFRESH_INTERVAL_MS : false },
   );
-  const createMutation = useCreateEnvironmentBackupMutation();
+
+  // Declared in `onSuccess`, not after `mutateAsync` in the handler, per
+  // dev/guidelines/frontend/data-fetching.md — invalidation is the mutation's
+  // responsibility.
+  const createMutation = useCreateEnvironmentBackupMutation({
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["ListEnvironmentBackups"],
+      });
+      // The fan-out creates one constituent `Backup` per eligible deployment,
+      // which the deployment detail page lists via `ListBackups`.
+      void queryClient.invalidateQueries({ queryKey: ["ListBackups"] });
+    },
+  });
 
   const environmentBackups = query.data?.environmentBackups ?? [];
 
@@ -48,9 +69,6 @@ export function EnvironmentBackupsTab({
     setCreateError(null);
     try {
       await createMutation.mutateAsync({ environmentId });
-      await queryClient.invalidateQueries({
-        queryKey: ["ListEnvironmentBackups"],
-      });
     } catch (err) {
       // Surfaced inline rather than swallowed: a rejected fan-out (for
       // example ALREADY_IN_PROGRESS) is the operator's answer to why no new
@@ -136,6 +154,7 @@ export function EnvironmentBackupsTab({
               key={environmentBackup.id}
               environmentBackup={environmentBackup}
               index={i}
+              autoRefreshEnabled={autoRefreshEnabled}
             />
           ))}
         </>

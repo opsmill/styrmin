@@ -226,23 +226,55 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
     runs-on:
       group: huge-runners
-    timeout-minutes: 40
+    # Raised from 40 because a cell's *worst case* has to leave room for the
+    # test's own diagnostic. A wait that overruns raises an AssertionError naming
+    # the deployment, the observed state and the budget; a cell killed on
+    # timeout-minutes produces none of that, which is strictly worse to debug —
+    # and shard_backup is the cell where it bites, now that it runs four heavy
+    # lifecycle nodes under *both* entrypoints.
+    #
+    # test_environment_backup_and_restore_lifecycle alone sums to ~48 minutes of
+    # worst-case waits after those budgets were tightened (see the named
+    # constants in test_backup_restore.py). It cannot go lower without dropping
+    # below values the repo already calibrated elsewhere in this shard — 480s for
+    # an env-config redeploy fanout (009), 600s for one Velero restore plus the
+    # post-restore reapply (test_restore_lifecycle_transitions), 300s for a
+    # deployment to reach RUNNING. Observed locally the same node takes 328s of
+    # body time (463s including full session bootstrap), so the ceiling is ~9x
+    # the real cost: it exists to bound a pathological run, not to pace a normal
+    # one.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         entrypoint: [api, ui]
         shard: [general, env, compute, backup, infrahub, configuration]
         exclude:
-          # infrahub/ tests all carry @pytest.mark.api_only — the UI cell would
-          # collect 0 tests and exit with code 5, failing the cell while burning
-          # vcluster boot time. Re-enable here if a dual-entrypoint test is ever
-          # added. (`backup` used to be listed for the same reason; it now runs
-          # under both entrypoints because
-          # test_backup_restore.py::test_environment_backup_and_restore_lifecycle
-          # exercises the environment-level flow through the UI too.)
+          # A cell is excluded only when *every* test it would collect is
+          # marked for the other entrypoint. Selecting zero tests makes pytest
+          # exit 5, which fails the cell after paying full vcluster boot time —
+          # so the exclusion is about an empty collection, not about saving time
+          # on tests that would still run.
+          #
+          # shard_infrahub is test_infrahub_backup_restore.py +
+          # test_infrahub_services.py (module files, not a directory): all three
+          # of their tests carry @pytest.mark.api_only, so the ui cell collects
+          # nothing. Drop this line if a dual-entrypoint Infrahub test is added.
           - {entrypoint: ui, shard: infrahub}
-          # configuration/ is entirely ui_only — drawer flows have no SDK equivalent
+          # backend/tests/e2e/configuration/ is a real directory and is entirely
+          # ui_only — the config drawer flows have no SDK equivalent — so the api
+          # cell collects nothing.
           - {entrypoint: api, shard: configuration}
+          #
+          # shard_backup is deliberately NOT excluded from either entrypoint.
+          # Its lifecycle tests drive create_backup / create_restore /
+          # delete_backup / set_environment_backup_ttl through the dual-entrypoint
+          # scenario_driver, and per dev/knowledge/backend/e2e-testing.md
+          # ("api_only audit discipline") the parametrisation over those methods
+          # *is* the UI/API parity check, so they must run under both. Only
+          # test_restore_failure_marks_failed_not_indefinite is api_only (it
+          # discards the driver and submits an unknown backup id, which the UI
+          # cannot express), which is not enough to empty the ui cell.
     steps:
       - uses: actions/checkout@v6
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8

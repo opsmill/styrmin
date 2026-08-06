@@ -383,7 +383,12 @@ export default function EnvironmentDetailPage() {
 
       {/* Backups Tab */}
       <TabPanel active={activeTab === "backups"}>
-        <EnvironmentBackupsTab environmentId={environmentId} />
+        {/* The AutoRefreshIndicator in the header renders for every tab, so the
+            tab's own polls have to honour the same flag. */}
+        <EnvironmentBackupsTab
+          environmentId={environmentId}
+          autoRefreshEnabled={autoRefreshEnabled}
+        />
       </TabPanel>
     </div>
   );
