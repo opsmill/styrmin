@@ -108,6 +108,7 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [0052-client-side-config-diff-impact-and-conflict-detection.md](adr/0052-client-side-config-diff-impact-and-conflict-detection.md) - Deployment config drawer: hand-rolled stable-key structural diff, declarative impact rule table behind a swappable interface, client-side fingerprint conflict detection with reload-keeping-edits
 - [0053-driver-version-provenance-fingerprint.md](adr/0053-driver-version-provenance-fingerprint.md) - Driver-version identity widens to include a provenance fingerprint (`content_hash` for local, `source_commit_sha` for git); no load ever deletes a row; labels always render `<version>@<short7>`
 - [0054-backend-authoritative-noop-detection.md](adr/0054-backend-authoritative-noop-detection.md) - No-op detection runs in the service layer before any write and is signalled by returning `null` from the already-nullable `Task` field; reverts the SDK-side stopgap
+- [0055-environment-backup-parent-records.md](adr/0055-environment-backup-parent-records.md) - Environment backup/restore as parent records grouping constituents via nullable child FKs, with status derived on every read and never stored; the justified deviation from ADR-012's umbrella rejection, plus the restore ordering that excludes restored deployments from the config fan-out
 
 ## Current Knowledge
 
