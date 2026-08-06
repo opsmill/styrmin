@@ -74,3 +74,6 @@ Environments list → "Clone" action (ADMIN-gated) → dialog: new name, deploym
 - `deleteEnvironmentBackup` on a backup with an in-flight clone → `OPERATION_DENIED` (FR-008); after `deleteEnvironmentClone`, the same deletion succeeds (escape hatch).
 - Second clone of the same source while one is in flight → `ALREADY_IN_PROGRESS`, zero side effects (D4 amendment).
 - Derivation property tests: `finished_at` unset ⇒ never terminal; terminal statuses computed only from `deployment_results` + linked restores; deleted linked rows never flip a `cloned` outcome.
+- Scratch isolation prelude: the deny-all NetworkPolicy is created in the scratch namespace **before** the Velero restore is dispatched (critique E1); the namespace carries the `styrmin.io/environment-clone-restore` label.
+- Bounded waits: a counterpart that never reaches `RUNNING` within its timeout is attributed `failed` with reason and the saga continues; `finished_at` is stamped on every survivable exit path (critique E2).
+- Strategy-less constituent (e.g. `action`-only components) → outcome `cloned` with the "no restorable data strategies" reason note; phases 0–3 skipped (critique Q1).

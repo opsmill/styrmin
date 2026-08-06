@@ -24,7 +24,7 @@ Add environment cloning (issue #6): one ADMIN operation produces a data-bearing 
 
 **Performance Goals**: None time-bound by the spec (clone duration is data-dominated). SC-001 is an effort bound: one operation per surface, zero manual per-deployment steps.
 
-**Constraints**: Nothing materialises unless the backup succeeds (FR-002); clone built entirely from the capture — live source never re-read after capture (FR-007); zero silent omissions in attribution (FR-010/SC-003); source never mutated (SC-002); per-instance backup/restore execution machinery reused with **narrow, behaviour-preserving extensions** (selection filter on `create_environment_backup`; target-aware `create_restore` that defaults to today's in-place semantics when no target is given).
+**Constraints**: Nothing materialises unless the backup succeeds (FR-002); clone built entirely from the capture — live source never re-read after capture (FR-007); zero silent omissions in attribution (FR-010/SC-003); source never mutated (SC-002); per-instance backup/restore execution machinery reused with **narrow, behaviour-preserving extensions** (selection filter on `create_environment_backup`; target-aware `create_restore` that defaults to today's in-place semantics when no target is given). Post-critique: every saga wait is bounded, with timeout → attributed failure + continue (critique E2); scratch namespaces get a deny-all NetworkPolicy before any restore lands in them (critique E1).
 
 **Scale/Scope**: Environments with tens of deployments; one scratch namespace per constituent restore, deleted unconditionally after transfer.
 
@@ -85,7 +85,9 @@ backend/styrmin_backend/
 ├── workflows/
 │   ├── models.py / catalogue.py           # + EXECUTE_ENVIRONMENT_CLONE, EXECUTE_CLONE_RESTORE
 │   └── templates/
-│       └── clone.py                       # NEW: the saga flow + the scratch-restore/transfer flow
+│       └── clone.py                       # NEW: INTERNAL saga + INTERNAL per-constituent flow;
+│                                          #      K8s-side scratch restore/transfer as a USER flow
+│                                          #      (deny-all prelude, Velero restore, transfer, teardown)
 ├── agent/service/kubernetes/
 │   ├── resources/builders/backup.py       # build_velero_restore call sites pass excludedResources (builder param addition)
 │   └── velero/hooks.py                    # factor strategy restore-command builders for reuse by the transfer step
