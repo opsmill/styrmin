@@ -109,17 +109,25 @@ all**, which is why this feature changed no existing flow.
 lifts the derivation, adds the mixed state as a first-class outcome, and drops
 the storage.
 
-Two honest costs, both documented rather than engineered away:
+The derivation only ever sees a *complete* capture, which is why the whole
+capture — parent row, every constituent row, every recorded error — commits in
+**one transaction** before any dispatch (decision 4). The first draft committed
+the parent on its own and its children afterwards, which opened a window where
+a committed snapshot had zero children and zero errors and therefore derived
+`COMPLETED`: a cancelled request (`CancelledError` escapes the per-constituent
+`except Exception`) published that state permanently, and the D6 guard of
+decision 5 — an `EXISTS` over non-terminal *children* — did not hold the
+environment while it was open. Committing once removes both by construction.
 
-- **A fresh snapshot reads `COMPLETED`.** The parent is committed before the
-  fan-out starts (decision 4's commit-before-dispatch rule), so between that
-  commit and the first constituent row the snapshot has zero children and zero
-  errors — which derives to `COMPLETED`. The mutation's own return value is
-  taken after the loop and is accurate, but any independent read racing the
-  fan-out observes the window. Terminal status is therefore not evidence that
-  the fan-out finished; the constituent count against `deployment_snapshots`
-  is. Closing the window would require the stored status this decision exists
-  to avoid, or a sentinel column amounting to the same thing.
+Two honest costs remain, documented rather than engineered away:
+
+- **Terminal status is still not proof of convergence.** For a restore, the
+  constituent data restores can be done while the reverted config is still
+  propagating to the deployments that did not receive one; and a snapshot whose
+  constituents were individually deleted afterwards legitimately reads
+  `COMPLETED` with fewer children than `deployment_snapshots` (FR-014). The
+  constituent count against `deployment_snapshots`, not the status, is what
+  says whether the snapshot still covers the whole environment.
 - **Status is O(children) per read.** Acceptable at tens of deployments per
   environment; the derivation is a list comprehension over already-loaded
   relationship rows.
@@ -161,10 +169,21 @@ after the config revert per ADR-027.
 2. Classify every captured constituent as usable or skipped; persist the skips
    on the `EnvironmentRestore` row at creation.
 3. Revert `Environment.config` to the captured value, recompute capabilities,
-   **commit before any dispatch**.
+   create one constituent `Restore` per usable constituent (recording any late
+   skip found while doing so), and **commit all of it once, before any
+   dispatch**.
 4. Run the config fan-out (`redeploy_for_environment_update`) for eligible
    deployments **not** receiving a constituent restore.
-5. Create and dispatch one constituent restore per usable constituent.
+5. Dispatch one `EXECUTE_RESTORE` per created constituent restore.
+
+Steps 2, 3 and step 5's row creation share one transaction for the same reason
+`createEnvironmentBackup`'s capture does (decision 2): a cancellation between
+the parent's commit and the constituent rows would otherwise publish a restore
+that silently dropped its late skips and did not hold the environment.
+Reusing `create_backup` / `create_restore` inside that shared transaction needs
+one accommodation — a `UnitOfWork` view whose `commit`/`rollback` are no-ops, so
+those services join the caller's transaction instead of committing a half-built
+capture or rolling the parent back when one constituent's instance is busy.
 
 The exclusion in step 4 is the load-bearing part. A deployment receiving a
 Velero data restore is being returned to its backup-time state, and its restored

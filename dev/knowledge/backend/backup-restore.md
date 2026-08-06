@@ -407,18 +407,33 @@ derivation, adds `PARTIAL`, and drops the storage.
 The `EnvironmentBackupStatus` / `EnvironmentRestoreStatus` GraphQL enums both
 project the same service-layer `EnvironmentOperationStatus`.
 
-#### Terminal status is not convergence — two caveats
+#### The capture is atomic — and terminal status still is not convergence
 
-**A fresh snapshot reads `COMPLETED` before its constituents exist.** The
-parent is committed before the fan-out starts (ADR-0012 commit-before-dispatch),
-so in the window between that commit and the first `create_backup` a snapshot
-has zero children and zero errors — which derives to `COMPLETED`. The mutation's
-own return value is taken after the loop, so it is accurate; any *independent*
-read racing the fan-out (frontend auto-refresh, `wait_for_backup`, a
-concurrent `environmentBackup` query) can observe the window. Terminal status is
-not evidence the fan-out finished — compare the constituent count against
-`deployment_snapshots`. This is why the E2E asserts constituent counts rather
-than status alone.
+**The derivation never sees a half-built capture.** The parent row, every
+constituent `Backup` row and every recorded `ConstituentError` are written in
+**one transaction, committed before any dispatch** (ADR-0012
+commit-before-dispatch, made atomic). Committing the parent on its own first —
+the original shape — left a window where a snapshot had zero children and zero
+errors and therefore derived `COMPLETED`; a `CancelledError` (client
+disconnect, request timeout) escapes the per-constituent `except Exception` and
+made that state permanent, and the concurrency guard below (an `EXISTS` over
+non-terminal *children*) did not hold the environment while the window was
+open. `restore_environment_backup` commits the same way.
+
+Reusing `create_backup` / `create_restore` inside that transaction needs
+`_SharedTransaction`, a `UnitOfWork` view that forwards every repository to the
+real unit of work and makes `commit`/`rollback` no-ops. Without it those
+services would commit a half-built capture at the end of their own `async with
+uow` block, and `UnitOfWork.__aexit__` would *roll back the parent snapshot*
+whenever one constituent raised (e.g. `BackupAlreadyInProgressError`) — turning
+per-constituent isolation into "no snapshot at all".
+
+**Terminal status is still not evidence that a snapshot covers the
+environment.** A snapshot whose constituents were individually deleted
+afterwards legitimately reads `COMPLETED` with fewer children than
+`deployment_snapshots` (that gap is the point — see FR-014). Compare the
+constituent count against `deployment_snapshots`, which is why the E2E asserts
+constituent counts rather than status alone.
 
 **A terminal restore does not mean the environment has converged.** The
 constituent data restores are done, but the reverted config is still
@@ -472,11 +487,12 @@ order:
 2. **Classify** every captured constituent as usable or skipped, and persist
    the skips on the new `EnvironmentRestore` row at creation time.
 3. **Revert `Environment.config`** to the captured value, recompute
-   capabilities, **commit before any dispatch**.
+   capabilities, create one constituent restore per usable constituent
+   (`create_restore(..., environment_restore_id=…)`), and **commit all of it
+   once, before any dispatch**.
 4. **Exclusion-aware config fan-out**: `redeploy_for_environment_update` for
    every eligible deployment *not* receiving a constituent restore.
-5. **Dispatch constituent restores**: `create_restore(..., environment_restore_id=…)`
-   + `EXECUTE_RESTORE` per usable constituent.
+5. **Dispatch** one `EXECUTE_RESTORE` per created constituent restore.
 
 Why the exclusion in step 4 is load-bearing: a deployment receiving a Velero
 data restore is being returned to its backup-time state, and its restored
@@ -493,9 +509,10 @@ Two implementation details that are easy to get wrong:
   delegate to `update_environment`, which treats `config is None` as an
   idempotent no-op and would silently make a captured `None` config
   unrestorable.
-- **A `RestoreAlreadyInProgressError` in step 5 downgrades to a skip**, never
-  an abort. Late skips are appended to `skipped_constituents` after the
-  dispatch loop.
+- **A `RestoreAlreadyInProgressError` while creating a constituent restore
+  downgrades to a skip**, never an abort. Late skips are appended to
+  `skipped_constituents` inside the step-3 transaction, so they are durable
+  before anything is dispatched.
 
 ### Skip classification
 
