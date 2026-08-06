@@ -38,6 +38,7 @@ from styrmin_backend.services.backup.metadata import read_backup_metadata
 from styrmin_backend.services.backup.service import (
     create_backup,
     create_restore,
+    delete_backup,
     resolve_backup_target,
 )
 from styrmin_backend.services.capabilities import compute_environment_capabilities
@@ -855,3 +856,117 @@ async def get_environment_restores(
         return await uow.environment_restores.get_by_environment_backup_id(
             environment_backup_id
         )
+
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+
+
+async def delete_environment_backup(
+    environment_backup_id: UUID, uow: UnitOfWork
+) -> None:
+    """Delete a snapshot together with everything that hangs off it (FR-010).
+
+    The cascade is research.md D5, in FK-dependency order:
+
+    1. every constituent backup, via the existing :func:`delete_backup` — which
+       already deletes each backup's ``Restore`` rows, so the constituent
+       restores of this snapshot's environment restores go with them;
+    2. the snapshot's ``EnvironmentRestore`` rows, now childless;
+    3. the parent row itself.
+
+    Reusing :func:`delete_backup` per constituent is what keeps FR-014's
+    "constituents behave as ordinary backups" true for deletion too: the DB row
+    goes, and the Velero object's lifecycle stays governed by its TTL exactly
+    as for a standalone backup.
+
+    **There is deliberately no status guard.** Deleting an environment backup
+    whose constituents are still ``PENDING``/``IN_PROGRESS`` is legal and is
+    the documented escape hatch (spec FR-010, critique E1): a constituent whose
+    work was never picked up pins the snapshot non-terminal forever, and since
+    the D6 concurrency guard reads that same non-terminal state, deletion is
+    the only way to release the environment for new operations.
+
+    Constituent backups remain individually deletable; doing so leaves the
+    parent alive with a visible gap in ``deployment_snapshots`` (spec US3),
+    which is also why an already-vanished constituent here is a no-op rather
+    than an error.
+
+    Args:
+        environment_backup_id: The snapshot to delete.
+        uow: Unit of work supplying the repositories.
+
+    Raises:
+        EnvironmentBackupNotFoundError: When the snapshot does not exist.
+    """
+    async with uow:
+        environment_backup = await uow.environment_backups.get(environment_backup_id)
+        if environment_backup is None:
+            raise EnvironmentBackupNotFoundError(
+                f"Environment backup {environment_backup_id} not found"
+            )
+        environment_id = environment_backup.environment_id
+        constituent_ids = [backup.id for backup in environment_backup.backups]
+
+    deleted_constituents = 0
+    for backup_id in constituent_ids:
+        try:
+            await delete_backup(backup_id, uow)
+        except BackupNotFoundError:
+            # The constituent was deleted individually in the meantime, which
+            # is already the state this cascade is trying to reach.
+            logger.debug(
+                "env_backup_delete_constituent_absent environment_backup_id={} "
+                "backup_id={}",
+                environment_backup_id,
+                backup_id,
+            )
+            continue
+        deleted_constituents += 1
+
+    async with uow:
+        environment_backup = await uow.environment_backups.get(environment_backup_id)
+        if environment_backup is None:
+            # A concurrent deletion of the same snapshot won the race; the
+            # requested end state holds either way.
+            return
+        environment_restores = list(environment_backup.restores)
+        for environment_restore in environment_restores:
+            await uow.environment_restores.delete(environment_restore)
+        await uow.environment_backups.delete(environment_backup)
+        await uow.commit()
+
+    logger.info(
+        "env_backup_deleted environment_id={} environment_backup_id={} "
+        "constituents_deleted={} environment_restores_deleted={}",
+        environment_id,
+        environment_backup_id,
+        deleted_constituents,
+        len(environment_restores),
+    )
+
+
+async def delete_environment_backups_for_environment(
+    environment_id: UUID, uow: UnitOfWork
+) -> int:
+    """Cascade-delete every snapshot of an environment (spec FR-015).
+
+    Called by :func:`~styrmin_backend.services.environments.delete_environment`
+    before the environment row goes: ``environmentbackup.environment_id`` is a
+    non-nullable FK, so without this the delete fails on a constraint violation
+    surfacing as an opaque ``INTERNAL_ERROR`` (critique E2).
+
+    Returns:
+        The number of snapshots deleted.
+    """
+    async with uow:
+        environment_backups = await uow.environment_backups.get_by_environment_id(
+            environment_id
+        )
+        environment_backup_ids = [parent.id for parent in environment_backups]
+
+    for environment_backup_id in environment_backup_ids:
+        await delete_environment_backup(environment_backup_id, uow)
+
+    return len(environment_backup_ids)

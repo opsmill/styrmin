@@ -94,6 +94,7 @@ def test_env_backups_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert "create" in output
     assert "get" in output
     assert "list" in output
+    assert "delete" in output
     assert "restore" in output
     assert "restore-get" in output
     assert "restore-list" in output
@@ -322,6 +323,37 @@ def test_env_backups_get_not_found(mock_client: MagicMock, capsys: pytest.Captur
 
     with pytest.raises(SystemExit) as exc:
         app(["env-backups", "get", ENV_BACKUP_UUID])
+    assert exc.value.code == 1
+    assert "Environment backup not found" in capsys.readouterr().out
+
+
+# --- delete ---------------------------------------------------------------
+
+
+def test_env_backups_delete(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.environment_backups.delete = AsyncMock(return_value=None)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "delete", ENV_BACKUP_UUID])
+    assert exc.value.code == 0
+    mock_client.environment_backups.delete.assert_called_once_with(ENV_BACKUP_UUID)
+    assert "deleted" in capsys.readouterr().out
+
+
+def test_env_backups_delete_rejects_non_uuid(mock_client: MagicMock) -> None:
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "delete", "not-a-uuid"])
+    assert exc.value.code != 0
+    mock_client.environment_backups.delete.assert_not_called()
+
+
+def test_env_backups_delete_not_found(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.environment_backups.delete = AsyncMock(
+        side_effect=ResourceNotFoundError("Environment backup not found", "NOT_FOUND")
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "delete", ENV_BACKUP_UUID])
     assert exc.value.code == 1
     assert "Environment backup not found" in capsys.readouterr().out
 

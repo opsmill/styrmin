@@ -116,6 +116,23 @@ class EnvironmentBackupResource(BaseResource):
         data = ListEnvironmentBackups.model_validate(result["data"])
         return data.environment_backups or []
 
+    async def delete(self, environment_backup_id: str | UUID) -> None:
+        """Delete an environment backup and everything that hangs off it.
+
+        Cascades through the constituent backups (and any restores of them) and
+        the snapshot's own environment restores.
+
+        Succeeds regardless of the snapshot's derived status: deleting one whose
+        constituents are still in flight is the documented escape hatch for an
+        environment pinned in progress by a constituent whose work was never
+        picked up, which otherwise blocks every new environment-level operation.
+        """
+        result = await self._transport.execute(
+            load_query("delete_environment_backup"),
+            {"environmentBackupId": str(environment_backup_id)},
+        )
+        self._check_graphql_errors(result)
+
     async def wait_for_backup(
         self,
         environment_backup_id: str | UUID,

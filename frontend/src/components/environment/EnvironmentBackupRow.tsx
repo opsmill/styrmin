@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronRight, RotateCcw, Trash2 } from "lucide-react";
 
 import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { IfRole } from "@/auth/IfRole";
 import {
+  useDeleteEnvironmentBackupMutation,
   useListEnvironmentRestoresQuery,
   useRestoreEnvironmentBackupMutation,
   type EnvironmentBackupStatus,
@@ -65,13 +66,51 @@ export interface ConstituentSummary {
 }
 
 /**
- * Fold the per-constituent outcomes into the counts the snapshot row shows.
+ * The outcome of one constituent, as a closed vocabulary.
+ *
+ * `error` and `failed` are deliberately distinct even though the row summary
+ * folds both into its `failed` count: `error` means the constituent backup was
+ * never created (the environment backup recorded an attributable reason —
+ * usually a per-instance conflict), while `failed` means the backup ran and
+ * failed. `missing` is the gap left by a constituent that was deleted
+ * individually, or whose row is otherwise gone, after the snapshot was taken.
+ */
+export type ConstituentOutcome =
+  | "completed"
+  | "failed"
+  | "error"
+  | "in-flight"
+  | "missing";
+
+/**
+ * Classify one constituent's outcome.
  *
  * Constituent backups are ordinary per-instance backups, so their `status` is
  * the lowercase string the Backup type carries (`"completed"`, `"failed"`,
  * `"pending"`, …) — not the uppercase `EnvironmentBackupStatus` enum of the
  * parent. Comparison is case-insensitive so a backend that ever uppercases
- * them does not silently zero the counts.
+ * them does not silently misclassify.
+ */
+export function classifyConstituent(
+  constituent: EnvironmentBackupConstituentItem,
+): ConstituentOutcome {
+  if (constituent.error != null) return "error";
+  if (constituent.backup == null) return "missing";
+  switch (constituent.backup.status.toLowerCase()) {
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    default:
+      return "in-flight";
+  }
+}
+
+/**
+ * Fold the per-constituent outcomes into the counts the snapshot row shows.
+ *
+ * Built on `classifyConstituent` so the collapsed counts and the expanded
+ * per-constituent rows can never disagree about a constituent.
  */
 export function summarizeConstituents(
   constituents: readonly EnvironmentBackupConstituentItem[],
@@ -85,20 +124,18 @@ export function summarizeConstituents(
   };
 
   for (const constituent of constituents) {
-    if (constituent.error != null) {
-      summary.failed += 1;
-      continue;
-    }
-    if (constituent.backup == null) {
-      summary.missing += 1;
-      continue;
-    }
-    switch (constituent.backup.status.toLowerCase()) {
+    switch (classifyConstituent(constituent)) {
       case "completed":
         summary.completed += 1;
         break;
+      // A constituent that never got a backup row and one whose backup failed
+      // are both "not covered by this snapshot" for the collapsed count.
+      case "error":
       case "failed":
         summary.failed += 1;
+        break;
+      case "missing":
+        summary.missing += 1;
         break;
       default:
         summary.inFlight += 1;
@@ -106,6 +143,22 @@ export function summarizeConstituents(
   }
 
   return summary;
+}
+
+/** Human-readable detail for one constituent in the expanded outcome list. */
+export function describeConstituent(
+  constituent: EnvironmentBackupConstituentItem,
+): string {
+  const { backup, error } = constituent;
+  // The backend's messages are free text, so they are shown verbatim rather
+  // than mapped through a table that would drop unknown values.
+  if (error != null) return `not backed up — ${error}`;
+  // A snapshot entry with no backup row is a gap: the constituent was deleted
+  // individually, or expired, after the snapshot was taken (spec US3).
+  if (backup == null) return "backup no longer exists (deleted or expired)";
+  return backup.errorMessage
+    ? `${backup.status} — ${backup.errorMessage}`
+    : backup.status;
 }
 
 /**
@@ -122,6 +175,62 @@ export function formatConstituentSummary(summary: ConstituentSummary): string {
 
   const base = `${summary.completed}/${summary.total} complete`;
   return detail.length > 0 ? `${base} · ${detail.join(", ")}` : base;
+}
+
+interface ConstituentOutcomesProps {
+  constituents: readonly EnvironmentBackupConstituentItem[];
+}
+
+/**
+ * The per-constituent outcome list inside an expanded snapshot (spec US3).
+ *
+ * This is what makes a `PARTIAL` snapshot trustworthy: before deciding to
+ * restore, the operator needs to see exactly which applications are covered.
+ * Every captured deployment appears exactly once — as a live constituent
+ * backup, as an attributable creation error, or as a *gap* left by a
+ * constituent that was deleted individually or has expired. Gaps are rendered
+ * explicitly rather than omitted, because a silently missing row is
+ * indistinguishable from an application that was never in the snapshot.
+ */
+function ConstituentOutcomes({ constituents }: ConstituentOutcomesProps) {
+  if (constituents.length === 0) {
+    return (
+      <p
+        className="text-sm text-muted-foreground"
+        data-testid="environment-backup-constituents-empty"
+      >
+        Config-only snapshot — no application backups
+      </p>
+    );
+  }
+
+  return (
+    <ul
+      className="flex flex-col gap-1"
+      data-testid="environment-backup-constituent-outcomes"
+    >
+      {constituents.map((constituent) => {
+        const outcome = classifyConstituent(constituent);
+        return (
+          <li
+            key={constituent.deploymentId}
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+            data-testid="environment-backup-constituent"
+            data-deployment-id={constituent.deploymentId}
+            data-deployment-name={constituent.deploymentName}
+            data-constituent-outcome={outcome}
+            data-backup-id={constituent.backup?.id ?? ""}
+            data-backup-status={constituent.backup?.status ?? ""}
+          >
+            <span className="font-medium text-foreground">
+              {constituent.deploymentName}
+            </span>
+            <span>{describeConstituent(constituent)}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 interface EnvironmentRestoreRowProps {
@@ -238,7 +347,9 @@ export function EnvironmentBackupRow({
 }: EnvironmentBackupRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const summary = summarizeConstituents(environmentBackup.constituents);
@@ -251,6 +362,7 @@ export function EnvironmentBackupRow({
     { enabled: expanded, refetchInterval: RESTORE_REFRESH_INTERVAL_MS },
   );
   const restoreMutation = useRestoreEnvironmentBackupMutation();
+  const deleteMutation = useDeleteEnvironmentBackupMutation();
 
   const environmentRestores = restoresQuery.data?.environmentRestores ?? [];
 
@@ -273,6 +385,24 @@ export function EnvironmentBackupRow({
       // nothing happened.
       console.error("[restore-environment-backup] mutation failed", err);
       setRestoreError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }
+
+  async function handleDelete() {
+    setDeleteError(null);
+    setDeleteConfirmOpen(false);
+    try {
+      await deleteMutation.mutateAsync({
+        environmentBackupId: environmentBackup.id,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["ListEnvironmentBackups"],
+      });
+    } catch (err) {
+      // Surfaced inline rather than swallowed: the row is still on screen, so
+      // without this the operator cannot tell a failed delete from a stale list.
+      console.error("[delete-environment-backup] mutation failed", err);
+      setDeleteError(err instanceof Error ? err.message : "Unknown error");
     }
   }
 
@@ -349,6 +479,19 @@ export function EnvironmentBackupRow({
             {restoreMutation.isPending ? "Restoring..." : "Restore"}
           </Button>
         </IfRole>
+        <IfRole minimum="READ_WRITE">
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="environment-backup-delete-button"
+            aria-label={`Delete ${environmentBackup.name}`}
+            disabled={deleteMutation.isPending}
+            onClick={() => setDeleteConfirmOpen(true)}
+          >
+            <Trash2 className="h-4 w-4" />
+            {deleteMutation.isPending ? "Deleting..." : "Delete"}
+          </Button>
+        </IfRole>
       </div>
 
       {restoreError && (
@@ -358,6 +501,34 @@ export function EnvironmentBackupRow({
         >
           <AlertDescription>{restoreError}</AlertDescription>
         </Alert>
+      )}
+
+      {deleteError && (
+        <Alert
+          variant="destructive"
+          data-testid="environment-backup-delete-error"
+        >
+          <AlertDescription>{deleteError}</AlertDescription>
+        </Alert>
+      )}
+
+      {expanded && (
+        <div
+          className="flex flex-col gap-3 px-4 py-2"
+          data-testid="environment-backup-detail"
+        >
+          <div className="flex flex-col gap-2">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Applications in this snapshot
+            </span>
+            <ConstituentOutcomes
+              constituents={environmentBackup.constituents}
+            />
+          </div>
+          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            Restores
+          </span>
+        </div>
       )}
 
       {expanded && (
@@ -403,6 +574,19 @@ export function EnvironmentBackupRow({
           void handleRestore();
         }}
         onCancel={() => setConfirmOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        data-testid="environment-backup-delete-dialog"
+        title="Delete this environment snapshot?"
+        description={`This deletes "${environmentBackup.name}" together with its ${summary.total} application backup(s) and every restore performed from it. This cannot be undone. Deletion works even while the snapshot is still in progress — that is how a stuck snapshot is cleared.`}
+        confirmLabel="Delete"
+        busy={deleteMutation.isPending}
+        onConfirm={() => {
+          void handleDelete();
+        }}
+        onCancel={() => setDeleteConfirmOpen(false)}
       />
     </div>
   );

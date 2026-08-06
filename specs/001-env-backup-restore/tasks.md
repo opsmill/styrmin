@@ -78,10 +78,10 @@
 
 **Independent Test**: Snapshots with mixed outcomes are listable/inspectable; deleting one removes constituents + their restores; individually deleted constituent leaves a visible gap; deleting an in-progress snapshot works (escape hatch).
 
-- [ ] T029 [US3] Implement `delete_environment_backup` (per-constituent `delete_backup` reuse + delete `EnvironmentRestore` rows + delete parent; **no status guard** — FR-010 escape hatch) in `backend/styrmin_backend/services/backup/environment.py`, and extend `delete_environment` in `backend/styrmin_backend/services/environments.py` to cascade the environment's environment backups first (FR-015); unit tests for both cascades incl. delete-while-in-progress in `backend/tests/unit/services/backup/test_environment_backup.py`
-- [ ] T030 [US3] Wire `deleteEnvironmentBackup` mutation (`_requires(Role.READ_WRITE)`) in `mutation.py`; regenerate `schema.graphql`; propagation tests asserting DB-level cascade (constituents + their restores gone, gap visible after individual child deletion) in `backend/tests/functional/graphql/test_environment_backup.py`
-- [ ] T031 [P] [US3] SDK `delete_environment_backup.graphql` + `delete` facade method + `uv run invoke generate`; CLI `delete` command + tests
-- [ ] T032 [US3] Frontend: delete confirm dialog and per-constituent outcome expansion (constituent rows show backup status or error; gaps from deleted/expired children visible) in `frontend/src/components/environment/`; `delete_environment_backup.graphql` + codegen; component tests
+- [X] T029 [US3] Implement `delete_environment_backup` (per-constituent `delete_backup` reuse + delete `EnvironmentRestore` rows + delete parent; **no status guard** — FR-010 escape hatch) in `backend/styrmin_backend/services/backup/environment.py`, and extend `delete_environment` in `backend/styrmin_backend/services/environments.py` to cascade the environment's environment backups first (FR-015); unit tests for both cascades incl. delete-while-in-progress in `backend/tests/unit/services/backup/test_environment_backup.py`
+- [X] T030 [US3] Wire `deleteEnvironmentBackup` mutation (`_requires(Role.READ_WRITE)`) in `mutation.py`; regenerate `schema.graphql`; propagation tests asserting DB-level cascade (constituents + their restores gone, gap visible after individual child deletion) in `backend/tests/functional/graphql/test_environment_backup.py`
+- [X] T031 [P] [US3] SDK `delete_environment_backup.graphql` + `delete` facade method + `uv run invoke generate`; CLI `delete` command + tests
+- [X] T032 [US3] Frontend: delete confirm dialog and per-constituent outcome expansion (constituent rows show backup status or error; gaps from deleted/expired children visible) in `frontend/src/components/environment/`; `delete_environment_backup.graphql` + codegen; component tests
 
 **Checkpoint**: All three stories complete on all four surfaces.
 

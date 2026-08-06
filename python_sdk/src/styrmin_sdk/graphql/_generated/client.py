@@ -24,6 +24,7 @@ from .delete_backup_storage_location import DeleteBackupStorageLocation
 from .delete_cluster import DeleteCluster
 from .delete_deployment import DeleteDeployment
 from .delete_environment import DeleteEnvironment
+from .delete_environment_backup import DeleteEnvironmentBackup
 from .delete_group import DeleteGroup
 from .delete_user import DeleteUser
 from .deploy import Deploy
@@ -606,6 +607,24 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return DeleteEnvironment.model_validate(data)
+
+    async def delete_environment_backup(
+        self, environment_backup_id: UUID, **kwargs: Any
+    ) -> DeleteEnvironmentBackup:
+        query = gql("""
+            mutation DeleteEnvironmentBackup($environmentBackupId: UUID!) {
+              deleteEnvironmentBackup(environmentBackupId: $environmentBackupId)
+            }
+            """)
+        variables: dict[str, object] = {"environmentBackupId": environment_backup_id}
+        response = await self.execute(
+            query=query,
+            operation_name="DeleteEnvironmentBackup",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return DeleteEnvironmentBackup.model_validate(data)
 
     async def delete_group(self, id: UUID, **kwargs: Any) -> DeleteGroup:
         query = gql("""

@@ -329,6 +329,21 @@ async def list_environment_backups(
 
 
 @environment_backups_app.command
+async def delete(environment_backup_id: EnvironmentBackupId) -> None:
+    """Delete an environment backup, its constituent backups, and their restores.
+
+    Works regardless of the snapshot's status: deleting one whose constituents
+    are still in flight is the escape hatch for an environment pinned in
+    progress by a constituent backup that never got picked up.
+    """
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            await sdk.environment_backups.delete(environment_backup_id)
+
+    print_success(f"Environment backup '{environment_backup_id}' deleted")
+
+
+@environment_backups_app.command
 async def restore(
     environment_backup_id: EnvironmentBackupId,
     *,
