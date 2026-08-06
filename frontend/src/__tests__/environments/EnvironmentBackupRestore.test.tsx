@@ -8,6 +8,7 @@
  * are tested as behaviour rather than left to the E2E to discover.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import { render, screen, userEvent, waitFor, within } from "@/test/utils";
 import type { AuthContextValue } from "@/auth/AuthProvider";
 import {
@@ -126,7 +127,11 @@ async function renderRow(
   options = {},
 ) {
   return render(
-    <EnvironmentBackupRow environmentBackup={snapshot(overrides)} index={0} />,
+    <EnvironmentBackupRow
+      environmentBackup={snapshot(overrides)}
+      index={0}
+      autoRefreshEnabled
+    />,
     options,
   );
 }
@@ -144,10 +149,44 @@ describe("EnvironmentBackupRow — restore", () => {
       },
     });
     useRestoreEnvironmentBackupMutation.mockReset();
-    useRestoreEnvironmentBackupMutation.mockReturnValue({
-      mutateAsync: restoreMutateAsync,
-      isPending: false,
-    });
+    // The stub honours the `onSuccess` the component passes in, so the
+    // guideline-mandated invalidation is reachable from a test. A bare
+    // `{ mutateAsync }` would swallow it and a dropped query key could not fail.
+    useRestoreEnvironmentBackupMutation.mockImplementation(
+      (options?: { onSuccess?: (data: unknown) => void }) => ({
+        mutateAsync: async (variables: unknown) => {
+          const data = await restoreMutateAsync(variables);
+          options?.onSuccess?.(data);
+          return data;
+        },
+        isPending: false,
+      }),
+    );
+  });
+
+  it("invalidates the environment config alongside the restore history", async () => {
+    // A coordinated restore rewrites `Environment.config` back to the captured
+    // snapshot (SC-005) and fans out one constituent `Restore` per usable
+    // constituent. Invalidating only `ListEnvironmentRestores` leaves the
+    // Overview and Configuration tabs rendering the pre-restore config, and the
+    // deployment detail page missing the new restores.
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    await renderRow();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("environment-backup-restore-button"));
+    await user.click(screen.getByTestId("environment-restore-dialog-confirm"));
+
+    await waitFor(() => expect(restoreMutateAsync).toHaveBeenCalled());
+    const keys = invalidate.mock.calls.map((call) => call[0]?.queryKey);
+    for (const key of [
+      ["ListEnvironmentRestores"],
+      ["GetEnvironment"],
+      ["ListRestores"],
+    ]) {
+      expect(keys).toContainEqual(key);
+    }
+    invalidate.mockRestore();
   });
 
   it("does not fetch the restore history until the row is expanded", async () => {

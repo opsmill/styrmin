@@ -8,6 +8,7 @@
  * tested as behaviour rather than left to the E2E to discover.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import { render, screen, userEvent, waitFor, within } from "@/test/utils";
 import type { AuthContextValue } from "@/auth/AuthProvider";
 import { EnvironmentBackupsTab } from "@/components/environment/EnvironmentBackupsTab";
@@ -15,6 +16,9 @@ import { EnvironmentBackupsTab } from "@/components/environment/EnvironmentBacku
 const useListEnvironmentBackupsQuery = vi.fn();
 const createEnvironmentBackupMutateAsync = vi.fn();
 const useCreateEnvironmentBackupMutation = vi.fn();
+// Stubbed because expanding a row mounts the nested restore-history query; left
+// unmocked it would issue a real fetch as soon as `enabled` flips true.
+const useListEnvironmentRestoresQuery = vi.fn();
 
 vi.mock("@/generated/graphql", async () => {
   const actual = await vi.importActual<typeof import("@/generated/graphql")>(
@@ -26,6 +30,8 @@ vi.mock("@/generated/graphql", async () => {
       useListEnvironmentBackupsQuery(...args),
     useCreateEnvironmentBackupMutation: (...args: unknown[]) =>
       useCreateEnvironmentBackupMutation(...args),
+    useListEnvironmentRestoresQuery: (...args: unknown[]) =>
+      useListEnvironmentRestoresQuery(...args),
   };
 });
 
@@ -96,6 +102,14 @@ const readOnlyAuth: AuthContextValue = {
 describe("EnvironmentBackupsTab", () => {
   beforeEach(() => {
     useListEnvironmentBackupsQuery.mockReset();
+    useListEnvironmentRestoresQuery.mockReset();
+    useListEnvironmentRestoresQuery.mockReturnValue({
+      data: { environmentRestores: [] },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
     createEnvironmentBackupMutateAsync.mockReset();
     createEnvironmentBackupMutateAsync.mockResolvedValue({
       createEnvironmentBackup: {
@@ -106,10 +120,88 @@ describe("EnvironmentBackupsTab", () => {
       },
     });
     useCreateEnvironmentBackupMutation.mockReset();
-    useCreateEnvironmentBackupMutation.mockReturnValue({
-      mutateAsync: createEnvironmentBackupMutateAsync,
-      isPending: false,
-    });
+    // The stub honours the `onSuccess` the component passes in so the
+    // guideline-mandated invalidation is reachable from a test; a bare
+    // `{ mutateAsync }` would swallow it and a dropped key could not fail.
+    useCreateEnvironmentBackupMutation.mockImplementation(
+      (options?: { onSuccess?: (data: unknown) => void }) => ({
+        mutateAsync: async (variables: unknown) => {
+          const data = await createEnvironmentBackupMutateAsync(variables);
+          options?.onSuccess?.(data);
+          return data;
+        },
+        isPending: false,
+      }),
+    );
+  });
+
+  it("stops polling when the page's auto-refresh toggle is off", async () => {
+    // The environment detail page renders one AutoRefreshIndicator above every
+    // tab. A hardcoded interval here would keep requesting after the operator
+    // paused refresh, so the visible control would be lying.
+    useListEnvironmentBackupsQuery.mockReturnValue(queryResult([]));
+
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled={false}
+      />,
+    );
+
+    expect(useListEnvironmentBackupsQuery).toHaveBeenCalledWith(
+      { environmentId: ENVIRONMENT_ID },
+      expect.objectContaining({ refetchInterval: false }),
+    );
+  });
+
+  it("stops the nested restore-history poll when auto-refresh is off", async () => {
+    // The flag has to reach the row too: its restore-history query polls on its
+    // own interval, so gating only the snapshot list would leave half the tab
+    // still requesting while the indicator says refresh is paused.
+    useListEnvironmentBackupsQuery.mockReturnValue(queryResult([snapshot()]));
+
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled={false}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("environment-backup-expand-button"));
+
+    expect(useListEnvironmentRestoresQuery).toHaveBeenLastCalledWith(
+      { environmentBackupId: "envbackup-1" },
+      expect.objectContaining({ enabled: true, refetchInterval: false }),
+    );
+  });
+
+  it("invalidates the per-instance backup list the fan-out writes to", async () => {
+    // One environment backup creates one constituent `Backup` per eligible
+    // deployment. Those rows are listed on the deployment detail page via
+    // `ListBackups`, so invalidating only `ListEnvironmentBackups` leaves that
+    // page without the backups this click just created.
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    useListEnvironmentBackupsQuery.mockReturnValue(queryResult([]));
+
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("create-environment-backup-button"));
+
+    await waitFor(() =>
+      expect(createEnvironmentBackupMutateAsync).toHaveBeenCalled(),
+    );
+    const keys = invalidate.mock.calls.map((call) => call[0]?.queryKey);
+    for (const key of [["ListEnvironmentBackups"], ["ListBackups"]]) {
+      expect(keys).toContainEqual(key);
+    }
+    invalidate.mockRestore();
   });
 
   it("polls the snapshot list every 10 seconds", async () => {
@@ -117,7 +209,12 @@ describe("EnvironmentBackupsTab", () => {
     // refetching — a missing interval would freeze a snapshot on IN_PROGRESS.
     useListEnvironmentBackupsQuery.mockReturnValue(queryResult([]));
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     expect(useListEnvironmentBackupsQuery).toHaveBeenCalledWith(
       { environmentId: ENVIRONMENT_ID },
@@ -128,7 +225,12 @@ describe("EnvironmentBackupsTab", () => {
   it("renders the empty state when the environment has no snapshots", async () => {
     useListEnvironmentBackupsQuery.mockReturnValue(queryResult([]));
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     expect(screen.getByTestId("environment-backups-empty")).toHaveTextContent(
       /no environment backups yet/i,
@@ -159,7 +261,12 @@ describe("EnvironmentBackupsTab", () => {
       ]),
     );
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     const rows = screen.getAllByTestId("environment-backup-row");
     expect(rows).toHaveLength(2);
@@ -194,7 +301,12 @@ describe("EnvironmentBackupsTab", () => {
       ]),
     );
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     const badges = screen
       .getAllByTestId("environment-backup-status")
@@ -237,7 +349,12 @@ describe("EnvironmentBackupsTab", () => {
       ]),
     );
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     const row = screen.getByTestId("environment-backup-row");
     expect(row).toHaveAttribute("data-constituent-total", "5");
@@ -256,7 +373,12 @@ describe("EnvironmentBackupsTab", () => {
       queryResult([snapshot({ constituents: [] })]),
     );
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     const row = screen.getByTestId("environment-backup-row");
     expect(row).toHaveAttribute("data-constituent-total", "0");
@@ -268,7 +390,12 @@ describe("EnvironmentBackupsTab", () => {
   it("creates a snapshot for the environment when Create Backup is clicked", async () => {
     useListEnvironmentBackupsQuery.mockReturnValue(queryResult([]));
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("create-environment-backup-button"));
@@ -290,7 +417,12 @@ describe("EnvironmentBackupsTab", () => {
     );
     vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("create-environment-backup-button"));
@@ -307,7 +439,12 @@ describe("EnvironmentBackupsTab", () => {
       isPending: true,
     });
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     const button = screen.getByTestId("create-environment-backup-button");
     expect(button).toBeDisabled();
@@ -317,9 +454,15 @@ describe("EnvironmentBackupsTab", () => {
   it("hides Create Backup from a READ_ONLY operator but still lists snapshots", async () => {
     useListEnvironmentBackupsQuery.mockReturnValue(queryResult([snapshot()]));
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />, {
-      auth: readOnlyAuth,
-    });
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+      {
+        auth: readOnlyAuth,
+      },
+    );
 
     expect(
       screen.queryByTestId("create-environment-backup-button"),
@@ -338,7 +481,12 @@ describe("EnvironmentBackupsTab", () => {
       }),
     );
 
-    await render(<EnvironmentBackupsTab environmentId={ENVIRONMENT_ID} />);
+    await render(
+      <EnvironmentBackupsTab
+        environmentId={ENVIRONMENT_ID}
+        autoRefreshEnabled
+      />,
+    );
 
     expect(screen.getByText(/network down/i)).toBeInTheDocument();
     const user = userEvent.setup();

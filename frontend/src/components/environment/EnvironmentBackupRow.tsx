@@ -56,7 +56,8 @@ export interface ConstituentSummary {
   /**
    * Constituents whose backup row is gone: neither a backup nor a creation
    * error. That means the child was deleted individually after the snapshot
-   * was taken. The parent survives and the gap is deliberately visible
+   * was taken — retention expiry cannot cause it, because nothing reaps the
+   * `Backup` row. The parent survives and the gap is deliberately visible
    * (spec FR-010), so it gets its own bucket rather than being folded into
    * `failed`.
    */
@@ -72,8 +73,8 @@ export interface ConstituentSummary {
  * folds both into its `failed` count: `error` means the constituent backup was
  * never created (the environment backup recorded an attributable reason —
  * usually a per-instance conflict), while `failed` means the backup ran and
- * failed. `missing` is the gap left by a constituent that was deleted
- * individually, or whose row is otherwise gone, after the snapshot was taken.
+ * failed. `missing` is the gap left by a constituent whose `Backup` row was
+ * deleted after the snapshot was taken.
  */
 export type ConstituentOutcome =
   | "completed"
@@ -153,9 +154,14 @@ export function describeConstituent(
   // The backend's messages are free text, so they are shown verbatim rather
   // than mapped through a table that would drop unknown values.
   if (error != null) return `not backed up — ${error}`;
-  // A snapshot entry with no backup row is a gap: the constituent was deleted
-  // individually, or expired, after the snapshot was taken (spec US3).
-  if (backup == null) return "backup no longer exists (deleted or expired)";
+  // A snapshot entry with no backup row is a gap: the constituent backup was
+  // deleted individually after the snapshot was taken (spec US3). Expiry is
+  // deliberately *not* offered as an explanation — retention TTL expires the
+  // Velero backup, but nothing reaps the Styrmin `Backup` row, so an expired
+  // constituent still has a row and still reads `completed`. Naming expiry
+  // here would send the operator looking for a retention problem that cannot
+  // produce this state.
+  if (backup == null) return "constituent backup was deleted";
   return backup.errorMessage
     ? `${backup.status} — ${backup.errorMessage}`
     : backup.status;
@@ -188,9 +194,10 @@ interface ConstituentOutcomesProps {
  * restore, the operator needs to see exactly which applications are covered.
  * Every captured deployment appears exactly once — as a live constituent
  * backup, as an attributable creation error, or as a *gap* left by a
- * constituent that was deleted individually or has expired. Gaps are rendered
- * explicitly rather than omitted, because a silently missing row is
- * indistinguishable from an application that was never in the snapshot.
+ * constituent that was deleted individually (expiry does not reap the `Backup`
+ * row, so it never produces a gap). Gaps are rendered explicitly rather than
+ * omitted, because a silently missing row is indistinguishable from an
+ * application that was never in the snapshot.
  */
 function ConstituentOutcomes({ constituents }: ConstituentOutcomesProps) {
   if (constituents.length === 0) {
@@ -211,6 +218,11 @@ function ConstituentOutcomes({ constituents }: ConstituentOutcomesProps) {
     >
       {constituents.map((constituent) => {
         const outcome = classifyConstituent(constituent);
+        // `data-constituent-error` publishes the creation-error *text*, not just
+        // its presence via the outcome. The API scenario driver reports
+        // `constituent.error` verbatim, so without this hook the UI driver has
+        // to report null and any assertion on `.error` would pass
+        // [api-chromium] while failing [ui-chromium].
         return (
           <li
             key={constituent.deploymentId}
@@ -221,6 +233,7 @@ function ConstituentOutcomes({ constituents }: ConstituentOutcomesProps) {
             data-constituent-outcome={outcome}
             data-backup-id={constituent.backup?.id ?? ""}
             data-backup-status={constituent.backup?.status ?? ""}
+            data-constituent-error={constituent.error ?? ""}
           >
             <span className="font-medium text-foreground">
               {constituent.deploymentName}
@@ -325,6 +338,12 @@ interface EnvironmentBackupRowProps {
   environmentBackup: EnvironmentBackupItem;
   /** Row position, used only for zebra striping. */
   index: number;
+  /**
+   * Mirrors the page-level auto-refresh toggle. When the operator pauses
+   * refresh, the restore-history poll must stop too — otherwise the indicator
+   * claims refreshing is off while this panel keeps requesting.
+   */
+  autoRefreshEnabled: boolean;
 }
 
 /**
@@ -344,6 +363,7 @@ interface EnvironmentBackupRowProps {
 export function EnvironmentBackupRow({
   environmentBackup,
   index,
+  autoRefreshEnabled,
 }: EnvironmentBackupRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -359,10 +379,45 @@ export function EnvironmentBackupRow({
 
   const restoresQuery = useListEnvironmentRestoresQuery(
     { environmentBackupId: environmentBackup.id },
-    { enabled: expanded, refetchInterval: RESTORE_REFRESH_INTERVAL_MS },
+    {
+      enabled: expanded,
+      refetchInterval: autoRefreshEnabled ? RESTORE_REFRESH_INTERVAL_MS : false,
+    },
   );
-  const restoreMutation = useRestoreEnvironmentBackupMutation();
-  const deleteMutation = useDeleteEnvironmentBackupMutation();
+
+  // Invalidation is declared in `onSuccess` rather than after `mutateAsync` in
+  // the handler (dev/guidelines/frontend/data-fetching.md): it belongs to the
+  // mutation, it runs even for a caller that does not await, and it is the only
+  // form a component test can exercise without reaching into the handler.
+  const restoreMutation = useRestoreEnvironmentBackupMutation({
+    onSuccess: () => {
+      // The restore history this row shows.
+      void queryClient.invalidateQueries({
+        queryKey: ["ListEnvironmentRestores"],
+      });
+      // A coordinated restore rewrites the environment's `config` back to the
+      // captured snapshot, which the Overview and Configuration tabs read from
+      // `GetEnvironment` — without this they keep showing the pre-restore
+      // config until the next poll.
+      void queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
+      // It also fans out one constituent `Restore` per usable constituent,
+      // which the deployment detail page lists via `ListRestores`.
+      void queryClient.invalidateQueries({ queryKey: ["ListRestores"] });
+    },
+  });
+
+  const deleteMutation = useDeleteEnvironmentBackupMutation({
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["ListEnvironmentBackups"],
+      });
+      // Deleting a snapshot cascades: every constituent `Backup` and every
+      // `Restore` performed from it goes with it, and both are listed on the
+      // deployment detail page (`ListBackups` / `ListRestores`).
+      void queryClient.invalidateQueries({ queryKey: ["ListBackups"] });
+      void queryClient.invalidateQueries({ queryKey: ["ListRestores"] });
+    },
+  });
 
   const environmentRestores = restoresQuery.data?.environmentRestores ?? [];
 
@@ -376,9 +431,6 @@ export function EnvironmentBackupRow({
       // Reveal the history immediately: the new restore is the operator's
       // only view of which constituents were skipped and why.
       setExpanded(true);
-      await queryClient.invalidateQueries({
-        queryKey: ["ListEnvironmentRestores"],
-      });
     } catch (err) {
       // Surfaced inline rather than swallowed: OPERATION_DENIED (not
       // restorable) and ALREADY_IN_PROGRESS are the operator's answer to why
@@ -394,9 +446,6 @@ export function EnvironmentBackupRow({
     try {
       await deleteMutation.mutateAsync({
         environmentBackupId: environmentBackup.id,
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["ListEnvironmentBackups"],
       });
     } catch (err) {
       // Surfaced inline rather than swallowed: the row is still on screen, so

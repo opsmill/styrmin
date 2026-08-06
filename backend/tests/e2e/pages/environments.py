@@ -540,11 +540,15 @@ class EnvironmentBackupsTabPage:
                     # it back to None so both drivers agree.
                     backup_id=backup_id or None,
                     backup_status=backup_status or None,
-                    # The list query does not project the creation error text,
-                    # only its presence via ``data-constituent-outcome=error``.
-                    # Scenarios assert on the outcome; the API driver carries
-                    # the message for diagnosis only.
-                    error=None,
+                    # ``ListEnvironmentBackups`` does project ``constituents.
+                    # error``, and the row publishes it as
+                    # ``data-constituent-error``, so the UI driver reports the
+                    # same free-text message the API driver does. Hardcoding
+                    # ``None`` here would make any future assertion on
+                    # ``.error`` pass [api-chromium] and fail [ui-chromium].
+                    # "" is the DOM's stand-in for null (an attribute cannot
+                    # hold one), normalised back the same way ``backup_id`` is.
+                    error=(await item.get_attribute("data-constituent-error")) or None,
                 )
             )
         return tuple(constituents)
@@ -860,7 +864,18 @@ class EnvironmentBackupsTabPage:
                 f"environment backup {environment_backup_id} is not listed on "
                 f"environment {environment_id}"
             )
-        await row.locator("[data-testid=environment-backup-delete-button]").click()
+        button = row.locator("[data-testid=environment-backup-delete-button]").first
+        if await button.count() == 0:
+            # Same guard as ``restore_backup``: the button is wrapped in
+            # ``IfRole minimum="READ_WRITE"``, so for a READ_ONLY operator it is
+            # absent rather than disabled. Without this, the click below fails
+            # with a bare Playwright "element not found" timeout instead of
+            # naming the permission as the cause.
+            raise ScenarioActionError(
+                "delete button is absent — the signed-in user is not "
+                "READ_WRITE or ADMIN"
+            )
+        await button.click()
         dialog = self._page.locator(
             "[data-testid=environment-backup-delete-dialog]"
         ).first

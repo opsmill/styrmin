@@ -7,8 +7,8 @@
  * - **Per-constituent visibility** — what makes a `PARTIAL` snapshot
  *   trustworthy. Every captured deployment must appear exactly once, as a live
  *   backup, an attributable creation error, or a *gap* left by a constituent
- *   deleted individually or expired since the snapshot was taken. A silently
- *   omitted row is indistinguishable from an application that was never in the
+ *   whose backup was deleted since the snapshot was taken. A silently omitted
+ *   row is indistinguishable from an application that was never in the
  *   snapshot, so gaps are asserted explicitly.
  * - **Cascade deletion behind a confirmation** (FR-010), including the escape
  *   hatch: deleting an `IN_PROGRESS` snapshot must be offered, because that is
@@ -20,6 +20,7 @@
  * the E2E to discover.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import { render, screen, userEvent, waitFor, within } from "@/test/utils";
 import type { AuthContextValue } from "@/auth/AuthProvider";
 import {
@@ -140,7 +141,11 @@ async function renderRow(
   options = {},
 ) {
   return render(
-    <EnvironmentBackupRow environmentBackup={snapshot(overrides)} index={0} />,
+    <EnvironmentBackupRow
+      environmentBackup={snapshot(overrides)}
+      index={0}
+      autoRefreshEnabled
+    />,
     options,
   );
 }
@@ -162,10 +167,20 @@ beforeEach(() => {
   deleteMutateAsync.mockReset();
   deleteMutateAsync.mockResolvedValue({ deleteEnvironmentBackup: true });
   useDeleteEnvironmentBackupMutation.mockReset();
-  useDeleteEnvironmentBackupMutation.mockReturnValue({
-    mutateAsync: deleteMutateAsync,
-    isPending: false,
-  });
+  // The stub honours the `onSuccess` the component passes in. Returning a bare
+  // `{ mutateAsync }` would silently swallow it, which is exactly how the
+  // guideline-mandated invalidation went untested (and under-specified) before:
+  // a dropped query key could not fail any test.
+  useDeleteEnvironmentBackupMutation.mockImplementation(
+    (options?: { onSuccess?: (data: unknown) => void }) => ({
+      mutateAsync: async (variables: unknown) => {
+        const data = await deleteMutateAsync(variables);
+        options?.onSuccess?.(data);
+        return data;
+      },
+      isPending: false,
+    }),
+  );
 });
 
 describe("classifyConstituent", () => {
@@ -269,7 +284,7 @@ describe("EnvironmentBackupRow — per-constituent outcomes", () => {
     expect(row).toHaveAttribute("data-backup-id", "");
   });
 
-  it("makes a gap from a deleted or expired constituent visible", async () => {
+  it("makes a gap from a deleted constituent visible", async () => {
     // US3: the parent survives an individually deleted child and the gap must
     // be legible — an omitted row would look like an application that was
     // never in the snapshot at all.
@@ -283,7 +298,13 @@ describe("EnvironmentBackupRow — per-constituent outcomes", () => {
       .getAllByTestId("environment-backup-constituent")
       .find((el) => el.getAttribute("data-deployment-name") === "cache");
     expect(row).toHaveAttribute("data-constituent-outcome", "missing");
-    expect(row).toHaveTextContent(/no longer exists/i);
+    expect(row).toHaveTextContent(/constituent backup was deleted/i);
+    // Deliberately NOT attributed to retention expiry: expiry garbage-collects
+    // the Velero data but never removes the `Backup` row (see
+    // `_classify_constituents` — an expired constituent still reads
+    // `completed`), so naming expiry here would send the operator hunting a
+    // retention problem that cannot produce this state.
+    expect(row).not.toHaveTextContent(/expired/i);
     // The collapsed summary counts it separately from a failure.
     expect(screen.getByTestId("environment-backup-row")).toHaveAttribute(
       "data-constituent-missing",
@@ -429,6 +450,33 @@ describe("EnvironmentBackupRow — delete", () => {
     expect(
       screen.queryByTestId("environment-backup-restore-button"),
     ).not.toBeInTheDocument();
+  });
+
+  it("invalidates every list the cascade makes stale", async () => {
+    // The cascade removes the parent, every constituent `Backup` and every
+    // `Restore` taken from it. `ListBackups` and `ListRestores` back the
+    // deployment detail page's Backups tab, so invalidating only
+    // `ListEnvironmentBackups` leaves that page showing rows the server has
+    // already deleted — clicking one 404s.
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    await renderRow();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("environment-backup-delete-button"));
+    await user.click(
+      screen.getByTestId("environment-backup-delete-dialog-confirm"),
+    );
+
+    await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalled());
+    const keys = invalidate.mock.calls.map((call) => call[0]?.queryKey);
+    for (const key of [
+      ["ListEnvironmentBackups"],
+      ["ListBackups"],
+      ["ListRestores"],
+    ]) {
+      expect(keys).toContainEqual(key);
+    }
+    invalidate.mockRestore();
   });
 
   it("hides delete from a READ_ONLY viewer", async () => {

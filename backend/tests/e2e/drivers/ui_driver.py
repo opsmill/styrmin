@@ -61,6 +61,18 @@ def _environment_id_from_url(url: str) -> str | None:
     return None
 
 
+def _deployment_id_from_url(url: str) -> str | None:
+    """Extract the deployment id from a ``.../deployments/<id>/...`` URL."""
+    path = urlparse(url).path
+    parts = [p for p in path.split("/") if p]
+    if "deployments" not in parts:
+        return None
+    index = parts.index("deployments")
+    if index + 1 >= len(parts):
+        return None
+    return parts[index + 1]
+
+
 @asynccontextmanager
 async def _ui_errors(action: str) -> AsyncIterator[None]:
     """Normalise Playwright exceptions into the ScenarioDriver hierarchy.
@@ -100,6 +112,11 @@ class UiScenarioDriver:
         # wait_for_deployment_running can build the detail URL without
         # re-receiving it (matches ApiScenarioDriver's signature).
         self._environment_id: str | None = None
+        # The deployment whose detail page the backup/restore flow acts on.
+        # Stamped by every call that navigates to a deployment detail page, so
+        # ``_ensure_deployment_detail`` can verify the page shows *that*
+        # deployment rather than merely some deployment (see its docstring).
+        self._deployment_id: str | None = None
         # environment_backup_id -> environment_id, and
         # environment_restore_id -> environment_backup_id. The
         # environment-level read methods only carry the child's id, but the UI
@@ -204,12 +221,15 @@ class UiScenarioDriver:
                 parameters=parameters,
                 service_name_overrides=service_name_overrides,
             )
-            return await self._deploy_form.submit()
+            deployment = await self._deploy_form.submit()
+            self._deployment_id = deployment.id
+            return deployment
 
     async def wait_for_deployment_running(
         self, *, deployment_id: str, timeout: float = 300.0
     ) -> DeploymentRef:
         environment_id = self._require_environment_context(deployment_id=deployment_id)
+        self._deployment_id = deployment_id
         async with _ui_errors(
             f"waiting for deployment {deployment_id} to reach 'running'"
         ):
@@ -347,19 +367,44 @@ class UiScenarioDriver:
 
     # --- Backup / Restore -------------------------------------------------
     #
-    # These methods assume the UI driver has already navigated to (or can
-    # re-enter) the correct deployment detail page. ``create_backup`` does
-    # not need ``instance_id`` in the UI flow — the page already knows which
-    # instance it's showing — but we accept it for protocol parity and fall
-    # back to re-navigating if the URL has drifted.
+    # These methods act on the deployment detail page of whichever deployment
+    # this driver is bound to. ``create_backup`` does not need ``instance_id``
+    # in the UI flow — the page already knows which instance it's showing — but
+    # we accept it for protocol parity.
 
     async def _ensure_deployment_detail(self) -> None:
-        """Ensure the Playwright page is on a deployment detail URL."""
-        path = self._page.url
-        if "/deployments/" not in path:
+        """Ensure the page shows the deployment this driver is bound to.
+
+        Checking only for ``"/deployments/"`` in the URL is not enough: the
+        Playwright ``Page`` is **session-scoped and shared** across every
+        scenario in the run, so a sibling test can leave a *different*
+        deployment's detail page open. A scenario that never navigated itself
+        (``test_restore_lifecycle_transitions`` and the MariaDB/MongoDB
+        lifecycle both drive ``create_backup`` off the session driver without
+        calling ``wait_for_deployment_running`` first) would then back up
+        whichever deployment happened to be on screen — passing for the wrong
+        reason, and silently changing target if collection order ever changed.
+
+        So the bound deployment id is compared against the URL and the page is
+        re-navigated when it has drifted, which is what the previous comment
+        here promised but the code never did. Falling back to the id parsed out
+        of the current URL preserves the old behaviour for a scenario that
+        navigated by hand and never told the driver which deployment it means.
+        """
+        deployment_id = self._deployment_id or _deployment_id_from_url(self._page.url)
+        if deployment_id is None:
             raise ScenarioActionError(
                 "UI driver can't open backup/restore flow — no deployment "
-                f"detail page is active (current URL: {path})"
+                f"detail page is active and no deployment is bound (current "
+                f"URL: {self._page.url}); call create_deployment or "
+                "wait_for_deployment_running first"
+            )
+        if _deployment_id_from_url(self._page.url) != deployment_id:
+            environment_id = self._require_environment_context(
+                deployment_id=deployment_id
+            )
+            await self._deployment_detail.goto(
+                environment_id=environment_id, deployment_id=deployment_id
             )
 
     async def create_backup(self, *, instance_id: str) -> BackupRef:  # noqa: ARG002

@@ -40,6 +40,41 @@ ENVIRONMENT_SNAPSHOT_MUTATED_TTL = "1440h"
 # reconcile back to RUNNING.
 FANOUT_RECONCILE_TIMEOUT_SECONDS = 480.0
 
+# A fresh deployment reaching RUNNING. Matches the ``wait_for_deployment_running``
+# protocol default that the ``deployed_simple_app`` fixture relies on for the
+# identical simple-app deployment — a *create* is not a config fanout and does
+# not need ``FANOUT_RECONCILE_TIMEOUT_SECONDS``.
+DEPLOYMENT_RUNNING_TIMEOUT_SECONDS = 300.0
+
+# Best-effort waits in a ``finally`` block get their own, much smaller budget.
+# They exist to hand a sane environment to the sibling ``shard_backup`` tests,
+# not to prove anything — and every one of them is wrapped in ``suppress``. On
+# the failure path a full reconcile budget per cleanup wait is actively harmful:
+# it can push the job past ``timeout-minutes`` so the runner kills the cell
+# before pytest ever writes the real failure out.
+CLEANUP_WAIT_TIMEOUT_SECONDS = 180.0
+
+# One coordinated environment backup: N constituent per-instance Velero backups
+# dispatched concurrently after the parent commits. Calibrated off the sibling
+# per-instance budgets in this shard rather than guessed — 180s for one
+# simple-app backup (``test_backup_and_restore_lifecycle``) and 300s for the
+# heavier MariaDB+MongoDB one (``test_backup_restore_databases``) — so 300s
+# covers a concurrent simple-app fan-out with the shard's widest single-backup
+# budget.
+ENVIRONMENT_BACKUP_FANOUT_TIMEOUT_SECONDS = 300.0
+
+# The *derived* parent status, once every constituent has already been observed
+# in its expected outcome. Deriving happens on read, so the next read after the
+# constituents settle is already terminal; this is slack for the UI
+# entrypoint's list refetch, not for any backend work.
+DERIVED_STATUS_TIMEOUT_SECONDS = 60.0
+
+# One coordinated environment restore. Only one constituent is restorable in
+# this scenario (the other's backup is deleted on purpose), so this is a
+# single-restore budget: the same 600s ``test_restore_lifecycle_transitions``
+# allows for one simple-app Velero restore plus the post-restore reapply.
+ENVIRONMENT_RESTORE_TIMEOUT_SECONDS = 600.0
+
 # ``TaskStatus`` values that mean "this Task is still in flight".
 _NON_TERMINAL_TASK_STATUSES = frozenset({"pending", "running"})
 
@@ -674,7 +709,7 @@ async def test_environment_backup_and_restore_lifecycle(
     secondary_deployment_id = secondary.id
     await scenario_driver.wait_for_deployment_running(
         deployment_id=secondary_deployment_id,
-        timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS,
+        timeout=DEPLOYMENT_RUNNING_TIMEOUT_SECONDS,
     )
     secondary_name = (await client.deployments.get(secondary_deployment_id)).name
 
@@ -734,10 +769,11 @@ async def test_environment_backup_and_restore_lifecycle(
             scenario_driver,
             environment_backup_id=environment_backup_id,
             expected=dict.fromkeys(expected_constituents, "completed"),
-            timeout=600.0,
+            timeout=ENVIRONMENT_BACKUP_FANOUT_TIMEOUT_SECONDS,
         )
         completed = await scenario_driver.wait_for_environment_backup(
-            environment_backup_id=environment_backup_id, max_wait=120.0
+            environment_backup_id=environment_backup_id,
+            max_wait=DERIVED_STATUS_TIMEOUT_SECONDS,
         )
         assert completed.status == "COMPLETED", (
             "every constituent completed, so the derived parent status must be "
@@ -795,7 +831,9 @@ async def test_environment_backup_and_restore_lifecycle(
                 primary_deployment_id: "completed",
                 secondary_deployment_id: "missing",
             },
-            timeout=120.0,
+            # The delete is already committed; the only latency left is the UI
+            # entrypoint's 10s list refetch.
+            timeout=DERIVED_STATUS_TIMEOUT_SECONDS,
         )
         assert len(with_gap.constituents) == len(expected_constituents), (
             "deleting a constituent must leave the parent's snapshot list intact "
@@ -826,10 +864,19 @@ async def test_environment_backup_and_restore_lifecycle(
             "the config write must actually diverge from the captured snapshot, "
             "otherwise SC-005 would pass without a revert happening"
         )
-        for deployment_id, length in pre_write_timeline.items():
-            await wait_for_env_fanout_steady_state(
-                client, deployment_id=deployment_id, pre_timeline_length=length
+        # One env-config write queues the redeploy Task on *every* deployment in
+        # the environment at once, so the two fanouts run concurrently. Awaiting
+        # them sequentially gave each its own full ``FANOUT_RECONCILE_TIMEOUT_
+        # SECONDS``, making the worst case 2× the wall-clock the platform can
+        # actually take; gathering them shares one budget.
+        await asyncio.gather(
+            *(
+                wait_for_env_fanout_steady_state(
+                    client, deployment_id=deployment_id, pre_timeline_length=length
+                )
+                for deployment_id, length in pre_write_timeline.items()
             )
+        )
         await wait_for_pods_ready(kubeconfig_path, primary_namespace)
 
         async with portforward_simple_app(kubeconfig_path, primary_namespace) as port:
@@ -866,7 +913,8 @@ async def test_environment_backup_and_restore_lifecycle(
         )
 
         finished = await scenario_driver.wait_for_environment_restore(
-            environment_restore_id=environment_restore.id, max_wait=900.0
+            environment_restore_id=environment_restore.id,
+            max_wait=ENVIRONMENT_RESTORE_TIMEOUT_SECONDS,
         )
         assert finished.status == "PARTIAL", (
             "one constituent restored and one skipped derives to PARTIAL "
@@ -927,18 +975,34 @@ async def test_environment_backup_and_restore_lifecycle(
         await scenario_driver.set_environment_backup_ttl(
             environment_id=scenario_environment_id, ttl=previous_backup_ttl
         )
-        for deployment_id, length in revert_timeline.items():
-            with suppress(AssertionError):
-                await wait_for_env_fanout_steady_state(
-                    client, deployment_id=deployment_id, pre_timeline_length=length
+        with suppress(AssertionError):
+            await asyncio.gather(
+                *(
+                    wait_for_env_fanout_steady_state(
+                        client,
+                        deployment_id=deployment_id,
+                        pre_timeline_length=length,
+                        timeout=CLEANUP_WAIT_TIMEOUT_SECONDS,
+                    )
+                    for deployment_id, length in revert_timeline.items()
                 )
+            )
+        # Delete the deployment this test created. The environment is
+        # session-shared, so leaving it behind hands every later
+        # ``shard_backup`` test an extra peer: one more constituent in any
+        # snapshot they take, one more redeploy in any env-config fanout they
+        # wait on, and a service-name that the next ``simple-app`` peer has to
+        # avoid. Best-effort like the waits — a cleanup failure must not mask
+        # the test's own.
+        with suppress(Exception):
+            await client.deployments.delete(secondary_deployment_id)
         # The UI driver's page is session-scoped and the sibling backup tests act
         # on whatever page is open, so hand it back on a deployment detail page.
         scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
         with suppress(Exception):
             await scenario_driver.wait_for_deployment_running(
                 deployment_id=primary_deployment_id,
-                timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS,
+                timeout=CLEANUP_WAIT_TIMEOUT_SECONDS,
             )
 
 
@@ -1030,6 +1094,15 @@ async def test_restore_lifecycle_transitions(
 
 
 @pytest.mark.ci
+@pytest.mark.api_only(
+    reason="Every action is a raw SDK call — the driver half of "
+    "``session_scenario_driver`` is discarded (``_, client = ...``) and no "
+    "dual-entrypoint driver method is invoked. The flow provokes a rejected "
+    "restore by passing a non-existent backup id, which the UI cannot express: "
+    "the restore button is bound to a listed backup row, so there is no "
+    "Playwright path to submit an unknown id. The [ui-chromium] variant would "
+    "replay the identical GraphQL calls for ~20 minutes of extra CI time."
+)
 async def test_restore_failure_marks_failed_not_indefinite(
     deployed_simple_app: dict,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
