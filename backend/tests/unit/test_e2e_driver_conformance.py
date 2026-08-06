@@ -4,13 +4,27 @@ Ensures both ApiScenarioDriver and UiScenarioDriver implement every method
 declared on :class:`ScenarioDriver` — and that no implementation is a
 ``raise NotImplementedError`` stub.
 
-Lives under ``tests/e2e/`` (not unit) because the driver modules import
-playwright; but is a plain unit-scoped test — no fixtures needed.
+Lives under ``tests/unit/`` even though it introspects the ``tests.e2e.drivers``
+modules, because it is a plain unit test: it imports the driver classes and
+reflects over them, with no cluster, no fixtures and no Playwright browser.
+Importing ``playwright`` is not a reason to sit under ``tests/e2e/`` — the
+package is an ordinary dev dependency.
+
+Placement is load-bearing rather than cosmetic. ``backend/tests/e2e/conftest.py``
+declares an ``autouse=True`` fixture that depends on the session-scoped
+``vcluster`` fixture, so *collecting* any module under ``tests/e2e/`` boots a
+virtual Kubernetes cluster. The unit job runs ``pytest tests --ignore=tests/e2e``
+(``tasks/__init__.py``) and the CI e2e cells select ``-m "ci and shard_<name>"``;
+while this module lived under ``tests/e2e/drivers/`` — carrying neither ``ci``
+nor a ``shard_*`` marker — it therefore ran in **no** CI job at all. Under
+``tests/unit/`` the existing unit job picks it up with no workflow change.
 """
 
 from __future__ import annotations
 
+import ast
 import inspect
+import textwrap
 
 import pytest
 
@@ -73,6 +87,35 @@ def _is_async(cls: type, name: str) -> bool:
     return inspect.iscoroutinefunction(getattr(cls, name))
 
 
+def _raises_notimplementederror(method: object) -> bool:
+    """Whether ``method``'s body contains a real ``raise NotImplementedError``.
+
+    Parsed as an AST rather than grepped for the literal phrase: a substring
+    search over the raw source also matches the *prose* of a docstring or a
+    comment (this very file's module docstring would trip it), so a driver
+    method that merely documents "raise NotImplementedError" as the thing it
+    deliberately avoids would be reported as a stub. Only ``ast.Raise`` nodes
+    naming ``NotImplementedError`` — bare or called — count.
+    """
+    try:
+        source = textwrap.dedent(inspect.getsource(method))
+    except OSError, TypeError:
+        return False
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:  # pragma: no cover — a decorator-mangled source
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Raise) or node.exc is None:
+            continue
+        raised = node.exc
+        if isinstance(raised, ast.Call):
+            raised = raised.func
+        if isinstance(raised, ast.Name) and raised.id == "NotImplementedError":
+            return True
+    return False
+
+
 @pytest.mark.parametrize(
     "driver_cls", [ApiScenarioDriver, UiScenarioDriver], ids=["api", "ui"]
 )
@@ -103,26 +146,42 @@ def test_driver_has_no_notimplementederror_stubs(driver_cls: type) -> None:
         method = getattr(driver_cls, name, None)
         if method is None:
             continue
-        try:
-            source = inspect.getsource(method)
-        except OSError, TypeError:
-            continue
-        # Strip leading whitespace and comments before checking.
-        body_lines = [
-            ln.strip()
-            for ln in source.splitlines()
-            if ln.strip() and not ln.strip().startswith("#")
-        ]
-        # Heuristic: if the body (after signature + docstring) only contains
-        # ``raise NotImplementedError``, flag it. We look for the token in the
-        # raw source and require NO other statement after the signature.
-        stripped = "\n".join(body_lines)
-        if "raise NotImplementedError" in stripped:
+        if _raises_notimplementederror(method):
             offenders.append(f"{driver_cls.__name__}.{name}")
     assert not offenders, (
         "Methods still raise NotImplementedError — implement them or raise "
         f"ScenarioActionError with an actionable reason instead: {offenders}"
     )
+
+
+def test_stub_detector_ignores_prose_and_catches_real_raises() -> None:
+    """The stub detector must key off code, not the words in a docstring.
+
+    The previous implementation substring-matched ``raise NotImplementedError``
+    over the raw source, so a method whose *docstring* or comment mentioned the
+    phrase read as an unimplemented stub — the exact false positive that makes a
+    conformance guard untrustworthy, and the reason this asserts on both
+    directions rather than only on the happy path.
+    """
+
+    def documents_but_does_not_raise() -> str:
+        """Never a ``raise NotImplementedError`` — see the driver contract."""
+        # raise NotImplementedError would be wrong here
+        return "implemented"
+
+    def bare_stub() -> None:
+        raise NotImplementedError
+
+    def called_stub() -> None:
+        raise NotImplementedError("not yet")
+
+    def raises_something_else() -> None:
+        raise ValueError("a real, actionable failure")
+
+    assert not _raises_notimplementederror(documents_but_does_not_raise)
+    assert not _raises_notimplementederror(raises_something_else)
+    assert _raises_notimplementederror(bare_stub)
+    assert _raises_notimplementederror(called_stub)
 
 
 def test_protocol_methods_match_both_drivers() -> None:
