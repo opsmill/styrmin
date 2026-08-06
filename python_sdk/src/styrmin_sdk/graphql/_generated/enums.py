@@ -16,6 +16,14 @@ class DriverEnvVarLevel(str, Enum):
     COMPONENT = "COMPONENT"
 
 
+class EnvironmentBackupStatus(str, Enum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+
+
 class ExternalDnsEndpointsType(str, Enum):
     NODE_EXTERNAL_IP = "NODE_EXTERNAL_IP"
     CLUSTER_IP = "CLUSTER_IP"

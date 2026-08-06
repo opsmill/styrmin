@@ -376,6 +376,20 @@ export type DeploymentReferenceInput = {
   deploymentName?: InputMaybe<Scalars['String']['input']>;
 };
 
+/** The declared state of one deployment captured at backup time — enough to recreate it later (clone readiness). */
+export type DeploymentSnapshot = {
+  __typename?: 'DeploymentSnapshot';
+  applicationVersion: Scalars['String']['output'];
+  config?: Maybe<Scalars['JSON']['output']>;
+  deploymentId: Scalars['UUID']['output'];
+  deploymentName: Scalars['String']['output'];
+  driverFingerprint?: Maybe<Scalars['String']['output']>;
+  driverName: Scalars['String']['output'];
+  driverVersion: Scalars['String']['output'];
+  instanceId: Scalars['UUID']['output'];
+  parameters?: Maybe<Scalars['JSON']['output']>;
+};
+
 export type DeploymentStatusReportInput = {
   conditions?: InputMaybe<Array<CrdConditionInput>>;
   deploymentId: Scalars['UUID']['input'];
@@ -470,6 +484,40 @@ export type EnvironmentDeploymentsArgs = {
   includeDeleted?: Scalars['Boolean']['input'];
 };
 
+export type EnvironmentBackup = {
+  __typename?: 'EnvironmentBackup';
+  /** One entry per eligible deployment: its constituent backup, its creation error, or neither when the constituent was deleted. */
+  constituents: Array<EnvironmentBackupConstituent>;
+  createdOn: Scalars['DateTime']['output'];
+  /** Per-deployment declared state captured at backup time (clone readiness). */
+  deploymentSnapshots: Array<DeploymentSnapshot>;
+  environment: Environment;
+  /** Environment config captured at backup time. */
+  environmentConfig?: Maybe<Scalars['JSON']['output']>;
+  environmentId: Scalars['UUID']['output'];
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  /** Derived from the constituent backups and recorded creation errors on every read — never stored, so it cannot contradict its constituents. An environment with no eligible deployments yields a config-only snapshot that is COMPLETED immediately. */
+  status: EnvironmentBackupStatus;
+  updatedOn?: Maybe<Scalars['DateTime']['output']>;
+};
+
+/** One eligible deployment's outcome in the snapshot. ``backup`` is set when a constituent backup exists, ``error`` when creation failed. Both null means the constituent was deleted individually after the snapshot was taken — the gap is deliberately visible. */
+export type EnvironmentBackupConstituent = {
+  __typename?: 'EnvironmentBackupConstituent';
+  backup?: Maybe<Backup>;
+  deploymentId: Scalars['UUID']['output'];
+  deploymentName: Scalars['String']['output'];
+  error?: Maybe<Scalars['String']['output']>;
+};
+
+export type EnvironmentBackupStatus =
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'IN_PROGRESS'
+  | 'PARTIAL'
+  | 'PENDING';
+
 export type ExternalDnsEndpointsType =
   | 'CLUSTER_IP'
   | 'NODE_EXTERNAL_IP';
@@ -563,6 +611,7 @@ export type Mutation = {
   createBackupStorageLocation?: Maybe<BackupStorageLocation>;
   createCluster?: Maybe<Cluster>;
   createEnvironment?: Maybe<Environment>;
+  createEnvironmentBackup: EnvironmentBackup;
   createGroup: Group;
   createRestore?: Maybe<Restore>;
   createUser: User;
@@ -652,6 +701,12 @@ export type MutationCreateEnvironmentArgs = {
   clusterName?: InputMaybe<Scalars['String']['input']>;
   config?: InputMaybe<Scalars['JSON']['input']>;
   name: Scalars['String']['input'];
+};
+
+
+export type MutationCreateEnvironmentBackupArgs = {
+  environmentId: Scalars['UUID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -921,6 +976,8 @@ export type Query = {
   deploymentServices: Array<DeployedService>;
   deploymentTimeline: Array<DeploymentTimelineEntry>;
   environment?: Maybe<Environment>;
+  environmentBackup?: Maybe<EnvironmentBackup>;
+  environmentBackups: Array<EnvironmentBackup>;
   environmentServices: Array<DeployedService>;
   environments: Array<Environment>;
   group?: Maybe<Group>;
@@ -996,6 +1053,16 @@ export type QueryEnvironmentArgs = {
   clusterName?: InputMaybe<Scalars['String']['input']>;
   environmentId?: InputMaybe<Scalars['UUID']['input']>;
   environmentName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type QueryEnvironmentBackupArgs = {
+  environmentBackupId: Scalars['UUID']['input'];
+};
+
+
+export type QueryEnvironmentBackupsArgs = {
+  environmentId: Scalars['UUID']['input'];
 };
 
 
