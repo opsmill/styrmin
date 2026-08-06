@@ -48,6 +48,12 @@ from styrmin_backend.repository.environment import (
     EnvironmentRepository,
     SQLModelEnvironmentRepository,
 )
+from styrmin_backend.repository.environment_backup import (
+    EnvironmentBackupRepository,
+    EnvironmentRestoreRepository,
+    SQLModelEnvironmentBackupRepository,
+    SQLModelEnvironmentRestoreRepository,
+)
 from styrmin_backend.repository.helm_chart import (
     HelmChartRepository,
     SQLModelHelmChartRepository,
@@ -93,6 +99,8 @@ class UnitOfWork(ABC):
     deployed_services: DeployedServiceRepository
     backups: BackupRepository
     restores: RestoreRepository
+    environment_backups: EnvironmentBackupRepository
+    environment_restores: EnvironmentRestoreRepository
     backup_schedules: BackupScheduleRepository
     pod_statuses: PodStatusRepository
     deployment_statuses: DeploymentStatusRepository
@@ -136,6 +144,8 @@ class SqlModelUnitOfWork(UnitOfWork):
     deployed_services: SQLModelDeployedServiceRepository
     backups: SQLModelBackupRepository
     restores: SQLModelRestoreRepository
+    environment_backups: SQLModelEnvironmentBackupRepository
+    environment_restores: SQLModelEnvironmentRestoreRepository
     backup_schedules: SQLModelBackupScheduleRepository
     pod_statuses: SQLModelPodStatusRepository
     deployment_statuses: SQLModelDeploymentStatusRepository
@@ -168,6 +178,12 @@ class SqlModelUnitOfWork(UnitOfWork):
         self.deployed_services = SQLModelDeployedServiceRepository(session=self.session)
         self.backups = SQLModelBackupRepository(session=self.session)
         self.restores = SQLModelRestoreRepository(session=self.session)
+        self.environment_backups = SQLModelEnvironmentBackupRepository(
+            session=self.session
+        )
+        self.environment_restores = SQLModelEnvironmentRestoreRepository(
+            session=self.session
+        )
         self.backup_schedules = SQLModelBackupScheduleRepository(session=self.session)
         self.pod_statuses = SQLModelPodStatusRepository(session=self.session)
         self.deployment_statuses = SQLModelDeploymentStatusRepository(

@@ -338,6 +338,53 @@ class BackupScheduleNotFoundError(ServiceError):
     default_message = "Backup schedule not found"
 
 
+class EnvironmentBackupNotFoundError(ServiceError):
+    """The environment backup was not found."""
+
+    error_code = "NOT_FOUND"
+    default_message = "Environment backup not found"
+
+
+class EnvironmentOperationInProgressError(ServiceError):
+    """An environment-level backup or restore is already in progress.
+
+    Only one environment-level operation may be in flight per environment
+    (research.md D6). ``operation_kind`` names which one is holding the
+    environment: ``"environment_backup"`` or ``"environment_restore"``.
+    """
+
+    error_code = "ALREADY_IN_PROGRESS"
+    default_message = (
+        "An environment-level operation is already in progress for this environment"
+    )
+
+    def __init__(
+        self, operation_id: str, operation_kind: str, message: str = ""
+    ) -> None:
+        self.operation_id = operation_id
+        self.operation_kind = operation_kind
+        super().__init__(
+            message or f"An {operation_kind} is already in progress: {operation_id}"
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {
+            "operation_id": self.operation_id,
+            "operation_kind": self.operation_kind,
+        }
+
+
+class EnvironmentBackupNotRestorableError(ServiceError):
+    """The environment backup's derived status does not permit a restore."""
+
+    error_code = "OPERATION_DENIED"
+    default_message = (
+        "Environment backup is not restorable: its derived status is neither "
+        "completed nor partial"
+    )
+
+
 class BackupScheduleAlreadyExistsError(ServiceError):
     """A backup schedule already exists for this deployment."""
 
