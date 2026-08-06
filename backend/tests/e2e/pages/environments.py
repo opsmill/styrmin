@@ -32,6 +32,18 @@ if TYPE_CHECKING:
 # still fails inside the test's own budget.
 _SAVE_SETTLE_TIMEOUT_MS = 60_000
 
+# How long the environment Backups tab may take to resolve its
+# ``ListEnvironmentBackups`` query after the panel mounts. Generous because the
+# same styrmin-server is concurrently running a backup/restore fan-out; short
+# enough that a query which errored (the panel renders an ``ErrorState`` with no
+# test hook) still fails inside a scenario's own budget.
+_LIST_SETTLE_TIMEOUT_SECONDS = 60.0
+
+# How long a specific snapshot row may take to appear once the list has settled.
+# Covers the tab's 10s ``refetchInterval`` picking up a change made out of band
+# (a constituent deleted through the SDK, a snapshot created by another surface).
+_ROW_APPEAR_TIMEOUT_SECONDS = 30.0
+
 
 class EnvironmentsListPage:
     def __init__(self, page: Page) -> None:
@@ -398,6 +410,35 @@ class EnvironmentBackupsTabPage:
         # ``role="tab"``), same caveat as the Configuration tab above.
         await self._page.get_by_role("button", name="Backups", exact=True).click()
         await self._tab(environment_id).wait_for(state="visible")
+        await self._wait_for_list_settled(environment_id=environment_id)
+
+    async def _wait_for_list_settled(self, *, environment_id: str) -> None:
+        """Block until the ``ListEnvironmentBackups`` query has resolved.
+
+        A mounted tab is not a loaded list: while the query is in flight the
+        panel renders "Loading environment backups..." with no rows at all, so a
+        row lookup at that moment reports an existing snapshot as absent. That is
+        exactly how the UI entrypoint first failed — re-entering the tab after an
+        env-config write and immediately looking for the snapshot it had been
+        reading a moment earlier.
+
+        Settled means the panel committed to an answer: at least one snapshot row,
+        or the empty state.
+        """
+        tab = self._tab(environment_id)
+        deadline = time.time() + _LIST_SETTLE_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            if await tab.locator("[data-testid=environment-backup-row]").count() > 0:
+                return
+            if await tab.locator("[data-testid=environment-backups-empty]").count() > 0:
+                return
+            await asyncio.sleep(0.5)
+        raise ScenarioTimeout(
+            "environment backups list rendered neither a snapshot row nor the "
+            f"empty state within {_LIST_SETTLE_TIMEOUT_SECONDS}s on environment "
+            f"{environment_id} — the query may have failed (the panel renders an "
+            "ErrorState carrying no test hook)"
+        )
 
     def _tab(self, environment_id: str) -> Locator:
         return self._page.locator(
@@ -422,6 +463,39 @@ class EnvironmentBackupsTabPage:
             f"[data-testid=environment-backup-row]"
             f"[data-environment-backup-id='{environment_backup_id}']"
         ).first
+
+    async def _find_row(
+        self,
+        environment_backup_id: str,
+        *,
+        timeout: float = _ROW_APPEAR_TIMEOUT_SECONDS,
+    ) -> Locator | None:
+        """Return a snapshot row, or ``None`` once ``timeout`` proves it absent.
+
+        Polls rather than reading once: the list refetches on a 10s interval, so
+        a snapshot created or changed out of band (or one whose row is rendering
+        from a refetch triggered by a mutation) needs a moment to land. Returning
+        ``None`` only after the wait keeps "absent" a real answer — which is what
+        makes ``get_environment_backup`` a sound cascade-delete assertion.
+        """
+        deadline = time.time() + timeout
+        while True:
+            row = self._row(environment_backup_id)
+            if await row.count() > 0:
+                return row
+            # The empty state is a *positive* "no snapshots at all" answer, so a
+            # cascade delete of the last snapshot resolves at once instead of
+            # burning the whole budget waiting for a row that cannot come.
+            if (
+                await self._page.locator(
+                    "[data-testid=environment-backups-empty]"
+                ).count()
+                > 0
+            ):
+                return None
+            if time.time() >= deadline:
+                return None
+            await asyncio.sleep(1.0)
 
     # ------------------------------------------------------------------
     # Reads
@@ -480,8 +554,8 @@ class EnvironmentBackupsTabPage:
     ) -> EnvironmentBackupRef | None:
         """Read a snapshot row, or ``None`` when the list no longer shows it."""
         await self._ensure_on_tab(environment_id=environment_id)
-        row = self._row(environment_backup_id)
-        if await row.count() == 0:
+        row = await self._find_row(environment_backup_id)
+        if row is None:
             return None
         context = f"environment backup row {environment_backup_id}"
         await self._ensure_expanded(row, context=context)
@@ -652,8 +726,8 @@ class EnvironmentBackupsTabPage:
         descriptive error rather than a click that silently does nothing.
         """
         await self._ensure_on_tab(environment_id=environment_id)
-        row = self._row(environment_backup_id)
-        if await row.count() == 0:
+        row = await self._find_row(environment_backup_id)
+        if row is None:
             raise ScenarioActionError(
                 f"environment backup {environment_backup_id} is not listed on "
                 f"environment {environment_id}"
@@ -780,8 +854,8 @@ class EnvironmentBackupsTabPage:
         snapshot is the documented escape hatch (spec FR-010).
         """
         await self._ensure_on_tab(environment_id=environment_id)
-        row = self._row(environment_backup_id)
-        if await row.count() == 0:
+        row = await self._find_row(environment_backup_id)
+        if row is None:
             raise ScenarioActionError(
                 f"environment backup {environment_backup_id} is not listed on "
                 f"environment {environment_id}"
