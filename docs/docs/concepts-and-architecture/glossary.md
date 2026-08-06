@@ -64,6 +64,12 @@ scale) act on the Component as a unit.
 overrides the Application Driver Version's default Component config.
 First-class to the deployment-config feature.
 
+**Constituent backup / constituent restore** — An ordinary
+per-deployment backup (or restore) that belongs to an **Environment
+backup** (or **Environment restore**). Constituents stay individually
+listable, deletable, and subject to per-backup retention. See [Backups
+and restores](./backups-and-restores.md#backing-up-a-whole-environment).
+
 **Context (GlobalContext)** — The resolved configuration snapshot
 both the **server** and the **agent** act on. Embedded in both the
 **Instance**'s `context` field and the **StyrminDeployment** CRD spec.
@@ -95,6 +101,20 @@ FluxCD, Prefect, and supporting services — no mocks.
 **Environment** — A logical deployment target inside a **Cluster** —
 `dev`, `staging`, `prod`, etc. Groups Deployments that share a
 lifecycle and a Backup Storage Location.
+
+**Environment backup** — A coordinated, near-consistent snapshot of one
+Environment: its config as of backup time, the declared state of every
+eligible Deployment, and one **constituent backup** per eligible
+Deployment, grouped under a single record whose status is derived from
+its constituents. Deleting it cascades to its constituents. See [Backups
+and restores](./backups-and-restores.md#backing-up-a-whole-environment).
+
+**Environment restore** — The coordinated operation that reapplies an
+Environment backup's captured config and restores every usable
+constituent backup **in place**, into the Deployment it came from.
+Reports every constituent it could not restore with a deployment name
+and reason; never creates or deletes Deployments. Requires the
+administrator role.
 
 ### F
 

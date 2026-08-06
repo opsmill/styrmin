@@ -4,6 +4,8 @@
 
 The backup/restore system provides component-level backup and restore operations for deployed application instances, built on top of Velero for Kubernetes-native volume snapshots. It supports multiple backup strategies per component and uses a two-worker architecture to separate orchestration from Kubernetes operations.
 
+A coordinated **environment** scope sits on top of that per-instance machinery without modifying it — see [Environment-Level Backup & Restore](#environment-level-backup--restore).
+
 ```text
 GraphQL Mutation (createBackup / createRestore)
         |
@@ -109,6 +111,7 @@ class Backup(StyrminModel, table=True):
     status: BackupStatus          # PENDING, IN_PROGRESS, COMPLETED, FAILED
     instance_id: UUID             # FK to ApplicationInstance
     schedule_id: UUID | None      # FK to BackupSchedule (for scheduled backups)
+    environment_backup_id: UUID | None  # FK to EnvironmentBackup (constituent membership)
     started_at: datetime | None
     completed_at: datetime | None
     size_bytes: int | None
@@ -141,6 +144,7 @@ class Restore(StyrminModel, table=True):
     backup_id: UUID               # FK to Backup
     target_namespace: str         # K8s namespace to restore into
     target_instance_id: UUID | None  # Optional target instance
+    environment_restore_id: UUID | None  # FK to EnvironmentRestore (constituent membership)
     component_statuses: dict      # JSON: component-level restore status
     metadata_: dict
 ```
@@ -181,6 +185,21 @@ class BackupSchedule(StyrminModel, table=True):
 | `get_restores(backup_id, uow, status)` | List restores for backup |
 | `update_restore_status(restore_id, status, uow, ...)` | Update restore status |
 | `update_restore_component_status(restore_id, component_name, ...)` | Update component restore status |
+
+### Environment Operations (`services/backup/environment.py`)
+
+Detail in [Environment-Level Backup & Restore](#environment-level-backup--restore).
+
+| Function | Description |
+|----------|-------------|
+| `create_environment_backup(environment_id, uow, name, prefect_manager)` | Capture config + declared state, then fan out one constituent backup per eligible deployment |
+| `restore_environment_backup(environment_backup_id, uow, prefect_manager)` | Revert captured config, then fan out constituent restores; skips are classified up front |
+| `get_environment_backup` / `get_environment_backups(environment_id, ...)` | Read one snapshot / an environment's snapshots (newest first) |
+| `get_environment_restore` / `get_environment_restores(environment_backup_id, ...)` | Read one restore / a snapshot's restores (newest first) |
+| `delete_environment_backup(environment_backup_id, uow)` | Cascade-delete constituents, their restores, the snapshot's environment restores, and the parent. No status guard |
+| `delete_environment_backups_for_environment(environment_id, uow)` | Environment-deletion arm of the same cascade; called by `delete_environment` |
+| `derive_environment_operation_status(children_statuses, error_count)` | Pure derivation of both parents' status; never stored |
+| `is_eligible_for_environment_backup(deployment)` | Non-tombstoned, non-internal, has an active instance |
 
 ### Scheduler (`services/backup/scheduler.py`)
 
@@ -303,6 +322,281 @@ The agent's status reporter maps CRD `displayState` to `deployment.status` (see 
 | `Restoring` | `RESTORING` |
 | `Error` | `FAILED` |
 
+## Environment-Level Backup & Restore
+
+Everything above is per-instance. `services/backup/environment.py` adds a
+coordinated environment scope on top of it **without touching any of it**: no
+new Prefect flows, no changes to `execute_backup_workflow` /
+`execute_restore_workflow`, no new backup strategies. An environment backup is
+a parent record plus a fan-out loop over the existing `create_backup` /
+`create_restore` services.
+
+The design decisions are recorded in
+[ADR-055](../../adr/0055-environment-backup-parent-records.md); this section
+describes the resulting flow.
+
+### Fan-out
+
+```text
+GraphQL Mutation (createEnvironmentBackup)
+        |
+        v
+  create_environment_backup  (services/backup/environment.py)
+        |   1. resolve environment, guard concurrency (derived, see below)
+        |   2. filter eligible deployments
+        |   3. capture environment_config + one DeploymentSnapshot each
+        |   4. create EnvironmentBackup row  --> COMMIT (before any dispatch)
+        v
+  for each captured snapshot:            <-- per-item try/except (ADR-0012)
+        |
+        +--> resolve_backup_target(instance_id)
+        +--> create_backup(..., environment_backup_id=<parent>)
+        +--> prefect_manager.run_action(EXECUTE_BACKUP)
+        |
+        |   creation failure  -> ConstituentError recorded, loop continues
+        |   dispatch failure  -> Backup row stays PENDING, loop continues
+        v
+  constituent_errors persisted, audit line emitted, parent returned
+```
+
+From there each constituent is an ordinary backup: the same INTERNAL/USER
+two-worker flow, the same Velero objects, the same `update_backup_status`
+writer, the same TTL resolution. The parent has **no writer at all** — which
+is why nothing downstream had to change.
+
+Structured audit lines mirror ADR-0012's `env_config_fanout_dispatched`:
+
+```text
+env_backup_fanout_dispatched environment_id=… environment_backup_id=… evaluated=… dispatched=… conflict=… dispatch_failed=…
+env_restore_fanout_dispatched environment_id=… environment_backup_id=… environment_restore_id=… evaluated=… restored=… skipped=… config_redeployed=… dispatch_failed=…
+```
+
+### Data models
+
+Neither parent table has a status column — see [Derived
+status](#derived-status) below. Both ship in one Alembic revision
+(`c1d2e3f4a5b6`), which also adds the two nullable FK columns on `Backup` and
+`Restore`. No new DB enums.
+
+```python
+class EnvironmentBackup(StyrminModel, table=True):
+    name: str                      # unique; defaults to styrmin-envbackup-<id>
+    environment_id: UUID           # FK to Environment (non-nullable)
+    environment_config: dict | None    # JSON: Environment.config at backup time
+    deployment_snapshots: list | None  # JSON: list[DeploymentSnapshot]
+    constituent_errors: list | None    # JSON: list[ConstituentError]
+    backups: list[Backup]              # constituents, via Backup.environment_backup_id
+    restores: list[EnvironmentRestore]
+
+
+class EnvironmentRestore(StyrminModel, table=True):
+    environment_backup_id: UUID        # FK to EnvironmentBackup (non-nullable)
+    skipped_constituents: list | None  # JSON: list[SkippedConstituent]
+    restores: list[Restore]            # constituents, via Restore.environment_restore_id
+```
+
+The three JSON shapes are Pydantic models in the service module, stored as
+plain JSON (the `Backup.component_statuses` / `metadata_` precedent):
+
+| Model | Fields | Purpose |
+|-------|--------|---------|
+| `DeploymentSnapshot` | `deployment_id`, `deployment_name`, `instance_id`, `driver_name`, `driver_version`, `driver_fingerprint`, `application_version`, `config`, `parameters` | Declared state of one eligible deployment. Records the ADR-0053 provenance fingerprint, not just the version string, so a future clone can tell whether the same driver content is still loaded. An unresolvable driver version degrades the driver fields to empty strings rather than failing the snapshot. |
+| `ConstituentError` | `deployment_id`, `deployment_name`, `error` | A constituent that never got a `Backup` row — most often `BackupAlreadyInProgressError`, which `create_backup` raises *before* row creation. |
+| `SkippedConstituent` | `deployment_id`, `deployment_name`, `reason` | A constituent that was not restored. `reason` is free text, not a closed enum on the wire. |
+
+`deployment_snapshots` is the record of what *should* be in the snapshot;
+linked `Backup` rows are what *is*. The difference is the gap left by an
+individually deleted constituent, and it is surfaced rather than hidden — the
+`constituents` GraphQL resolver joins snapshots ⋈ linked backups ⋈
+`constituent_errors` and returns an entry per snapshot with `backup`, `error`,
+or neither.
+
+### Derived status
+
+`derive_environment_operation_status(children_statuses, error_count)` is a pure
+function, called on every read, shared by both parents:
+
+```text
+any child PENDING/IN_PROGRESS  -> IN_PROGRESS
+                                  (narrowing to PENDING when every child is
+                                   PENDING and error_count == 0)
+all children terminal, over (terminal children + error_count):
+    no failures                -> COMPLETED
+    some completed, some not   -> PARTIAL
+    nothing completed          -> FAILED
+    no children, no errors     -> COMPLETED   (config-only snapshot)
+```
+
+Inputs per parent:
+
+| Parent | `children_statuses` | `error_count` |
+|--------|---------------------|---------------|
+| `EnvironmentBackup` | linked `Backup.status` values | `len(constituent_errors)` |
+| `EnvironmentRestore` | linked `Restore.status` values | `len(skipped_constituents)` |
+
+Storing this was rejected outright: a stored parent status is a second source
+of truth that can contradict its children after a crash or a race between
+concurrent child completions, and the spec requires that contradiction be
+*impossible*, not merely unlikely. Deriving it also means the existing flows
+need no parent-update callback. The closest prior art is
+`update_backup_component_status`, which derives a parent status from a child
+map — but stores it, and collapses mixed outcomes to `FAILED`. This lifts the
+derivation, adds `PARTIAL`, and drops the storage.
+
+The `EnvironmentBackupStatus` / `EnvironmentRestoreStatus` GraphQL enums both
+project the same service-layer `EnvironmentOperationStatus`.
+
+#### Terminal status is not convergence — two caveats
+
+**A fresh snapshot reads `COMPLETED` before its constituents exist.** The
+parent is committed before the fan-out starts (ADR-0012 commit-before-dispatch),
+so in the window between that commit and the first `create_backup` a snapshot
+has zero children and zero errors — which derives to `COMPLETED`. The mutation's
+own return value is taken after the loop, so it is accurate; any *independent*
+read racing the fan-out (frontend auto-refresh, `wait_for_backup`, a
+concurrent `environmentBackup` query) can observe the window. Terminal status is
+not evidence the fan-out finished — compare the constituent count against
+`deployment_snapshots`. This is why the E2E asserts constituent counts rather
+than status alone.
+
+**A terminal restore does not mean the environment has converged.** The
+constituent data restores are done, but the reverted config is still
+propagating to the deployments that did *not* receive a constituent restore.
+That propagation is tracked by those deployments' own `Task` rows, not by the
+`EnvironmentRestore`.
+
+### Eligibility
+
+`is_eligible_for_environment_backup(deployment)` — non-tombstoned, not
+`internal`, and carrying an active application instance. Deployment *state* is
+irrelevant: a `FAILED` deployment with an active instance still contributes a
+constituent. The list comes from `uow.deployments.find_all_by_environment`
+(which already excludes tombstones); the predicate repeats the check so it is
+correct on any deployment list.
+
+Note that every real environment carries at least one `internal` deployment
+(its ingress controller), so "one constituent per deployment" is always "one
+constituent per *eligible* deployment" in practice.
+
+### Concurrency guard
+
+`_guard_no_environment_operation_in_progress` raises
+`EnvironmentOperationInProgressError` (`ALREADY_IN_PROGRESS`, metadata carrying
+the in-flight operation's id and kind) when the environment already has an
+environment-level backup or restore in flight. "In flight" is itself derived —
+repository `EXISTS` queries (`has_in_progress_environment_backup` /
+`has_in_progress_environment_restore`) over linked children in
+`PENDING`/`IN_PROGRESS` — so there is no lock row to leak if a process dies.
+
+Two consequences worth knowing:
+
+- **A stuck constituent pins the environment.** Dispatch is fire-and-forget; a
+  constituent whose flow never ran stays `PENDING`, so its parent stays
+  non-terminal and the guard keeps rejecting new operations. Deletion is the
+  escape hatch, which is why `delete_environment_backup` has no status guard.
+- **Two racing create calls can both pass the check.** Accepted: the
+  per-instance `has_in_progress_backup` guard then turns the loser's
+  constituents into recorded `ConstituentError`s (a `PARTIAL` outcome) rather
+  than corrupting anything. A DB advisory lock was rejected as disproportionate
+  machinery for the window.
+
+### Restore ordering
+
+`restore_environment_backup` runs five steps in one service function, in this
+order:
+
+1. **Guard.** Snapshot exists; its *derived* status is `COMPLETED` or `PARTIAL`
+   (else `EnvironmentBackupNotRestorableError`, `OPERATION_DENIED`); no
+   environment-level operation in flight.
+2. **Classify** every captured constituent as usable or skipped, and persist
+   the skips on the new `EnvironmentRestore` row at creation time.
+3. **Revert `Environment.config`** to the captured value, recompute
+   capabilities, **commit before any dispatch**.
+4. **Exclusion-aware config fan-out**: `redeploy_for_environment_update` for
+   every eligible deployment *not* receiving a constituent restore.
+5. **Dispatch constituent restores**: `create_restore(..., environment_restore_id=…)`
+   + `EXECUTE_RESTORE` per usable constituent.
+
+Why the exclusion in step 4 is load-bearing: a deployment receiving a Velero
+data restore is being returned to its backup-time state, and its restored
+in-cluster resources already correspond to the captured config (both came from
+the same near-consistent snapshot). Redeploying it via the config fan-out
+*while* Velero restores the same namespace races apply-state against the
+restore with an undefined outcome. Excluding restored deployments removes the
+race by construction while still converging everything: restored deployments
+via Velero, the rest via the standard fan-out.
+
+Two implementation details that are easy to get wrong:
+
+- **The config revert assigns `Environment.config` directly** — it does *not*
+  delegate to `update_environment`, which treats `config is None` as an
+  idempotent no-op and would silently make a captured `None` config
+  unrestorable.
+- **A `RestoreAlreadyInProgressError` in step 5 downgrades to a skip**, never
+  an abort. Late skips are appended to `skipped_constituents` after the
+  dispatch loop.
+
+### Skip classification
+
+`_classify_constituents` returns `(usable, skipped)`. The reasons come from the
+`SkipReason` enum, stored as its `str` values:
+
+| `SkipReason` | Value | Condition |
+|--------------|-------|-----------|
+| `BACKUP_FAILED_AT_CREATION` | `backup failed at creation` | The snapshot recorded a `ConstituentError` for this deployment. |
+| `BACKUP_NOT_COMPLETED` | `backup not completed` | Linked `Backup` exists but its status is not `COMPLETED`. |
+| `BACKUP_DELETED` | `backup deleted` | No linked `Backup` row and no recorded error — deleted individually. |
+| `BACKUP_EXPIRED` | `backup expired` | `expires_at < now`, derived from `Backup.metadata_`. |
+| `DEPLOYMENT_GONE` | `deployment no longer exists` | Deployment row missing or tombstoned. |
+| `DEPLOYMENT_BUSY` | `deployment busy with another restore` | Deployment already `RESTORING` from a separately started restore. |
+
+Plus one escape hatch outside the enum: `restore could not be created: <exc>`,
+appended as a late skip when `create_restore` fails for any other reason.
+
+`BACKUP_EXPIRED` is the subtle one. Velero garbage-collects expired backup data
+cluster-side but never updates the DB row, so **an expired constituent still
+reads `COMPLETED`**. Classification therefore computes expiry from the
+recorded TTL metadata (`_backup_expires_at`, the same derivation the
+`Backup.expiresAt` resolver uses) rather than trusting `status`. Without this,
+a restore would dispatch a Velero restore for data that no longer exists and
+fail at the Velero step instead of reporting an honest skip.
+
+### Cascade delete
+
+`delete_environment_backup` runs the cascade in FK-dependency order: every
+constituent via the existing `delete_backup` (which already deletes each
+backup's `Restore` rows, taking the environment restores' constituents with
+them), then the snapshot's now-childless `EnvironmentRestore` rows, then the
+parent. A constituent that vanished in the meantime is a no-op, not an error.
+
+**There is deliberately no status guard** — deleting a snapshot whose
+constituents are still in flight is the documented escape hatch for an
+environment pinned by a stuck constituent (see [Concurrency
+guard](#concurrency-guard)).
+
+`delete_environment_backups_for_environment` is the environment-deletion arm:
+`services/environments.py::delete_environment` calls it *before* deleting the
+environment row, because `environmentbackup.environment_id` is a non-nullable
+FK and would otherwise turn environment deletion into a constraint violation
+surfacing as an opaque `INTERNAL_ERROR`.
+
+### Typed errors
+
+| Error | Code | Raised when |
+|-------|------|-------------|
+| `EnvironmentBackupNotFoundError` | `NOT_FOUND` | Snapshot id does not resolve. |
+| `EnvironmentOperationInProgressError` | `ALREADY_IN_PROGRESS` | An environment-level operation is already in flight for the environment. |
+| `EnvironmentBackupNotRestorableError` | `OPERATION_DENIED` | Derived status is not `COMPLETED` or `PARTIAL`. |
+
+### Authorization asymmetry
+
+`createEnvironmentBackup` and `deleteEnvironmentBackup` require `READ_WRITE`,
+matching per-instance `createBackup` / `deleteBackup`.
+`restoreEnvironmentBackup` requires **`ADMIN`**: it rewrites
+`Environment.config`, which is exactly what `updateEnvironment` does, and that
+mutation is `ADMIN`. Granting config-mutation-by-restore to `READ_WRITE` would
+be a privilege bypass. No new roles or permission concepts (ADR-0017).
+
 ## GraphQL API
 
 ### Queries
@@ -314,6 +608,10 @@ restore(restoreId: UUID!): Restore
 restores(backupId: UUID!, status: RestoreStatus): [Restore!]!
 backupSchedule(scheduleId: UUID!): BackupSchedule
 backupSchedules(deploymentId: UUID!): [BackupSchedule!]!
+environmentBackup(environmentBackupId: UUID!): EnvironmentBackup
+environmentBackups(environmentId: UUID!): [EnvironmentBackup!]!
+environmentRestore(environmentRestoreId: UUID!): EnvironmentRestore
+environmentRestores(environmentBackupId: UUID!): [EnvironmentRestore!]!
 ```
 
 ### Mutations
@@ -325,6 +623,9 @@ createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID)
 createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int, enabled: Boolean): BackupSchedule!
 updateBackupSchedule(scheduleId: UUID!, name: String, cronExpression: String, retentionCount: Int, enabled: Boolean): BackupSchedule!
 deleteBackupSchedule(scheduleId: UUID!): String!
+createEnvironmentBackup(environmentId: UUID!, name: String): EnvironmentBackup!   # READ_WRITE
+restoreEnvironmentBackup(environmentBackupId: UUID!): EnvironmentRestore!         # ADMIN
+deleteEnvironmentBackup(environmentBackupId: UUID!): Boolean!                     # READ_WRITE
 ```
 
 ### Retention fields on `Backup`
@@ -414,12 +715,16 @@ for the stamp to move and fails fast on a `Failed` entry in
 | File | Purpose |
 |------|---------|
 | [services/backup/service.py](backend/styrmin_backend/services/backup/service.py) | Backup and restore service functions |
+| [services/backup/environment.py](backend/styrmin_backend/services/backup/environment.py) | Environment-level fan-out, snapshot capture, derived status, classification, cascades |
 | [services/backup/ttl.py](backend/styrmin_backend/services/backup/ttl.py) | Retention default, validation, and deepest-wins scope resolution |
 | [services/backup/scheduler.py](backend/styrmin_backend/services/backup/scheduler.py) | Backup schedule management |
 | [services/backup/strategies/](backend/styrmin_backend/services/backup/strategies/) | Backup strategy implementations |
 | [workflows/templates/backup.py](backend/styrmin_backend/workflows/templates/backup.py) | Prefect workflow templates for backup/restore |
 | [agent/service/kubernetes/resources/builders/backup.py](backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup.py) | Velero CRD builders |
 | [agent/service/kubernetes/resources/builders/backup_annotations.py](backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup_annotations.py) | Volume annotation patches |
+| [api/definitions/backup/environment_backup.py](backend/styrmin_backend/api/definitions/backup/environment_backup.py) | `EnvironmentBackup` strawberry types incl. the derived-status and constituents resolvers |
+| [api/definitions/backup/environment_restore.py](backend/styrmin_backend/api/definitions/backup/environment_restore.py) | `EnvironmentRestore` strawberry types incl. skipped constituents |
 | [repository/backup.py](backend/styrmin_backend/repository/backup.py) | Backup data access |
 | [repository/restore.py](backend/styrmin_backend/repository/restore.py) | Restore data access |
+| [repository/environment_backup.py](backend/styrmin_backend/repository/environment_backup.py) | Environment backup/restore data access and the in-progress `EXISTS` guards |
 | [repository/backup_schedule.py](backend/styrmin_backend/repository/backup_schedule.py) | Schedule data access |

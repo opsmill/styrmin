@@ -57,12 +57,16 @@ How long **Velero** keeps a backup before garbage-collecting it, as a strictly p
 _Avoid_: "retention policy" unqualified (ambiguous with `retention_count`), "backup expiry" (that is the resulting timestamp, `Backup.expiresAt`), bare "TTL" (overloaded with the Velero polling timeout).
 
 **Environment backup**:
-A coordinated, near-consistent snapshot of an **environment**: its **config** as of backup time, the declared state of every eligible **deployment** (non-tombstoned, non-internal, with an active **application instance**), and one constituent **Velero** backup per eligible instance — grouped under a single `EnvironmentBackup` record whose status (`completed` / `partial` / `failed`) is derived from its children. Deleting it cascade-deletes its constituent backups. See [issue #7](https://github.com/opsmill/styrmin/issues/7).
+A coordinated, near-consistent snapshot of an **environment**: its **config** as of backup time, the declared state of every eligible **deployment** (non-tombstoned, non-internal, with an active **application instance**), and one **constituent backup** per eligible instance — grouped under a single `EnvironmentBackup` record. Its status (`PENDING` / `IN_PROGRESS` / `COMPLETED` / `PARTIAL` / `FAILED`) is **derived from its constituents on every read and never stored**, so it cannot contradict them. Deleting it cascade-deletes its constituent backups and their restores, and is legal regardless of status (the escape hatch for a snapshot pinned in progress). See [issue #7](https://github.com/opsmill/styrmin/issues/7) and [ADR-055](dev/adr/0055-environment-backup-parent-records.md).
 _Avoid_: "env snapshot", "full backup" (ambiguous with a per-instance backup), "environment export".
 
 **Environment restore**:
-The coordinated operation that reapplies an **environment backup**'s captured **config** and restores every usable constituent backup into its still-existing **deployment**, in place — restoring what's usable and reporting what isn't; it never creates or deletes deployments. Tracked by an `EnvironmentRestore` record with derived status.
+The coordinated operation that reapplies an **environment backup**'s captured **config** and restores every usable **constituent backup** into its still-existing **deployment**, in place — restoring what's usable and reporting what isn't (every non-restored constituent is attributed with a deployment name and a free-text reason); it never creates or deletes deployments. Tracked by an `EnvironmentRestore` record whose status is derived the same way. Requires the `ADMIN` role, unlike creating or deleting an **environment backup** — it rewrites `Environment.config`, the same privilege `updateEnvironment` needs.
 _Avoid_: "environment rollback" (implies topology reversion), "environment recovery" (broader DR concept).
+
+**Constituent backup / constituent restore**:
+An ordinary per-instance `Backup` (or per-deployment `Restore`) row that belongs to an **environment backup** (or **environment restore**), linked by the nullable FK `Backup.environment_backup_id` / `Restore.environment_restore_id`. Constituents keep their existing semantics entirely — individually listable, deletable, and expiring under the **backup retention TTL**. A null FK is a standalone backup or restore.
+_Avoid_: "child backup", "sub-backup", "member backup", "partial backup" (that describes an outcome, not membership).
 
 ### Application drivers
 
