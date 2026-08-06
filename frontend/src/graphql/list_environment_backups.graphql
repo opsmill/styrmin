@@ -1,0 +1,21 @@
+query ListEnvironmentBackups($environmentId: UUID!) {
+  environmentBackups(environmentId: $environmentId) {
+    id
+    name
+    status
+    createdOn
+    constituents {
+      deploymentId
+      deploymentName
+      error
+      backup {
+        id
+        name
+        status
+        completedAt
+        sizeBytes
+        errorMessage
+      }
+    }
+  }
+}
