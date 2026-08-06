@@ -70,6 +70,9 @@ A platform operator inspects existing environment backups — seeing each snapsh
 - **Topology drift**: restore never creates or deletes deployments. Deployments created after the backup keep their data; they do receive the reverted environment config via the existing config propagation behavior (documented as correct).
 - **Concurrent environment-level operations**: at most one environment backup *or* environment restore in progress per environment; a second request receives a typed error. Different environments are fully independent. Per-instance guards are unchanged.
 - **Piecewise expiry**: constituents expire individually per the existing deepest-wins backup retention TTL, so a snapshot decays piecewise; the parent record persists until explicitly deleted, even if all constituents have expired.
+- **Deployment busy at restore time**: a constituent whose deployment is already mid-restore (an individual restore started separately) is skipped and reported ("deployment busy with another restore") — the environment restore never aborts or waits because of it.
+- **Stuck constituent**: if a constituent backup never leaves `PENDING` (e.g. its work was never picked up), the environment backup reads as in-progress indefinitely and the concurrency rule blocks new environment-level operations. The escape hatch is deletion: an environment backup can be deleted regardless of its status, which releases the environment for new operations.
+- **Environment deletion**: deleting an environment deletes its environment backups (and their environment restores) with the same cascade as deleting an environment backup directly. In v1, snapshots do not outlive their environment; the future clone extension may revisit this.
 
 ## Requirements *(mandatory)*
 
@@ -81,14 +84,15 @@ A platform operator inspects existing environment backups — seeing each snapsh
 - **FR-004**: The status of an environment backup and of an environment restore MUST be purely derived from their constituents: `COMPLETED` (all constituents completed), `PARTIAL` (at least one completed and at least one not), `FAILED` (all failed), plus `PENDING`/`IN_PROGRESS` while work is ongoing. A stored parent status that contradicts its constituents MUST NOT be possible.
 - **FR-005**: A per-instance conflict at backup time (backup already in progress for that instance) MUST be recorded as a failed constituent with an attributable error and MUST NOT abort, block, or delay the rest of the environment backup.
 - **FR-006**: Users MUST be able to restore a `COMPLETED` or `PARTIAL` environment backup with a single operation: the environment's captured config is reapplied and every usable constituent backup is restored in place into its still-existing deployment, without further operator input.
-- **FR-007**: Every constituent that is not restored (failed at backup, expired, constituent deleted, deployment gone) MUST be reported with its deployment name and reason. Zero silent skips.
+- **FR-007**: Every constituent that is not restored (failed at backup, expired, constituent deleted, deployment gone, or deployment busy with another restore) MUST be reported with its deployment name and reason. Zero silent skips.
 - **FR-008**: An environment restore MUST NOT create or delete deployments.
 - **FR-009**: The system MUST reject a second concurrent environment-level operation (backup or restore) on the same environment with a typed, machine-readable error. Environment-level operations on different environments MUST NOT block each other, and per-instance operation guards remain unchanged.
-- **FR-010**: Deleting an environment backup MUST delete its constituent backups and any restores of those backups. Constituent backups MUST remain individually deletable, with the parent surviving and the gap visible.
+- **FR-010**: Deleting an environment backup MUST delete its constituent backups and any restores of those backups, and MUST be possible regardless of the environment backup's status (this is the escape hatch for an operation stuck in progress). Constituent backups MUST remain individually deletable, with the parent surviving and the gap visible.
 - **FR-011**: Backing up an environment with zero eligible deployments MUST yield a config-only environment backup that immediately reports `COMPLETED`.
 - **FR-012**: Environment backup and restore MUST be available on all four user surfaces with equivalent capability: the programmatic API, the client SDK, the command-line client, and the web frontend (a backups section on the environment detail page: trigger backup, list snapshots with derived status, trigger restore, inspect per-constituent outcomes).
 - **FR-013**: Users MUST be able to list environment backups per environment and inspect a single environment backup or environment restore, including per-constituent status and errors.
 - **FR-014**: Constituent backups MUST behave as ordinary individual backups for retention: expiry stays per-constituent with the existing deepest-wins retention TTL resolution. The environment backup record persists until explicitly deleted, even when all constituents have expired.
+- **FR-015**: Deleting an environment MUST delete its environment backups and their environment restores, using the same cascade as deleting an environment backup directly.
 
 ### Key Entities
 
@@ -118,7 +122,8 @@ A platform operator inspects existing environment backups — seeing each snapsh
 - **Capabilities are computed, never captured**: environment capabilities are recomputed after restore per the existing model (ADR-0027), not stored in the snapshot.
 - **Storage model unchanged**: the backup-storage-location-per-environment model is untouched; constituents store to the environment's assigned location exactly as individual backups do today.
 - **Config propagation**: reverting the environment config flows through the existing environment-config propagation behavior (ADR-0012), including to deployments created after the backup — documented as correct.
-- **Authorization**: environment backup/restore operations follow the existing authorization model (ADR-0017); no new roles or permission concepts.
+- **Authorization**: environment backup/restore operations follow the existing authorization model (ADR-0017); no new roles or permission concepts. Note the deliberate asymmetry: creating/deleting environment backups requires the same role as per-instance backups, but **restoring an environment backup requires the administrator role**, because it reverts the environment's config — the same privilege required to update an environment's config directly. User surfaces gate the restore action accordingly.
+- **Terminal status vs. convergence**: an environment restore's status can read as finished while the environment-config propagation to non-restored deployments is still converging in the background (propagation is tracked by the existing per-deployment task records, not by the restore). This matches the feature's near-consistent semantics and today's per-instance behavior; documentation states it explicitly.
 
 ## Out of Scope (v1)
 

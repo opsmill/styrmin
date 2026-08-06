@@ -79,8 +79,9 @@ type SkippedConstituent {
 Behavioral notes:
 - `createEnvironmentBackup` returns synchronously after all constituent backups are created + dispatched (fire-and-forget flows); the returned object's `status` is typically `PENDING`/`IN_PROGRESS`. Empty environment → zero constituents, `status: COMPLETED` immediately.
 - A per-instance conflict during fan-out becomes a `constituents[].error` entry — it never fails the mutation.
-- `restoreEnvironmentBackup` classifies skips at creation time; `skippedConstituents` is complete in the mutation response.
-- `deleteEnvironmentBackup` cascade-deletes constituent backups (and their restores) and the parent's `EnvironmentRestore` records.
+- `restoreEnvironmentBackup` classifies skips at creation time; `skippedConstituents` is complete in the mutation response. Skip reasons include "deployment busy with another restore" when a constituent's deployment is already mid-restore.
+- `deleteEnvironmentBackup` cascade-deletes constituent backups (and their restores) and the parent's `EnvironmentRestore` records. It succeeds **regardless of derived status** — deleting an in-progress environment backup is the documented escape hatch (spec FR-010).
+- `deleteEnvironment` (existing mutation) cascades through the environment's environment backups first (spec FR-015).
 
 ## Queries
 
