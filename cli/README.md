@@ -100,6 +100,32 @@ environment with no eligible deployments yields a config-only snapshot that is
 exits non-zero on `PARTIAL` or `FAILED`, printing the deployment name and reason
 for every constituent that did not complete.
 
+### Restoring an environment snapshot
+
+`env-backups restore` is the coordinated counterpart of `backups restore`: it
+reverts the environment config to the captured value and restores every usable
+constituent backup in place, into its existing deployment. It never creates or
+deletes deployments. Restoring requires the **ADMIN** role, because reverting
+the environment config carries the same privilege as editing it.
+
+```bash
+# Restore a whole environment snapshot in place
+uv run styrminctl env-backups restore <environment-backup-id>
+uv run styrminctl env-backups restore <environment-backup-id> --wait
+
+# Inspect one restore, or list every restore made from a snapshot (newest first)
+uv run styrminctl env-backups restore-get <environment-restore-id>
+uv run styrminctl env-backups restore-list <environment-backup-id>
+```
+
+Only a `COMPLETED` or `PARTIAL` snapshot can be restored; anything else is
+refused. Every constituent that is **not** restored is printed with its
+deployment name and reason — a backup that failed at creation, never completed,
+was deleted, or expired; a deployment that no longer exists; or a deployment
+already busy with another restore. There are no silent skips. Like
+`create --wait`, `restore --wait` exits non-zero on `PARTIAL` as well as
+`FAILED`.
+
 ## Authentication
 
 `styrminctl` supports three credential flows. Pick one per environment.

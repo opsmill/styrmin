@@ -1645,6 +1645,13 @@ export type ListEnvironmentBackupsQueryVariables = Exact<{
 
 export type ListEnvironmentBackupsQuery = { __typename?: 'Query', environmentBackups: Array<{ __typename?: 'EnvironmentBackup', id: string, name: string, status: EnvironmentBackupStatus, createdOn: any, constituents: Array<{ __typename?: 'EnvironmentBackupConstituent', deploymentId: string, deploymentName: string, error?: string | null, backup?: { __typename?: 'Backup', id: string, name: string, status: string, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null } | null }> }> };
 
+export type ListEnvironmentRestoresQueryVariables = Exact<{
+  environmentBackupId: Scalars['UUID']['input'];
+}>;
+
+
+export type ListEnvironmentRestoresQuery = { __typename?: 'Query', environmentRestores: Array<{ __typename?: 'EnvironmentRestore', id: string, status: EnvironmentRestoreStatus, createdOn: any, environmentBackupId: string, restores: Array<{ __typename?: 'Restore', id: string, name: string, status: string, targetInstanceId?: string | null, errorMessage?: string | null }>, skippedConstituents: Array<{ __typename?: 'SkippedConstituent', deploymentId: string, deploymentName: string, reason: string }> }> };
+
 export type ListEnvironmentsQueryVariables = Exact<{
   includeDeleted?: InputMaybe<Scalars['Boolean']['input']>;
 }>;
@@ -1711,6 +1718,13 @@ export type ResetUserPasswordMutationVariables = Exact<{
 
 
 export type ResetUserPasswordMutation = { __typename?: 'Mutation', resetUserPassword: boolean };
+
+export type RestoreEnvironmentBackupMutationVariables = Exact<{
+  environmentBackupId: Scalars['UUID']['input'];
+}>;
+
+
+export type RestoreEnvironmentBackupMutation = { __typename?: 'Mutation', restoreEnvironmentBackup: { __typename?: 'EnvironmentRestore', id: string, status: EnvironmentRestoreStatus, createdOn: any } };
 
 export type UnassignBackupStorageLocationMutationVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -2916,6 +2930,47 @@ export const useListEnvironmentBackupsQuery = <
 
 useListEnvironmentBackupsQuery.getKey = (variables: ListEnvironmentBackupsQueryVariables) => ['ListEnvironmentBackups', variables];
 
+export const ListEnvironmentRestoresDocument = `
+    query ListEnvironmentRestores($environmentBackupId: UUID!) {
+  environmentRestores(environmentBackupId: $environmentBackupId) {
+    id
+    status
+    createdOn
+    environmentBackupId
+    restores {
+      id
+      name
+      status
+      targetInstanceId
+      errorMessage
+    }
+    skippedConstituents {
+      deploymentId
+      deploymentName
+      reason
+    }
+  }
+}
+    `;
+
+export const useListEnvironmentRestoresQuery = <
+      TData = ListEnvironmentRestoresQuery,
+      TError = Error
+    >(
+      variables: ListEnvironmentRestoresQueryVariables,
+      options?: Omit<UseQueryOptions<ListEnvironmentRestoresQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListEnvironmentRestoresQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListEnvironmentRestoresQuery, TError, TData>(
+      {
+    queryKey: ['ListEnvironmentRestores', variables],
+    queryFn: graphqlFetcher<ListEnvironmentRestoresQuery, ListEnvironmentRestoresQueryVariables>(ListEnvironmentRestoresDocument, variables),
+    ...options
+  }
+    )};
+
+useListEnvironmentRestoresQuery.getKey = (variables: ListEnvironmentRestoresQueryVariables) => ['ListEnvironmentRestores', variables];
+
 export const ListEnvironmentsDocument = `
     query ListEnvironments($includeDeleted: Boolean = false) {
   environments {
@@ -3181,6 +3236,29 @@ export const useResetUserPasswordMutation = <
       {
     mutationKey: ['ResetUserPassword'],
     mutationFn: (variables?: ResetUserPasswordMutationVariables) => graphqlFetcher<ResetUserPasswordMutation, ResetUserPasswordMutationVariables>(ResetUserPasswordDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const RestoreEnvironmentBackupDocument = `
+    mutation RestoreEnvironmentBackup($environmentBackupId: UUID!) {
+  restoreEnvironmentBackup(environmentBackupId: $environmentBackupId) {
+    id
+    status
+    createdOn
+  }
+}
+    `;
+
+export const useRestoreEnvironmentBackupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<RestoreEnvironmentBackupMutation, TError, RestoreEnvironmentBackupMutationVariables, TContext>) => {
+    
+    return useMutation<RestoreEnvironmentBackupMutation, TError, RestoreEnvironmentBackupMutationVariables, TContext>(
+      {
+    mutationKey: ['RestoreEnvironmentBackup'],
+    mutationFn: (variables?: RestoreEnvironmentBackupMutationVariables) => graphqlFetcher<RestoreEnvironmentBackupMutation, RestoreEnvironmentBackupMutationVariables>(RestoreEnvironmentBackupDocument, variables)(),
     ...options
   }
     )};

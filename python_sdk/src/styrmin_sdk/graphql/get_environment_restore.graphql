@@ -1,0 +1,25 @@
+query GetEnvironmentRestore($environmentRestoreId: UUID!) {
+    environmentRestore(environmentRestoreId: $environmentRestoreId) {
+        id
+        status
+        createdOn
+        updatedOn
+        environmentBackupId
+        restores {
+            id
+            name
+            status
+            backupId
+            targetNamespace
+            targetInstanceId
+            errorMessage
+            startedAt
+            completedAt
+        }
+        skippedConstituents {
+            deploymentId
+            deploymentName
+            reason
+        }
+    }
+}

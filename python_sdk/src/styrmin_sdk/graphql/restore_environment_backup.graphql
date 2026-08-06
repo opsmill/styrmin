@@ -1,0 +1,25 @@
+mutation RestoreEnvironmentBackup($environmentBackupId: UUID!) {
+    restoreEnvironmentBackup(environmentBackupId: $environmentBackupId) {
+        id
+        status
+        createdOn
+        updatedOn
+        environmentBackupId
+        restores {
+            id
+            name
+            status
+            backupId
+            targetNamespace
+            targetInstanceId
+            errorMessage
+            startedAt
+            completedAt
+        }
+        skippedConstituents {
+            deploymentId
+            deploymentName
+            reason
+        }
+    }
+}

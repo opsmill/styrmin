@@ -1,6 +1,9 @@
 """Styrmin SDK response models."""
 
-from styrmin_sdk.graphql._generated.enums import EnvironmentBackupStatus
+from styrmin_sdk.graphql._generated.enums import (
+    EnvironmentBackupStatus,
+    EnvironmentRestoreStatus,
+)
 from styrmin_sdk.graphql._generated.get_backup import GetBackupBackup as Backup
 from styrmin_sdk.graphql._generated.get_backup_schedule import (
     GetBackupScheduleBackupSchedule as BackupSchedule,
@@ -32,6 +35,12 @@ from styrmin_sdk.graphql._generated.get_environment_backup import (
 )
 from styrmin_sdk.graphql._generated.get_environment_backup import (
     GetEnvironmentBackupEnvironmentBackupDeploymentSnapshots as DeploymentSnapshot,
+)
+from styrmin_sdk.graphql._generated.get_environment_restore import (
+    GetEnvironmentRestoreEnvironmentRestore as EnvironmentRestore,
+)
+from styrmin_sdk.graphql._generated.get_environment_restore import (
+    GetEnvironmentRestoreEnvironmentRestoreSkippedConstituents as SkippedConstituent,
 )
 from styrmin_sdk.graphql._generated.get_restore import GetRestoreRestore as Restore
 from styrmin_sdk.graphql._generated.get_task import GetTaskTask as Task
@@ -96,6 +105,8 @@ __all__ = [
     "EnvironmentBackup",
     "EnvironmentBackupConstituent",
     "EnvironmentBackupStatus",
+    "EnvironmentRestore",
+    "EnvironmentRestoreStatus",
     "HelmChart",
     "ParameterValueInput",
     "ResolvedManifest",
@@ -103,6 +114,7 @@ __all__ = [
     "ResourceSpecInput",
     "Restore",
     "SchedulingInput",
+    "SkippedConstituent",
     "StandardStorageInput",
     "Task",
     "UpdateDeploymentInput",
