@@ -37,4 +37,12 @@ describe("StatusBadge", () => {
     await render(<StatusBadge status="deleted" />);
     expect(screen.getByText("Deleted")).toBeInTheDocument();
   });
+
+  it("renders Partial for the partial status", async () => {
+    // Environment backups/restores derive a PARTIAL status when some
+    // constituents succeeded and some did not. Without an entry it would fall
+    // through to the raw-string branch and read as "partial".
+    await render(<StatusBadge status="partial" />);
+    expect(screen.getByText("Partial")).toBeInTheDocument();
+  });
 });
