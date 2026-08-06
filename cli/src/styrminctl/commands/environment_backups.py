@@ -29,9 +29,20 @@ from styrminctl.types import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from styrmin_sdk import EnvironmentBackup, EnvironmentRestore, StyrminClient
+    from styrmin_sdk import EnvironmentBackupStatus, EnvironmentRestoreStatus, StyrminClient
 
 environment_backups_app = App(name="env-backups", help="Manage environment-level backups and restores.")
+
+
+#: Terminal environment-level statuses that mean "not everything worked".
+#: The mutation derives the parent status synchronously, so it can already be
+#: one of these when it returns — see :func:`create` and :func:`restore`.
+_FAILED_STATUSES = frozenset({"FAILED", "PARTIAL"})
+
+#: ``Backup.status`` is a plain string on the wire carrying the backend enum's
+#: lowercase value, unlike the uppercase ``EnvironmentBackupStatus`` enum of the
+#: parent. Compared case-insensitively so the counts survive either spelling.
+_COMPLETED_BACKUP_STATUS = "completed"
 
 
 class _BackupLike(Protocol):
@@ -55,6 +66,31 @@ class _ConstituentLike(Protocol):
 
     @property
     def backup(self) -> _BackupLike | None: ...
+
+
+class _DetailedBackupLike(_BackupLike, Protocol):
+    """A constituent backup that also carries its own failure reason.
+
+    The get and create projections select ``errorMessage``; the list projection
+    does not (it only renders counts), which is why this is a separate protocol
+    rather than a field on :class:`_BackupLike`.
+    """
+
+    @property
+    def error_message(self) -> str | None: ...
+
+
+class _DetailedConstituentLike(Protocol):
+    """A per-constituent outcome whose backup can explain its own failure."""
+
+    @property
+    def deployment_name(self) -> str: ...
+
+    @property
+    def error(self) -> str | None: ...
+
+    @property
+    def backup(self) -> _DetailedBackupLike | None: ...
 
 
 class _RestoreLike(Protocol):
@@ -81,6 +117,35 @@ class _SkippedConstituentLike(Protocol):
 
     @property
     def reason(self) -> str: ...
+
+
+class _EnvironmentBackupLike(Protocol):
+    """A snapshot as returned by either the create mutation or the get query.
+
+    Both carry the same derived status and per-constituent projection, and the
+    terminal report is reached from both paths (the mutation can already return
+    a terminal status), so the reporter is typed structurally rather than
+    against one of the two generated shapes.
+    """
+
+    @property
+    def status(self) -> EnvironmentBackupStatus: ...
+
+    @property
+    def constituents(self) -> Sequence[_DetailedConstituentLike]: ...
+
+
+class _EnvironmentRestoreLike(Protocol):
+    """A restore as returned by either the restore mutation or the get query."""
+
+    @property
+    def status(self) -> EnvironmentRestoreStatus: ...
+
+    @property
+    def restores(self) -> Sequence[_RestoreLike]: ...
+
+    @property
+    def skipped_constituents(self) -> Sequence[_SkippedConstituentLike]: ...
 
 
 async def _resolve_environment_id(
@@ -121,18 +186,19 @@ async def _resolve_environment_id(
 def _constituent_counts(constituents: Sequence[_ConstituentLike]) -> tuple[int, int, int]:
     """Return ``(ok, failed, total)`` for a snapshot's constituents.
 
-    ``ok`` counts constituents whose backup row was created — the aggregate
-    outcome of those backups is what the parent's derived ``status`` reports.
-    ``failed`` counts constituents that could not be created at all (spec
-    FR-005). Entries with neither are gaps left by individually deleted
-    constituents and show up only in the total.
+    ``ok`` counts constituents whose backup actually **completed**, not merely
+    those whose row exists: counting a created-but-failed backup as ok made a
+    ``PARTIAL`` snapshot print ``constituents: 2/0/2``, contradicting its own
+    status on one line. ``failed`` counts constituents that never got a row at
+    all (spec FR-005). Entries with neither — the gaps left by individually
+    deleted constituents — and rows still in flight show up only in the total.
     """
-    ok = sum(1 for c in constituents if c.backup is not None)
+    ok = sum(1 for c in constituents if c.backup is not None and c.backup.status.lower() == _COMPLETED_BACKUP_STATUS)
     failed = sum(1 for c in constituents if c.error is not None)
     return ok, failed, len(constituents)
 
 
-def _print_constituents(constituents: Sequence[_ConstituentLike]) -> None:
+def _print_constituents(constituents: Sequence[_DetailedConstituentLike]) -> None:
     if not constituents:
         console.print("  Constituents: none (config-only snapshot)")
         return
@@ -141,6 +207,11 @@ def _print_constituents(constituents: Sequence[_ConstituentLike]) -> None:
     for constituent in constituents:
         if constituent.backup is not None:
             detail = f"backup {constituent.backup.id} ({constituent.backup.status})"
+            if constituent.backup.error_message is not None:
+                # A constituent that failed *after* its row was created carries
+                # its own reason; without it ``--wait`` printed a bare
+                # ``backup <id> (failed)`` and left the operator to go digging.
+                detail = f"{detail} — {constituent.backup.error_message}"
         elif constituent.error is not None:
             detail = f"failed: {constituent.error}"
         else:
@@ -151,7 +222,7 @@ def _print_constituents(constituents: Sequence[_ConstituentLike]) -> None:
         console.print(f"    - {constituent.deployment_name}: {detail}")
 
 
-def _report_terminal_status(environment_backup: EnvironmentBackup) -> None:
+def _report_terminal_status(environment_backup: _EnvironmentBackupLike) -> None:
     """Print the polled outcome and exit non-zero unless every constituent completed.
 
     ``PARTIAL`` exits non-zero too: the snapshot is real and restorable, but a
@@ -201,7 +272,7 @@ def _print_skipped_constituents(skipped_constituents: Sequence[_SkippedConstitue
         console.print(f"    - {skipped.deployment_name}: {skipped.reason}")
 
 
-def _report_terminal_restore_status(environment_restore: EnvironmentRestore) -> None:
+def _report_terminal_restore_status(environment_restore: _EnvironmentRestoreLike) -> None:
     """Print the polled outcome and exit non-zero unless every constituent restored.
 
     Mirrors :func:`_report_terminal_status`: ``PARTIAL`` exits non-zero too,
@@ -253,11 +324,22 @@ async def create(
             environment_backup = await sdk.environment_backups.create(environment_id=environment_id, name=name)
 
             ok, failed, total = _constituent_counts(environment_backup.constituents)
-            print_success(
+            summary = (
                 f"Environment backup '{environment_backup.name}' created "
                 f"(id: {environment_backup.id}, status: {environment_backup.status.value}, "
                 f"constituents: {ok}/{failed}/{total} ok/failed/total)"
             )
+
+            if environment_backup.status.value in _FAILED_STATUSES:
+                # The parent status is derived synchronously, so a fan-out where
+                # every constituent failed at creation comes back terminal from
+                # the mutation itself. Printing "Success" and exiting 0 there
+                # would report a backup that does not exist as one that does.
+                # Nothing is polled: FAILED and PARTIAL are terminal already.
+                console.print(summary)
+                _report_terminal_status(environment_backup)
+
+            print_success(summary)
             _print_constituents(environment_backup.constituents)
 
             if wait:
@@ -362,12 +444,21 @@ async def restore(
         async with client.get_client() as sdk:
             environment_restore = await sdk.environment_backups.restore(environment_backup_id)
 
-            print_success(
+            summary = (
                 f"Environment restore started (id: {environment_restore.id}, "
                 f"status: {environment_restore.status.value}, "
                 f"restored: {len(environment_restore.restores)}, "
                 f"skipped: {len(environment_restore.skipped_constituents)})"
             )
+
+            if environment_restore.status.value in _FAILED_STATUSES:
+                # Same as ``create``: the derived status can already be terminal
+                # when the mutation returns — every constituent skipped is a
+                # FAILED restore — and "Success" plus exit 0 would hide it.
+                console.print(summary)
+                _report_terminal_restore_status(environment_restore)
+
+            print_success(summary)
             _print_restores(environment_restore.restores)
             _print_skipped_constituents(environment_restore.skipped_constituents)
 

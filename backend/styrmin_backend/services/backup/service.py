@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, NamedTuple, Sequence
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from loguru import logger
 
@@ -158,8 +158,14 @@ async def create_backup(
 
         metadata: BackupMetadata = {"timeout": timeout}
 
+        # The id is generated up front so the auto-generated name is final
+        # *before* the INSERT: ``Backup.name`` is unique, and writing a shared
+        # sentinel and renaming afterwards collides on that index as soon as two
+        # rows are created inside one transaction (the environment fan-out).
+        backup_id = uuid4()
         backup = Backup(
-            name=name or "placeholder",
+            id=backup_id,
+            name=name or f"styrmin-{backup_id}",
             status=BackupStatus.PENDING,
             instance_id=instance_id,
             component_statuses=component_statuses or None,
@@ -168,9 +174,6 @@ async def create_backup(
         )
 
         backup = await uow.backups.create(backup)
-
-        if name is None:
-            backup.name = f"styrmin-{backup.id}"
 
         await uow.commit()
         await uow.session.refresh(backup)  # Load server-generated fields
@@ -401,8 +404,13 @@ async def create_restore(
                 existing_restore_id=str(existing_restores[0].id),
             )
 
+        # Same reasoning as ``create_backup``: the id is generated up front so
+        # the auto-generated name is final before the INSERT rather than being
+        # patched after it (``Restore.name`` is unique).
+        restore_id = uuid4()
         restore = Restore(
-            name=name or "placeholder",
+            id=restore_id,
+            name=name or f"styrmin-{restore_id}",
             status=RestoreStatus.PENDING,
             target_namespace=target_namespace,
             backup_id=backup_id,
@@ -412,9 +420,6 @@ async def create_restore(
         )
 
         restore = await uow.restores.create(restore)
-
-        if name is None:
-            restore.name = f"styrmin-{restore.id}"
 
         # Flip the deployment into RESTORING so the UI/API reflect it
         # immediately. The CRD status patch happens in the restore workflow

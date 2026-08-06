@@ -23,9 +23,20 @@ def _make_constituent(
     deployment_name: str,
     backup_status: str | None = "completed",
     error: str | None = None,
+    backup_error_message: str | None = None,
 ) -> MagicMock:
-    """Build a per-constituent outcome: a backup, a creation error, or a gap (neither)."""
-    backup = MagicMock(id=BACKUP_UUID, status=backup_status) if backup_status is not None else None
+    """Build a per-constituent outcome: a backup, a creation error, or a gap (neither).
+
+    ``error`` is the snapshot-level "never got a row" reason (FR-005);
+    ``backup_error_message`` is the constituent backup's own failure reason,
+    which only exists once the row does. Both are set explicitly so an
+    auto-created ``MagicMock`` attribute can never masquerade as a real value.
+    """
+    backup = (
+        MagicMock(id=BACKUP_UUID, status=backup_status, error_message=backup_error_message)
+        if backup_status is not None
+        else None
+    )
     constituent = MagicMock(id=DEPLOYMENT_UUID, backup=backup, error=error)
     constituent.deployment_name = deployment_name
     return constituent
@@ -220,6 +231,69 @@ def test_env_backups_create_reports_constituent_error(
     assert "A backup is already in progress" in output
 
 
+def test_env_backups_create_already_failed_exits_nonzero(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The derived status is synchronous: an all-failed fan-out returns FAILED already.
+
+    Printing "Success" and exiting 0 there would tell a script that a backup it
+    does not have was taken.
+    """
+    _seed_environment(mock_client)
+    mock_client.environment_backups.create = AsyncMock(
+        return_value=_make_environment_backup(
+            status=EnvironmentBackupStatus.FAILED,
+            constituents=[
+                _make_constituent(deployment_name="demo", backup_status=None, error="A backup is already in progress")
+            ],
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "create", "prod"])
+    assert exc.value.code == 1
+    output = capsys.readouterr().out
+    assert "Success" not in output
+    assert "FAILED" in output
+    assert "A backup is already in progress" in output
+    # Nothing was polled: FAILED is terminal already.
+    mock_client.environment_backups.wait_for_backup.assert_not_called()
+
+
+def test_env_backups_create_already_partial_exits_nonzero(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PARTIAL is terminal too, and the counts must not contradict it."""
+    # Rich wraps at the terminal width; widen it so the printed reason is
+    # asserted verbatim rather than split across lines.
+    monkeypatch.setenv("COLUMNS", "200")
+    _seed_environment(mock_client)
+    mock_client.environment_backups.create = AsyncMock(
+        return_value=_make_environment_backup(
+            status=EnvironmentBackupStatus.PARTIAL,
+            constituents=[
+                _make_constituent(deployment_name="demo"),
+                _make_constituent(
+                    deployment_name="other",
+                    backup_status="failed",
+                    backup_error_message="velero exploded",
+                ),
+            ],
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "create", "prod"])
+    assert exc.value.code == 1
+    output = capsys.readouterr().out
+    assert "Success" not in output
+    assert "PARTIAL" in output
+    # ok counts completed backups only — a failed row is not an ok constituent.
+    assert "1/0/2" in output
+    # The constituent's own failure reason is printed, not just "(failed)".
+    assert "velero exploded" in output
+
+
 def test_env_backups_create_wait_completed(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
     _seed_environment(mock_client)
     mock_client.environment_backups.create = AsyncMock(return_value=_make_environment_backup())
@@ -235,9 +309,10 @@ def test_env_backups_create_wait_completed(mock_client: MagicMock, capsys: pytes
 
 
 def test_env_backups_create_wait_partial_exits_nonzero(
-    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """PARTIAL is terminal and restorable, but not "everything worked" — exit non-zero."""
+    monkeypatch.setenv("COLUMNS", "200")
     _seed_environment(mock_client)
     mock_client.environment_backups.create = AsyncMock(return_value=_make_environment_backup())
     mock_client.environment_backups.wait_for_backup = AsyncMock(
@@ -245,7 +320,11 @@ def test_env_backups_create_wait_partial_exits_nonzero(
             status=EnvironmentBackupStatus.PARTIAL,
             constituents=[
                 _make_constituent(deployment_name="demo"),
-                _make_constituent(deployment_name="other", backup_status="failed"),
+                _make_constituent(
+                    deployment_name="other",
+                    backup_status="failed",
+                    backup_error_message="velero backup partially failed",
+                ),
             ],
         )
     )
@@ -256,6 +335,10 @@ def test_env_backups_create_wait_partial_exits_nonzero(
     output = capsys.readouterr().out
     assert "PARTIAL" in output
     assert "other" in output
+    # README promise: --wait prints the reason for every constituent that did
+    # not complete, and a constituent that failed after its row existed carries
+    # that reason on the backup itself.
+    assert "velero backup partially failed" in output
 
 
 def test_env_backups_create_wait_failed_exits_nonzero(
@@ -462,6 +545,28 @@ def test_env_backups_restore_prints_every_skip_with_a_reason(
     assert "stale: backup expired" in output
     assert "gone: deployment no longer exists" in output
     assert "busy: deployment busy with another restore" in output
+
+
+def test_env_backups_restore_already_failed_exits_nonzero(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A restore where every constituent was skipped comes back FAILED immediately."""
+    mock_client.environment_backups.restore = AsyncMock(
+        return_value=_make_environment_restore(
+            status=EnvironmentRestoreStatus.FAILED,
+            restores=[],
+            skipped_constituents=[_make_skipped(deployment_name="stale", reason="backup expired")],
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore", ENV_BACKUP_UUID])
+    assert exc.value.code == 1
+    output = capsys.readouterr().out
+    assert "Success" not in output
+    assert "FAILED" in output
+    assert "stale: backup expired" in output
+    mock_client.environment_backups.wait_for_restore.assert_not_called()
 
 
 def test_env_backups_restore_rejects_non_uuid(mock_client: MagicMock) -> None:
