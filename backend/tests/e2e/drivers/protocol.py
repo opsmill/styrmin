@@ -33,7 +33,9 @@ from tests.e2e.drivers.refs import (
     ClusterRef,
     DeploymentRef,
     DriverVersionRef,
+    EnvironmentBackupRef,
     EnvironmentRef,
+    EnvironmentRestoreRef,
     RestoreRef,
     TimelineEntry,
 )
@@ -231,3 +233,66 @@ class ScenarioDriver(Protocol):
     async def delete_backup(self, *, backup_id: str) -> None: ...
 
     async def get_backup(self, *, backup_id: str) -> BackupRef: ...
+
+    # --- Environment-level backup / restore -------------------------------
+    #
+    # Ordering contract: the UI flow lives on the environment detail page's
+    # Backups tab, so every method below needs the owning environment.
+    # ``create_environment_backup`` takes it explicitly and stashes it;
+    # the read/act methods that only carry a parent id reuse that stash (or
+    # whatever ``attach_to_deployment`` last set) and raise
+    # ``ScenarioActionError`` if the driver has no environment context yet.
+    # The API driver ignores the stash — every call re-derives what it needs
+    # from its arguments — so scenarios need no ``driver_mode`` branch.
+
+    async def create_environment_backup(
+        self, *, environment_id: str
+    ) -> EnvironmentBackupRef:
+        """Trigger one coordinated snapshot of an environment.
+
+        Returns as soon as the fan-out has been dispatched, so the returned
+        ``status`` is normally ``PENDING``/``IN_PROGRESS`` — or ``COMPLETED``
+        immediately for a config-only snapshot of an environment with no
+        eligible deployments (spec FR-011).
+        """
+
+    async def get_environment_backup(
+        self, *, environment_backup_id: str
+    ) -> EnvironmentBackupRef:
+        """Read one snapshot, including its per-constituent outcomes.
+
+        Raises ``ResourceNotFound`` when the snapshot no longer exists, so a
+        scenario can assert a cascade delete took effect.
+        """
+
+    async def wait_for_environment_backup(
+        self, *, environment_backup_id: str, max_wait: float = 600.0
+    ) -> EnvironmentBackupRef:
+        """Poll until the *derived* parent status is terminal.
+
+        Terminal means ``COMPLETED`` / ``PARTIAL`` / ``FAILED``. ``PARTIAL`` is
+        a final outcome, not a transitional one.
+        """
+
+    async def restore_environment_backup(
+        self, *, environment_backup_id: str
+    ) -> EnvironmentRestoreRef:
+        """Restore a snapshot in place: revert env config, restore constituents.
+
+        ADMIN-only on both entrypoints (it reverts the environment's config).
+        Constituent classification is synchronous, so ``skipped`` on the
+        returned ref is already complete: every constituent that will not be
+        restored is named with a free-text reason (spec FR-007).
+        """
+
+    async def wait_for_environment_restore(
+        self, *, environment_restore_id: str, max_wait: float = 900.0
+    ) -> EnvironmentRestoreRef:
+        """Poll until the restore's derived parent status is terminal."""
+
+    async def delete_environment_backup(self, *, environment_backup_id: str) -> None:
+        """Delete a snapshot and cascade through its constituents.
+
+        Legal regardless of derived status — the FR-010 escape hatch for a
+        snapshot pinned in progress by a constituent that was never picked up.
+        """

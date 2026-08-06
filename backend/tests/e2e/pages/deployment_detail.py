@@ -14,6 +14,10 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
 from tests.e2e.drivers.refs import BackupRef, RestoreRef, TimelineEntry
 
+# Shared with ``pages/environments.py`` — both read their state off ``data-*``
+# test hooks and must fail identically when one is missing.
+from tests.e2e.pages._dom import required_attr as _required_attr
+
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
 
@@ -26,21 +30,6 @@ _STATUS_LABELS = {
     "completed": "Complete",
     "failed": "Failed",
 }
-
-
-async def _required_attr(locator: Locator, attr: str, *, context: str) -> str:
-    """Read ``attr`` from ``locator`` and raise if absent or empty.
-
-    Prevents a frontend test-hook removal from surfacing as a cryptic
-    downstream assertion; the missing attribute is reported at the boundary.
-    """
-    value = await locator.get_attribute(attr)
-    if not value:
-        raise ScenarioActionError(
-            f"{context} rendered without {attr} attribute "
-            "(frontend test-hook may have been removed or renamed)"
-        )
-    return value
 
 
 class DeploymentDetailPage:
