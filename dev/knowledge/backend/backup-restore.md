@@ -169,7 +169,8 @@ class BackupSchedule(StyrminModel, table=True):
 
 | Function | Description |
 |----------|-------------|
-| `create_backup(instance_id, uow, ...)` | Create on-demand backup with component configs |
+| `resolve_backup_target(instance_id, uow)` | Walk instance → deployment (namespace) and instance → driver version → backup-enabled component configs, returning a `BackupTarget(deployment_id, target_namespace, component_configs)`. Best-effort: any failure degrades to `BackupTarget(None, "", None)` — a hookless backup — and logs a warning. Shared by the `createBackup` mutation and the environment fan-out so both build identical constituents (FR-014) |
+| `create_backup(instance_id, uow, ...)` | Create on-demand backup with component configs. `environment_backup_id` links it as an environment-backup constituent. The row id is generated up front so the unique auto-generated name is final before the `INSERT` |
 | `get_backup(backup_id, uow)` | Get backup by ID |
 | `get_backups(instance_id, uow, status)` | List backups for instance |
 | `delete_backup(backup_id, uow)` | Delete backup (cascades to restores) |
@@ -180,7 +181,7 @@ class BackupSchedule(StyrminModel, table=True):
 
 | Function | Description |
 |----------|-------------|
-| `create_restore(backup_id, target_namespace, uow, ...)` | Create restore from backup; resolves the target deployment, rejects internal deployments and concurrent restores, flips `deployment.status` to `RESTORING`. Returns `(Restore, deployment_id)`. |
+| `create_restore(backup_id, target_namespace, uow, ...)` | Create restore from backup; resolves the target deployment, rejects internal deployments and concurrent restores, flips `deployment.status` to `RESTORING`. Returns `(Restore, deployment_id)`. `environment_restore_id` links it as an environment-restore constituent; the row id is generated up front for the same unique-name reason as `create_backup`. |
 | `get_restore(restore_id, uow)` | Get restore by ID |
 | `get_restores(backup_id, uow, status)` | List restores for backup |
 | `update_restore_status(restore_id, status, uow, ...)` | Update restore status |
@@ -192,8 +193,8 @@ Detail in [Environment-Level Backup & Restore](#environment-level-backup--restor
 
 | Function | Description |
 |----------|-------------|
-| `create_environment_backup(environment_id, uow, name, prefect_manager)` | Capture config + declared state, then fan out one constituent backup per eligible deployment |
-| `restore_environment_backup(environment_backup_id, uow, prefect_manager)` | Revert captured config, then fan out constituent restores; skips are classified up front |
+| `create_environment_backup(environment_id, uow, name, prefect_manager)` | Capture config + declared state and create every constituent backup in **one transaction**, then dispatch one `EXECUTE_BACKUP` per committed constituent |
+| `restore_environment_backup(environment_backup_id, uow, prefect_manager)` | Revert captured config and create every constituent restore in **one transaction** (skips classified up front), then run the exclusion-aware config fan-out and dispatch `EXECUTE_RESTORE` per constituent |
 | `get_environment_backup` / `get_environment_backups(environment_id, ...)` | Read one snapshot / an environment's snapshots (newest first) |
 | `get_environment_restore` / `get_environment_restores(environment_backup_id, ...)` | Read one restore / a snapshot's restores (newest first) |
 | `delete_environment_backup(environment_backup_id, uow)` | Cascade-delete constituents, their restores, the snapshot's environment restores, and the parent. No status guard |
@@ -325,11 +326,26 @@ The agent's status reporter maps CRD `displayState` to `deployment.status` (see 
 ## Environment-Level Backup & Restore
 
 Everything above is per-instance. `services/backup/environment.py` adds a
-coordinated environment scope on top of it **without touching any of it**: no
-new Prefect flows, no changes to `execute_backup_workflow` /
-`execute_restore_workflow`, no new backup strategies. An environment backup is
-a parent record plus a fan-out loop over the existing `create_backup` /
+coordinated environment scope on top of it, leaving everything downstream of row
+creation untouched: no new Prefect flows, no changes to
+`execute_backup_workflow` / `execute_restore_workflow`, no new backup
+strategies, and no writer for the parent status. An environment backup is a
+parent record plus a fan-out loop over the existing `create_backup` /
 `create_restore` services.
+
+The per-instance *service* layer did change, additively, in four places:
+
+- `create_backup` / `create_restore` take the parent-FK kwarg
+  (`environment_backup_id` / `environment_restore_id`), null for a standalone
+  operation;
+- both now generate their row id up front so the auto-generated name is final
+  before the `INSERT` — a shared sentinel violates the `unique=True` name index
+  as soon as two rows are created inside one transaction, which the environment
+  capture does (see [The capture is atomic](#the-capture-is-atomic--and-terminal-status-still-is-not-convergence));
+- `createBackup`'s target resolution moved into the shared
+  `resolve_backup_target`, so the mutation and the fan-out build identical
+  constituents (FR-014);
+- `delete_environment` gained the snapshot cascade.
 
 The design decisions are recorded in
 [ADR-055](../../adr/0055-environment-backup-parent-records.md); this section
@@ -342,21 +358,30 @@ GraphQL Mutation (createEnvironmentBackup)
         |
         v
   create_environment_backup  (services/backup/environment.py)
+        |
+        |  ONE TRANSACTION ------------------------------------------------
         |   1. resolve environment, guard concurrency (derived, see below)
         |   2. filter eligible deployments
         |   3. capture environment_config + one DeploymentSnapshot each
-        |   4. create EnvironmentBackup row  --> COMMIT (before any dispatch)
+        |   4. create the EnvironmentBackup row
+        |   5. for each captured snapshot:   <-- per-item try/except (ADR-0012)
+        |        +--> resolve_backup_target(instance_id)
+        |        +--> create_backup(..., environment_backup_id=<parent>)
+        |             (via _SharedTransaction — joins this transaction)
+        |        |
+        |        |   creation failure -> ConstituentError collected, continue
+        |        +--> collect (backup_id, deployment_id) for dispatch
+        |   6. persist constituent_errors
+        |  --> COMMIT  (the capture is now complete and durable)
+        |  ----------------------------------------------------------------
         v
-  for each captured snapshot:            <-- per-item try/except (ADR-0012)
-        |
-        +--> resolve_backup_target(instance_id)
-        +--> create_backup(..., environment_backup_id=<parent>)
+  for each committed constituent:
         +--> prefect_manager.run_action(EXECUTE_BACKUP)
         |
-        |   creation failure  -> ConstituentError recorded, loop continues
-        |   dispatch failure  -> Backup row stays PENDING, loop continues
+        |   dispatch failure -> Backup row stays PENDING, loop continues
         v
-  constituent_errors persisted, audit line emitted, parent returned
+  audit line emitted, parent re-read and returned
+        (NOT_FOUND if it was deleted mid-dispatch — FR-010 has no status guard)
 ```
 
 From there each constituent is an ordinary backup: the same INTERNAL/USER
@@ -400,7 +425,7 @@ plain JSON (the `Backup.component_statuses` / `metadata_` precedent):
 
 | Model | Fields | Purpose |
 |-------|--------|---------|
-| `DeploymentSnapshot` | `deployment_id`, `deployment_name`, `instance_id`, `driver_name`, `driver_version`, `driver_fingerprint`, `application_version`, `config`, `parameters` | Declared state of one eligible deployment. Records the ADR-0053 provenance fingerprint, not just the version string, so a future clone can tell whether the same driver content is still loaded. An unresolvable driver version degrades the driver fields to empty strings rather than failing the snapshot. |
+| `DeploymentSnapshot` | `deployment_id`, `deployment_name`, `instance_id`, `driver_name`, `driver_version`, `driver_fingerprint`, `application_version`, `config`, `parameters` | Declared state of one eligible deployment. Records the ADR-0053 provenance fingerprint, not just the version string, so a future clone can tell whether the same driver content is still loaded. An unresolvable driver version degrades rather than failing the snapshot: `driver_name` / `driver_version` to empty strings, `driver_fingerprint` to `None`. |
 | `ConstituentError` | `deployment_id`, `deployment_name`, `error` | A constituent that never got a `Backup` row — most often `BackupAlreadyInProgressError`, which `create_backup` raises *before* row creation. |
 | `SkippedConstituent` | `deployment_id`, `deployment_name`, `reason` | A constituent that was not restored. `reason` is free text, not a closed enum on the wire. |
 
@@ -456,8 +481,20 @@ the original shape — left a window where a snapshot had zero children and zero
 errors and therefore derived `COMPLETED`; a `CancelledError` (client
 disconnect, request timeout) escapes the per-constituent `except Exception` and
 made that state permanent, and the concurrency guard below (an `EXISTS` over
-non-terminal *children*) did not hold the environment while the window was
-open. `restore_environment_backup` commits the same way.
+non-terminal *children*) did not hold the environment while the window was open,
+so a second `createEnvironmentBackup` passed it (FR-009).
+`restore_environment_backup` commits the same way.
+
+**What a fresh snapshot reads now.** After the commit, either the snapshot does
+not exist or its constituents and recorded errors exist with it, so the first
+read is honest: `PENDING` (constituents created, none started), `IN_PROGRESS`
+(some constituents created, at least one creation error recorded), `FAILED`
+(every constituent blocked at creation, so zero children and `error_count > 0`),
+or `COMPLETED` — which on a brand-new snapshot means only one thing: nothing was
+eligible, so it is the config-only snapshot of FR-011.
+`derive_environment_operation_status([], 0) == COMPLETED` is therefore still
+correct and still load-bearing; it is no longer reachable from a half-built
+capture.
 
 Reusing `create_backup` / `create_restore` inside that transaction needs
 `_SharedTransaction`, a `UnitOfWork` view that forwards every repository to the
@@ -470,9 +507,20 @@ per-constituent isolation into "no snapshot at all".
 **Terminal status is still not evidence that a snapshot covers the
 environment.** A snapshot whose constituents were individually deleted
 afterwards legitimately reads `COMPLETED` with fewer children than
-`deployment_snapshots` (that gap is the point — see FR-014). Compare the
-constituent count against `deployment_snapshots`, which is why the E2E asserts
-constituent counts rather than status alone.
+`deployment_snapshots` (that gap is the point — see FR-014). Coverage is a count,
+not a status: the capture commits
+
+```text
+len(backups) + len(constituent_errors) == len(deployment_snapshots)
+```
+
+and a later shortfall against that identity is precisely the set of
+individually deleted constituents. Comparing linked backups alone against
+`deployment_snapshots` is *not* the check — a constituent that failed at
+creation never got a row, so it is a legitimate permanent shortfall. The
+`constituents` resolver already does this join: an entry with neither `backup`
+nor `error` is a deleted constituent, which is why the E2E asserts
+per-constituent outcomes rather than status alone.
 
 **A terminal restore does not mean the environment has converged.** The
 constituent data restores are done, but the reverted config is still
@@ -601,7 +649,8 @@ surfacing as an opaque `INTERNAL_ERROR`.
 
 | Error | Code | Raised when |
 |-------|------|-------------|
-| `EnvironmentBackupNotFoundError` | `NOT_FOUND` | Snapshot id does not resolve. |
+| `EnvironmentBackupNotFoundError` | `NOT_FOUND` | Snapshot id does not resolve — including the snapshot being deleted underneath a fan-out that was still dispatching (FR-010 has no status guard). |
+| `EnvironmentRestoreNotFoundError` | `NOT_FOUND` | Restore id does not resolve, or the restore was taken by its snapshot's cascade while its fan-out was still dispatching. |
 | `EnvironmentOperationInProgressError` | `ALREADY_IN_PROGRESS` | An environment-level operation is already in flight for the environment. |
 | `EnvironmentBackupNotRestorableError` | `OPERATION_DENIED` | Derived status is not `COMPLETED` or `PARTIAL`. |
 

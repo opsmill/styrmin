@@ -6,14 +6,15 @@ description: Reference for every command, flag, and exit code in the styrminctl 
 
 ## `styrminctl` CLI
 
-:::info Stub page — to be auto-generated
+:::info Partial reference — the full command tree is still to be auto-generated
 
-This page will be generated from the Cyclopts command tree at build
-time. The information below is a placeholder describing scope, not
-the final content.
+The sections below are hand-written and **authoritative for the commands
+they cover**: they document the behaviour `--help` cannot carry, such as
+identifier precedence and exit codes. They are not a complete
+command-by-command reference yet — that will be generated from the
+Cyclopts command tree at build time.
 
-Until the auto-generation pipeline is wired up, the authoritative
-source is the CLI itself:
+For anything not covered here, the CLI itself is the source:
 
 ```bash
 styrminctl --help
@@ -31,11 +32,17 @@ Plus the source tree under
 It's a thin wrapper over the GraphQL API — it never talks to the
 database or the agent directly.
 
-This page will document, command by command:
+Its top-level command groups are `clusters`, `environments`,
+`deployments`, `drivers`, `backups`, `env-backups`, `backup-locations`,
+`tasks`, `auth`, and `telemetry`. `login`, `logout`, and `whoami` are
+also registered at the top level as shorthands for their `auth`
+sub-commands. Everything else — restoring a backup, upgrading a
+deployment's version — is a sub-command inside one of those groups, not a
+group of its own.
 
-- Top-level commands (`cluster`, `environment`, `deployment`,
-  `driver`, `backup`, `restore`, `env-backups`, `upgrade`, `auth`, ...)
-- Sub-commands and their flags
+Once auto-generation lands, this page will document, command by command:
+
+- Every group, sub-command, and flag
 - Output formats (`--output text|json|yaml`)
 - Exit codes
 - Authentication and configuration (where the CLI looks for a
@@ -73,10 +80,16 @@ Seven commands:
 #### Targeting an environment
 
 `create` and `list` take the environment as a positional name, or as a
-UUID with `--id`. A name is resolved within a cluster, so pass
-`--cluster <name>` (defaults to `default`) or `--cluster-id <uuid>` when
-you have more than one cluster registered. Passing both a name and
-`--id`, or both `--cluster` and `--cluster-id`, is an error.
+UUID with `--id`. Passing both — or neither — is an error. A name is
+resolved within a cluster, so pass `--cluster <name>` (defaults to
+`default`) or `--cluster-id <uuid>` when you have more than one cluster
+registered.
+
+`--cluster-id` combined with an explicitly named, non-default `--cluster`
+is an error. `--cluster-id` alongside the default `--cluster default` is
+accepted — the CLI cannot tell a defaulted value from a typed one — and
+`--cluster-id` wins: the name lookup is sent with the cluster id and no
+cluster name.
 
 ```bash
 styrminctl env-backups create production --name before-upgrade
@@ -132,6 +145,13 @@ was skipped, is finished before there is anything to wait for. In that
 case the command reports the outcome and exits non-zero immediately
 rather than polling. Without `--wait`, a command whose constituents are
 still running exits successfully once the operation is accepted.
+
+**A `--wait` that times out also exits 1.** `--max-wait` elapsing is not
+an error the CLI distinguishes: the poll returns the last record it read,
+so the command prints the non-terminal status it saw (`PENDING` or
+`IN_PROGRESS`) and exits non-zero. Raise `--max-wait` rather than reading
+that exit code as a failed backup — nothing has been abandoned, and the
+constituents keep running.
 
 :::note `delete` has no status guard
 
