@@ -545,17 +545,23 @@ async def test_backup_and_restore_lifecycle(
 # ---------------------------------------------------------------------------
 
 
-async def eligible_deployment_ids(
+async def instanced_deployment_ids(
     client: StyrminClient, environment_id: str
 ) -> set[str]:
-    """Deployment ids that must contribute a constituent to a snapshot.
+    """Every live deployment in ``environment_id`` that has an active instance.
 
-    Mirrors the service's ``is_eligible_for_environment_backup``: non-tombstoned
-    (``ListDeployments`` already excludes tombstones) and carrying an active
-    application instance. ``internal`` is not projected on the read API; the
-    scenario environment never holds an internal deployment, and if one ever
-    appeared this set would become a strict superset and the SC-001 assertion
-    would fail loudly rather than silently weaken.
+    A **superset** of the snapshot's eligible set: ``ListDeployments`` excludes
+    tombstones but does not project ``internal``, and every environment built on
+    a ``dedicated_ingress`` cluster owns an internal ingress-controller
+    deployment (``services/deployment.py`` creates it with ``internal=True``).
+    That controller has an active instance and therefore appears here, while the
+    snapshot must exclude it (spec FR-001) — which is exactly what the SC-001
+    assertion below checks by requiring the constituent set to equal only the
+    two operator-created deployments.
+
+    Used unchanged on both sides of the restore for the FR-008 "no deployment
+    created or deleted" check, where counting the internal controller too is a
+    feature rather than a caveat.
     """
     deployments = await client.deployments.list(environment_id=environment_id)
     return {
@@ -691,14 +697,18 @@ async def test_environment_backup_and_restore_lifecycle(
                 pre_backup_count = resp.json()["counter"]
 
         # 2. One action snapshots the whole environment (SC-001).
-        expected_constituents = await eligible_deployment_ids(
+        #    ``expected_constituents`` is the two operator-created deployments.
+        #    The environment also owns an internal ingress-controller deployment
+        #    with an active instance, so requiring *equality* below is both the
+        #    SC-001 "one per eligible deployment" check and the FR-001
+        #    "internal deployments excluded" check.
+        expected_constituents = {primary_deployment_id, secondary_deployment_id}
+        instanced_before = await instanced_deployment_ids(
             client, scenario_environment_id
         )
-        assert {primary_deployment_id, secondary_deployment_id} <= (
-            expected_constituents
-        ), (
-            "both deployments must be eligible before the snapshot, got "
-            f"{expected_constituents!r}"
+        assert expected_constituents <= instanced_before, (
+            "both deployments must carry an active instance before the "
+            f"snapshot, got {instanced_before!r}"
         )
 
         created = await scenario_driver.create_environment_backup(
@@ -710,8 +720,9 @@ async def test_environment_backup_and_restore_lifecycle(
         )
         constituent_ids = [c.deployment_id for c in created.constituents]
         assert set(constituent_ids) == expected_constituents, (
-            "one constituent per eligible deployment (SC-001): expected "
-            f"{expected_constituents!r}, got {set(constituent_ids)!r}"
+            "one constituent per eligible deployment, internal deployments "
+            f"excluded (SC-001 / FR-001): expected {expected_constituents!r}, "
+            f"got {set(constituent_ids)!r}"
         )
         assert len(constituent_ids) == len(set(constituent_ids)), (
             f"a deployment appears twice in the snapshot: {constituent_ids!r}"
@@ -883,8 +894,8 @@ async def test_environment_backup_and_restore_lifecycle(
                     "value (the +1 is this read itself)"
                 )
         assert (
-            await eligible_deployment_ids(client, scenario_environment_id)
-        ) == expected_constituents, (
+            await instanced_deployment_ids(client, scenario_environment_id)
+        ) == instanced_before, (
             "an environment restore must not create or delete deployments (FR-008)"
         )
 
