@@ -83,8 +83,10 @@ derive(children_statuses: list[terminal|non-terminal], error_count: int) -> Stat
     no children, no errors                -> COMPLETED   (config-only backup, FR-011)
 ```
 
-For `EnvironmentBackup`: children = linked `Backup` rows; errors = `constituent_errors`. A deleted child simply vanishes from the derivation (parent shows the gap via `deployment_snapshots` minus linked backups — US3).
+For `EnvironmentBackup`: children = linked `Backup` rows; errors = `constituent_errors`. A deleted child simply vanishes from the derivation (parent shows the gap via `deployment_snapshots` minus linked backups *and* recorded errors — US3).
 For `EnvironmentRestore`: children = linked `Restore` rows; errors = `skipped_constituents`.
+
+**The derivation only ever sees a complete capture.** The parent row, every constituent row and every recorded error/late skip are committed in **one transaction** before any dispatch (research.md D1 amendment), so after the commit either the parent does not exist or its children and errors exist with it. Consequences for the table above: `no children, no errors -> COMPLETED` is reachable only from the genuine FR-011 config-only case; every constituent failing at creation yields `error_count > 0` and therefore `FAILED`, not `COMPLETED`. Coverage is the count identity `len(children) + error_count == len(deployment_snapshots)` at capture time — not the status — and a later shortfall against it is the US3 gap.
 
 ## State transitions
 

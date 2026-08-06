@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Environment-level backup and restore. One action snapshots an environment —
+  its config plus the declared state and a constituent backup of every eligible
+  deployment — and one action restores it in place. New GraphQL surface:
+  `createEnvironmentBackup`, `restoreEnvironmentBackup` (ADMIN — it rewrites
+  `Environment.config`), `deleteEnvironmentBackup` (cascading through the
+  constituents), plus the `environmentBackup(s)` / `environmentRestore(s)`
+  queries. The parent status is **derived** from its constituents on every read
+  and adds a `PARTIAL` outcome, so it can never contradict them. Exposed as
+  `client.environment_backups` in the SDK, the `styrminctl env-backups` command
+  group (`create`, `get`, `list`, `restore`, `restore-get`, `restore-list`,
+  `delete`), and a **Backups** tab on the environment detail page. Ships one
+  Alembic revision (`c1d2e3f4a5b6`) adding the two parent tables and a nullable
+  membership FK on `Backup` / `Restore` — existing per-deployment backups are
+  unaffected. See
+  `docs/docs/concepts-and-architecture/backups-and-restores.md` ("Backing up a
+  whole environment") and `docs/docs/reference/styrminctl.md`.
 - Declarative deployment management via `styrminctl deployments apply`. Author
   YAML manifests (`apiVersion: styrmin/v1`, `kind: Deployment`) and apply them
   with `styrminctl deployments apply -f <path>` to create or update deployments

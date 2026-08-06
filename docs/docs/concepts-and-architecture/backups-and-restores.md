@@ -318,21 +318,23 @@ snapshot in the UI — or run `styrminctl env-backups get <id>` — to see
 each deployment's constituent, its status, or the error that stopped it
 being created.
 
-:::caution A fresh `COMPLETED` is not proof the fan-out finished
+:::caution A terminal status is not proof the snapshot still covers the environment
 
-Styrmin commits the environment backup record *before* it starts
-dispatching constituent backups, so a crash mid-fan-out leaves a real
-snapshot rather than a half-written one. The side effect: for a moment
-after creation, the record has zero constituents and zero errors — and
-"nothing failed" derives to `COMPLETED`. A snapshot read inside that
-window looks finished when its constituents haven't been created yet.
+The record and *all* of its constituents are written together, in one
+transaction, before Styrmin dispatches any backup work. So there is no
+moment at which you can read a snapshot that is missing constituents it
+was about to create: a snapshot with work to do reports `PENDING` or
+`IN_PROGRESS`, one whose every constituent was blocked at creation
+reports `FAILED`, and an immediate `COMPLETED` means one specific thing
+— there was nothing eligible to back up, so it's a config-only snapshot.
 
-Don't treat an immediate `COMPLETED` as evidence that every deployment
-was captured. Check that the constituent count matches the number of
-eligible deployments — the CLI prints it as `ok/failed/total` — and
-re-read the snapshot rather than trusting the first status you see.
-`--wait` polls for a terminal status, which does not close this window
-either.
+What a terminal status still doesn't tell you is whether the snapshot
+*covers* the environment today. Constituent backups can be deleted
+individually afterwards, and the snapshot keeps reporting `COMPLETED`
+with a gap where that deployment used to be — that visibility is the
+point, not a bug. Read the per-constituent list rather than the status
+alone: a constituent shown with neither a backup nor a failure reason
+(`deleted` in the CLI's output) is a gap.
 
 :::
 
@@ -356,7 +358,7 @@ Two things it deliberately does **not** do:
 Every constituent that is **not** restored is reported with its
 deployment name and a reason. There are no silent skips — if a
 deployment isn't in the restore's list of restored constituents, it is in
-the skipped list with one of these reasons:
+the skipped list with a reason. These six cover the expected cases:
 
 | Reason | What happened |
 |--------|---------------|
@@ -367,6 +369,9 @@ the skipped list with one of these reasons:
 | `deployment no longer exists` | The deployment was deleted (or tombstoned) after the snapshot was taken. |
 | `deployment busy with another restore` | A separately started restore is already running on that deployment. |
 
+They are not the only possible values. Anything else that stops a
+constituent restore from being created is reported verbatim as
+`restore could not be created: <error>`, and the set is expected to grow.
 The reason is free text, so treat it as a message to read rather than a
 fixed set of codes to switch on.
 

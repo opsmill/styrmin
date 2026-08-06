@@ -104,10 +104,15 @@ _COMPLETED = "completed"
 
 
 class SkipReason(str, Enum):
-    """The uniform reasons a constituent is not restored (spec FR-007).
+    """The conventional reasons a constituent is not restored (spec FR-007).
 
-    Every non-restored constituent carries exactly one of these — there are no
-    silent skips.
+    Every non-restored constituent is attributed with its deployment name and a
+    reason — there are no silent skips. The reason is **not** limited to these
+    members: an unexpected ``create_restore`` failure is recorded verbatim as
+    ``f"restore could not be created: {exc}"``, so
+    :class:`SkippedConstituent.reason` is an open string rather than a closed
+    vocabulary (ADR-0055 — a wire-level enum would break older clients every
+    time the set grows).
     """
 
     BACKUP_FAILED_AT_CREATION = "backup failed at creation"
@@ -146,7 +151,11 @@ class ConstituentError(BaseModel):
 
 
 class SkippedConstituent(BaseModel):
-    """A constituent that was not restored, attributed by name and reason."""
+    """A constituent that was not restored, attributed by name and reason.
+
+    ``reason`` is an open string: usually a :class:`SkipReason` value, but an
+    unexpected constituent-creation failure is recorded verbatim.
+    """
 
     deployment_id: UUID
     deployment_name: str
@@ -226,8 +235,11 @@ async def _capture_deployment_snapshot(
     the declared state — and records the ADR-0053 provenance fingerprint
     (``content_hash`` for local sources, ``source_commit_sha`` for git) so a
     later clone can tell whether the same driver content is still loaded.
-    A driver version that cannot be resolved degrades the driver fields to
-    empty strings rather than failing the whole snapshot.
+    A driver version that cannot be resolved degrades the driver fields rather
+    than failing the whole snapshot: ``driver_name`` and ``driver_version`` to
+    empty strings, ``driver_fingerprint`` to ``None`` (it is nullable because a
+    resolvable driver version can also carry neither a ``content_hash`` nor a
+    ``source_commit_sha``).
     """
     instance = deployment.active_instance
     assert instance is not None, (

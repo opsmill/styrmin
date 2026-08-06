@@ -8,6 +8,53 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Back up and restore a whole environment in one action
+
+Backups were per-deployment only. An **environment backup** captures the
+whole environment as a single record — and restores it as a single
+action.
+
+#### What's new
+
+- One action captures the environment's config, the declared state of
+  every eligible deployment (Application Driver, driver version and
+  provenance fingerprint, application version, config, parameters), and
+  one constituent backup per eligible deployment. Constituents are
+  ordinary per-deployment backups: same storage location, same retention
+  rules, individually listable and deletable.
+- Restoring a `COMPLETED` or `PARTIAL` snapshot reverts the environment
+  config and restores every usable constituent **in place**. It never
+  creates or deletes deployments — topology drift is reported, never
+  repaired — and every constituent that is not restored is named with a
+  reason. **Restoring requires the administrator role**, because it
+  rewrites the environment config; creating and deleting need the same
+  role as an ordinary backup.
+- A snapshot's status is **derived** from its constituents on every read,
+  so it can never contradict them, and `PARTIAL` is a first-class
+  outcome: a snapshot that covered four of five applications says so and
+  is still restorable.
+- An environment runs at most one environment-level operation at a time;
+  a second request is rejected with a machine-readable error rather than
+  queued.
+- New surfaces: a **Backups** tab on the environment detail page; the
+  `styrminctl env-backups` command group (`create`, `get`, `list`,
+  `restore`, `restore-get`, `restore-list`, `delete`, with `--wait` on
+  `create` and `restore`); `client.environment_backups` in the Python
+  SDK; and the `createEnvironmentBackup` /
+  `restoreEnvironmentBackup` / `deleteEnvironmentBackup` mutations with
+  their four `environmentBackup(s)` / `environmentRestore(s)` queries.
+
+#### Migration
+
+- No action required. Existing per-deployment backups are untouched:
+  membership in an environment backup is a nullable link, and a backup
+  without one behaves exactly as before.
+- In this release an environment backup does not outlive its
+  environment — deleting an environment deletes its snapshots.
+- See [Backups and restores](./concepts-and-architecture/backups-and-restores.md#backing-up-a-whole-environment)
+  for the semantics and [the CLI reference](./reference/styrminctl.md#env-backups--environment-level-backup-and-restore)
+  for the commands, flags, and exit codes.
+
 ### Deterministic driver-version selection and explicit pinning
 
 When several loaded driver versions support the same application version,
