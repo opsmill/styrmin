@@ -52,8 +52,15 @@
 
 - TypeScript 5.9.3, React 19.2.4 + TanStack Query v5, Tailwind, lucide-react (frontend); reuses existing PodStatus GraphQL surface (012-deployment-pods-tab)
 
+- Python 3.14+ (backend, SDK, CLI) + Strawberry GraphQL, SQLModel/SQLAlchemy (async), Pydantic v2, Prefect (existing flows only), Cyclopts; TypeScript 5.9.3/React 19 + TanStack Query v5 (frontend). PostgreSQL: two new tables (environmentbackup, environmentrestore) + two nullable FK columns via one Alembic revision; parent status derived, never stored (001-env-backup-restore)
+
 ## Recent Changes
 
+- 001-env-backup-restore: Environment-level backup and restore (issue #7) — EnvironmentBackup/EnvironmentRestore parent records grouping per-instance constituent backups, ADR-0012-style service-layer fan-out, derived parent status, all four surfaces
 - 012-deployment-pods-tab: Added Pods tab to the deployment detail page — observed per-pod state grouped by component (declared / drifting / unlabeled per ADR-007), inline expand with container detail and copy-to-clipboard kubectl helpers, 10s auto-refresh paused when the tab is inactive
 - 011-admin-user-group-mgmt: Added admin user/group GraphQL surface + auth UX (login, profile, role gating) on top of the #179 auth foundation
 - 058-frontend-testing: Added TypeScript 5.9.3, React 19.2.4, Node 22 + Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI, React Router 7, React Hook Form 7
+
+<!-- SPECKIT START -->
+Active feature plan: [specs/001-env-backup-restore/plan.md](specs/001-env-backup-restore/plan.md) (spec: [spec.md](specs/001-env-backup-restore/spec.md), design: research.md, data-model.md, contracts/graphql.md, quickstart.md)
+<!-- SPECKIT END -->
