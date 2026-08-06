@@ -1,0 +1,20 @@
+query ListEnvironmentRestores($environmentBackupId: UUID!) {
+  environmentRestores(environmentBackupId: $environmentBackupId) {
+    id
+    status
+    createdOn
+    environmentBackupId
+    restores {
+      id
+      name
+      status
+      targetInstanceId
+      errorMessage
+    }
+    skippedConstituents {
+      deploymentId
+      deploymentName
+      reason
+    }
+  }
+}

@@ -20,6 +20,7 @@ from styrminctl.types import (
     ClusterContextName,
     EnvironmentBackupId,
     EnvironmentName,
+    EnvironmentRestoreId,
     MaxWait,
     OptionalEnvironmentId,
     PollInterval,
@@ -28,7 +29,7 @@ from styrminctl.types import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from styrmin_sdk import EnvironmentBackup, StyrminClient
+    from styrmin_sdk import EnvironmentBackup, EnvironmentRestore, StyrminClient
 
 environment_backups_app = App(name="env-backups", help="Manage environment-level backups and restores.")
 
@@ -54,6 +55,32 @@ class _ConstituentLike(Protocol):
 
     @property
     def backup(self) -> _BackupLike | None: ...
+
+
+class _RestoreLike(Protocol):
+    """The constituent-restore fields both the restore-get and restore-list projections carry."""
+
+    @property
+    def id(self) -> object: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def status(self) -> str: ...
+
+    @property
+    def error_message(self) -> str | None: ...
+
+
+class _SkippedConstituentLike(Protocol):
+    """A constituent that was not restored, attributed by deployment name and reason."""
+
+    @property
+    def deployment_name(self) -> str: ...
+
+    @property
+    def reason(self) -> str: ...
 
 
 async def _resolve_environment_id(
@@ -142,6 +169,57 @@ def _report_terminal_status(environment_backup: EnvironmentBackup) -> None:
     else:
         print_error(f"Environment backup {status}")
     _print_constituents(environment_backup.constituents)
+    raise SystemExit(1)
+
+
+def _print_restores(restores: Sequence[_RestoreLike]) -> None:
+    if not restores:
+        console.print("  Restored constituents: none")
+        return
+
+    console.print("  Restored constituents:")
+    for restore in restores:
+        detail = f"restore {restore.id} ({restore.status})"
+        if restore.error_message is not None:
+            detail = f"{detail} — {restore.error_message}"
+        console.print(f"    - {restore.name}: {detail}")
+
+
+def _print_skipped_constituents(skipped_constituents: Sequence[_SkippedConstituentLike]) -> None:
+    """Print every non-restored constituent with its deployment name and reason.
+
+    Spec FR-007 / SC-004: zero silent skips. ``reason`` is free text from the
+    backend, not a closed vocabulary, so it is printed verbatim rather than
+    mapped through a lookup table that would drop unknown values.
+    """
+    if not skipped_constituents:
+        console.print("  Skipped constituents: none")
+        return
+
+    console.print("  Skipped constituents:")
+    for skipped in skipped_constituents:
+        console.print(f"    - {skipped.deployment_name}: {skipped.reason}")
+
+
+def _report_terminal_restore_status(environment_restore: EnvironmentRestore) -> None:
+    """Print the polled outcome and exit non-zero unless every constituent restored.
+
+    Mirrors :func:`_report_terminal_status`: ``PARTIAL`` exits non-zero too,
+    because a script that asked to restore an environment did not get every
+    deployment back, and the exit code is the only machine-readable place to
+    say so.
+    """
+    status = environment_restore.status.value
+    if status == "COMPLETED":
+        print_success("Environment restore completed")
+        return
+
+    if status == "PARTIAL":
+        console.print("[yellow]Warning:[/yellow] Environment restore PARTIAL — some constituents did not restore")
+    else:
+        print_error(f"Environment restore {status}")
+    _print_restores(environment_restore.restores)
+    _print_skipped_constituents(environment_restore.skipped_constituents)
     raise SystemExit(1)
 
 
@@ -247,4 +325,83 @@ async def list_environment_backups(
         rows,
         columns=["id", "name", "status", "constituents", "created_on"],
         title="Environment backups (constituents: ok/failed/total)",
+    )
+
+
+@environment_backups_app.command
+async def restore(
+    environment_backup_id: EnvironmentBackupId,
+    *,
+    wait: Annotated[bool, Parameter(help="Wait for every constituent restore to reach a terminal state.")] = False,
+    max_wait: MaxWait = 900,
+    interval: PollInterval = 5,
+) -> None:
+    """Restore an environment backup in place.
+
+    Reverts the environment's captured config and restores every usable
+    constituent into its existing deployment. Requires the ADMIN role. Every
+    constituent that is not restored is printed with its deployment name and
+    reason.
+    """
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            environment_restore = await sdk.environment_backups.restore(environment_backup_id)
+
+            print_success(
+                f"Environment restore started (id: {environment_restore.id}, "
+                f"status: {environment_restore.status.value}, "
+                f"restored: {len(environment_restore.restores)}, "
+                f"skipped: {len(environment_restore.skipped_constituents)})"
+            )
+            _print_restores(environment_restore.restores)
+            _print_skipped_constituents(environment_restore.skipped_constituents)
+
+            if wait:
+                console.print("Waiting for constituent restores to complete...")
+                environment_restore = await sdk.environment_backups.wait_for_restore(
+                    environment_restore.id, max_wait=max_wait, interval=interval
+                )
+                _report_terminal_restore_status(environment_restore)
+
+
+@environment_backups_app.command(name="restore-get")
+async def restore_get(environment_restore_id: EnvironmentRestoreId) -> None:
+    """Get environment restore details, including skipped constituents and their reasons."""
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            environment_restore = await sdk.environment_backups.get_restore(environment_restore_id)
+
+    console.print(f"  ID: {environment_restore.id}")
+    console.print(f"  Status: {environment_restore.status.value}")
+    console.print(f"  Environment backup ID: {environment_restore.environment_backup_id}")
+    console.print(f"  Created on: {environment_restore.created_on}")
+    _print_restores(environment_restore.restores)
+    _print_skipped_constituents(environment_restore.skipped_constituents)
+
+
+@environment_backups_app.command(name="restore-list")
+async def restore_list(environment_backup_id: EnvironmentBackupId) -> None:
+    """List the coordinated restores performed from an environment backup, newest first."""
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            environment_restores = await sdk.environment_backups.list_restores(environment_backup_id)
+
+    if not environment_restores:
+        console.print("No environment restores found.")
+        return
+
+    rows = [
+        {
+            "id": str(environment_restore.id),
+            "status": environment_restore.status.value,
+            "restored": str(len(environment_restore.restores)),
+            "skipped": str(len(environment_restore.skipped_constituents)),
+            "created_on": str(environment_restore.created_on),
+        }
+        for environment_restore in environment_restores
+    ]
+    print_table(
+        rows,
+        columns=["id", "status", "restored", "skipped", "created_on"],
+        title="Environment restores",
     )

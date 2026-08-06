@@ -5,14 +5,16 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from styrmin_sdk import EnvironmentBackupStatus
-from styrmin_sdk.exceptions import ResourceNotFoundError, StyrminError
+from styrmin_sdk import EnvironmentBackupStatus, EnvironmentRestoreStatus
+from styrmin_sdk.exceptions import OperationFailedError, ResourceNotFoundError, StyrminError
 from styrminctl.cli import app
 
 ENV_UUID = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
 ENV_BACKUP_UUID = "c3d4e5f6-a7b8-9012-cdef-123456789012"
+ENV_RESTORE_UUID = "f6a7b8c9-d0e1-2345-f012-3456789abcde"
 CLUSTER_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 BACKUP_UUID = "d4e5f6a7-b8c9-0123-def0-123456789abc"
+RESTORE_UUID = "a7b8c9d0-e1f2-3456-0123-456789abcdef"
 DEPLOYMENT_UUID = "e5f6a7b8-c9d0-1234-ef01-23456789abcd"
 
 
@@ -48,6 +50,36 @@ def _make_environment_backup(
     return environment_backup
 
 
+def _make_restore(
+    *, name: str = "demo-restore", status: str = "pending", error_message: str | None = None
+) -> MagicMock:
+    restore = MagicMock(id=RESTORE_UUID, status=status, error_message=error_message)
+    restore.name = name
+    return restore
+
+
+def _make_skipped(*, deployment_name: str, reason: str) -> MagicMock:
+    skipped = MagicMock(deployment_id=DEPLOYMENT_UUID, reason=reason)
+    skipped.deployment_name = deployment_name
+    return skipped
+
+
+def _make_environment_restore(
+    *,
+    status: EnvironmentRestoreStatus = EnvironmentRestoreStatus.PENDING,
+    restores: list[MagicMock] | None = None,
+    skipped_constituents: list[MagicMock] | None = None,
+) -> MagicMock:
+    return MagicMock(
+        id=ENV_RESTORE_UUID,
+        status=status,
+        environment_backup_id=ENV_BACKUP_UUID,
+        created_on="2026-01-01T00:00:00",
+        restores=restores if restores is not None else [_make_restore()],
+        skipped_constituents=skipped_constituents if skipped_constituents is not None else [],
+    )
+
+
 def _seed_environment(mock_client: MagicMock) -> None:
     environment = MagicMock(id=ENV_UUID)
     environment.name = "prod"
@@ -62,6 +94,9 @@ def test_env_backups_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert "create" in output
     assert "get" in output
     assert "list" in output
+    assert "restore" in output
+    assert "restore-get" in output
+    assert "restore-list" in output
 
 
 # --- create ---------------------------------------------------------------
@@ -351,3 +386,203 @@ def test_env_backups_list_requires_a_target(mock_client: MagicMock, capsys: pyte
     assert exc.value.code == 1
     mock_client.environment_backups.list.assert_not_called()
     assert "Either an environment name or --id is required" in capsys.readouterr().out
+
+
+# --- restore --------------------------------------------------------------
+
+
+def test_env_backups_restore(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.environment_backups.restore = AsyncMock(
+        return_value=_make_environment_restore(status=EnvironmentRestoreStatus.IN_PROGRESS)
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore", ENV_BACKUP_UUID])
+    assert exc.value.code == 0
+    mock_client.environment_backups.restore.assert_called_once_with(ENV_BACKUP_UUID)
+    output = capsys.readouterr().out
+    assert "IN_PROGRESS" in output
+    assert "demo-restore" in output
+    assert "Skipped constituents: none" in output
+
+
+def test_env_backups_restore_prints_every_skip_with_a_reason(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """FR-007 / SC-004: every non-restored constituent is attributed by name and reason."""
+    mock_client.environment_backups.restore = AsyncMock(
+        return_value=_make_environment_restore(
+            status=EnvironmentRestoreStatus.IN_PROGRESS,
+            skipped_constituents=[
+                _make_skipped(deployment_name="stale", reason="backup expired"),
+                _make_skipped(deployment_name="gone", reason="deployment no longer exists"),
+                _make_skipped(deployment_name="busy", reason="deployment busy with another restore"),
+            ],
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore", ENV_BACKUP_UUID])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "skipped: 3" in output
+    # Reasons are free text from the backend and are printed verbatim.
+    assert "stale: backup expired" in output
+    assert "gone: deployment no longer exists" in output
+    assert "busy: deployment busy with another restore" in output
+
+
+def test_env_backups_restore_rejects_non_uuid(mock_client: MagicMock) -> None:
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore", "not-a-uuid"])
+    assert exc.value.code != 0
+    mock_client.environment_backups.restore.assert_not_called()
+
+
+def test_env_backups_restore_not_restorable(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    """A snapshot whose derived status is not COMPLETED/PARTIAL is refused, with the reason shown."""
+    mock_client.environment_backups.restore = AsyncMock(
+        side_effect=OperationFailedError("Environment backup is not restorable", "OPERATION_DENIED")
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore", ENV_BACKUP_UUID])
+    assert exc.value.code == 1
+    assert "not restorable" in capsys.readouterr().out
+
+
+def test_env_backups_restore_wait_completed(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.environment_backups.restore = AsyncMock(return_value=_make_environment_restore())
+    mock_client.environment_backups.wait_for_restore = AsyncMock(
+        return_value=_make_environment_restore(status=EnvironmentRestoreStatus.COMPLETED)
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore", ENV_BACKUP_UUID, "--wait", "--max-wait", "30", "--interval", "1"])
+    assert exc.value.code == 0
+    mock_client.environment_backups.wait_for_restore.assert_called_once_with(ENV_RESTORE_UUID, max_wait=30, interval=1)
+    assert "Environment restore completed" in capsys.readouterr().out
+
+
+def test_env_backups_restore_wait_partial_exits_nonzero(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PARTIAL is terminal, but not "everything restored" — exit non-zero, same as backup --wait."""
+    mock_client.environment_backups.restore = AsyncMock(return_value=_make_environment_restore())
+    mock_client.environment_backups.wait_for_restore = AsyncMock(
+        return_value=_make_environment_restore(
+            status=EnvironmentRestoreStatus.PARTIAL,
+            restores=[_make_restore(name="ok-restore", status="completed")],
+            skipped_constituents=[_make_skipped(deployment_name="gone", reason="deployment no longer exists")],
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore", ENV_BACKUP_UUID, "--wait"])
+    assert exc.value.code == 1
+    output = capsys.readouterr().out
+    assert "PARTIAL" in output
+    assert "gone: deployment no longer exists" in output
+
+
+def test_env_backups_restore_wait_failed_exits_nonzero(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mock_client.environment_backups.restore = AsyncMock(return_value=_make_environment_restore())
+    mock_client.environment_backups.wait_for_restore = AsyncMock(
+        return_value=_make_environment_restore(
+            status=EnvironmentRestoreStatus.FAILED,
+            restores=[],
+            skipped_constituents=[_make_skipped(deployment_name="demo", reason="backup not completed")],
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore", ENV_BACKUP_UUID, "--wait"])
+    assert exc.value.code == 1
+    output = capsys.readouterr().out
+    assert "FAILED" in output
+    assert "Restored constituents: none" in output
+    assert "demo: backup not completed" in output
+
+
+# --- restore-get ----------------------------------------------------------
+
+
+def test_env_backups_restore_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.environment_backups.get_restore = AsyncMock(
+        return_value=_make_environment_restore(
+            status=EnvironmentRestoreStatus.PARTIAL,
+            restores=[
+                _make_restore(name="ok-restore", status="completed"),
+                _make_restore(name="bad-restore", status="failed", error_message="velero exploded"),
+            ],
+            skipped_constituents=[_make_skipped(deployment_name="gone", reason="backup deleted")],
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore-get", ENV_RESTORE_UUID])
+    assert exc.value.code == 0
+    mock_client.environment_backups.get_restore.assert_called_once_with(ENV_RESTORE_UUID)
+    output = capsys.readouterr().out
+    assert "PARTIAL" in output
+    assert "ok-restore" in output
+    assert "velero exploded" in output
+    assert "gone: backup deleted" in output
+
+
+def test_env_backups_restore_get_rejects_non_uuid(mock_client: MagicMock) -> None:
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore-get", "not-a-uuid"])
+    assert exc.value.code != 0
+    mock_client.environment_backups.get_restore.assert_not_called()
+
+
+def test_env_backups_restore_get_not_found(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.environment_backups.get_restore = AsyncMock(
+        side_effect=ResourceNotFoundError("Environment restore not found", "NOT_FOUND")
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore-get", ENV_RESTORE_UUID])
+    assert exc.value.code == 1
+    assert "Environment restore not found" in capsys.readouterr().out
+
+
+# --- restore-list ---------------------------------------------------------
+
+
+def test_env_backups_restore_list(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    mock_client.environment_backups.list_restores = AsyncMock(
+        return_value=[
+            _make_environment_restore(
+                status=EnvironmentRestoreStatus.PARTIAL,
+                restores=[_make_restore(status="completed")],
+                skipped_constituents=[
+                    _make_skipped(deployment_name="gone", reason="deployment no longer exists"),
+                    _make_skipped(deployment_name="stale", reason="backup expired"),
+                ],
+            )
+        ]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore-list", ENV_BACKUP_UUID])
+    assert exc.value.code == 0
+    mock_client.environment_backups.list_restores.assert_called_once_with(ENV_BACKUP_UUID)
+    output = capsys.readouterr().out
+    assert ENV_RESTORE_UUID in output
+    assert "PARTIAL" in output
+
+
+def test_env_backups_restore_list_empty(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.environment_backups.list_restores = AsyncMock(return_value=[])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-backups", "restore-list", ENV_BACKUP_UUID])
+    assert exc.value.code == 0
+    assert "No environment restores found" in capsys.readouterr().out
