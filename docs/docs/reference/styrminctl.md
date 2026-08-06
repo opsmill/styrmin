@@ -34,7 +34,7 @@ database or the agent directly.
 This page will document, command by command:
 
 - Top-level commands (`cluster`, `environment`, `deployment`,
-  `driver`, `backup`, `restore`, `upgrade`, `auth`, ...)
+  `driver`, `backup`, `restore`, `env-backups`, `upgrade`, `auth`, ...)
 - Sub-commands and their flags
 - Output formats (`--output text|json|yaml`)
 - Exit codes
@@ -47,6 +47,90 @@ This page will document, command by command:
   [`cli/src/`](https://github.com/opsmill/styrmin/tree/develop/cli/src)
 - **Build step**: TBD — walk the Cyclopts tree, emit one Markdown
   section per command, write it into this file
+
+### `env-backups` — environment-level backup and restore
+
+The `env-backups` group covers whole-environment snapshots: one command
+backs up every eligible deployment in an environment, and one restores
+them. Per-deployment backups stay in the `backups` group — the two are
+deliberately separate namespaces, because `backups` options are
+instance-scoped (`--deployment`, `--instance-id`) and these are not. For
+the semantics behind these commands, read [Backups and
+restores](../concepts-and-architecture/backups-and-restores.md#backing-up-a-whole-environment).
+
+Seven commands:
+
+| Command | What it does |
+|---------|--------------|
+| `env-backups create [ENVIRONMENT]` | Create a coordinated backup of an environment. |
+| `env-backups get <ENVIRONMENT_BACKUP_ID>` | Show one snapshot, including per-constituent outcomes. |
+| `env-backups list [ENVIRONMENT]` | List an environment's snapshots, newest first. |
+| `env-backups restore <ENVIRONMENT_BACKUP_ID>` | Restore a snapshot in place. Requires the administrator role. |
+| `env-backups restore-get <ENVIRONMENT_RESTORE_ID>` | Show one restore, including skipped constituents and their reasons. |
+| `env-backups restore-list <ENVIRONMENT_BACKUP_ID>` | List the restores performed from a snapshot, newest first. |
+| `env-backups delete <ENVIRONMENT_BACKUP_ID>` | Delete a snapshot, its constituent backups, and their restores. |
+
+#### Targeting an environment
+
+`create` and `list` take the environment as a positional name, or as a
+UUID with `--id`. A name is resolved within a cluster, so pass
+`--cluster <name>` (defaults to `default`) or `--cluster-id <uuid>` when
+you have more than one cluster registered. Passing both a name and
+`--id`, or both `--cluster` and `--cluster-id`, is an error.
+
+```bash
+styrminctl env-backups create production --name before-upgrade
+styrminctl env-backups list production
+styrminctl env-backups list --id <environment-uuid>
+```
+
+Every other command takes a snapshot or restore UUID directly.
+
+#### `create` options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `--name` | generated | Snapshot name. Defaults to `styrmin-envbackup-<uuid>`. |
+| `--wait` | off | Block until every constituent backup reaches a terminal state. |
+| `--max-wait` | `600` | Seconds to wait, with `--wait`. |
+| `--interval` | `5` | Poll interval in seconds, with `--wait`. |
+
+`create` prints the snapshot's derived status and a constituent count in
+`ok/failed/total` form, then one line per constituent. Compare `total`
+against the number of eligible deployments — that count, not the status,
+is what tells you the fan-out covered everything.
+
+#### `restore` options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `--wait` | off | Block until every constituent restore reaches a terminal state. |
+| `--max-wait` | `900` | Seconds to wait, with `--wait`. |
+| `--interval` | `5` | Poll interval in seconds, with `--wait`. |
+
+`restore` prints the restored constituents and every skipped one with its
+deployment name and reason, before any waiting. The skip list is complete
+the moment the command returns — classification happens up front.
+
+#### Exit codes with `--wait`
+
+`create --wait` and `restore --wait` exit **non-zero on `PARTIAL` as
+well as on `FAILED`**. A `PARTIAL` snapshot is real and restorable, but
+you asked to back up (or restore) a whole environment and did not get
+every deployment — the exit code is the only machine-readable place to
+say so, and a CI job that treats it as success will not notice the gap.
+Without `--wait`, the commands exit successfully once the operation is
+accepted.
+
+:::note `delete` has no status guard
+
+`env-backups delete` works regardless of the snapshot's status,
+including while its constituents are still running. That is the escape
+hatch for an environment blocked by a constituent backup that never got
+picked up — deleting the snapshot releases the environment for new
+environment-level operations.
+
+:::
 
 ### `deployment apply` is idempotent
 

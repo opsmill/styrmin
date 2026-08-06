@@ -24,7 +24,7 @@ explains how.
   Spaces, MinIO, AWS S3, …) that Velero writes backups to. You
   configure one per environment.
 - **A backup strategy per component** — declared by the driver. Tells
-  Styrmin _how_ to back up that specific component.
+  Styrmin *how* to back up that specific component.
 
 ### Backup strategies
 
@@ -250,6 +250,173 @@ this sooner, so check the expiry column before picking a backup to
 restore from.
 
 :::
+
+### Backing up a whole environment
+
+Everything above is per-deployment: one application, one backup. An
+**environment backup** does the same thing for every application in an
+environment in one action, and keeps the result together as a single
+record — so you never again have to remember by hand which five backups
+formed last Tuesday's snapshot.
+
+One action — the **Backups** tab on the environment page, one
+`styrminctl env-backups create`, or one `createEnvironmentBackup` call —
+captures three things:
+
+- the **environment's config** as it stands at that moment;
+- the **declared state of every eligible deployment**: its Application
+  Driver, driver version and provenance fingerprint, application
+  version, config, and parameters;
+- one **constituent backup** per eligible deployment — an ordinary
+  per-deployment backup, taken by exactly the machinery described above,
+  writing to the same BSL, expiring under the same retention rules.
+
+A deployment is **eligible** when it isn't tombstoned, isn't one of
+Styrmin's own internal deployments (the environment's ingress
+controller, for instance), and has a running instance to back up. Its
+current state doesn't matter — a `FAILED` deployment with an active
+instance still contributes a constituent.
+
+An environment with no eligible deployments is not an error: you get a
+config-only snapshot that reports `COMPLETED` immediately. That is the
+useful shape for capturing an environment's settings before you populate
+it.
+
+#### Near-consistent, not stop-the-world
+
+Constituent backups are all started together and run in parallel.
+Nothing is quiesced — no component is stopped, no writes are frozen, and
+the constituents do not finish at the same instant. The snapshot is
+**near-consistent**: the right tool for getting an environment back to a
+known-good state, not a distributed transaction. If one application
+needs a genuinely quiesced backup, stop its components and back that one
+up on its own.
+
+A per-deployment conflict never derails the rest. If one deployment
+already has a backup running, that constituent is recorded as failed
+with the reason attached and its neighbours carry on — the environment
+backup never waits for it and never aborts because of it.
+
+#### Status is derived, never stored
+
+An environment backup has no status column of its own. Every time you
+read one, Styrmin computes its status from its constituents:
+
+| Status | What it means |
+|--------|---------------|
+| `PENDING` | Nothing has started yet. |
+| `IN_PROGRESS` | At least one constituent is still running. |
+| `COMPLETED` | Every constituent completed and none failed to start. |
+| `PARTIAL` | At least one constituent completed and at least one did not. |
+| `FAILED` | Nothing completed. |
+
+Because the status is recomputed on every read, it can never drift out
+of step with the constituents it summarises. It also means `PARTIAL` is
+a first-class, normal outcome rather than a bug: the snapshot is real and
+restorable, and the constituents it is missing are named on it. Expand a
+snapshot in the UI — or run `styrminctl env-backups get <id>` — to see
+each deployment's constituent, its status, or the error that stopped it
+being created.
+
+:::caution A fresh `COMPLETED` is not proof the fan-out finished
+
+Styrmin commits the environment backup record *before* it starts
+dispatching constituent backups, so a crash mid-fan-out leaves a real
+snapshot rather than a half-written one. The side effect: for a moment
+after creation, the record has zero constituents and zero errors — and
+"nothing failed" derives to `COMPLETED`. A snapshot read inside that
+window looks finished when its constituents haven't been created yet.
+
+Don't treat an immediate `COMPLETED` as evidence that every deployment
+was captured. Check that the constituent count matches the number of
+eligible deployments — the CLI prints it as `ok/failed/total` — and
+re-read the snapshot rather than trusting the first status you see.
+`--wait` polls for a terminal status, which does not close this window
+either.
+
+:::
+
+#### Restoring an environment
+
+Restoring a `COMPLETED` or `PARTIAL` environment backup is also one
+action. Styrmin reverts the environment's config to the captured value
+and restores every usable constituent **in place**, back into the
+deployment it came from.
+
+Two things it deliberately does **not** do:
+
+- **It never creates or deletes deployments.** Restoring is a config-and-
+  data operation, not a topology one. A deployment you deleted since the
+  backup is not recreated; a deployment you added since is not removed.
+- **It never touches data it has no backup for.** A deployment created
+  after the snapshot keeps its data untouched. It does still pick up the
+  reverted environment config, through the same config propagation any
+  environment edit triggers — that is the intended outcome, not a leak.
+
+Every constituent that is **not** restored is reported with its
+deployment name and a reason. There are no silent skips — if a
+deployment isn't in the restore's list of restored constituents, it is in
+the skipped list with one of these reasons:
+
+| Reason | What happened |
+|--------|---------------|
+| `backup failed at creation` | The constituent backup never got started — usually a conflicting backup already running at snapshot time. |
+| `backup not completed` | The constituent backup exists but didn't finish successfully. |
+| `backup deleted` | Someone deleted that constituent backup individually. |
+| `backup expired` | The constituent's retention TTL elapsed and Velero garbage-collected the data. |
+| `deployment no longer exists` | The deployment was deleted (or tombstoned) after the snapshot was taken. |
+| `deployment busy with another restore` | A separately started restore is already running on that deployment. |
+
+The reason is free text, so treat it as a message to read rather than a
+fixed set of codes to switch on.
+
+:::note Restoring an environment requires the administrator role
+
+Creating and deleting environment backups needs the same role as an
+ordinary per-deployment backup. **Restoring** one needs the
+administrator role, because it rewrites the environment's config — the
+same privilege you need to edit that config directly. The UI hides the
+restore action from anyone without it.
+
+:::
+
+A restore's status is derived from its constituent restores exactly the
+way a backup's is, with the same `PARTIAL` semantics. And the same
+caveat applies at the far end: when the restore reports a terminal
+status, its constituent data restores are done, but the reverted config
+may still be propagating to the deployments that *didn't* receive a
+restore. That propagation is tracked by those deployments' own
+reconciliations — watch their status, not the restore's.
+
+#### One environment operation at a time
+
+An environment runs at most one environment-level operation — backup or
+restore — at a time. A second request while one is in flight is
+rejected with a machine-readable error rather than queued. Different
+environments never block each other, and per-deployment backups and
+restores keep their own separate guards.
+
+"In flight" is derived from the constituents too, which has one sharp
+edge: if a constituent backup never gets picked up, it stays
+non-terminal, its snapshot stays non-terminal, and the environment stays
+blocked. Deleting the snapshot is the way out — see below.
+
+#### Deleting snapshots
+
+Deleting an environment backup deletes its constituent backups and any
+restores of them, in one action. Retention still works per constituent:
+each one expires on its own TTL, so an old snapshot decays piecewise and
+its record survives even after every constituent has expired. The gaps
+stay visible, which is the point — a snapshot that can only restore
+three of its five applications should say so.
+
+Deleting works **regardless of status**, including while constituents
+are still running. That is deliberate: it's the escape hatch for a
+snapshot pinned in progress by a constituent that never ran, and it's
+what releases the environment for new operations.
+
+Deleting an environment takes its environment backups with it. In this
+release a snapshot does not outlive its environment.
 
 ### What you set up vs what Styrmin handles
 

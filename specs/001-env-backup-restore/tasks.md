@@ -100,11 +100,11 @@
 
 ## Phase 6: Polish, Documentation & Final Gates (Constitution §VII)
 
-- [ ] T037 [P] Add the environment-level backup/restore section to `docs/docs/concepts-and-architecture/backups-and-restores.md` (semantics: near-consistent, config + data not topology, derived status, skip reasons, terminal-status-vs-convergence note, escape hatch)
-- [ ] T038 [P] Update `docs/docs/alpha-status.md` (remove the issue-#7 "coming before beta" bullet, lines 30-32), `docs/docs/reference/styrminctl.md` (`env-backups` group), and `docs/docs/concepts-and-architecture/glossary.md` (environment backup / environment restore entries)
-- [ ] T039 [P] Update `dev/knowledge/backend/backup-restore.md` with the environment-level flow (fan-out diagram, derived status, restore ordering)
-- [ ] T040 [P] Write the new ADR `dev/adr/0055-environment-backup-parent-records.md`: parent record + derived status design, restore ordering (D4), and the justified deviation from ADR-0012's umbrella-record rejection
-- [ ] T041 Final gates: `uv run invoke format lint` (includes `validate-graphql` + `generate-validate` codegen-drift checks), `uv run invoke test`, `cd frontend && pnpm test`, `cd cli && uv run pytest` — all green
+- [X] T037 [P] Add the environment-level backup/restore section to `docs/docs/concepts-and-architecture/backups-and-restores.md` (semantics: near-consistent, config + data not topology, derived status, skip reasons, terminal-status-vs-convergence note, escape hatch)
+- [X] T038 [P] Update `docs/docs/alpha-status.md` (remove the issue-#7 "coming before beta" bullet, lines 30-32), `docs/docs/reference/styrminctl.md` (`env-backups` group), and `docs/docs/concepts-and-architecture/glossary.md` (environment backup / environment restore entries) — also refined the `CONTEXT.md` environment backup/restore entries (derived-status values, ADMIN restore, escape hatch) and added a canonical **constituent backup / constituent restore** entry there and in the docs glossary
+- [X] T039 [P] Update `dev/knowledge/backend/backup-restore.md` with the environment-level flow (fan-out diagram, derived status, restore ordering)
+- [X] T040 [P] Write the new ADR `dev/adr/0055-environment-backup-parent-records.md`: parent record + derived status design, restore ordering (D4), and the justified deviation from ADR-0012's umbrella-record rejection — indexed in `dev/README.md`
+- [X] T041 Final gates: `uv run invoke format lint` (includes `validate-graphql` + `generate-validate` codegen-drift checks), `uv run invoke test`, `cd frontend && pnpm test`, `cd cli && uv run pytest` — all green apart from the two documented pre-existing environment failures (`cli/tests/telemetry/`, root ignores `chmod`)
 
 ---
 

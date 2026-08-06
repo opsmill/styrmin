@@ -27,9 +27,6 @@ to running it in anger:
 These features are deliberately not in the alpha and are tracked for the
 beta release:
 
-- **Backup of a full environment** — bundling every deployment in an
-  environment into a single backup/restore operation. Tracked in
-  [opsmill/styrmin#7](https://github.com/opsmill/styrmin/issues/7).
 - **Cloning an environment** — copy an environment (including selected
   applications) into a new, network-isolated environment. Tracked in
   [opsmill/styrmin#6](https://github.com/opsmill/styrmin/issues/6).
