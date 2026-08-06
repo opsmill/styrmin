@@ -340,6 +340,7 @@ async def create_restore(
     name: str | None = None,
     target_instance_id: UUID | None = None,
     timeout: int = DEFAULT_RESTORE_TIMEOUT,
+    environment_restore_id: UUID | None = None,
 ) -> tuple[Restore, UUID]:
     """Create a new restore operation from a backup.
 
@@ -347,6 +348,12 @@ async def create_restore(
     internal deployment, blocks a second concurrent restore on the same
     deployment, and flips the deployment to RESTORING in the same
     transaction so the UI reflects the lifecycle immediately.
+
+    Args:
+        environment_restore_id: Links the restore to an environment restore
+            as one of its constituents. ``None`` (the default) for a
+            standalone per-deployment restore; the constituent's own
+            lifecycle is otherwise identical (spec FR-014).
 
     Returns:
         Tuple of ``(restore_record, deployment_id)``. The deployment id
@@ -401,6 +408,7 @@ async def create_restore(
             backup_id=backup_id,
             target_instance_id=target_instance_id,
             metadata_={"timeout": timeout},
+            environment_restore_id=environment_restore_id,
         )
 
         restore = await uow.restores.create(restore)

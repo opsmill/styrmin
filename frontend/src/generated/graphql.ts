@@ -497,6 +497,8 @@ export type EnvironmentBackup = {
   environmentId: Scalars['UUID']['output'];
   id: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
+  /** Coordinated restores performed from this snapshot, newest first. */
+  restores: Array<EnvironmentRestore>;
   /** Derived from the constituent backups and recorded creation errors on every read — never stored, so it cannot contradict its constituents. An environment with no eligible deployments yields a config-only snapshot that is COMPLETED immediately. */
   status: EnvironmentBackupStatus;
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
@@ -512,6 +514,29 @@ export type EnvironmentBackupConstituent = {
 };
 
 export type EnvironmentBackupStatus =
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'IN_PROGRESS'
+  | 'PARTIAL'
+  | 'PENDING';
+
+export type EnvironmentRestore = {
+  __typename?: 'EnvironmentRestore';
+  createdOn: Scalars['DateTime']['output'];
+  environmentBackup: EnvironmentBackup;
+  environmentBackupId: Scalars['UUID']['output'];
+  id: Scalars['UUID']['output'];
+  /** Constituent restores dispatched by this operation. */
+  restores: Array<Restore>;
+  /** Constituents not restored, each with its deployment name and reason (zero silent skips). */
+  skippedConstituents: Array<SkippedConstituent>;
+  /** Derived from the constituent restores and the recorded skips on every read — never stored, so it cannot contradict its constituents. A restore that skipped everything and restored nothing is FAILED; a restore with nothing to do at all (no constituents, no skips) is COMPLETED. */
+  status: EnvironmentRestoreStatus;
+  updatedOn?: Maybe<Scalars['DateTime']['output']>;
+};
+
+/** Derived status of an environment restore. Mirrors ``EnvironmentBackupStatus`` — both project the same service-layer ``EnvironmentOperationStatus``. */
+export type EnvironmentRestoreStatus =
   | 'COMPLETED'
   | 'FAILED'
   | 'IN_PROGRESS'
@@ -631,6 +656,7 @@ export type Mutation = {
   reportDeploymentStatuses: ReportDeploymentStatusesResponse;
   reportPodStatuses: ReportPodStatusesResponse;
   resetUserPassword: Scalars['Boolean']['output'];
+  restoreEnvironmentBackup: EnvironmentRestore;
   runJob?: Maybe<Task>;
   startComponents?: Maybe<Task>;
   stopComponents?: Maybe<Task>;
@@ -819,6 +845,11 @@ export type MutationResetUserPasswordArgs = {
 };
 
 
+export type MutationRestoreEnvironmentBackupArgs = {
+  environmentBackupId: Scalars['UUID']['input'];
+};
+
+
 export type MutationRunJobArgs = {
   commands: Array<Scalars['String']['input']>;
   deploymentId: Scalars['UUID']['input'];
@@ -978,6 +1009,8 @@ export type Query = {
   environment?: Maybe<Environment>;
   environmentBackup?: Maybe<EnvironmentBackup>;
   environmentBackups: Array<EnvironmentBackup>;
+  environmentRestore?: Maybe<EnvironmentRestore>;
+  environmentRestores: Array<EnvironmentRestore>;
   environmentServices: Array<DeployedService>;
   environments: Array<Environment>;
   group?: Maybe<Group>;
@@ -1063,6 +1096,16 @@ export type QueryEnvironmentBackupArgs = {
 
 export type QueryEnvironmentBackupsArgs = {
   environmentId: Scalars['UUID']['input'];
+};
+
+
+export type QueryEnvironmentRestoreArgs = {
+  environmentRestoreId: Scalars['UUID']['input'];
+};
+
+
+export type QueryEnvironmentRestoresArgs = {
+  environmentBackupId: Scalars['UUID']['input'];
 };
 
 
@@ -1204,6 +1247,14 @@ export type ServiceDefinition = {
 export type ServiceNameOverride = {
   driverServiceName: Scalars['String']['input'];
   overrideName: Scalars['String']['input'];
+};
+
+/** A constituent that was not restored, attributed by deployment name and reason. Reasons come from a fixed vocabulary: backup failed at creation, backup not completed, backup deleted, backup expired, deployment no longer exists, deployment busy with another restore. */
+export type SkippedConstituent = {
+  __typename?: 'SkippedConstituent';
+  deploymentId: Scalars['UUID']['output'];
+  deploymentName: Scalars['String']['output'];
+  reason: Scalars['String']['output'];
 };
 
 /** Standard storage configuration for the cluster, naming the Kubernetes ``StorageClass`` used as the default for deployments. */

@@ -81,10 +81,17 @@ class SQLModelEnvironmentBackupRepository(
         that reads an ``EnvironmentBackup`` also reads ``backups``. Loading it
         lazily would raise ``MissingGreenlet`` inside the async GraphQL
         resolvers, so it is loaded up front rather than left to the caller.
+
+        ``restores`` is chained one level deeper for the same reason: each
+        ``EnvironmentRestore`` the parent exposes derives *its* status from
+        its own constituent ``Restore`` rows.
         """
         return [
             selectinload(self.model_class.backups),  # type: ignore[arg-type]
             selectinload(self.model_class.environment),  # type: ignore[arg-type]
+            selectinload(self.model_class.restores).selectinload(  # type: ignore[arg-type]
+                EnvironmentRestore.restores  # type: ignore[arg-type]
+            ),
         ]
 
     async def get(self, id: UUID) -> EnvironmentBackup | None:
@@ -141,6 +148,28 @@ class SQLModelEnvironmentRestoreRepository(
 
     model_class = EnvironmentRestore
 
+    def _eager_load_options(self) -> list[Any]:
+        """Eager-load the relationships every read of a parent needs.
+
+        Same reasoning as the environment backup repository above: the
+        restore's status is *derived* from its constituent ``Restore`` rows,
+        so every reader touches them. Loading them lazily would raise
+        ``MissingGreenlet`` inside the async GraphQL resolvers.
+        """
+        return [
+            selectinload(self.model_class.restores),  # type: ignore[arg-type]
+        ]
+
+    async def get(self, id: UUID) -> EnvironmentRestore | None:
+        """Get an environment restore with its constituents eagerly loaded."""
+        statement = (
+            select(self.model_class)
+            .where(self.model_class.id == id)
+            .options(*self._eager_load_options())
+        )
+        result = await self.session.exec(statement)
+        return result.first()
+
     async def get_by_environment_backup_id(
         self, environment_backup_id: UUID
     ) -> Sequence[EnvironmentRestore]:
@@ -148,6 +177,7 @@ class SQLModelEnvironmentRestoreRepository(
         statement = (
             select(self.model_class)
             .where(self.model_class.environment_backup_id == environment_backup_id)
+            .options(*self._eager_load_options())
             .order_by(self.model_class.created_on.desc())  # type: ignore[union-attr]
         )
         result = await self.session.exec(statement)

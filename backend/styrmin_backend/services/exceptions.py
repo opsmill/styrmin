@@ -345,6 +345,13 @@ class EnvironmentBackupNotFoundError(ServiceError):
     default_message = "Environment backup not found"
 
 
+class EnvironmentRestoreNotFoundError(ServiceError):
+    """The environment restore was not found."""
+
+    error_code = "NOT_FOUND"
+    default_message = "Environment restore not found"
+
+
 class EnvironmentOperationInProgressError(ServiceError):
     """An environment-level backup or restore is already in progress.
 

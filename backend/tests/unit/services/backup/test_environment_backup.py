@@ -6,7 +6,7 @@ function is the single definition of what a parent's status means, and it must
 never contradict the constituents it is derived from (spec FR-004 / SC-003).
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -39,7 +39,11 @@ from styrmin_backend.db.models import (
     Restore,
     RestoreStatus,
 )
+from styrmin_backend.api.definitions.backup.environment_restore import (
+    EnvironmentRestoreStatus,
+)
 from styrmin_backend.domain.models import Deployment as DeploymentEntity
+from styrmin_backend.domain.models import DeploymentState
 from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
 from styrmin_backend.services.backup.environment import (
@@ -52,10 +56,15 @@ from styrmin_backend.services.backup.environment import (
     SkippedConstituent,
     create_environment_backup,
     derive_environment_operation_status,
+    restore_environment_backup,
 )
+from styrmin_backend.services.backup.service import create_restore
 from styrmin_backend.services.exceptions import (
+    EnvironmentBackupNotFoundError,
+    EnvironmentBackupNotRestorableError,
     EnvironmentNotFoundError,
     EnvironmentOperationInProgressError,
+    RestoreAlreadyInProgressError,
 )
 from styrmin_backend.workflows.models import PrefectAction
 from tests.unit.services.fakes import (
@@ -357,6 +366,7 @@ def _deployment(
     config: dict | None = None,
     parameters: dict | None = None,
     application_version: str = "1.6.0",
+    status: DeploymentState = DeploymentState.RUNNING,
 ) -> DeploymentEntity:
     deployment = DeploymentEntity(
         id=uuid4(),
@@ -368,6 +378,7 @@ def _deployment(
         application_driver_version_id=adv.id,
         environment_id=environment_id,
         deleted_at=deleted_at,
+        status=status,
         created_by_user_id=uuid4(),
     )
     if with_instance:
@@ -861,3 +872,950 @@ async def test_dispatch_failure_leaves_the_constituent_row_and_records_no_error(
     assert environment_backup.constituent_errors is None
     assert len(uow.backups.models) == 1
     assert uow.backups.models[0].status == BackupStatus.PENDING
+
+
+# ---------------------------------------------------------------------------
+# restore_environment_backup — helpers
+# ---------------------------------------------------------------------------
+#
+# The restore fan-out calls ``redeploy_for_environment_update`` (the full
+# reconciliation chain: ``generate_instance_from_deployment`` + ``apply_state``)
+# for the deployments that are NOT receiving a constituent restore. Driving
+# that chain through fakes is brittle and duplicates coverage that already
+# lives in ``test_environment_services.py``, so these tests patch it *at the
+# call site* and assert on the exclusion set instead. Everything else — the
+# classification, the config revert, the constituent restores — runs for real
+# against the fakes.
+
+
+def _snapshot_of(deployment: DeploymentEntity) -> dict:
+    """The JSON snapshot entry the backup fan-out would have captured."""
+    assert deployment.active_instance is not None
+    return DeploymentSnapshot(
+        deployment_id=deployment.id,
+        deployment_name=deployment.name,
+        instance_id=deployment.active_instance.id,
+        driver_name="infrahub-driver",
+        driver_version="1.2.0",
+        application_version=deployment.application_version,
+        config=deployment.config,
+        parameters=deployment.parameters or None,
+    ).model_dump(mode="json")
+
+
+def _constituent(
+    parent: EnvironmentBackup,
+    deployment: DeploymentEntity,
+    *,
+    status: BackupStatus = BackupStatus.COMPLETED,
+    expires_at: datetime | None = None,
+) -> Backup:
+    """A constituent backup linked to ``parent`` both ways.
+
+    The FK is set explicitly on top of the relationship append: nothing
+    flushes in these tests, so SQLAlchemy never syncs it, and the D6 guard
+    fake reads the FK.
+    """
+    assert deployment.active_instance is not None
+    backup = Backup(
+        name=f"constituent-{deployment.name}-{uuid4().hex[:6]}",
+        status=status,
+        instance_id=deployment.active_instance.id,
+        metadata_={"expires_at": expires_at.isoformat()} if expires_at else None,
+    )
+    parent.backups.append(backup)
+    backup.environment_backup_id = parent.id
+    return backup
+
+
+def _environment_backup(
+    *,
+    environment: Environment,
+    snapshots: list[dict],
+    environment_config: dict | None,
+    constituent_errors: list[dict] | None = None,
+) -> EnvironmentBackup:
+    return EnvironmentBackup(
+        name=f"snapshot-{uuid4().hex[:8]}",
+        environment_id=environment.id,
+        environment_config=environment_config,
+        deployment_snapshots=snapshots or None,
+        constituent_errors=constituent_errors,
+    )
+
+
+def _skips(environment_restore: EnvironmentRestore) -> dict[str, str]:
+    """Skip reasons keyed by deployment name."""
+    return {
+        SkippedConstituent.model_validate(
+            raw
+        ).deployment_name: SkippedConstituent.model_validate(raw).reason
+        for raw in environment_restore.skipped_constituents or []
+    }
+
+
+@pytest.fixture
+def no_config_fanout(mocker):
+    """Patch the exclusion-aware config fan-out at its call site."""
+    return mocker.patch(
+        "styrmin_backend.services.backup.environment.redeploy_for_environment_update",
+        autospec=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# restore_environment_backup — happy path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_restore_reverts_config_and_restores_every_usable_constituent(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """FR-006/SC-002/SC-005: one action reverts config and restores in place."""
+    adv = _driver_version()
+    infrahub = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    netbox = _deployment(environment_id=environment.id, adv=adv, name="netbox")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(infrahub), _snapshot_of(netbox)],
+        environment_config={"dns_zone": "captured.example.com"},
+    )
+    constituents = [_constituent(parent, infrahub), _constituent(parent, netbox)]
+    # The environment drifted away from the captured config since the backup.
+    environment.config = {"dns_zone": "drifted.example.com"}
+    uow = _make_uow(
+        environment=environment,
+        deployments=[infrahub, netbox],
+        driver_versions=[adv],
+        backups=constituents,
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    # SC-005: the environment config equals the captured value.
+    assert environment.config == {"dns_zone": "captured.example.com"}
+    # SC-002: every usable constituent got a restore, linked to the parent.
+    assert len(uow.restores.models) == 2
+    assert {restore.environment_restore_id for restore in uow.restores.models} == {
+        environment_restore.id
+    }
+    assert {restore.target_namespace for restore in uow.restores.models} == {
+        f"styrmin-{infrahub.id}",
+        f"styrmin-{netbox.id}",
+    }
+    assert environment_restore.skipped_constituents is None
+
+    dispatched = [
+        call.kwargs for call in prefect_manager_mock.run_action.call_args_list
+    ]
+    assert {call["action"] for call in dispatched} == {PrefectAction.EXECUTE_RESTORE}
+    assert {call["parameters"]["deployment_id"] for call in dispatched} == {
+        str(infrahub.id),
+        str(netbox.id),
+    }
+    # Every restored deployment is excluded from the config fan-out (D4).
+    no_config_fanout.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_restore_reverts_a_captured_none_config(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """Critique E3: a captured ``None`` config must actually revert to ``None``.
+
+    Delegating to ``update_environment`` would treat ``config=None`` as an
+    idempotent no-op and silently leave the drifted config in place.
+    """
+    parent = _environment_backup(
+        environment=environment, snapshots=[], environment_config=None
+    )
+    environment.config = {"dns_zone": "drifted.example.com"}
+    uow = _make_uow(
+        environment=environment,
+        deployments=[],
+        driver_versions=[],
+        environment_backups=[parent],
+    )
+
+    await restore_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    assert environment.config is None
+
+
+@pytest.mark.asyncio
+async def test_restore_fans_config_out_only_to_deployments_not_being_restored(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """D4: a deployment gets either a Velero restore or a redeploy, never both."""
+    adv = _driver_version()
+    restored = _deployment(environment_id=environment.id, adv=adv, name="restored-app")
+    # Created after the backup: no snapshot entry, so it only sees the config.
+    newcomer = _deployment(environment_id=environment.id, adv=adv, name="newcomer")
+    internal = _deployment(
+        environment_id=environment.id, adv=adv, name="ingress", internal=True
+    )
+    instanceless = _deployment(
+        environment_id=environment.id,
+        adv=adv,
+        name="never-deployed",
+        with_instance=False,
+    )
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(restored)],
+        environment_config={"dns_zone": "captured.example.com"},
+    )
+    constituent = _constituent(parent, restored)
+    uow = _make_uow(
+        environment=environment,
+        deployments=[restored, newcomer, internal, instanceless],
+        driver_versions=[adv],
+        backups=[constituent],
+        environment_backups=[parent],
+    )
+
+    await restore_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    fanned_out = [call.args[0].name for call in no_config_fanout.await_args_list]
+    assert fanned_out == ["newcomer"]
+
+
+@pytest.mark.asyncio
+async def test_restore_survives_a_config_fanout_failure(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """ADR-0012 isolation: one laggard's redeploy failure is not an abort."""
+    adv = _driver_version()
+    restored = _deployment(environment_id=environment.id, adv=adv, name="restored-app")
+    newcomer = _deployment(environment_id=environment.id, adv=adv, name="newcomer")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(restored)],
+        environment_config={"dns_zone": "captured.example.com"},
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[restored, newcomer],
+        driver_versions=[adv],
+        backups=[_constituent(parent, restored)],
+        environment_backups=[parent],
+    )
+    no_config_fanout.side_effect = RuntimeError("driver render failed")
+
+    await restore_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    # The config still reverted and the constituent restore still ran.
+    assert environment.config == {"dns_zone": "captured.example.com"}
+    assert len(uow.restores.models) == 1
+
+
+# ---------------------------------------------------------------------------
+# restore_environment_backup — classification matrix (FR-007 / SC-004)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_constituent_that_failed_at_backup_creation_is_skipped(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    adv = _driver_version()
+    busy_at_backup = _deployment(
+        environment_id=environment.id, adv=adv, name="busy-at-backup"
+    )
+    healthy = _deployment(environment_id=environment.id, adv=adv, name="healthy")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(busy_at_backup), _snapshot_of(healthy)],
+        environment_config=None,
+        constituent_errors=[
+            ConstituentError(
+                deployment_id=busy_at_backup.id,
+                deployment_name="busy-at-backup",
+                error="backup already in progress (existing: 1234)",
+            ).model_dump(mode="json")
+        ],
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[busy_at_backup, healthy],
+        driver_versions=[adv],
+        backups=[_constituent(parent, healthy)],
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert _skips(environment_restore) == {
+        "busy-at-backup": SkipReason.BACKUP_FAILED_AT_CREATION.value
+    }
+    assert len(uow.restores.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_constituent_whose_backup_never_completed_is_skipped(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """A FAILED constituent has nothing to restore from.
+
+    Only FAILED is exercised here: a ``PENDING``/``IN_PROGRESS`` constituent
+    makes the *parent* non-terminal, which the restorability guard rejects
+    before classification ever runs (see
+    ``test_a_non_restorable_snapshot_is_rejected``).
+    """
+    adv = _driver_version()
+    unfinished = _deployment(environment_id=environment.id, adv=adv, name="unfinished")
+    healthy = _deployment(environment_id=environment.id, adv=adv, name="healthy")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(unfinished), _snapshot_of(healthy)],
+        environment_config=None,
+    )
+    constituents = [
+        _constituent(parent, unfinished, status=BackupStatus.FAILED),
+        _constituent(parent, healthy),
+    ]
+    uow = _make_uow(
+        environment=environment,
+        deployments=[unfinished, healthy],
+        driver_versions=[adv],
+        backups=constituents,
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert _skips(environment_restore) == {
+        "unfinished": SkipReason.BACKUP_NOT_COMPLETED.value
+    }
+    assert len(uow.restores.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_constituent_deleted_after_the_backup_is_skipped(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """US3: the snapshot keeps the entry; the missing row is a visible gap."""
+    adv = _driver_version()
+    gap = _deployment(environment_id=environment.id, adv=adv, name="deleted-backup")
+    healthy = _deployment(environment_id=environment.id, adv=adv, name="healthy")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(gap), _snapshot_of(healthy)],
+        environment_config=None,
+    )
+    # Only ``healthy`` keeps a constituent row.
+    uow = _make_uow(
+        environment=environment,
+        deployments=[gap, healthy],
+        driver_versions=[adv],
+        backups=[_constituent(parent, healthy)],
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert _skips(environment_restore) == {
+        "deleted-backup": SkipReason.BACKUP_DELETED.value
+    }
+
+
+@pytest.mark.asyncio
+async def test_expired_but_completed_constituent_is_skipped(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """Critique E4: Velero GC never touches the row, so it still reads COMPLETED.
+
+    Classification must therefore compute expiry from the recorded TTL
+    metadata rather than trusting the status — otherwise the restore
+    dispatches a Velero restore against data that no longer exists.
+    """
+    adv = _driver_version()
+    expired = _deployment(environment_id=environment.id, adv=adv, name="expired-app")
+    fresh = _deployment(environment_id=environment.id, adv=adv, name="fresh-app")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(expired), _snapshot_of(fresh)],
+        environment_config=None,
+    )
+    now = datetime.now(timezone.utc)
+    constituents = [
+        _constituent(parent, expired, expires_at=now - timedelta(hours=1)),
+        _constituent(parent, fresh, expires_at=now + timedelta(days=30)),
+    ]
+    assert all(backup.status == BackupStatus.COMPLETED for backup in constituents), (
+        "the whole point: the expired row still reads COMPLETED"
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[expired, fresh],
+        driver_versions=[adv],
+        backups=constituents,
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert _skips(environment_restore) == {
+        "expired-app": SkipReason.BACKUP_EXPIRED.value
+    }
+    # The un-expired peer was restored.
+    assert [restore.target_namespace for restore in uow.restores.models] == [
+        f"styrmin-{fresh.id}"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_constituent_without_expiry_metadata_is_not_treated_as_expired(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """Unknown expiry must degrade to "restore it", not to a silent skip."""
+    adv = _driver_version()
+    deployment = _deployment(environment_id=environment.id, adv=adv, name="no-ttl")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(deployment)],
+        environment_config=None,
+    )
+    constituent = _constituent(parent, deployment)
+    constituent.metadata_ = {"timeout": 3600}
+    uow = _make_uow(
+        environment=environment,
+        deployments=[deployment],
+        driver_versions=[adv],
+        backups=[constituent],
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert environment_restore.skipped_constituents is None
+    assert len(uow.restores.models) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tombstoned", [True, False])
+async def test_constituent_whose_deployment_is_gone_is_skipped(
+    environment: Environment,
+    prefect_manager_mock,
+    no_config_fanout,
+    tombstoned: bool,
+) -> None:
+    """FR-008: a vanished deployment is reported, never recreated."""
+    adv = _driver_version()
+    departed = _deployment(
+        environment_id=environment.id,
+        adv=adv,
+        name="departed",
+        deleted_at=datetime(2026, 8, 1, tzinfo=timezone.utc) if tombstoned else None,
+    )
+    healthy = _deployment(environment_id=environment.id, adv=adv, name="healthy")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(departed), _snapshot_of(healthy)],
+        environment_config=None,
+    )
+    constituents = [_constituent(parent, departed), _constituent(parent, healthy)]
+    # ``tombstoned=False`` models the row being deleted outright.
+    deployments = [departed, healthy] if tombstoned else [healthy]
+    uow = _make_uow(
+        environment=environment,
+        deployments=deployments,
+        driver_versions=[adv],
+        backups=constituents,
+        environment_backups=[parent],
+    )
+    deployment_count_before = len(uow.deployments._deployments)
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert _skips(environment_restore) == {"departed": SkipReason.DEPLOYMENT_GONE.value}
+    # FR-008: the restore neither created nor deleted a deployment.
+    assert len(uow.deployments._deployments) == deployment_count_before
+
+
+@pytest.mark.asyncio
+async def test_constituent_whose_deployment_is_mid_restore_is_skipped(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """Critique P2: a busy deployment is a skip, never an abort or a wait."""
+    adv = _driver_version()
+    busy = _deployment(
+        environment_id=environment.id,
+        adv=adv,
+        name="busy-app",
+        status=DeploymentState.RESTORING,
+    )
+    healthy = _deployment(environment_id=environment.id, adv=adv, name="healthy")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(busy), _snapshot_of(healthy)],
+        environment_config=None,
+    )
+    constituents = [_constituent(parent, busy), _constituent(parent, healthy)]
+    uow = _make_uow(
+        environment=environment,
+        deployments=[busy, healthy],
+        driver_versions=[adv],
+        backups=constituents,
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert _skips(environment_restore) == {"busy-app": SkipReason.DEPLOYMENT_BUSY.value}
+    assert len(uow.restores.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_that_goes_busy_mid_dispatch_downgrades_to_a_skip(
+    environment: Environment, prefect_manager_mock, no_config_fanout, mocker
+) -> None:
+    """The race window between classification and dispatch is a skip too."""
+    adv = _driver_version()
+    racer = _deployment(environment_id=environment.id, adv=adv, name="racer")
+    healthy = _deployment(environment_id=environment.id, adv=adv, name="healthy")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(racer), _snapshot_of(healthy)],
+        environment_config=None,
+    )
+    racer_backup = _constituent(parent, racer)
+    uow = _make_uow(
+        environment=environment,
+        deployments=[racer, healthy],
+        driver_versions=[adv],
+        backups=[racer_backup, _constituent(parent, healthy)],
+        environment_backups=[parent],
+    )
+
+    async def _create_restore(*args, **kwargs):
+        if kwargs["backup_id"] == racer_backup.id:
+            raise RestoreAlreadyInProgressError(existing_restore_id=str(uuid4()))
+        return await create_restore(*args, **kwargs)
+
+    mocker.patch(
+        "styrmin_backend.services.backup.environment.create_restore",
+        side_effect=_create_restore,
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert _skips(environment_restore) == {"racer": SkipReason.DEPLOYMENT_BUSY.value}
+    assert len(uow.restores.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_every_non_restored_constituent_is_attributed(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """FR-007/SC-004: zero silent skips across the whole matrix at once."""
+    adv = _driver_version()
+    failed_at_creation = _deployment(
+        environment_id=environment.id, adv=adv, name="failed-at-creation"
+    )
+    not_completed = _deployment(
+        environment_id=environment.id, adv=adv, name="not-completed"
+    )
+    deleted_backup = _deployment(
+        environment_id=environment.id, adv=adv, name="deleted-backup"
+    )
+    expired = _deployment(environment_id=environment.id, adv=adv, name="expired")
+    gone = _deployment(environment_id=environment.id, adv=adv, name="gone")
+    busy = _deployment(
+        environment_id=environment.id,
+        adv=adv,
+        name="busy",
+        status=DeploymentState.RESTORING,
+    )
+    usable = _deployment(environment_id=environment.id, adv=adv, name="usable")
+    every = [
+        failed_at_creation,
+        not_completed,
+        deleted_backup,
+        expired,
+        gone,
+        busy,
+        usable,
+    ]
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(deployment) for deployment in every],
+        environment_config={"dns_zone": "captured.example.com"},
+        constituent_errors=[
+            ConstituentError(
+                deployment_id=failed_at_creation.id,
+                deployment_name="failed-at-creation",
+                error="backup already in progress",
+            ).model_dump(mode="json")
+        ],
+    )
+    now = datetime.now(timezone.utc)
+    constituents = [
+        _constituent(parent, not_completed, status=BackupStatus.FAILED),
+        _constituent(parent, expired, expires_at=now - timedelta(minutes=1)),
+        _constituent(parent, gone),
+        _constituent(parent, busy),
+        _constituent(parent, usable),
+    ]
+    uow = _make_uow(
+        environment=environment,
+        deployments=[d for d in every if d is not gone],
+        driver_versions=[adv],
+        backups=constituents,
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert _skips(environment_restore) == {
+        "failed-at-creation": SkipReason.BACKUP_FAILED_AT_CREATION.value,
+        "not-completed": SkipReason.BACKUP_NOT_COMPLETED.value,
+        "deleted-backup": SkipReason.BACKUP_DELETED.value,
+        "expired": SkipReason.BACKUP_EXPIRED.value,
+        "gone": SkipReason.DEPLOYMENT_GONE.value,
+        "busy": SkipReason.DEPLOYMENT_BUSY.value,
+    }
+    # Every captured constituent is accounted for exactly once: restored or
+    # skipped, never dropped.
+    assert len(uow.restores.models) == 1
+    assert len(environment_restore.skipped_constituents or []) + len(
+        uow.restores.models
+    ) == len(parent.deployment_snapshots or [])
+    # The single dispatched restore is still PENDING, so the parent reads as
+    # in progress despite the six terminal skips.
+    assert (
+        derive_environment_operation_status(
+            [restore.status for restore in uow.restores.models],
+            error_count=len(environment_restore.skipped_constituents or []),
+        )
+        == EnvironmentOperationStatus.IN_PROGRESS
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_with_nothing_usable_still_reverts_the_config(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """Acceptance scenario US2-5: all constituents gone, config still reverts."""
+    adv = _driver_version()
+    a = _deployment(environment_id=environment.id, adv=adv, name="app-a")
+    b = _deployment(environment_id=environment.id, adv=adv, name="app-b")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(a), _snapshot_of(b)],
+        environment_config={"dns_zone": "captured.example.com"},
+    )
+    now = datetime.now(timezone.utc)
+    constituents = [
+        _constituent(parent, a, expires_at=now - timedelta(days=1)),
+        _constituent(parent, b, expires_at=now - timedelta(days=1)),
+    ]
+    environment.config = {"dns_zone": "drifted.example.com"}
+    uow = _make_uow(
+        environment=environment,
+        deployments=[a, b],
+        driver_versions=[adv],
+        backups=constituents,
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert environment.config == {"dns_zone": "captured.example.com"}
+    assert set(_skips(environment_restore)) == {"app-a", "app-b"}
+    assert uow.restores.models == []
+    # Nothing restored and everything skipped derives as FAILED.
+    assert (
+        derive_environment_operation_status(
+            [], error_count=len(environment_restore.skipped_constituents or [])
+        )
+        == EnvironmentOperationStatus.FAILED
+    )
+
+
+# ---------------------------------------------------------------------------
+# restore_environment_backup — guards
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_restoring_an_unknown_environment_backup_raises_not_found(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    uow = _make_uow(environment=environment, deployments=[], driver_versions=[])
+
+    with pytest.raises(EnvironmentBackupNotFoundError):
+        await restore_environment_backup(environment_backup_id=uuid4(), uow=uow)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("child_statuses", "error_count"),
+    [
+        # Everything failed: nothing usable was ever captured.
+        ([BackupStatus.FAILED], 0),
+        ([], 1),
+        # Still running: restoring a moving snapshot is not offered.
+        ([BackupStatus.PENDING], 0),
+        ([BackupStatus.COMPLETED, BackupStatus.IN_PROGRESS], 0),
+    ],
+)
+async def test_a_non_restorable_snapshot_is_rejected(
+    environment: Environment,
+    prefect_manager_mock,
+    no_config_fanout,
+    child_statuses: list[BackupStatus],
+    error_count: int,
+) -> None:
+    """FR-006: only COMPLETED / PARTIAL snapshots can be restored."""
+    adv = _driver_version()
+    deployments = [
+        _deployment(environment_id=environment.id, adv=adv, name=f"app-{index}")
+        for index in range(max(len(child_statuses), 1))
+    ]
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(deployment) for deployment in deployments],
+        environment_config={"dns_zone": "captured.example.com"},
+        constituent_errors=[
+            ConstituentError(
+                deployment_id=uuid4(),
+                deployment_name=f"errored-{index}",
+                error="backup already in progress",
+            ).model_dump(mode="json")
+            for index in range(error_count)
+        ]
+        or None,
+    )
+    constituents = [
+        _constituent(parent, deployments[index], status=status)
+        for index, status in enumerate(child_statuses)
+    ]
+    environment.config = {"dns_zone": "drifted.example.com"}
+    uow = _make_uow(
+        environment=environment,
+        deployments=deployments,
+        driver_versions=[adv],
+        backups=constituents,
+        environment_backups=[parent],
+    )
+
+    with pytest.raises(EnvironmentBackupNotRestorableError) as excinfo:
+        await restore_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    assert excinfo.value.error_code == "OPERATION_DENIED"
+    # Nothing was touched: no restore record, no config revert.
+    assert uow.environment_restores.models == []
+    assert environment.config == {"dns_zone": "drifted.example.com"}
+
+
+@pytest.mark.asyncio
+async def test_a_partial_snapshot_is_restorable(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """FR-006: PARTIAL is explicitly restorable — restore what is usable."""
+    adv = _driver_version()
+    ok = _deployment(environment_id=environment.id, adv=adv, name="ok")
+    broken = _deployment(environment_id=environment.id, adv=adv, name="broken")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(ok), _snapshot_of(broken)],
+        environment_config=None,
+    )
+    constituents = [
+        _constituent(parent, ok),
+        _constituent(parent, broken, status=BackupStatus.FAILED),
+    ]
+    uow = _make_uow(
+        environment=environment,
+        deployments=[ok, broken],
+        driver_versions=[adv],
+        backups=constituents,
+        environment_backups=[parent],
+    )
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert _skips(environment_restore) == {
+        "broken": SkipReason.BACKUP_NOT_COMPLETED.value
+    }
+    assert len(uow.restores.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_in_flight_environment_restore_blocks_a_second_restore(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """FR-009: the D6 guard covers the restore entry point too."""
+    adv = _driver_version()
+    deployment = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(deployment)],
+        environment_config=None,
+    )
+    constituent = _constituent(parent, deployment)
+    in_flight = EnvironmentRestore(environment_backup_id=parent.id)
+    uow = _make_uow(
+        environment=environment,
+        deployments=[deployment],
+        driver_versions=[adv],
+        backups=[constituent],
+        restores=[
+            Restore(
+                name="in-flight-restore",
+                status=RestoreStatus.IN_PROGRESS,
+                target_namespace=f"styrmin-{deployment.id}",
+                backup_id=constituent.id,
+                environment_restore_id=in_flight.id,
+            )
+        ],
+        environment_backups=[parent],
+        environment_restores=[in_flight],
+    )
+
+    with pytest.raises(EnvironmentOperationInProgressError) as excinfo:
+        await restore_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    assert excinfo.value.error_metadata == {
+        "operation_id": str(in_flight.id),
+        "operation_kind": "environment_restore",
+    }
+    assert len(uow.environment_restores.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_in_flight_environment_backup_blocks_a_restore(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """The guard is bidirectional (FR-009)."""
+    adv = _driver_version()
+    deployment = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(deployment)],
+        environment_config=None,
+    )
+    constituent = _constituent(parent, deployment)
+    newer = EnvironmentBackup(name="newer-in-flight", environment_id=environment.id)
+    in_flight_child = _constituent(newer, deployment, status=BackupStatus.IN_PROGRESS)
+    uow = _make_uow(
+        environment=environment,
+        deployments=[deployment],
+        driver_versions=[adv],
+        backups=[constituent, in_flight_child],
+        environment_backups=[parent, newer],
+    )
+
+    with pytest.raises(EnvironmentOperationInProgressError) as excinfo:
+        await restore_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    assert excinfo.value.error_metadata["operation_kind"] == "environment_backup"
+
+
+# ---------------------------------------------------------------------------
+# restore_environment_backup — ADR-0012 ordering
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_config_revert_is_committed_before_any_dispatch(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """ADR-0012: a crash mid-fan-out must not lose the revert."""
+    adv = _driver_version()
+    deployment = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(deployment)],
+        environment_config={"dns_zone": "captured.example.com"},
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[deployment],
+        driver_versions=[adv],
+        backups=[_constituent(parent, deployment)],
+        environment_backups=[parent],
+    )
+    config_at_dispatch: list[dict | None] = []
+    commits_at_dispatch: list[int] = []
+    prefect_manager_mock.run_action.side_effect = lambda **_: (
+        config_at_dispatch.append(environment.config),
+        commits_at_dispatch.append(uow.commit_count),
+    )
+
+    await restore_environment_backup(environment_backup_id=parent.id, uow=uow)
+
+    assert config_at_dispatch == [{"dns_zone": "captured.example.com"}]
+    assert commits_at_dispatch and commits_at_dispatch[0] >= 2
+
+
+@pytest.mark.asyncio
+async def test_a_dispatch_failure_leaves_the_constituent_restore_pending(
+    environment: Environment, prefect_manager_mock, no_config_fanout
+) -> None:
+    """A Prefect submission failure is a pending constituent, not a skip."""
+    adv = _driver_version()
+    deployment = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    parent = _environment_backup(
+        environment=environment,
+        snapshots=[_snapshot_of(deployment)],
+        environment_config=None,
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[deployment],
+        driver_versions=[adv],
+        backups=[_constituent(parent, deployment)],
+        environment_backups=[parent],
+    )
+    prefect_manager_mock.run_action.side_effect = RuntimeError("prefect is down")
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert environment_restore.skipped_constituents is None
+    assert len(uow.restores.models) == 1
+    assert uow.restores.models[0].status == RestoreStatus.PENDING
+
+
+# ---------------------------------------------------------------------------
+# GraphQL enum mirror
+# ---------------------------------------------------------------------------
+
+
+def test_environment_restore_status_mirrors_the_service_enum() -> None:
+    """``strawberry.enum`` binds one GraphQL name per class, so the restore
+    surface declares its own mirror of ``EnvironmentOperationStatus``. Drift
+    between the two would silently change what the API reports.
+    """
+    assert {member.name: member.value for member in EnvironmentRestoreStatus} == {
+        member.name: member.value for member in EnvironmentOperationStatus
+    }
