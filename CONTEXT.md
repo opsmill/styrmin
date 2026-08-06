@@ -56,6 +56,14 @@ _Avoid_: "bucket" (implementation detail), "backup destination".
 How long **Velero** keeps a backup before garbage-collecting it, as a strictly positive Go duration in `h`/`m`/`s` units (e.g. `"2160h"`). An optional `backup_ttl` on the **cluster**, **environment**, or **deployment** **config**, resolved deepest-wins at backup time — deployment → environment → cluster → the built-in `720h` — with the applied value and its source scope recorded on the backup record. Applies only to backups created afterwards; an already-created Velero backup keeps the expiration fixed at its creation. Distinct from `BackupSchedule.retention_count`, which caps _how many_ backups a schedule keeps rather than how long each one lives (and is currently unenforced — scheduled backups do not execute yet). See [016-backup-retention-ttl] and [issue #305](https://github.com/opsmill/styrmin/issues/305).
 _Avoid_: "retention policy" unqualified (ambiguous with `retention_count`), "backup expiry" (that is the resulting timestamp, `Backup.expiresAt`), bare "TTL" (overloaded with the Velero polling timeout).
 
+**Environment backup**:
+A coordinated, near-consistent snapshot of an **environment**: its **config** as of backup time, the declared state of every eligible **deployment** (non-tombstoned, non-internal, with an active **application instance**), and one constituent **Velero** backup per eligible instance — grouped under a single `EnvironmentBackup` record whose status (`completed` / `partial` / `failed`) is derived from its children. Deleting it cascade-deletes its constituent backups. See [issue #7](https://github.com/opsmill/styrmin/issues/7).
+_Avoid_: "env snapshot", "full backup" (ambiguous with a per-instance backup), "environment export".
+
+**Environment restore**:
+The coordinated operation that reapplies an **environment backup**'s captured **config** and restores every usable constituent backup into its still-existing **deployment**, in place — restoring what's usable and reporting what isn't; it never creates or deletes deployments. Tracked by an `EnvironmentRestore` record with derived status.
+_Avoid_: "environment rollback" (implies topology reversion), "environment recovery" (broader DR concept).
+
 ### Application drivers
 
 **Application driver**:
