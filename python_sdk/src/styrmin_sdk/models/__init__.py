@@ -1,5 +1,6 @@
 """Styrmin SDK response models."""
 
+from styrmin_sdk.graphql._generated.enums import EnvironmentBackupStatus
 from styrmin_sdk.graphql._generated.get_backup import GetBackupBackup as Backup
 from styrmin_sdk.graphql._generated.get_backup_schedule import (
     GetBackupScheduleBackupSchedule as BackupSchedule,
@@ -22,6 +23,15 @@ from styrmin_sdk.graphql._generated.get_environment import (
 )
 from styrmin_sdk.graphql._generated.get_environment import (
     GetEnvironmentEnvironmentCluster as ClusterRef,
+)
+from styrmin_sdk.graphql._generated.get_environment_backup import (
+    GetEnvironmentBackupEnvironmentBackup as EnvironmentBackup,
+)
+from styrmin_sdk.graphql._generated.get_environment_backup import (
+    GetEnvironmentBackupEnvironmentBackupConstituents as EnvironmentBackupConstituent,
+)
+from styrmin_sdk.graphql._generated.get_environment_backup import (
+    GetEnvironmentBackupEnvironmentBackupDeploymentSnapshots as DeploymentSnapshot,
 )
 from styrmin_sdk.graphql._generated.get_restore import GetRestoreRestore as Restore
 from styrmin_sdk.graphql._generated.get_task import GetTaskTask as Task
@@ -80,8 +90,12 @@ __all__ = [
     "Deployment",
     "DeploymentConfigInput",
     "DeploymentManifest",
+    "DeploymentSnapshot",
     "EnvVarInput",
     "Environment",
+    "EnvironmentBackup",
+    "EnvironmentBackupConstituent",
+    "EnvironmentBackupStatus",
     "HelmChart",
     "ParameterValueInput",
     "ResolvedManifest",

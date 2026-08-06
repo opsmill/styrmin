@@ -13,6 +13,11 @@ app.command("styrminctl.commands.drivers:drivers_app", name="drivers", help="Man
 app.command("styrminctl.commands.deployments:deployments_app", name="deployments", help="Manage deployments.")
 app.command("styrminctl.commands.backups:backups_app", name="backups", help="Manage backups and restores.")
 app.command(
+    "styrminctl.commands.environment_backups:environment_backups_app",
+    name="env-backups",
+    help="Manage environment-level backups and restores.",
+)
+app.command(
     "styrminctl.commands.backup_storage_locations:backup_storage_locations_app",
     name="backup-locations",
     help="Manage backup storage locations.",
