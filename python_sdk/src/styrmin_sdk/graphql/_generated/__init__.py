@@ -165,6 +165,12 @@ from .get_environment_backup import (
     GetEnvironmentBackupEnvironmentBackupConstituentsBackup,
     GetEnvironmentBackupEnvironmentBackupDeploymentSnapshots,
 )
+from .get_environment_restore import (
+    GetEnvironmentRestore,
+    GetEnvironmentRestoreEnvironmentRestore,
+    GetEnvironmentRestoreEnvironmentRestoreRestores,
+    GetEnvironmentRestoreEnvironmentRestoreSkippedConstituents,
+)
 from .get_environment_services import (
     GetEnvironmentServices,
     GetEnvironmentServicesEnvironmentServices,
@@ -230,6 +236,12 @@ from .list_environment_backups import (
     ListEnvironmentBackupsEnvironmentBackupsConstituents,
     ListEnvironmentBackupsEnvironmentBackupsConstituentsBackup,
 )
+from .list_environment_restores import (
+    ListEnvironmentRestores,
+    ListEnvironmentRestoresEnvironmentRestores,
+    ListEnvironmentRestoresEnvironmentRestoresRestores,
+    ListEnvironmentRestoresEnvironmentRestoresSkippedConstituents,
+)
 from .list_environments import (
     ListEnvironments,
     ListEnvironmentsEnvironments,
@@ -262,6 +274,12 @@ from .report_deployment_statuses import (
 )
 from .report_pod_statuses import ReportPodStatuses, ReportPodStatusesReportPodStatuses
 from .reset_user_password import ResetUserPassword
+from .restore_environment_backup import (
+    RestoreEnvironmentBackup,
+    RestoreEnvironmentBackupRestoreEnvironmentBackup,
+    RestoreEnvironmentBackupRestoreEnvironmentBackupRestores,
+    RestoreEnvironmentBackupRestoreEnvironmentBackupSkippedConstituents,
+)
 from .run_job import RunJob, RunJobRunJob
 from .start_components import StartComponents, StartComponentsStartComponents
 from .stop_components import StopComponents, StopComponentsStopComponents
@@ -423,6 +441,10 @@ __all__ = [
     "GetEnvironmentBackupEnvironmentBackupDeploymentSnapshots",
     "GetEnvironmentEnvironment",
     "GetEnvironmentEnvironmentCluster",
+    "GetEnvironmentRestore",
+    "GetEnvironmentRestoreEnvironmentRestore",
+    "GetEnvironmentRestoreEnvironmentRestoreRestores",
+    "GetEnvironmentRestoreEnvironmentRestoreSkippedConstituents",
     "GetEnvironmentServices",
     "GetEnvironmentServicesEnvironmentServices",
     "GetGroup",
@@ -461,6 +483,10 @@ __all__ = [
     "ListEnvironmentBackupsEnvironmentBackups",
     "ListEnvironmentBackupsEnvironmentBackupsConstituents",
     "ListEnvironmentBackupsEnvironmentBackupsConstituentsBackup",
+    "ListEnvironmentRestores",
+    "ListEnvironmentRestoresEnvironmentRestores",
+    "ListEnvironmentRestoresEnvironmentRestoresRestores",
+    "ListEnvironmentRestoresEnvironmentRestoresSkippedConstituents",
     "ListEnvironments",
     "ListEnvironmentsEnvironments",
     "ListEnvironmentsEnvironmentsCluster",
@@ -500,6 +526,10 @@ __all__ = [
     "ResetUserPassword",
     "ResourceRequirementsInput",
     "ResourceSpecInput",
+    "RestoreEnvironmentBackup",
+    "RestoreEnvironmentBackupRestoreEnvironmentBackup",
+    "RestoreEnvironmentBackupRestoreEnvironmentBackupRestores",
+    "RestoreEnvironmentBackupRestoreEnvironmentBackupSkippedConstituents",
     "RestoreStatus",
     "Role",
     "RunJob",

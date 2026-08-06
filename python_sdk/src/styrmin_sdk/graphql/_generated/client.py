@@ -49,6 +49,7 @@ from .get_driver_container_override_docs import GetDriverContainerOverrideDocs
 from .get_driver_env_var_docs import GetDriverEnvVarDocs
 from .get_environment import GetEnvironment
 from .get_environment_backup import GetEnvironmentBackup
+from .get_environment_restore import GetEnvironmentRestore
 from .get_environment_services import GetEnvironmentServices
 from .get_group import GetGroup
 from .get_pod_statuses import GetPodStatuses
@@ -74,6 +75,7 @@ from .list_backups import ListBackups
 from .list_clusters import ListClusters
 from .list_deployments import ListDeployments
 from .list_environment_backups import ListEnvironmentBackups
+from .list_environment_restores import ListEnvironmentRestores
 from .list_environments import ListEnvironments
 from .list_groups import ListGroups
 from .list_restores import ListRestores
@@ -86,6 +88,7 @@ from .logout import Logout
 from .report_deployment_statuses import ReportDeploymentStatuses
 from .report_pod_statuses import ReportPodStatuses
 from .reset_user_password import ResetUserPassword
+from .restore_environment_backup import RestoreEnvironmentBackup
 from .run_job import RunJob
 from .start_components import StartComponents
 from .stop_components import StopComponents
@@ -1334,6 +1337,46 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetEnvironmentBackup.model_validate(data)
 
+    async def get_environment_restore(
+        self, environment_restore_id: UUID, **kwargs: Any
+    ) -> GetEnvironmentRestore:
+        query = gql("""
+            query GetEnvironmentRestore($environmentRestoreId: UUID!) {
+              environmentRestore(environmentRestoreId: $environmentRestoreId) {
+                id
+                status
+                createdOn
+                updatedOn
+                environmentBackupId
+                restores {
+                  id
+                  name
+                  status
+                  backupId
+                  targetNamespace
+                  targetInstanceId
+                  errorMessage
+                  startedAt
+                  completedAt
+                }
+                skippedConstituents {
+                  deploymentId
+                  deploymentName
+                  reason
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"environmentRestoreId": environment_restore_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetEnvironmentRestore",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetEnvironmentRestore.model_validate(data)
+
     async def get_environment_services(
         self, environment_id: UUID, **kwargs: Any
     ) -> GetEnvironmentServices:
@@ -1657,6 +1700,43 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return ListEnvironmentBackups.model_validate(data)
+
+    async def list_environment_restores(
+        self, environment_backup_id: UUID, **kwargs: Any
+    ) -> ListEnvironmentRestores:
+        query = gql("""
+            query ListEnvironmentRestores($environmentBackupId: UUID!) {
+              environmentRestores(environmentBackupId: $environmentBackupId) {
+                id
+                status
+                createdOn
+                updatedOn
+                environmentBackupId
+                restores {
+                  id
+                  name
+                  status
+                  backupId
+                  targetInstanceId
+                  errorMessage
+                }
+                skippedConstituents {
+                  deploymentId
+                  deploymentName
+                  reason
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"environmentBackupId": environment_backup_id}
+        response = await self.execute(
+            query=query,
+            operation_name="ListEnvironmentRestores",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return ListEnvironmentRestores.model_validate(data)
 
     async def list_environments(self, **kwargs: Any) -> ListEnvironments:
         query = gql("""
@@ -2008,6 +2088,46 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return ResetUserPassword.model_validate(data)
+
+    async def restore_environment_backup(
+        self, environment_backup_id: UUID, **kwargs: Any
+    ) -> RestoreEnvironmentBackup:
+        query = gql("""
+            mutation RestoreEnvironmentBackup($environmentBackupId: UUID!) {
+              restoreEnvironmentBackup(environmentBackupId: $environmentBackupId) {
+                id
+                status
+                createdOn
+                updatedOn
+                environmentBackupId
+                restores {
+                  id
+                  name
+                  status
+                  backupId
+                  targetNamespace
+                  targetInstanceId
+                  errorMessage
+                  startedAt
+                  completedAt
+                }
+                skippedConstituents {
+                  deploymentId
+                  deploymentName
+                  reason
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"environmentBackupId": environment_backup_id}
+        response = await self.execute(
+            query=query,
+            operation_name="RestoreEnvironmentBackup",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return RestoreEnvironmentBackup.model_validate(data)
 
     async def run_job(
         self,
