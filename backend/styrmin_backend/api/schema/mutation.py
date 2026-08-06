@@ -16,6 +16,9 @@ from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
 from styrmin_backend.api.definitions.backup.environment_backup import (
     EnvironmentBackup as EnvironmentBackupType,
 )
+from styrmin_backend.api.definitions.backup.environment_restore import (
+    EnvironmentRestore as EnvironmentRestoreType,
+)
 from styrmin_backend.api.definitions.backup.restore import Restore as RestoreType
 from styrmin_backend.api.definitions.backup.schedule import (
     BackupSchedule as BackupScheduleType,
@@ -118,6 +121,7 @@ from styrmin_backend.services.backup.scheduler import (
 )
 from styrmin_backend.services.backup.environment import (
     create_environment_backup as create_environment_backup_service,
+    restore_environment_backup as restore_environment_backup_service,
 )
 from styrmin_backend.services.backup.service import (
     create_backup as create_backup_service,
@@ -937,6 +941,35 @@ class Mutation:
             uow=uow,
         )
         return EnvironmentBackupType.from_instance(environment_backup)
+
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    async def restore_environment_backup(
+        self,
+        environment_backup_id: UUID,
+        info: strawberry.Info,
+    ) -> EnvironmentRestoreType:
+        """Restore an environment snapshot in place, in one action.
+
+        Reverts the environment's config to the captured value and restores
+        every usable constituent into its still-existing deployment. Every
+        constituent that is *not* restored comes back in
+        ``skippedConstituents`` with its deployment name and reason — the
+        classification is complete in this response (spec FR-006/FR-007).
+
+        No deployment is ever created or deleted (FR-008): topology drift is
+        reported, never repaired.
+
+        Requires ``ADMIN`` rather than ``READ_WRITE``: the restore reverts
+        ``Environment.config``, which is exactly what ``updateEnvironment``
+        does, and granting config mutation by way of a restore to a lower role
+        would be a privilege bypass (research.md D7).
+        """
+        uow = info.context["uow"]
+        environment_restore = await restore_environment_backup_service(
+            environment_backup_id=environment_backup_id,
+            uow=uow,
+        )
+        return EnvironmentRestoreType.from_instance(environment_restore)
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def delete_backup(

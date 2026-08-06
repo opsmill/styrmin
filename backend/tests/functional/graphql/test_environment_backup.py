@@ -18,6 +18,7 @@ map, so the values must have survived a real round-trip.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -50,10 +51,15 @@ from styrmin_backend.db.models import (
     Deployment,
     Environment,
     EnvironmentBackup,
+    EnvironmentRestore,
     InstanceStatus,
+    Restore,
+    RestoreStatus,
+    Role,
 )
 from styrmin_backend.db.utils import get_session
 from styrmin_backend.server.app import app
+from styrmin_backend.services.auth.session import create_session
 
 from ._queries import load_query
 from .conftest import gql
@@ -61,6 +67,7 @@ from .seeds import (
     seed_application_driver_version,
     seed_deployment,
     seed_environment,
+    seed_user,
 )
 
 
@@ -89,6 +96,30 @@ async def fresh_client_fixture(session: AsyncSession, admin_token: str):
         ) as client:
             yield client
         app.dependency_overrides.clear()
+
+
+@pytest.fixture(name="read_write_client")
+async def read_write_client_fixture(session: AsyncSession):
+    """Authenticated ASGI client at ``READ_WRITE`` — one rung below ADMIN.
+
+    ``restoreEnvironmentBackup`` reverts ``Environment.config``, so it is
+    gated at ``ADMIN`` for parity with ``updateEnvironment`` (research.md D7).
+    Proving the gate needs a client that is authenticated but under-privileged.
+    """
+    user = await seed_user(session, username="alice-rw", role=Role.READ_WRITE)
+    _row, token = await create_session(session, user.id)
+
+    async def get_session_override():
+        yield session
+
+    app.dependency_overrides[get_session] = get_session_override
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {token}"},
+    ) as client:
+        yield client
+    app.dependency_overrides.clear()
 
 
 def _global_context_dict() -> dict:
@@ -561,3 +592,565 @@ async def test_environment_backups_lists_newest_first_and_scopes_by_environment(
     assert "elsewhere" not in names
     # Every listed snapshot is config-only, hence COMPLETED (FR-011).
     assert {row["status"] for row in data["environmentBackups"]} == {"COMPLETED"}
+
+
+# ---------------------------------------------------------------------------
+# restoreEnvironmentBackup — write propagation
+# ---------------------------------------------------------------------------
+
+
+def _snapshot_payload(*, deployment: Deployment, instance: ApplicationInstance) -> dict:
+    """The JSON snapshot entry the backup fan-out would have captured."""
+    return {
+        "deployment_id": str(deployment.id),
+        "deployment_name": deployment.name,
+        "instance_id": str(instance.id),
+        "driver_name": "seed-driver",
+        "driver_version": "1.0.0",
+        "driver_fingerprint": None,
+        "application_version": deployment.application_version,
+        "config": deployment.config,
+        "parameters": deployment.parameters or None,
+    }
+
+
+async def seed_environment_backup(
+    session: AsyncSession,
+    *,
+    environment: Environment,
+    entries: list[tuple[Deployment, ApplicationInstance, BackupStatus | None]],
+    environment_config: dict | None = None,
+    constituent_errors: list[dict] | None = None,
+    name: str | None = None,
+) -> EnvironmentBackup:
+    """Seed a snapshot plus one constituent per entry.
+
+    A ``None`` status means "the constituent row was deleted after the
+    backup" — the snapshot entry survives without a linked ``Backup``.
+    """
+    parent = EnvironmentBackup(
+        name=name or f"snapshot-{uuid4().hex[:8]}",
+        environment_id=environment.id,
+        environment_config=environment_config,
+        deployment_snapshots=[
+            _snapshot_payload(deployment=deployment, instance=instance)
+            for deployment, instance, _ in entries
+        ]
+        or None,
+        constituent_errors=constituent_errors,
+    )
+    session.add(parent)
+    await session.commit()
+    for _deployment, instance, status in entries:
+        if status is None:
+            continue
+        session.add(
+            Backup(
+                name=f"constituent-{uuid4().hex[:8]}",
+                status=status,
+                instance_id=instance.id,
+                environment_backup_id=parent.id,
+            )
+        )
+    await session.commit()
+    return parent
+
+
+@pytest.fixture(name="no_config_fanout")
+def no_config_fanout_fixture(mocker):
+    """Patch the exclusion-aware config fan-out at its call site.
+
+    The fan-out drives the full reconciliation chain
+    (``generate_instance_from_deployment`` + ``apply_state``), which needs a
+    renderable driver graph these seeds deliberately do not build. The
+    behaviour under test here is what reaches the *database*, not what the
+    reconciler does with it — that is covered by the env-config fan-out tests.
+    """
+    return mocker.patch(
+        "styrmin_backend.services.backup.environment.redeploy_for_environment_update",
+        autospec=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_restore_environment_backup_persists_record_links_and_config_revert(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    no_config_fanout,
+) -> None:
+    """FR-006/SC-005: the revert and the constituent links must reach the DB."""
+    environment = await seed_environment(session)
+    environment.config = {"dns_zone": "drifted.example.com"}
+    session.add(environment)
+    await session.commit()
+    adv = await seed_application_driver_version(session)
+    deployment_a, instance_a = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="infrahub"
+    )
+    deployment_b, instance_b = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="netbox"
+    )
+    parent = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[
+            (deployment_a, instance_a, BackupStatus.COMPLETED),
+            (deployment_b, instance_b, BackupStatus.COMPLETED),
+        ],
+        environment_config={"dns_zone": "captured.example.com"},
+    )
+
+    data = await gql(
+        fresh_client,
+        "restore_environment_backup",
+        {"environmentBackupId": str(parent.id)},
+    )
+    payload = data["restoreEnvironmentBackup"]
+
+    # --- The parent restore row reached the database -------------------
+    persisted = await session.get(EnvironmentRestore, UUID(payload["id"]))
+    assert persisted is not None
+    assert persisted.environment_backup_id == parent.id
+    assert persisted.skipped_constituents is None
+
+    # --- The config revert reached the database (SC-005) ---------------
+    await session.refresh(environment)
+    assert environment.config == {"dns_zone": "captured.example.com"}
+
+    # --- The constituent FK reached the database -----------------------
+    result = await session.exec(
+        select(Restore).where(Restore.environment_restore_id == persisted.id)
+    )
+    constituents = list(result.all())
+    assert {restore.target_namespace for restore in constituents} == {
+        f"styrmin-{deployment_a.id}",
+        f"styrmin-{deployment_b.id}",
+    }
+    assert all(restore.status == RestoreStatus.PENDING for restore in constituents)
+
+    # --- The response projects the same state --------------------------
+    assert payload["status"] == "PENDING"
+    assert payload["environmentBackup"]["id"] == str(parent.id)
+    assert payload["skippedConstituents"] == []
+    assert {restore["id"] for restore in payload["restores"]} == {
+        str(restore.id) for restore in constituents
+    }
+
+
+@pytest.mark.asyncio
+async def test_restore_environment_backup_persists_every_skip_reason(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    no_config_fanout,
+) -> None:
+    """FR-007/SC-004: every non-restored constituent is persisted with a reason."""
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    usable, usable_instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="usable"
+    )
+    failed, failed_instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="failed-backup"
+    )
+    gap, gap_instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="deleted-backup"
+    )
+    errored, errored_instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="failed-at-creation"
+    )
+    parent = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[
+            (usable, usable_instance, BackupStatus.COMPLETED),
+            (failed, failed_instance, BackupStatus.FAILED),
+            (gap, gap_instance, None),
+            (errored, errored_instance, None),
+        ],
+        constituent_errors=[
+            {
+                "deployment_id": str(errored.id),
+                "deployment_name": "failed-at-creation",
+                "error": "backup already in progress",
+            }
+        ],
+    )
+
+    data = await gql(
+        fresh_client,
+        "restore_environment_backup",
+        {"environmentBackupId": str(parent.id)},
+    )
+    payload = data["restoreEnvironmentBackup"]
+
+    persisted = await session.get(EnvironmentRestore, UUID(payload["id"]))
+    assert persisted is not None
+    assert persisted.skipped_constituents is not None
+    assert {
+        raw["deployment_name"]: raw["reason"] for raw in persisted.skipped_constituents
+    } == {
+        "failed-backup": "backup not completed",
+        "deleted-backup": "backup deleted",
+        "failed-at-creation": "backup failed at creation",
+    }
+    # Exactly one constituent restore was created — the usable one.
+    result = await session.exec(
+        select(Restore).where(Restore.environment_restore_id == persisted.id)
+    )
+    assert [restore.target_namespace for restore in result.all()] == [
+        f"styrmin-{usable.id}"
+    ]
+    # One PENDING restore alongside three skips derives as IN_PROGRESS.
+    assert payload["status"] == "IN_PROGRESS"
+    assert {skip["deploymentName"] for skip in payload["skippedConstituents"]} == {
+        "failed-backup",
+        "deleted-backup",
+        "failed-at-creation",
+    }
+
+
+@pytest.mark.asyncio
+async def test_restore_environment_backup_does_not_change_the_deployment_count(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    no_config_fanout,
+) -> None:
+    """FR-008: restore never creates or deletes a deployment."""
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    survivor, survivor_instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="survivor"
+    )
+    departed, departed_instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="departed"
+    )
+    parent = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[
+            (survivor, survivor_instance, BackupStatus.COMPLETED),
+            (departed, departed_instance, BackupStatus.COMPLETED),
+        ],
+    )
+    # Tombstone one deployment after the snapshot was taken.
+    departed.deleted_at = datetime(2026, 8, 5, tzinfo=timezone.utc)
+    session.add(departed)
+    await session.commit()
+    before = len(
+        list(
+            (
+                await session.exec(
+                    select(Deployment).where(
+                        Deployment.environment_id == environment.id
+                    )
+                )
+            ).all()
+        )
+    )
+
+    data = await gql(
+        fresh_client,
+        "restore_environment_backup",
+        {"environmentBackupId": str(parent.id)},
+    )
+    payload = data["restoreEnvironmentBackup"]
+
+    after = list(
+        (
+            await session.exec(
+                select(Deployment).where(Deployment.environment_id == environment.id)
+            )
+        ).all()
+    )
+    assert len(after) == before
+    assert [skip["reason"] for skip in payload["skippedConstituents"]] == [
+        "deployment no longer exists"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_restore_environment_backup_rejects_a_non_restorable_snapshot(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    no_config_fanout,
+) -> None:
+    """FR-006: a FAILED snapshot is refused with OPERATION_DENIED."""
+    environment = await seed_environment(session)
+    environment.config = {"dns_zone": "drifted.example.com"}
+    session.add(environment)
+    await session.commit()
+    adv = await seed_application_driver_version(session)
+    deployment, instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="infrahub"
+    )
+    parent = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[(deployment, instance, BackupStatus.FAILED)],
+        environment_config={"dns_zone": "captured.example.com"},
+    )
+
+    response = await fresh_client.post(
+        "/graphql",
+        json={
+            "query": load_query("restore_environment_backup"),
+            "variables": {"environmentBackupId": str(parent.id)},
+        },
+    )
+
+    assert response.status_code == 200
+    errors = response.json()["errors"]
+    assert errors[0]["extensions"]["code"] == "OPERATION_DENIED"
+    # Nothing was written and the drifted config stands.
+    result = await session.exec(
+        select(EnvironmentRestore).where(
+            EnvironmentRestore.environment_backup_id == parent.id
+        )
+    )
+    assert list(result.all()) == []
+    await session.refresh(environment)
+    assert environment.config == {"dns_zone": "drifted.example.com"}
+
+
+@pytest.mark.asyncio
+async def test_restore_environment_backup_rejects_a_concurrent_operation(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    no_config_fanout,
+) -> None:
+    """FR-009: the D6 guard reaches the restore entry point."""
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    deployment, instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="infrahub"
+    )
+    parent = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[(deployment, instance, BackupStatus.COMPLETED)],
+    )
+    constituent = (
+        await session.exec(
+            select(Backup).where(Backup.environment_backup_id == parent.id)
+        )
+    ).first()
+    assert constituent is not None
+    in_flight = EnvironmentRestore(environment_backup_id=parent.id)
+    session.add(in_flight)
+    await session.commit()
+    session.add(
+        Restore(
+            name=f"in-flight-{uuid4().hex[:8]}",
+            status=RestoreStatus.IN_PROGRESS,
+            target_namespace=f"styrmin-{deployment.id}",
+            backup_id=constituent.id,
+            environment_restore_id=in_flight.id,
+        )
+    )
+    await session.commit()
+
+    response = await fresh_client.post(
+        "/graphql",
+        json={
+            "query": load_query("restore_environment_backup"),
+            "variables": {"environmentBackupId": str(parent.id)},
+        },
+    )
+
+    assert response.status_code == 200
+    errors = response.json()["errors"]
+    assert errors[0]["extensions"]["code"] == "ALREADY_IN_PROGRESS"
+    assert errors[0]["extensions"]["operation_kind"] == "environment_restore"
+    result = await session.exec(
+        select(EnvironmentRestore).where(
+            EnvironmentRestore.environment_backup_id == parent.id
+        )
+    )
+    assert [row.id for row in result.all()] == [in_flight.id]
+
+
+@pytest.mark.asyncio
+async def test_restore_environment_backup_requires_admin(
+    session: AsyncSession, read_write_client: AsyncClient
+) -> None:
+    """research.md D7: reverting env config is an ADMIN-only privilege."""
+    environment = await seed_environment(session)
+    parent = await seed_environment_backup(session, environment=environment, entries=[])
+
+    response = await read_write_client.post(
+        "/graphql",
+        json={
+            "query": load_query("restore_environment_backup"),
+            "variables": {"environmentBackupId": str(parent.id)},
+        },
+    )
+
+    assert response.status_code == 200
+    errors = response.json()["errors"]
+    assert errors[0]["extensions"]["code"] == "FORBIDDEN"
+
+
+# ---------------------------------------------------------------------------
+# environmentRestore / environmentRestores — read projection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("child_statuses", "skip_count", "expected"),
+    [
+        ([RestoreStatus.COMPLETED, RestoreStatus.COMPLETED], 0, "COMPLETED"),
+        ([RestoreStatus.COMPLETED], 1, "PARTIAL"),
+        ([RestoreStatus.COMPLETED, RestoreStatus.FAILED], 0, "PARTIAL"),
+        ([RestoreStatus.FAILED], 0, "FAILED"),
+        ([], 2, "FAILED"),
+        ([RestoreStatus.PENDING], 0, "PENDING"),
+        ([RestoreStatus.COMPLETED, RestoreStatus.IN_PROGRESS], 0, "IN_PROGRESS"),
+        ([], 0, "COMPLETED"),
+    ],
+)
+async def test_environment_restore_projects_derived_status_from_the_database(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    child_statuses: list[RestoreStatus],
+    skip_count: int,
+    expected: str,
+) -> None:
+    """SC-003: the resolver derives the restore status from the persisted rows."""
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    deployment, instance = await seed_running_deployment(
+        session, environment=environment, adv=adv, name="infrahub"
+    )
+    parent = await seed_environment_backup(
+        session,
+        environment=environment,
+        entries=[(deployment, instance, BackupStatus.COMPLETED)],
+    )
+    constituent = (
+        await session.exec(
+            select(Backup).where(Backup.environment_backup_id == parent.id)
+        )
+    ).first()
+    assert constituent is not None
+    environment_restore = EnvironmentRestore(
+        environment_backup_id=parent.id,
+        skipped_constituents=[
+            {
+                "deployment_id": str(uuid4()),
+                "deployment_name": f"skipped-{index}",
+                "reason": "backup expired",
+            }
+            for index in range(skip_count)
+        ]
+        or None,
+    )
+    session.add(environment_restore)
+    await session.commit()
+    for index, status in enumerate(child_statuses):
+        session.add(
+            Restore(
+                name=f"restore-{index}-{uuid4().hex[:6]}",
+                status=status,
+                target_namespace=f"styrmin-{deployment.id}",
+                backup_id=constituent.id,
+                environment_restore_id=environment_restore.id,
+            )
+        )
+    await session.commit()
+
+    data = await gql(
+        fresh_client,
+        "get_environment_restore",
+        {"environmentRestoreId": str(environment_restore.id)},
+    )
+
+    assert data["environmentRestore"]["status"] == expected
+    assert len(data["environmentRestore"]["skippedConstituents"]) == skip_count
+    assert len(data["environmentRestore"]["restores"]) == len(child_statuses)
+
+
+@pytest.mark.asyncio
+async def test_environment_restores_lists_newest_first_and_scopes_by_snapshot(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """FR-013: listing is per-snapshot and ordered newest first."""
+    environment = await seed_environment(session)
+    target = await seed_environment_backup(
+        session, environment=environment, entries=[], name="target"
+    )
+    other = await seed_environment_backup(
+        session, environment=environment, entries=[], name="other"
+    )
+    mine = []
+    # ``created_on`` is set explicitly: the server default has second-level
+    # resolution here, so two rows written back to back would tie and the
+    # newest-first assertion below would be vacuous.
+    for offset, reason in enumerate(("backup expired", "backup deleted")):
+        environment_restore = EnvironmentRestore(
+            environment_backup_id=target.id,
+            created_on=datetime(2026, 8, 1, tzinfo=timezone.utc)
+            + timedelta(hours=offset),
+            skipped_constituents=[
+                {
+                    "deployment_id": str(uuid4()),
+                    "deployment_name": "gone-app",
+                    "reason": reason,
+                }
+            ],
+        )
+        session.add(environment_restore)
+        await session.commit()
+        mine.append(environment_restore)
+    session.add(EnvironmentRestore(environment_backup_id=other.id))
+    await session.commit()
+
+    data = await gql(
+        fresh_client,
+        "list_environment_restores",
+        {"environmentBackupId": str(target.id)},
+    )
+
+    rows = data["environmentRestores"]
+    assert {row["id"] for row in rows} == {str(row.id) for row in mine}
+    # Every listed restore skipped everything and restored nothing -> FAILED.
+    assert {row["status"] for row in rows} == {"FAILED"}
+    assert rows[0]["skippedConstituents"][0]["reason"] == "backup deleted"
+
+
+@pytest.mark.asyncio
+async def test_environment_backup_projects_its_restores(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """The snapshot exposes the coordinated restores performed from it."""
+    environment = await seed_environment(session)
+    parent = await seed_environment_backup(session, environment=environment, entries=[])
+    environment_restore = EnvironmentRestore(
+        environment_backup_id=parent.id,
+        skipped_constituents=[
+            {
+                "deployment_id": str(uuid4()),
+                "deployment_name": "gone-app",
+                "reason": "deployment no longer exists",
+            }
+        ],
+    )
+    session.add(environment_restore)
+    await session.commit()
+
+    data = await gql(
+        fresh_client,
+        "get_environment_backup",
+        {"environmentBackupId": str(parent.id)},
+    )
+
+    restores = data["environmentBackup"]["restores"]
+    assert [row["id"] for row in restores] == [str(environment_restore.id)]
+    assert restores[0]["skippedConstituents"] == [
+        {"deploymentName": "gone-app", "reason": "deployment no longer exists"}
+    ]

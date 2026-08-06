@@ -18,6 +18,9 @@ from styrmin_backend.api.definitions.backup.backup import (
 from styrmin_backend.api.definitions.backup.environment_backup import (
     EnvironmentBackup as EnvironmentBackupType,
 )
+from styrmin_backend.api.definitions.backup.environment_restore import (
+    EnvironmentRestore as EnvironmentRestoreType,
+)
 from styrmin_backend.api.definitions.backup_storage_location.model import (
     BackupStorageLocation as BackupStorageLocationType,
 )
@@ -63,6 +66,8 @@ from styrmin_backend.services.backup.scheduler import (
 from styrmin_backend.services.backup.environment import (
     get_environment_backup,
     get_environment_backups,
+    get_environment_restore,
+    get_environment_restores,
 )
 from styrmin_backend.services.backup.service import (
     get_backup,
@@ -354,6 +359,31 @@ class Query:
         return [
             EnvironmentBackupType.from_instance(environment_backup)
             for environment_backup in environment_backups
+        ]
+
+    @strawberry.field
+    async def environment_restore(
+        self, environment_restore_id: UUID, info: strawberry.Info
+    ) -> EnvironmentRestoreType | None:
+        """Get a specific environment restore by ID."""
+        uow = info.context["uow"]
+        environment_restore = await get_environment_restore(
+            environment_restore_id=environment_restore_id, uow=uow
+        )
+        return EnvironmentRestoreType.from_instance(environment_restore)
+
+    @strawberry.field
+    async def environment_restores(
+        self, environment_backup_id: UUID, info: strawberry.Info
+    ) -> list[EnvironmentRestoreType]:
+        """List a snapshot's environment restores, newest first."""
+        uow = info.context["uow"]
+        environment_restores = await get_environment_restores(
+            environment_backup_id=environment_backup_id, uow=uow
+        )
+        return [
+            EnvironmentRestoreType.from_instance(environment_restore)
+            for environment_restore in environment_restores
         ]
 
     @strawberry.field

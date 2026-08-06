@@ -571,6 +571,9 @@ type EnvironmentBackup {
   One entry per eligible deployment: its constituent backup, its creation error, or neither when the constituent was deleted.
   """
   constituents: [EnvironmentBackupConstituent!]!
+
+  """Coordinated restores performed from this snapshot, newest first."""
+  restores: [EnvironmentRestore!]!
   environment: Environment!
 }
 
@@ -585,6 +588,38 @@ type EnvironmentBackupConstituent {
 }
 
 enum EnvironmentBackupStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+type EnvironmentRestore {
+  id: UUID!
+  createdOn: DateTime!
+  updatedOn: DateTime
+  environmentBackupId: UUID!
+
+  """
+  Derived from the constituent restores and the recorded skips on every read — never stored, so it cannot contradict its constituents. A restore that skipped everything and restored nothing is FAILED; a restore with nothing to do at all (no constituents, no skips) is COMPLETED.
+  """
+  status: EnvironmentRestoreStatus!
+
+  """Constituent restores dispatched by this operation."""
+  restores: [Restore!]!
+
+  """
+  Constituents not restored, each with its deployment name and reason (zero silent skips).
+  """
+  skippedConstituents: [SkippedConstituent!]!
+  environmentBackup: EnvironmentBackup!
+}
+
+"""
+Derived status of an environment restore. Mirrors ``EnvironmentBackupStatus`` — both project the same service-layer ``EnvironmentOperationStatus``.
+"""
+enum EnvironmentRestoreStatus {
   PENDING
   IN_PROGRESS
   COMPLETED
@@ -711,6 +746,7 @@ type Mutation {
   deleteDeployment(deploymentId: UUID!): Task! @requiresRole
   createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
   createEnvironmentBackup(environmentId: UUID!, name: String = null): EnvironmentBackup! @requiresRole
+  restoreEnvironmentBackup(environmentBackupId: UUID!): EnvironmentRestore! @requiresRole
   deleteBackup(backupId: UUID!): String @requiresRole
   createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore @requiresRole
   createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int! = 10, enabled: Boolean! = true): BackupSchedule @requiresRole
@@ -814,6 +850,8 @@ type Query {
   restores(backupId: UUID!, status: RestoreStatus = null): [Restore!]!
   environmentBackup(environmentBackupId: UUID!): EnvironmentBackup
   environmentBackups(environmentId: UUID!): [EnvironmentBackup!]!
+  environmentRestore(environmentRestoreId: UUID!): EnvironmentRestore
+  environmentRestores(environmentBackupId: UUID!): [EnvironmentRestore!]!
   backupSchedule(scheduleId: UUID!): BackupSchedule
   backupSchedules(deploymentId: UUID!): [BackupSchedule!]!
   applicationDrivers: [ApplicationDriver!]!
@@ -913,6 +951,15 @@ type ServiceDefinition {
 input ServiceNameOverride {
   driverServiceName: String!
   overrideName: String!
+}
+
+"""
+A constituent that was not restored, attributed by deployment name and reason. Reasons come from a fixed vocabulary: backup failed at creation, backup not completed, backup deleted, backup expired, deployment no longer exists, deployment busy with another restore.
+"""
+type SkippedConstituent {
+  deploymentId: UUID!
+  deploymentName: String!
+  reason: String!
 }
 
 """
