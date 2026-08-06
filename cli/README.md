@@ -86,6 +86,7 @@ uv run styrminctl env-backups create prod --cluster edge --name nightly
 uv run styrminctl env-backups create --id <environment-id> --wait
 
 # List an environment's snapshots (newest first), with ok/failed/total counts
+# (ok = constituents whose backup completed; failed = never got a backup row)
 uv run styrminctl env-backups list prod
 
 # Inspect one snapshot, including per-constituent outcomes
@@ -99,6 +100,11 @@ environment with no eligible deployments yields a config-only snapshot that is
 `COMPLETED` immediately. `--wait` polls until the derived status is terminal and
 exits non-zero on `PARTIAL` or `FAILED`, printing the deployment name and reason
 for every constituent that did not complete.
+
+Because the status is derived synchronously, `create` and `restore` can come
+back already terminal — a fan-out where every constituent was busy, or a restore
+where every constituent was skipped. Both commands report that outcome and exit
+non-zero straight away, with or without `--wait`.
 
 ### Restoring an environment snapshot
 

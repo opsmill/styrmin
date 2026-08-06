@@ -96,9 +96,13 @@ Every other command takes a snapshot or restore UUID directly.
 | `--interval` | `5` | Poll interval in seconds, with `--wait`. |
 
 `create` prints the snapshot's derived status and a constituent count in
-`ok/failed/total` form, then one line per constituent. Compare `total`
-against the number of eligible deployments — that count, not the status,
-is what tells you the fan-out covered everything.
+`ok/failed/total` form, then one line per constituent with its own
+failure reason when it has one. `ok` counts constituents whose backup
+**completed**, `failed` counts constituents that never got a backup at
+all, and anything still running or since deleted shows up only in
+`total`. Compare `total` against the number of eligible deployments —
+that count, not the status, is what tells you the fan-out covered
+everything.
 
 #### `restore` options
 
@@ -112,15 +116,22 @@ is what tells you the fan-out covered everything.
 deployment name and reason, before any waiting. The skip list is complete
 the moment the command returns — classification happens up front.
 
-#### Exit codes with `--wait`
+#### Exit codes
 
-`create --wait` and `restore --wait` exit **non-zero on `PARTIAL` as
-well as on `FAILED`**. A `PARTIAL` snapshot is real and restorable, but
-you asked to back up (or restore) a whole environment and did not get
-every deployment — the exit code is the only machine-readable place to
-say so, and a CI job that treats it as success will not notice the gap.
-Without `--wait`, the commands exit successfully once the operation is
-accepted.
+`create` and `restore` exit **non-zero on `PARTIAL` as well as on
+`FAILED`**, with or without `--wait`. A `PARTIAL` snapshot is real and
+restorable, but you asked to back up (or restore) a whole environment
+and did not get every deployment — the exit code is the only
+machine-readable place to say so, and a CI job that treats it as success
+will not notice the gap.
+
+The status is derived from the constituents on every read, so it can
+already be `PARTIAL` or `FAILED` when the command returns: a fan-out
+where every constituent was busy, or a restore where every constituent
+was skipped, is finished before there is anything to wait for. In that
+case the command reports the outcome and exits non-zero immediately
+rather than polling. Without `--wait`, a command whose constituents are
+still running exits successfully once the operation is accepted.
 
 :::note `delete` has no status guard
 

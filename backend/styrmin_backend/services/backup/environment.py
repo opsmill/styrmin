@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import Enum
 from typing import NamedTuple, Sequence
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fast_depends import Depends, inject
 from loguru import logger
@@ -293,6 +293,55 @@ async def _guard_no_environment_operation_in_progress(
         )
 
 
+class _SharedTransaction(UnitOfWork):
+    """A unit-of-work view that lets a nested service join the caller's transaction.
+
+    ``create_backup`` / ``create_restore`` each own their transaction: they end
+    with ``uow.commit()``, and ``UnitOfWork.__aexit__`` calls ``uow.rollback()``
+    whenever an exception leaves their ``async with uow`` block. Both are right
+    for the per-instance mutations that call them directly and fatal for the
+    environment fan-out, which needs the parent record, every constituent row
+    and every recorded error to commit **once**:
+
+    * their ``commit()`` would publish a half-built capture, and
+    * their ``rollback()`` would discard the parent snapshot INSERT because one
+      constituent's instance happened to be busy — turning FR-005's
+      "one conflicted constituent, peers proceed" into "no snapshot at all".
+
+    Forwarding every repository to the real unit of work while turning
+    ``commit`` and ``rollback`` into no-ops leaves the enclosing service the
+    single owner of the transaction boundary, with no change to the reused
+    services. Construct it **inside** the caller's ``async with uow`` block:
+    the real unit of work binds its repositories in ``__aenter__``.
+    """
+
+    def __init__(self, uow: UnitOfWork) -> None:
+        self._uow = uow
+
+    def __getattr__(self, name: str) -> object:
+        # Only reached for attributes this view does not define itself — i.e.
+        # ``session`` and every repository.
+        return getattr(self._uow, name)
+
+    async def commit(self) -> None:
+        """No-op: the enclosing service commits the shared transaction."""
+
+    async def rollback(self) -> None:
+        """No-op: the enclosing service owns rollback too."""
+
+
+class _PendingBackupDispatch(NamedTuple):
+    """A committed constituent backup awaiting its ``EXECUTE_BACKUP`` dispatch.
+
+    Collected while the capture transaction is still open and consumed after it
+    commits, which is what keeps "nothing is dispatched before the whole capture
+    is durable" true (ADR-0012).
+    """
+
+    backup_id: UUID
+    deployment_id: UUID
+
+
 @inject(cast_result=False)  # type: ignore[arg-type]
 async def create_environment_backup(
     environment_id: UUID,
@@ -302,16 +351,29 @@ async def create_environment_backup(
 ) -> EnvironmentBackup:
     """Snapshot an environment and fan out one constituent backup per deployment.
 
-    The parent row (captured config + per-deployment declared state) is
-    created and **committed before any dispatch**, so a crash mid-fan-out
-    leaves a durable, inspectable snapshot rather than losing the capture —
-    the ADR-0012 ordering rule.
+    The whole capture — the parent row (captured config + per-deployment
+    declared state), every constituent ``Backup`` row and every recorded
+    :class:`ConstituentError` — is written in **one transaction, committed
+    before any dispatch**. That is the ADR-0012 ordering rule made atomic: a
+    crash or client disconnect mid-capture leaves either no snapshot at all or
+    a complete, inspectable one, never a committed parent that lost the
+    constituents and errors belonging to it. Two defects follow from the
+    non-atomic ordering and are closed by this shape:
 
-    The fan-out then follows ADR-0012's per-item isolation: each constituent
-    is created and dispatched inside its own ``try``/``except``, and a failure
-    is recorded as a :class:`ConstituentError` naming the deployment before
-    the loop moves on (spec FR-005). The mutation never fails because one
-    application was busy.
+    * ``CancelledError`` (client disconnect, request timeout) escapes the
+      per-constituent ``except Exception``, so deferring the error write until
+      after the fan-out could publish a snapshot with fewer children than
+      snapshots and *zero* recorded errors — which derives ``COMPLETED``
+      (spec FR-007);
+    * the D6 guard is an EXISTS over non-terminal *children*, so a committed
+      parent with no children yet does not block a second environment backup
+      (spec FR-009).
+
+    The fan-out still follows ADR-0012's per-item isolation: each constituent
+    is created inside its own ``try``/``except``, and a failure is recorded as
+    a :class:`ConstituentError` naming the deployment before the loop moves on
+    (spec FR-005) — now in the same transaction as its peers. The mutation
+    never fails because one application was busy.
 
     An environment with no eligible deployments yields a config-only snapshot
     which derives as ``COMPLETED`` immediately (spec FR-011) — no constituents
@@ -331,6 +393,9 @@ async def create_environment_backup(
         EnvironmentNotFoundError: When ``environment_id`` does not exist.
         EnvironmentOperationInProgressError: When an environment-level backup
             or restore is already in flight for this environment (FR-009).
+        EnvironmentBackupNotFoundError: When the snapshot was deleted while the
+            fan-out was still dispatching — legal, because
+            :func:`delete_environment_backup` has no status guard (FR-010).
     """
     async with uow:
         environment = await uow.environments.get(environment_id)
@@ -348,9 +413,16 @@ async def create_environment_backup(
             for deployment in eligible
         ]
 
+        # The id is generated up front so the auto-generated name is final
+        # *before* the INSERT. ``EnvironmentBackup.name`` is unique, so writing
+        # a shared sentinel and renaming afterwards makes two concurrently
+        # auto-named snapshots — even in different environments — collide on
+        # that index.
+        environment_backup_id = uuid4()
         environment_backup = await uow.environment_backups.create(
             EnvironmentBackup(
-                name=name or "placeholder",
+                id=environment_backup_id,
+                name=name or f"styrmin-envbackup-{environment_backup_id}",
                 environment_id=environment_id,
                 environment_config=environment.config,
                 deployment_snapshots=[
@@ -359,53 +431,66 @@ async def create_environment_backup(
                 or None,
             )
         )
-        if name is None:
-            environment_backup.name = f"styrmin-envbackup-{environment_backup.id}"
 
-        # Commit the capture before dispatching anything (ADR-0012).
+        errors: list[ConstituentError] = []
+        pending_dispatch: list[_PendingBackupDispatch] = []
+        # The constituents join this transaction instead of opening one each.
+        constituent_uow = _SharedTransaction(uow)
+
+        for snapshot in snapshots:
+            try:
+                _, target_namespace, component_configs = await resolve_backup_target(
+                    snapshot.instance_id, constituent_uow
+                )
+                backup = await create_backup(
+                    instance_id=snapshot.instance_id,
+                    uow=constituent_uow,
+                    target_namespace=target_namespace,
+                    component_configs=component_configs,
+                    environment_backup_id=environment_backup_id,
+                )
+            except Exception as exc:  # noqa: BLE001 — per-constituent isolation (FR-005)
+                logger.exception(
+                    "env_backup_constituent_error environment_backup_id={} "
+                    "deployment_id={}",
+                    environment_backup_id,
+                    snapshot.deployment_id,
+                )
+                errors.append(
+                    ConstituentError(
+                        deployment_id=snapshot.deployment_id,
+                        deployment_name=snapshot.deployment_name,
+                        error=str(exc),
+                    )
+                )
+                continue
+
+            pending_dispatch.append(
+                _PendingBackupDispatch(
+                    backup_id=backup.id, deployment_id=snapshot.deployment_id
+                )
+            )
+
+        if errors:
+            environment_backup.constituent_errors = [
+                error.model_dump(mode="json") for error in errors
+            ]
+
+        # The single commit: from here on the capture is complete and durable,
+        # and nothing has been dispatched yet (ADR-0012).
         await uow.commit()
         await uow.session.refresh(environment_backup)
 
-    environment_backup_id = environment_backup.id
-    errors: list[ConstituentError] = []
     dispatched = 0
     dispatch_failed = 0
 
-    for snapshot in snapshots:
-        try:
-            _, target_namespace, component_configs = await resolve_backup_target(
-                snapshot.instance_id, uow
-            )
-            backup = await create_backup(
-                instance_id=snapshot.instance_id,
-                uow=uow,
-                target_namespace=target_namespace,
-                component_configs=component_configs,
-                environment_backup_id=environment_backup_id,
-            )
-        except Exception as exc:  # noqa: BLE001 — per-constituent isolation (FR-005)
-            logger.warning(
-                "env_backup_constituent_error environment_backup_id={} "
-                "deployment_id={} error={}",
-                environment_backup_id,
-                snapshot.deployment_id,
-                exc,
-            )
-            errors.append(
-                ConstituentError(
-                    deployment_id=snapshot.deployment_id,
-                    deployment_name=snapshot.deployment_name,
-                    error=str(exc),
-                )
-            )
-            continue
-
+    for pending in pending_dispatch:
         try:
             await prefect_manager.run_action(
                 action=PrefectAction.EXECUTE_BACKUP,
                 parameters={
-                    "backup_id": str(backup.id),
-                    "deployment_id": str(snapshot.deployment_id),
+                    "backup_id": str(pending.backup_id),
+                    "deployment_id": str(pending.deployment_id),
                 },
             )
         except Exception as exc:  # noqa: BLE001 — a dispatch failure is not a lost row
@@ -417,25 +502,28 @@ async def create_environment_backup(
                 "env_backup_dispatch_error environment_backup_id={} backup_id={} "
                 "backup record created but Velero execution not triggered: {}",
                 environment_backup_id,
-                backup.id,
+                pending.backup_id,
                 exc,
             )
             continue
         dispatched += 1
 
     async with uow:
-        if errors:
-            persisted = await uow.environment_backups.get(environment_backup_id)
-            assert persisted is not None, (
-                "The environment backup was committed above and cannot vanish here"
-            )
-            persisted.constituent_errors = [
-                error.model_dump(mode="json") for error in errors
-            ]
-            await uow.commit()
         refreshed = await uow.environment_backups.get(environment_backup_id)
-        assert refreshed is not None, (
-            "The environment backup was committed above and cannot vanish here"
+    if refreshed is None:
+        # ``delete_environment_backup`` deliberately has no status guard (spec
+        # FR-010): an operator clearing an in-flight snapshot while this
+        # fan-out was still dispatching really can delete the row underneath
+        # us. That is a NOT_FOUND, not an internal error.
+        logger.warning(
+            "env_backup_deleted_during_fanout environment_id={} "
+            "environment_backup_id={}",
+            environment_id,
+            environment_backup_id,
+        )
+        raise EnvironmentBackupNotFoundError(
+            f"Environment backup {environment_backup_id} was deleted while its "
+            "fan-out was still running"
         )
 
     # One audit entry per fan-out, matching ``env_config_fanout_dispatched``
@@ -583,6 +671,19 @@ async def _classify_constituents(
     return usable, skipped
 
 
+class _PendingRestoreDispatch(NamedTuple):
+    """A committed constituent restore awaiting its ``EXECUTE_RESTORE`` dispatch.
+
+    The restore counterpart of :class:`_PendingBackupDispatch`: collected inside
+    the capture transaction, consumed after it commits.
+    """
+
+    restore_id: UUID
+    backup_id: UUID
+    deployment_id: UUID
+    target_namespace: str
+
+
 @inject(cast_result=False)  # type: ignore[arg-type]
 async def restore_environment_backup(
     environment_backup_id: UUID,
@@ -598,12 +699,22 @@ async def restore_environment_backup(
     2. classify every captured constituent as restorable or skipped, and
        record the skips on the new ``EnvironmentRestore`` row (FR-007);
     3. revert ``Environment.config`` to the captured value, recompute
-       capabilities, and **commit before any dispatch** (ADR-0012);
+       capabilities, create one constituent ``Restore`` row per usable
+       constituent (recording any late skip discovered while doing so), and
+       **commit all of it once, before any dispatch** (ADR-0012);
     4. fan the reverted config out to the eligible deployments that are
        *not* receiving a constituent restore — restored deployments come
        back with their backup-time state, so redeploying them concurrently
        would race the Velero restore on the same namespace;
-    5. create and dispatch one constituent restore per usable constituent.
+    5. dispatch one ``EXECUTE_RESTORE`` per created constituent restore.
+
+    Steps 2, 3 and the row creation of step 5 share **one** transaction for the
+    same reason ``create_environment_backup`` does: a ``CancelledError`` (client
+    disconnect, request timeout) escapes the per-constituent ``except
+    Exception``, so persisting the late skips after the loop could publish a
+    restore that silently dropped them (spec FR-007), and a committed parent
+    with no constituent rows yet does not block a second environment-level
+    operation (spec FR-009).
 
     The config revert assigns ``Environment.config`` directly rather than
     delegating to ``update_environment``: that service treats ``config=None``
@@ -630,6 +741,10 @@ async def restore_environment_backup(
         EnvironmentNotFoundError: When the snapshot's environment is gone.
         EnvironmentOperationInProgressError: When an environment-level backup
             or restore is already in flight for this environment (FR-009).
+        EnvironmentRestoreNotFoundError: When the restore record was deleted
+            (via its snapshot's cascade) while the fan-out was still
+            dispatching — legal, because that cascade has no status guard
+            (FR-010).
     """
     now = datetime.now(timezone.utc)
 
@@ -661,8 +776,10 @@ async def restore_environment_backup(
 
         usable, skipped = await _classify_constituents(environment_backup, uow, now)
 
+        environment_restore_id = uuid4()
         environment_restore = await uow.environment_restores.create(
             EnvironmentRestore(
+                id=environment_restore_id,
                 environment_backup_id=environment_backup_id,
                 skipped_constituents=[
                     entry.model_dump(mode="json") for entry in skipped
@@ -679,13 +796,81 @@ async def restore_environment_backup(
 
         deployments = await uow.deployments.find_all_by_environment(environment_id)
 
-        # The revert and the restore record are durable before anything is
-        # dispatched (ADR-0012): a crash mid-fan-out leaves a re-submittable
-        # operation rather than a half-applied config.
+        # Step 5, creation half — one constituent restore per usable
+        # constituent, in the same transaction as the revert and the parent row.
+        late_skips: list[SkippedConstituent] = []
+        pending_dispatch: list[_PendingRestoreDispatch] = []
+        # The constituents join this transaction instead of opening one each.
+        constituent_uow = _SharedTransaction(uow)
+        for constituent in usable:
+            snapshot = constituent.snapshot
+            try:
+                _, target_namespace, _ = await resolve_backup_target(
+                    snapshot.instance_id, constituent_uow
+                )
+                # ``resolve_backup_target`` degrades to an empty namespace when
+                # the instance row cannot be walked; the deployment (alive as of
+                # classification) still names its own namespace.
+                target_namespace = (
+                    target_namespace or f"{_NAMESPACE_PREFIX}{snapshot.deployment_id}"
+                )
+                restore, deployment_id = await create_restore(
+                    backup_id=constituent.backup_id,
+                    target_namespace=target_namespace,
+                    uow=constituent_uow,
+                    environment_restore_id=environment_restore_id,
+                )
+            except RestoreAlreadyInProgressError:
+                # research.md D4 / critique P2: a deployment that began an
+                # individual restore between classification and dispatch is a
+                # skip, never an abort.
+                late_skips.append(
+                    _skip(snapshot, SkipReason.DEPLOYMENT_BUSY.value),
+                )
+                continue
+            except BackupNotFoundError:
+                # The constituent (or its instance) vanished in the same window.
+                late_skips.append(_skip(snapshot, SkipReason.BACKUP_DELETED.value))
+                continue
+            except Exception as exc:  # noqa: BLE001 — per-constituent isolation
+                # Belt and braces: an unexpected failure is still an attributed
+                # skip rather than a silent one (FR-007).
+                logger.exception(
+                    "env_restore_constituent_error environment_restore_id={} "
+                    "deployment_id={}",
+                    environment_restore_id,
+                    snapshot.deployment_id,
+                )
+                late_skips.append(
+                    _skip(snapshot, f"restore could not be created: {exc}")
+                )
+                continue
+
+            pending_dispatch.append(
+                _PendingRestoreDispatch(
+                    restore_id=restore.id,
+                    backup_id=constituent.backup_id,
+                    deployment_id=deployment_id,
+                    target_namespace=target_namespace,
+                )
+            )
+
+        if late_skips:
+            environment_restore.skipped_constituents = [
+                *(environment_restore.skipped_constituents or []),
+                *(entry.model_dump(mode="json") for entry in late_skips),
+            ]
+
+        # The single commit: the revert, the restore record, every constituent
+        # restore row and every recorded skip become durable together, and
+        # nothing has been dispatched yet (ADR-0012). A crash mid-fan-out
+        # leaves a re-submittable operation rather than a half-applied config.
         await uow.commit()
         await uow.session.refresh(environment_restore)
 
-    environment_restore_id = environment_restore.id
+    # Every classified-usable constituent, not just the ones that got a row: a
+    # late skip means the deployment began its own restore, so redeploying it
+    # would race that restore for the same reason.
     restoring_deployment_ids = {
         constituent.snapshot.deployment_id for constituent in usable
     }
@@ -715,61 +900,18 @@ async def restore_environment_backup(
             fanout_dispatched += 1
         await uow.commit()
 
-    # Step 5 — one constituent restore per usable constituent.
-    late_skips: list[SkippedConstituent] = []
+    # Step 5, dispatch half — the rows already exist and are committed.
     restored = 0
     dispatch_failed = 0
-    for constituent in usable:
-        snapshot = constituent.snapshot
-        try:
-            _, target_namespace, _ = await resolve_backup_target(
-                snapshot.instance_id, uow
-            )
-            # ``resolve_backup_target`` degrades to an empty namespace when the
-            # instance row cannot be walked; the deployment (alive as of
-            # classification) still names its own namespace.
-            target_namespace = (
-                target_namespace or f"{_NAMESPACE_PREFIX}{snapshot.deployment_id}"
-            )
-            restore, deployment_id = await create_restore(
-                backup_id=constituent.backup_id,
-                target_namespace=target_namespace,
-                uow=uow,
-                environment_restore_id=environment_restore_id,
-            )
-        except RestoreAlreadyInProgressError:
-            # research.md D4 / critique P2: a deployment that began an
-            # individual restore between classification and dispatch is a
-            # skip, never an abort.
-            late_skips.append(
-                _skip(snapshot, SkipReason.DEPLOYMENT_BUSY.value),
-            )
-            continue
-        except BackupNotFoundError:
-            # The constituent (or its instance) vanished in the same window.
-            late_skips.append(_skip(snapshot, SkipReason.BACKUP_DELETED.value))
-            continue
-        except Exception as exc:  # noqa: BLE001 — per-constituent isolation
-            # Belt and braces: an unexpected failure is still an attributed
-            # skip rather than a silent one (FR-007).
-            logger.warning(
-                "env_restore_constituent_error environment_restore_id={} "
-                "deployment_id={} error={}",
-                environment_restore_id,
-                snapshot.deployment_id,
-                exc,
-            )
-            late_skips.append(_skip(snapshot, f"restore could not be created: {exc}"))
-            continue
-
+    for pending in pending_dispatch:
         try:
             await prefect_manager.run_action(
                 action=PrefectAction.EXECUTE_RESTORE,
                 parameters={
-                    "restore_id": str(restore.id),
-                    "backup_id": str(constituent.backup_id),
-                    "deployment_id": str(deployment_id),
-                    "target_namespace": target_namespace,
+                    "restore_id": str(pending.restore_id),
+                    "backup_id": str(pending.backup_id),
+                    "deployment_id": str(pending.deployment_id),
+                    "target_namespace": pending.target_namespace,
                 },
             )
         except Exception as exc:  # noqa: BLE001 — a dispatch failure is not a lost row
@@ -781,26 +923,29 @@ async def restore_environment_backup(
                 "env_restore_dispatch_error environment_restore_id={} restore_id={} "
                 "restore record created but Velero execution not triggered: {}",
                 environment_restore_id,
-                restore.id,
+                pending.restore_id,
                 exc,
             )
             continue
         restored += 1
 
     async with uow:
-        if late_skips:
-            persisted = await uow.environment_restores.get(environment_restore_id)
-            assert persisted is not None, (
-                "The environment restore was committed above and cannot vanish here"
-            )
-            persisted.skipped_constituents = [
-                *(persisted.skipped_constituents or []),
-                *(entry.model_dump(mode="json") for entry in late_skips),
-            ]
-            await uow.commit()
         refreshed = await uow.environment_restores.get(environment_restore_id)
-        assert refreshed is not None, (
-            "The environment restore was committed above and cannot vanish here"
+    if refreshed is None:
+        # The cascade behind ``delete_environment_backup`` has no status guard
+        # (spec FR-010), so an operator clearing the snapshot while this
+        # fan-out was still dispatching really can delete this row underneath
+        # us. Mirrors ``create_environment_backup``: NOT_FOUND, not an
+        # internal error.
+        logger.warning(
+            "env_restore_deleted_during_fanout environment_id={} "
+            "environment_restore_id={}",
+            environment_id,
+            environment_restore_id,
+        )
+        raise EnvironmentRestoreNotFoundError(
+            f"Environment restore {environment_restore_id} was deleted while its "
+            "fan-out was still running"
         )
 
     # One audit entry per fan-out, matching ``env_backup_fanout_dispatched``
