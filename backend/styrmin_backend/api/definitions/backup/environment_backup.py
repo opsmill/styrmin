@@ -19,6 +19,7 @@ every eligible deployment shows up exactly once, as one of
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 import strawberry
@@ -37,6 +38,15 @@ from styrmin_backend.services.backup.environment import (
     derive_environment_operation_status,
 )
 from styrmin_backend.services.exceptions import EnvironmentNotFoundError
+
+if TYPE_CHECKING:
+    # Type-check-only: ``environment_restore`` imports this module at runtime
+    # for its own ``environmentBackup`` field, so the pairing is a cycle unless
+    # one direction stays deferred. ``strawberry.lazy`` resolves the annotation
+    # at schema-build time.
+    from styrmin_backend.api.definitions.backup.environment_restore import (
+        EnvironmentRestore,
+    )
 
 # NOTE: ``EnvironmentOperationStatus`` is one Python enum shared by both
 # parents, but ``strawberry.enum`` attaches its definition to the class, so it
@@ -169,6 +179,36 @@ class EnvironmentBackup:
                 )
             )
         return constituents
+
+    @strawberry.field(
+        description="Coordinated restores performed from this snapshot, newest first."
+    )
+    def restores(
+        self,
+    ) -> list[
+        Annotated[
+            "EnvironmentRestore",
+            strawberry.lazy(
+                "styrmin_backend.api.definitions.backup.environment_restore"
+            ),
+        ]
+    ]:
+        # Imported inside the resolver: ``environment_restore`` imports this
+        # module for its own ``environmentBackup`` field, so a module-level
+        # import here would be a cycle. ``strawberry.lazy`` above is what lets
+        # the annotation resolve at schema-build time.
+        from styrmin_backend.api.definitions.backup.environment_restore import (
+            EnvironmentRestore,
+        )
+
+        return [
+            EnvironmentRestore.from_instance(environment_restore)
+            for environment_restore in sorted(
+                self.db_model.restores,
+                key=lambda restore: restore.created_on,  # type: ignore[arg-type,return-value]
+                reverse=True,
+            )
+        ]
 
     @strawberry.field
     async def environment(self, info: strawberry.Info) -> EnvironmentType:

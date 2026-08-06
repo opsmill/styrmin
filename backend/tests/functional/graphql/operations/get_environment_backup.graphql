@@ -26,5 +26,13 @@ query GetEnvironmentBackup($environmentBackupId: UUID!) {
                 status
             }
         }
+        restores {
+            id
+            status
+            skippedConstituents {
+                deploymentName
+                reason
+            }
+        }
     }
 }
