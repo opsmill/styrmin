@@ -23,6 +23,13 @@ from .create_environment import (
     CreateEnvironmentCreateEnvironment,
     CreateEnvironmentCreateEnvironmentCluster,
 )
+from .create_environment_backup import (
+    CreateEnvironmentBackup,
+    CreateEnvironmentBackupCreateEnvironmentBackup,
+    CreateEnvironmentBackupCreateEnvironmentBackupConstituents,
+    CreateEnvironmentBackupCreateEnvironmentBackupConstituentsBackup,
+    CreateEnvironmentBackupCreateEnvironmentBackupDeploymentSnapshots,
+)
 from .create_group import CreateGroup, CreateGroupCreateGroup
 from .create_restore import CreateRestore, CreateRestoreCreateRestore
 from .create_user import CreateUser, CreateUserCreateUser, CreateUserCreateUserGroups
@@ -150,6 +157,13 @@ from .get_environment import (
     GetEnvironmentEnvironment,
     GetEnvironmentEnvironmentCluster,
 )
+from .get_environment_backup import (
+    GetEnvironmentBackup,
+    GetEnvironmentBackupEnvironmentBackup,
+    GetEnvironmentBackupEnvironmentBackupConstituents,
+    GetEnvironmentBackupEnvironmentBackupConstituentsBackup,
+    GetEnvironmentBackupEnvironmentBackupDeploymentSnapshots,
+)
 from .get_environment_services import (
     GetEnvironmentServices,
     GetEnvironmentServicesEnvironmentServices,
@@ -208,6 +222,12 @@ from .list_deployments import (
     ListDeploymentsEnvironment,
     ListDeploymentsEnvironmentDeployments,
     ListDeploymentsEnvironmentDeploymentsApplicationInstance,
+)
+from .list_environment_backups import (
+    ListEnvironmentBackups,
+    ListEnvironmentBackupsEnvironmentBackups,
+    ListEnvironmentBackupsEnvironmentBackupsConstituents,
+    ListEnvironmentBackupsEnvironmentBackupsConstituentsBackup,
 )
 from .list_environments import (
     ListEnvironments,
@@ -290,6 +310,11 @@ __all__ = [
     "CreateCluster",
     "CreateClusterCreateCluster",
     "CreateEnvironment",
+    "CreateEnvironmentBackup",
+    "CreateEnvironmentBackupCreateEnvironmentBackup",
+    "CreateEnvironmentBackupCreateEnvironmentBackupConstituents",
+    "CreateEnvironmentBackupCreateEnvironmentBackupConstituentsBackup",
+    "CreateEnvironmentBackupCreateEnvironmentBackupDeploymentSnapshots",
     "CreateEnvironmentCreateEnvironment",
     "CreateEnvironmentCreateEnvironmentCluster",
     "CreateGroup",
@@ -389,6 +414,11 @@ __all__ = [
     "GetDriverEnvVarDocsApplicationDriverVersions",
     "GetDriverEnvVarDocsApplicationDriverVersionsEnvVars",
     "GetEnvironment",
+    "GetEnvironmentBackup",
+    "GetEnvironmentBackupEnvironmentBackup",
+    "GetEnvironmentBackupEnvironmentBackupConstituents",
+    "GetEnvironmentBackupEnvironmentBackupConstituentsBackup",
+    "GetEnvironmentBackupEnvironmentBackupDeploymentSnapshots",
     "GetEnvironmentEnvironment",
     "GetEnvironmentEnvironmentCluster",
     "GetEnvironmentServices",
@@ -425,6 +455,10 @@ __all__ = [
     "ListDeploymentsEnvironment",
     "ListDeploymentsEnvironmentDeployments",
     "ListDeploymentsEnvironmentDeploymentsApplicationInstance",
+    "ListEnvironmentBackups",
+    "ListEnvironmentBackupsEnvironmentBackups",
+    "ListEnvironmentBackupsEnvironmentBackupsConstituents",
+    "ListEnvironmentBackupsEnvironmentBackupsConstituentsBackup",
     "ListEnvironments",
     "ListEnvironmentsEnvironments",
     "ListEnvironmentsEnvironmentsCluster",
