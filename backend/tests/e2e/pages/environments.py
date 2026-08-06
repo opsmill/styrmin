@@ -13,7 +13,14 @@ from typing import Any, TYPE_CHECKING
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 
 from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
-from tests.e2e.drivers.refs import EnvironmentRef
+from tests.e2e.drivers.refs import (
+    EnvironmentBackupConstituentRef,
+    EnvironmentBackupRef,
+    EnvironmentRef,
+    EnvironmentRestoreRef,
+    EnvironmentRestoreSkipRef,
+)
+from tests.e2e.pages._dom import required_attr as _required_attr
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -352,6 +359,456 @@ class EnvironmentDetailPage:
             await asyncio.sleep(0.5)
         raise ScenarioTimeout(
             f"BSL assignment did not reflect within 15s on environment {environment_id!r}"
+        )
+
+
+class EnvironmentBackupsTabPage:
+    """The Backups tab on the environment detail page (spec 001-env-backup-restore).
+
+    Backs :class:`~tests.e2e.drivers.ui_driver.UiScenarioDriver`'s
+    environment-level backup/restore methods. Every read is taken off the
+    ``data-*`` attributes the tab publishes rather than visible text, so the UI
+    driver reports the same raw enum values (``COMPLETED``, ``PARTIAL``, …) and
+    the same free-text skip reasons as the API driver.
+
+    Two rendering facts drive the shape of this class:
+
+    * a snapshot's per-constituent outcomes only exist in the DOM while its row
+      is expanded, so every constituent read expands the row first;
+    * the restore panel is inside that same expansion, and the row keeps its
+      own ``expanded`` state across the tab's 10s refetch (the list is keyed by
+      snapshot id, so React does not remount it).
+    """
+
+    def __init__(self, page: Page) -> None:
+        self._page = page
+
+    # ------------------------------------------------------------------
+    # Navigation
+    # ------------------------------------------------------------------
+
+    async def goto(self, *, environment_id: str) -> None:
+        """Open ``/environments/{id}`` and switch to the Backups tab."""
+        await self._page.goto(f"/environments/{environment_id}")
+        detail = self._page.locator(
+            f"[data-testid=environment-detail][data-environment-id='{environment_id}']"
+        ).first
+        await detail.wait_for()
+        # The project's ``Tabs`` primitive renders plain buttons (no
+        # ``role="tab"``), same caveat as the Configuration tab above.
+        await self._page.get_by_role("button", name="Backups", exact=True).click()
+        await self._tab(environment_id).wait_for(state="visible")
+
+    def _tab(self, environment_id: str) -> Locator:
+        return self._page.locator(
+            f"[data-testid=environment-backups-tab]"
+            f"[data-environment-id='{environment_id}']"
+        ).first
+
+    async def _ensure_on_tab(self, *, environment_id: str) -> None:
+        """Re-enter the Backups tab unless it is already the active panel.
+
+        The Playwright page is session-scoped and shared with every other
+        scenario, so "already there" is never assumed — but re-navigating on
+        every call would throw away the row expansions this page relies on.
+        """
+        if await self._tab(environment_id).count() > 0:
+            if await self._tab(environment_id).is_visible():
+                return
+        await self.goto(environment_id=environment_id)
+
+    def _row(self, environment_backup_id: str) -> Locator:
+        return self._page.locator(
+            f"[data-testid=environment-backup-row]"
+            f"[data-environment-backup-id='{environment_backup_id}']"
+        ).first
+
+    # ------------------------------------------------------------------
+    # Reads
+    # ------------------------------------------------------------------
+
+    async def _ensure_expanded(self, row: Locator, *, context: str) -> None:
+        """Expand a snapshot row so its constituents and restores are rendered."""
+        button = row.locator("[data-testid=environment-backup-expand-button]").first
+        if await button.get_attribute("aria-expanded") != "true":
+            await button.click()
+        detail = row.locator("[data-testid=environment-backup-detail]").first
+        try:
+            await detail.wait_for(state="visible", timeout=15_000)
+        except PlaywrightTimeoutError as exc:
+            raise ScenarioActionError(
+                f"{context}: snapshot row did not expand its detail panel"
+            ) from exc
+
+    async def _read_constituents(
+        self, row: Locator
+    ) -> tuple[EnvironmentBackupConstituentRef, ...]:
+        items = row.locator("[data-testid=environment-backup-constituent]")
+        constituents: list[EnvironmentBackupConstituentRef] = []
+        for i in range(await items.count()):
+            item = items.nth(i)
+            context = "environment backup constituent"
+            backup_id = await item.get_attribute("data-backup-id")
+            backup_status = await item.get_attribute("data-backup-status")
+            constituents.append(
+                EnvironmentBackupConstituentRef(
+                    deployment_id=await _required_attr(
+                        item, "data-deployment-id", context=context
+                    ),
+                    deployment_name=await _required_attr(
+                        item, "data-deployment-name", context=context
+                    ),
+                    outcome=await _required_attr(
+                        item, "data-constituent-outcome", context=context
+                    ),
+                    # The row renders "" for an absent backup (a DOM attribute
+                    # cannot hold null), which is the `missing` gap — normalise
+                    # it back to None so both drivers agree.
+                    backup_id=backup_id or None,
+                    backup_status=backup_status or None,
+                    # The list query does not project the creation error text,
+                    # only its presence via ``data-constituent-outcome=error``.
+                    # Scenarios assert on the outcome; the API driver carries
+                    # the message for diagnosis only.
+                    error=None,
+                )
+            )
+        return tuple(constituents)
+
+    async def read_backup(
+        self, *, environment_id: str, environment_backup_id: str
+    ) -> EnvironmentBackupRef | None:
+        """Read a snapshot row, or ``None`` when the list no longer shows it."""
+        await self._ensure_on_tab(environment_id=environment_id)
+        row = self._row(environment_backup_id)
+        if await row.count() == 0:
+            return None
+        context = f"environment backup row {environment_backup_id}"
+        await self._ensure_expanded(row, context=context)
+        return EnvironmentBackupRef(
+            id=environment_backup_id,
+            name=await _required_attr(
+                row, "data-environment-backup-name", context=context
+            ),
+            status=await _required_attr(
+                row, "data-environment-backup-status", context=context
+            ),
+            constituents=await self._read_constituents(row),
+        )
+
+    async def wait_for_backup_status(
+        self,
+        *,
+        environment_id: str,
+        environment_backup_id: str,
+        terminal_statuses: frozenset[str],
+        max_wait: float,
+    ) -> EnvironmentBackupRef:
+        """Poll ``data-environment-backup-status`` until it is terminal.
+
+        The tab refetches every 10s on its own, so this only has to re-read the
+        attribute — no reload, which would collapse the row.
+        """
+        await self._ensure_on_tab(environment_id=environment_id)
+        row = self._row(environment_backup_id)
+        context = f"environment backup row {environment_backup_id}"
+        deadline = time.time() + max_wait
+        last_status = "<row absent>"
+        while time.time() < deadline:
+            if await row.count() > 0:
+                last_status = await _required_attr(
+                    row, "data-environment-backup-status", context=context
+                )
+                if last_status in terminal_statuses:
+                    await self._ensure_expanded(row, context=context)
+                    return EnvironmentBackupRef(
+                        id=environment_backup_id,
+                        name=await _required_attr(
+                            row, "data-environment-backup-name", context=context
+                        ),
+                        status=last_status,
+                        constituents=await self._read_constituents(row),
+                    )
+            await asyncio.sleep(3.0)
+        raise ScenarioTimeout(
+            f"environment backup {environment_backup_id} did not reach a terminal "
+            f"derived status within {max_wait}s (last seen: {last_status})"
+        )
+
+    # ------------------------------------------------------------------
+    # Create
+    # ------------------------------------------------------------------
+
+    async def create_backup(self, *, environment_id: str) -> EnvironmentBackupRef:
+        """Click "Create Backup" and return the newly-added snapshot row."""
+        await self.goto(environment_id=environment_id)
+
+        rows = self._page.locator("[data-testid=environment-backup-row]")
+        existing_ids: set[str] = set()
+        for i in range(await rows.count()):
+            existing_ids.add(
+                await _required_attr(
+                    rows.nth(i),
+                    "data-environment-backup-id",
+                    context="environment backup row",
+                )
+            )
+
+        await self._page.locator(
+            "[data-testid=create-environment-backup-button]"
+        ).click()
+
+        deadline = time.time() + 120.0
+        while time.time() < deadline:
+            await self._raise_on_tab_error(environment_id=environment_id)
+            rows = self._page.locator("[data-testid=environment-backup-row]")
+            for i in range(await rows.count()):
+                row = rows.nth(i)
+                row_id = await _required_attr(
+                    row,
+                    "data-environment-backup-id",
+                    context="environment backup row",
+                )
+                if row_id in existing_ids:
+                    continue
+                context = f"environment backup row {row_id}"
+                await self._ensure_expanded(row, context=context)
+                return EnvironmentBackupRef(
+                    id=row_id,
+                    name=await _required_attr(
+                        row, "data-environment-backup-name", context=context
+                    ),
+                    status=await _required_attr(
+                        row, "data-environment-backup-status", context=context
+                    ),
+                    constituents=await self._read_constituents(row),
+                )
+            await asyncio.sleep(2.0)
+        raise ScenarioTimeout(
+            "create_environment_backup: no new snapshot row appeared within 120s"
+        )
+
+    async def _raise_on_tab_error(self, *, environment_id: str) -> None:
+        """Surface the tab's inline mutation error instead of timing out on it."""
+        alert = self._tab(environment_id).locator(
+            "[data-testid=environment-backups-error]"
+        )
+        if await alert.count() > 0:
+            raise ScenarioActionError(
+                "environment backups tab reported an error: "
+                f"{(await alert.first.inner_text()).strip()}"
+            )
+
+    # ------------------------------------------------------------------
+    # Restore
+    # ------------------------------------------------------------------
+
+    async def _read_restore(self, row: Locator) -> EnvironmentRestoreRef:
+        restore_id = await _required_attr(
+            row, "data-environment-restore-id", context="environment restore row"
+        )
+        context = f"environment restore row {restore_id}"
+        constituents = row.locator("[data-testid=environment-restore-constituent]")
+        restore_ids: list[str] = []
+        for i in range(await constituents.count()):
+            restore_ids.append(
+                await _required_attr(
+                    constituents.nth(i), "data-restore-id", context=context
+                )
+            )
+        skips = row.locator("[data-testid=environment-restore-skipped-constituent]")
+        skipped: list[EnvironmentRestoreSkipRef] = []
+        for i in range(await skips.count()):
+            skip = skips.nth(i)
+            skipped.append(
+                EnvironmentRestoreSkipRef(
+                    deployment_id=await _required_attr(
+                        skip, "data-deployment-id", context=context
+                    ),
+                    deployment_name=await _required_attr(
+                        skip, "data-deployment-name", context=context
+                    ),
+                    reason=await _required_attr(
+                        skip, "data-skip-reason", context=context
+                    ),
+                )
+            )
+        return EnvironmentRestoreRef(
+            id=restore_id,
+            status=await _required_attr(
+                row, "data-environment-restore-status", context=context
+            ),
+            restore_ids=tuple(restore_ids),
+            skipped=tuple(skipped),
+        )
+
+    async def restore_backup(
+        self, *, environment_id: str, environment_backup_id: str
+    ) -> EnvironmentRestoreRef:
+        """Drive the restore confirm dialog and return the new restore row.
+
+        The button is gated on ``data-restorable`` (COMPLETED / PARTIAL only),
+        so a scenario that reaches here on a non-restorable snapshot gets a
+        descriptive error rather than a click that silently does nothing.
+        """
+        await self._ensure_on_tab(environment_id=environment_id)
+        row = self._row(environment_backup_id)
+        if await row.count() == 0:
+            raise ScenarioActionError(
+                f"environment backup {environment_backup_id} is not listed on "
+                f"environment {environment_id}"
+            )
+        button = row.locator("[data-testid=environment-backup-restore-button]").first
+        if await button.count() == 0:
+            raise ScenarioActionError(
+                "restore button is absent — the signed-in user is not ADMIN "
+                "(restoring reverts the environment config)"
+            )
+        if await button.get_attribute("data-restorable") != "true":
+            status = await row.get_attribute("data-environment-backup-status")
+            raise ScenarioActionError(
+                f"environment backup {environment_backup_id} is not restorable "
+                f"(derived status {status!r}); the UI disables the action"
+            )
+
+        # The restores panel is inside the row's expansion and the mutation's
+        # success handler expands it for us, but existing restores have to be
+        # snapshotted first so the new row can be told apart.
+        await self._ensure_expanded(
+            row, context=f"environment backup row {environment_backup_id}"
+        )
+        existing_ids: set[str] = set()
+        existing = row.locator("[data-testid=environment-restore-row]")
+        for i in range(await existing.count()):
+            existing_ids.add(
+                await _required_attr(
+                    existing.nth(i),
+                    "data-environment-restore-id",
+                    context="environment restore row",
+                )
+            )
+
+        await button.click()
+        dialog = self._page.locator("[data-testid=environment-restore-dialog]").first
+        await dialog.wait_for(state="visible")
+        await self._page.locator(
+            "[data-testid=environment-restore-dialog-confirm]"
+        ).click()
+
+        # ``restoreEnvironmentBackup`` classifies every constituent, reverts the
+        # environment config, fans the revert out to the non-restoring
+        # deployments and dispatches one restore per usable constituent — all
+        # synchronously — so the mutation can take a while to return. The panel
+        # auto-expands on success (no expand click needed here).
+        deadline = time.time() + 300.0
+        while time.time() < deadline:
+            error = row.locator("[data-testid=environment-backup-restore-error]")
+            if await error.count() > 0:
+                raise ScenarioActionError(
+                    "restoreEnvironmentBackup failed: "
+                    f"{(await error.first.inner_text()).strip()}"
+                )
+            rows = row.locator("[data-testid=environment-restore-row]")
+            for i in range(await rows.count()):
+                candidate = rows.nth(i)
+                candidate_id = await _required_attr(
+                    candidate,
+                    "data-environment-restore-id",
+                    context="environment restore row",
+                )
+                if candidate_id in existing_ids:
+                    continue
+                return await self._read_restore(candidate)
+            await asyncio.sleep(2.0)
+        raise ScenarioTimeout(
+            "restore_environment_backup: no new restore row appeared within 300s"
+        )
+
+    async def wait_for_restore_status(
+        self,
+        *,
+        environment_id: str,
+        environment_backup_id: str,
+        environment_restore_id: str,
+        terminal_statuses: frozenset[str],
+        max_wait: float,
+    ) -> EnvironmentRestoreRef:
+        """Poll ``data-environment-restore-status`` until it is terminal."""
+        deadline = time.time() + max_wait
+        last_status = "<row absent>"
+        while time.time() < deadline:
+            row = self._page.locator(
+                f"[data-testid=environment-restore-row]"
+                f"[data-environment-restore-id='{environment_restore_id}']"
+            ).first
+            if await row.count() == 0:
+                # The shared session page may have been navigated away, or the
+                # snapshot row collapsed — re-enter and re-expand rather than
+                # burning the whole budget on an absent locator.
+                await self._ensure_on_tab(environment_id=environment_id)
+                parent = self._row(environment_backup_id)
+                if await parent.count() > 0:
+                    await self._ensure_expanded(
+                        parent,
+                        context=f"environment backup row {environment_backup_id}",
+                    )
+                await asyncio.sleep(3.0)
+                continue
+            last_status = await _required_attr(
+                row,
+                "data-environment-restore-status",
+                context=f"environment restore row {environment_restore_id}",
+            )
+            if last_status in terminal_statuses:
+                return await self._read_restore(row)
+            await asyncio.sleep(3.0)
+        raise ScenarioTimeout(
+            f"environment restore {environment_restore_id} did not reach a terminal "
+            f"derived status within {max_wait}s (last seen: {last_status})"
+        )
+
+    # ------------------------------------------------------------------
+    # Delete
+    # ------------------------------------------------------------------
+
+    async def delete_backup(
+        self, *, environment_id: str, environment_backup_id: str
+    ) -> None:
+        """Delete a snapshot through the confirm dialog and wait for the row to go.
+
+        The delete button is never disabled by status — deleting an in-progress
+        snapshot is the documented escape hatch (spec FR-010).
+        """
+        await self._ensure_on_tab(environment_id=environment_id)
+        row = self._row(environment_backup_id)
+        if await row.count() == 0:
+            raise ScenarioActionError(
+                f"environment backup {environment_backup_id} is not listed on "
+                f"environment {environment_id}"
+            )
+        await row.locator("[data-testid=environment-backup-delete-button]").click()
+        dialog = self._page.locator(
+            "[data-testid=environment-backup-delete-dialog]"
+        ).first
+        await dialog.wait_for(state="visible")
+        await self._page.locator(
+            "[data-testid=environment-backup-delete-dialog-confirm]"
+        ).click()
+
+        deadline = time.time() + 120.0
+        while time.time() < deadline:
+            error = row.locator("[data-testid=environment-backup-delete-error]")
+            if await error.count() > 0:
+                raise ScenarioActionError(
+                    "deleteEnvironmentBackup failed: "
+                    f"{(await error.first.inner_text()).strip()}"
+                )
+            if await self._row(environment_backup_id).count() == 0:
+                return
+            await asyncio.sleep(2.0)
+        raise ScenarioTimeout(
+            f"environment backup {environment_backup_id} row did not disappear "
+            "within 120s of confirming the delete"
         )
 
 

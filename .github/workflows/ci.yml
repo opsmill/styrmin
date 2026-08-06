@@ -233,11 +233,13 @@ jobs:
         entrypoint: [api, ui]
         shard: [general, env, compute, backup, infrahub, configuration, apply]
         exclude:
-          # Shards whose every test carries @pytest.mark.api_only — the UI
-          # cell would collect 0 tests and exit with code 5, failing the
-          # cell while burning vcluster boot time. Re-enable here if a
-          # dual-entrypoint test is ever added.
-          - {entrypoint: ui, shard: backup}
+          # infrahub/ tests all carry @pytest.mark.api_only — the UI cell would
+          # collect 0 tests and exit with code 5, failing the cell while burning
+          # vcluster boot time. Re-enable here if a dual-entrypoint test is ever
+          # added. (`backup` used to be listed for the same reason; it now runs
+          # under both entrypoints because
+          # test_backup_restore.py::test_environment_backup_and_restore_lifecycle
+          # exercises the environment-level flow through the UI too.)
           - {entrypoint: ui, shard: infrahub}
           - {entrypoint: ui, shard: apply}
           # configuration/ is entirely ui_only — drawer flows have no SDK equivalent

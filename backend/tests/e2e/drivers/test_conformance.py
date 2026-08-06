@@ -14,9 +14,23 @@ import inspect
 
 import pytest
 
-from tests.e2e.drivers.api_driver import ApiScenarioDriver
+from tests.e2e.drivers.api_driver import ApiScenarioDriver, _constituent_outcome
 from tests.e2e.drivers.protocol import ScenarioDriver
+from tests.e2e.drivers.refs import TERMINAL_ENVIRONMENT_OPERATION_STATUSES
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
+
+# The environment-level backup/restore surface (spec 001-env-backup-restore).
+# Spelled out rather than derived so a method silently dropped from the
+# protocol — which would make every scenario using it a collection error
+# instead of a conformance failure — is caught here by name.
+_ENVIRONMENT_BACKUP_METHODS = (
+    "create_environment_backup",
+    "get_environment_backup",
+    "wait_for_environment_backup",
+    "restore_environment_backup",
+    "wait_for_environment_restore",
+    "delete_environment_backup",
+)
 
 
 def _protocol_methods() -> list[str]:
@@ -154,6 +168,91 @@ def test_protocol_methods_match_both_drivers() -> None:
     assert not mismatched, "Sync/async divergence from the protocol: " + "; ".join(
         mismatched
     )
+
+
+def test_environment_backup_surface_is_on_the_protocol_and_both_drivers() -> None:
+    """The environment-level surface must exist on the protocol *and* both drivers.
+
+    ``test_driver_implements_every_protocol_method`` only checks that the
+    drivers cover whatever the protocol declares — if a method were dropped from
+    the protocol it would keep passing while every scenario using it broke. This
+    pins the six methods by name at both ends.
+    """
+    protocol = set(_protocol_methods())
+    missing_from_protocol = [
+        name for name in _ENVIRONMENT_BACKUP_METHODS if name not in protocol
+    ]
+    assert not missing_from_protocol, (
+        f"ScenarioDriver lost environment-level backup methods: {missing_from_protocol}"
+    )
+    for driver_cls in (ApiScenarioDriver, UiScenarioDriver):
+        missing = [
+            name
+            for name in _ENVIRONMENT_BACKUP_METHODS
+            if not callable(getattr(driver_cls, name, None))
+        ]
+        assert not missing, f"{driver_cls.__name__} is missing: {missing}"
+
+
+def test_terminal_environment_statuses_cover_the_sdk_enums() -> None:
+    """The refs' terminal-status names must match the SDK's terminal enum sets.
+
+    Both drivers report the raw ``EnvironmentBackupStatus`` /
+    ``EnvironmentRestoreStatus`` *name* as a plain string, so the waiter's
+    terminal set is maintained by hand. If a new terminal member is ever added
+    to the schema, the waiters would poll past it forever — this catches that at
+    unit speed.
+    """
+    from styrmin_sdk.resources.environment_backups import (
+        TERMINAL_ENVIRONMENT_BACKUP_STATUSES,
+        TERMINAL_ENVIRONMENT_RESTORE_STATUSES,
+    )
+
+    assert TERMINAL_ENVIRONMENT_OPERATION_STATUSES == {
+        status.name for status in TERMINAL_ENVIRONMENT_BACKUP_STATUSES
+    }
+    assert TERMINAL_ENVIRONMENT_OPERATION_STATUSES == {
+        status.name for status in TERMINAL_ENVIRONMENT_RESTORE_STATUSES
+    }
+
+
+class _FakeBackup:
+    def __init__(self, status: str) -> None:
+        self.status = status
+
+
+class _FakeConstituent:
+    def __init__(self, *, error: str | None = None, backup_status: str | None = None):
+        self.error = error
+        self.backup = None if backup_status is None else _FakeBackup(backup_status)
+
+
+@pytest.mark.parametrize(
+    ("constituent", "expected"),
+    [
+        (_FakeConstituent(error="already in progress"), "error"),
+        (_FakeConstituent(), "missing"),
+        (_FakeConstituent(backup_status="completed"), "completed"),
+        (_FakeConstituent(backup_status="failed"), "failed"),
+        (_FakeConstituent(backup_status="pending"), "in-flight"),
+        (_FakeConstituent(backup_status="in_progress"), "in-flight"),
+        # Case-insensitive for the same reason the frontend is: a backend that
+        # ever uppercased Backup.status must not silently read as in-flight.
+        (_FakeConstituent(backup_status="COMPLETED"), "completed"),
+    ],
+)
+def test_api_driver_constituent_outcome_matches_frontend_vocabulary(
+    constituent: _FakeConstituent, expected: str
+) -> None:
+    """The API driver's classifier must agree with ``classifyConstituent``.
+
+    The UI driver reads ``data-constituent-outcome`` straight out of the DOM,
+    which the frontend computes with its own ``classifyConstituent``. The API
+    driver re-implements it, so scenarios can only assert on ``outcome``
+    without a ``driver_mode`` branch while the two stay in lock-step — and
+    ``missing`` in particular is the deliberately-visible gap of spec FR-010.
+    """
+    assert _constituent_outcome(constituent) == expected
 
 
 def test_protocol_method_signatures_match() -> None:

@@ -11,7 +11,11 @@ from __future__ import annotations
 from tests.e2e.pages.deploy_form import DeployFormPage
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 from tests.e2e.pages.drivers_list import DriversListPage
-from tests.e2e.pages.environments import EnvironmentDetailPage, EnvironmentsListPage
+from tests.e2e.pages.environments import (
+    EnvironmentBackupsTabPage,
+    EnvironmentDetailPage,
+    EnvironmentsListPage,
+)
 from tests.e2e.pages.groups_admin import GroupsAdminPage
 from tests.e2e.pages.login import LoginPage
 from tests.e2e.pages.settings import BackupStorageLocationsListPage, SettingsPage
@@ -22,6 +26,7 @@ __all__ = [
     "DeployFormPage",
     "DeploymentDetailPage",
     "DriversListPage",
+    "EnvironmentBackupsTabPage",
     "EnvironmentDetailPage",
     "EnvironmentsListPage",
     "GroupsAdminPage",

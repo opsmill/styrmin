@@ -25,8 +25,13 @@ from tests.e2e.drivers.refs import (
     ClusterRef,
     DeploymentRef,
     DriverVersionRef,
+    EnvironmentBackupConstituentRef,
+    EnvironmentBackupRef,
     EnvironmentRef,
+    EnvironmentRestoreRef,
+    EnvironmentRestoreSkipRef,
     RestoreRef,
+    TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
     TimelineEntry,
 )
 
@@ -80,6 +85,81 @@ def _translate_scheduling_enums(value: Any) -> Any:
     if isinstance(value, list):
         return [_translate_scheduling_enums(v) for v in value]
     return value
+
+
+def _constituent_outcome(constituent: Any) -> str:
+    """Classify one constituent exactly as the frontend's ``classifyConstituent``.
+
+    Keeping the two implementations in lock-step is what lets a scenario assert
+    on ``EnvironmentBackupConstituentRef.outcome`` without a ``driver_mode``
+    branch. Constituent backups are ordinary per-instance backups, so their
+    ``status`` is the lowercase Backup string, not the parent's uppercase
+    derived enum — compared case-insensitively for the same reason the frontend
+    does it.
+    """
+    if constituent.error is not None:
+        return "error"
+    if constituent.backup is None:
+        # Neither a backup nor a creation error: the constituent was deleted
+        # individually after the snapshot was taken. The gap is deliberately
+        # visible (spec FR-010 / US3) rather than folded into ``failed``.
+        return "missing"
+    match constituent.backup.status.lower():
+        case "completed":
+            return "completed"
+        case "failed":
+            return "failed"
+        case _:
+            return "in-flight"
+
+
+def _environment_backup_ref(environment_backup: Any) -> EnvironmentBackupRef:
+    """Adapt any of the generated EnvironmentBackup payloads into a ref.
+
+    ``create`` / ``get`` / ``list`` each produce a distinct generated Pydantic
+    class with the same field names, so this reads them structurally.
+    """
+    return EnvironmentBackupRef(
+        id=str(environment_backup.id),
+        name=environment_backup.name,
+        status=environment_backup.status.value,
+        constituents=tuple(
+            EnvironmentBackupConstituentRef(
+                deployment_id=str(constituent.deployment_id),
+                deployment_name=constituent.deployment_name,
+                outcome=_constituent_outcome(constituent),
+                backup_id=(
+                    str(constituent.backup.id)
+                    if constituent.backup is not None
+                    else None
+                ),
+                backup_status=(
+                    constituent.backup.status
+                    if constituent.backup is not None
+                    else None
+                ),
+                error=constituent.error,
+            )
+            for constituent in environment_backup.constituents
+        ),
+    )
+
+
+def _environment_restore_ref(environment_restore: Any) -> EnvironmentRestoreRef:
+    """Adapt any of the generated EnvironmentRestore payloads into a ref."""
+    return EnvironmentRestoreRef(
+        id=str(environment_restore.id),
+        status=environment_restore.status.value,
+        restore_ids=tuple(str(restore.id) for restore in environment_restore.restores),
+        skipped=tuple(
+            EnvironmentRestoreSkipRef(
+                deployment_id=str(entry.deployment_id),
+                deployment_name=entry.deployment_name,
+                reason=entry.reason,
+            )
+            for entry in environment_restore.skipped_constituents
+        ),
+    )
 
 
 class ApiScenarioDriver:
@@ -621,3 +701,89 @@ class ApiScenarioDriver:
         except StyrminError as exc:
             raise _normalise(exc) from exc
         return BackupRef(id=str(backup.id), name=backup.name, status=backup.status)
+
+    # --- Environment-level backup / restore -------------------------------
+
+    async def create_environment_backup(
+        self, *, environment_id: str
+    ) -> EnvironmentBackupRef:
+        try:
+            environment_backup = await self._client.environment_backups.create(
+                environment_id
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        return _environment_backup_ref(environment_backup)
+
+    async def get_environment_backup(
+        self, *, environment_backup_id: str
+    ) -> EnvironmentBackupRef:
+        try:
+            environment_backup = await self._client.environment_backups.get(
+                environment_backup_id
+            )
+        except ResourceNotFoundError as exc:
+            raise ResourceNotFound(str(exc)) from exc
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        return _environment_backup_ref(environment_backup)
+
+    async def wait_for_environment_backup(
+        self, *, environment_backup_id: str, max_wait: float = 600.0
+    ) -> EnvironmentBackupRef:
+        """Poll the derived parent status via the SDK's own waiter.
+
+        ``EnvironmentBackupResource.wait_for_backup`` returns the last observed
+        snapshot rather than raising on timeout, so the non-terminal case is
+        converted into a ``ScenarioTimeout`` here — same failure mode the UI
+        driver produces, with the observed status in the message.
+        """
+        try:
+            environment_backup = await self._client.environment_backups.wait_for_backup(
+                environment_backup_id, max_wait=max_wait
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        ref = _environment_backup_ref(environment_backup)
+        if ref.status not in TERMINAL_ENVIRONMENT_OPERATION_STATUSES:
+            raise ScenarioTimeout(
+                f"environment backup {environment_backup_id} did not reach a "
+                f"terminal derived status within {max_wait}s (status: {ref.status})"
+            )
+        return ref
+
+    async def restore_environment_backup(
+        self, *, environment_backup_id: str
+    ) -> EnvironmentRestoreRef:
+        try:
+            environment_restore = await self._client.environment_backups.restore(
+                environment_backup_id
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        return _environment_restore_ref(environment_restore)
+
+    async def wait_for_environment_restore(
+        self, *, environment_restore_id: str, max_wait: float = 900.0
+    ) -> EnvironmentRestoreRef:
+        try:
+            environment_restore = (
+                await self._client.environment_backups.wait_for_restore(
+                    environment_restore_id, max_wait=max_wait
+                )
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        ref = _environment_restore_ref(environment_restore)
+        if ref.status not in TERMINAL_ENVIRONMENT_OPERATION_STATUSES:
+            raise ScenarioTimeout(
+                f"environment restore {environment_restore_id} did not reach a "
+                f"terminal derived status within {max_wait}s (status: {ref.status})"
+            )
+        return ref
+
+    async def delete_environment_backup(self, *, environment_backup_id: str) -> None:
+        try:
+            await self._client.environment_backups.delete(environment_backup_id)
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
