@@ -1,7 +1,7 @@
 ---
 title: Backups and restores
 sidebar_position: 6
-description: How Styrmin backs up an application stack, and what happens when you restore.
+description: How Styrmin backs up an application stack, what happens when you restore, and how cloning an environment works.
 ---
 
 ## Backups and restores
@@ -111,9 +111,11 @@ deployment. That gives you a few useful properties:
 
 - **All backups for an environment live in one place.** Easy to
   retention-manage, easy to point at a different region per environment.
-- **Cloning an environment can also copy its backup history.** If you
-  clone production into a test environment, the clone can be pointed at
-  the production BSL (or a copy of it) without per-deployment fiddling.
+- **One place to point at a region, or to swap out.** Repointing an
+  environment's backups is one assignment, not one per deployment.
+  Note that a **cloned** environment does not inherit the source's BSL:
+  assign one before the clone can take backups of its own (see
+  [Cloning an environment](#cloning-an-environment)).
 - **A BSL is shared infrastructure.** Setting it up once per environment
   is cheaper than setting it up per deployment.
 
@@ -441,6 +443,238 @@ what releases the environment for new operations.
 
 Deleting an environment takes its environment backups with it. In this
 release a snapshot does not outlive its environment.
+
+### Cloning an environment
+
+An environment backup captures an environment so you can put it *back*. A
+**clone** uses the same capture to stand up a **second, brand-new
+environment** next to the source — running, with the source's data as of
+clone time — in one action.
+
+The typical reason is a rehearsal: you want to practise a migration, an
+upgrade, or an incident against production-shaped data without touching
+production. Clone it, work in the copy, delete the copy.
+
+One action — the **Clones** tab on the environment page, one
+`styrminctl env-clones create`, or one `cloneEnvironment` call — does all
+of this:
+
+1. Captures a **fresh environment backup** of the source, limited to the
+   deployments you selected.
+2. Waits for that capture to finish. If it fails outright, **nothing is
+   created** — no environment, no deployments.
+3. Creates the new environment from the **captured** config, with your
+   override merged over it.
+4. Creates one **counterpart deployment** per included source
+   deployment, pinned to the driver version the capture recorded.
+5. Restores each source deployment's data **into its counterpart**.
+
+Everything after step 1 is built from the capture. The live source is
+never read again, so data written to the source *after* the capture
+completes is not in the clone — that's the point of a defined clone
+point, not a gap.
+
+**Cloning needs the administrator role**, for the same reason restoring
+does: it writes environment configuration. Reading clone records does
+not.
+
+:::note The source is not modified
+
+A clone leaves the source environment's config and declared state exactly
+as they were. The only source-side artefact is the environment backup it
+captured — an ordinary snapshot, in the source's list, expiring under the
+source's retention rules.
+
+:::
+
+#### Choosing which deployments come along
+
+Leave the selection empty and every **eligible** deployment comes along —
+the same eligibility rule as an environment backup: not tombstoned, not
+one of Styrmin's own internal deployments, and with a running instance.
+
+Name specific deployments and only those are captured and cloned, which
+is how you leave a heavyweight analytics stack out of a rehearsal. The
+selection filters the capture too, so excluded deployments are not backed
+up at all.
+
+Three different things happen to a deployment you name, and the
+difference matters:
+
+| What you named | What happens |
+|----------------|--------------|
+| A deployment that doesn't exist, or belongs to a different environment | The whole request is **rejected up front**. Nothing is created and no backup is taken. |
+| A deployment that exists but isn't eligible | It's **skipped**, by name, with a reason. Not an error. |
+| An eligible deployment | It's included. |
+
+Every source deployment you could have selected is accounted for on the
+clone record — cloned, skipped with a reason, or failed with a reason.
+Styrmin's **internal** deployments are the exception: they are left off
+the record entirely unless you named one explicitly, because the clone
+gets its own fresh ingress controller as part of ordinary environment
+setup.
+
+An **empty** selection is legal and means something useful: clone the
+environment only — its configuration, none of its applications. That
+clone reports `COMPLETED`.
+
+#### Changing the config on the way in
+
+A clone of production that keeps production's configuration will behave
+like production: send real email, call real webhooks, register real DNS.
+So the clone takes an environment-config override, applied **before** the
+new environment is created — the counterparts' very first startup already
+sees the changed values. There is no window in which cloned workloads run
+under the source's settings.
+
+The override works one field at a time. A field you supply replaces the
+captured field **wholesale**; a field you leave out keeps its captured
+value. So overriding one environment variable list replaces that list,
+and leaves `fqdn_suffix`, retention, and everything else untouched.
+
+To **remove** a setting rather than change it — a production-only DNS
+integration, say — name it in the clear-fields list instead. A cleared
+field is *absent* from the clone's configuration: not empty, not
+defaulted. Naming a field that the capture never set is a harmless no-op;
+only an unknown field *name* is an error. Name a field in both places and
+the override wins.
+
+Watch the casing here, because it follows the surface rather than the
+feature:
+
+| Where | Casing |
+|-------|--------|
+| The override input (`configOverride`, `--config-override`) | **camelCase** on GraphQL — the same `UpdateEnvironmentInput` shape as `updateEnvironment`, including `envVars` as a list of `{name, value}` entries rather than a map. The CLI and Python SDK also accept the snake_case field names, since their generated input model populates by either. |
+| The clear-fields list (`clearConfigFields`, `--clear-config-field`) | **snake_case** config field names: `fqdn_suffix`, `external_dns_endpoints_type`, `backup_ttl`, … |
+| What the clone record reports back | **snake_case** canonical JSON, whatever casing you sent. |
+
+:::caution A misspelled override field is dropped silently
+
+The override input tolerates keys it doesn't recognise, so a typo'd field
+name is ignored rather than rejected — and the captured value stays in
+place. Read the `configOverride` echoed back on the clone record (or the
+new environment's configuration) to confirm an override actually landed.
+A misspelled *clear-field* name **is** rejected, because that list is
+validated against the config's field names.
+
+:::
+
+#### Watching a clone, and what its status means
+
+A clone runs asynchronously and is tracked by its own record: which
+capture it was built from, which environment it created, one outcome per
+source deployment, and a list of operation-level events. Its status is
+**derived on every read** from those parts, exactly like an environment
+backup's:
+
+| Status | What it means |
+|--------|---------------|
+| `PENDING` | Registered, capture not started. |
+| `IN_PROGRESS` | The capture, the environment, or a data restore is still moving. |
+| `COMPLETED` | Every included deployment was cloned. |
+| `PARTIAL` | Some included deployments were cloned and some failed. |
+| `FAILED` | Nothing was cloned — or the clone was discarded (see below). |
+
+Two things surprise people:
+
+- **A clone can read `IN_PROGRESS` the instant you create it.** Anything
+  skipped up front is recorded together with the clone, and recorded
+  progress counts. Don't wait for `PENDING`.
+- **An all-skipped clone is `COMPLETED`, not a failure.** So is a clone
+  of an empty selection. The environment was created; there was simply
+  nothing eligible to bring across.
+
+`PARTIAL` is a normal outcome, not a bug. One way to get there: the
+driver version the capture recorded no longer exists by the time the
+counterpart is created. That deployment is attributed as failed, its
+neighbours are cloned, and the clone reports the mix.
+
+#### Discarding a clone
+
+**Delete the environment the clone created.** That is the supported
+discard path, it works in any state including `PARTIAL` and `FAILED`, and
+it takes the counterpart deployments with it. The clone record then reads
+`FAILED` with a `created_environment_deleted` event — a *discarded* state,
+not an unexpected error, and the UI labels it that way.
+
+Because a clone's name is deliberately not unique, and deleting the
+environment frees the environment name, you can immediately re-clone the
+same source under the same name.
+
+Two more handles, for the cases where there is no environment to delete
+yet:
+
+- **Deleting the backing environment backup** is refused (`IN_USE`) only
+  while that clone's *capture* is still running. Once the capture has
+  landed, deleting it is allowed — and it is the escape hatch for a clone
+  that stalled before its environment appeared. On a still-running clone
+  the deletion is recorded and the clone ends `FAILED`; on a clone that
+  already finished, the recorded outcome stands.
+- **Deleting the source environment** keeps a finished clone as
+  provenance: the source link is cleared, the source's *name* stays on the
+  record, and an unfinished clone's record is removed instead. Because the
+  source's snapshots cascade with it, a finished clone also picks up a
+  non-fatal note that its backing capture is gone.
+
+:::note Deleting an environment now removes its deployments
+
+Environment deletion tears down and removes the deployments inside the
+environment, rather than refusing. This is what makes the discard path
+above work — a cloned environment always owns at least its counterparts
+and its own ingress controller — and it applies to every environment, not
+just clones.
+
+:::
+
+#### What a clone is *not* isolated from
+
+This is the part to read before you point a clone at anything live.
+
+A clone is isolated at the Kubernetes level: its own namespaces, its own
+workloads, its own ingress controller. The config override is a genuine
+lever over environment-level settings. **Neither of those touches values
+stored inside the restored application data.**
+
+Database rows, config tables, and secrets that came across in the restore
+are copied **verbatim**. If your application stores an outbound webhook
+URL, a payment-provider API key, an SMTP credential, a licence key, or a
+partner endpoint in its own data, the clone holds the same value and can
+reach the same system as the source. Cloned workloads are real workloads:
+schedulers fire, queues drain, integrations call out.
+
+Treat "neutralise the data-borne references" as a step you own, before
+the clone is allowed to talk to anything that matters. The override
+handles configuration; it cannot reach into a table.
+
+One more, narrower caveat. A counterpart's Helm values are re-rendered
+while its data is restored from the source. A driver whose chart
+**generates** credentials at install time — a random password minted per
+release — can therefore mint a fresh credential over restored data that
+expects the old one, leaving the restored component unreachable. Drivers
+meant to be cloneable should take credentials from configuration rather
+than generating them at deploy time.
+
+#### Details worth knowing
+
+- **A counterpart's Helm release is named after the source deployment.**
+  `helm list -n styrmin-<counterpart-id>` shows a release named for the
+  *source*. That is intentional: the restored objects carry the source's
+  Helm ownership metadata, and matching the release name is what keeps
+  Helm's view consistent. It is not drift.
+- **A cloned environment has no backup storage location.** Locations are
+  assigned per environment, and a clone does not inherit the source's, so
+  the new environment cannot take its own backups until you assign one.
+  Restoring the capture *into* the clone is unaffected.
+- **A clone occupies its new environment until it finishes.** While a
+  clone is running, environment-level operations and config edits on the
+  environment it is building are refused. Deleting it is always allowed —
+  that's the discard path.
+- **You can clone a clone**, and you can run several clones of one source
+  at once. Only the capture window is serialised: a second clone started
+  while the first is still *capturing* is refused with a busy error.
+
+For the commands and their exit codes, see
+[the `env-clones` CLI reference](../reference/styrminctl.md#env-clones--clone-an-environment).
 
 ### What you set up vs what Styrmin handles
 

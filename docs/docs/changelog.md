@@ -8,6 +8,103 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Clone an environment, with its data, in one action
+
+Environment backups could put an environment **back**. An **environment
+clone** uses the same capture to stand up a **second, running
+environment** beside the source — with the source's data as of clone
+time — in one operation.
+
+#### What's new
+
+- One action captures a fresh environment backup of the source, waits for
+  it, creates a new environment from the captured config, creates one
+  **counterpart deployment** per included source deployment (pinned to the
+  driver version the capture recorded), and restores each source
+  deployment's data **into its counterpart**. Everything after the capture
+  is built from the capture — the live source is never read again, so the
+  clone holds a defined point in time. The source's config and declared
+  state are untouched.
+- **Selective inclusion.** Omit the selection to bring every eligible
+  deployment; name deployments to bring only those (the selection filters
+  the capture, so excluded deployments are not backed up at all). An
+  unknown or foreign deployment id is rejected up front with no side
+  effects; a known-but-ineligible one is *skipped* by name with a reason,
+  never an error. An empty selection is legal and clones the
+  configuration only.
+- **A config override applied before anything starts**, so a clone of
+  production doesn't come up with production's outbound integrations. A
+  supplied field replaces the captured field wholesale; a separate
+  clear-fields list **removes** a captured setting entirely rather than
+  changing it. The merge happens before the new environment is created,
+  so the counterparts' first startup already sees it.
+- A clone's status is **derived** on every read (`PENDING` /
+  `IN_PROGRESS` / `COMPLETED` / `PARTIAL` / `FAILED`) from the capture,
+  the created environment, the per-deployment outcomes and the restores.
+  Every source deployment you could have selected is accounted for by
+  name. Two consequences worth knowing: a brand-new clone commonly reads
+  `IN_PROGRESS` rather than `PENDING`, and an all-skipped clone is
+  `COMPLETED`, not a failure.
+- **Discard by deleting the environment the clone created** — in any
+  state, including `PARTIAL` and `FAILED`. The clone record keeps the
+  history as a discarded outcome, and because a clone's name is not
+  unique you can immediately re-clone under the same name. For a clone
+  that stalled before its environment appeared, deleting its backing
+  snapshot is the escape hatch.
+- **Cloning requires the administrator role** (it writes environment
+  configuration, like restoring). Reading clone records does not.
+- New surfaces: a **Clones** tab on the environment detail page with an
+  ADMIN-gated Clone dialog (ineligible deployments disabled with their
+  reason); the `styrminctl env-clones` group (`create`, `get`, `list`,
+  with `--deployment`, `--config-override`, `--clear-config-field` and
+  `--wait` on `create`); `client.environment_clones` in the Python SDK;
+  and the `cloneEnvironment` mutation with `environmentClone` /
+  `environmentClones` queries and an `Environment.clonedFrom`
+  back-reference.
+
+#### Know before you clone
+
+- **A clone is not isolated from data-borne references.** Credentials,
+  webhook URLs, API endpoints and licence keys stored *inside* the
+  restored application data are copied verbatim, so a clone can reach the
+  same external systems the source pointed at. The config override
+  handles environment-level settings; it cannot reach into a table.
+  Neutralising those values is a step you own.
+- A driver whose chart **generates** credentials at install time can mint
+  fresh credentials over restored data. Cloneable drivers should take
+  credentials from configuration.
+- A counterpart's Helm release is named after the **source** deployment,
+  which keeps Helm's ownership metadata consistent with the restored
+  objects. `helm list` in the counterpart's namespace showing a
+  source-named release is intentional.
+- A cloned environment does **not** inherit the source's backup storage
+  location — assign one before it can take backups of its own.
+
+#### Behaviour changes
+
+- **Deleting an environment now tears down and removes the deployments
+  inside it**, instead of failing. Previously `deleteEnvironment` did not
+  cascade deployments at all; the failure was masked by callers' cleanup
+  handling. This applies to every environment, not just clones — it is
+  what makes clone discard work.
+- **A second restore is now refused only when a restore is actually in
+  flight** for that deployment (a `PENDING` or `IN_PROGRESS` restore
+  record), rather than whenever the deployment sits in the `RESTORING`
+  state. A deployment left `RESTORING` by a restore that never finished is
+  therefore restorable again instead of permanently stuck.
+- Deleting an environment backup is refused with `IN_USE` while a clone's
+  *capture* of it is still running. Once the capture has landed, deletion
+  is allowed again.
+
+#### Migration
+
+- No action required, and nothing existing changes shape: clone adds its
+  own record and two nullable links. Cloning is a same-cluster operation
+  — cross-cluster clones remain out of scope.
+- See [Cloning an environment](./concepts-and-architecture/backups-and-restores.md#cloning-an-environment)
+  for the semantics and [the CLI reference](./reference/styrminctl.md#env-clones--clone-an-environment)
+  for the commands, flags, and exit codes.
+
 ### Back up and restore a whole environment in one action
 
 Backups were per-deployment only. An **environment backup** captures the

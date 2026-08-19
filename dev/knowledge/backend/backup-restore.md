@@ -663,6 +663,261 @@ matching per-instance `createBackup` / `deleteBackup`.
 mutation is `ADMIN`. Granting config-mutation-by-restore to `READ_WRITE` would
 be a privilege bypass. No new roles or permission concepts (ADR-0017).
 
+## Environment Clone
+
+`services/backup/clone.py` + `workflows/templates/clone.py` compose one more scope on
+top of the environment capture: an **environment clone** copies a live environment into
+a **new** environment on the same cluster, built entirely from a fresh environment
+backup of the source. The design decisions are recorded in
+[ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md); this
+section describes the resulting mechanics.
+
+The operation splits in two, and the split is the whole architecture:
+
+- **Everything decidable synchronously** happens in the mutation — validation, the clone
+  record, the capture, the constituent dispatch. A caller therefore receives
+  `ALREADY_EXISTS` / `NOT_FOUND` / `VALIDATION_ERROR` / `ALREADY_IN_PROGRESS` at request
+  time, with zero side effects.
+- **Everything that has to *wait*** happens in `EXECUTE_ENVIRONMENT_CLONE`, the
+  platform's first orchestration that polls instead of firing and forgetting: nothing
+  materialises until the capture reaches a restorable terminal status.
+
+`EnvironmentClone` has **no status column** (same argument as the two ADR-055 parents,
+with four inputs instead of two) and its `name` is **not unique** (uniqueness of an
+environment name lives on `Environment(name, cluster_id)`; a discarded clone must not
+burn the name).
+
+### Service functions (`services/backup/clone.py`)
+
+| Function | Purpose |
+|----------|---------|
+| `clone_environment(...)` | The mutation half. Three phases: (1) upfront validation with zero side effects — source resolution (ADR-031), config-override canonicalisation, cleared-field names, target name free, every selected id belongs to the source, source concurrency guard; (2) one transaction writing the clone record, its upfront attribution and the whole capture; (3) post-commit dispatch of one `EXECUTE_BACKUP` per constituent plus the single `EXECUTE_ENVIRONMENT_CLONE` run. The target name is checked but **not reserved** — reserving it needs a placeholder environment, which FR-002 forbids. |
+| `merge_environment_config(captured, override, cleared)` | Top-level-field replacement merge over the canonicalised capture, cleared fields popped **before** the override is applied. Validates the result; a field both cleared and overridden takes the override. |
+| `derive_clone_capture_status(environment_backup)` | The backing capture's own derived status, or `None` when the capture is unreachable (never registered, or since deleted). The absence is never re-interpreted — the deletion path records what happened in `clone_errors` instead. |
+| `derive_environment_clone_status(...)` / `..._from_record(clone, restores)` | The derivation (below). The `_from_record` adapter is what the resolvers, the guards and the deletion cascades all read the record through. |
+| `find_clone_occupying_environment(...)` | Backs the environment-level guard: a non-terminal clone occupies its *created* environment for its whole lifetime, and its *source* only while the capture is in flight. |
+| `guard_no_clone_capturing_environment_backup(...)` | The `IN_USE` guard on `delete_environment_backup`, scoped to the capture window (see below). |
+| `detach_clones_from_environment_backup(...)` | Post-capture backup deletion: nulls the FK and appends `environment_backup_deleted` — fatal on a non-terminal clone, non-fatal on a terminal one. |
+| `detach_clones_from_created_environment(...)` | The discard path: nulls `created_environment_id` and appends a fatal `created_environment_deleted`. |
+| `resolve_clones_of_deleted_source_environment(...)` | Source deletion: terminal clones survive as provenance with `source_environment_id` nulled; non-terminal ones are deleted outright. |
+| `get_environment_clone` / `get_environment_clones` | Reads. `get_environment_clones` is scoped by **source** environment, newest first. |
+
+### Flow
+
+```text
+GraphQL Mutation (cloneEnvironment)            [ADMIN]
+        |
+        v
+  clone_environment  (services/backup/clone.py)
+        |
+        |  UPFRONT — zero side effects on any failure
+        |   resolve source, validate override + cleared fields,
+        |   target name free?, selection ids belong to source?,
+        |   environment-level guard on the source
+        |
+        |  ONE TRANSACTION ------------------------------------------------
+        |   1. EnvironmentClone row (no status column)
+        |   2. deployment_results: one entry per source deployment
+        |      considered — upfront skips already attributed
+        |   3. the whole capture, via create_environment_backup with a
+        |      deployment filter (parent + constituent Backup rows +
+        |      constituent errors)
+        |  --> COMMIT
+        |  ----------------------------------------------------------------
+        v
+  dispatch: one EXECUTE_BACKUP per constituent, then ONE
+            EXECUTE_ENVIRONMENT_CLONE run
+        |
+        v
+  EXECUTE_ENVIRONMENT_CLONE  (INTERNAL; workflows/templates/clone.py)
+        |
+        |  1. poll the capture's DERIVED status until terminal
+        |  2. gate: FAILED capture -> fatal capture_failed, nothing
+        |     materialises.  COMPLETED / PARTIAL -> proceed with the
+        |     usable constituents
+        |  3. create the environment from the captured config with the
+        |     clone's cleared fields dropped and its override merged over
+        |     the rest; capabilities recomputed (ADR-0027).  Committed
+        |     before any counterpart exists — it is the discard handle
+        |  4. per usable constituent: deploy_application(driver_version_id
+        |     pinned from the snapshot fingerprint, skip_initial_reconcile,
+        |     release_reference = the SOURCE's release name), created in
+        |     RESTORING
+        |  5. per counterpart: create_restore(target_deployment_id=<counterpart>)
+        |     -> cross-target restore; record the attribution
+        v
+  env_clone_materialised … (structured audit line)
+```
+
+The flow **never writes the clone's status** — it writes the *inputs* to the derivation:
+`created_environment_id`, `deployment_results`, `clone_errors`. It also tolerates its own
+record vanishing mid-flight (deleting the source removes non-terminal clones), ending
+quietly on `EnvironmentCloneNotFoundError` exactly as `execute_restore_workflow` handles
+`RestoreNotFoundError`.
+
+### Derived status
+
+`derive_environment_clone_status` takes four inputs — the capture's derived status, the
+created environment's existence, the attribution entries, the recorded events — plus the
+referenced `Restore` rows. First match wins:
+
+```text
+1. any FATAL clone_errors entry                -> FAILED
+   (per-deployment failures are never fatal entries)
+2. capture PENDING and nothing else recorded   -> PENDING
+3. anything still moving                       -> IN_PROGRESS
+     capture non-terminal, or no created environment (and no
+     created_environment_deleted marker), or a `pending` entry, or a
+     resolvable non-terminal Restore row
+4. no *included* entry failed                  -> COMPLETED
+5. some included failed, some succeeded        -> PARTIAL
+6. every included entry failed                 -> FAILED
+```
+
+Four points worth internalising, all pinned by the unit matrix:
+
+- **`PENDING` is not guaranteed to be the first status.** An upfront skip is recorded with
+  the clone row, and recorded progress is progress — so a freshly created clone commonly
+  reads `IN_PROGRESS`. Nothing may assume a `PENDING`-first progression.
+- **"Included" means "not skipped".** A skipped deployment neither fails the clone nor
+  rescues it: `skipped` + `failed` with nothing cloned is `FAILED`, while **all-skipped is
+  `COMPLETED`** — as is a clone of an empty selection (`deploymentIds: []`), which is the
+  legal "configuration only, no applications" shape.
+- **A missing `Restore` row does not retract a recorded outcome.** A restore that cascaded
+  away leaves its `cloned` entry standing; only a `FAILED` restore turns it into a
+  failure (`RestoreStatus` has no `PARTIAL` member).
+- **`NULL` FKs are disambiguated by markers, not by absence.** `created_environment_id IS
+  NULL` means "not created yet" *unless* a `created_environment_deleted` entry says
+  otherwise, which is why every cascade appends one.
+
+| Marker step | Written when | Fatal? |
+|-------------|--------------|--------|
+| `capture_failed` | The capture reached `FAILED`; nothing materialises. | yes |
+| `target_name_taken` | The target name was free at validation and taken at creation (TOCTOU). | yes |
+| `environment_creation_failed` | The merged config was invalid, or environment creation raised. | yes |
+| `environment_backup_deleted` | The backing capture was deleted post-capture. | yes on a non-terminal clone, no on a terminal one |
+| `created_environment_deleted` | The created environment was deleted — the discard path. | yes |
+
+### Attribution and skip reasons
+
+Every source deployment a caller could have selected gets one `deployment_results` entry:
+`PENDING` → `CLONED` / `SKIPPED` / `FAILED`, with a free-text `reason` on the latter two,
+plus `counterpart_deployment_id` and `restore_id` once they exist. Three distinct
+behaviours, deliberately not collapsed:
+
+| Situation | Outcome |
+|-----------|---------|
+| Selected id unknown, or belonging to another environment | Rejected **upfront** with `NOT_FOUND` — no clone record, no capture, no side effects. |
+| Selected id known but ineligible | Attributed `SKIPPED` with a reason. Never an error. |
+| Eligible | Included, and the selection also filters the capture. |
+
+`internal` deployments are **omitted from attribution entirely** unless explicitly named:
+the cloned environment gets its own fresh ingress controller as part of ordinary setup, so
+reporting the source's as a skip would be noise. The reason constants are
+`CLONE_REASON_*` in `services/backup/clone.py` (`not_selected`, `not_eligible`,
+`internal`, `tombstoned`, `capture_failed`, `backup_not_completed`, `backup_deleted`,
+`backup_expired`, `driver_version_gone`, `capture_unusable`); like ADR-055's skip
+classification the wire value is free text, not a closed code set.
+
+### Config override and clearing
+
+The wire input is `UpdateEnvironmentInput` (**camelCase**, `envVars` as a list of
+`{name, value}`), and it is **stored and returned as canonical snake_case JSON** — the
+asymmetry is deliberate and documented on the public surface. `clearConfigFields` takes
+**snake_case** `EnvironmentConfig` field names.
+
+- Clearing removes the field: it is *absent* from the created environment's config, not
+  null and not defaulted, and resolves to `None` in an instance context.
+- Clearing a field the capture never set is a legal no-op; only an unknown *field name* is
+  a `VALIDATION_ERROR`.
+- The merge runs **before** `create_environment`, so the counterparts' very first instance
+  contexts already observe the merged config — there is no window under source config.
+- Known caveat: the generated input model does not forbid extra keys, so a **misspelled**
+  override field is silently dropped and the captured value stays in place.
+
+### Cross-target restore
+
+The shipped restore contract was in-place by construction, not by Velero limitation.
+Velero's native `namespaceMapping` was already wired in `build_velero_restore`; what
+changed is our own coupling:
+
+| Coupling point | Change |
+|----------------|--------|
+| `create_restore` resolved the deployment *from the backup* and flipped **that** deployment to `RESTORING` | Gains an explicit optional target deployment: all guards and the `RESTORING` flip apply to the target, and the long-persisted `Restore.target_instance_id` is finally honoured for attribution. |
+| `execute_restore_workflow` derived the source namespace from, and wrote terminal status to, the same deployment id | Signature splits source identity (namespace derivation) from the status-write target. Identical values for an in-place restore. |
+| Post-restore recovery assumed `crd_name == target_namespace` | Under `namespaceMapping` Velero preserves the CR *name*, so the restored CR name is passed explicitly. |
+| Recovery replayed the **restored (source) CR spec** into the target namespace | For a cross-target restore, `operator/restore_recovery.py::reapply_with_counterpart_identity` replaces it with the **counterpart's own CR body**. |
+| Restore CR labels carried the source instance id | The clone path labels with the counterpart's instance id. |
+
+**Counterpart identity is split on purpose.** A counterpart keeps its own
+`StyrminDeployment` CR identity (CR name = namespace = `styrmin-<counterpart_id>`) but
+pins its **Helm release name to the source's** (`styrmin-<source_deployment_id>`). Velero
+restores the source-named `HelmRelease` and the source's Helm release-storage secret into
+the counterpart namespace, and restored chart objects carry the source's
+`meta.helm.sh/release-name`. Matching the name makes the recovery upsert a Helm
+*upgrade* — which rewrites those ownership annotations consistently; a counterpart-named
+release would be a fresh *install* over objects Helm already owns and would fail its
+ownership check. The pin is kept honest by
+`services/context.py::_resolve_release_reference`, whose order is: explicit override → the
+value the active instance already carries → `styrmin-<deployment id>`. A later config
+fan-out therefore cannot silently rename a live release.
+
+Operator-visible consequence: **`helm list -n styrmin-<counterpart>` shows a release named
+after the *source* deployment.** Correct, not drift (assuming Helm's default secret
+storage driver).
+
+`reapply_with_counterpart_identity` then, in order: applies the counterpart's CR body
+carrying kopf's state annotations over from the restored CR (a CR without
+`last-handled-configuration` would make kopf fire `on.create` and race the finalize);
+deletes the restored source-named CR **after clearing and verifying its finalizers**
+(deleting it with kopf's finalizer intact fires the delete handler, which would tear down
+the counterpart's HelmRelease and, through Flux, the volumes just restored); and re-runs
+prerequisites → HelmRelease → services against the counterpart's spec before marking it
+Ready. Data survives; only identity objects are re-rendered.
+
+Two related notes:
+
+- Counterparts are created with the **initial reconcile deferred** and in the `RESTORING`
+  state — reconciling first would only create resources the restore flow immediately
+  deletes, and `RESTORING` is what makes the existing restoring-deployment guards protect
+  a counterpart until its data lands. The restore concurrency guard was moved onto an
+  actual non-terminal `Restore` row for exactly this reason (see
+  [Restore Lifecycle](#restore-lifecycle)).
+- The data-layer hooks (`pg_restore`, neo4j, mariadb, mongodb) already exec inside the
+  restored pods with target-namespace selectors and read credentials from the restored
+  Secrets, so they are target-agnostic. The open risk class is a chart that **generates**
+  credentials at install/upgrade time: the counterpart's Helm values are re-rendered while
+  its data is restored, so such a chart can mint credentials the restored data does not
+  recognise. Statically configured credentials are safe (config and parameters are copied
+  verbatim). The E2E performs an authenticated write against the counterpart to keep this
+  honest.
+
+### Concurrency and the discard cascades
+
+- **The source is occupied only during the capture.** A non-terminal clone extends the
+  existing environment-level guard for as long as its capture is non-terminal; afterwards
+  clones proceed independently. A second clone of the same source during that window is
+  refused with `EnvironmentOperationInProgressError`.
+- **The created environment is occupied for the clone's whole lifetime.** Environment-level
+  backups/restores/clones of it are refused, and `update_environment` refuses too (its
+  redeploy fan-out would race the restore flow's namespace delete-and-wait).
+  `redeploy_for_environment_update` also learned to skip `RESTORING` deployments.
+  `delete_environment` stays allowed — it is the discard path.
+- **`delete_environment_backup` refuses with `IN_USE` only while a referencing clone's
+  capture is in flight**, and only while that clone is itself non-terminal. Terminality is
+  **snapshotted at the guard, not re-derived after the cascade**, because the cascade
+  deletes `Backup` and `Restore` rows that are themselves derivation inputs. Post-capture
+  deletion is the escape hatch for a clone whose flow died.
+- **`delete_environment` settles clone records first**, in both roles: as a *source*
+  (terminal clones survive with the FK nulled and a non-fatal `environment_backup_deleted`
+  entry, since the source's captures cascade; non-terminal ones are removed) and as a
+  *created* environment (`created_environment_deleted`, fatal). It then cascades the
+  environment's snapshots, then **its deployments** — asking each to tear its cluster
+  resources down and deleting its rows in FK order, detaching rather than deleting
+  cross-target restores so a clone's `restore_id` stays resolvable — and only then the
+  environment row. That deployment cascade did not exist before this feature: every prior
+  caller swallowed the resulting NOT NULL violation in cleanup handling.
+
 ## GraphQL API
 
 ### Queries
@@ -678,6 +933,8 @@ environmentBackup(environmentBackupId: UUID!): EnvironmentBackup
 environmentBackups(environmentId: UUID!): [EnvironmentBackup!]!
 environmentRestore(environmentRestoreId: UUID!): EnvironmentRestore
 environmentRestores(environmentBackupId: UUID!): [EnvironmentRestore!]!
+environmentClone(environmentCloneId: UUID!): EnvironmentClone!    # non-null; NOT_FOUND if unknown
+environmentClones(environmentId: UUID!): [EnvironmentClone!]!     # by SOURCE environment, newest first
 ```
 
 ### Mutations
@@ -692,7 +949,10 @@ deleteBackupSchedule(scheduleId: UUID!): String!
 createEnvironmentBackup(environmentId: UUID!, name: String): EnvironmentBackup!   # READ_WRITE
 restoreEnvironmentBackup(environmentBackupId: UUID!): EnvironmentRestore!         # ADMIN
 deleteEnvironmentBackup(environmentBackupId: UUID!): Boolean!                     # READ_WRITE
+cloneEnvironment(name: String!, environmentId: UUID, environmentName: String, clusterId: UUID, clusterName: String, deploymentIds: [UUID!], configOverride: UpdateEnvironmentInput, clearConfigFields: [String!]): EnvironmentClone!   # ADMIN
 ```
+
+`Environment.clonedFrom: EnvironmentClone` is the provenance back-reference — `environmentClones` is scoped by *source*, so this is how a clone-born environment points at where it came from. All three clone reads are **ungated**, matching `environmentBackup(s)`; see [ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) decision 6 for why that parity is a decision rather than an inheritance.
 
 ### Retention fields on `Backup`
 
@@ -782,10 +1042,13 @@ for the stamp to move and fails fast on a `Failed` entry in
 |------|---------|
 | [services/backup/service.py](backend/styrmin_backend/services/backup/service.py) | Backup and restore service functions |
 | [services/backup/environment.py](backend/styrmin_backend/services/backup/environment.py) | Environment-level fan-out, snapshot capture, derived status, classification, cascades |
+| [services/backup/clone.py](backend/styrmin_backend/services/backup/clone.py) | Environment clone: registration, config merge/clear, derived clone status, guards and the discard cascades |
 | [services/backup/ttl.py](backend/styrmin_backend/services/backup/ttl.py) | Retention default, validation, and deepest-wins scope resolution |
 | [services/backup/scheduler.py](backend/styrmin_backend/services/backup/scheduler.py) | Backup schedule management |
 | [services/backup/strategies/](backend/styrmin_backend/services/backup/strategies/) | Backup strategy implementations |
 | [workflows/templates/backup.py](backend/styrmin_backend/workflows/templates/backup.py) | Prefect workflow templates for backup/restore |
+| [workflows/templates/clone.py](backend/styrmin_backend/workflows/templates/clone.py) | `EXECUTE_ENVIRONMENT_CLONE` — polls the capture, creates the environment and counterparts, dispatches the cross-target restores |
+| [operator/restore_recovery.py](backend/styrmin_backend/operator/restore_recovery.py) | Post-restore CR recovery, incl. `reapply_with_counterpart_identity` for cross-target restores |
 | [agent/service/kubernetes/resources/builders/backup.py](backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup.py) | Velero CRD builders |
 | [agent/service/kubernetes/resources/builders/backup_annotations.py](backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup_annotations.py) | Volume annotation patches |
 | [api/definitions/backup/environment_backup.py](backend/styrmin_backend/api/definitions/backup/environment_backup.py) | `EnvironmentBackup` strawberry types incl. the derived-status and constituents resolvers |
@@ -793,4 +1056,5 @@ for the stamp to move and fails fast on a `Failed` entry in
 | [repository/backup.py](backend/styrmin_backend/repository/backup.py) | Backup data access |
 | [repository/restore.py](backend/styrmin_backend/repository/restore.py) | Restore data access |
 | [repository/environment_backup.py](backend/styrmin_backend/repository/environment_backup.py) | Environment backup/restore data access and the in-progress `EXISTS` guards |
+| [repository/environment_clone.py](backend/styrmin_backend/repository/environment_clone.py) | Environment clone data access, eager-loaded capture, referenced-restore lookup |
 | [repository/backup_schedule.py](backend/styrmin_backend/repository/backup_schedule.py) | Schedule data access |
