@@ -15,11 +15,17 @@ contribution is needed.
 **Rationale** (constrained-third-party-dependency evaluation, as directed):
 
 - Velero natively supports restoring a backup into a different namespace via
-  `namespaceMapping` on the Restore CR (velero.io restore reference). PVs are handled
-  (existing PVs are renamed `velero-clone-<uuid>` with the original name kept as an
-  annotation; PVC binding fields are stripped so dynamic binding re-binds), and
+  `namespaceMapping` on the Restore CR (velero.io restore reference), and
   `existingResourcePolicy`, `labelSelector`, and `includedNamespaces` provide
-  filtering.
+  filtering. **Our data-movement mode is FSB/kopia pod-volume restore, not PV
+  snapshots**: `build_velero_restore` hardcodes `restore_pvs=False`
+  (`builders/backup.py:67`) plus the `styrmin-velero-velero-restore-pvc-patch`
+  resource modifier (strips `spec.volumeName` from restored PVCs), so PVCs restored
+  into the mapped namespace are dynamically re-provisioned and populated by
+  PodVolumeRestore init containers — a combination that works with
+  `namespaceMapping`. Constraint recorded: if the platform ever adopts CSI snapshot
+  restores, `restorePVs: false` would silently restore no data — that hardcode must
+  be revisited with any data-mover change.
 - Our wrapper already supports it end to end: `VeleroRestore.namespace_mapping`
   renders `spec.namespaceMapping`
   (`backend/styrmin_backend/agent/service/kubernetes/velero/resources.py:197-239`),
@@ -90,8 +96,19 @@ Data-layer hooks (postgres `pg_restore`, neo4j, mariadb, mongodb —
 `agent/service/kubernetes/velero/hooks.py`) already exec inside the restored pods
 with `included_namespaces=[target_namespace]` selectors and read credentials from the
 restored Secrets, so they are target-agnostic and expected to work unchanged. Known
-risk class: role/db-name mismatches (`hooks.py:261-264` FIXME) — same exposure as
-in-place restore, not clone-specific.
+risk classes:
+
+- role/db-name mismatches (`hooks.py:261-264` FIXME) — same exposure as in-place
+  restore, not clone-specific.
+- **self-generating chart credentials**: the counterpart-identity reapply (D2.4)
+  re-renders Secrets from the counterpart's context and the Flux helm upgrade rolls
+  pods. Because deployment config/parameters are copied verbatim (FR-005),
+  statically-configured credentials stay consistent with the restored data; but a
+  chart that *generates* credentials at install/upgrade time (`randAlphaNum` without
+  `lookup`) would mint new credentials over restored data, leaving the restored
+  database unreachable. Mitigations: the E2E performs an **authenticated write**
+  against the counterpart post-clone, and the driver documentation gains a note that
+  cloneable drivers must not rely on install-time credential generation.
 
 ## D3 — Clone record: new `EnvironmentClone` table, derived status (ADR-055 pattern)
 
@@ -124,7 +141,9 @@ Prefect flow `EXECUTE_ENVIRONMENT_CLONE(clone_id)` and returns the clone record.
 flow: polls the capture's derived status to terminal → creates the environment (with
 merged config, D7) → creates counterpart deployments (D6) → dispatches one
 cross-target restore per usable constituent → exits (restores report their own
-status; clone status stays derived).
+status; clone status stays derived). Each stage emits the conventional structured
+audit line (`env_clone_dispatched` with outcome counters — ADR-012/055 convention,
+matching `env_backup_fanout_dispatched`).
 
 **Rationale**: ADR-055 deliberately shipped **no** environment-backup flow because its
 fan-out needed no waiting — every existing dispatch is fire-and-forget. Clone is the
@@ -145,16 +164,36 @@ whole capture — minutes); service-side background task outside Prefect (violat
 `driver_version_id` pinned to the row resolved from the snapshot's
 `driver_name`/`driver_version`/`driver_fingerprint` (ADR-053 identity;
 `DeploymentSnapshot` carries all of it — `services/backup/environment.py:126-142`;
-ADR-055 captured the fingerprint *explicitly for clone*). Counterpart creation
-**skips the initial `apply_state`** — the cross-target restore rebuilds the namespace
-from the capture and the recovery step (D2.4) reconciles with counterpart identity;
-reconciling first would only create resources the restore flow immediately deletes
-(D2.5).
+ADR-055 captured the fingerprint *explicitly for clone*). Two honest amendments:
+
+- **Deferring the initial reconcile is new surgery on `deploy_application`, not an
+  existing capability**: today it unconditionally calls `apply_state`
+  (`services/deployment.py:1309`) and returns that Task. It gains
+  `skip_initial_reconcile: bool = False` (return becomes `Task | None`, or a thin
+  sibling entry point — implementer's choice), scoped to the counterpart only:
+  `_ensure_ingress_controller` (`:1225`) still reconciles its internal ingress
+  deployment (never part of the capture), and `create_services_for_deployment`
+  (`:1291`) plus `generate_instance_from_deployment` (`:1301`) still run — the
+  counterpart's service rows and instance context are required to build its CR body
+  for the recovery step (D2.4). Counterparts are created in the `RESTORING`
+  deployment state (not `PENDING`), so the existing restoring-deployment mutation
+  guards protect them until their restore lands (see D8).
+- **The snapshot gains `service_name_overrides`**: `create_services_for_deployment`
+  persists per-deployment resolved service names, and sibling deployments' FQDNs
+  build on them; without capturing the overrides, FR-005 and FR-007 are jointly
+  unsatisfiable (re-reading the live source is forbidden). `DeploymentSnapshot` gains
+  `service_name_overrides: dict[str, str] | None` (additive JSON — pre-existing
+  snapshots default to `None` → driver-default names, documented), passed through to
+  counterpart creation.
+
+If the pinned version row no longer exists (fingerprint unresolvable), that
+deployment is attributed `failed` and the rest proceed (spec edge case; clone ends
+`PARTIAL`). The cross-target restore rebuilds the namespace from the capture and the
+recovery step (D2.4) reconciles with counterpart identity; reconciling first would
+only create resources the restore flow immediately deletes (D2.5).
 
 **Rationale**: Constitution §II — counterparts bind to captured driver versions
-through the ordinary driver path, no ad-hoc deploy logic. If the pinned version row
-no longer exists (fingerprint unresolvable), that deployment is attributed `failed`
-and the rest proceed (spec edge case; clone ends `PARTIAL`).
+through the ordinary driver path, no ad-hoc deploy logic.
 
 **Alternatives rejected**: deploy-then-inject (fully reconcile the counterpart, then
 restore data over it) — collides with the restore flow's namespace delete-and-wait
@@ -185,9 +224,17 @@ values. Both sides are canonicalised through `EnvironmentConfig` validation firs
 (mirroring `_deployment_already_at_config`'s canonicalisation,
 `services/environments.py:127-136`). The override is expressed with the existing
 `UpdateEnvironmentInput` shape (`api/definitions/environment/inputs.py:69`), reusing
-`update_environment_input_to_dict`. The merged result is validated with
-`validate_environment_config` before the environment is created, and capabilities are
-recomputed (never copied — ADR-027).
+`update_environment_input_to_dict`. **Clearing**: because
+`update_environment_input_to_dict` omits `None`-valued fields, the input alone cannot
+express "remove this field" for scalars (`fqdn_suffix`,
+`external_dns_endpoints_type`, `ingress_class`, `db_size`, …) — yet clearing
+production-only settings is exactly US3's motive. The mutation therefore gains a
+companion `clearConfigFields: [String!]` argument: validated against
+`EnvironmentConfig`'s top-level field names (typed validation error otherwise), the
+named keys are popped from the captured config *before* the override merge; a field
+both cleared and overridden takes the override value. The merged result is validated
+with `validate_environment_config` before the environment is created, and
+capabilities are recomputed (never copied — ADR-027).
 
 **Rationale**: ADR-012 rejected deep/PATCH merge for `updateEnvironment`; per-field
 replacement is the platform's established granularity, so the clone override adopts
@@ -212,6 +259,19 @@ occupying the source, and further clones (or backups/restores) may start while t
 first clone is still building its new environment. Clones of *different* sources
 never interact.
 
+**The created environment is guarded for the clone's whole lifetime**: a
+non-terminal clone also occupies its `created_environment_id` as the environment-level
+operation — environment-level backups/restores/clones of the under-construction
+environment are refused (`EnvironmentOperationInProgressError`), and
+`update_environment` refuses on it too (its `redeploy_for_environment_update` fan-out
+would race the restore flow's namespace delete-and-wait, the exact race ADR-055
+decision 4 excluded by construction). Counterpart deployments are created in the
+`RESTORING` state (D5), so ordinary deployment mutations are refused by the existing
+restoring-deployment rules (`DeploymentRestoringError`), and
+`redeploy_for_environment_update` learns to skip `RESTORING` deployments — closing a
+gap ADR-055 itself flagged. `delete_environment` on the created environment stays
+allowed: it is the discard path, and it drives the clone terminal (D9).
+
 **Rationale**: the idea brief's "concurrent clones, independent backups, no lock" is
 achievable after capture but not during it: the per-instance
 `BackupAlreadyInProgressError` guard means two overlapping captures of the same
@@ -221,20 +281,52 @@ only the capture window preserves the brief's intent (independent artefacts, no
 long-lived lock spanning the whole clone) without weakening shipped invariants. The
 spec's edge case is updated to say exactly this.
 
-## D9 — FR-008 delete guard: `IN_USE` typed error, narrowly scoped, escape hatch preserved
+## D9 — FR-008 delete guard scoped to the capture window; deletion is otherwise the escape hatch
 
-**Decision**: `delete_environment_backup` gains one guard: if a **non-terminal**
-`EnvironmentClone` references the backup, raise a new
+**Decision**: `delete_environment_backup` gains one guard: if a clone references the
+backup **and that clone's capture is still non-terminal**, raise a new
 `EnvironmentBackupInUseByCloneError` (`error_code="IN_USE"`, metadata: clone id/name)
-— precedent `BackupStorageLocationInUseError`
-(`services/exceptions.py:443-459`). Terminal clones never block deletion.
+— precedent `BackupStorageLocationInUseError` (`services/exceptions.py:443-459`).
+Once the capture is terminal, deletion is allowed and becomes the documented escape
+hatch:
+
+- on a **non-terminal** clone, the deletion (in the same transaction) nulls the
+  clone's `environment_backup_id` and appends a fatal `clone_errors` entry
+  (`{"step": "environment_backup_deleted", ...}`) — the clone derives `FAILED`,
+  attributed;
+- on a **terminal** clone, the FK is nulled and the recorded outcome stands
+  (backups are TTL-governed; routine cleanup must not rewrite history — see the
+  derivation in data-model.md).
 
 **Rationale**: ADR-055 decision 6 made unguarded deletion the escape hatch for
-operations pinned non-terminal, so this guard is a deliberate, documented deviation
-(FR-008) and must not create an un-deletable backup: the escape remains, because
-deleting the clone's created environment (or the capture itself failing) drives the
-clone terminal, which releases the guard. `created_environment_id` is `ON DELETE SET
-NULL`; a clone whose created environment vanished derives `FAILED` (terminal).
+operations pinned non-terminal; the original "guard while any clone is non-terminal"
+shape recreated the exact permanently-wedged state that decision was engineered to
+avoid — a clone whose flow died *after* a successful capture but *before* the
+environment materialised would sit `IN_PROGRESS` forever with an un-deletable backup
+and no environment to delete. Scoping the guard to the capture window (the only
+window where deletion strands unattributable work) keeps FR-008's protection **and**
+the escape. The zombie-flow-run detection shipped in b1073d4/0914ace crashes a dead
+`EXECUTE_ENVIRONMENT_CLONE` run but writes nothing to the clone record — backup
+deletion (or created-environment deletion) is the operator-visible recovery for that
+case.
+
+**Deletion cascades touched by clone** (all app-level so derivation inputs are
+written; DB-level `ON DELETE SET NULL` on `created_environment_id` stays as
+belt-and-braces only):
+
+- **`delete_environment` (created environment)**: clone-aware — nulls
+  `created_environment_id` *and* appends a fatal `clone_errors` entry
+  (`{"step": "created_environment_deleted", ...}`) in the same transaction, so the
+  derivation can distinguish "deleted" from "not yet created" (a bare SET NULL leaves
+  no computable marker).
+- **`delete_environment` (source environment)**: handles the source's clone records
+  *before* cascading its environment backups (avoiding a spurious `IN_USE` from the
+  clone guard): terminal clones survive as history with `source_environment_id`
+  nulled (the FK is nullable for this reason — provenance must not die with the
+  source); non-terminal clones are deleted outright, and the clone flow tolerates its
+  row vanishing mid-flight (mirrors `execute_restore_workflow`'s
+  `RestoreNotFoundError` handling, `workflows/templates/backup.py:794-808`). Created
+  environments are ordinary environments and survive.
 
 ## D10 — GraphQL surface
 
@@ -248,7 +340,10 @@ matching the environment-backup query conventions (`query.py:339-387`). The
 `EnvironmentClone` type follows the `db_model: strawberry.Private[...]` +
 computed-`status()` pattern (`api/definitions/backup/environment_backup.py:109-232`),
 with its own hand-mirrored status enum (strawberry binds one GraphQL name per Python
-class — same reason `EnvironmentRestoreStatus` is mirrored).
+class — same reason `EnvironmentRestoreStatus` is mirrored). Read access is ungated,
+**deliberately** matching `environmentBackup` — which already exposes the captured
+`environment_config`, the same value class as `configOverride`; the feature ADR
+records this parity as a conscious decision, not an inheritance.
 
 ## D11 — Surface parity (SDK, CLI, frontend)
 
@@ -262,10 +357,15 @@ class — same reason `EnvironmentRestoreStatus` is mirrored).
   status reporting via the `_report_terminal_status` pattern (exit 1 on
   FAILED/PARTIAL).
 - **Frontend**: a Clone action on the environment detail page opening a dialog
-  (name, per-deployment include checkboxes, optional config override), plus a Clones
-  list section beside the Backups tab content, polling the derived status via
-  TanStack Query with the tab-scoped `refetchInterval` pattern
-  (`EnvironmentBackupsTab.tsx:47`); invalidation in `onSuccess`.
+  (name, per-deployment include checkboxes, optional config override + clear-fields),
+  plus a Clones list section beside the Backups tab content, polling the derived
+  status via TanStack Query with the tab-scoped `refetchInterval` pattern
+  (`EnvironmentBackupsTab.tsx:47`); invalidation in `onSuccess`. The dialog
+  **disables ineligible deployments** with the ineligibility reason as tooltip
+  (never-deployed / internal / tombstoned — the data is already on the deployment
+  list query) rather than letting them silently become skips. Clone rows show their
+  age (`createdOn`-relative) so slow and stuck are distinguishable, and link to the
+  created environment and backing backup — the two discard handles.
 
 ## D12 — Test strategy
 
@@ -275,20 +375,32 @@ class — same reason `EnvironmentRestoreStatus` is mirrored).
   `dev/guides/graphql-propagation-tests.md`; model file
   `test_environment_backup.py`.
 - **Unit**: derived clone status matrix (mirroring
-  `test_environment_backup_projects_derived_status_from_the_database`), merge
-  utility, selection validation, D9 delete guard, cross-target `create_restore`
-  guard/flip behaviour.
+  `test_environment_backup_projects_derived_status_from_the_database`) — including
+  the PARTIAL-capture row, the backup-deleted-post-terminality row (outcome must
+  stand), the backup-deleted-mid-clone row (FAILED, attributed), the
+  created-environment-deleted row, and missing-restore-row handling; merge + clear
+  utility, selection validation, D9 delete guard scoping, cross-target
+  `create_restore` guard/flip behaviour, `redeploy_for_environment_update` skipping
+  `RESTORING`.
 - **E2E** (heavy, `shard_backup`): extend `backend/tests/e2e/test_backup_restore.py`
   with one dual-entrypoint `@pytest.mark.ci` node
   `test_environment_clone_lifecycle`, reusing `scenario_environment_id`,
   `deployed_simple_app`, `velero_ready` (reuse-before-you-boot: same stack the
   environment backup E2E already deploys). Flow: write data marker (existing
   `portforward_simple_app` + `/count` recipe) → clone with the marker present →
-  mutate source post-capture → assert clone data = capture point (SC-004), source
-  unchanged (SC-002), all deployments attributed (SC-003), clone reaches terminal →
-  delete cloned environment, re-clone same name succeeds (SC-005). Scenario-driver
-  protocol gains `clone_environment` / `get_environment_clone` /
-  `wait_for_environment_clone` implemented by both API and UI drivers (ADR-038).
+  mutate source post-capture → assert clone data = capture point (SC-004) **via an
+  authenticated write against the counterpart** (proving restored credentials work —
+  D2's self-generating-credentials risk), source unchanged (SC-002), all deployments
+  attributed (SC-003), clone reaches terminal → delete cloned environment, re-clone
+  same name **accepted and materialised** (name free, record created, environment row
+  exists — SC-005) *without* waiting a second restore-to-terminal: the restore path
+  is already proven by the first cycle, and a full second cycle would put the node
+  ≈2.5 clone-cycles deep on the heaviest shard (`shard_backup` already carries the
+  backup/restore and database nodes against the ~20 min/variant budget). If measured
+  runtime still busts the budget, the fallback is a shard split — a CI/CD governance
+  gate, flagged now rather than at implement time. Scenario-driver protocol gains
+  `clone_environment` / `get_environment_clone` / `wait_for_environment_clone`
+  implemented by both API and UI drivers (ADR-038).
 - **Local PASS evidence** recorded per Constitution §V (node id, command, timestamp,
   cluster id, verbatim PASSED line).
 
@@ -301,6 +413,6 @@ class — same reason `EnvironmentRestoreStatus` is mirrored).
 | Do backup strategies survive cross-target? | Hook selectors and credential reads are target-namespace-relative; expected to work unchanged (D2). |
 | How does a clone wait for its capture? | New INTERNAL Prefect flow — first sanctioned waiting orchestration (D4). |
 | How are counterpart driver versions bound? | `deploy_application(driver_version_id=...)` pin resolved from the snapshot fingerprint (D5). |
-| What does "merge override" mean? | Top-level-field replacement over canonicalised configs (D7). |
-| Concurrent clones? | Serialised during capture via the existing guard, independent after (D8). |
-| FR-008 vs the no-guard escape hatch? | Narrow `IN_USE` guard on non-terminal clones only; escape preserved (D9). |
+| What does "merge override" mean? | Top-level-field replacement over canonicalised configs, plus explicit field clearing via `clearConfigFields` (D7). |
+| Concurrent clones? | Serialised during capture via the existing guard, independent after; the created environment is occupied for the clone's whole lifetime (D8). |
+| FR-008 vs the no-guard escape hatch? | `IN_USE` guard only while the capture is in flight; post-capture deletion is the escape hatch and drives a running clone `FAILED`, attributed (D9). |

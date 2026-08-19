@@ -52,11 +52,16 @@ The scenario (single dual-entrypoint node, reusing the environment-backup stack)
 6. Assert:
    - clone `COMPLETED`; every source deployment attributed (SC-003);
    - counterpart deployment `RUNNING`, data equals the marker, not the post-capture
-     mutation (SC-001, SC-004, FR-007);
+     mutation (SC-001, SC-004, FR-007) — asserted via an **authenticated write**
+     against the counterpart (proves restored credentials work, research D2);
    - source environment config + declared state unchanged; only source-side artefact
      is the environment backup (SC-002);
-   - config override visible on the created environment (FR-006).
-7. Delete the cloned environment; re-clone under the same name succeeds (SC-005).
+   - config override (and cleared field) visible on the created environment (FR-006).
+7. Delete the cloned environment; re-clone under the same name is **accepted and
+   materialises** (name free, record created, environment row exists — SC-005). The
+   second clone is not waited to a second restore-to-terminal: the restore path is
+   proven by the first cycle, and the node must fit the `shard_backup` budget
+   (research D12).
 
 Also run the `[ui-chromium]` variant (clone dialog → clones list → status badge).
 
@@ -81,6 +86,13 @@ environment's page.
 
 - Clone with a taken name → `ALREADY_EXISTS`, zero side effects (FR-011).
 - Clone during another environment-level op on the source → `ALREADY_IN_PROGRESS` (D8).
-- Delete the backing environment backup mid-clone → `IN_USE` (FR-008).
+- Mutate the under-construction created environment → `ALREADY_IN_PROGRESS` /
+  restoring-deployment errors (D8).
+- Delete the backing environment backup while the capture is in flight → `IN_USE`;
+  after capture, deletion drives a non-terminal clone `FAILED` (attributed) and
+  leaves a terminal clone's outcome untouched (FR-008, D9).
 - Non-admin clone attempt → `FORBIDDEN` (FR-010).
-- Capture forced to fail → no environment created, clone `FAILED` (FR-002).
+- Capture forced to fail entirely → no environment created, clone `FAILED` (FR-002).
+- One constituent forced to fail at capture → clone proceeds, ends `PARTIAL`, failure
+  attributed (FR-002/E5).
+- `clearConfigFields` naming an unknown field → `VALIDATION_ERROR` (FR-006, D7).

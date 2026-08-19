@@ -40,8 +40,13 @@ single-cluster scope per ADR-039.
 
 **Project Type**: web service (backend + frontend + SDK + CLI — four-surface parity, FR-012)
 
-**Performance Goals**: clone mutation returns immediately (async); status reads are
-O(constituents) per read — same envelope as environment backup (ADR-055 accepted cost).
+**Performance Goals**: clone mutation returns immediately (async); status reads are a
+**superset** of the environment-backup envelope (clone row + capture children +
+restore rows reachable via JSON ids) — the repository provides a batched restore-row
+fetch (one `IN` query across all listed clones) to avoid N+1 on `environmentClones`.
+Velero processes restores sequentially cluster-wide, so clone duration is
+O(N × restore-time) plus queueing — accepted at the "tens of deployments" scale and
+documented so it is not filed as a bug.
 
 **Constraints**: source never mutated (SC-002); nothing materialises unless capture
 succeeds (FR-002); clone built only from the capture (FR-007); capture window
@@ -108,10 +113,18 @@ backend/styrmin_backend/
 │   ├── models.py                          # + EnvironmentClone
 │   └── migrations/versions/<new>.py       # + environmentclone revision
 ├── repository/
-│   └── environment_clone.py               # NEW: CRUD + non-terminal EXISTS queries
+│   └── environment_clone.py               # NEW: CRUD, by-source/by-created lookups, batched
+│                                          #      restore-row fetch (terminality derives in Python
+│                                          #      — not EXISTS-able; see data-model.md)
 ├── services/
 │   ├── unit_of_work.py                    # + environment_clones repo wiring
 │   ├── exceptions.py                      # + EnvironmentBackupInUseByCloneError, clone errors
+│   ├── deployment.py                      # deploy_application: + skip_initial_reconcile /
+│   │                                      #   RESTORING initial state for counterparts;
+│   │                                      #   redeploy_for_environment_update skips RESTORING
+│   ├── environments.py                    # delete_environment: clone-aware cascades (created-env
+│   │                                      #   error write; source-side record handling);
+│   │                                      #   update_environment: refuse on under-construction clone
 │   └── backup/
 │       ├── clone.py                       # NEW: clone_environment service, derivation,
 │       │                                  #      selection validation, config merge helper
@@ -189,6 +202,6 @@ python_sdk + cli); the feature is additive within each surface, centered on
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| New guard on `delete_environment_backup` (deviation from ADR-055 decision 6's guard-free escape hatch) | FR-008: deleting the capture under an in-flight clone strands it mid-build | Unguarded deletion (status quo) silently kills clones; guard is scoped to **non-terminal** clones only and the escape hatch survives — driving the clone terminal (e.g. deleting its created environment) releases the guard (research D9) |
+| New guard on `delete_environment_backup` (deviation from ADR-055 decision 6's guard-free escape hatch) | FR-008: deleting the capture while it is still being taken strands unattributable work | Unguarded deletion (status quo) silently kills clones mid-capture; the guard is scoped to the **capture window only** — post-capture deletion stays legal and *is* the escape hatch (drives a stuck clone `FAILED`, attributed; leaves terminal outcomes untouched), so no permanently-wedged state exists (research D9) |
 | New INTERNAL Prefect flow (ADR-055 explicitly shipped *no* environment-level flow) | Clone is the first operation that must **wait** on an async capture before materialising anything (FR-002); every existing dispatch is fire-and-forget | Synchronous mutation would hold a GraphQL request for minutes; non-Prefect background work violates Constitution §III (research D4) |
 | Clone capture serialises with other env-level ops on the source (refines the idea brief's "concurrent clones, no lock") | Existing one-op-per-environment invariant (ADR-055 decision 5) + per-instance backup guards make truly concurrent captures degrade to `PARTIAL` | Removing the invariant weakens shipped backup/restore semantics for a marginal concurrency win; post-capture independence preserves the brief's intent (research D8) |
