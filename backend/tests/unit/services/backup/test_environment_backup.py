@@ -33,6 +33,7 @@ from styrmin_backend.db.models import (
     ApplicationInstance,
     Backup,
     BackupStatus,
+    DeployedService,
     Environment,
     EnvironmentBackup,
     EnvironmentRestore,
@@ -77,6 +78,7 @@ from tests.unit.services.fakes import (
     FakeApplicationRepository,
     FakeBackupRepository,
     FakeClusterRepository,
+    FakeDeployedServiceRepository,
     FakeDeploymentRepository,
     FakeEnvironmentBackupRepository,
     FakeEnvironmentRepository,
@@ -409,6 +411,7 @@ def _make_uow(
     restores: list[Restore] | None = None,
     environment_backups: list[EnvironmentBackup] | None = None,
     environment_restores: list[EnvironmentRestore] | None = None,
+    deployed_services: list[DeployedService] | None = None,
 ) -> FakeUnitOfWork:
     """Build a UoW whose repositories are consistent with each other.
 
@@ -446,6 +449,27 @@ def _make_uow(
         environment_restores=FakeEnvironmentRestoreRepository(
             environment_restores or []
         ),
+        deployed_services=FakeDeployedServiceRepository(deployed_services or []),
+    )
+
+
+def _deployed_service(
+    *,
+    deployment: DeploymentEntity,
+    environment_id: UUID,
+    driver_service_name: str,
+    resolved_name: str | None = None,
+) -> DeployedService:
+    """One resolved service row, overridden when ``resolved_name`` differs."""
+    return DeployedService(
+        driver_service_name=driver_service_name,
+        resolved_name=resolved_name or driver_service_name,
+        kind="http",
+        scope="external",
+        port=8080,
+        component="server",
+        deployment_id=deployment.id,
+        environment_id=environment_id,
     )
 
 
@@ -567,6 +591,227 @@ async def test_snapshot_records_the_driver_provenance_fingerprint(
         environment_backup.deployment_snapshots[0]
     )
     assert snapshot.driver_fingerprint == expected
+
+
+@pytest.mark.asyncio
+async def test_snapshot_captures_only_genuine_service_name_overrides(
+    environment: Environment, prefect_manager_mock
+) -> None:
+    """010 FR-005 ∧ FR-007: a counterpart must reproduce overridden service names.
+
+    Only the services whose resolved name differs from the driver's own name are
+    recorded, because that is what ``create_services_for_deployment`` takes as
+    its override argument — capturing identity mappings would push
+    driver-default names through validation they never went through.
+    """
+    adv = _driver_version()
+    deployment = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    uow = _make_uow(
+        environment=environment,
+        deployments=[deployment],
+        driver_versions=[adv],
+        deployed_services=[
+            _deployed_service(
+                deployment=deployment,
+                environment_id=environment.id,
+                driver_service_name="api",
+                resolved_name="infrahub-api",
+            ),
+            _deployed_service(
+                deployment=deployment,
+                environment_id=environment.id,
+                driver_service_name="ui",
+            ),
+        ],
+    )
+
+    environment_backup = await create_environment_backup(
+        environment_id=environment.id, uow=uow
+    )
+
+    assert environment_backup.deployment_snapshots is not None
+    snapshot = DeploymentSnapshot.model_validate(
+        environment_backup.deployment_snapshots[0]
+    )
+    assert snapshot.service_name_overrides == {"api": "infrahub-api"}
+
+
+@pytest.mark.asyncio
+async def test_snapshot_records_no_overrides_when_every_name_is_the_driver_default(
+    environment: Environment, prefect_manager_mock
+) -> None:
+    """``None`` means "use the driver defaults" — the same as an older snapshot."""
+    adv = _driver_version()
+    deployment = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    uow = _make_uow(
+        environment=environment,
+        deployments=[deployment],
+        driver_versions=[adv],
+        deployed_services=[
+            _deployed_service(
+                deployment=deployment,
+                environment_id=environment.id,
+                driver_service_name="api",
+            )
+        ],
+    )
+
+    environment_backup = await create_environment_backup(
+        environment_id=environment.id, uow=uow
+    )
+
+    assert environment_backup.deployment_snapshots is not None
+    snapshot = DeploymentSnapshot.model_validate(
+        environment_backup.deployment_snapshots[0]
+    )
+    assert snapshot.service_name_overrides is None
+
+
+def test_a_snapshot_taken_before_service_overrides_existed_still_reads() -> None:
+    """The field is additive: pre-existing JSON has no key and reads as ``None``."""
+    legacy = {
+        "deployment_id": str(uuid4()),
+        "deployment_name": "infrahub",
+        "instance_id": str(uuid4()),
+        "driver_name": "infrahub-driver",
+        "driver_version": "1.2.0",
+        "driver_fingerprint": None,
+        "application_version": "1.6.0",
+        "config": None,
+        "parameters": None,
+    }
+
+    assert DeploymentSnapshot.model_validate(legacy).service_name_overrides is None
+
+
+# ---------------------------------------------------------------------------
+# create_environment_backup — the deployment selection filter (010 research D6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_selection_narrows_the_capture(
+    environment: Environment, prefect_manager_mock
+) -> None:
+    """010 FR-003: the capture covers the selection, not the whole environment.
+
+    Filtering at capture time is the point of the selection — an excluded
+    heavyweight deployment must not be backed up at all.
+    """
+    adv = _driver_version()
+    included = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    excluded = _deployment(environment_id=environment.id, adv=adv, name="netbox")
+    uow = _make_uow(
+        environment=environment,
+        deployments=[included, excluded],
+        driver_versions=[adv],
+    )
+
+    environment_backup = await create_environment_backup(
+        environment_id=environment.id, uow=uow, deployment_ids=[included.id]
+    )
+
+    assert environment_backup.deployment_snapshots is not None
+    assert [
+        DeploymentSnapshot.model_validate(raw).deployment_name
+        for raw in environment_backup.deployment_snapshots
+    ] == ["infrahub"]
+    assert len(uow.backups.models) == 1
+    assert uow.backups.models[0].instance_id == included.active_instance.id  # type: ignore[union-attr]
+    prefect_manager_mock.run_action.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_an_omitted_selection_captures_every_eligible_deployment(
+    environment: Environment, prefect_manager_mock
+) -> None:
+    """``None`` means "all eligible" — the standalone mutation's behaviour."""
+    adv = _driver_version()
+    deployments = [
+        _deployment(environment_id=environment.id, adv=adv, name="infrahub"),
+        _deployment(environment_id=environment.id, adv=adv, name="netbox"),
+    ]
+    uow = _make_uow(
+        environment=environment, deployments=deployments, driver_versions=[adv]
+    )
+
+    environment_backup = await create_environment_backup(
+        environment_id=environment.id, uow=uow, deployment_ids=None
+    )
+
+    assert environment_backup.deployment_snapshots is not None
+    assert len(environment_backup.deployment_snapshots) == 2
+    assert len(uow.backups.models) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_empty_selection_captures_nothing(
+    environment: Environment, prefect_manager_mock
+) -> None:
+    """``[]`` is an explicit "select nothing", distinct from an omitted filter.
+
+    It yields the same config-only snapshot as an environment with no eligible
+    deployments, which derives ``COMPLETED`` immediately.
+    """
+    adv = _driver_version()
+    uow = _make_uow(
+        environment=environment,
+        deployments=[
+            _deployment(environment_id=environment.id, adv=adv, name="netbox")
+        ],
+        driver_versions=[adv],
+    )
+
+    environment_backup = await create_environment_backup(
+        environment_id=environment.id, uow=uow, deployment_ids=[]
+    )
+
+    assert environment_backup.deployment_snapshots is None
+    assert environment_backup.constituent_errors is None
+    assert uow.backups.models == []
+    prefect_manager_mock.run_action.assert_not_called()
+    assert (
+        derive_environment_operation_status([], error_count=0)
+        == EnvironmentOperationStatus.COMPLETED
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_selection_filter_never_raises_on_unusable_ids(
+    environment: Environment, prefect_manager_mock
+) -> None:
+    """Unknown and ineligible ids are simply not captured.
+
+    Deciding whether an unusable id is a client mistake (``NOT_FOUND``) or an
+    attributable skip (FR-004) belongs to the caller — the filter itself stays
+    silent so ``create_environment_backup`` keeps one behaviour.
+    """
+    adv = _driver_version()
+    eligible = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
+    never_deployed = _deployment(
+        environment_id=environment.id,
+        adv=adv,
+        name="never-deployed",
+        with_instance=False,
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[eligible, never_deployed],
+        driver_versions=[adv],
+    )
+
+    environment_backup = await create_environment_backup(
+        environment_id=environment.id,
+        uow=uow,
+        deployment_ids=[eligible.id, never_deployed.id, uuid4()],
+    )
+
+    assert environment_backup.deployment_snapshots is not None
+    assert [
+        DeploymentSnapshot.model_validate(raw).deployment_name
+        for raw in environment_backup.deployment_snapshots
+    ] == ["infrahub"]
+    assert environment_backup.constituent_errors is None
 
 
 @pytest.mark.asyncio

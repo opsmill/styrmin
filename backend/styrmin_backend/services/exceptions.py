@@ -392,6 +392,112 @@ class EnvironmentBackupNotRestorableError(ServiceError):
     )
 
 
+class EnvironmentCloneNotFoundError(ServiceError):
+    """The environment clone record was not found.
+
+    Also raised *inside* the clone flow when the record vanished mid-flight:
+    deleting the source environment deletes its non-terminal clone records
+    (010 research D9), exactly like ``RestoreNotFoundError`` ends the restore
+    flow quietly instead of crashing it.
+    """
+
+    error_code = "NOT_FOUND"
+    default_message = "Environment clone not found"
+
+
+class EnvironmentBackupInUseByCloneError(ServiceError):
+    """Cannot delete an environment backup a clone is still capturing into.
+
+    The guard is scoped to the **capture window** (010 spec FR-008, research
+    D9): the only window in which deleting the backup would strand work that
+    can no longer be attributed to anything. Once the capture is terminal,
+    deletion is allowed on purpose — it is the documented escape hatch for a
+    clone whose flow died, and it drives a non-terminal clone to ``FAILED``
+    with the deletion attributed.
+
+    Precedent for the shape: :class:`BackupStorageLocationInUseError`.
+    """
+
+    error_code = "IN_USE"
+    default_message = (
+        "Environment backup is in use by a clone whose capture is still in flight"
+    )
+
+    def __init__(self, clone_id: str, clone_name: str, message: str = "") -> None:
+        self.clone_id = clone_id
+        self.clone_name = clone_name
+        super().__init__(
+            message
+            or (
+                f"Environment backup is being captured by clone {clone_name!r} "
+                f"({clone_id}); it can be deleted once that capture is terminal"
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"clone_id": self.clone_id, "clone_name": self.clone_name}
+
+
+class UnknownEnvironmentConfigFieldError(ServiceError):
+    """A named environment-config field does not exist.
+
+    Raised by the clone's config merge when ``clearConfigFields`` names
+    something that is not a top-level ``EnvironmentConfig`` field (010
+    research D7). The known field names travel in the metadata so the caller
+    can render the valid set rather than guessing.
+    """
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "Unknown environment config field"
+
+    def __init__(
+        self, fields: list[str], known_fields: list[str], message: str = ""
+    ) -> None:
+        self.fields = fields
+        self.known_fields = known_fields
+        super().__init__(
+            message
+            or (
+                f"Unknown environment config field(s): {', '.join(sorted(fields))}. "
+                f"Known fields: {', '.join(sorted(known_fields))}"
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"fields": self.fields, "known_fields": self.known_fields}
+
+
+class InvalidCloneDeploymentSelectionError(ServiceError):
+    """The requested clone selection names deployments that cannot be cloned.
+
+    The ids are unknown, or belong to another environment (010
+    contracts/graphql.md — ``NOT_FOUND``, upfront, zero side effects). A
+    selected deployment that exists but is *ineligible* is not an error: it is
+    attributed as ``skipped`` on the clone record (spec FR-004).
+    """
+
+    error_code = "NOT_FOUND"
+    default_message = (
+        "One or more selected deployments do not exist in this environment"
+    )
+
+    def __init__(self, deployment_ids: list[str], message: str = "") -> None:
+        self.deployment_ids = deployment_ids
+        super().__init__(
+            message
+            or (
+                "These deployments do not exist in the source environment: "
+                f"{', '.join(sorted(deployment_ids))}"
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"deployment_ids": self.deployment_ids}
+
+
 class BackupScheduleAlreadyExistsError(ServiceError):
     """A backup schedule already exists for this deployment."""
 

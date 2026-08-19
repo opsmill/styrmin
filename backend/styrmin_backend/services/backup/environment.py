@@ -129,6 +129,15 @@ class DeploymentSnapshot(BaseModel):
     Self-contained on purpose: it records the driver *fingerprint* (ADR-0053),
     not just the version string, so a later clone can tell whether the same
     driver content is still loaded.
+
+    ``service_name_overrides`` is the second clone-readiness field: a
+    deployment's resolved service names are chosen at *creation* time and
+    sibling deployments' FQDNs are built on them, so a counterpart that cannot
+    read them back would either rename the services or break the FQDNs — and
+    re-reading the live source after capture is forbidden (010 spec FR-005 ∧
+    FR-007). It is additive and nullable: snapshots captured before this field
+    existed read as ``None``, which means "no overrides" — the counterpart uses
+    the driver-default service names.
     """
 
     deployment_id: UUID
@@ -140,6 +149,10 @@ class DeploymentSnapshot(BaseModel):
     application_version: str
     config: dict | None = None
     parameters: dict | None = None
+    #: ``driver_service_name`` → overridden ``resolved_name``, for the services
+    #: whose resolved name differs from the driver default. ``None`` when the
+    #: deployment overrode nothing (or the snapshot predates this field).
+    service_name_overrides: dict[str, str] | None = None
 
 
 class ConstituentError(BaseModel):
@@ -240,6 +253,13 @@ async def _capture_deployment_snapshot(
     empty strings, ``driver_fingerprint`` to ``None`` (it is nullable because a
     resolvable driver version can also carry neither a ``content_hash`` nor a
     ``source_commit_sha``).
+
+    The deployment's service-name overrides are captured too (010 spec FR-005 ∧
+    FR-007): only the services whose ``resolved_name`` differs from the driver's
+    own name are recorded, because that is exactly the argument
+    :func:`create_services_for_deployment` takes — passing identity mappings
+    would put driver-default names through the override validation path they
+    never went through originally.
     """
     instance = deployment.active_instance
     assert instance is not None, (
@@ -261,6 +281,13 @@ async def _capture_deployment_snapshot(
         if driver is not None:
             driver_name = driver.name
 
+    deployed_services = await uow.deployed_services.get_by_deployment_id(deployment.id)
+    service_name_overrides = {
+        service.driver_service_name: service.resolved_name
+        for service in deployed_services
+        if service.resolved_name != service.driver_service_name
+    }
+
     return DeploymentSnapshot(
         deployment_id=deployment.id,
         deployment_name=deployment.name,
@@ -271,6 +298,7 @@ async def _capture_deployment_snapshot(
         application_version=deployment.application_version,
         config=deployment.config,
         parameters=deployment.parameters or None,
+        service_name_overrides=service_name_overrides or None,
     )
 
 
@@ -359,6 +387,7 @@ async def create_environment_backup(
     environment_id: UUID,
     uow: UnitOfWork,
     name: str | None = None,
+    deployment_ids: list[UUID] | None = None,
     prefect_manager: PrefectManager = Depends(get_manager),
 ) -> EnvironmentBackup:
     """Snapshot an environment and fan out one constituent backup per deployment.
@@ -395,6 +424,17 @@ async def create_environment_backup(
         environment_id: The environment to snapshot.
         uow: Unit of work supplying the repositories.
         name: Optional snapshot name. Defaults to ``styrmin-envbackup-<id>``.
+        deployment_ids: Optional selection, applied to the eligible set before
+            anything is captured (010 spec FR-003, research D6): ``None`` means
+            "every eligible deployment", an explicit list narrows the capture to
+            the ids it names, and ``[]`` selects nothing (a config-only
+            snapshot). Ids that are unknown, tombstoned, internal, or
+            instance-less are simply not captured — this filter never raises.
+            Rejecting or attributing them is the caller's job, because only the
+            caller knows whether an id it cannot use is a client mistake
+            (``cloneEnvironment`` → ``NOT_FOUND``) or an attributable skip
+            (FR-004). The ``createEnvironmentBackup`` mutation does not expose
+            this argument; the clone path is its only caller.
         prefect_manager: Injected dispatcher for the per-constituent
             ``EXECUTE_BACKUP`` flows.
 
@@ -420,6 +460,9 @@ async def create_environment_backup(
 
         deployments = await uow.deployments.find_all_by_environment(environment_id)
         eligible = [d for d in deployments if is_eligible_for_environment_backup(d)]
+        if deployment_ids is not None:
+            selected = set(deployment_ids)
+            eligible = [d for d in eligible if d.id in selected]
         snapshots = [
             await _capture_deployment_snapshot(deployment, uow)
             for deployment in eligible
@@ -540,7 +583,8 @@ async def create_environment_backup(
 
     # One audit entry per fan-out, matching ``env_config_fanout_dispatched``
     # (research.md D1 amendment). ``evaluated`` counts every deployment
-    # considered, including the internal / instance-less ones filtered out.
+    # considered, including the internal / instance-less ones filtered out and
+    # the ones an explicit ``deployment_ids`` selection excluded.
     logger.info(
         "env_backup_fanout_dispatched environment_id={} environment_backup_id={} "
         "evaluated={} dispatched={} conflict={} dispatch_failed={}",
