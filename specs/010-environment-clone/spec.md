@@ -55,6 +55,7 @@ The operator supplies an environment-config override when invoking the clone, so
 
 1. **Given** a source environment with config, **When** the operator invokes clone with an environment-config override, **Then** the clone's environment config is the captured source config with the override merged over it, applied before any cloned deployment comes up.
 2. **Given** a clone invoked without an override, **When** the clone materialises, **Then** its environment config equals the captured source config.
+3. **Given** a source environment with a production-only config field set (e.g. an external DNS integration), **When** the operator invokes clone naming that field as cleared, **Then** the clone's environment config does not contain the field at all.
 
 ---
 
@@ -78,22 +79,25 @@ The clone runs asynchronously. The operator watches its progress through a first
 - **Captured application driver version vanishes mid-clone**: that deployment is attributed as failed; the remaining deployments proceed; the clone ends `PARTIAL`.
 - **Clone of a clone**: allowed; no special casing.
 - **Concurrent clones of one source**: allowed, each built from its own independent environment backup; there is no lock spanning a whole clone. Refinement from planning: the capture window counts as an environment-level operation on the source (same rule as environment backup/restore), so a second clone started while the first is still *capturing* is rejected upfront with a typed busy error; once the capture completes, further clones may start while earlier ones are still building their environments.
-- **Deleting the backing environment backup while a clone is in flight**: refused with a typed error while the clone depends on it.
+- **Deleting the backing environment backup**: refused with a typed error while the clone's *capture* is in flight; allowed afterwards — on a still-running clone it drives the clone to a failed terminal state with the deletion attributed (this is the escape hatch for a clone stuck before its environment materialised), and on a finished clone the recorded outcome stands.
+- **Partially successful capture**: constituents that failed at capture are attributed as failed; the clone proceeds with the usable ones and ends partially successful (mirrors what environment restore accepts as restorable).
+- **Mutating the clone's new environment while it is still being built**: environment-level config updates and further environment-level operations (backup/restore/clone) on the under-construction environment are refused with a typed busy error until the clone is terminal; counterpart deployments are in a restoring state, so ordinary deployment mutations are refused by the existing restoring-deployment rules. Deleting the under-construction environment remains allowed (it is the discard path) and drives the clone to a failed terminal state.
+- **Deleting the source environment mid-clone**: allowed. The source's clone records are handled before its backups cascade — records of finished clones survive as history (with the source reference cleared); a still-running clone's record is removed and its work aborts quietly. Environments already created by earlier clones are ordinary environments and survive.
 - **Clone status boundary**: the clone record covers environment/deployment creation and data restoration only; ongoing workload health remains the existing deployment-state machinery's job.
-- **Recovery from `PARTIAL`/`FAILED`/stuck clones**: discard-and-retry via ordinary environment deletion; no per-deployment repair in v1.
+- **Recovery from `PARTIAL`/`FAILED`/stuck clones**: discard-and-retry — delete the created environment when it exists; for a clone stuck before the environment materialised, delete the backing environment backup (see above). No per-deployment repair in v1.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: Users MUST be able to clone a live environment into a new environment on the same cluster; the clone MUST come up running with the source's data as of clone time. *(Verify: E2E — clone an environment with a stateful deployment, assert data present.)*
-- **FR-002**: System MUST capture a fresh environment backup of the selected deployments as the clone's first step, and nothing MUST materialise (no environment, no deployments) unless that capture succeeds. *(Verify: force backup failure, assert no environment created.)*
+- **FR-002**: System MUST capture a fresh environment backup of the selected deployments as the clone's first step, and nothing MUST materialise (no environment, no deployments) unless that capture reaches a restorable terminal status — fully or partially successful, matching what environment restore accepts. Constituents whose capture failed are attributed as failed and the clone may end partially successful; a wholly failed capture materialises nothing. *(Verify: force full backup failure, assert no environment created; force one constituent failure, assert the rest clone and the failure is attributed.)*
 - **FR-003**: Users MUST be able to select which eligible deployments are included; omitting the selection includes all eligible. Eligibility is the environment-backup rule: non-tombstoned, non-internal, with an active application instance. *(Verify: propagation + E2E with an exclusion.)*
 - **FR-004**: System MUST skip ineligible deployments with an attributed name and reason, not an error. *(Verify: clone an environment containing a never-deployed deployment.)*
 - **FR-005**: Clone MUST preserve each included deployment's configuration, parameters, and application driver version. *(Verify: propagation test comparing source vs clone records.)*
-- **FR-006**: Users MUST be able to supply an environment-config override at clone time, merged over the copied config before any cloned deployment comes up. *(Verify: propagation — override visible in the clone's config and its first instances' contexts.)*
+- **FR-006**: Users MUST be able to supply an environment-config override at clone time, merged over the copied config before any cloned deployment comes up — including the ability to **clear** a copied config field entirely (not just replace its value), so production-only settings such as real DNS or outbound integrations can be removed, not merely changed. *(Verify: propagation — override visible in the clone's config and its first instances' contexts; a cleared field absent from the clone's config.)*
 - **FR-007**: The clone MUST be built entirely from the captured environment backup; the live source is never re-read after capture. *(Verify: mutate source after capture, assert clone reflects capture-time state.)*
-- **FR-008**: System MUST refuse to delete an environment backup that an in-flight clone depends on. *(Verify: unit test, typed error.)*
+- **FR-008**: System MUST refuse to delete an environment backup while a clone's capture of it is still in flight (the only window where deletion strands unattributable work). Once the capture is terminal, deleting the backup is allowed and is the documented escape hatch for a stuck clone: it drives a non-terminal clone to a failed terminal state with the deletion attributed, and leaves a finished clone's recorded outcome untouched. *(Verify: unit tests — typed error during capture; attributed failure on post-capture deletion of a non-terminal clone; unchanged outcome on a terminal one.)*
 - **FR-009**: Clone MUST be asynchronous and tracked by a first-class record whose status is derived from its steps on every read, never stored. *(Verify: derived-status unit tests, mirroring the environment-backup pattern of ADR-055.)*
 - **FR-010**: Only `ADMIN` users MUST be able to clone. *(Verify: auth propagation test.)*
 - **FR-011**: System MUST reject a clone whose target environment name is already taken with an upfront typed validation error and zero side effects; a name lost between validation and creation resolves to a `FAILED` clone with the conflict attributed. *(Verify: unit test for the upfront rejection; attributed-failure test for the race.)*
@@ -123,6 +127,7 @@ The clone runs asynchronously. The operator watches its progress through a first
 - **Existing backup strategies can restore into a different target**: disk, postgres, neo4j, and action strategies are assumed adaptable to cross-target restore; feasibility detail belongs to the plan phase.
 - **Auth precedent**: clone requires the `ADMIN` role, following environment restore, whose privilege footprint clone strictly supersets.
 - **No new external dependency is expected**; to be revisited at plan time if cross-target restore demands one.
+- **Scope of the non-interference mitigation**: the clone-time config override (including field clearing) mitigates *configuration-level* interference only. Credentials, webhook URLs, and endpoints stored **inside the cloned application data** are copied verbatim and remain the operator's responsibility to neutralise; the documentation states this plainly.
 
 ## Out of Scope (v1)
 
