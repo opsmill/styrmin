@@ -53,6 +53,7 @@ class PrefectAction(Enum):
     RUN_JOB = "run_job"
     EXECUTE_BACKUP = "execute_backup"
     EXECUTE_RESTORE = "execute_restore"
+    EXECUTE_ENVIRONMENT_CLONE = "execute_environment_clone"
     EXECUTE_VELERO_BACKUP = "execute_velero_backup"
     EXECUTE_VELERO_RESTORE = "execute_velero_restore"
     APPLY_UTILITY_RESOURCES = "apply_utility_resources"

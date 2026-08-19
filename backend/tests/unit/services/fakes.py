@@ -16,6 +16,7 @@ from styrmin_backend.db.models import (
     DeploymentStatus,
     Environment,
     EnvironmentBackup,
+    EnvironmentClone,
     EnvironmentRestore,
     HelmChart,
     HelmRepository,
@@ -47,6 +48,10 @@ from styrmin_backend.repository.environment import EnvironmentRepository
 from styrmin_backend.repository.environment_backup import (
     EnvironmentBackupRepository,
     EnvironmentRestoreRepository,
+)
+from styrmin_backend.repository.environment_clone import (
+    EnvironmentCloneRepository,
+    referenced_restore_ids,
 )
 from styrmin_backend.repository.deployment_status import (
     DeploymentStatusRepository,
@@ -342,6 +347,97 @@ class FakeEnvironmentBackupRepository(
         return None
 
 
+class FakeEnvironmentCloneRepository(
+    FakeRepository[EnvironmentClone], EnvironmentCloneRepository
+):
+    """In-memory environment clone repository.
+
+    ``restore_source`` is wired by :class:`FakeUnitOfWork` so
+    ``get_referenced_restores`` resolves the same rows the production ``IN``
+    query would: the derivation reads restore status through those rows, and a
+    fake that returned nothing would make every clone look terminal.
+    """
+
+    def __init__(
+        self,
+        models: list[EnvironmentClone] | None = None,
+        restore_source: "FakeRestoreRepository | None" = None,
+    ) -> None:
+        super().__init__(models)
+        self.restore_source = restore_source
+        self.environment_backup_source: "FakeEnvironmentBackupRepository | None" = None
+        self.backup_source: "FakeBackupRepository | None" = None
+        self.environment_source: "FakeEnvironmentRepository | None" = None
+
+    def _hydrate(self, clone: EnvironmentClone) -> EnvironmentClone:
+        """Attach what the real repository eager-loads.
+
+        The clone derivation reads the backing capture's *own* derived status,
+        which means walking ``clone.environment_backup.backups``. On a transient
+        SQLModel instance those relationships are empty, so a fake that skipped
+        this would make every clone look like it had no capture at all — the one
+        state the derivation reads as "nothing in flight".
+        """
+        if self.environment_backup_source is not None:
+            clone.environment_backup = next(
+                (
+                    parent
+                    for parent in self.environment_backup_source.models
+                    if parent.id == clone.environment_backup_id
+                ),
+                None,
+            )
+        if clone.environment_backup is not None and self.backup_source is not None:
+            clone.environment_backup.backups = [
+                backup
+                for backup in self.backup_source.models
+                if backup.environment_backup_id == clone.environment_backup.id
+            ]
+        if self.environment_source is not None:
+            by_id = {
+                environment.id: environment
+                for environment in self.environment_source.models
+            }
+            clone.source_environment = by_id.get(clone.source_environment_id)  # type: ignore[arg-type]
+            clone.created_environment = by_id.get(clone.created_environment_id)  # type: ignore[arg-type]
+        return clone
+
+    async def get(self, id: UUID) -> EnvironmentClone | None:  # type: ignore[override]
+        for clone in self.models:
+            if clone.id == id:
+                return self._hydrate(clone)
+        return None
+
+    async def save(self, clone: EnvironmentClone) -> EnvironmentClone:
+        for index, existing in enumerate(self.models):
+            if existing.id == clone.id:
+                self.models[index] = clone
+                return clone
+        self.models.append(clone)
+        return clone
+
+    async def get_by_source_environment_id(
+        self, environment_id: UUID
+    ) -> list[EnvironmentClone]:
+        return [m for m in self.models if m.source_environment_id == environment_id][
+            ::-1
+        ]
+
+    async def get_by_created_environment_id(
+        self, environment_id: UUID
+    ) -> list[EnvironmentClone]:
+        return [m for m in self.models if m.created_environment_id == environment_id][
+            ::-1
+        ]
+
+    async def get_referenced_restores(
+        self, clones: "list[EnvironmentClone]"
+    ) -> dict[UUID, Restore]:
+        ids = referenced_restore_ids(clones)
+        rows = self.restore_source.models if self.restore_source else []
+        return {restore.id: restore for restore in rows if restore.id in ids}
+
+
 class FakeEnvironmentRestoreRepository(
     FakeRepository[EnvironmentRestore], EnvironmentRestoreRepository
 ):
@@ -608,6 +704,7 @@ class FakeUnitOfWork(UnitOfWork):
     restores: FakeRestoreRepository  # type: ignore[assignment]
     environment_backups: FakeEnvironmentBackupRepository  # type: ignore[assignment]
     environment_restores: FakeEnvironmentRestoreRepository  # type: ignore[assignment]
+    environment_clones: FakeEnvironmentCloneRepository  # type: ignore[assignment]
     backup_schedules: FakeBackupScheduleRepository  # type: ignore[assignment]
     pod_statuses: FakePodStatusRepository  # type: ignore[assignment]
     deployment_statuses: FakeDeploymentStatusRepository  # type: ignore[assignment]
@@ -630,6 +727,7 @@ class FakeUnitOfWork(UnitOfWork):
         restores: FakeRestoreRepository | None = None,
         environment_backups: FakeEnvironmentBackupRepository | None = None,
         environment_restores: FakeEnvironmentRestoreRepository | None = None,
+        environment_clones: FakeEnvironmentCloneRepository | None = None,
         backup_schedules: FakeBackupScheduleRepository | None = None,
         backup_storage_locations: FakeBackupStorageLocationRepository | None = None,
         pod_statuses: FakePodStatusRepository | None = None,
@@ -669,6 +767,11 @@ class FakeUnitOfWork(UnitOfWork):
         )
         self.environment_restores.constituent_source = self.restores
         self.environment_restores.parent_source = self.environment_backups
+        self.environment_clones = environment_clones or FakeEnvironmentCloneRepository()
+        self.environment_clones.restore_source = self.restores
+        self.environment_clones.environment_backup_source = self.environment_backups
+        self.environment_clones.backup_source = self.backups
+        self.environment_clones.environment_source = self.environments
         self.backup_schedules = backup_schedules or FakeBackupScheduleRepository()
         self.pod_statuses = pod_statuses or FakePodStatusRepository()
         self.deployment_statuses = (

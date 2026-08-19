@@ -6,13 +6,20 @@ not fire ``on.create`` for the restored CRD because velero re-applies the
 ``kopf.zalando.org/last-handled-configuration`` annotation. The styrmin
 restore workflow therefore drives the post-restore lifecycle explicitly:
 
-1. Strip kopf state-tracking annotations from the restored CRD.
-2. Mark the CRD ``phase=Restoring`` so the operator's timer skips its
+1. Mark the CRD ``phase=Restoring`` so the operator's timer skips its
    readiness timeout while we reapply.
-3. Re-apply Phase 1 prerequisites (NetworkPolicies + Secrets).
-4. Verify the HelmRelease reaches Ready.
-5. Re-apply Phase 3 utility resources (Middlewares + Services).
-6. Mark the CRD ``phase=Ready / displayState=Running``.
+2. Re-apply Phase 1 prerequisites (NetworkPolicies + Secrets).
+3. Re-apply Phase 3 utility resources (Middlewares + Services).
+4. Mark the CRD ``phase=Ready / displayState=Running``.
+
+The kopf state annotations are deliberately **kept** — see
+``reapply_and_finalize`` for why stripping them makes the deployment
+oscillate.
+
+A cross-target restore (environment clone) takes the same route through
+``reapply_with_counterpart_identity``, with two additions: the restored
+source-named CR is replaced by the counterpart's own CR body, and Phase 2
+(HelmRelease) is re-rendered from the counterpart's spec.
 
 Each step is idempotent (server-side apply for resources, JSON patch for
 the CRD status).
@@ -34,6 +41,7 @@ from styrmin_backend.operator.crd.schema import (
     DisplayState,
 )
 from styrmin_backend.operator.pipeline import (
+    execute_phase_helmrelease,
     execute_phase_prerequisites,
     execute_phase_services,
 )
@@ -75,28 +83,6 @@ async def _patch_crd_status(
         plural=CRD_PLURAL,
         name=name,
         body={"status": status},
-        _content_type="application/merge-patch+json",  # type: ignore[call-arg]
-    )
-
-
-async def _strip_kopf_annotations(
-    api_client: ApiClient, namespace: str, name: str
-) -> None:
-    """Remove kopf state-tracking annotations from the CRD.
-
-    Uses a merge patch with ``null`` values, which is how the K8s API
-    removes annotations. See ``_patch_crd_status`` for the
-    ``_content_type`` workaround.
-    """
-    custom_api = k8s_client.CustomObjectsApi(api_client)
-    body = {"metadata": {"annotations": {key: None for key in _KOPF_STATE_ANNOTATIONS}}}
-    await custom_api.patch_namespaced_custom_object(
-        group=CRD_GROUP,
-        version=CRD_VERSION,
-        namespace=namespace,
-        plural=CRD_PLURAL,
-        name=name,
-        body=body,
         _content_type="application/merge-patch+json",  # type: ignore[call-arg]
     )
 
@@ -145,7 +131,11 @@ async def reapply_and_finalize(
 
 
 async def _reapply_phases_and_finalize(
-    api_client: ApiClient, namespace: str, name: str, crd_spec: dict[str, Any]
+    api_client: ApiClient,
+    namespace: str,
+    name: str,
+    crd_spec: dict[str, Any],
+    include_helmrelease: bool = False,
 ) -> None:
     """Run the prerequisite + utility phases for ``crd_spec``, then mark Ready.
 
@@ -153,6 +143,14 @@ async def _reapply_phases_and_finalize(
     spec comes from the restored CR) and the cross-target one
     (``reapply_with_counterpart_identity``, whose spec comes from the
     counterpart's own CR body).
+
+    ``include_helmrelease`` inserts pipeline phase 2 between the prerequisites
+    and the utility resources, in the operator's own phase order. The in-place
+    path leaves it off — the restored HelmRelease already carries the identity
+    it should — while the cross-target path needs it: the restored HelmRelease
+    was rendered from the **source's** context (source FQDNs, source ingress
+    hosts), so without re-rendering it from the counterpart's spec the cloned
+    namespace would keep serving the source's identity (010 research D2.4).
     """
     prerequisites = await execute_phase_prerequisites(
         crd_spec=crd_spec, namespace=namespace
@@ -161,6 +159,16 @@ async def _reapply_phases_and_finalize(
         raise RuntimeError(
             f"Failed to re-apply prerequisites after restore: {prerequisites.errors}"
         )
+
+    if include_helmrelease:
+        helmrelease = await execute_phase_helmrelease(
+            crd_spec=crd_spec, namespace=namespace
+        )
+        if not helmrelease.success:
+            raise RuntimeError(
+                "Failed to re-render the HelmRelease with counterpart identity: "
+                f"{helmrelease.errors}"
+            )
 
     services = await execute_phase_services(crd_spec=crd_spec, namespace=namespace)
     if not services.success:
@@ -241,6 +249,33 @@ async def _upsert_crd(
         )
 
 
+async def _clear_finalizers(api_client: ApiClient, namespace: str, name: str) -> None:
+    """Drop every finalizer from a CR so deleting it runs no delete handler.
+
+    This is what makes deleting the restored source-named CR safe. That CR
+    arrives from Velero with kopf's finalizer intact, and kopf only runs
+    ``@kopf.on.delete`` — which for a ``StyrminDeployment`` is
+    ``_teardown_owned_resources``: it deletes the HelmRelease named by
+    ``spec.releaseReference`` plus every resource labelled with it. In a
+    cross-target restore that HelmRelease is the one Flux uses to keep the
+    **counterpart's** chart alive, so letting the handler fire would have Flux
+    uninstall the release and take the just-restored PersistentVolumeClaims
+    with it. Without a finalizer the API server removes the object outright and
+    the handler never gets the chance.
+    """
+    custom_api = k8s_client.CustomObjectsApi(api_client)
+    await custom_api.patch_namespaced_custom_object(
+        group=CRD_GROUP,
+        version=CRD_VERSION,
+        namespace=namespace,
+        plural=CRD_PLURAL,
+        name=name,
+        body={"metadata": {"finalizers": []}},
+        # See ``_patch_crd_status`` for why the content type is forced.
+        _content_type="application/merge-patch+json",  # type: ignore[call-arg]
+    )
+
+
 async def _delete_crd(api_client: ApiClient, namespace: str, name: str) -> None:
     """Delete a CR, tolerating a CR that is already gone."""
     custom_api = k8s_client.CustomObjectsApi(api_client)
@@ -255,6 +290,46 @@ async def _delete_crd(api_client: ApiClient, namespace: str, name: str) -> None:
     except k8s_client.ApiException as exc:
         if exc.status != 404:
             raise
+
+
+async def _delete_restored_crd_without_teardown(
+    api_client: ApiClient, namespace: str, name: str
+) -> None:
+    """Remove the restored source-named CR without triggering kopf's teardown.
+
+    Finalizers are cleared first and the result is **verified** before the
+    delete: a delete that still had kopf's finalizer attached would run
+    ``_teardown_owned_resources`` against the counterpart's live HelmRelease
+    and destroy the restored data. Refusing to delete is the safe failure —
+    the caller turns it into a failed restore, which is recoverable by
+    discarding the cloned environment; data loss is not.
+    """
+    try:
+        await _clear_finalizers(api_client, namespace, name)
+    except k8s_client.ApiException as exc:
+        if exc.status == 404:
+            return
+        raise
+
+    try:
+        remaining = (await _read_crd(api_client, namespace, name)).get(
+            "metadata", {}
+        ).get("finalizers") or []
+    except k8s_client.ApiException as exc:
+        if exc.status == 404:
+            # Nothing left to delete: no finalizers means the clear itself
+            # completed a deletion that was already pending.
+            return
+        raise
+
+    if remaining:
+        raise RuntimeError(
+            f"Refusing to delete restored StyrminDeployment {namespace}/{name}: "
+            f"finalizers are still attached ({remaining}), and deleting it would "
+            "run the operator's teardown against the counterpart's Helm release"
+        )
+
+    await _delete_crd(api_client, namespace, name)
 
 
 async def reapply_with_counterpart_identity(
@@ -280,13 +355,28 @@ async def reapply_with_counterpart_identity(
        carrying over kopf's state-tracking annotations from the restored CR.
        Carrying them is deliberate and mirrors ``reapply_and_finalize``: a CR
        without ``last-handled-configuration`` makes kopf fire ``on.create``,
-       which would race — and then undo — the finalize below.
-    2. Delete the restored source-named CR, so exactly one
-       ``StyrminDeployment`` owns the namespace. Data (PVC contents) survives;
-       only identity objects are re-rendered.
-    3. Re-apply prerequisites + utility resources from the **counterpart's**
-       spec and mark the counterpart CR Ready — the same finalize the in-place
-       path performs.
+       which would race — and then undo — the finalize below. kopf **will**
+       still see a spec diff against the inherited annotation and fire
+       ``on.update``; that handler re-runs exactly the phases below against the
+       same counterpart spec, so it is idempotent rather than harmful (its
+       ``displayState`` bounce is settled by the operator's timer).
+    2. Delete the restored source-named CR — finalizers first, so kopf's
+       ``on.delete`` teardown never fires (see
+       ``_delete_restored_crd_without_teardown``: that teardown would delete
+       the counterpart's own HelmRelease and, through Flux, the restored
+       volumes). Data survives; only identity objects are re-rendered.
+    3. Re-apply prerequisites, **re-render the HelmRelease from the
+       counterpart's spec** and re-apply utility resources, then mark the
+       counterpart CR Ready.
+
+    The HelmRelease is where the identity swap is subtle. The counterpart keeps
+    the *source's* Helm release name (``spec.releaseReference``, pinned at
+    counterpart creation — research D2), so this upsert **updates** the restored
+    HelmRelease rather than installing a second release: Flux performs a Helm
+    *upgrade*, which rewrites the ``meta.helm.sh/release-*`` ownership
+    annotations the restored objects carry from the source. A counterpart-named
+    release would instead be a fresh *install* over objects Helm already owns
+    and would fail its ownership check outright.
 
     Caller is responsible for catching exceptions and translating to
     ``mark_failed`` (same contract as ``reapply_and_finalize``).
@@ -326,7 +416,9 @@ async def reapply_with_counterpart_identity(
     )
 
     if counterpart_name != restored_crd_name:
-        await _delete_crd(api_client, namespace, restored_crd_name)
+        await _delete_restored_crd_without_teardown(
+            api_client, namespace, restored_crd_name
+        )
         logger.info(
             "Deleted restored source-named StyrminDeployment %s/%s",
             namespace,
@@ -334,7 +426,11 @@ async def reapply_with_counterpart_identity(
         )
 
     await _reapply_phases_and_finalize(
-        api_client, namespace, counterpart_name, counterpart_crd_body.get("spec", {})
+        api_client,
+        namespace,
+        counterpart_name,
+        counterpart_crd_body.get("spec", {}),
+        include_helmrelease=True,
     )
 
 

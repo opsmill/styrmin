@@ -33,8 +33,9 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any, Mapping, NamedTuple, Sequence
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from fast_depends import Depends, inject
 from loguru import logger
 from pydantic import BaseModel
 
@@ -47,16 +48,32 @@ from styrmin_backend.db.models import (
     Restore,
     RestoreStatus,
 )
+from styrmin_backend.domain.models import Deployment as DeploymentEntity
 from styrmin_backend.repository.environment_backup import NON_TERMINAL_RESTORE_STATUSES
 from styrmin_backend.services.backup.environment import (
     TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
     EnvironmentOperationStatus,
+    _guard_no_environment_operation_in_progress,
     derive_environment_operation_status,
+    dispatch_constituent_backups,
+    is_eligible_for_environment_backup,
+    register_environment_backup,
 )
+from styrmin_backend.services.environments import resolve_environment
 from styrmin_backend.services.exceptions import (
+    EnvironmentAlreadyExistsError,
+    EnvironmentCloneNotFoundError,
     InvalidContextError,
     UnknownEnvironmentConfigFieldError,
 )
+
+# ``UnitOfWork`` is imported at runtime, not under ``TYPE_CHECKING``: the
+# ``@inject``-decorated ``clone_environment`` below has fast-depends build a
+# Pydantic model from its signature, which resolves the annotation for real.
+from styrmin_backend.services.unit_of_work import UnitOfWork
+from styrmin_backend.workflows.dependency import get_manager
+from styrmin_backend.workflows.manager import PrefectManager
+from styrmin_backend.workflows.models import PrefectAction
 
 
 class EnvironmentCloneStatus(str, Enum):
@@ -172,6 +189,31 @@ CLONE_STEPS = frozenset(
         CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
     }
 )
+
+
+# ---------------------------------------------------------------------------
+# Per-deployment attribution reasons (spec FR-004 / SC-003)
+# ---------------------------------------------------------------------------
+#
+# Open strings on the wire (ADR-0055 decision 4) but written from one place, so
+# the UI copy and the tests have something stable to key on.
+
+#: An explicit selection was given and did not name this deployment.
+CLONE_REASON_NOT_SELECTED = "not included in the requested deployment selection"
+#: The deployment cannot contribute a constituent backup at all.
+CLONE_REASON_NOT_ELIGIBLE = "deployment has no active instance"
+#: The capture never produced a constituent ``Backup`` row for it.
+CLONE_REASON_CAPTURE_FAILED = "constituent backup failed at capture"
+#: The constituent exists but did not reach ``COMPLETED``.
+CLONE_REASON_BACKUP_NOT_COMPLETED = "constituent backup did not complete"
+#: The constituent row is gone (deleted individually after the capture).
+CLONE_REASON_BACKUP_DELETED = "constituent backup deleted"
+#: Velero garbage-collected the constituent's data before the clone ran.
+CLONE_REASON_BACKUP_EXPIRED = "constituent backup expired"
+#: The capture's driver identity no longer resolves to a loaded driver version.
+CLONE_REASON_DRIVER_VERSION_GONE = "captured driver version no longer exists"
+#: The whole capture failed, so no counterpart was ever attempted (FR-002).
+CLONE_REASON_CAPTURE_UNUSABLE = "environment backup capture did not succeed"
 
 
 # ---------------------------------------------------------------------------
@@ -544,3 +586,356 @@ def derive_environment_clone_status_from_record(
         clone_errors=clone.clone_errors,
         restores=restores,
     )
+
+
+# ---------------------------------------------------------------------------
+# Occupancy guard (research D8)
+# ---------------------------------------------------------------------------
+
+
+async def find_clone_occupying_environment(
+    environment_id: UUID, uow: UnitOfWork
+) -> EnvironmentClone | None:
+    """Return the clone that currently occupies ``environment_id``, if any.
+
+    A clone occupies **two** environments, for different windows (research D8):
+
+    * its **source**, only while the capture is non-terminal. That is the one
+      window where a second environment-level operation would fight it: the
+      per-instance backup guards would degrade both captures to ``PARTIAL``
+      anyway. Once the capture is terminal the source is released, so further
+      backups/restores/clones may start while this clone is still building its
+      new environment.
+    * its **created environment**, for the clone's whole lifetime. That
+      environment is still being assembled — its counterparts are mid-restore —
+      so an environment-level operation (or a config update, whose fan-out
+      would race the restore's namespace delete-and-wait) has to wait.
+
+    A clone whose ``environment_backup_id`` is still ``None`` occupies nothing:
+    registration has not completed, and treating it as an occupant would make
+    the registering transaction collide with itself.
+
+    Returns:
+        The occupying clone, or ``None``. Callers turn it into
+        ``EnvironmentOperationInProgressError``; the candidate sets are the
+        clones of one environment, so deriving in Python is cheap (clone
+        terminality is not expressible as a SQL ``EXISTS``).
+    """
+    for clone in await uow.environment_clones.get_by_source_environment_id(
+        environment_id
+    ):
+        if clone.environment_backup_id is None:
+            continue
+        capture_status = derive_clone_capture_status(clone.environment_backup)
+        if capture_status is None:
+            # The capture is unreachable: it was deleted, which the deletion
+            # path attributed on the record. Nothing is in flight.
+            continue
+        if capture_status not in TERMINAL_ENVIRONMENT_OPERATION_STATUSES:
+            return clone
+
+    created_by = await uow.environment_clones.get_by_created_environment_id(
+        environment_id
+    )
+    if created_by:
+        restores = await uow.environment_clones.get_referenced_restores(created_by)
+        for clone in created_by:
+            status = derive_environment_clone_status_from_record(clone, restores)
+            if status not in TERMINAL_ENVIRONMENT_CLONE_STATUSES:
+                return clone
+    return None
+
+
+# ---------------------------------------------------------------------------
+# clone_environment (research D4)
+# ---------------------------------------------------------------------------
+
+
+def _validate_cleared_config_fields(cleared_fields: Sequence[str] | None) -> None:
+    """Reject unknown ``clearConfigFields`` names before anything is written.
+
+    :func:`merge_environment_config` performs the same check, but it only runs
+    inside the clone flow — long after the mutation returned. FR-011 requires
+    an invalid request to fail upfront with zero side effects, so the names are
+    validated here too.
+    """
+    known_fields = set(EnvironmentConfig.model_fields)
+    unknown = [name for name in cleared_fields or () if name not in known_fields]
+    if unknown:
+        raise UnknownEnvironmentConfigFieldError(
+            fields=unknown, known_fields=sorted(known_fields)
+        )
+
+
+def _plan_deployment_results(
+    deployments: Sequence[DeploymentEntity], deployment_ids: Sequence[UUID] | None
+) -> list[CloneDeploymentResult]:
+    """Account for every source deployment before the capture is registered.
+
+    SC-003 wants 100% attribution, and the two outcomes that are already known
+    at registration time are recorded here so they survive even a clone whose
+    flow never runs:
+
+    * a deployment an explicit selection left out → ``SKIPPED``;
+    * a deployment that cannot contribute a constituent backup (no active
+      instance) → ``SKIPPED`` with the reason, never an error (FR-004).
+
+    Everything else starts ``PENDING`` and the flow resolves it.
+
+    Internal deployments are deliberately **not** listed: they are
+    platform-managed infrastructure (the per-environment ingress controller),
+    never part of an environment's application topology, and the cloned
+    environment gets its own through ``_ensure_ingress_controller``. Tombstoned
+    deployments are already excluded by ``find_all_by_environment``.
+    """
+    selected = set(deployment_ids) if deployment_ids is not None else None
+    results: list[CloneDeploymentResult] = []
+    for deployment in deployments:
+        if deployment.internal:
+            continue
+        if selected is not None and deployment.id not in selected:
+            reason: str | None = CLONE_REASON_NOT_SELECTED
+        elif not is_eligible_for_environment_backup(deployment):
+            reason = CLONE_REASON_NOT_ELIGIBLE
+        else:
+            reason = None
+        results.append(
+            CloneDeploymentResult(
+                deployment_id=deployment.id,
+                deployment_name=deployment.name,
+                outcome=(
+                    EnvironmentCloneDeploymentOutcome.PENDING
+                    if reason is None
+                    else EnvironmentCloneDeploymentOutcome.SKIPPED
+                ),
+                reason=reason,
+            )
+        )
+    return results
+
+
+@inject(cast_result=False)  # type: ignore[arg-type]
+async def clone_environment(
+    uow: UnitOfWork,
+    name: str,
+    created_by_user_id: UUID,
+    environment_id: UUID | None = None,
+    environment_name: str | None = None,
+    cluster_id: UUID | None = None,
+    cluster_name: str | None = None,
+    deployment_ids: list[UUID] | None = None,
+    config_override: dict | None = None,
+    clear_config_fields: list[str] | None = None,
+    prefect_manager: PrefectManager = Depends(get_manager),
+) -> EnvironmentClone:
+    """Register a clone of an environment and start it (research D4).
+
+    The mutation half of the operation, and deliberately only that half.
+    Everything that can be decided synchronously happens here — validation,
+    the clone record, the capture, the fan-out — and everything that has to
+    *wait* happens in the ``EXECUTE_ENVIRONMENT_CLONE`` flow, which polls the
+    capture to terminality before anything materialises (spec FR-002).
+
+    Ordering, in three phases:
+
+    1. **Upfront validation with zero side effects** (spec FR-011): resolve the
+       source (ADR-031 dual identifier), canonicalise/validate the config
+       override and the cleared-field names, check the target environment name
+       is free in the source's cluster, and apply the environment-level
+       concurrency guard to the source (research D8).
+    2. **One registration transaction**: the clone record, its per-deployment
+       attribution (including the skips already knowable — FR-004), and the
+       whole capture (parent snapshot + constituent ``Backup`` rows + recorded
+       constituent errors) are written and committed **together**. Same
+       atomicity argument as ``create_environment_backup``: a client
+       disconnect mid-registration must leave either nothing or a complete,
+       inspectable clone — never a clone record whose capture is missing, or a
+       capture nobody can attribute.
+    3. **Dispatch, after the commit** (ADR-0012): one ``EXECUTE_BACKUP`` per
+       constituent, then the single ``EXECUTE_ENVIRONMENT_CLONE`` flow run.
+
+    The target name is checked but **not** reserved: reserving it would need a
+    placeholder environment row, which FR-002 forbids (nothing materialises
+    before the capture succeeds). The race is therefore accepted and handled
+    where it lands — the flow attributes a lost name as a fatal
+    ``target_name_taken`` and the clone derives ``FAILED`` (spec FR-011).
+
+    Args:
+        uow: Unit of work supplying the repositories.
+        name: The target environment's name.
+        created_by_user_id: The invoking user; also the attributed creator of
+            every counterpart deployment (``Deployment.created_by_user_id`` is
+            not nullable).
+        environment_id: The source environment's id (exclusive with
+            ``environment_name``).
+        environment_name: The source environment's name; needs cluster context.
+        cluster_id: Cluster context for ``environment_name``.
+        cluster_name: Cluster context for ``environment_name``.
+        deployment_ids: Optional selection; ``None`` means every eligible
+            deployment (spec FR-003).
+        config_override: Optional environment-config override, merged over the
+            captured config by the flow (spec FR-006, research D7).
+        clear_config_fields: Optional captured-config field names to drop
+            before the merge (spec FR-006).
+        prefect_manager: Injected dispatcher.
+
+    Returns:
+        The persisted clone record, reloaded so its capture is attached.
+
+    Raises:
+        EnvironmentNotFoundError: When the source does not exist.
+        AmbiguousIdentifierError: When the source identifiers conflict.
+        EnvironmentAlreadyExistsError: When ``name`` is already taken in the
+            source's cluster.
+        InvalidContextError: When ``config_override`` is not a valid
+            environment config.
+        UnknownEnvironmentConfigFieldError: When ``clear_config_fields`` names
+            something that is not a top-level ``EnvironmentConfig`` field.
+        EnvironmentOperationInProgressError: When an environment-level
+            operation already occupies the source (research D8).
+        EnvironmentCloneNotFoundError: When the record was deleted while the
+            fan-out was still dispatching — legal, because deleting the source
+            environment removes non-terminal clone records (research D9).
+    """
+    source = await resolve_environment(
+        uow,
+        environment_id=environment_id,
+        environment_name=environment_name,
+        cluster_id=cluster_id,
+        cluster_name=cluster_name,
+    )
+
+    # Pure, before any write: an invalid override or cleared-field name must
+    # cost the caller a typed error and nothing else (FR-011).
+    canonical_override = (
+        _canonicalise_environment_config(
+            config_override, what="the environment config override"
+        )
+        if config_override
+        else None
+    )
+    _validate_cleared_config_fields(clear_config_fields)
+
+    async with uow:
+        existing = await uow.environments.get_by_name_in_cluster(
+            name, source.cluster_id
+        )
+        if existing is not None:
+            raise EnvironmentAlreadyExistsError(
+                f"An environment named {name!r} already exists in this cluster."
+            )
+
+        await _guard_no_environment_operation_in_progress(source.id, uow)
+
+        deployments = await uow.deployments.find_all_by_environment(source.id)
+        results = _plan_deployment_results(deployments, deployment_ids)
+
+        clone_id = uuid4()
+        clone = await uow.environment_clones.create(
+            EnvironmentClone(
+                id=clone_id,
+                name=name,
+                source_environment_id=source.id,
+                source_environment_name=source.name,
+                requested_deployment_ids=(
+                    [str(value) for value in deployment_ids]
+                    if deployment_ids is not None
+                    else None
+                ),
+                config_override=canonical_override,
+                cleared_config_fields=(
+                    list(clear_config_fields) if clear_config_fields else None
+                ),
+                deployment_results=[
+                    result.model_dump(mode="json") for result in results
+                ]
+                or None,
+                created_by_user_id=created_by_user_id,
+            )
+        )
+
+        registration = await register_environment_backup(
+            environment=source,
+            uow=uow,
+            deployment_ids=deployment_ids,
+        )
+        environment_backup_id = registration.environment_backup.id
+        # Linked last: ``find_clone_occupying_environment`` reads a clone with
+        # no capture as occupying nothing, which is what keeps the guard above
+        # from colliding with the row this transaction is writing.
+        clone.environment_backup_id = environment_backup_id
+        await uow.environment_clones.save(clone)
+
+        # The single commit: clone record, attribution, capture and every
+        # constituent become durable together, and nothing has been dispatched
+        # yet (ADR-0012).
+        await uow.commit()
+
+    dispatched, dispatch_failed = await dispatch_constituent_backups(
+        registration.pending_dispatch, prefect_manager, environment_backup_id
+    )
+
+    clone_dispatched = True
+    try:
+        await prefect_manager.run_action(
+            action=PrefectAction.EXECUTE_ENVIRONMENT_CLONE,
+            parameters={"clone_id": str(clone_id)},
+        )
+    except Exception as exc:  # noqa: BLE001 — a dispatch failure is not a lost row
+        # The clone record exists and derives non-terminal, so this shows up as
+        # a clone that never progresses rather than a lost operation. The
+        # documented recovery is the FR-008 escape hatch: delete the backing
+        # capture once it is terminal and the clone ends FAILED, attributed.
+        clone_dispatched = False
+        logger.warning(
+            "env_clone_dispatch_error environment_clone_id={} clone record created "
+            "but the clone flow was not triggered: {}",
+            clone_id,
+            exc,
+        )
+
+    skipped = sum(
+        1
+        for result in results
+        if result.outcome is EnvironmentCloneDeploymentOutcome.SKIPPED
+    )
+
+    async with uow:
+        refreshed = await uow.environment_clones.get(clone_id)
+    if refreshed is None:
+        # Deleting the source environment removes its non-terminal clone
+        # records (research D9), so an operator really can delete this row
+        # underneath the fan-out. NOT_FOUND, not an internal error — same
+        # contract as ``create_environment_backup``.
+        logger.warning(
+            "env_clone_deleted_during_fanout source_environment_id={} "
+            "environment_clone_id={}",
+            source.id,
+            clone_id,
+        )
+        raise EnvironmentCloneNotFoundError(
+            f"Environment clone {clone_id} was deleted while its registration "
+            "was still dispatching"
+        )
+
+    # One audit entry per clone registration, matching
+    # ``env_backup_fanout_dispatched`` (ADR-0012/0055 convention).
+    logger.info(
+        "env_clone_dispatched source_environment_id={} environment_clone_id={} "
+        "environment_backup_id={} target_name={} evaluated={} pending={} "
+        "skipped={} capture_dispatched={} capture_conflict={} "
+        "capture_dispatch_failed={} flow_dispatched={}",
+        source.id,
+        clone_id,
+        environment_backup_id,
+        name,
+        registration.evaluated,
+        len(results) - skipped,
+        skipped,
+        dispatched,
+        len(registration.errors),
+        dispatch_failed,
+        clone_dispatched,
+    )
+
+    return refreshed

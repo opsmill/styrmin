@@ -25,6 +25,8 @@ from styrmin_backend.domain.models import (
     Deployment as DeploymentEntity,
     Instance as InstanceEntity,
     InstanceStatus as InstanceStatusEntity,
+    Task,
+    TaskType,
 )
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.environments import (
@@ -603,11 +605,13 @@ async def test_fanout_dispatches_to_all_fresh_deployments(
     assert len(fanout_log_calls) == 1
     args = fanout_log_calls[0].args
     # args[0]=template, args[1..]=positional substitutions
-    # (environment_id, evaluated, dispatched, skipped_noop, dispatch_failed)
+    # (environment_id, evaluated, dispatched, skipped_noop,
+    #  skipped_restoring, dispatch_failed)
     assert args[2] == 3  # evaluated
     assert args[3] == 3  # dispatched
     assert args[4] == 0  # skipped_noop
-    assert args[5] == 0  # dispatch_failed
+    assert args[5] == 0  # skipped_restoring
+    assert args[6] == 0  # dispatch_failed
 
 
 async def test_fanout_skips_deployments_already_at_config(
@@ -668,7 +672,8 @@ async def test_fanout_skips_deployments_already_at_config(
     assert args[2] == 3  # evaluated
     assert args[3] == 1  # dispatched
     assert args[4] == 2  # skipped_noop
-    assert args[5] == 0  # dispatch_failed
+    assert args[5] == 0  # skipped_restoring
+    assert args[6] == 0  # dispatch_failed
 
 
 async def test_fanout_excludes_tombstoned_deployments(
@@ -833,7 +838,9 @@ async def test_fanout_per_deployment_failure_isolation(
     async def fake_redeploy(deployment, uow):  # noqa: ARG001
         if deployment.name == "dep-b":
             raise RuntimeError("simulated render failure on B")
-        return None
+        # A dispatched redeploy returns its Task; only a ``RESTORING``
+        # deployment returns None, which the fanout counts separately.
+        return Task.create(type=TaskType.UPDATE_INSTANCE, deployment_id=deployment.id)
 
     redeploy_mock = mocker.patch(
         "styrmin_backend.services.environments.redeploy_for_environment_update",
@@ -872,7 +879,8 @@ async def test_fanout_per_deployment_failure_isolation(
     assert args[2] == 3  # evaluated
     assert args[3] == 2  # dispatched
     assert args[4] == 0  # skipped_noop
-    assert args[5] == 1  # dispatch_failed
+    assert args[5] == 0  # skipped_restoring
+    assert args[6] == 1  # dispatch_failed
 
     # The env-config row persisted despite B's failure.
     refreshed = await uow.environments.get(environment.id)

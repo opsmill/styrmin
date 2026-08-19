@@ -78,9 +78,52 @@ async def generate_context_from_deployment_id(
         return await generate_context_from_deployment(deployment, uow)
 
 
+def _resolve_release_reference(
+    deployment: Deployment, release_reference: str | None
+) -> str:
+    """Decide the Helm release name for a deployment's next context.
+
+    A deployment's Helm release name is chosen **once** and never changes:
+    renaming it would orphan the live release and make the next Flux
+    reconciliation *install* a second release over objects Helm already owns.
+    Recomputing it from the deployment id on every context regeneration was
+    only ever correct because the computed value happened to match — this
+    resolution order makes the intent explicit.
+
+    Order:
+
+    1. an explicit ``release_reference`` (the clone flow, creating a
+       counterpart that adopts the *source's* release name — 010 research D2);
+    2. otherwise the value the deployment's active instance already carries,
+       so an upgrade / config fan-out never renames a live release;
+    3. otherwise ``styrmin-<deployment id>`` — the first instance of an
+       ordinary deployment, unchanged from the shipped behaviour.
+    """
+    if release_reference:
+        return release_reference
+    active = deployment.active_instance
+    if active is not None:
+        existing = getattr(
+            getattr(active.context, "instance", None), "release_reference", None
+        )
+        if existing:
+            return str(existing)
+    return get_kubernetes_reference(deployment.id)
+
+
 async def generate_context_from_deployment(
-    deployment: Deployment, uow: UnitOfWork
+    deployment: Deployment, uow: UnitOfWork, release_reference: str | None = None
 ) -> GlobalContext:
+    """Build the resolved :class:`GlobalContext` for a deployment.
+
+    Args:
+        deployment: The deployment to resolve a context for.
+        uow: Unit of work supplying the repositories.
+        release_reference: Override the Helm release name instead of deriving
+            it (see :func:`_resolve_release_reference`). Only the environment
+            clone path passes it, for a counterpart that adopts the source's
+            release; every other caller omits it.
+    """
     # FIXME: Fix the context generation
     logger.debug("Generating context for deployment: {}", deployment.id)
     async with uow:
@@ -127,7 +170,9 @@ async def generate_context_from_deployment(
                 )
 
         namespace = get_kubernetes_reference(deployment.id)
-        release_reference = get_kubernetes_reference(deployment.id)
+        resolved_release_reference = _resolve_release_reference(
+            deployment, release_reference
+        )
         context_input = ContextInput.model_validate(
             {
                 "config": {
@@ -138,7 +183,7 @@ async def generate_context_from_deployment(
                 "instance": {
                     "deployment_id": deployment.id,
                     "namespace": namespace,
-                    "release_reference": release_reference,
+                    "release_reference": resolved_release_reference,
                 },
                 "application": {
                     "name": application_driver.name,

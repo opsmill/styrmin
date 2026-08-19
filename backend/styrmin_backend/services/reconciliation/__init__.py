@@ -17,9 +17,18 @@ from styrmin_backend.workflows.models import PrefectAction
 async def generate_instance_from_deployment(
     deployment: Deployment,
     uow: UnitOfWork,
+    release_reference: str | None = None,
 ) -> Instance:
-    """Generate an instance from a deployment."""
-    context = await generate_context_from_deployment(deployment=deployment, uow=uow)
+    """Generate an instance from a deployment.
+
+    ``release_reference`` is forwarded to
+    :func:`~styrmin_backend.services.context.generate_context_from_deployment`;
+    only an environment clone's counterpart passes it (it adopts the source
+    deployment's Helm release name — 010 research D2).
+    """
+    context = await generate_context_from_deployment(
+        deployment=deployment, uow=uow, release_reference=release_reference
+    )
 
     instance = Instance.create(
         application_version=deployment.application_version,

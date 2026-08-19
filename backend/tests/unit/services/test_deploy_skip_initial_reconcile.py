@@ -120,9 +120,13 @@ def _make_instance(deployment: Deployment) -> Instance:
 def stub_reconcile(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     """Stub the context resolver and the Prefect dispatch boundary."""
     calls: dict[str, list] = {"generate": [], "apply_state": []}
+    calls["release_reference"] = []
 
-    async def _generate(*, deployment: Deployment, uow: object) -> Instance:
+    async def _generate(
+        *, deployment: Deployment, uow: object, release_reference: str | None = None
+    ) -> Instance:
         calls["generate"].append(deployment.id)
+        calls["release_reference"].append(release_reference)
         return _make_instance(deployment)
 
     async def _apply_state(
