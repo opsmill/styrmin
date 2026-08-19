@@ -1,11 +1,12 @@
 ---
-description: Run the speckit implementation phase chunk-by-chunk in clean-context
-  subagents, then review, then produce a final report. Picks up from an existing tasks.md.
+name: speckit-opsmill-implement
+description: Run the speckit implementation phase chunk-by-chunk in clean-context subagents, then review, then produce a final report. Picks up from an existing tasks.md.
+compatibility: Requires spec-kit project structure with .specify/ directory
+metadata:
+  author: github-spec-kit
+  source: opsmill:commands/implement.md
 ---
 
-
-<!-- Extension: opsmill -->
-<!-- Config: .specify/extensions/opsmill/ -->
 ## User Input
 
 ```text
