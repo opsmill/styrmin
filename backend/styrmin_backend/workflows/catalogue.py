@@ -259,6 +259,17 @@ class PrefectCatalogue:
         )
 
         self.add_workflow_definition(
+            action=PrefectAction.EXECUTE_ENVIRONMENT_CLONE,
+            workflow=LocalSourceWorkflowDefinition(
+                name="execute_environment_clone",
+                type=WorkflowType.INTERNAL,
+                module="styrmin_backend.workflows.templates.clone",
+                function="execute_environment_clone_workflow",
+                set_directory="/source/backend/",
+            ),
+        )
+
+        self.add_workflow_definition(
             action=PrefectAction.EXECUTE_VELERO_BACKUP,
             workflow=LocalSourceWorkflowDefinition(
                 name="execute_velero_backup",

@@ -764,7 +764,11 @@ async def upgrade_instance_crd(
     # prematurely flipping Deployment.status to RUNNING.
     await patch_custom_resource_status(
         plural=CRD_PLURAL,
-        reference=release_reference,
+        # The CR is named after its namespace, not after the release reference
+        # (``build_styrmin_deployment_body``). The two are the same string for an
+        # ordinary deployment and differ for a clone counterpart, which adopts
+        # the source's Helm release name (010 research D2).
+        reference=namespace,
         group=CRD_GROUP,
         version=CRD_VERSION,
         namespace=namespace,

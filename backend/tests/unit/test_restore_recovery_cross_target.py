@@ -28,6 +28,22 @@ from styrmin_backend.operator.pipeline import PhaseResult
 KOPF_ANNOTATION = "kopf.zalando.org/last-handled-configuration"
 
 
+def _merge_patch(target: dict[str, Any], patch: dict[str, Any]) -> None:
+    """Apply an RFC 7386 merge patch in place (one real behaviour that matters).
+
+    A shallow ``dict.update`` would let ``{"metadata": {"finalizers": []}}``
+    wipe the object's name and namespace, which is exactly the kind of thing the
+    finalizer-clearing test must not accidentally rely on.
+    """
+    for key, value in patch.items():
+        if value is None:
+            target.pop(key, None)
+        elif isinstance(value, dict) and isinstance(target.get(key), dict):
+            _merge_patch(target[key], value)
+        else:
+            target[key] = value
+
+
 class FakeApiException(Exception):
     """Stand-in for ``kubernetes_asyncio.client.ApiException``."""
 
@@ -91,7 +107,7 @@ class FakeCustomObjectsApi:
         self._record("patch", name)
         assert _content_type == "application/merge-patch+json"
         existing = self._client.objects.setdefault((namespace, name), {})
-        existing.update(body)
+        _merge_patch(existing, body)
         return existing
 
     async def delete_namespaced_custom_object(
@@ -144,8 +160,31 @@ def phase_spy(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         return PhaseResult(success=True)
 
     monkeypatch.setattr(restore_recovery, "execute_phase_prerequisites", _phase)
+    monkeypatch.setattr(restore_recovery, "execute_phase_helmrelease", _phase)
     monkeypatch.setattr(restore_recovery, "execute_phase_services", _phase)
     return seen
+
+
+@pytest.fixture
+def phase_order(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record which pipeline phases ran, in order."""
+    order: list[str] = []
+
+    def _spy(label: str):
+        async def _phase(*, crd_spec: dict[str, Any], namespace: str) -> PhaseResult:
+            order.append(label)
+            return PhaseResult(success=True)
+
+        return _phase
+
+    monkeypatch.setattr(
+        restore_recovery, "execute_phase_prerequisites", _spy("prerequisites")
+    )
+    monkeypatch.setattr(
+        restore_recovery, "execute_phase_helmrelease", _spy("helmrelease")
+    )
+    monkeypatch.setattr(restore_recovery, "execute_phase_services", _spy("services"))
+    return order
 
 
 NAMESPACE = "styrmin-counterpart-id"
@@ -161,6 +200,9 @@ def restored_crd() -> dict[str, Any]:
         "metadata": {
             "name": RESTORED_NAME,
             "namespace": NAMESPACE,
+            # Velero restores finalizers along with the rest of the metadata,
+            # so the restored CR arrives still holding kopf's.
+            "finalizers": ["kopf.zalando.org/KopfFinalizerMarker"],
             "annotations": {
                 KOPF_ANNOTATION: '{"spec":{"deploymentId":"source-id"}}',
                 "unrelated.io/keep": "yes",
@@ -174,13 +216,20 @@ def restored_crd() -> dict[str, Any]:
 
 
 def counterpart_body() -> dict[str, Any]:
+    """The counterpart's own CR body, as ``_build_counterpart_crd_body`` renders it.
+
+    Note the deliberate split (010 research D2): the CR is named after the
+    counterpart's namespace, while ``releaseReference`` is the **source's** —
+    the counterpart adopts the restored Helm release rather than installing a
+    second one over objects Helm already owns.
+    """
     return {
         "apiVersion": "styrmin.io/v1alpha1",
         "kind": "StyrminDeployment",
         "metadata": {"name": COUNTERPART_NAME, "namespace": NAMESPACE},
         "spec": {
             "deploymentId": "counterpart-id",
-            "releaseReference": COUNTERPART_NAME,
+            "releaseReference": RESTORED_NAME,
         },
     }
 
@@ -203,13 +252,14 @@ async def test_counterpart_identity_replaces_the_restored_source_named_crd(
     assert (NAMESPACE, COUNTERPART_NAME) in api_client.objects
     applied = api_client.objects[(NAMESPACE, COUNTERPART_NAME)]
     assert applied["spec"]["deploymentId"] == "counterpart-id"
-    assert applied["spec"]["releaseReference"] == COUNTERPART_NAME
+    # The adopted Helm release keeps the source's name — that is the point.
+    assert applied["spec"]["releaseReference"] == RESTORED_NAME
     # ... and the restored source-named CR is gone.
     assert (NAMESPACE, RESTORED_NAME) not in api_client.objects
 
-    # Both pipeline phases ran against the counterpart's spec, never the
+    # All three pipeline phases ran against the counterpart's spec, never the
     # restored source spec.
-    assert len(phase_spy) == 2
+    assert len(phase_spy) == 3
     assert all(spec["deploymentId"] == "counterpart-id" for spec in phase_spy)
 
     # The counterpart CR is the one finalized to Ready/Running.
@@ -291,10 +341,11 @@ async def test_existing_counterpart_crd_is_patched_not_duplicated(
     )
 
     applied = api_client.objects[(NAMESPACE, COUNTERPART_NAME)]
-    assert applied["spec"] == {
-        "deploymentId": "counterpart-id",
-        "releaseReference": COUNTERPART_NAME,
-    }
+    # A merge patch overwrites the fields the counterpart body carries; a
+    # leftover key it does not mention survives here and is pruned server-side
+    # by the CRD's structural schema in a real cluster.
+    assert applied["spec"]["deploymentId"] == "counterpart-id"
+    assert applied["spec"]["releaseReference"] == RESTORED_NAME
     assert ("patch", COUNTERPART_NAME) in api_client.calls
 
 
@@ -398,3 +449,118 @@ async def test_in_place_reapply_and_finalize_is_unchanged(
     assert status["phase"] == DeploymentPhase.READY.value
     assert status["displayState"] == DisplayState.RUNNING.value
     assert [verb for verb, _ in api_client.calls] == ["get", "patch_status"]
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_cross_target_reruns_the_helmrelease_phase_in_pipeline_order(
+    phase_order: list[str],
+) -> None:
+    """The counterpart's HelmRelease is re-rendered, between the other phases.
+
+    The restored HelmRelease was rendered from the *source's* context (source
+    FQDNs, source ingress hosts). Skipping phase 2 would leave the cloned
+    namespace serving the source's identity forever (010 research D2.4), and
+    running it out of order would upsert a HelmRelease before its Secrets and
+    NetworkPolicies exist.
+    """
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+
+    await restore_recovery.reapply_with_counterpart_identity(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+        counterpart_body(),
+    )
+
+    assert phase_order == ["prerequisites", "helmrelease", "services"]
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_in_place_recovery_does_not_touch_the_helmrelease(
+    phase_order: list[str],
+) -> None:
+    """The in-place contract is unchanged: no phase 2, as before."""
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+
+    await restore_recovery.reapply_and_finalize(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+    )
+
+    assert phase_order == ["prerequisites", "services"]
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_restored_crd_finalizers_are_cleared_before_it_is_deleted(
+    phase_spy: list[dict[str, Any]],
+) -> None:
+    """Deleting the restored CR with kopf's finalizer would destroy the data.
+
+    kopf's ``on.delete`` handler for a ``StyrminDeployment`` runs
+    ``_teardown_owned_resources``, which deletes the HelmRelease named by
+    ``spec.releaseReference`` — for a cross-target restore that is the release
+    keeping the counterpart's chart (and its just-restored volumes) alive. The
+    finalizer must be gone before the delete so the handler never runs.
+    """
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+
+    await restore_recovery.reapply_with_counterpart_identity(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+        counterpart_body(),
+    )
+
+    restored_patches = [
+        index
+        for index, (verb, name) in enumerate(api_client.calls)
+        if verb == "patch" and name == RESTORED_NAME
+    ]
+    delete_index = api_client.calls.index(("delete", RESTORED_NAME))
+    assert restored_patches, "the restored CR's finalizers were never cleared"
+    assert max(restored_patches) < delete_index
+    assert (NAMESPACE, RESTORED_NAME) not in api_client.objects
+
+
+@pytest.mark.anyio
+async def test_restored_crd_is_not_deleted_while_finalizers_remain(
+    monkeypatch: pytest.MonkeyPatch,
+    phase_spy: list[dict[str, Any]],
+) -> None:
+    """A finalizer that survives the clear aborts the recovery instead of deleting.
+
+    Failing the restore is recoverable (discard the cloned environment and
+    re-clone); letting kopf's teardown run is not.
+    """
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+
+    class StubbornApi(FakeCustomObjectsApi):
+        async def patch_namespaced_custom_object(self, **kwargs: Any) -> dict[str, Any]:
+            # Accept the patch, then put the finalizer straight back — the
+            # observable shape of another controller re-adding it.
+            result = await super().patch_namespaced_custom_object(**kwargs)
+            if kwargs["name"] == RESTORED_NAME:
+                result["metadata"]["finalizers"] = [
+                    "kopf.zalando.org/KopfFinalizerMarker"
+                ]
+            return result
+
+    class Module(FakeK8sClientModule):
+        CustomObjectsApi = StubbornApi
+
+    monkeypatch.setattr(restore_recovery, "k8s_client", Module)
+
+    with pytest.raises(RuntimeError, match="Refusing to delete"):
+        await restore_recovery.reapply_with_counterpart_identity(
+            api_client,  # type: ignore[arg-type]
+            NAMESPACE,
+            RESTORED_NAME,
+            counterpart_body(),
+        )
+
+    assert ("delete", RESTORED_NAME) not in api_client.calls
+    assert (NAMESPACE, RESTORED_NAME) in api_client.objects

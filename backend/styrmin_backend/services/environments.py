@@ -14,6 +14,7 @@ from styrmin_backend.db.models import Environment
 from styrmin_backend.domain.models import Deployment
 from styrmin_backend.services.backup.environment import (
     delete_environment_backups_for_environment,
+    guard_no_clone_occupying_environment,
 )
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.clusters import resolve_cluster
@@ -284,8 +285,18 @@ async def update_environment(
     distinction between "no rows to consider" and "rows considered, all
     skipped".
 
+    An environment a non-terminal clone is still building is refused outright
+    (010 research D8): its counterpart deployments are mid-restore, and this
+    fan-out's ``redeploy_for_environment_update`` would race the restore flow's
+    namespace delete-and-wait for the same objects — the one race ADR-0055
+    decision 4 excluded by construction and cannot exclude here. Only the clone
+    half of the environment-level guard applies: an in-flight environment
+    backup or restore has never blocked a config update and must not start to.
+
     Raises:
         EnvironmentNotFoundError: When ``environment_id`` does not exist.
+        EnvironmentOperationInProgressError: When a non-terminal clone is still
+            building this environment (010 research D8).
         InvalidContextError: When the new config fails ``EnvironmentConfig``
             validation (e.g. invalid env var names, oversized dicts).
     """
@@ -295,6 +306,11 @@ async def update_environment(
             raise EnvironmentNotFoundError(
                 f"Environment with id {environment_id} not found."
             )
+
+        # Before the ``config is None`` short-circuit on purpose: "busy" is a
+        # property of the environment, not of the payload, so a no-op update
+        # must not read as accepted while a clone owns it.
+        await guard_no_clone_occupying_environment(environment_id, uow)
 
         if config is None:
             # Idempotent no-op: nothing to validate, nothing to fan out.
@@ -331,6 +347,7 @@ async def update_environment(
             "evaluated": 0,
             "dispatched": 0,
             "skipped_noop": 0,
+            "skipped_restoring": 0,
             "dispatch_failed": 0,
         }
         for deployment in deployments:
@@ -346,7 +363,7 @@ async def update_environment(
                 _emit_fanout_metric(environment_id, "skipped_noop")
                 continue
             try:
-                await redeploy_for_environment_update(deployment, uow)
+                task = await redeploy_for_environment_update(deployment, uow)
             except Exception:  # noqa: BLE001 — broad catch is intentional for per-deployment isolation (FR-008)
                 counts["dispatch_failed"] += 1
                 logger.exception(
@@ -355,6 +372,16 @@ async def update_environment(
                     deployment.id,
                 )
                 _emit_fanout_metric(environment_id, "dispatch_failed")
+                continue
+            if task is None:
+                # ``redeploy_for_environment_update`` returns None only for a
+                # ``RESTORING`` deployment, which it deliberately leaves alone
+                # (010 research D8). Counting that as ``dispatched`` would have
+                # the audit line claim a redeploy that never happened — most
+                # visibly for a clone's counterparts, which sit in ``RESTORING``
+                # for the whole clone.
+                counts["skipped_restoring"] += 1
+                _emit_fanout_metric(environment_id, "skipped_restoring")
                 continue
             counts["dispatched"] += 1
             _emit_fanout_metric(environment_id, "dispatched")
@@ -383,11 +410,13 @@ async def update_environment(
         # produce an entry with ``dispatched=0``.
         logger.info(
             "env_config_fanout_dispatched environment_id={} evaluated={} "
-            "dispatched={} skipped_noop={} dispatch_failed={}",
+            "dispatched={} skipped_noop={} skipped_restoring={} "
+            "dispatch_failed={}",
             environment_id,
             counts["evaluated"],
             counts["dispatched"],
             counts["skipped_noop"],
+            counts["skipped_restoring"],
             counts["dispatch_failed"],
         )
 

@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from styrmin_backend.db.models import (
     Backup,
     BackupStatus,
+    Environment,
     EnvironmentBackup,
     EnvironmentRestore,
     RestoreStatus,
@@ -153,6 +154,14 @@ class DeploymentSnapshot(BaseModel):
     #: whose resolved name differs from the driver default. ``None`` when the
     #: deployment overrode nothing (or the snapshot predates this field).
     service_name_overrides: dict[str, str] | None = None
+    #: The deployment's Helm release name at capture time. Additive and
+    #: nullable: snapshots taken before this field existed read as ``None``,
+    #: which means "the conventional ``styrmin-<deployment id>``". A clone's
+    #: counterpart is created with this exact value so it **adopts** the
+    #: restored Helm release instead of installing a second one over objects
+    #: Helm already owns (010 research D2). Reading it back matters for a clone
+    #: of a clone, whose source is itself already an adopter.
+    release_reference: str | None = None
 
 
 class ConstituentError(BaseModel):
@@ -260,6 +269,10 @@ async def _capture_deployment_snapshot(
     :func:`create_services_for_deployment` takes — passing identity mappings
     would put driver-default names through the override validation path they
     never went through originally.
+
+    The instance's ``release_reference`` is captured for the same reason: the
+    Helm release inside the backed-up namespace is named after it, and a clone
+    counterpart has to adopt that exact name (010 research D2).
     """
     instance = deployment.active_instance
     assert instance is not None, (
@@ -288,6 +301,13 @@ async def _capture_deployment_snapshot(
         if service.resolved_name != service.driver_service_name
     }
 
+    # The Helm release name as it actually is in the cluster, not as it would
+    # be recomputed: the source may itself be a clone counterpart that adopted
+    # another deployment's release (010 research D2).
+    release_reference = getattr(
+        getattr(instance.context, "instance", None), "release_reference", None
+    )
+
     return DeploymentSnapshot(
         deployment_id=deployment.id,
         deployment_name=deployment.name,
@@ -299,6 +319,7 @@ async def _capture_deployment_snapshot(
         config=deployment.config,
         parameters=deployment.parameters or None,
         service_name_overrides=service_name_overrides or None,
+        release_reference=str(release_reference) if release_reference else None,
     )
 
 
@@ -307,10 +328,13 @@ async def _guard_no_environment_operation_in_progress(
 ) -> None:
     """Enforce one environment-level operation per environment (research.md D6).
 
-    Both directions are checked: an in-flight environment backup and an
-    in-flight environment restore each block a new operation (spec FR-009).
-    "In flight" is an EXISTS over the constituent rows, so the guard can never
-    disagree with reality.
+    Three directions are checked: an in-flight environment backup, an in-flight
+    environment restore, and an environment clone occupying this environment
+    each block a new operation (spec FR-009, 010 research D8). The first two are
+    an EXISTS over the constituent rows, so they can never disagree with
+    reality; clone terminality is not EXISTS-able, so
+    :func:`~styrmin_backend.services.backup.clone.find_clone_occupying_environment`
+    derives it in Python over a tiny candidate set.
     """
     in_flight_backup = await uow.environment_backups.has_in_progress_environment_backup(
         environment_id
@@ -330,6 +354,34 @@ async def _guard_no_environment_operation_in_progress(
         raise EnvironmentOperationInProgressError(
             operation_id=str(in_flight_restore.id),
             operation_kind="environment_restore",
+        )
+
+    await guard_no_clone_occupying_environment(environment_id, uow)
+
+
+async def guard_no_clone_occupying_environment(
+    environment_id: UUID, uow: UnitOfWork
+) -> None:
+    """Refuse the operation when a clone occupies ``environment_id`` (010 D8).
+
+    Deliberately importable on its own so ``update_environment`` can apply the
+    clone half of the guard without also inheriting the backup/restore halves —
+    a config update has never been blocked by an in-flight environment backup
+    and must not start being.
+
+    The import is deferred because ``services.backup.clone`` imports this
+    module for the shared status vocabulary; hoisting it would make the two
+    modules a cycle.
+    """
+    from styrmin_backend.services.backup.clone import (
+        find_clone_occupying_environment,
+    )
+
+    occupying = await find_clone_occupying_environment(environment_id, uow)
+    if occupying is not None:
+        raise EnvironmentOperationInProgressError(
+            operation_id=str(occupying.id),
+            operation_kind="environment_clone",
         )
 
 
@@ -380,6 +432,172 @@ class _PendingBackupDispatch(NamedTuple):
 
     backup_id: UUID
     deployment_id: UUID
+
+
+class CaptureRegistration(NamedTuple):
+    """Everything one capture wrote inside the caller's open transaction.
+
+    Returned by :func:`register_environment_backup` so the caller can commit
+    once and only then dispatch — the ADR-0012 ordering rule. ``evaluated``
+    counts every deployment considered (including the internal /
+    instance-less ones and the ones an explicit selection excluded) so the
+    audit line can distinguish "nothing to capture" from "everything filtered
+    out".
+    """
+
+    environment_backup: EnvironmentBackup
+    pending_dispatch: list[_PendingBackupDispatch]
+    errors: list[ConstituentError]
+    evaluated: int
+
+
+async def register_environment_backup(
+    environment: Environment,
+    uow: UnitOfWork,
+    name: str | None = None,
+    deployment_ids: list[UUID] | None = None,
+) -> CaptureRegistration:
+    """Write a whole capture into the caller's transaction, dispatching nothing.
+
+    Extracted from :func:`create_environment_backup` so the environment clone
+    can register its capture in the **same** transaction as the clone record
+    (010 research D4) without duplicating the snapshot/constituent logic. The
+    caller owns the concurrency guard, the commit, and the fan-out dispatch.
+
+    Must be called inside an ``async with uow`` block: the constituents join
+    that transaction through :class:`_SharedTransaction` rather than opening
+    (and committing) one each.
+
+    Args:
+        environment: The already-loaded environment row being snapshotted.
+        uow: Unit of work supplying the repositories, transaction already open.
+        name: Optional snapshot name. Defaults to ``styrmin-envbackup-<id>``.
+        deployment_ids: Optional selection — see
+            :func:`create_environment_backup` for the full contract.
+
+    Returns:
+        The capture registration; nothing has been dispatched or committed.
+    """
+    environment_id = environment.id
+    deployments = await uow.deployments.find_all_by_environment(environment_id)
+    eligible = [d for d in deployments if is_eligible_for_environment_backup(d)]
+    if deployment_ids is not None:
+        selected = set(deployment_ids)
+        eligible = [d for d in eligible if d.id in selected]
+    snapshots = [
+        await _capture_deployment_snapshot(deployment, uow) for deployment in eligible
+    ]
+
+    # The id is generated up front so the auto-generated name is final
+    # *before* the INSERT. ``EnvironmentBackup.name`` is unique, so writing
+    # a shared sentinel and renaming afterwards makes two concurrently
+    # auto-named snapshots — even in different environments — collide on
+    # that index.
+    environment_backup_id = uuid4()
+    environment_backup = await uow.environment_backups.create(
+        EnvironmentBackup(
+            id=environment_backup_id,
+            name=name or f"styrmin-envbackup-{environment_backup_id}",
+            environment_id=environment_id,
+            environment_config=environment.config,
+            deployment_snapshots=[
+                snapshot.model_dump(mode="json") for snapshot in snapshots
+            ]
+            or None,
+        )
+    )
+
+    errors: list[ConstituentError] = []
+    pending_dispatch: list[_PendingBackupDispatch] = []
+    # The constituents join this transaction instead of opening one each.
+    constituent_uow = _SharedTransaction(uow)
+
+    for snapshot in snapshots:
+        try:
+            _, target_namespace, component_configs = await resolve_backup_target(
+                snapshot.instance_id, constituent_uow
+            )
+            backup = await create_backup(
+                instance_id=snapshot.instance_id,
+                uow=constituent_uow,
+                target_namespace=target_namespace,
+                component_configs=component_configs,
+                environment_backup_id=environment_backup_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — per-constituent isolation (FR-005)
+            logger.exception(
+                "env_backup_constituent_error environment_backup_id={} "
+                "deployment_id={}",
+                environment_backup_id,
+                snapshot.deployment_id,
+            )
+            errors.append(
+                ConstituentError(
+                    deployment_id=snapshot.deployment_id,
+                    deployment_name=snapshot.deployment_name,
+                    error=str(exc),
+                )
+            )
+            continue
+
+        pending_dispatch.append(
+            _PendingBackupDispatch(
+                backup_id=backup.id, deployment_id=snapshot.deployment_id
+            )
+        )
+
+    if errors:
+        environment_backup.constituent_errors = [
+            error.model_dump(mode="json") for error in errors
+        ]
+
+    return CaptureRegistration(
+        environment_backup=environment_backup,
+        pending_dispatch=pending_dispatch,
+        errors=errors,
+        evaluated=len(deployments),
+    )
+
+
+async def dispatch_constituent_backups(
+    pending_dispatch: Sequence[_PendingBackupDispatch],
+    prefect_manager: PrefectManager,
+    environment_backup_id: UUID,
+) -> tuple[int, int]:
+    """Dispatch one ``EXECUTE_BACKUP`` per committed constituent.
+
+    Shared by :func:`create_environment_backup` and the clone registration, so
+    both report dispatch failures the same way.
+
+    Returns:
+        ``(dispatched, dispatch_failed)``.
+    """
+    dispatched = 0
+    dispatch_failed = 0
+    for pending in pending_dispatch:
+        try:
+            await prefect_manager.run_action(
+                action=PrefectAction.EXECUTE_BACKUP,
+                parameters={
+                    "backup_id": str(pending.backup_id),
+                    "deployment_id": str(pending.deployment_id),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — a dispatch failure is not a lost row
+            # The Backup row exists and stays PENDING, so this is visible as a
+            # non-terminal constituent rather than a recorded creation error —
+            # exactly how the per-instance ``createBackup`` mutation behaves.
+            dispatch_failed += 1
+            logger.warning(
+                "env_backup_dispatch_error environment_backup_id={} backup_id={} "
+                "backup record created but Velero execution not triggered: {}",
+                environment_backup_id,
+                pending.backup_id,
+                exc,
+            )
+            continue
+        dispatched += 1
+    return dispatched, dispatch_failed
 
 
 @inject(cast_result=False)  # type: ignore[arg-type]
@@ -458,110 +676,23 @@ async def create_environment_backup(
 
         await _guard_no_environment_operation_in_progress(environment_id, uow)
 
-        deployments = await uow.deployments.find_all_by_environment(environment_id)
-        eligible = [d for d in deployments if is_eligible_for_environment_backup(d)]
-        if deployment_ids is not None:
-            selected = set(deployment_ids)
-            eligible = [d for d in eligible if d.id in selected]
-        snapshots = [
-            await _capture_deployment_snapshot(deployment, uow)
-            for deployment in eligible
-        ]
-
-        # The id is generated up front so the auto-generated name is final
-        # *before* the INSERT. ``EnvironmentBackup.name`` is unique, so writing
-        # a shared sentinel and renaming afterwards makes two concurrently
-        # auto-named snapshots — even in different environments — collide on
-        # that index.
-        environment_backup_id = uuid4()
-        environment_backup = await uow.environment_backups.create(
-            EnvironmentBackup(
-                id=environment_backup_id,
-                name=name or f"styrmin-envbackup-{environment_backup_id}",
-                environment_id=environment_id,
-                environment_config=environment.config,
-                deployment_snapshots=[
-                    snapshot.model_dump(mode="json") for snapshot in snapshots
-                ]
-                or None,
-            )
+        registration = await register_environment_backup(
+            environment=environment,
+            uow=uow,
+            name=name,
+            deployment_ids=deployment_ids,
         )
-
-        errors: list[ConstituentError] = []
-        pending_dispatch: list[_PendingBackupDispatch] = []
-        # The constituents join this transaction instead of opening one each.
-        constituent_uow = _SharedTransaction(uow)
-
-        for snapshot in snapshots:
-            try:
-                _, target_namespace, component_configs = await resolve_backup_target(
-                    snapshot.instance_id, constituent_uow
-                )
-                backup = await create_backup(
-                    instance_id=snapshot.instance_id,
-                    uow=constituent_uow,
-                    target_namespace=target_namespace,
-                    component_configs=component_configs,
-                    environment_backup_id=environment_backup_id,
-                )
-            except Exception as exc:  # noqa: BLE001 — per-constituent isolation (FR-005)
-                logger.exception(
-                    "env_backup_constituent_error environment_backup_id={} "
-                    "deployment_id={}",
-                    environment_backup_id,
-                    snapshot.deployment_id,
-                )
-                errors.append(
-                    ConstituentError(
-                        deployment_id=snapshot.deployment_id,
-                        deployment_name=snapshot.deployment_name,
-                        error=str(exc),
-                    )
-                )
-                continue
-
-            pending_dispatch.append(
-                _PendingBackupDispatch(
-                    backup_id=backup.id, deployment_id=snapshot.deployment_id
-                )
-            )
-
-        if errors:
-            environment_backup.constituent_errors = [
-                error.model_dump(mode="json") for error in errors
-            ]
+        environment_backup = registration.environment_backup
+        environment_backup_id = environment_backup.id
 
         # The single commit: from here on the capture is complete and durable,
         # and nothing has been dispatched yet (ADR-0012).
         await uow.commit()
         await uow.session.refresh(environment_backup)
 
-    dispatched = 0
-    dispatch_failed = 0
-
-    for pending in pending_dispatch:
-        try:
-            await prefect_manager.run_action(
-                action=PrefectAction.EXECUTE_BACKUP,
-                parameters={
-                    "backup_id": str(pending.backup_id),
-                    "deployment_id": str(pending.deployment_id),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001 — a dispatch failure is not a lost row
-            # The Backup row exists and stays PENDING, so this is visible as a
-            # non-terminal constituent rather than a recorded creation error —
-            # exactly how the per-instance ``createBackup`` mutation behaves.
-            dispatch_failed += 1
-            logger.warning(
-                "env_backup_dispatch_error environment_backup_id={} backup_id={} "
-                "backup record created but Velero execution not triggered: {}",
-                environment_backup_id,
-                pending.backup_id,
-                exc,
-            )
-            continue
-        dispatched += 1
+    dispatched, dispatch_failed = await dispatch_constituent_backups(
+        registration.pending_dispatch, prefect_manager, environment_backup_id
+    )
 
     async with uow:
         refreshed = await uow.environment_backups.get(environment_backup_id)
@@ -590,9 +721,9 @@ async def create_environment_backup(
         "evaluated={} dispatched={} conflict={} dispatch_failed={}",
         environment_id,
         environment_backup_id,
-        len(deployments),
+        registration.evaluated,
         dispatched,
-        len(errors),
+        len(registration.errors),
         dispatch_failed,
     )
 

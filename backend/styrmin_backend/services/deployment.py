@@ -1097,6 +1097,7 @@ async def deploy_application(
     service_name_overrides: dict[str, str] | None = None,
     driver_version_id: UUID | None = None,
     skip_initial_reconcile: bool = False,
+    release_reference: str | None = None,
 ) -> Task | None:
     """Instantiate an application in the given environment.
 
@@ -1132,6 +1133,15 @@ async def deploy_application(
             no Task is dispatched. The ``RESTORING`` state also makes the
             existing restoring-deployment mutation guards protect the
             counterpart until its restore lands (research D8).
+        release_reference: Pin the deployment's Helm release name instead of
+            deriving ``styrmin-<deployment id>``. Only the clone flow passes
+            it: a counterpart **adopts the source's release name** so the
+            restored Helm release, its storage record and the
+            ``meta.helm.sh/release-*`` ownership annotations on the restored
+            chart objects all agree, and Flux performs an *upgrade* rather
+            than an install that would fail Helm's ownership check (research
+            D2). The value sticks for the deployment's whole life — see
+            ``services.context._resolve_release_reference``.
 
     Raises:
         InvalidContextError: If the context is invalid.
@@ -1342,6 +1352,7 @@ async def deploy_application(
         instance = await generate_instance_from_deployment(
             deployment=deployment,
             uow=uow,
+            release_reference=release_reference,
         )
         # Set the new instance as the active one
         deployment.set_active_instance(instance=instance)

@@ -29,10 +29,22 @@ def build_styrmin_deployment_body(
 ) -> dict[str, Any]:
     """Build a StyrminDeployment CRD body from deployment context.
 
+    The CR is named after its **namespace**, not after the release reference:
+    there is exactly one ``StyrminDeployment`` per deployment namespace, which is
+    the invariant the status reporter, ``delete_deployment`` and the janitor all
+    rely on (``styrmin-<deployment id>`` for both). The two strings are equal for
+    every ordinary deployment; they diverge for an environment clone's
+    counterpart, which keeps its own namespace and CR name while **adopting the
+    source's Helm release name** so the restored Helm release, its storage record
+    and the ``meta.helm.sh/release-*`` ownership annotations on the restored chart
+    objects all line up (010 research D2 — a counterpart-named release would make
+    Flux *install* over already-owned objects and fail Helm's ownership check).
+
     Args:
         context: The fully resolved GlobalContext for the deployment.
-        release_reference: The Kubernetes release reference.
-        namespace: Target namespace.
+        release_reference: The Kubernetes release reference — the Helm release
+            (and HelmRelease object) name, not the CR name.
+        namespace: Target namespace; also the CR name.
         helm_chart_spec: Rendered Helm chart spec (optional, derived from context if not provided).
         helm_repo_spec: Rendered Helm repository spec (optional).
         internal: Whether this is an internal deployment (e.g., ingress controller). Defaults to False.
@@ -44,7 +56,7 @@ def build_styrmin_deployment_body(
         "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
         "kind": CRD_KIND,
         "metadata": {
-            "name": release_reference,
+            "name": namespace,
             "namespace": namespace,
             "labels": {
                 LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE,
