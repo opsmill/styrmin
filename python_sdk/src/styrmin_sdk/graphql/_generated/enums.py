@@ -24,6 +24,21 @@ class EnvironmentBackupStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class EnvironmentCloneDeploymentOutcome(str, Enum):
+    PENDING = "PENDING"
+    CLONED = "CLONED"
+    SKIPPED = "SKIPPED"
+    FAILED = "FAILED"
+
+
+class EnvironmentCloneStatus(str, Enum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+
+
 class EnvironmentRestoreStatus(str, Enum):
     PENDING = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"

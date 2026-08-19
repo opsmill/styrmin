@@ -18,6 +18,9 @@ from styrmin_backend.api.definitions.backup.backup import (
 from styrmin_backend.api.definitions.backup.environment_backup import (
     EnvironmentBackup as EnvironmentBackupType,
 )
+from styrmin_backend.api.definitions.backup.environment_clone import (
+    EnvironmentClone as EnvironmentCloneType,
+)
 from styrmin_backend.api.definitions.backup.environment_restore import (
     EnvironmentRestore as EnvironmentRestoreType,
 )
@@ -62,6 +65,10 @@ from styrmin_backend.services.auth.users import (
 from styrmin_backend.services.backup.scheduler import (
     get_backup_schedule,
     get_backup_schedules,
+)
+from styrmin_backend.services.backup.clone import (
+    get_environment_clone,
+    get_environment_clones,
 )
 from styrmin_backend.services.backup.environment import (
     get_environment_backup,
@@ -384,6 +391,40 @@ class Query:
         return [
             EnvironmentRestoreType.from_instance(environment_restore)
             for environment_restore in environment_restores
+        ]
+
+    @strawberry.field
+    async def environment_clone(
+        self, environment_clone_id: UUID, info: strawberry.Info
+    ) -> EnvironmentCloneType:
+        """Get a specific environment clone by ID.
+
+        ``NOT_FOUND`` when the id is unknown. Read access is ungated, matching
+        ``environmentBackup`` — which already exposes the captured
+        ``environmentConfig``, the same value class as ``configOverride``
+        (research D10, a deliberate parity decision).
+        """
+        uow = info.context["uow"]
+        readout = await get_environment_clone(
+            environment_clone_id=environment_clone_id, uow=uow
+        )
+        return EnvironmentCloneType.from_instance(readout.clones[0], readout.restores)
+
+    @strawberry.field
+    async def environment_clones(
+        self, environment_id: UUID, info: strawberry.Info
+    ) -> list[EnvironmentCloneType]:
+        """List the clones made *from* an environment, newest first.
+
+        The referenced constituent restores are fetched once for the whole batch
+        and shared across the rows, so deriving every ``status`` in the list
+        costs one extra query rather than one per clone.
+        """
+        uow = info.context["uow"]
+        readout = await get_environment_clones(environment_id=environment_id, uow=uow)
+        return [
+            EnvironmentCloneType.from_instance(clone, readout.restores)
+            for clone in readout.clones
         ]
 
     @strawberry.field

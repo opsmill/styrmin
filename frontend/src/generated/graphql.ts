@@ -520,6 +520,59 @@ export type EnvironmentBackupStatus =
   | 'PARTIAL'
   | 'PENDING';
 
+export type EnvironmentClone = {
+  __typename?: 'EnvironmentClone';
+  /** The captured-config field names removed before the override merge, as supplied; null if none (FR-006). */
+  clearConfigFields?: Maybe<Array<Scalars['String']['output']>>;
+  /** Operation-level events that happened outside any single deployment (capture failed, target name lost, environment creation failed, an input deleted underneath the clone), rendered ``step: error``. Per-deployment failures are not here — they are in ``deploymentResults``. */
+  cloneErrors: Array<Scalars['String']['output']>;
+  /** The environment-config override as supplied, canonicalised; null if none. Merged over the captured config by the clone flow (FR-006). */
+  configOverride?: Maybe<Scalars['JSON']['output']>;
+  /** The environment the clone created. Null until the capture succeeds and the environment materialises, and again once it has been deleted (the discard path — SC-005). */
+  createdEnvironment?: Maybe<Environment>;
+  createdOn: Scalars['DateTime']['output'];
+  /** One entry per source deployment considered — cloned, skipped with a reason, or failed with a reason (SC-003). */
+  deploymentResults: Array<EnvironmentCloneDeploymentResult>;
+  /** The capture the clone was built from. Null when registration never linked one, or once the capture has been deleted post-terminality (routine TTL cleanup does not rewrite the clone's outcome). */
+  environmentBackup?: Maybe<EnvironmentBackup>;
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  /** The explicit deployment selection as requested. Null means every eligible deployment was included (FR-003). */
+  requestedDeploymentIds?: Maybe<Array<Scalars['UUID']['output']>>;
+  /** The environment that was cloned. Null once the source has been deleted — a terminal clone survives its source as the created environment's provenance (``sourceEnvironmentName`` keeps it readable). */
+  sourceEnvironment?: Maybe<Environment>;
+  sourceEnvironmentName: Scalars['String']['output'];
+  /** Derived on every read from the capture's own derived status, the existence of the created environment, the constituent cross-target restores and the recorded clone errors — never stored, so it cannot contradict any of them. Terminal values are COMPLETED, PARTIAL and FAILED. */
+  status: EnvironmentCloneStatus;
+  updatedOn?: Maybe<Scalars['DateTime']['output']>;
+};
+
+/** What became of one source deployment in a clone. ``PENDING`` is the transient value between registration and the step landing; a terminal clone contains no ``PENDING`` entry. Closed enum on the wire because the write-side vocabulary is fixed at these four values. */
+export type EnvironmentCloneDeploymentOutcome =
+  | 'CLONED'
+  | 'FAILED'
+  | 'PENDING'
+  | 'SKIPPED';
+
+/** One source deployment's outcome in the clone. Every source deployment considered appears exactly once (SC-003). ``reason`` is set for SKIPPED and FAILED and is open text — render it, do not switch on it. ``counterpartDeploymentId`` is the deployment created in the cloned environment (null unless CLONED); ``restoreId`` is the cross-target restore carrying the data (null until one is dispatched). */
+export type EnvironmentCloneDeploymentResult = {
+  __typename?: 'EnvironmentCloneDeploymentResult';
+  counterpartDeploymentId?: Maybe<Scalars['UUID']['output']>;
+  deploymentId: Scalars['UUID']['output'];
+  deploymentName: Scalars['String']['output'];
+  outcome: EnvironmentCloneDeploymentOutcome;
+  reason?: Maybe<Scalars['String']['output']>;
+  restoreId?: Maybe<Scalars['UUID']['output']>;
+};
+
+/** Derived status of an environment clone — recomputed on every read, never stored (FR-009). Same vocabulary as ``EnvironmentBackupStatus`` and ``EnvironmentRestoreStatus``, but folded from different inputs: the backing capture's own derived status, whether the created environment exists, the constituent cross-target restores, and the recorded clone errors. */
+export type EnvironmentCloneStatus =
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'IN_PROGRESS'
+  | 'PARTIAL'
+  | 'PENDING';
+
 export type EnvironmentRestore = {
   __typename?: 'EnvironmentRestore';
   createdOn: Scalars['DateTime']['output'];
@@ -631,6 +684,7 @@ export type Mutation = {
   assignBackupStorageLocation?: Maybe<Environment>;
   callback: CallbackResponse;
   changePassword: Scalars['Boolean']['output'];
+  cloneEnvironment: EnvironmentClone;
   createBackup?: Maybe<Backup>;
   createBackupSchedule?: Maybe<BackupSchedule>;
   createBackupStorageLocation?: Maybe<BackupStorageLocation>;
@@ -689,6 +743,18 @@ export type MutationCallbackArgs = {
 export type MutationChangePasswordArgs = {
   currentPassword: Scalars['String']['input'];
   newPassword: Scalars['String']['input'];
+};
+
+
+export type MutationCloneEnvironmentArgs = {
+  clearConfigFields?: InputMaybe<Array<Scalars['String']['input']>>;
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  clusterName?: InputMaybe<Scalars['String']['input']>;
+  configOverride?: InputMaybe<UpdateEnvironmentInput>;
+  deploymentIds?: InputMaybe<Array<Scalars['UUID']['input']>>;
+  environmentId?: InputMaybe<Scalars['UUID']['input']>;
+  environmentName?: InputMaybe<Scalars['String']['input']>;
+  name: Scalars['String']['input'];
 };
 
 
@@ -1015,6 +1081,8 @@ export type Query = {
   environment?: Maybe<Environment>;
   environmentBackup?: Maybe<EnvironmentBackup>;
   environmentBackups: Array<EnvironmentBackup>;
+  environmentClone: EnvironmentClone;
+  environmentClones: Array<EnvironmentClone>;
   environmentRestore?: Maybe<EnvironmentRestore>;
   environmentRestores: Array<EnvironmentRestore>;
   environmentServices: Array<DeployedService>;
@@ -1101,6 +1169,16 @@ export type QueryEnvironmentBackupArgs = {
 
 
 export type QueryEnvironmentBackupsArgs = {
+  environmentId: Scalars['UUID']['input'];
+};
+
+
+export type QueryEnvironmentCloneArgs = {
+  environmentCloneId: Scalars['UUID']['input'];
+};
+
+
+export type QueryEnvironmentClonesArgs = {
   environmentId: Scalars['UUID']['input'];
 };
 

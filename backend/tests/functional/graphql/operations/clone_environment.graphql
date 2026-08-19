@@ -1,0 +1,55 @@
+mutation CloneEnvironment(
+    $environmentId: UUID
+    $environmentName: String
+    $clusterId: UUID
+    $clusterName: String
+    $name: String!
+    $deploymentIds: [UUID!]
+    $configOverride: UpdateEnvironmentInput
+    $clearConfigFields: [String!]
+) {
+    cloneEnvironment(
+        environmentId: $environmentId
+        environmentName: $environmentName
+        clusterId: $clusterId
+        clusterName: $clusterName
+        name: $name
+        deploymentIds: $deploymentIds
+        configOverride: $configOverride
+        clearConfigFields: $clearConfigFields
+    ) {
+        id
+        name
+        status
+        sourceEnvironmentName
+        sourceEnvironment {
+            id
+            name
+        }
+        environmentBackup {
+            id
+            name
+            status
+            deploymentSnapshots {
+                deploymentName
+            }
+        }
+        createdEnvironment {
+            id
+        }
+        requestedDeploymentIds
+        configOverride
+        clearConfigFields
+        deploymentResults {
+            deploymentId
+            deploymentName
+            outcome
+            reason
+            counterpartDeploymentId
+            restoreId
+        }
+        cloneErrors
+        createdOn
+        updatedOn
+    }
+}

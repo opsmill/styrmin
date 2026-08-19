@@ -16,6 +16,9 @@ from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
 from styrmin_backend.api.definitions.backup.environment_backup import (
     EnvironmentBackup as EnvironmentBackupType,
 )
+from styrmin_backend.api.definitions.backup.environment_clone import (
+    EnvironmentClone as EnvironmentCloneType,
+)
 from styrmin_backend.api.definitions.backup.environment_restore import (
     EnvironmentRestore as EnvironmentRestoreType,
 )
@@ -118,6 +121,9 @@ from styrmin_backend.services.backup.scheduler import (
     create_backup_schedule as create_backup_schedule_service,
     delete_backup_schedule as delete_backup_schedule_service,
     update_backup_schedule as update_backup_schedule_service,
+)
+from styrmin_backend.services.backup.clone import (
+    clone_environment as clone_environment_service,
 )
 from styrmin_backend.services.backup.environment import (
     create_environment_backup as create_environment_backup_service,
@@ -975,6 +981,87 @@ class Mutation:
             uow=uow,
         )
         return EnvironmentRestoreType.from_instance(environment_restore)
+
+    @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
+    async def clone_environment(
+        self,
+        name: str,
+        info: strawberry.Info,
+        environment_id: UUID | None = None,
+        environment_name: str | None = None,
+        cluster_id: UUID | None = None,
+        cluster_name: str | None = None,
+        deployment_ids: list[UUID] | None = None,
+        config_override: UpdateEnvironmentInput | None = None,
+        clear_config_fields: list[str] | None = None,
+    ) -> EnvironmentCloneType:
+        """Clone an environment into a new environment on the same cluster.
+
+        The clone is built entirely from a **fresh environment backup** of the
+        source (FR-007): the capture is registered synchronously, and the
+        environment plus its counterpart deployments only materialise once that
+        capture reaches a restorable terminal status (FR-002). The source is
+        never mutated — the capture is the only source-side artefact (SC-002).
+
+        Asynchronous: the clone record comes back immediately, normally deriving
+        ``PENDING`` / ``IN_PROGRESS``. ``status`` is recomputed on every read and
+        never stored (FR-009), and ``deploymentResults`` accounts for every
+        source deployment considered — cloned, skipped with a reason, or failed
+        with a reason (SC-003). Skips (no active instance, not selected) are
+        outcomes, not errors (FR-004).
+
+        Arguments:
+
+        * the source is addressed by the dual-identifier convention (ADR-031),
+          exactly like ``deleteEnvironment``;
+        * ``name`` is the target environment's name, checked free upfront and
+          **not** reserved — reserving it would need a placeholder environment
+          row, which FR-002 forbids. A name lost in the window resolves to a
+          ``FAILED`` clone with the conflict attributed (FR-011);
+        * ``deploymentIds`` selects which eligible deployments to include; omit
+          it for all eligible (FR-003);
+        * ``configOverride`` is merged over the captured environment config
+          before any counterpart comes up, and ``clearConfigFields`` names
+          captured fields to drop entirely first — clearing a production-only
+          setting, not merely replacing it (FR-006).
+
+        Upfront typed errors, with zero side effects (FR-011): ``ALREADY_EXISTS``
+        (the name is taken), ``NOT_FOUND`` (unknown source), ``VALIDATION_ERROR``
+        (invalid ``configOverride`` or unknown ``clearConfigFields`` name),
+        ``ALREADY_IN_PROGRESS`` (another environment-level operation occupies the
+        source).
+
+        Requires ``ADMIN``: a clone writes an environment config and creates
+        deployments, so it strictly supersets ``restoreEnvironmentBackup``'s
+        privilege footprint (FR-010).
+        """
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        # RequiresAuthentication + RequiresRole(ADMIN) above guarantee a user is
+        # present; ``created_by_user_id`` is required by the service (it is also
+        # the attributed creator of every counterpart deployment), so assert
+        # rather than pass None if the chain is ever reordered.
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        override_dict = (
+            update_environment_input_to_dict(config_override)
+            if config_override is not None
+            else None
+        )
+        clone = await clone_environment_service(
+            uow=uow,
+            name=name,
+            created_by_user_id=current_user.id,
+            environment_id=environment_id,
+            environment_name=environment_name,
+            cluster_id=cluster_id,
+            cluster_name=cluster_name,
+            deployment_ids=deployment_ids,
+            config_override=override_dict,
+            clear_config_fields=clear_config_fields,
+        )
+        return EnvironmentCloneType.from_instance(clone)
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def delete_environment_backup(
