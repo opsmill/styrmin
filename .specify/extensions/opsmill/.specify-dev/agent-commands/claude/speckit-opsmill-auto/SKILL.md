@@ -1,12 +1,12 @@
 ---
-description: Run the full speckit workflow end-to-end — specify, plan, critique, tasks,
-  implement, review — making all decisions autonomously. Stops before extract; run
-  that manually.
+name: speckit-opsmill-auto
+description: Run the full speckit workflow end-to-end — specify, plan, critique, tasks, implement, review — making all decisions autonomously. Stops before extract; run that manually.
+compatibility: Requires spec-kit project structure with .specify/ directory
+metadata:
+  author: github-spec-kit
+  source: opsmill:commands/auto.md
 ---
 
-
-<!-- Extension: opsmill -->
-<!-- Config: .specify/extensions/opsmill/ -->
 ## User Input
 
 ```text

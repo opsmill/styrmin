@@ -1,15 +1,12 @@
 ---
-description: Produce a flow-level summary of the current Claude Code session — executive
-  summary, chronological timeline, and outcomes — written into the active feature
-  directory next to spec.md / plan.md.
-scripts:
-  sh: .specify/scripts/bash/check-prerequisites.sh --json --paths-only
-  ps: .specify/scripts/powershell/check-prerequisites.ps1 -Json -PathsOnly
+name: speckit-opsmill-summary
+description: Produce a flow-level summary of the current Claude Code session — executive summary, chronological timeline, and outcomes — written into the active feature directory next to spec.md / plan.md.
+compatibility: Requires spec-kit project structure with .specify/ directory
+metadata:
+  author: github-spec-kit
+  source: opsmill:commands/summary.md
 ---
 
-
-<!-- Extension: opsmill -->
-<!-- Config: .specify/extensions/opsmill/ -->
 ## User Input
 
 ```text
@@ -59,7 +56,7 @@ previously generated session files when composing the new one.
 
 ## Outline
 
-1. Run `.specify/scripts/bash/check-prerequisites.sh --json --paths-only` from repo root and parse `FEATURE_DIR` from the JSON
+1. Run `.specify/extensions/opsmill/scripts/bash/check-prerequisites.sh --json --paths-only` from repo root and parse `FEATURE_DIR` from the JSON
    output. All paths must be absolute.
 
    - If `FEATURE_DIR` is missing, empty, or the resolved directory does

@@ -275,47 +275,7 @@
       "enabled": true,
       "priority": 10,
       "registered_commands": {
-        "agy": [
-          "speckit.opsmill.extract",
-          "speckit.opsmill.retrospect",
-          "speckit.opsmill.summary",
-          "speckit.opsmill.auto",
-          "speckit.opsmill.prep",
-          "speckit.opsmill.implement"
-        ],
-        "amp": [
-          "speckit.opsmill.extract",
-          "speckit.opsmill.retrospect",
-          "speckit.opsmill.summary",
-          "speckit.opsmill.auto",
-          "speckit.opsmill.prep",
-          "speckit.opsmill.implement"
-        ],
         "claude": [
-          "speckit.opsmill.extract",
-          "speckit.opsmill.retrospect",
-          "speckit.opsmill.summary",
-          "speckit.opsmill.auto",
-          "speckit.opsmill.prep",
-          "speckit.opsmill.implement"
-        ],
-        "codex": [
-          "speckit.opsmill.extract",
-          "speckit.opsmill.retrospect",
-          "speckit.opsmill.summary",
-          "speckit.opsmill.auto",
-          "speckit.opsmill.prep",
-          "speckit.opsmill.implement"
-        ],
-        "copilot": [
-          "speckit.opsmill.extract",
-          "speckit.opsmill.retrospect",
-          "speckit.opsmill.summary",
-          "speckit.opsmill.auto",
-          "speckit.opsmill.prep",
-          "speckit.opsmill.implement"
-        ],
-        "zed": [
           "speckit.opsmill.extract",
           "speckit.opsmill.retrospect",
           "speckit.opsmill.summary",
@@ -325,7 +285,7 @@
         ]
       },
       "registered_skills": [],
-      "installed_at": "2026-06-21T14:21:28.775860+00:00"
+      "installed_at": "2026-08-19T08:06:27.568048+00:00"
     }
   }
 }
