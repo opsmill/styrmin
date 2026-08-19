@@ -25,10 +25,10 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 Add `EnvironmentClone` model (fields per data-model.md, incl. nullable `source_environment_id`, `source_environment_name`, `cleared_config_fields`, `clone_errors` with `fatal` flag; docstring stating **no status column, deliberately**) in `backend/styrmin_backend/db/models.py`
-- [ ] T003 Generate the Alembic revision creating `environmentclone` (named FK constraints, batch-alter-compatible, no new PG enums) in `backend/styrmin_backend/db/migrations/versions/` per `dev/guides/database-migrations.md`; verify upgrade+downgrade on a head database
-- [ ] T004 Create `SQLModelEnvironmentCloneRepository` (create/get/save, by-source and by-created lookups, batched restore-row fetch via one `IN` query across JSON `restore_id`s) in `backend/styrmin_backend/repository/environment_clone.py`
-- [ ] T005 Wire `environment_clones` repository into `UnitOfWork` (incl. `_SharedTransaction` forwarding) in `backend/styrmin_backend/services/unit_of_work.py`
+- [X] T002 Add `EnvironmentClone` model (fields per data-model.md, incl. nullable `source_environment_id`, `source_environment_name`, `cleared_config_fields`, `clone_errors` with `fatal` flag; docstring stating **no status column, deliberately**) in `backend/styrmin_backend/db/models.py`
+- [X] T003 Generate the Alembic revision creating `environmentclone` (named FK constraints, batch-alter-compatible, no new PG enums) in `backend/styrmin_backend/db/migrations/versions/` per `dev/guides/database-migrations.md`; verify upgrade+downgrade on a head database
+- [X] T004 Create `SQLModelEnvironmentCloneRepository` (create/get/save, by-source and by-created lookups, batched restore-row fetch via one `IN` query across JSON `restore_id`s) in `backend/styrmin_backend/repository/environment_clone.py`
+- [X] T005 Wire `environment_clones` repository into `UnitOfWork` (incl. `_SharedTransaction` forwarding) in `backend/styrmin_backend/services/unit_of_work.py`
 - [ ] T006 [P] Add typed errors `EnvironmentBackupInUseByCloneError` (`IN_USE`, metadata clone id/name) and clone-specific validation errors in `backend/styrmin_backend/services/exceptions.py`
 - [ ] T007 [P] Extend `DeploymentSnapshot` with `service_name_overrides` and capture it in `_capture_deployment_snapshot` (pre-existing snapshots read as `None`) in `backend/styrmin_backend/services/backup/environment.py`; unit test in `backend/tests/unit/services/backup/`
 - [ ] T008 [P] Add optional `deployment_ids: list[UUID] | None` filter to `create_environment_backup` (filters the eligible set before snapshot/constituent fan-out; GraphQL mutation unchanged) in `backend/styrmin_backend/services/backup/environment.py`; unit test
