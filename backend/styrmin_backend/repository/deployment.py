@@ -89,6 +89,12 @@ class DeploymentRepository(BaseRepository[DeploymentModel], ABC):
             "The find_all_by_environment method must be implemented in the subclass."
         )
 
+    @abstractmethod
+    async def delete_all_for_environment(self, environment_id: UUID) -> list[UUID]:
+        raise NotImplementedError(
+            "The delete_all_for_environment method must be implemented in the subclass."
+        )
+
 
 class SQLModelDeploymentRepository(
     BaseSQLModelRepository[DeploymentModel], DeploymentRepository
@@ -311,6 +317,129 @@ class SQLModelDeploymentRepository(
             statement = statement.where(self.model_class.deleted_at.is_(None))  # type: ignore[union-attr]
         result = await self.session.exec(statement)
         return [self._to_entity(entity) for entity in result.all()]
+
+    async def delete_all_for_environment(self, environment_id: UUID) -> list[UUID]:
+        """Hard-delete every deployment of an environment, dependents first.
+
+        ``deployment.environment_id`` is a non-nullable FK, so a deployment row
+        cannot outlive its environment. Without this cascade,
+        :func:`~styrmin_backend.services.environments.delete_environment` fails
+        the moment the environment has ever held a deployment: the ORM's
+        reaction to a deleted parent is to *null* the child's FK, which trips
+        the NOT NULL constraint and surfaces as an opaque ``INTERNAL_ERROR``.
+        Same class of gap — and the same remedy — as
+        ``delete_environment_backups_for_environment``, which had to be added
+        for ``environmentbackup.environment_id`` for exactly this reason.
+
+        Tombstoned rows are included: a ``DELETED`` deployment still holds the
+        FK, so leaving it behind blocks the environment delete just as a live
+        one would.
+
+        Deletion follows the FK graph, and two edges need more than a delete:
+
+        * ``deployment.active_application_instance_id`` points *back* at
+          ``applicationinstance``, so the cycle is broken by nulling it before
+          the instances go.
+        * ``restore.target_instance_id`` is how a **cross-target** restore (an
+          environment clone's constituent — 010 research D2) names the
+          counterpart it restored into. Its ``Backup`` belongs to a *different*
+          environment, so the row must survive; it is detached rather than
+          deleted, which keeps the clone record's ``restore_id`` resolvable and
+          its recorded outcome intact.
+
+        Returns:
+            The ids of the deleted deployments.
+        """
+        # Local imports: these models are only needed for the cascade, and
+        # hoisting them would widen this module's import surface for every
+        # caller that just reads deployments.
+        from sqlalchemy import delete as sa_delete
+        from sqlalchemy import update as sa_update
+
+        from styrmin_backend.db.models import Backup as BackupModel
+        from styrmin_backend.db.models import BackupSchedule as BackupScheduleModel
+        from styrmin_backend.db.models import DeployedService as DeployedServiceModel
+        from styrmin_backend.db.models import DeploymentStatus as DeploymentStatusModel
+        from styrmin_backend.db.models import PodStatus as PodStatusModel
+        from styrmin_backend.db.models import Restore as RestoreModel
+        from styrmin_backend.db.models import Task as TaskModel
+
+        deployment_ids = list(
+            (
+                await self.session.exec(
+                    select(self.model_class.id).where(
+                        self.model_class.environment_id == environment_id
+                    )
+                )
+            ).all()
+        )
+        if not deployment_ids:
+            return []
+
+        instance_ids = list(
+            (
+                await self.session.exec(
+                    select(InstanceModel.id).where(
+                        InstanceModel.deployment_id.in_(deployment_ids)  # type: ignore[attr-defined]
+                    )
+                )
+            ).all()
+        )
+
+        if instance_ids:
+            # Cross-target restores keep their history; only the pointer goes.
+            await self.session.execute(
+                sa_update(RestoreModel)
+                .where(RestoreModel.target_instance_id.in_(instance_ids))  # type: ignore[attr-defined]
+                .values(target_instance_id=None)
+            )
+            backup_ids = list(
+                (
+                    await self.session.exec(
+                        select(BackupModel.id).where(
+                            BackupModel.instance_id.in_(instance_ids)  # type: ignore[attr-defined]
+                        )
+                    )
+                ).all()
+            )
+            if backup_ids:
+                await self.session.execute(
+                    sa_delete(RestoreModel).where(
+                        RestoreModel.backup_id.in_(backup_ids)  # type: ignore[attr-defined]
+                    )
+                )
+                await self.session.execute(
+                    sa_delete(BackupModel).where(BackupModel.id.in_(backup_ids))  # type: ignore[attr-defined]
+                )
+
+        await self.session.execute(
+            sa_update(self.model_class)
+            .where(self.model_class.id.in_(deployment_ids))  # type: ignore[attr-defined]
+            .values(active_application_instance_id=None)
+        )
+        if instance_ids:
+            await self.session.execute(
+                sa_delete(InstanceModel).where(InstanceModel.id.in_(instance_ids))  # type: ignore[attr-defined]
+            )
+
+        for child in (
+            ComponentModel,
+            DeployedServiceModel,
+            TaskModel,
+            PodStatusModel,
+            DeploymentStatusModel,
+            BackupScheduleModel,
+        ):
+            await self.session.execute(
+                sa_delete(child).where(child.deployment_id.in_(deployment_ids))  # type: ignore[attr-defined]
+            )
+
+        await self.session.execute(
+            sa_delete(self.model_class).where(
+                self.model_class.id.in_(deployment_ids)  # type: ignore[attr-defined]
+            )
+        )
+        return list(deployment_ids)
 
     async def find_internal_by_environment(
         self, environment_id: UUID
