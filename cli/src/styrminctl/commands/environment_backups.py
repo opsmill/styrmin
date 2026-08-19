@@ -15,6 +15,7 @@ from cyclopts import App, Parameter
 
 from styrminctl import client
 from styrminctl.output import console, print_error, print_success, print_table, styrmin_error_handler
+from styrminctl.resolve import resolve_environment_id
 from styrminctl.types import (
     ClusterContextId,
     ClusterContextName,
@@ -29,7 +30,7 @@ from styrminctl.types import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from styrmin_sdk import EnvironmentBackupStatus, EnvironmentRestoreStatus, StyrminClient
+    from styrmin_sdk import EnvironmentBackupStatus, EnvironmentRestoreStatus
 
 environment_backups_app = App(name="env-backups", help="Manage environment-level backups and restores.")
 
@@ -146,41 +147,6 @@ class _EnvironmentRestoreLike(Protocol):
 
     @property
     def skipped_constituents(self) -> Sequence[_SkippedConstituentLike]: ...
-
-
-async def _resolve_environment_id(
-    sdk: StyrminClient,
-    *,
-    name: str | None,
-    environment_id: str | None,
-    cluster: str,
-    cluster_id: str | None,
-) -> str:
-    """Resolve an environment to its UUID from a name (cluster-scoped) or ``--id``.
-
-    ``createEnvironmentBackup`` and ``environmentBackups`` take a UUID only, so
-    the name lookup goes through the ``environment`` query — which is where the
-    ADR-0031 dual-identifier resolution actually lives (server-side, with the
-    cluster scoping rules). The CLI never reimplements the name matching.
-
-    Raises ``ValueError`` on any invalid identifier combination.
-    """
-    if name is not None and environment_id is not None:
-        raise ValueError("Provide either an environment name or --id, not both")
-    if name is None and environment_id is None:
-        raise ValueError("Either an environment name or --id is required")
-    if cluster_id is not None and cluster != "default":
-        raise ValueError("Provide either --cluster or --cluster-id, not both")
-
-    if environment_id is not None:
-        return environment_id
-
-    environment = await sdk.environments.get(
-        environment_name=name,
-        cluster_id=cluster_id,
-        cluster_name=cluster if cluster_id is None else None,
-    )
-    return str(environment.id)
 
 
 def _constituent_counts(constituents: Sequence[_ConstituentLike]) -> tuple[int, int, int]:
@@ -314,7 +280,7 @@ async def create(
     """
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            environment_id = await _resolve_environment_id(
+            environment_id = await resolve_environment_id(
                 sdk,
                 name=environment,
                 environment_id=id,
@@ -378,7 +344,7 @@ async def list_environment_backups(
     """List an environment's environment backups, newest first."""
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            environment_id = await _resolve_environment_id(
+            environment_id = await resolve_environment_id(
                 sdk,
                 name=environment,
                 environment_id=id,

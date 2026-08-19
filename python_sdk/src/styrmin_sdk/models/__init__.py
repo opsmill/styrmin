@@ -2,6 +2,8 @@
 
 from styrmin_sdk.graphql._generated.enums import (
     EnvironmentBackupStatus,
+    EnvironmentCloneDeploymentOutcome,
+    EnvironmentCloneStatus,
     EnvironmentRestoreStatus,
 )
 from styrmin_sdk.graphql._generated.get_backup import GetBackupBackup as Backup
@@ -36,6 +38,12 @@ from styrmin_sdk.graphql._generated.get_environment_backup import (
 from styrmin_sdk.graphql._generated.get_environment_backup import (
     GetEnvironmentBackupEnvironmentBackupDeploymentSnapshots as DeploymentSnapshot,
 )
+from styrmin_sdk.graphql._generated.get_environment_clone import (
+    GetEnvironmentCloneEnvironmentClone as EnvironmentClone,
+)
+from styrmin_sdk.graphql._generated.get_environment_clone import (
+    GetEnvironmentCloneEnvironmentCloneDeploymentResults as EnvironmentCloneDeploymentResult,
+)
 from styrmin_sdk.graphql._generated.get_environment_restore import (
     GetEnvironmentRestoreEnvironmentRestore as EnvironmentRestore,
 )
@@ -54,6 +62,7 @@ from styrmin_sdk.graphql._generated.input_types import (
     SchedulingInput,
     StandardStorageInput,
     UpdateDeploymentInput,
+    UpdateEnvironmentInput,
 )
 from styrmin_sdk.graphql._generated.load_remote_application_driver_version import (
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion as ApplicationDriverVersion,
@@ -105,6 +114,10 @@ __all__ = [
     "EnvironmentBackup",
     "EnvironmentBackupConstituent",
     "EnvironmentBackupStatus",
+    "EnvironmentClone",
+    "EnvironmentCloneDeploymentOutcome",
+    "EnvironmentCloneDeploymentResult",
+    "EnvironmentCloneStatus",
     "EnvironmentRestore",
     "EnvironmentRestoreStatus",
     "HelmChart",
@@ -118,5 +131,6 @@ __all__ = [
     "StandardStorageInput",
     "Task",
     "UpdateDeploymentInput",
+    "UpdateEnvironmentInput",
     "resolve_overrides",
 ]

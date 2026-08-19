@@ -8,6 +8,14 @@ from .async_base_client import AsyncBaseClient
 from .base_model import BaseModel, Upload
 from .change_password import ChangePassword
 from .client import Client
+from .clone_environment import (
+    CloneEnvironment,
+    CloneEnvironmentCloneEnvironment,
+    CloneEnvironmentCloneEnvironmentCreatedEnvironment,
+    CloneEnvironmentCloneEnvironmentDeploymentResults,
+    CloneEnvironmentCloneEnvironmentEnvironmentBackup,
+    CloneEnvironmentCloneEnvironmentSourceEnvironment,
+)
 from .create_backup import CreateBackup, CreateBackupCreateBackup
 from .create_backup_schedule import (
     CreateBackupSchedule,
@@ -168,6 +176,14 @@ from .get_environment_backup import (
     GetEnvironmentBackupEnvironmentBackupConstituentsBackup,
     GetEnvironmentBackupEnvironmentBackupDeploymentSnapshots,
 )
+from .get_environment_clone import (
+    GetEnvironmentClone,
+    GetEnvironmentCloneEnvironmentClone,
+    GetEnvironmentCloneEnvironmentCloneCreatedEnvironment,
+    GetEnvironmentCloneEnvironmentCloneDeploymentResults,
+    GetEnvironmentCloneEnvironmentCloneEnvironmentBackup,
+    GetEnvironmentCloneEnvironmentCloneSourceEnvironment,
+)
 from .get_environment_restore import (
     GetEnvironmentRestore,
     GetEnvironmentRestoreEnvironmentRestore,
@@ -238,6 +254,12 @@ from .list_environment_backups import (
     ListEnvironmentBackupsEnvironmentBackups,
     ListEnvironmentBackupsEnvironmentBackupsConstituents,
     ListEnvironmentBackupsEnvironmentBackupsConstituentsBackup,
+)
+from .list_environment_clones import (
+    ListEnvironmentClones,
+    ListEnvironmentClonesEnvironmentClones,
+    ListEnvironmentClonesEnvironmentClonesCreatedEnvironment,
+    ListEnvironmentClonesEnvironmentClonesDeploymentResults,
 )
 from .list_environment_restores import (
     ListEnvironmentRestores,
@@ -321,6 +343,12 @@ __all__ = [
     "BaseModel",
     "ChangePassword",
     "Client",
+    "CloneEnvironment",
+    "CloneEnvironmentCloneEnvironment",
+    "CloneEnvironmentCloneEnvironmentCreatedEnvironment",
+    "CloneEnvironmentCloneEnvironmentDeploymentResults",
+    "CloneEnvironmentCloneEnvironmentEnvironmentBackup",
+    "CloneEnvironmentCloneEnvironmentSourceEnvironment",
     "ComponentConfigInput",
     "CrdConditionInput",
     "CreateBackup",
@@ -445,6 +473,12 @@ __all__ = [
     "GetEnvironmentBackupEnvironmentBackupConstituents",
     "GetEnvironmentBackupEnvironmentBackupConstituentsBackup",
     "GetEnvironmentBackupEnvironmentBackupDeploymentSnapshots",
+    "GetEnvironmentClone",
+    "GetEnvironmentCloneEnvironmentClone",
+    "GetEnvironmentCloneEnvironmentCloneCreatedEnvironment",
+    "GetEnvironmentCloneEnvironmentCloneDeploymentResults",
+    "GetEnvironmentCloneEnvironmentCloneEnvironmentBackup",
+    "GetEnvironmentCloneEnvironmentCloneSourceEnvironment",
     "GetEnvironmentEnvironment",
     "GetEnvironmentEnvironmentCluster",
     "GetEnvironmentRestore",
@@ -489,6 +523,10 @@ __all__ = [
     "ListEnvironmentBackupsEnvironmentBackups",
     "ListEnvironmentBackupsEnvironmentBackupsConstituents",
     "ListEnvironmentBackupsEnvironmentBackupsConstituentsBackup",
+    "ListEnvironmentClones",
+    "ListEnvironmentClonesEnvironmentClones",
+    "ListEnvironmentClonesEnvironmentClonesCreatedEnvironment",
+    "ListEnvironmentClonesEnvironmentClonesDeploymentResults",
     "ListEnvironmentRestores",
     "ListEnvironmentRestoresEnvironmentRestores",
     "ListEnvironmentRestoresEnvironmentRestoresRestores",

@@ -1,0 +1,437 @@
+"""Unit tests for EnvironmentCloneResource."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock
+
+import pytest
+from styrmin_sdk import (
+    EnvironmentCloneDeploymentOutcome,
+    EnvironmentCloneStatus,
+    UpdateEnvironmentInput,
+)
+from styrmin_sdk.exceptions import OperationFailedError, ResourceAlreadyExistsError, ResourceNotFoundError
+
+if TYPE_CHECKING:
+    from styrmin_sdk.client import StyrminClient
+
+CLONE_ID = "00000000-0000-0000-0000-0000000000c1"
+ENVIRONMENT_ID = "00000000-0000-0000-0000-0000000000e0"
+CREATED_ENVIRONMENT_ID = "00000000-0000-0000-0000-0000000000e9"
+ENV_BACKUP_ID = "00000000-0000-0000-0000-0000000000e1"
+DEPLOYMENT_ID = "00000000-0000-0000-0000-000000000100"
+OTHER_DEPLOYMENT_ID = "00000000-0000-0000-0000-000000000101"
+COUNTERPART_DEPLOYMENT_ID = "00000000-0000-0000-0000-000000000200"
+RESTORE_ID = "00000000-0000-0000-0000-000000000002"
+CLUSTER_ID = "00000000-0000-0000-0000-00000000000c"
+
+
+def _deployment_result(
+    *,
+    deployment_id: str = DEPLOYMENT_ID,
+    deployment_name: str = "demo",
+    outcome: str = "CLONED",
+    reason: str | None = None,
+    counterpart_deployment_id: str | None = COUNTERPART_DEPLOYMENT_ID,
+    restore_id: str | None = RESTORE_ID,
+) -> dict[str, Any]:
+    return {
+        "deploymentId": deployment_id,
+        "deploymentName": deployment_name,
+        "outcome": outcome,
+        "reason": reason,
+        "counterpartDeploymentId": counterpart_deployment_id,
+        "restoreId": restore_id,
+    }
+
+
+def _environment_clone(
+    *,
+    status: str = "PENDING",
+    deployment_results: list[dict[str, Any]] | None = None,
+    clone_errors: list[str] | None = None,
+    config_override: dict[str, Any] | None = None,
+    clear_config_fields: list[str] | None = None,
+    requested_deployment_ids: list[str] | None = None,
+    created_environment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": CLONE_ID,
+        "name": "prod-rehearsal",
+        "status": status,
+        "sourceEnvironmentName": "prod",
+        "createdOn": "2026-01-01T00:00:00",
+        "updatedOn": None,
+        "requestedDeploymentIds": requested_deployment_ids,
+        "configOverride": config_override,
+        "clearConfigFields": clear_config_fields,
+        "cloneErrors": clone_errors if clone_errors is not None else [],
+        "sourceEnvironment": {"id": ENVIRONMENT_ID, "name": "prod"},
+        "environmentBackup": {"id": ENV_BACKUP_ID, "name": "prod-clone-capture", "status": "COMPLETED"},
+        "createdEnvironment": created_environment,
+        "deploymentResults": deployment_results if deployment_results is not None else [_deployment_result()],
+    }
+
+
+class TestEnvironmentCloneCreate:
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_by_environment_id(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        environment_clone = await client.environment_clones.create(name="prod-rehearsal", environment_id=ENVIRONMENT_ID)
+
+        assert environment_clone.name == "prod-rehearsal"
+        assert environment_clone.status is EnvironmentCloneStatus.PENDING
+        assert environment_clone.source_environment_name == "prod"
+        assert environment_clone.deployment_results[0].outcome is EnvironmentCloneDeploymentOutcome.CLONED
+        query, variables = mock_transport.execute.call_args.args
+        assert "cloneEnvironment" in query
+        assert variables == {"name": "prod-rehearsal", "environmentId": ENVIRONMENT_ID}
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_by_environment_name_scoped_to_cluster(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """The source is addressed by the dual-identifier convention, cluster scoping included."""
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(
+            name="prod-rehearsal", environment_name="prod", cluster_name="edge", cluster_id=None
+        )
+
+        _, variables = mock_transport.execute.call_args.args
+        assert variables == {"name": "prod-rehearsal", "environmentName": "prod", "clusterName": "edge"}
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_omits_unset_optional_arguments(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        """Unset selection/override arguments are absent, not sent as explicit nulls."""
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(name="prod-rehearsal", environment_id=ENVIRONMENT_ID)
+
+        _, variables = mock_transport.execute.call_args.args
+        assert "deploymentIds" not in variables
+        assert "configOverride" not in variables
+        assert "clearConfigFields" not in variables
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_sends_selection_and_override(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        """configOverride goes out camelCased (UpdateEnvironmentInput), clearConfigFields snake_cased."""
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(
+            name="prod-rehearsal",
+            environment_id=ENVIRONMENT_ID,
+            cluster_id=CLUSTER_ID,
+            deployment_ids=[DEPLOYMENT_ID],
+            config_override=UpdateEnvironmentInput(fqdn_suffix="rehearsal.local"),
+            clear_config_fields=["ingress_class"],
+        )
+
+        _, variables = mock_transport.execute.call_args.args
+        assert variables == {
+            "name": "prod-rehearsal",
+            "environmentId": ENVIRONMENT_ID,
+            "clusterId": CLUSTER_ID,
+            "deploymentIds": [DEPLOYMENT_ID],
+            "configOverride": {"fqdnSuffix": "rehearsal.local"},
+            "clearConfigFields": ["ingress_class"],
+        }
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_returns_snake_case_config_override(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        """The override is sent camelCase but stored and returned as canonical snake_case JSON."""
+        mock_transport.execute.return_value = {
+            "data": {
+                "cloneEnvironment": _environment_clone(
+                    config_override={"fqdn_suffix": "rehearsal.local"},
+                    clear_config_fields=["ingress_class"],
+                )
+            }
+        }
+
+        environment_clone = await client.environment_clones.create(
+            name="prod-rehearsal",
+            environment_id=ENVIRONMENT_ID,
+            config_override=UpdateEnvironmentInput(fqdn_suffix="rehearsal.local"),
+            clear_config_fields=["ingress_class"],
+        )
+
+        assert environment_clone.config_override == {"fqdn_suffix": "rehearsal.local"}
+        assert environment_clone.clear_config_fields == ["ingress_class"]
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_is_in_progress_when_a_skip_was_recorded_upfront(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """A just-registered clone can already be IN_PROGRESS — never assume a PENDING first read."""
+        mock_transport.execute.return_value = {
+            "data": {
+                "cloneEnvironment": _environment_clone(
+                    status="IN_PROGRESS",
+                    deployment_results=[
+                        _deployment_result(),
+                        _deployment_result(
+                            deployment_id=OTHER_DEPLOYMENT_ID,
+                            deployment_name="analytics",
+                            outcome="SKIPPED",
+                            reason="not_eligible",
+                            counterpart_deployment_id=None,
+                            restore_id=None,
+                        ),
+                    ],
+                )
+            }
+        }
+
+        environment_clone = await client.environment_clones.create(name="prod-rehearsal", environment_id=ENVIRONMENT_ID)
+
+        assert environment_clone.status is EnvironmentCloneStatus.IN_PROGRESS
+        skipped = environment_clone.deployment_results[1]
+        assert skipped.outcome is EnvironmentCloneDeploymentOutcome.SKIPPED
+        assert skipped.reason == "not_eligible"
+        assert skipped.counterpart_deployment_id is None
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_target_name_taken(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [
+                {
+                    "message": "Environment 'prod-rehearsal' already exists",
+                    "extensions": {"code": "ALREADY_EXISTS"},
+                }
+            ],
+        }
+
+        with pytest.raises(ResourceAlreadyExistsError):
+            await client.environment_clones.create(name="prod-rehearsal", environment_id=ENVIRONMENT_ID)
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_unknown_source(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [{"message": "Environment not found", "extensions": {"code": "NOT_FOUND"}}],
+        }
+
+        with pytest.raises(ResourceNotFoundError):
+            await client.environment_clones.create(name="prod-rehearsal", environment_name="nope")
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_invalid_clear_config_field(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [
+                {
+                    "message": "'nope' is not an environment config field",
+                    "extensions": {"code": "VALIDATION_ERROR"},
+                }
+            ],
+        }
+
+        with pytest.raises(OperationFailedError):
+            await client.environment_clones.create(
+                name="prod-rehearsal", environment_id=ENVIRONMENT_ID, clear_config_fields=["nope"]
+            )
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_already_in_progress(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [
+                {
+                    "message": "An environment operation is already in progress",
+                    "extensions": {"code": "ALREADY_IN_PROGRESS"},
+                }
+            ],
+        }
+
+        with pytest.raises(OperationFailedError):
+            await client.environment_clones.create(name="prod-rehearsal", environment_id=ENVIRONMENT_ID)
+
+
+class TestEnvironmentCloneReads:
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_get(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {
+            "data": {
+                "environmentClone": _environment_clone(
+                    status="COMPLETED",
+                    created_environment={
+                        "id": CREATED_ENVIRONMENT_ID,
+                        "name": "prod-rehearsal",
+                        "config": {"fqdn_suffix": "rehearsal.local"},
+                    },
+                )
+            }
+        }
+
+        environment_clone = await client.environment_clones.get(CLONE_ID)
+
+        assert environment_clone.status is EnvironmentCloneStatus.COMPLETED
+        assert environment_clone.created_environment is not None
+        assert str(environment_clone.created_environment.id) == CREATED_ENVIRONMENT_ID
+        _, variables = mock_transport.execute.call_args.args
+        assert variables == {"environmentCloneId": CLONE_ID}
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_get_not_found_raises_rather_than_returning_none(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """``environmentClone`` is non-null: an unknown id is an error, not a null."""
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [{"message": "Environment clone not found", "extensions": {"code": "NOT_FOUND"}}],
+        }
+
+        with pytest.raises(ResourceNotFoundError):
+            await client.environment_clones.get(CLONE_ID)
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_get_projects_flattened_clone_errors(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        """Operation-level events arrive as flat ``"step: error"`` strings, not structured objects."""
+        mock_transport.execute.return_value = {
+            "data": {
+                "environmentClone": _environment_clone(
+                    status="FAILED",
+                    deployment_results=[],
+                    clone_errors=["capture: environment backup FAILED"],
+                )
+            }
+        }
+
+        environment_clone = await client.environment_clones.get(CLONE_ID)
+
+        assert environment_clone.status is EnvironmentCloneStatus.FAILED
+        assert environment_clone.clone_errors == ["capture: environment backup FAILED"]
+        assert environment_clone.created_environment is None
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_get_tolerates_a_deleted_source_and_capture(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        """A terminal clone survives its source environment and its capture."""
+        payload = _environment_clone(status="COMPLETED")
+        payload["sourceEnvironment"] = None
+        payload["environmentBackup"] = None
+        mock_transport.execute.return_value = {"data": {"environmentClone": payload}}
+
+        environment_clone = await client.environment_clones.get(CLONE_ID)
+
+        assert environment_clone.source_environment is None
+        assert environment_clone.environment_backup is None
+        assert environment_clone.source_environment_name == "prod"
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_list(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {
+            "data": {
+                "environmentClones": [
+                    {
+                        "id": CLONE_ID,
+                        "name": "prod-rehearsal",
+                        "status": "PARTIAL",
+                        "sourceEnvironmentName": "prod",
+                        "createdOn": "2026-01-01T00:00:00",
+                        "updatedOn": None,
+                        "cloneErrors": [],
+                        "createdEnvironment": {"id": CREATED_ENVIRONMENT_ID, "name": "prod-rehearsal"},
+                        "deploymentResults": [
+                            {
+                                "deploymentId": DEPLOYMENT_ID,
+                                "deploymentName": "demo",
+                                "outcome": "CLONED",
+                                "reason": None,
+                            },
+                            {
+                                "deploymentId": OTHER_DEPLOYMENT_ID,
+                                "deploymentName": "analytics",
+                                "outcome": "FAILED",
+                                "reason": "driver_version_gone",
+                            },
+                        ],
+                    }
+                ]
+            }
+        }
+
+        environment_clones = await client.environment_clones.list(environment_id=ENVIRONMENT_ID)
+
+        assert len(environment_clones) == 1
+        assert environment_clones[0].status is EnvironmentCloneStatus.PARTIAL
+        assert environment_clones[0].deployment_results[1].reason == "driver_version_gone"
+        _, variables = mock_transport.execute.call_args.args
+        assert variables == {"environmentId": ENVIRONMENT_ID}
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_list_empty(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {"data": {"environmentClones": []}}
+
+        assert await client.environment_clones.list(environment_id=ENVIRONMENT_ID) == []
+
+
+class TestWaitForClone:
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_polls_until_terminal(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.side_effect = [
+            {"data": {"environmentClone": _environment_clone(status="IN_PROGRESS")}},
+            {"data": {"environmentClone": _environment_clone(status="COMPLETED")}},
+        ]
+
+        environment_clone = await client.environment_clones.wait_for_clone(CLONE_ID, max_wait=10, interval=0)
+
+        assert environment_clone.status is EnvironmentCloneStatus.COMPLETED
+        assert mock_transport.execute.await_count == 2
+
+    @staticmethod
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["COMPLETED", "PARTIAL", "FAILED"])
+    async def test_treats_partial_and_failed_as_terminal(
+        client: StyrminClient, mock_transport: AsyncMock, status: str
+    ) -> None:
+        """COMPLETED / PARTIAL / FAILED are all final — polling must stop on each."""
+        mock_transport.execute.return_value = {"data": {"environmentClone": _environment_clone(status=status)}}
+
+        environment_clone = await client.environment_clones.wait_for_clone(CLONE_ID, max_wait=10, interval=0)
+
+        assert environment_clone.status is EnvironmentCloneStatus(status)
+        assert mock_transport.execute.await_count == 1
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_does_not_stop_on_pending_or_in_progress(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.side_effect = [
+            {"data": {"environmentClone": _environment_clone(status="PENDING")}},
+            {"data": {"environmentClone": _environment_clone(status="IN_PROGRESS")}},
+            {"data": {"environmentClone": _environment_clone(status="PARTIAL")}},
+        ]
+
+        environment_clone = await client.environment_clones.wait_for_clone(CLONE_ID, max_wait=10, interval=0)
+
+        assert environment_clone.status is EnvironmentCloneStatus.PARTIAL
+        assert mock_transport.execute.await_count == 3
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_returns_last_record_on_timeout(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {"data": {"environmentClone": _environment_clone(status="IN_PROGRESS")}}
+
+        environment_clone = await client.environment_clones.wait_for_clone(CLONE_ID, max_wait=0, interval=0)
+
+        assert environment_clone.status is EnvironmentCloneStatus.IN_PROGRESS

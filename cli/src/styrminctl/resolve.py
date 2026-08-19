@@ -104,3 +104,40 @@ async def resolve_active_instance(
         raise ValueError("Provide a deployment name, --id, or --instance-id.")
 
     return ResolvedTarget(instance_id=_active_instance_id(deployment), deployment_id=str(deployment.id))
+
+
+async def resolve_environment_id(
+    sdk: StyrminClient,
+    *,
+    name: str | None,
+    environment_id: str | None,
+    cluster: str,
+    cluster_id: str | None,
+) -> str:
+    """Resolve an environment to its UUID from a name (cluster-scoped) or ``--id``.
+
+    The environment-level mutations and queries that take a UUID only
+    (``createEnvironmentBackup``, ``environmentBackups``, ``environmentClones``)
+    need this; the name lookup goes through the ``environment`` query — which is
+    where the ADR-0031 dual-identifier resolution actually lives (server-side,
+    with the cluster scoping rules). The CLI never reimplements the name
+    matching.
+
+    Raises ``ValueError`` on any invalid identifier combination.
+    """
+    if name is not None and environment_id is not None:
+        raise ValueError("Provide either an environment name or --id, not both")
+    if name is None and environment_id is None:
+        raise ValueError("Either an environment name or --id is required")
+    if cluster_id is not None and cluster != "default":
+        raise ValueError("Provide either --cluster or --cluster-id, not both")
+
+    if environment_id is not None:
+        return environment_id
+
+    environment = await sdk.environments.get(
+        environment_name=name,
+        cluster_id=cluster_id,
+        cluster_name=cluster if cluster_id is None else None,
+    )
+    return str(environment.id)

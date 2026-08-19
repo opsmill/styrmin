@@ -8,6 +8,7 @@ from .assign_backup_storage_location import AssignBackupStorageLocation
 from .async_base_client import AsyncBaseClient
 from .base_model import UNSET, UnsetType
 from .change_password import ChangePassword
+from .clone_environment import CloneEnvironment
 from .create_backup import CreateBackup
 from .create_backup_schedule import CreateBackupSchedule
 from .create_backup_storage_location import CreateBackupStorageLocation
@@ -50,6 +51,7 @@ from .get_driver_container_override_docs import GetDriverContainerOverrideDocs
 from .get_driver_env_var_docs import GetDriverEnvVarDocs
 from .get_environment import GetEnvironment
 from .get_environment_backup import GetEnvironmentBackup
+from .get_environment_clone import GetEnvironmentClone
 from .get_environment_restore import GetEnvironmentRestore
 from .get_environment_services import GetEnvironmentServices
 from .get_group import GetGroup
@@ -76,6 +78,7 @@ from .list_backups import ListBackups
 from .list_clusters import ListClusters
 from .list_deployments import ListDeployments
 from .list_environment_backups import ListEnvironmentBackups
+from .list_environment_clones import ListEnvironmentClones
 from .list_environment_restores import ListEnvironmentRestores
 from .list_environments import ListEnvironments
 from .list_groups import ListGroups
@@ -152,6 +155,84 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return ChangePassword.model_validate(data)
+
+    async def clone_environment(
+        self,
+        name: str,
+        environment_id: Union[Optional[UUID], UnsetType] = UNSET,
+        environment_name: Union[Optional[str], UnsetType] = UNSET,
+        cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
+        cluster_name: Union[Optional[str], UnsetType] = UNSET,
+        deployment_ids: Union[Optional[list[UUID]], UnsetType] = UNSET,
+        config_override: Union[Optional[UpdateEnvironmentInput], UnsetType] = UNSET,
+        clear_config_fields: Union[Optional[list[str]], UnsetType] = UNSET,
+        **kwargs: Any,
+    ) -> CloneEnvironment:
+        query = gql("""
+            mutation CloneEnvironment($name: String!, $environmentId: UUID, $environmentName: String, $clusterId: UUID, $clusterName: String, $deploymentIds: [UUID!], $configOverride: UpdateEnvironmentInput, $clearConfigFields: [String!]) {
+              cloneEnvironment(
+                name: $name
+                environmentId: $environmentId
+                environmentName: $environmentName
+                clusterId: $clusterId
+                clusterName: $clusterName
+                deploymentIds: $deploymentIds
+                configOverride: $configOverride
+                clearConfigFields: $clearConfigFields
+              ) {
+                id
+                name
+                status
+                sourceEnvironmentName
+                createdOn
+                updatedOn
+                requestedDeploymentIds
+                configOverride
+                clearConfigFields
+                cloneErrors
+                sourceEnvironment {
+                  id
+                  name
+                }
+                environmentBackup {
+                  id
+                  name
+                  status
+                }
+                createdEnvironment {
+                  id
+                  name
+                  config
+                }
+                deploymentResults {
+                  deploymentId
+                  deploymentName
+                  outcome
+                  reason
+                  counterpartDeploymentId
+                  restoreId
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {
+            "name": name,
+            "environmentId": environment_id,
+            "environmentName": environment_name,
+            "clusterId": cluster_id,
+            "clusterName": cluster_name,
+            "deploymentIds": deployment_ids,
+            "configOverride": config_override,
+            "clearConfigFields": clear_config_fields,
+        }
+        response = await self.execute(
+            query=query,
+            operation_name="CloneEnvironment",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return CloneEnvironment.model_validate(data)
 
     async def create_backup(
         self,
@@ -1356,6 +1437,57 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return GetEnvironmentBackup.model_validate(data)
 
+    async def get_environment_clone(
+        self, environment_clone_id: UUID, **kwargs: Any
+    ) -> GetEnvironmentClone:
+        query = gql("""
+            query GetEnvironmentClone($environmentCloneId: UUID!) {
+              environmentClone(environmentCloneId: $environmentCloneId) {
+                id
+                name
+                status
+                sourceEnvironmentName
+                createdOn
+                updatedOn
+                requestedDeploymentIds
+                configOverride
+                clearConfigFields
+                cloneErrors
+                sourceEnvironment {
+                  id
+                  name
+                }
+                environmentBackup {
+                  id
+                  name
+                  status
+                }
+                createdEnvironment {
+                  id
+                  name
+                  config
+                }
+                deploymentResults {
+                  deploymentId
+                  deploymentName
+                  outcome
+                  reason
+                  counterpartDeploymentId
+                  restoreId
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"environmentCloneId": environment_clone_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetEnvironmentClone",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetEnvironmentClone.model_validate(data)
+
     async def get_environment_restore(
         self, environment_restore_id: UUID, **kwargs: Any
     ) -> GetEnvironmentRestore:
@@ -1719,6 +1851,42 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return ListEnvironmentBackups.model_validate(data)
+
+    async def list_environment_clones(
+        self, environment_id: UUID, **kwargs: Any
+    ) -> ListEnvironmentClones:
+        query = gql("""
+            query ListEnvironmentClones($environmentId: UUID!) {
+              environmentClones(environmentId: $environmentId) {
+                id
+                name
+                status
+                sourceEnvironmentName
+                createdOn
+                updatedOn
+                cloneErrors
+                createdEnvironment {
+                  id
+                  name
+                }
+                deploymentResults {
+                  deploymentId
+                  deploymentName
+                  outcome
+                  reason
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"environmentId": environment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="ListEnvironmentClones",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return ListEnvironmentClones.model_validate(data)
 
     async def list_environment_restores(
         self, environment_backup_id: UUID, **kwargs: Any
