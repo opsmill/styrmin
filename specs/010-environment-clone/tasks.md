@@ -125,7 +125,7 @@
 - [X] T046 [P] New ADR (clone record + cross-target restore + capture-window guard deviation + ungated-read parity decision from research D10/X2) in `dev/adr/`
 - [X] T047 [P] Add **Environment clone** to `CONTEXT.md` (first-class record; links to the new ADR)
 - [X] T048 [P] Extend `dev/knowledge/backend/backup-restore.md` with the clone service table, flow, derivation, and cross-target restore mechanics
-- [ ] T049 Final gates: `uv run invoke format lint`, `uv run invoke validate-graphql`, `uv run invoke generate` (no diff), full `uv run invoke test`, frontend `pnpm test` — all green
+- [X] T049 Final gates: `uv run invoke format lint`, `uv run invoke validate-graphql`, `uv run invoke generate` (no diff), full `uv run invoke test`, frontend `pnpm test` — all green
 
 ---
 

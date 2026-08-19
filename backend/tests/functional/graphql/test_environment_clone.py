@@ -885,10 +885,17 @@ async def _complete_capture_constituents(
     result = await session.exec(
         select(Backup).where(Backup.environment_backup_id == environment_backup_id)
     )
+    # NOTE: commit each row separately. Mutating two dirty rows of the same
+    # table in one flush triggers SQLAlchemy's bulk UPDATE path, which raises
+    # ``InvalidRequestError`` on SQLite because ``updated_on``'s
+    # ``onupdate=func.now()`` renders as a postcompile ``strftime(...)`` and
+    # postcompile / ``literal_execute`` params cannot be used with
+    # ``executemany()``. Same workaround as
+    # ``test_application_driver_created_on_distinct_versions``.
     for backup in result.all():
         backup.status = BackupStatus.COMPLETED
         session.add(backup)
-    await session.commit()
+        await session.commit()
 
 
 async def _run_clone_flow(
@@ -2095,10 +2102,12 @@ async def test_a_terminal_clone_accounts_for_every_deployment_exactly_once(
     # The stubbed cross-target restores land, which is what makes the clone
     # terminal — the derivation folds their status, not the flow's exit.
     result = await session.exec(select(Restore))
+    # One commit per row: see the note in ``_complete_capture_constituents``
+    # for why a multi-row flush cannot carry the ``updated_on`` onupdate here.
     for restore in result.all():
         restore.status = RestoreStatus.COMPLETED
         session.add(restore)
-    await session.commit()
+        await session.commit()
 
     data = await gql(
         fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
