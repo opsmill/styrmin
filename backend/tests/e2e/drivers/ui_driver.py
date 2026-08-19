@@ -29,6 +29,7 @@ from tests.e2e.drivers.refs import (
     DeploymentRef,
     DriverVersionRef,
     EnvironmentBackupRef,
+    EnvironmentCloneRef,
     EnvironmentRef,
     EnvironmentRestoreRef,
     RestoreRef,
@@ -40,6 +41,7 @@ from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 from tests.e2e.pages.drivers_list import DriversListPage
 from tests.e2e.pages.environments import (
     EnvironmentBackupsTabPage,
+    EnvironmentClonesTabPage,
     EnvironmentDetailPage,
     EnvironmentsListPage,
 )
@@ -108,6 +110,7 @@ class UiScenarioDriver:
         self._environments_list = EnvironmentsListPage(page)
         self._environment_detail = EnvironmentDetailPage(page)
         self._environment_backups = EnvironmentBackupsTabPage(page)
+        self._environment_clones = EnvironmentClonesTabPage(page)
         # environment_id passed into create_deployment — stashed so
         # wait_for_deployment_running can build the detail URL without
         # re-receiving it (matches ApiScenarioDriver's signature).
@@ -125,6 +128,11 @@ class UiScenarioDriver:
         # remembered from the call that created it.
         self._environment_backup_owners: dict[str, str] = {}
         self._environment_restore_owners: dict[str, str] = {}
+        # environment_clone_id -> the clone's *source* environment_id. The
+        # Clones tab is scoped by source, so reading a clone by its own id needs
+        # the environment whose tab lists it; the only call that carries it is
+        # the one that created the clone.
+        self._environment_clone_owners: dict[str, str] = {}
 
     def attach_to_deployment(self, *, environment_id: str) -> None:
         """Bind this driver to an environment without going through create_deployment.
@@ -573,4 +581,77 @@ class UiScenarioDriver:
             await self._environment_backups.delete_backup(
                 environment_id=environment_id,
                 environment_backup_id=environment_backup_id,
+            )
+
+    # --- Environment clone ------------------------------------------------
+    #
+    # Driven from the Clones tab on the *source* environment's detail page: the
+    # tab lists the clones taken **of** that environment, and the clone dialog's
+    # trigger lives in its section header.
+
+    def _owning_source_environment(self, *, environment_clone_id: str) -> str:
+        """Resolve which environment's Clones tab lists a clone record."""
+        environment_id = (
+            self._environment_clone_owners.get(environment_clone_id)
+            or self._environment_id
+        )
+        if environment_id is None:
+            raise ScenarioActionError(
+                "UI driver has no source-environment context for environment "
+                f"clone {environment_clone_id!r}; the Clones tab is scoped by "
+                "source, so clone_environment or attach_to_deployment must have "
+                "named the environment first"
+            )
+        return environment_id
+
+    async def clone_environment(
+        self,
+        *,
+        environment_id: str,
+        name: str,
+        deployment_ids: list[str] | None = None,
+        config_override: dict[str, Any] | None = None,
+        clear_config_fields: list[str] | None = None,
+    ) -> EnvironmentCloneRef:
+        async with _ui_errors(f"cloning environment {environment_id} into {name!r}"):
+            ref = await self._environment_clones.create_clone(
+                environment_id=environment_id,
+                name=name,
+                deployment_ids=deployment_ids,
+                config_override=config_override,
+                clear_config_fields=clear_config_fields,
+            )
+        self._environment_clone_owners[ref.id] = environment_id
+        return ref
+
+    async def get_environment_clone(
+        self, *, environment_clone_id: str
+    ) -> EnvironmentCloneRef:
+        environment_id = self._owning_source_environment(
+            environment_clone_id=environment_clone_id
+        )
+        async with _ui_errors(f"reading environment clone {environment_clone_id}"):
+            ref = await self._environment_clones.read_clone(
+                environment_id=environment_id,
+                environment_clone_id=environment_clone_id,
+            )
+        if ref is None:
+            raise ResourceNotFound(
+                f"environment clone {environment_clone_id} is not listed on the "
+                f"Clones tab of environment {environment_id}"
+            )
+        return ref
+
+    async def wait_for_environment_clone(
+        self, *, environment_clone_id: str, max_wait: float = 1800.0
+    ) -> EnvironmentCloneRef:
+        environment_id = self._owning_source_environment(
+            environment_clone_id=environment_clone_id
+        )
+        async with _ui_errors(f"waiting for environment clone {environment_clone_id}"):
+            return await self._environment_clones.wait_for_clone_status(
+                environment_id=environment_id,
+                environment_clone_id=environment_clone_id,
+                terminal_statuses=TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
+                max_wait=max_wait,
             )

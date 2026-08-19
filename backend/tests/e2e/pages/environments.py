@@ -7,6 +7,7 @@ environment detail page (BSL assignment, deploy entry point).
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any, TYPE_CHECKING
 
@@ -16,6 +17,8 @@ from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
 from tests.e2e.drivers.refs import (
     EnvironmentBackupConstituentRef,
     EnvironmentBackupRef,
+    EnvironmentCloneDeploymentResultRef,
+    EnvironmentCloneRef,
     EnvironmentRef,
     EnvironmentRestoreRef,
     EnvironmentRestoreSkipRef,
@@ -43,6 +46,25 @@ _LIST_SETTLE_TIMEOUT_SECONDS = 60.0
 # Covers the tab's 10s ``refetchInterval`` picking up a change made out of band
 # (a constituent deleted through the SDK, a snapshot created by another surface).
 _ROW_APPEAR_TIMEOUT_SECONDS = 30.0
+
+
+# How long an expanded clone row may take to resolve its ``GetEnvironmentClone``
+# detail query. Generous because the same styrmin-server is concurrently running
+# a clone's capture and cross-target restore fan-out; short enough that a query
+# which errored still fails inside a scenario's own budget.
+_CLONE_DETAIL_TIMEOUT_SECONDS = 60.0
+
+# Gap between reads of a clone row's derived status. The list refetches itself
+# every 10s while anything is non-terminal, so polling faster than that only
+# re-reads the same DOM; 3s matches the environment backup/restore waiters.
+_CLONE_STATUS_POLL_SECONDS = 3.0
+
+# How long ``cloneEnvironment`` may take to return and its row to appear. The
+# mutation validates the name, resolves the source, registers the clone row plus
+# its capture in one transaction and dispatches the constituent fan-out, all
+# synchronously — the same shape (and budget) as the environment-restore
+# mutation the Backups tab drives.
+_CLONE_SUBMIT_TIMEOUT_SECONDS = 300.0
 
 
 class EnvironmentsListPage:
@@ -899,6 +921,515 @@ class EnvironmentBackupsTabPage:
             f"environment backup {environment_backup_id} row did not disappear "
             "within 120s of confirming the delete"
         )
+
+
+class EnvironmentClonesTabPage:
+    """The Clones tab on the environment detail page (spec 010-environment-clone).
+
+    Backs :class:`~tests.e2e.drivers.ui_driver.UiScenarioDriver`'s
+    environment-clone methods. Scoped by the clone's **source** environment: the
+    tab lists the clones taken *of* this environment, so every method needs the
+    source id even when it is only reading one clone by its own id.
+
+    Three rendering facts drive the shape of this class:
+
+    * the collapsed row publishes identity, derived status, the created
+      environment and the backing capture as ``data-*`` attributes, but the
+      per-deployment attribution and the recorded events only exist in the DOM
+      while the row is expanded — and they come from a *second* query
+      (``GetEnvironmentClone``) that resolves after the expansion, so expanding
+      is not the same as having the detail;
+    * the list polls on a 10s interval only while some listed clone is
+      non-terminal, so a status transition needs a poll to become visible while
+      a finished list is stable;
+    * every read is taken off ``data-*`` attributes rather than visible text, so
+      the UI driver reports the same raw enum names (``COMPLETED``, ``CLONED``,
+      …) the API driver reads off the generated enums.
+    """
+
+    def __init__(self, page: Page) -> None:
+        self._page = page
+
+    # ------------------------------------------------------------------
+    # Navigation
+    # ------------------------------------------------------------------
+
+    async def goto(self, *, environment_id: str) -> None:
+        """Open ``/environments/{id}`` and switch to the Clones tab."""
+        await self._page.goto(f"/environments/{environment_id}")
+        detail = self._page.locator(
+            f"[data-testid=environment-detail][data-environment-id='{environment_id}']"
+        ).first
+        await detail.wait_for()
+        # Same caveat as the Backups and Configuration tabs: the project's
+        # ``Tabs`` primitive renders plain buttons with no ``role="tab"``.
+        await self._page.get_by_role("button", name="Clones", exact=True).click()
+        await self._section(environment_id).wait_for(state="visible")
+        await self._wait_for_list_settled(environment_id=environment_id)
+
+    def _section(self, environment_id: str) -> Locator:
+        return self._page.locator(
+            f"[data-testid=environment-clones-section]"
+            f"[data-environment-id='{environment_id}']"
+        ).first
+
+    async def _wait_for_list_settled(self, *, environment_id: str) -> None:
+        """Block until ``ListEnvironmentClones`` has committed to an answer.
+
+        A mounted section is not a loaded list: while the query is in flight the
+        panel renders "Loading clones..." with no rows at all, so a row lookup
+        at that moment reports an existing clone as absent. Settled means at
+        least one clone row, or the empty state.
+        """
+        section = self._section(environment_id)
+        deadline = time.time() + _LIST_SETTLE_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            if await section.locator("[data-testid=environment-clone-row]").count() > 0:
+                return
+            if await section.locator("[data-testid=environment-clones-empty]").count():
+                return
+            await asyncio.sleep(0.5)
+        raise ScenarioTimeout(
+            "environment clones list rendered neither a clone row nor the empty "
+            f"state within {_LIST_SETTLE_TIMEOUT_SECONDS}s on environment "
+            f"{environment_id} — the query may have failed (the section renders "
+            "an ErrorState carrying no test hook)"
+        )
+
+    async def _ensure_on_tab(self, *, environment_id: str) -> None:
+        """Re-enter the Clones tab unless it is already the active panel.
+
+        The Playwright page is session-scoped and shared with every other
+        scenario, so "already there" is never assumed — but re-navigating on
+        every call would throw away the row expansions this page relies on.
+        """
+        section = self._section(environment_id)
+        if await section.count() > 0 and await section.is_visible():
+            return
+        await self.goto(environment_id=environment_id)
+
+    def _row(self, environment_id: str, environment_clone_id: str) -> Locator:
+        return (
+            self._section(environment_id)
+            .locator(
+                f"[data-testid=environment-clone-row]"
+                f"[data-environment-clone-id='{environment_clone_id}']"
+            )
+            .first
+        )
+
+    async def _find_row(
+        self,
+        environment_id: str,
+        environment_clone_id: str,
+        *,
+        timeout: float = _ROW_APPEAR_TIMEOUT_SECONDS,
+    ) -> Locator | None:
+        """Return a clone row, or ``None`` once ``timeout`` proves it absent.
+
+        Polls rather than reading once: the list refetches on a 10s interval
+        while anything is non-terminal, so a clone created or changed out of
+        band needs a moment to land. Returning ``None`` only after the wait
+        keeps "absent" a real answer, which is what lets a scenario assert that
+        deleting the source removed a clone record.
+        """
+        deadline = time.time() + timeout
+        while True:
+            row = self._row(environment_id, environment_clone_id)
+            if await row.count() > 0:
+                return row
+            # The empty state is a *positive* "no clones at all" answer, so an
+            # absent record resolves at once instead of burning the budget.
+            if (
+                await self._section(environment_id)
+                .locator("[data-testid=environment-clones-empty]")
+                .count()
+                > 0
+            ):
+                return None
+            if time.time() >= deadline:
+                return None
+            await asyncio.sleep(1.0)
+
+    # ------------------------------------------------------------------
+    # Reads
+    # ------------------------------------------------------------------
+
+    async def _ensure_detail_loaded(self, row: Locator, *, context: str) -> None:
+        """Expand a clone row and wait for its detail query to resolve.
+
+        Two steps, because expanding only mounts the panel: the attribution
+        list and the recorded events come from ``GetEnvironmentClone``, which is
+        ``enabled`` on expansion and renders "Loading clone details..." until it
+        resolves. Waiting only for the panel would read an empty attribution
+        list as "no source deployments considered".
+        """
+        button = row.locator("[data-testid=environment-clone-expand-button]").first
+        if await button.get_attribute("aria-expanded") != "true":
+            await button.click()
+        detail = row.locator("[data-testid=environment-clone-detail]").first
+        try:
+            await detail.wait_for(state="visible", timeout=15_000)
+        except PlaywrightTimeoutError as exc:
+            raise ScenarioActionError(
+                f"{context}: clone row did not expand its detail panel"
+            ) from exc
+
+        deadline = time.time() + _CLONE_DETAIL_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            if await detail.locator("[data-testid=environment-clone-results]").count():
+                return
+            if await detail.locator(
+                "[data-testid=environment-clone-results-empty]"
+            ).count():
+                return
+            error = detail.locator("[data-testid=environment-clone-detail-error]")
+            if await error.count() > 0:
+                raise ScenarioActionError(
+                    f"{context}: GetEnvironmentClone failed: "
+                    f"{(await error.first.inner_text()).strip()}"
+                )
+            await asyncio.sleep(1.0)
+        raise ScenarioTimeout(
+            f"{context}: the expanded clone detail did not resolve its "
+            f"attribution list within {_CLONE_DETAIL_TIMEOUT_SECONDS}s"
+        )
+
+    async def _read_results(
+        self, row: Locator
+    ) -> tuple[EnvironmentCloneDeploymentResultRef, ...]:
+        items = row.locator("[data-testid=environment-clone-result]")
+        results: list[EnvironmentCloneDeploymentResultRef] = []
+        for i in range(await items.count()):
+            item = items.nth(i)
+            context = "environment clone deployment result"
+            results.append(
+                EnvironmentCloneDeploymentResultRef(
+                    deployment_id=await _required_attr(
+                        item, "data-deployment-id", context=context
+                    ),
+                    deployment_name=await _required_attr(
+                        item, "data-deployment-name", context=context
+                    ),
+                    outcome=await _required_attr(item, "data-outcome", context=context),
+                    # "" is the DOM's stand-in for null (an attribute cannot
+                    # hold one), normalised back so both drivers agree.
+                    reason=(await item.get_attribute("data-reason")) or None,
+                    counterpart_deployment_id=(
+                        await item.get_attribute("data-counterpart-deployment-id")
+                    )
+                    or None,
+                    restore_id=(await item.get_attribute("data-restore-id")) or None,
+                )
+            )
+        return tuple(results)
+
+    async def _read_clone_errors(self, row: Locator) -> tuple[str, ...]:
+        """Read the recorded operation-level events, already ``"step: error"``.
+
+        The list is only rendered when there is at least one entry, so an
+        absent ``environment-clone-errors`` block is an empty tuple rather than
+        a missing hook.
+        """
+        entries = row.locator("[data-testid=environment-clone-error-entry]")
+        # An explicit loop rather than ``tuple(... for ...)``: a generator
+        # expression containing ``await`` is an *async* generator, which
+        # ``tuple()`` cannot consume.
+        rendered: list[str] = []
+        for i in range(await entries.count()):
+            rendered.append((await entries.nth(i).inner_text()).strip())
+        return tuple(rendered)
+
+    async def _read_row(
+        self, row: Locator, *, environment_clone_id: str
+    ) -> EnvironmentCloneRef:
+        context = f"environment clone row {environment_clone_id}"
+        await self._ensure_detail_loaded(row, context=context)
+        return EnvironmentCloneRef(
+            id=environment_clone_id,
+            name=await _required_attr(
+                row, "data-environment-clone-name", context=context
+            ),
+            status=await _required_attr(
+                row, "data-environment-clone-status", context=context
+            ),
+            created_environment_id=(
+                await row.get_attribute("data-created-environment-id")
+            )
+            or None,
+            environment_backup_id=(
+                await row.get_attribute("data-environment-backup-id")
+            )
+            or None,
+            discarded=(
+                await _required_attr(
+                    row, "data-environment-clone-discarded", context=context
+                )
+            )
+            == "true",
+            deployment_results=await self._read_results(row),
+            clone_errors=await self._read_clone_errors(row),
+        )
+
+    async def read_clone(
+        self, *, environment_id: str, environment_clone_id: str
+    ) -> EnvironmentCloneRef | None:
+        """Read a clone row, or ``None`` when the list no longer shows it.
+
+        Deliberately re-navigates instead of reusing an already-visible tab the
+        way ``_ensure_on_tab`` would: the list drops its refetch interval as
+        soon as every listed clone is terminal, and the expanded detail does the
+        same. A terminal clone that then changes out of band — its created
+        environment deleted, its backing capture removed — would therefore never
+        appear, and this method is exactly how a scenario asserts that such a
+        change landed. Remounting the queries is what makes the read honest;
+        nothing is lost, since ``_read_row`` re-expands the row anyway.
+        """
+        await self.goto(environment_id=environment_id)
+        row = await self._find_row(environment_id, environment_clone_id)
+        if row is None:
+            return None
+        return await self._read_row(row, environment_clone_id=environment_clone_id)
+
+    async def wait_for_clone_status(
+        self,
+        *,
+        environment_id: str,
+        environment_clone_id: str,
+        terminal_statuses: frozenset[str],
+        max_wait: float,
+    ) -> EnvironmentCloneRef:
+        """Poll ``data-environment-clone-status`` until it is terminal.
+
+        Only the collapsed row's attribute is polled — the list refetches on its
+        own while anything is non-terminal, and expanding on every iteration
+        would add a detail query per poll for no gain. The expansion (and the
+        full attribution read) happens once, after the status settles.
+        """
+        await self._ensure_on_tab(environment_id=environment_id)
+        row = self._row(environment_id, environment_clone_id)
+        context = f"environment clone row {environment_clone_id}"
+        deadline = time.time() + max_wait
+        last_status = "<row absent>"
+        while time.time() < deadline:
+            if await row.count() > 0:
+                last_status = await _required_attr(
+                    row, "data-environment-clone-status", context=context
+                )
+                if last_status in terminal_statuses:
+                    return await self._read_row(
+                        row, environment_clone_id=environment_clone_id
+                    )
+            else:
+                # The shared session page may have been navigated away by
+                # another step of the same scenario (the counterpart deployment
+                # lives on a different environment's pages), so re-enter rather
+                # than burning the whole budget on a detached locator.
+                await self._ensure_on_tab(environment_id=environment_id)
+                row = self._row(environment_id, environment_clone_id)
+            await asyncio.sleep(_CLONE_STATUS_POLL_SECONDS)
+        raise ScenarioTimeout(
+            f"environment clone {environment_clone_id} did not reach a terminal "
+            f"derived status within {max_wait}s (last seen: {last_status})"
+        )
+
+    # ------------------------------------------------------------------
+    # Create
+    # ------------------------------------------------------------------
+
+    async def create_clone(
+        self,
+        *,
+        environment_id: str,
+        name: str,
+        deployment_ids: list[str] | None,
+        config_override: dict[str, Any] | None,
+        clear_config_fields: list[str] | None,
+    ) -> EnvironmentCloneRef:
+        """Drive the clone dialog and return the newly-added clone row."""
+        await self.goto(environment_id=environment_id)
+
+        section = self._section(environment_id)
+        existing_ids: set[str] = set()
+        rows = section.locator("[data-testid=environment-clone-row]")
+        for i in range(await rows.count()):
+            existing_ids.add(
+                await _required_attr(
+                    rows.nth(i),
+                    "data-environment-clone-id",
+                    context="environment clone row",
+                )
+            )
+
+        trigger = section.locator("[data-testid=clone-environment-button]").first
+        if await trigger.count() == 0:
+            # The whole dialog — trigger included — is wrapped in
+            # ``IfRole minimum="ADMIN"``, so for a non-admin operator it is
+            # absent rather than disabled. Without this the click below would
+            # fail as a bare "element not found" timeout instead of naming the
+            # permission as the cause.
+            raise ScenarioActionError(
+                "clone trigger is absent — the signed-in user is not ADMIN "
+                "(cloning creates an environment and reads every included "
+                "deployment's data)"
+            )
+        await trigger.click()
+        dialog = self._page.locator("[data-testid=clone-environment-dialog]").first
+        await dialog.wait_for(state="visible")
+
+        await dialog.locator("[data-testid=clone-environment-name-input]").fill(name)
+        await self._fill_selection(dialog, deployment_ids=deployment_ids)
+        await self._fill_config_override(dialog, config_override=config_override)
+        await self._fill_clear_fields(dialog, clear_config_fields=clear_config_fields)
+
+        await dialog.locator("[data-testid=clone-submit-button]").click()
+
+        # ``cloneEnvironment`` validates the target name, resolves the source,
+        # registers the clone row and its capture, and dispatches the
+        # constituent fan-out — all synchronously — so the mutation can take a
+        # while to return. On success the dialog closes itself; on a rejection
+        # it stays open with the typed error rendered inline.
+        deadline = time.time() + _CLONE_SUBMIT_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            error = dialog.locator("[data-testid=clone-environment-error]")
+            if await error.count() > 0:
+                raise ScenarioActionError(
+                    f"cloneEnvironment failed: "
+                    f"{(await error.first.inner_text()).strip()}"
+                )
+            rows = section.locator("[data-testid=environment-clone-row]")
+            for i in range(await rows.count()):
+                candidate = rows.nth(i)
+                candidate_id = await _required_attr(
+                    candidate,
+                    "data-environment-clone-id",
+                    context="environment clone row",
+                )
+                if candidate_id in existing_ids:
+                    continue
+                return await self._read_row(
+                    candidate, environment_clone_id=candidate_id
+                )
+            await asyncio.sleep(2.0)
+        raise ScenarioTimeout(
+            "clone_environment: no new clone row appeared within "
+            f"{_CLONE_SUBMIT_TIMEOUT_SECONDS}s"
+        )
+
+    async def _fill_selection(
+        self, dialog: Locator, *, deployment_ids: list[str] | None
+    ) -> None:
+        """Express the tri-state deployment selection in the dialog.
+
+        ``None`` leaves "Include every eligible application" checked, which is
+        what omits the ``deploymentIds`` argument. Anything else unchecks it and
+        then reconciles the per-deployment checkboxes — including the empty
+        list, which unchecks every one of them and sends the legal
+        configuration-only request.
+
+        The picker also renders the source's *ineligible* deployments (internal,
+        tombstoned, never deployed) as locked rows with a reason, so a selection
+        naming one of those has no checkbox to tick. That is reported as a
+        driver error rather than silently sending a smaller selection.
+        """
+        include_all = dialog.locator("[data-testid=clone-include-all-checkbox]").first
+        if deployment_ids is None:
+            await expect(include_all).to_have_attribute("aria-checked", "true")
+            return
+
+        requested = set(deployment_ids)
+        await include_all.click()
+        await expect(include_all).to_have_attribute("aria-checked", "false")
+
+        options = dialog.locator("[data-testid=clone-deployment-option]")
+        seen: set[str] = set()
+        for i in range(await options.count()):
+            option = options.nth(i)
+            context = "clone deployment option"
+            deployment_id = await _required_attr(
+                option, "data-deployment-id", context=context
+            )
+            seen.add(deployment_id)
+            eligible = (
+                await _required_attr(option, "data-eligible", context=context)
+            ) == "true"
+            wanted = deployment_id in requested
+            if wanted and not eligible:
+                raise ScenarioActionError(
+                    f"deployment {deployment_id} was requested for the clone but "
+                    "the dialog renders it as ineligible "
+                    f"({await option.get_attribute('data-ineligible-reason')!r}); "
+                    "the UI has no checkbox for it"
+                )
+            if not eligible:
+                continue
+            selected = (
+                await _required_attr(option, "data-selected", context=context)
+            ) == "true"
+            if selected != wanted:
+                await option.locator(
+                    "[data-testid=clone-deployment-checkbox]"
+                ).first.click()
+            await expect(option).to_have_attribute(
+                "data-selected", "true" if wanted else "false"
+            )
+
+        missing = sorted(requested - seen)
+        if missing:
+            raise ScenarioActionError(
+                f"deployment(s) {missing} were requested for the clone but the "
+                "dialog's picker does not list them (the source environment's "
+                "deployment list may be stale, or they belong to another "
+                "environment)"
+            )
+
+    async def _fill_config_override(
+        self, dialog: Locator, *, config_override: dict[str, Any] | None
+    ) -> None:
+        """Type the override JSON into the textarea, blank meaning "no override".
+
+        The form parses the text on every keystroke and disables submission
+        while it does not parse, so a malformed payload is reported here rather
+        than as a click that silently does nothing.
+        """
+        if config_override is None:
+            return
+        await dialog.locator("[data-testid=clone-config-override-input]").fill(
+            json.dumps(config_override)
+        )
+        error = dialog.locator("[data-testid=clone-config-override-error]")
+        if await error.count() > 0:
+            raise ScenarioActionError(
+                "the clone dialog rejected the config override: "
+                f"{(await error.first.inner_text()).strip()}"
+            )
+
+    async def _fill_clear_fields(
+        self, dialog: Locator, *, clear_config_fields: list[str] | None
+    ) -> None:
+        """Tick the captured-config fields to clear.
+
+        The checkboxes are built from the source environment's own config keys,
+        so a field the source does not set has no row — reported as a driver
+        error, since the UI cannot express it (the API driver can, and would
+        accept it as a no-op).
+        """
+        for field_name in clear_config_fields or ():
+            option = dialog.locator(
+                f"[data-testid=clone-clear-field-option]"
+                f"[data-config-field='{field_name}']"
+            ).first
+            if await option.count() == 0:
+                raise ScenarioActionError(
+                    f"config field {field_name!r} was requested for clearing but "
+                    "the clone dialog does not offer it — the source "
+                    "environment's config does not set that field"
+                )
+            if await option.get_attribute("data-selected") != "true":
+                await option.locator(
+                    "[data-testid=clone-clear-field-checkbox]"
+                ).first.click()
+            await expect(option).to_have_attribute("data-selected", "true")
 
 
 def _needs_advanced(config: dict[str, Any]) -> bool:

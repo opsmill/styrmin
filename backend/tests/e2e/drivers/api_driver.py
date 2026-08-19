@@ -27,6 +27,8 @@ from tests.e2e.drivers.refs import (
     DriverVersionRef,
     EnvironmentBackupConstituentRef,
     EnvironmentBackupRef,
+    EnvironmentCloneDeploymentResultRef,
+    EnvironmentCloneRef,
     EnvironmentRef,
     EnvironmentRestoreRef,
     EnvironmentRestoreSkipRef,
@@ -159,6 +161,68 @@ def _environment_restore_ref(environment_restore: Any) -> EnvironmentRestoreRef:
             )
             for entry in environment_restore.skipped_constituents
         ),
+    )
+
+
+#: The ``clone_errors`` step prefix the backend writes when the environment a
+#: clone created is deleted through ordinary environment deletion — the
+#: supported discard path (spec SC-005). Kept in lock-step with the frontend's
+#: ``DISCARD_STEP_PREFIX`` in ``EnvironmentClonesSection.tsx``: the UI driver
+#: reads ``data-environment-clone-discarded`` straight off the row, so this is
+#: how the API driver arrives at the identical boolean.
+_CLONE_DISCARD_STEP_PREFIX = "created_environment_deleted:"
+
+
+def _environment_clone_ref(environment_clone: Any) -> EnvironmentCloneRef:
+    """Adapt any of the generated EnvironmentClone payloads into a ref.
+
+    ``create`` / ``get`` / ``list`` each produce a distinct generated Pydantic
+    class with the same field names, so this reads them structurally — same
+    approach as :func:`_environment_backup_ref`.
+
+    ``list`` deliberately projects less than ``get`` (no ``counterpartDeployment
+    Id`` / ``restoreId`` on the results), which is why every scenario read goes
+    through ``get_environment_clone``; the ref shape stays uniform and the
+    thinner projection simply reports ``None`` for what it did not ask for.
+    """
+    clone_errors = tuple(environment_clone.clone_errors)
+    return EnvironmentCloneRef(
+        id=str(environment_clone.id),
+        name=environment_clone.name,
+        status=environment_clone.status.value,
+        created_environment_id=(
+            str(environment_clone.created_environment.id)
+            if environment_clone.created_environment is not None
+            else None
+        ),
+        environment_backup_id=(
+            str(environment_clone.environment_backup.id)
+            if getattr(environment_clone, "environment_backup", None) is not None
+            else None
+        ),
+        discarded=any(
+            entry.startswith(_CLONE_DISCARD_STEP_PREFIX) for entry in clone_errors
+        ),
+        deployment_results=tuple(
+            EnvironmentCloneDeploymentResultRef(
+                deployment_id=str(result.deployment_id),
+                deployment_name=result.deployment_name,
+                outcome=result.outcome.value,
+                reason=result.reason,
+                counterpart_deployment_id=(
+                    str(result.counterpart_deployment_id)
+                    if getattr(result, "counterpart_deployment_id", None) is not None
+                    else None
+                ),
+                restore_id=(
+                    str(result.restore_id)
+                    if getattr(result, "restore_id", None) is not None
+                    else None
+                ),
+            )
+            for result in environment_clone.deployment_results
+        ),
+        clone_errors=clone_errors,
     )
 
 
@@ -787,3 +851,85 @@ class ApiScenarioDriver:
             await self._client.environment_backups.delete(environment_backup_id)
         except StyrminError as exc:
             raise _normalise(exc) from exc
+
+    # --- Environment clone ------------------------------------------------
+
+    async def clone_environment(
+        self,
+        *,
+        environment_id: str,
+        name: str,
+        deployment_ids: list[str] | None = None,
+        config_override: dict[str, Any] | None = None,
+        clear_config_fields: list[str] | None = None,
+    ) -> EnvironmentCloneRef:
+        """Submit one ``cloneEnvironment`` through the typed SDK resource.
+
+        ``config_override`` arrives as the camelCase dict the protocol
+        specifies and is validated through ``UpdateEnvironmentInput`` here — the
+        generated model sets ``populate_by_name``, so the camelCase aliases the
+        UI textarea also takes are accepted directly, and validating is the
+        conversion.
+
+        ``deployment_ids`` is forwarded as-is so the tri-state survives: the SDK
+        omits the GraphQL argument for ``None`` and sends ``[]`` verbatim for the
+        configuration-only request.
+        """
+        # Imported locally for the same reason ``update_environment_via_form``
+        # defers its imports: keep the regenerated SDK input types off this
+        # module's import path, which many fixtures pull in.
+        from styrmin_sdk.graphql._generated.input_types import UpdateEnvironmentInput
+
+        override = (
+            UpdateEnvironmentInput.model_validate(config_override)
+            if config_override is not None
+            else None
+        )
+        try:
+            environment_clone = await self._client.environment_clones.create(
+                name,
+                environment_id=environment_id,
+                deployment_ids=deployment_ids,
+                config_override=override,
+                clear_config_fields=clear_config_fields,
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        return _environment_clone_ref(environment_clone)
+
+    async def get_environment_clone(
+        self, *, environment_clone_id: str
+    ) -> EnvironmentCloneRef:
+        try:
+            environment_clone = await self._client.environment_clones.get(
+                environment_clone_id
+            )
+        except ResourceNotFoundError as exc:
+            raise ResourceNotFound(str(exc)) from exc
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        return _environment_clone_ref(environment_clone)
+
+    async def wait_for_environment_clone(
+        self, *, environment_clone_id: str, max_wait: float = 1800.0
+    ) -> EnvironmentCloneRef:
+        """Poll the derived status via the SDK's own waiter.
+
+        ``EnvironmentCloneResource.wait_for_clone`` returns the last observed
+        record rather than raising on timeout, so the non-terminal case is
+        converted into a ``ScenarioTimeout`` here — the same failure mode the UI
+        driver produces, with the observed status in the message.
+        """
+        try:
+            environment_clone = await self._client.environment_clones.wait_for_clone(
+                environment_clone_id, max_wait=max_wait
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        ref = _environment_clone_ref(environment_clone)
+        if ref.status not in TERMINAL_ENVIRONMENT_OPERATION_STATUSES:
+            raise ScenarioTimeout(
+                f"environment clone {environment_clone_id} did not reach a "
+                f"terminal derived status within {max_wait}s (status: {ref.status})"
+            )
+        return ref
