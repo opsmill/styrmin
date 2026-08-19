@@ -14,6 +14,9 @@ from styrmin_backend.db.models import (
     Restore,
     RestoreStatus,
 )
+from styrmin_backend.repository.environment_backup import (
+    NON_TERMINAL_RESTORE_STATUSES,
+)
 from styrmin_backend.services.backup.metadata import BackupMetadata
 from styrmin_backend.services.backup.strategies.action import ActionBackupStrategy
 from styrmin_backend.services.backup.strategies.base import BackupStrategy
@@ -337,6 +340,38 @@ async def update_backup_component_status(
 # ---------------------------------------------------------------------------
 
 
+async def _find_in_flight_restore(
+    uow: UnitOfWork, deployment_id: UUID, target_namespace: str
+) -> Restore | None:
+    """Return a non-terminal restore already landing in *deployment_id*, if any.
+
+    A restore records its target as a namespace rather than a deployment FK, so
+    two namespaces are consulted: the requested one and the deployment's
+    canonical ``styrmin-<deployment_id>``. Every caller in the tree derives the
+    former from the latter, but the ``createRestore`` mutation takes
+    ``target_namespace`` verbatim from the client, and a restore already in
+    flight for the deployment must be found whichever namespace it was created
+    with.
+
+    ``PENDING`` counts as in flight: ``create_restore`` writes rows ``PENDING``
+    and only ``execute_restore_workflow`` promotes them to ``IN_PROGRESS``, so a
+    guard reading ``IN_PROGRESS`` alone would be blind for the whole dispatch
+    window.
+    """
+    canonical_namespace = f"styrmin-{deployment_id}"
+    namespaces = [target_namespace]
+    if canonical_namespace != target_namespace:
+        namespaces.append(canonical_namespace)
+
+    for namespace in namespaces:
+        # Ordered newest-first by the repository, so the most recent
+        # non-terminal restore is the one named in the refusal.
+        for restore in await uow.restores.get_by_target_namespace(namespace):
+            if restore.status in NON_TERMINAL_RESTORE_STATUSES:
+                return restore
+    return None
+
+
 async def create_restore(
     backup_id: UUID,
     target_namespace: str,
@@ -351,9 +386,10 @@ async def create_restore(
 
     Resolves the target deployment (from the backup for an in-place restore,
     or from ``target_deployment_id`` for a cross-target one), blocks
-    restoring an internal deployment, blocks a second concurrent restore on
-    the same deployment, and flips that deployment to RESTORING in the same
-    transaction so the UI reflects the lifecycle immediately.
+    restoring an internal deployment, blocks a second restore while one is
+    still non-terminal for that deployment or for the same backup, and flips
+    that deployment to RESTORING in the same transaction so the UI reflects
+    the lifecycle immediately.
 
     Args:
         environment_restore_id: Links the restore to an environment restore
@@ -362,11 +398,13 @@ async def create_restore(
             lifecycle is otherwise identical (spec FR-014).
         target_deployment_id: Restore into a **different** deployment than
             the one the backup was taken from (environment clone — research
-            D2.1). When given, every guard (``internal``, ``RESTORING``) and
-            the ``RESTORING`` flip apply to that deployment, never to the
+            D2.1). When given, every guard (``internal``, concurrent-restore)
+            and the ``RESTORING`` flip apply to that deployment, never to the
             backup's source deployment, and ``target_instance_id`` defaults
             to the target's active instance so the row records which
-            counterpart the data landed in. ``None`` (the default) keeps the
+            counterpart the data landed in. A counterpart already sitting in
+            ``RESTORING`` because the clone put it there is *not* a conflict —
+            see ``_find_in_flight_restore``. ``None`` (the default) keeps the
             shipped in-place behaviour: the target is resolved from the
             backup.
 
@@ -421,18 +459,32 @@ async def create_restore(
                 f"Cannot restore internal deployment {deployment_id}"
             )
 
-        # Concurrency guard: block a second restore on the same deployment.
-        if deployment.status == DeploymentState.RESTORING:
-            existing = await uow.restores.get_by_target_namespace(
-                target_namespace, status=RestoreStatus.IN_PROGRESS
-            )
-            existing_id = str(existing[0].id) if existing else "unknown"
-            raise RestoreAlreadyInProgressError(existing_restore_id=existing_id)
-
-        # Same-backup guard (preserved from prior behavior).
-        existing_restores = await uow.restores.get_by_backup_id(
-            backup_id, status=RestoreStatus.IN_PROGRESS
+        # Concurrency guard: refuse a second restore into the same deployment,
+        # gated on an actual non-terminal ``Restore`` row rather than on
+        # ``deployment.status == RESTORING``.
+        #
+        # The state alone cannot express the difference between "a restore is
+        # running here" and "this deployment is *waiting* for its first
+        # restore": an environment clone creates each counterpart already in
+        # ``RESTORING`` so nothing reconciles it before its data arrives
+        # (research D5), and gating on state therefore refused the very restore
+        # that populates it — naming no restore, because there was none. A
+        # refusal always names the row it collided with; when no row can be
+        # named there is nothing to collide with.
+        in_flight = await _find_in_flight_restore(
+            uow, deployment_id=deployment_id, target_namespace=target_namespace
         )
+        if in_flight is not None:
+            raise RestoreAlreadyInProgressError(existing_restore_id=str(in_flight.id))
+
+        # Same-backup guard: one backup cannot be replayed twice concurrently,
+        # wherever the two restores are aimed. Non-terminal (not merely
+        # ``IN_PROGRESS``) for the reason above — the dispatch window is real.
+        existing_restores = [
+            restore
+            for restore in await uow.restores.get_by_backup_id(backup_id)
+            if restore.status in NON_TERMINAL_RESTORE_STATUSES
+        ]
         if existing_restores:
             raise RestoreAlreadyInProgressError(
                 existing_restore_id=str(existing_restores[0].id),
