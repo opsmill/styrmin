@@ -539,6 +539,11 @@ type Environment {
   backupStorageLocation: BackupStorageLocation
 
   """
+  The clone that created this environment, or null when it was not clone-born. The provenance back-reference: `environmentClones` is scoped by *source* environment, so this is how a cloned environment points back at where it came from — and it keeps working after the source environment is deleted, since a terminal clone survives with `sourceEnvironmentName` intact.
+  """
+  clonedFrom: EnvironmentClone
+
+  """
   Env vars set at the environment scope. Empty when none are set.
   
   WARNING: This surface is for non-secret values only. The platform stores values in plaintext and exposes them through any query that selects them. Do not store credentials, API keys, or other secret material here — use the dedicated secret env var path (separate ticket) once available.

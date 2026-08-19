@@ -419,16 +419,29 @@ class FakeEnvironmentCloneRepository(
     async def get_by_source_environment_id(
         self, environment_id: UUID
     ) -> list[EnvironmentClone]:
-        return [m for m in self.models if m.source_environment_id == environment_id][
-            ::-1
-        ]
+        return [
+            self._hydrate(m)
+            for m in self.models
+            if m.source_environment_id == environment_id
+        ][::-1]
 
     async def get_by_created_environment_id(
         self, environment_id: UUID
     ) -> list[EnvironmentClone]:
-        return [m for m in self.models if m.created_environment_id == environment_id][
-            ::-1
-        ]
+        return [
+            self._hydrate(m)
+            for m in self.models
+            if m.created_environment_id == environment_id
+        ][::-1]
+
+    async def get_by_environment_backup_id(
+        self, environment_backup_id: UUID
+    ) -> list[EnvironmentClone]:
+        return [
+            self._hydrate(clone)
+            for clone in self.models
+            if clone.environment_backup_id == environment_backup_id
+        ][::-1]
 
     async def get_referenced_restores(
         self, clones: "list[EnvironmentClone]"

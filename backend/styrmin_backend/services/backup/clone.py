@@ -62,6 +62,7 @@ from styrmin_backend.services.backup.environment import (
 from styrmin_backend.services.environments import resolve_environment
 from styrmin_backend.services.exceptions import (
     EnvironmentAlreadyExistsError,
+    EnvironmentBackupInUseByCloneError,
     EnvironmentCloneNotFoundError,
     InvalidCloneDeploymentSelectionError,
     InvalidContextError,
@@ -654,6 +655,282 @@ async def find_clone_occupying_environment(
             if status not in TERMINAL_ENVIRONMENT_CLONE_STATUSES:
                 return clone
     return None
+
+
+# ---------------------------------------------------------------------------
+# Deletion cascades (research D9)
+# ---------------------------------------------------------------------------
+#
+# Every cascade below is **app-level on purpose**. The DB-level
+# ``ON DELETE SET NULL`` on ``created_environment_id`` is belt-and-braces only:
+# a bare NULL is not computably distinguishable from "not yet created", so each
+# deletion path also writes the ``clone_errors`` marker the derivation keys on,
+# in the same transaction as the deletion (``data-model.md``).
+#
+# All four helpers assume the caller's transaction is open and none of them
+# commits — the marker and the deletion have to land together or not at all,
+# which is only true if the caller owns the commit.
+
+
+def _append_clone_error(clone: EnvironmentClone, error: CloneError) -> None:
+    """Append one operation-level event to a clone, keeping what is recorded.
+
+    A new list rather than an in-place ``append``: ``clone_errors`` is a plain
+    JSON column, and SQLAlchemy only notices a *rebound* attribute (mutating
+    the list in place leaves the change undetected and silently unpersisted).
+    Same reason the clone flow's ``_save_progress`` rebinds it.
+    """
+    clone.clone_errors = [*(clone.clone_errors or []), error.model_dump(mode="json")]
+
+
+async def _derive_statuses(
+    clones: Sequence[EnvironmentClone], uow: UnitOfWork
+) -> dict[UUID, EnvironmentCloneStatus]:
+    """Derive a batch of clones' statuses with one restore query for the batch."""
+    if not clones:
+        return {}
+    restores = await uow.environment_clones.get_referenced_restores(list(clones))
+    return {
+        clone.id: derive_environment_clone_status_from_record(clone, restores)
+        for clone in clones
+    }
+
+
+async def guard_no_clone_capturing_environment_backup(
+    environment_backup_id: UUID, uow: UnitOfWork
+) -> dict[UUID, bool]:
+    """Refuse to delete a capture a clone is still taking (spec FR-008, D9).
+
+    The guard is scoped to the **capture window**, the only window in which
+    deleting the backup would strand work that can no longer be attributed to
+    anything: the clone flow is still polling for a capture that no longer
+    exists, and nothing has been created it could report against. Once the
+    capture is terminal the backup becomes deletable **on purpose** — that is
+    the documented escape hatch for a clone whose flow died (ADR-0055
+    decision 6), and :func:`detach_clones_from_environment_backup` attributes
+    the deletion on the record.
+
+    A clone that is *itself* already terminal never blocks the deletion either,
+    even in the (fatal-error-only) state where its capture still reads
+    non-terminal: it has nothing in flight left to strand, and refusing here
+    would recreate exactly the wedge D9 exists to prevent — most visibly on the
+    source-deletion cascade, which must never be blocked by a record it has
+    already resolved.
+
+    This is also the **snapshot point** for how each referencing clone stood
+    when the operator asked for the deletion, and the return value is not a
+    convenience: the deletion cascade destroys two of the derivation's own
+    inputs (the capture's constituent ``Backup`` rows, and the constituent
+    ``Restore`` rows that go with them), so a clone re-derived *after* the
+    cascade would read as though its restores had finished. Deriving here and
+    carrying the answer to
+    :func:`detach_clones_from_environment_backup` is what makes FR-008's
+    "drives a non-terminal clone to a failed terminal state" true for a clone
+    that was mid-restore.
+
+    Returns:
+        ``{clone_id: was_terminal}`` for every clone built from this capture.
+
+    Raises:
+        EnvironmentBackupInUseByCloneError: ``IN_USE``, naming the clone.
+    """
+    clones = await uow.environment_clones.get_by_environment_backup_id(
+        environment_backup_id
+    )
+    if not clones:
+        return {}
+    statuses = await _derive_statuses(clones, uow)
+    terminality = {
+        clone_id: status in TERMINAL_ENVIRONMENT_CLONE_STATUSES
+        for clone_id, status in statuses.items()
+    }
+    for clone in clones:
+        if terminality[clone.id]:
+            continue
+        capture_status = derive_clone_capture_status(clone.environment_backup)
+        if (
+            capture_status is not None
+            and capture_status not in TERMINAL_ENVIRONMENT_OPERATION_STATUSES
+        ):
+            raise EnvironmentBackupInUseByCloneError(
+                clone_id=str(clone.id), clone_name=clone.name
+            )
+    return terminality
+
+
+async def detach_clones_from_environment_backup(
+    environment_backup_id: UUID,
+    uow: UnitOfWork,
+    terminal_at_request: Mapping[UUID, bool] | None = None,
+) -> int:
+    """Attribute a capture's deletion on every clone built from it (D9).
+
+    Runs *before* the parent row goes, in the caller's transaction: the FK is
+    nullable but not ``ON DELETE SET NULL``, so the clone has to release it
+    first, and the marker has to be written where the release is.
+
+    The ``fatal`` flag is what makes one event mean two things (``data-model.md``
+    resolution rule 2):
+
+    * a **non-terminal** clone gets ``fatal: true`` and derives ``FAILED`` with
+      the deletion attributed — the escape hatch, honest about why it ended;
+    * an **already-terminal** clone gets ``fatal: false``: the event is kept as
+      history and the recorded outcome stands. Environment backups are
+      TTL-governed, and routine cleanup must never rewrite a finished clone.
+
+    Args:
+        environment_backup_id: The capture being deleted.
+        uow: The caller's open unit of work. Not committed here.
+        terminal_at_request: ``{clone_id: was_terminal}`` from
+            :func:`guard_no_clone_capturing_environment_backup`, taken before
+            the cascade removed the constituent backups and restores this
+            derivation reads. Omitting it derives now instead, which is only
+            right when nothing has been cascaded yet.
+
+    Returns:
+        The number of clone records updated.
+    """
+    clones = await uow.environment_clones.get_by_environment_backup_id(
+        environment_backup_id
+    )
+    if not clones:
+        return 0
+    terminality = dict(terminal_at_request or {})
+    unknown = [clone for clone in clones if clone.id not in terminality]
+    if unknown:
+        terminality.update(
+            {
+                clone_id: status in TERMINAL_ENVIRONMENT_CLONE_STATUSES
+                for clone_id, status in (await _derive_statuses(unknown, uow)).items()
+            }
+        )
+    for clone in clones:
+        terminal = terminality[clone.id]
+        _append_clone_error(
+            clone,
+            CloneError(
+                step=CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
+                error=(
+                    f"the backing environment backup {environment_backup_id} "
+                    "was deleted"
+                ),
+                fatal=not terminal,
+            ),
+        )
+        clone.environment_backup_id = None
+        clone.environment_backup = None
+        await uow.environment_clones.save(clone)
+        logger.info(
+            "clone_environment_backup_detached environment_clone_id={} "
+            "environment_backup_id={} was_terminal={}",
+            clone.id,
+            environment_backup_id,
+            terminal,
+        )
+    return len(clones)
+
+
+async def detach_clones_from_created_environment(
+    environment_id: UUID, uow: UnitOfWork
+) -> int:
+    """Attribute the discard of a cloned environment on its clone (SC-005).
+
+    Deleting the created environment is always allowed — it *is* the discard
+    path, and it is what drives a stuck clone terminal (D9). The clone record
+    itself survives as history, with the same ``fatal``-iff-non-terminal rule as
+    :func:`detach_clones_from_environment_backup`: discarding a half-built clone
+    ends it ``FAILED``, while discarding the environment of a clone that already
+    finished keeps the finished outcome and merely records that the environment
+    is gone.
+
+    Returns:
+        The number of clone records updated.
+    """
+    clones = await uow.environment_clones.get_by_created_environment_id(environment_id)
+    if not clones:
+        return 0
+    statuses = await _derive_statuses(clones, uow)
+    for clone in clones:
+        terminal = statuses[clone.id] in TERMINAL_ENVIRONMENT_CLONE_STATUSES
+        _append_clone_error(
+            clone,
+            CloneError(
+                step=CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
+                error=f"the created environment {environment_id} was deleted",
+                fatal=not terminal,
+            ),
+        )
+        clone.created_environment_id = None
+        clone.created_environment = None
+        await uow.environment_clones.save(clone)
+        logger.info(
+            "clone_created_environment_deleted environment_clone_id={} "
+            "environment_id={} was_terminal={}",
+            clone.id,
+            environment_id,
+            terminal,
+        )
+    return len(clones)
+
+
+class SourceCloneResolution(NamedTuple):
+    """What became of a deleted source environment's clone records."""
+
+    #: Terminal clones kept as provenance, with ``source_environment_id`` nulled.
+    kept: int
+    #: Non-terminal clones deleted outright.
+    deleted: int
+
+
+async def resolve_clones_of_deleted_source_environment(
+    environment_id: UUID, uow: UnitOfWork
+) -> SourceCloneResolution:
+    """Settle a source environment's clone records before it goes (D9).
+
+    Two outcomes, and the split is the whole point:
+
+    * a **terminal** clone survives with ``source_environment_id`` nulled. Its
+      created environment is an ordinary environment that outlives the source,
+      and that environment's provenance must not die with it —
+      ``source_environment_name`` keeps the record readable (which is why the FK
+      is nullable at all).
+    * a **non-terminal** clone is deleted outright. There is no outcome worth
+      keeping, its capture is about to be cascaded away with the environment,
+      and the clone flow tolerates its row vanishing mid-flight (the same
+      contract ``execute_restore_workflow`` has with ``RestoreNotFoundError``).
+
+    **Must run before the environment's backups cascade.** Deleting those
+    backups goes through :func:`guard_no_clone_capturing_environment_backup`,
+    and a clone whose capture is still in flight would refuse it — wedging the
+    deletion of the very environment that owns both rows. Settling the clones
+    first means the guard has nothing left to refuse.
+
+    Returns:
+        How many records were kept and how many were deleted.
+    """
+    clones = await uow.environment_clones.get_by_source_environment_id(environment_id)
+    if not clones:
+        return SourceCloneResolution(kept=0, deleted=0)
+    statuses = await _derive_statuses(clones, uow)
+    kept = 0
+    deleted = 0
+    for clone in clones:
+        if statuses[clone.id] in TERMINAL_ENVIRONMENT_CLONE_STATUSES:
+            clone.source_environment_id = None
+            clone.source_environment = None
+            await uow.environment_clones.save(clone)
+            kept += 1
+            continue
+        await uow.environment_clones.delete(clone)
+        deleted += 1
+    logger.info(
+        "clone_source_environment_deleted environment_id={} clones_kept={} "
+        "clones_deleted={}",
+        environment_id,
+        kept,
+        deleted,
+    )
+    return SourceCloneResolution(kept=kept, deleted=deleted)
 
 
 # ---------------------------------------------------------------------------

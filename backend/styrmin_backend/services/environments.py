@@ -426,25 +426,70 @@ async def update_environment(
 
 
 async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
-    """Delete an environment, cascading through its environment backups first.
+    """Delete an environment, settling its clone records and snapshots first.
 
-    ``environmentbackup.environment_id`` is a non-nullable FK, so a snapshot
-    outliving its environment is not representable: the environment's snapshots
-    (and their environment restores, constituent backups, and constituent
-    restores) are deleted with the same cascade as deleting a snapshot directly
-    before the environment row goes (spec FR-015). Skipping the cascade would
-    turn every delete of an environment that has ever been snapshotted into a
-    constraint violation surfacing as an opaque ``INTERNAL_ERROR``.
+    Three steps, and the order is load-bearing.
+
+    1. **Clone records are settled before anything else** (010 research D9).
+       An environment can appear on a clone record in two roles, and each has
+       its own rule:
+
+       * as the clone's **source** — a terminal clone survives with
+         ``source_environment_id`` nulled, because its created environment is an
+         ordinary environment that outlives the source and must keep its
+         provenance (``source_environment_name`` keeps it readable); a
+         non-terminal clone is deleted outright, and the clone flow tolerates
+         its row vanishing mid-flight.
+       * as the clone's **created** environment — this is the *discard* path
+         (spec SC-005) and is always allowed. The record survives as history
+         with ``created_environment_id`` nulled plus a
+         ``created_environment_deleted`` marker, fatal iff the clone was still
+         non-terminal, which is what drives a stuck clone terminal.
+
+       Settling first is what keeps step 2 from wedging: deleting an environment
+       backup refuses while a clone's capture of it is in flight (FR-008), and
+       that clone is exactly the non-terminal record this step has just removed.
+
+    2. **Environment backups cascade.** ``environmentbackup.environment_id`` is
+       a non-nullable FK, so a snapshot outliving its environment is not
+       representable: the environment's snapshots (and their environment
+       restores, constituent backups, and constituent restores) are deleted with
+       the same cascade as deleting a snapshot directly (spec FR-015). Skipping
+       it would turn every delete of an environment that has ever been
+       snapshotted into a constraint violation surfacing as an opaque
+       ``INTERNAL_ERROR``.
+
+    3. **The environment row goes.**
 
     Raises:
         EnvironmentNotFoundError: When ``environment_id`` does not exist.
     """
+    # Deferred: ``services.backup.clone`` imports this module for
+    # ``resolve_environment``, so hoisting these would make the two a cycle —
+    # the same reason ``guard_no_clone_occupying_environment`` defers its import.
+    from styrmin_backend.services.backup.clone import (
+        detach_clones_from_created_environment,
+        resolve_clones_of_deleted_source_environment,
+    )
+
     async with uow:
         environment = await uow.environments.get(environment_id)
         if environment is None:
             raise EnvironmentNotFoundError(
                 f"Environment with id {environment_id} not found."
             )
+
+        # Both clone roles are settled in one transaction, before the backup
+        # cascade: the discard marker and the FK release have to land together,
+        # and the non-terminal source clones have to be gone before the FR-008
+        # guard can see them.
+        discarded_clones = await detach_clones_from_created_environment(
+            environment_id, uow
+        )
+        source_clones = await resolve_clones_of_deleted_source_environment(
+            environment_id, uow
+        )
+        await uow.commit()
 
     cascaded = await delete_environment_backups_for_environment(environment_id, uow)
 
@@ -457,7 +502,11 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
         await uow.commit()
 
     logger.info(
-        "environment_deleted environment_id={} environment_backups_deleted={}",
+        "environment_deleted environment_id={} environment_backups_deleted={} "
+        "clones_discarded={} source_clones_kept={} source_clones_deleted={}",
         environment_id,
         cascaded,
+        discarded_clones,
+        source_clones.kept,
+        source_clones.deleted,
     )

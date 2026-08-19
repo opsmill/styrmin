@@ -477,6 +477,66 @@ async def test_get_by_created_environment_id_is_empty_for_unknown_environment(
     assert await repository.get_by_created_environment_id(uuid4()) == []
 
 
+@pytest.mark.asyncio
+async def test_get_by_environment_backup_id_finds_the_clones_built_from_a_capture(
+    session: AsyncSession,
+    repository: SQLModelEnvironmentCloneRepository,
+    source_environment: Environment,
+    capture: EnvironmentBackup,
+    instance: ApplicationInstance,
+) -> None:
+    """The lookup the FR-008 delete guard and its cascade run on (010 D9).
+
+    Newest-first and eager-loaded like every other read, because the guard
+    derives each clone's status — which walks the capture's own constituents —
+    before deciding whether the deletion is refused.
+    """
+    base = datetime(2026, 8, 19, 12, 0, tzinfo=timezone.utc)
+    session.add(
+        Backup(
+            name="styrmin-constituent-for-guard",
+            status=BackupStatus.IN_PROGRESS,
+            instance_id=instance.id,
+            environment_backup_id=capture.id,
+        )
+    )
+    for offset, name in enumerate(["older-clone", "newer-clone"]):
+        clone = await repository.create(
+            EnvironmentClone(
+                name=name,
+                source_environment_id=source_environment.id,
+                source_environment_name=source_environment.name,
+                environment_backup_id=capture.id,
+            )
+        )
+        clone.created_on = base + timedelta(minutes=offset)
+        session.add(clone)
+    await repository.create(
+        EnvironmentClone(
+            name="not-yet-registered",
+            source_environment_id=source_environment.id,
+            source_environment_name=source_environment.name,
+        )
+    )
+    await session.flush()
+
+    results = await repository.get_by_environment_backup_id(capture.id)
+
+    assert [clone.name for clone in results] == ["newer-clone", "older-clone"]
+    # Eager-loaded two levels deep: the guard reads the capture's constituents
+    # off these rows, and a lazy load there raises ``MissingGreenlet``.
+    assert [backup.status for backup in results[0].environment_backup.backups] == [
+        BackupStatus.IN_PROGRESS
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_by_environment_backup_id_is_empty_for_unknown_capture(
+    repository: SQLModelEnvironmentCloneRepository,
+) -> None:
+    assert await repository.get_by_environment_backup_id(uuid4()) == []
+
+
 # ---------------------------------------------------------------------------
 # Batched restore fetch
 # ---------------------------------------------------------------------------

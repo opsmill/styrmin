@@ -1225,19 +1225,45 @@ async def delete_environment_backup(
     which is also why an already-vanished constituent here is a no-op rather
     than an error.
 
+    **One guard does exist, and only one** (010 spec FR-008, research D9): a
+    snapshot a clone is still *capturing into* cannot be deleted, because that
+    is the single window in which deletion strands work nothing can be
+    attributed to. Once the capture is terminal deletion is allowed again and
+    becomes the escape hatch for a stuck clone —
+    :func:`~styrmin_backend.services.backup.clone.detach_clones_from_environment_backup`
+    releases the foreign key and attributes the deletion on every referencing
+    clone, fatally iff that clone was still non-terminal.
+
     Args:
         environment_backup_id: The snapshot to delete.
         uow: Unit of work supplying the repositories.
 
     Raises:
         EnvironmentBackupNotFoundError: When the snapshot does not exist.
+        EnvironmentBackupInUseByCloneError: When a clone's capture of this
+            snapshot is still in flight (010 spec FR-008).
     """
+    # Deferred: ``services.backup.clone`` imports this module for the shared
+    # status vocabulary, so hoisting these would make the two a cycle — same
+    # reason ``guard_no_clone_occupying_environment`` defers its import.
+    from styrmin_backend.services.backup.clone import (
+        detach_clones_from_environment_backup,
+        guard_no_clone_capturing_environment_backup,
+    )
+
     async with uow:
         environment_backup = await uow.environment_backups.get(environment_backup_id)
         if environment_backup is None:
             raise EnvironmentBackupNotFoundError(
                 f"Environment backup {environment_backup_id} not found"
             )
+        # Also the snapshot point for clone terminality: the cascade below
+        # destroys the constituent backups and their restores, both of which the
+        # clone derivation reads, so "was this clone terminal when the operator
+        # asked?" can only be answered here.
+        clone_terminality = await guard_no_clone_capturing_environment_backup(
+            environment_backup_id, uow
+        )
         environment_id = environment_backup.environment_id
         constituent_ids = [backup.id for backup in environment_backup.backups]
 
@@ -1266,16 +1292,25 @@ async def delete_environment_backup(
         environment_restores = list(environment_backup.restores)
         for environment_restore in environment_restores:
             await uow.environment_restores.delete(environment_restore)
+        # Before the parent row: ``environmentclone.environment_backup_id`` is
+        # nullable but carries no ``ON DELETE SET NULL``, so a referencing clone
+        # has to release it first — and the marker the derivation reads has to
+        # be written in the same transaction as the release.
+        detached_clones = await detach_clones_from_environment_backup(
+            environment_backup_id, uow, clone_terminality
+        )
         await uow.environment_backups.delete(environment_backup)
         await uow.commit()
 
     logger.info(
         "env_backup_deleted environment_id={} environment_backup_id={} "
-        "constituents_deleted={} environment_restores_deleted={}",
+        "constituents_deleted={} environment_restores_deleted={} "
+        "clones_detached={}",
         environment_id,
         environment_backup_id,
         deleted_constituents,
         len(environment_restores),
+        detached_clones,
     )
 
 
@@ -1288,6 +1323,11 @@ async def delete_environment_backups_for_environment(
     before the environment row goes: ``environmentbackup.environment_id`` is a
     non-nullable FK, so without this the delete fails on a constraint violation
     surfacing as an opaque ``INTERNAL_ERROR`` (critique E2).
+
+    Inherits :func:`delete_environment_backup`'s FR-008 guard, which is why
+    ``delete_environment`` settles the environment's clone records *first*: a
+    clone whose capture is still in flight would otherwise refuse the very
+    snapshot this cascade has to remove (010 research D9).
 
     Returns:
         The number of snapshots deleted.

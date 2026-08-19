@@ -91,6 +91,13 @@ class EnvironmentCloneRepository(BaseRepository[EnvironmentClone], ABC):
         raise NotImplementedError()
 
     @abstractmethod
+    async def get_by_environment_backup_id(
+        self, environment_backup_id: UUID
+    ) -> Sequence[EnvironmentClone]:
+        """Get the clones built from a capture, newest first."""
+        raise NotImplementedError()
+
+    @abstractmethod
     async def get_referenced_restores(
         self, clones: Sequence[EnvironmentClone]
     ) -> dict[UUID, Restore]:
@@ -168,6 +175,26 @@ class SQLModelEnvironmentCloneRepository(
         statement = (
             select(self.model_class)
             .where(self.model_class.created_environment_id == environment_id)
+            .options(*self._eager_load_options())
+            .order_by(self.model_class.created_on.desc())  # type: ignore[union-attr]
+        )
+        result = await self.session.exec(statement)
+        return result.all()
+
+    async def get_by_environment_backup_id(
+        self, environment_backup_id: UUID
+    ) -> Sequence[EnvironmentClone]:
+        """Get the clones built from a capture, newest first.
+
+        The lookup deleting an environment backup needs (010 research D9): the
+        FR-008 guard and the ``environment_backup_deleted`` marker both key on
+        "which clones point at this capture", and neither is expressible as a
+        SQL predicate over the clone's *status* (see the module docstring), so
+        the rows come back whole and are derived in Python.
+        """
+        statement = (
+            select(self.model_class)
+            .where(self.model_class.environment_backup_id == environment_backup_id)
             .options(*self._eager_load_options())
             .order_by(self.model_class.created_on.desc())  # type: ignore[union-attr]
         )
