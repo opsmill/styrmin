@@ -939,3 +939,58 @@ async def clone_environment(
     )
 
     return refreshed
+
+
+# ---------------------------------------------------------------------------
+# Read side (research D10)
+# ---------------------------------------------------------------------------
+
+
+class EnvironmentCloneReadout(NamedTuple):
+    """Clone records plus the ``Restore`` rows their statuses are derived from.
+
+    The rows travel *with* the records because they cannot be eager-loaded:
+    they are named by ids inside the JSON ``deployment_results`` entries, not by
+    a relationship. Fetching them per clone (let alone per entry) would be an
+    N+1 on every read of the clone surface, so both getters resolve the whole
+    batch with one ``IN`` query and hand the mapping to the caller, which passes
+    it straight into ``EnvironmentClone.from_instance``.
+    """
+
+    clones: Sequence[EnvironmentClone]
+    restores: dict[UUID, Restore]
+
+
+async def get_environment_clone(
+    environment_clone_id: UUID, uow: UnitOfWork
+) -> EnvironmentCloneReadout:
+    """Get one clone record and the restore rows its status needs.
+
+    Raises:
+        EnvironmentCloneNotFoundError: When no such clone exists.
+    """
+    async with uow:
+        clone = await uow.environment_clones.get(environment_clone_id)
+        if clone is None:
+            raise EnvironmentCloneNotFoundError(
+                f"Environment clone {environment_clone_id} not found"
+            )
+        restores = await uow.environment_clones.get_referenced_restores([clone])
+    return EnvironmentCloneReadout(clones=[clone], restores=restores)
+
+
+async def get_environment_clones(
+    environment_id: UUID, uow: UnitOfWork
+) -> EnvironmentCloneReadout:
+    """List the clones made *from* an environment, newest first.
+
+    Scoped by **source** environment (contracts/graphql.md): the created
+    environment's own provenance is reached through
+    ``Environment.clonedFrom``, not through this list.
+    """
+    async with uow:
+        clones = await uow.environment_clones.get_by_source_environment_id(
+            environment_id
+        )
+        restores = await uow.environment_clones.get_referenced_restores(clones)
+    return EnvironmentCloneReadout(clones=clones, restores=restores)

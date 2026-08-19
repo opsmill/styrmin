@@ -595,6 +595,92 @@ enum EnvironmentBackupStatus {
   FAILED
 }
 
+type EnvironmentClone {
+  id: UUID!
+  name: String!
+  sourceEnvironmentName: String!
+  createdOn: DateTime!
+  updatedOn: DateTime
+
+  """
+  Derived on every read from the capture's own derived status, the existence of the created environment, the constituent cross-target restores and the recorded clone errors — never stored, so it cannot contradict any of them. Terminal values are COMPLETED, PARTIAL and FAILED.
+  """
+  status: EnvironmentCloneStatus!
+
+  """
+  The environment that was cloned. Null once the source has been deleted — a terminal clone survives its source as the created environment's provenance (``sourceEnvironmentName`` keeps it readable).
+  """
+  sourceEnvironment: Environment
+
+  """
+  The capture the clone was built from. Null when registration never linked one, or once the capture has been deleted post-terminality (routine TTL cleanup does not rewrite the clone's outcome).
+  """
+  environmentBackup: EnvironmentBackup
+
+  """
+  The environment the clone created. Null until the capture succeeds and the environment materialises, and again once it has been deleted (the discard path — SC-005).
+  """
+  createdEnvironment: Environment
+
+  """
+  The explicit deployment selection as requested. Null means every eligible deployment was included (FR-003).
+  """
+  requestedDeploymentIds: [UUID!]
+
+  """
+  The environment-config override as supplied, canonicalised; null if none. Merged over the captured config by the clone flow (FR-006).
+  """
+  configOverride: JSON
+
+  """
+  The captured-config field names removed before the override merge, as supplied; null if none (FR-006).
+  """
+  clearConfigFields: [String!]
+
+  """
+  One entry per source deployment considered — cloned, skipped with a reason, or failed with a reason (SC-003).
+  """
+  deploymentResults: [EnvironmentCloneDeploymentResult!]!
+
+  """
+  Operation-level events that happened outside any single deployment (capture failed, target name lost, environment creation failed, an input deleted underneath the clone), rendered ``step: error``. Per-deployment failures are not here — they are in ``deploymentResults``.
+  """
+  cloneErrors: [String!]!
+}
+
+"""
+What became of one source deployment in a clone. ``PENDING`` is the transient value between registration and the step landing; a terminal clone contains no ``PENDING`` entry. Closed enum on the wire because the write-side vocabulary is fixed at these four values.
+"""
+enum EnvironmentCloneDeploymentOutcome {
+  PENDING
+  CLONED
+  SKIPPED
+  FAILED
+}
+
+"""
+One source deployment's outcome in the clone. Every source deployment considered appears exactly once (SC-003). ``reason`` is set for SKIPPED and FAILED and is open text — render it, do not switch on it. ``counterpartDeploymentId`` is the deployment created in the cloned environment (null unless CLONED); ``restoreId`` is the cross-target restore carrying the data (null until one is dispatched).
+"""
+type EnvironmentCloneDeploymentResult {
+  deploymentId: UUID!
+  deploymentName: String!
+  outcome: EnvironmentCloneDeploymentOutcome!
+  reason: String
+  counterpartDeploymentId: UUID
+  restoreId: UUID
+}
+
+"""
+Derived status of an environment clone — recomputed on every read, never stored (FR-009). Same vocabulary as ``EnvironmentBackupStatus`` and ``EnvironmentRestoreStatus``, but folded from different inputs: the backing capture's own derived status, whether the created environment exists, the constituent cross-target restores, and the recorded clone errors.
+"""
+enum EnvironmentCloneStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
 type EnvironmentRestore {
   id: UUID!
   createdOn: DateTime!
@@ -747,6 +833,7 @@ type Mutation {
   createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
   createEnvironmentBackup(environmentId: UUID!, name: String = null): EnvironmentBackup! @requiresRole
   restoreEnvironmentBackup(environmentBackupId: UUID!): EnvironmentRestore! @requiresRole
+  cloneEnvironment(name: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, deploymentIds: [UUID!] = null, configOverride: UpdateEnvironmentInput = null, clearConfigFields: [String!] = null): EnvironmentClone! @requiresRole
   deleteEnvironmentBackup(environmentBackupId: UUID!): Boolean! @requiresRole
   deleteBackup(backupId: UUID!): String @requiresRole
   createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore @requiresRole
@@ -853,6 +940,8 @@ type Query {
   environmentBackups(environmentId: UUID!): [EnvironmentBackup!]!
   environmentRestore(environmentRestoreId: UUID!): EnvironmentRestore
   environmentRestores(environmentBackupId: UUID!): [EnvironmentRestore!]!
+  environmentClone(environmentCloneId: UUID!): EnvironmentClone!
+  environmentClones(environmentId: UUID!): [EnvironmentClone!]!
   backupSchedule(scheduleId: UUID!): BackupSchedule
   backupSchedules(deploymentId: UUID!): [BackupSchedule!]!
   applicationDrivers: [ApplicationDriver!]!
