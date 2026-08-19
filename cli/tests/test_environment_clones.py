@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -225,6 +226,134 @@ def test_env_clones_create_forwards_selection_and_override_arguments(mock_client
     assert kwargs["clear_config_fields"] == ["ingress_class"]
     # Sent as a typed UpdateEnvironmentInput; the SDK camelCases it on the wire.
     assert kwargs["config_override"].fqdn_suffix == "rehearsal.local"
+
+
+def test_env_clones_create_reads_the_config_override_from_a_file(mock_client: MagicMock, tmp_path: Path) -> None:
+    """``--config-override @path`` reads the file, same as inline JSON.
+
+    An environment-config override is exactly the kind of argument that grows
+    past a comfortable shell literal (env-var bundles, ingress blocks), so the
+    ``@path`` form is the one operators actually use. It goes through the shared
+    ``parse_json_argument`` helper, so what is proven here is that the clone
+    command routes its argument through it rather than calling ``json.loads``
+    directly.
+    """
+    _seed_environment(mock_client)
+    override_file = tmp_path / "override.json"
+    override_file.write_text('{"fqdn_suffix": "rehearsal.local", "db_size": "5Gi"}')
+    mock_client.environment_clones.create = AsyncMock(return_value=_make_environment_clone())
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "env-clones",
+                "create",
+                "prod",
+                "--name",
+                "prod-rehearsal",
+                "--config-override",
+                f"@{override_file}",
+            ]
+        )
+    assert exc.value.code == 0
+    override = mock_client.environment_clones.create.call_args.kwargs["config_override"]
+    assert override.fqdn_suffix == "rehearsal.local"
+    assert override.db_size == "5Gi"
+
+
+def test_env_clones_create_accepts_a_camel_case_config_override(mock_client: MagicMock) -> None:
+    """Either casing parses: ``UpdateEnvironmentInput`` populates by name or alias.
+
+    The GraphQL argument is camelCase and the stored value is snake_case, so an
+    operator copying either form out of a response must not have to translate
+    it. ``--clear-config-field`` is the deliberate exception — it names
+    ``EnvironmentConfig`` fields, which are snake_case only.
+    """
+    _seed_environment(mock_client)
+    mock_client.environment_clones.create = AsyncMock(return_value=_make_environment_clone())
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "env-clones",
+                "create",
+                "prod",
+                "--name",
+                "prod-rehearsal",
+                "--config-override",
+                '{"fqdnSuffix": "rehearsal.local"}',
+            ]
+        )
+    assert exc.value.code == 0
+    override = mock_client.environment_clones.create.call_args.kwargs["config_override"]
+    assert override.fqdn_suffix == "rehearsal.local"
+
+
+def test_env_clones_create_forwards_repeated_clear_config_fields(mock_client: MagicMock) -> None:
+    """``--clear-config-field`` is repeatable and passed through verbatim."""
+    _seed_environment(mock_client)
+    mock_client.environment_clones.create = AsyncMock(return_value=_make_environment_clone())
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "env-clones",
+                "create",
+                "prod",
+                "--name",
+                "prod-rehearsal",
+                "--clear-config-field",
+                "ingress_class",
+                "--clear-config-field",
+                "external_dns_endpoints_type",
+            ]
+        )
+    assert exc.value.code == 0
+    assert mock_client.environment_clones.create.call_args.kwargs["clear_config_fields"] == [
+        "ingress_class",
+        "external_dns_endpoints_type",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("override", "expected_fragment"),
+    [
+        pytest.param("{not json", "Invalid JSON", id="malformed-inline-json"),
+        pytest.param("@/nonexistent/override.json", "not found", id="missing-file"),
+        pytest.param('{"externalUrlPort": "not-a-port"}', "externalUrlPort", id="wrongly-typed-value"),
+    ],
+)
+def test_env_clones_create_rejects_a_bad_config_override_before_calling_the_server(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    override: str,
+    expected_fragment: str,
+) -> None:
+    """A malformed override costs exit 1 and **no** clone.
+
+    The parse happens before the environment lookup, so a bad override never
+    registers a capture — the operator can fix the JSON and retry without first
+    discarding a half-started clone.
+    """
+    _seed_environment(mock_client)
+    mock_client.environment_clones.create = AsyncMock(return_value=_make_environment_clone())
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "env-clones",
+                "create",
+                "prod",
+                "--name",
+                "prod-rehearsal",
+                "--config-override",
+                override,
+            ]
+        )
+    assert exc.value.code == 1
+    assert expected_fragment in capsys.readouterr().out
+    mock_client.environment_clones.create.assert_not_called()
+    mock_client.environments.get.assert_not_called()
 
 
 def test_env_clones_create_forwards_a_repeated_deployment_selection(mock_client: MagicMock) -> None:

@@ -7,12 +7,14 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from styrmin_sdk import (
     EnvironmentCloneDeploymentOutcome,
     EnvironmentCloneStatus,
     UpdateEnvironmentInput,
 )
 from styrmin_sdk.exceptions import OperationFailedError, ResourceAlreadyExistsError, ResourceNotFoundError
+from styrmin_sdk.models import EnvVarInput
 
 if TYPE_CHECKING:
     from styrmin_sdk.client import StyrminClient
@@ -231,6 +233,135 @@ class TestEnvironmentCloneCreate:
 
         assert environment_clone.config_override == {"fqdn_suffix": "rehearsal.local"}
         assert environment_clone.clear_config_fields == ["ingress_class"]
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_sends_a_multi_field_override_with_only_the_set_fields(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """A partial override travels as a partial input, list fields included.
+
+        ``UpdateEnvironmentInput`` has a field per environment-config key, all
+        optional, so a caller who sets two of them must not accidentally send
+        the other nine as explicit nulls — on the server every present field
+        *replaces* the captured one wholesale (research D7), so a stray null
+        would silently wipe a captured setting the operator never mentioned.
+        ``env_vars`` is included because it is the one list-shaped field, sent
+        as ``[{name, value}]`` rather than a map.
+        """
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(
+            name="prod-rehearsal",
+            environment_id=ENVIRONMENT_ID,
+            config_override=UpdateEnvironmentInput(
+                fqdn_suffix="rehearsal.local",
+                env_vars=[EnvVarInput(name="SMTP_HOST", value="localhost")],
+            ),
+        )
+
+        _, variables = mock_transport.execute.call_args.args
+        assert variables["configOverride"] == {
+            "fqdnSuffix": "rehearsal.local",
+            "envVars": [{"name": "SMTP_HOST", "value": "localhost"}],
+        }
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_accepts_an_override_built_from_camel_case_keys(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """``UpdateEnvironmentInput`` populates by name *or* alias.
+
+        This is what lets the CLI hand raw JSON straight to
+        ``model_validate`` and accept whichever casing the operator typed; the
+        wire form is camelCase either way.
+        """
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(
+            name="prod-rehearsal",
+            environment_id=ENVIRONMENT_ID,
+            config_override=UpdateEnvironmentInput.model_validate({"fqdnSuffix": "rehearsal.local"}),
+        )
+
+        _, variables = mock_transport.execute.call_args.args
+        assert variables["configOverride"] == {"fqdnSuffix": "rehearsal.local"}
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_sends_an_explicit_empty_clear_config_fields(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """``[]`` clears nothing but is still a request the server may see.
+
+        Same reasoning as the empty deployment selection: the resource
+        distinguishes "not supplied" from "supplied empty" by presence, so an
+        empty list must not be dropped like an unset argument.
+        """
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(
+            name="prod-rehearsal", environment_id=ENVIRONMENT_ID, clear_config_fields=[]
+        )
+
+        _, variables = mock_transport.execute.call_args.args
+        assert variables["clearConfigFields"] == []
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_sends_every_clear_config_field_in_order(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """Multiple fields can be cleared in one clone, snake_case throughout.
+
+        ``clearConfigFields`` names ``EnvironmentConfig`` fields, not
+        ``UpdateEnvironmentInput`` ones, so — unlike ``configOverride`` — the
+        names are **not** camelCased on the way out.
+        """
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(
+            name="prod-rehearsal",
+            environment_id=ENVIRONMENT_ID,
+            clear_config_fields=("ingress_class", "external_dns_endpoints_type"),
+        )
+
+        _, variables = mock_transport.execute.call_args.args
+        assert variables["clearConfigFields"] == ["ingress_class", "external_dns_endpoints_type"]
+
+    @staticmethod
+    def test_override_rejects_a_wrongly_typed_value_client_side() -> None:
+        """A value of the wrong type is refused before any request is built."""
+        with pytest.raises(ValidationError):
+            UpdateEnvironmentInput.model_validate({"externalUrlPort": "not-a-port"})
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_drops_an_unknown_override_key_client_side(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """**Known gap**, characterised here rather than left undiscovered.
+
+        The ariadne-codegen base model does not set ``extra="forbid"``, so
+        ``UpdateEnvironmentInput`` *ignores* an unrecognised key instead of
+        raising. The misspelled field therefore never reaches the server's
+        ``extra="forbid"`` ``EnvironmentConfig`` validation and the override
+        silently degrades to a no-op. The same model backs the CLI's
+        ``--config-override`` parsing, so for US3 a typo means a clone that
+        quietly keeps production configuration — worth fixing, and worth being
+        visible until it is.
+        """
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(
+            name="prod-rehearsal",
+            environment_id=ENVIRONMENT_ID,
+            config_override=UpdateEnvironmentInput.model_validate({"fqdnSufix": "typo.local"}),
+        )
+
+        _, variables = mock_transport.execute.call_args.args
+        assert variables["configOverride"] == {}
 
     @staticmethod
     @pytest.mark.asyncio
