@@ -15,7 +15,7 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Verify baseline: `uv run invoke format lint`, `alembic heads` shows single head `c1d2e3f4a5b6`, `uv run invoke validate-graphql` green on the merged env-backup foundation; confirm `frontend/node_modules` present (`pnpm install`) so later codegen works
+- [X] T001 Verify baseline: `uv run invoke format lint`, `alembic heads` shows single head `c1d2e3f4a5b6`, `uv run invoke validate-graphql` green on the merged env-backup foundation; confirm `frontend/node_modules` present (`pnpm install`) so later codegen works
 
 ---
 
