@@ -456,6 +456,167 @@ async def test_clone_environment_persists_selection_override_and_cleared_fields(
     assert payload["clearConfigFields"] == ["ingress_class"]
 
 
+# ---------------------------------------------------------------------------
+# cloneEnvironment — deployment selection (US2: FR-003 / FR-004)
+# ---------------------------------------------------------------------------
+#
+# ``deploymentIds`` is only honoured if it reaches the *capture*: the clone is
+# built entirely from that capture and never re-reads the live source (FR-007),
+# so a selection that shaped the attribution list but not the snapshot would
+# still clone an excluded deployment. Both halves are asserted from a second
+# session, against the rows themselves.
+
+
+@pytest.mark.asyncio
+async def test_clone_environment_with_a_selection_captures_only_the_selection(
+    fresh_client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """FR-003/FR-004: the selection filters the capture; an ineligible pick is a skip.
+
+    The selection here names one eligible deployment *and* one that has never
+    been deployed. The first is captured; the second is attributed as skipped
+    with a reason rather than failing the request (FR-004); the deployment that
+    was not named is attributed as unselected.
+    """
+    source = await seed_environment(session, name="prod-selection")
+    adv = await seed_application_driver_version(session)
+    included, included_instance = await seed_running_deployment(
+        session, environment=source, adv=adv, name="included"
+    )
+    excluded, excluded_instance = await seed_running_deployment(
+        session, environment=source, adv=adv, name="excluded"
+    )
+    selected_but_ineligible = await seed_deployment(
+        session, environment=source, adv=adv, name="never-deployed"
+    )
+
+    data = await gql(
+        fresh_client,
+        "clone_environment",
+        {
+            "environmentId": str(source.id),
+            "name": "prod-selection-rehearsal",
+            "deploymentIds": [str(included.id), str(selected_but_ineligible.id)],
+        },
+    )
+    payload = data["cloneEnvironment"]
+
+    persisted = await session.get(EnvironmentClone, UUID(payload["id"]))
+    assert persisted is not None
+    assert persisted.requested_deployment_ids == [
+        str(included.id),
+        str(selected_but_ineligible.id),
+    ]
+
+    # --- The capture holds the selection, and only the selection ------
+    capture = await session.get(EnvironmentBackup, persisted.environment_backup_id)
+    assert capture is not None
+    assert {raw["deployment_name"] for raw in capture.deployment_snapshots or []} == {
+        "included"
+    }
+    result = await session.exec(
+        select(Backup).where(Backup.environment_backup_id == capture.id)
+    )
+    constituents = list(result.all())
+    assert [backup.instance_id for backup in constituents] == [included_instance.id]
+    assert excluded_instance.id not in {backup.instance_id for backup in constituents}
+
+    # --- Every source deployment is still accounted for (SC-003) -------
+    by_name = {
+        raw["deployment_name"]: raw for raw in persisted.deployment_results or []
+    }
+    assert set(by_name) == {"included", "excluded", "never-deployed"}
+    assert by_name["included"]["outcome"] == "pending"
+    assert by_name["excluded"]["outcome"] == "skipped"
+    assert by_name["excluded"]["reason"] == CLONE_REASON_NOT_SELECTED
+    assert by_name["excluded"]["deployment_id"] == str(excluded.id)
+    assert by_name["never-deployed"]["outcome"] == "skipped"
+    assert by_name["never-deployed"]["reason"] == CLONE_REASON_NOT_ELIGIBLE
+
+    # --- The response projects the same shape --------------------------
+    assert {
+        snapshot["deploymentName"]
+        for snapshot in payload["environmentBackup"]["deploymentSnapshots"]
+    } == {"included"}
+    wire = {row["deploymentName"]: row for row in payload["deploymentResults"]}
+    assert wire["excluded"]["outcome"] == "SKIPPED"
+    assert wire["excluded"]["reason"] == CLONE_REASON_NOT_SELECTED
+    assert wire["never-deployed"]["outcome"] == "SKIPPED"
+    assert wire["never-deployed"]["reason"] == CLONE_REASON_NOT_ELIGIBLE
+
+
+@pytest.mark.asyncio
+async def test_clone_environment_without_a_selection_captures_every_eligible_deployment(
+    fresh_client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """FR-003: omitting ``deploymentIds`` includes all eligible, and nothing else.
+
+    The contrast with the test above is the point: same topology, no selection,
+    so both eligible deployments are captured and *no* entry carries the
+    unselected reason. The never-deployed deployment is still a skip with a
+    reason — ineligibility does not depend on how the selection was expressed.
+    """
+    source = await seed_environment(session, name="prod-no-selection")
+    adv = await seed_application_driver_version(session)
+    first, first_instance = await seed_running_deployment(
+        session, environment=source, adv=adv, name="first"
+    )
+    second, second_instance = await seed_running_deployment(
+        session, environment=source, adv=adv, name="second"
+    )
+    never_deployed = await seed_deployment(
+        session, environment=source, adv=adv, name="never-deployed"
+    )
+
+    data = await gql(
+        fresh_client,
+        "clone_environment",
+        {
+            "environmentId": str(source.id),
+            "name": "prod-no-selection-rehearsal",
+        },
+    )
+    payload = data["cloneEnvironment"]
+
+    persisted = await session.get(EnvironmentClone, UUID(payload["id"]))
+    assert persisted is not None
+    # ``None``, not ``[]``: "no selection" and "an empty selection" are
+    # different requests and the row keeps them apart.
+    assert persisted.requested_deployment_ids is None
+
+    capture = await session.get(EnvironmentBackup, persisted.environment_backup_id)
+    assert capture is not None
+    assert {raw["deployment_name"] for raw in capture.deployment_snapshots or []} == {
+        "first",
+        "second",
+    }
+    result = await session.exec(
+        select(Backup).where(Backup.environment_backup_id == capture.id)
+    )
+    assert {backup.instance_id for backup in result.all()} == {
+        first_instance.id,
+        second_instance.id,
+    }
+
+    by_name = {
+        raw["deployment_name"]: raw for raw in persisted.deployment_results or []
+    }
+    assert set(by_name) == {"first", "second", "never-deployed"}
+    assert by_name["first"]["deployment_id"] == str(first.id)
+    assert by_name["second"]["deployment_id"] == str(second.id)
+    assert {by_name["first"]["outcome"], by_name["second"]["outcome"]} == {"pending"}
+    assert by_name["first"]["reason"] is None
+    assert by_name["second"]["reason"] is None
+    assert CLONE_REASON_NOT_SELECTED not in {
+        raw["reason"] for raw in persisted.deployment_results or []
+    }
+    # FR-004: the ineligible deployment is reported, not raised.
+    assert by_name["never-deployed"]["deployment_id"] == str(never_deployed.id)
+    assert by_name["never-deployed"]["outcome"] == "skipped"
+    assert by_name["never-deployed"]["reason"] == CLONE_REASON_NOT_ELIGIBLE
+    assert payload["cloneErrors"] == []
+
+
 @pytest.mark.asyncio
 async def test_clone_environment_requires_admin(
     session: AsyncSession, read_write_client: AsyncClient, prefect_manager_mock
@@ -540,6 +701,79 @@ async def test_clone_environment_rejects_an_unknown_source_environment(
     errors = response.json()["errors"]
     assert errors[0]["extensions"]["code"] == "NOT_FOUND"
     await _assert_no_clone_was_written(session)
+
+
+@pytest.mark.asyncio
+async def test_clone_environment_rejects_an_unknown_selected_deployment(
+    fresh_client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """FR-011: a selected id that names nothing is refused before any write.
+
+    Unlike an ineligible pick (attributed as a skip — FR-004), an id the source
+    does not have cannot be attributed to anything, so it is a typed
+    ``NOT_FOUND`` naming the offenders and nothing else happens.
+    """
+    source, _instance = await _seed_source_with_instance(session)
+    ghost = uuid4()
+
+    response = await fresh_client.post(
+        "/graphql",
+        json={
+            "query": load_query("clone_environment"),
+            "variables": {
+                "environmentId": str(source.id),
+                "name": "ghost-selection",
+                "deploymentIds": [str(ghost)],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    errors = response.json()["errors"]
+    assert errors[0]["extensions"]["code"] == "NOT_FOUND"
+    assert errors[0]["extensions"]["deployment_ids"] == [str(ghost)]
+    await _assert_no_clone_was_written(session)
+    # Not even the capture was registered (FR-011: zero side effects).
+    captures = await session.exec(select(EnvironmentBackup))
+    assert list(captures.all()) == []
+
+
+@pytest.mark.asyncio
+async def test_clone_environment_rejects_a_deployment_from_another_environment(
+    fresh_client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """FR-011: a foreign deployment id is a typo, not a skip.
+
+    It exists — so a naive "does this row exist?" check would let it through —
+    but it belongs to a different environment, and cloning another
+    environment's deployment is never what the caller meant.
+    """
+    source, _instance = await _seed_source_with_instance(session)
+    neighbour = await _sibling_environment(session, source, "neighbour")
+    adv = await seed_application_driver_version(session)
+    foreign, _foreign_instance = await seed_running_deployment(
+        session, environment=neighbour, adv=adv, name="foreign"
+    )
+
+    response = await fresh_client.post(
+        "/graphql",
+        json={
+            "query": load_query("clone_environment"),
+            "variables": {
+                "environmentId": str(source.id),
+                "name": "foreign-selection",
+                "deploymentIds": [str(foreign.id)],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    errors = response.json()["errors"]
+    assert errors[0]["extensions"]["code"] == "NOT_FOUND"
+    assert errors[0]["extensions"]["deployment_ids"] == [str(foreign.id)]
+    await _assert_no_clone_was_written(session)
+    captures = await session.exec(select(EnvironmentBackup))
+    assert list(captures.all()) == []
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from styrmin_sdk import (
@@ -142,6 +143,71 @@ class TestEnvironmentCloneCreate:
             "configOverride": {"fqdnSuffix": "rehearsal.local"},
             "clearConfigFields": ["ingress_class"],
         }
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_sends_every_selected_deployment_id_as_a_string(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """The selection is a list, so all of it travels — and UUIDs are stringified.
+
+        ``deploymentIds`` is ``[UUID!]`` on the wire and the transport JSON-encodes
+        the variables, so a ``uuid.UUID`` has to be converted here rather than
+        blowing up in the encoder.
+        """
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(
+            name="prod-rehearsal",
+            environment_id=ENVIRONMENT_ID,
+            deployment_ids=[UUID(DEPLOYMENT_ID), OTHER_DEPLOYMENT_ID],
+        )
+
+        _, variables = mock_transport.execute.call_args.args
+        assert variables["deploymentIds"] == [DEPLOYMENT_ID, OTHER_DEPLOYMENT_ID]
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_sends_an_explicit_empty_selection(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        """``[]`` is a selection that selects nothing — not the same as omitting it.
+
+        ``None`` means "every eligible deployment" (FR-003), so an empty list must
+        reach the server as an empty list rather than being dropped like an unset
+        argument.
+        """
+        mock_transport.execute.return_value = {"data": {"cloneEnvironment": _environment_clone()}}
+
+        await client.environment_clones.create(name="prod-rehearsal", environment_id=ENVIRONMENT_ID, deployment_ids=[])
+
+        _, variables = mock_transport.execute.call_args.args
+        assert variables["deploymentIds"] == []
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_unknown_selected_deployment(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        """A selected id the source does not have is refused upfront as NOT_FOUND.
+
+        Distinct from a selected-but-ineligible deployment, which is *not* an
+        error: it comes back as a ``SKIPPED`` entry with a reason (FR-004), which
+        is what ``test_create_is_in_progress_when_a_skip_was_recorded_upfront``
+        covers.
+        """
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [
+                {
+                    "message": "These deployments do not exist in the source environment: " + OTHER_DEPLOYMENT_ID,
+                    "extensions": {"code": "NOT_FOUND", "deployment_ids": [OTHER_DEPLOYMENT_ID]},
+                }
+            ],
+        }
+
+        with pytest.raises(ResourceNotFoundError):
+            await client.environment_clones.create(
+                name="prod-rehearsal",
+                environment_id=ENVIRONMENT_ID,
+                deployment_ids=[DEPLOYMENT_ID, OTHER_DEPLOYMENT_ID],
+            )
 
     @staticmethod
     @pytest.mark.asyncio

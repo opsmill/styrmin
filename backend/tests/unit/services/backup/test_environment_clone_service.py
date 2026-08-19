@@ -19,6 +19,7 @@ Three things are pinned here, all of them load-bearing for the 010 spec:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -60,8 +61,10 @@ from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
 from styrmin_backend.services.backup.clone import (
     CLONE_REASON_CAPTURE_FAILED,
     CLONE_REASON_DRIVER_VERSION_GONE,
+    CLONE_REASON_INTERNAL,
     CLONE_REASON_NOT_ELIGIBLE,
     CLONE_REASON_NOT_SELECTED,
+    CLONE_REASON_TOMBSTONED,
     CLONE_STEP_CAPTURE_FAILED,
     CLONE_STEP_TARGET_NAME_TAKEN,
     EnvironmentCloneDeploymentOutcome,
@@ -80,6 +83,7 @@ from styrmin_backend.services.environments import update_environment
 from styrmin_backend.services.exceptions import (
     EnvironmentAlreadyExistsError,
     EnvironmentOperationInProgressError,
+    InvalidCloneDeploymentSelectionError,
     InvalidContextError,
     UnknownEnvironmentConfigFieldError,
 )
@@ -471,6 +475,266 @@ async def test_ineligible_and_unselected_deployments_are_attributed_as_skipped(
         str(eligible.id),
         str(never_deployed.id),
     ]
+
+
+# ---------------------------------------------------------------------------
+# T026 — deployment selection semantics (FR-003 / FR-004 / FR-011)
+# ---------------------------------------------------------------------------
+#
+# The selection splits into exactly three cases, and the whole point of this
+# block is that they stay apart:
+#
+# * an id the source does not have (unknown, or another environment's) → an
+#   upfront ``NOT_FOUND`` with zero side effects (FR-011);
+# * an id the source has but cannot clone → an attributed skip with a reason,
+#   never an error (FR-004);
+# * an id the source has and can clone → captured and cloned (FR-003).
+
+
+@pytest.mark.asyncio
+async def test_unknown_selected_deployment_is_refused_with_zero_side_effects(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """FR-011: an id that names no deployment at all costs a typed error only."""
+    ghost = uuid4()
+
+    with pytest.raises(InvalidCloneDeploymentSelectionError) as excinfo:
+        await scenario.clone(deployment_ids=[scenario.first.id, ghost])
+
+    assert excinfo.value.error_code == "NOT_FOUND"
+    assert excinfo.value.error_metadata == {"deployment_ids": [str(ghost)]}
+    assert scenario.uow.environment_clones.models == []
+    assert scenario.uow.environment_backups.models == []
+    assert scenario.uow.backups.models == []
+    prefect_manager_mock.run_action.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_foreign_selected_deployment_is_refused_with_zero_side_effects(
+    prefect_manager_mock,
+) -> None:
+    """FR-011: a deployment of *another* environment is not a skip, it is a typo.
+
+    A foreign id is indistinguishable from an unknown one as far as the source
+    is concerned — it is simply not one of its deployments — so it takes the
+    same upfront ``NOT_FOUND`` rather than being quietly attributed.
+    """
+    cluster = Cluster(name="c1")
+    source = Environment(name="prod", cluster_id=cluster.id)
+    neighbour = Environment(name="staging", cluster_id=cluster.id)
+    driver = ApplicationDriver(name="test-driver")
+    adv = _driver_version(driver=driver)
+    mine = _deployment(environment_id=source.id, adv=adv, name="api")
+    theirs = _deployment(environment_id=neighbour.id, adv=adv, name="api")
+    uow = _make_uow(
+        cluster=cluster,
+        environments=[source, neighbour],
+        deployments=[mine, theirs],
+        drivers=[driver],
+        driver_versions=[adv],
+    )
+
+    with pytest.raises(InvalidCloneDeploymentSelectionError) as excinfo:
+        await clone_environment(
+            uow=uow,
+            name="prod-copy",
+            created_by_user_id=USER_ID,
+            environment_id=source.id,
+            deployment_ids=[theirs.id],
+        )
+
+    assert excinfo.value.deployment_ids == [str(theirs.id)]
+    assert uow.environment_clones.models == []
+    assert uow.environment_backups.models == []
+    prefect_manager_mock.run_action.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_selection_is_validated_before_the_concurrency_guard(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """A bad selection is a request error, so it does not depend on what is running.
+
+    Ordering matters for the caller: an operator who typo'd a deployment id
+    should be told about the typo, not about an unrelated capture that happens
+    to be in flight — otherwise fixing the "busy" report reveals a second
+    failure.
+    """
+    await scenario.clone()  # occupies the source for its capture window
+
+    with pytest.raises(InvalidCloneDeploymentSelectionError):
+        await scenario.clone(name="prod-rehearsal-2", deployment_ids=[uuid4()])
+
+
+@pytest.mark.asyncio
+async def test_selected_internal_deployment_is_attributed_as_skipped(
+    prefect_manager_mock,
+) -> None:
+    """FR-004: an explicitly selected internal deployment is a skip, not an error.
+
+    Unselected it stays off the list entirely (pinned by
+    ``test_ineligible_and_unselected_deployments_are_attributed_as_skipped``);
+    named by the caller it gets an answer, because SC-003 accounting must not
+    silently drop something that was asked for.
+    """
+    cluster = Cluster(name="c1")
+    source = Environment(name="prod", cluster_id=cluster.id)
+    driver = ApplicationDriver(name="test-driver")
+    adv = _driver_version(driver=driver)
+    eligible = _deployment(environment_id=source.id, adv=adv, name="api")
+    internal = _deployment(
+        environment_id=source.id, adv=adv, name="ingress", internal=True
+    )
+    uow = _make_uow(
+        cluster=cluster,
+        environments=[source],
+        deployments=[eligible, internal],
+        drivers=[driver],
+        driver_versions=[adv],
+    )
+
+    clone = await clone_environment(
+        uow=uow,
+        name="prod-copy",
+        created_by_user_id=USER_ID,
+        environment_id=source.id,
+        deployment_ids=[eligible.id, internal.id],
+    )
+
+    entries = _results(clone)
+    assert set(entries) == {"api", "ingress"}
+    assert entries["ingress"]["outcome"] == "skipped"
+    assert entries["ingress"]["reason"] == CLONE_REASON_INTERNAL
+    # Selected or not, it contributes no constituent: the clone's environment
+    # grows its own ingress controller.
+    assert len(uow.backups.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_selected_tombstoned_deployment_is_attributed_as_skipped(
+    prefect_manager_mock,
+) -> None:
+    """FR-004: a deleted deployment is ineligible, not unknown."""
+    cluster = Cluster(name="c1")
+    source = Environment(name="prod", cluster_id=cluster.id)
+    driver = ApplicationDriver(name="test-driver")
+    adv = _driver_version(driver=driver)
+    eligible = _deployment(environment_id=source.id, adv=adv, name="api")
+    gone = _deployment(environment_id=source.id, adv=adv, name="retired")
+    gone.deleted_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    uow = _make_uow(
+        cluster=cluster,
+        environments=[source],
+        deployments=[eligible, gone],
+        drivers=[driver],
+        driver_versions=[adv],
+    )
+
+    clone = await clone_environment(
+        uow=uow,
+        name="prod-copy",
+        created_by_user_id=USER_ID,
+        environment_id=source.id,
+        deployment_ids=[eligible.id, gone.id],
+    )
+
+    entries = _results(clone)
+    assert set(entries) == {"api", "retired"}
+    assert entries["retired"]["outcome"] == "skipped"
+    assert entries["retired"]["reason"] == CLONE_REASON_TOMBSTONED
+    assert len(uow.backups.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_selection_is_threaded_into_the_capture_filter(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """FR-003: only the selected deployments are captured, not merely reported.
+
+    The capture is the clone's only source of truth (FR-007), so a selection
+    that reached the attribution list but not the snapshot would still clone the
+    excluded deployment.
+    """
+    clone = await scenario.clone(deployment_ids=[scenario.first.id])
+
+    capture = await scenario.uow.environment_backups.get(clone.environment_backup_id)
+    assert capture is not None
+    snapshots = [
+        DeploymentSnapshot.model_validate(raw)
+        for raw in capture.deployment_snapshots or []
+    ]
+    assert [snapshot.deployment_name for snapshot in snapshots] == ["postgres-main"]
+    assert [backup.instance_id for backup in scenario.uow.backups.models] == [
+        scenario.first.active_instance.id
+    ]
+
+    entries = _results(clone)
+    assert entries["postgres-main"]["outcome"] == "pending"
+    assert entries["api"]["outcome"] == "skipped"
+    assert entries["api"]["reason"] == CLONE_REASON_NOT_SELECTED
+    # One EXECUTE_BACKUP for the one constituent, plus the clone flow itself.
+    actions = [
+        call.kwargs["action"] for call in prefect_manager_mock.run_action.call_args_list
+    ]
+    assert actions.count(PrefectAction.EXECUTE_BACKUP) == 1
+
+
+@pytest.mark.asyncio
+async def test_omitted_selection_captures_every_eligible_deployment(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """FR-003: no selection means all eligible, and nothing is marked unselected."""
+    clone = await scenario.clone()
+
+    capture = await scenario.uow.environment_backups.get(clone.environment_backup_id)
+    assert capture is not None
+    assert {raw["deployment_name"] for raw in capture.deployment_snapshots or []} == {
+        "postgres-main",
+        "api",
+    }
+    assert clone.requested_deployment_ids is None
+    entries = _results(clone)
+    assert {entry["outcome"] for entry in entries.values()} == {"pending"}
+    assert all(entry["reason"] is None for entry in entries.values())
+
+
+@pytest.mark.asyncio
+async def test_empty_selection_is_legal_and_clones_nothing(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """``[]`` is a selection that selects nothing — distinct from ``None``.
+
+    It is not rejected (it names no unknown id) and it is not read as "all":
+    every deployment is attributed as unselected and no constituent is
+    captured, so the clone produces an empty copy of the environment rather
+    than an error or a full clone.
+    """
+    clone = await scenario.clone(deployment_ids=[])
+
+    assert clone.requested_deployment_ids == []
+    entries = _results(clone)
+    assert {entry["outcome"] for entry in entries.values()} == {"skipped"}
+    assert {entry["reason"] for entry in entries.values()} == {
+        CLONE_REASON_NOT_SELECTED
+    }
+    assert scenario.uow.backups.models == []
+    capture = await scenario.uow.environment_backups.get(clone.environment_backup_id)
+    assert capture is not None
+    assert capture.deployment_snapshots is None
+
+    # Still IN_PROGRESS at registration — the environment itself has yet to
+    # materialise — and COMPLETED once it has, because an all-skipped clone has
+    # no failures (skips are not failures, FR-004).
+    clone.environment_backup = capture
+    assert (
+        derive_environment_clone_status_from_record(clone)
+        is EnvironmentCloneStatus.IN_PROGRESS
+    )
+    clone.created_environment_id = uuid4()
+    assert (
+        derive_environment_clone_status_from_record(clone)
+        is EnvironmentCloneStatus.COMPLETED
+    )
 
 
 # ---------------------------------------------------------------------------

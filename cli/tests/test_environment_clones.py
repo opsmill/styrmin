@@ -227,6 +227,97 @@ def test_env_clones_create_forwards_selection_and_override_arguments(mock_client
     assert kwargs["config_override"].fqdn_suffix == "rehearsal.local"
 
 
+def test_env_clones_create_forwards_a_repeated_deployment_selection(mock_client: MagicMock) -> None:
+    """--deployment is repeatable, mixes names with UUIDs, and preserves order.
+
+    Names are resolved against the *source* environment's deployment list in a
+    single lookup — one round-trip no matter how many names were given — and a
+    UUID is passed straight through, so a mixed selection reaches the SDK as one
+    flat list of ids in the order the operator typed them.
+    """
+    _seed_environment(mock_client)
+    first = MagicMock(id=DEPLOYMENT_UUID)
+    first.name = "demo"
+    second = MagicMock(id=COUNTERPART_UUID)
+    second.name = "analytics"
+    mock_client.deployments.list = AsyncMock(return_value=[first, second])
+    mock_client.environment_clones.create = AsyncMock(return_value=_make_environment_clone())
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "env-clones",
+                "create",
+                "prod",
+                "--name",
+                "prod-rehearsal",
+                "--deployment",
+                "analytics",
+                "--deployment",
+                ENV_BACKUP_UUID,
+                "--deployment",
+                "demo",
+            ]
+        )
+    assert exc.value.code == 0
+    mock_client.deployments.list.assert_awaited_once_with(ENV_UUID)
+    kwargs = mock_client.environment_clones.create.call_args.kwargs
+    assert kwargs["deployment_ids"] == [COUNTERPART_UUID, ENV_BACKUP_UUID, DEPLOYMENT_UUID]
+
+
+def test_env_clones_create_forwards_an_explicit_empty_selection(mock_client: MagicMock) -> None:
+    """--empty-deployment sends an empty selection, which is not the same as none.
+
+    Omitting --deployment sends ``None`` and clones every eligible deployment
+    (FR-003); Cyclopts' generated --empty-deployment sends ``[]``, which the
+    backend reads as "select nothing" and answers with an environment-only
+    clone. The CLI must not collapse the two.
+    """
+    _seed_environment(mock_client)
+    mock_client.environment_clones.create = AsyncMock(return_value=_make_environment_clone())
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-clones", "create", "prod", "--name", "prod-rehearsal", "--empty-deployment"])
+    assert exc.value.code == 0
+    # Nothing to resolve, so the deployment list is never fetched.
+    mock_client.deployments.list.assert_not_called()
+    assert mock_client.environment_clones.create.call_args.kwargs["deployment_ids"] == []
+
+
+def test_env_clones_create_reports_an_unknown_selected_deployment_uuid(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A selected UUID is the server's to validate, and its NOT_FOUND is surfaced.
+
+    Only *names* are resolved locally; a UUID is forwarded verbatim, so an id
+    that does not belong to the source environment is rejected upfront by the
+    mutation (FR-011) and the CLI reports that rather than guessing.
+    """
+    _seed_environment(mock_client)
+    mock_client.environment_clones.create = AsyncMock(
+        side_effect=ResourceNotFoundError(
+            f"These deployments do not exist in the source environment: {COUNTERPART_UUID}",
+            "NOT_FOUND",
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "env-clones",
+                "create",
+                "prod",
+                "--name",
+                "prod-rehearsal",
+                "--deployment",
+                COUNTERPART_UUID,
+            ]
+        )
+    assert exc.value.code == 1
+    assert "do not exist in the source environment" in capsys.readouterr().out
+    mock_client.deployments.list.assert_not_called()
+
+
 def test_env_clones_create_rejects_an_unknown_deployment_name(
     mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:

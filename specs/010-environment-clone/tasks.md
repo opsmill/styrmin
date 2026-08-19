@@ -71,9 +71,9 @@
 
 **Independent Test**: propagation test cloning with an exclusion — clone contains exactly the selected counterpart; the excluded deployment is accounted for.
 
-- [ ] T026 [US2] Selection semantics in `clone_environment` (`backend/styrmin_backend/services/backup/clone.py`): unknown/foreign deployment ids → upfront `NOT_FOUND` (zero side effects); selected-but-ineligible → attributed `skipped` with reason (FR-004); selection threaded into the capture filter (T008); unit tests
-- [ ] T027 [US2] Propagation tests in `backend/tests/functional/graphql/test_environment_clone.py`: explicit selection captures/clones only the selection; omitted selection includes all eligible; never-deployed deployment skipped with reason, not an error
-- [ ] T028 [P] [US2] Selection argument coverage in SDK (`deployment_ids`) and CLI (repeatable `--deployment`) tests in `python_sdk/tests/test_environment_clones.py` and `cli/tests/test_environment_clones.py`
+- [X] T026 [US2] Selection semantics in `clone_environment` (`backend/styrmin_backend/services/backup/clone.py`): unknown/foreign deployment ids → upfront `NOT_FOUND` (zero side effects); selected-but-ineligible → attributed `skipped` with reason (FR-004); selection threaded into the capture filter (T008); unit tests
+- [X] T027 [US2] Propagation tests in `backend/tests/functional/graphql/test_environment_clone.py`: explicit selection captures/clones only the selection; omitted selection includes all eligible; never-deployed deployment skipped with reason, not an error
+- [X] T028 [P] [US2] Selection argument coverage in SDK (`deployment_ids`) and CLI (repeatable `--deployment`) tests in `python_sdk/tests/test_environment_clones.py` and `cli/tests/test_environment_clones.py`
 
 **Checkpoint**: selection provable end-to-end at the functional tier.
 
