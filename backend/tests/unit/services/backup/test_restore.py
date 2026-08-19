@@ -190,7 +190,7 @@ class TestCreateRestore:
 
     @pytest.mark.anyio
     async def test_create_restore_blocks_when_already_restoring(self) -> None:
-        """Concurrency guard: if the deployment is already RESTORING, reject."""
+        """Concurrency guard: a restore still in flight for the target wins."""
         deployment, instance, backup = make_chain(
             deployment_status=DeploymentState.RESTORING
         )
@@ -207,12 +207,85 @@ class TestCreateRestore:
             deployments=[deployment],
         )
 
-        with pytest.raises(RestoreAlreadyInProgressError):
+        with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
             await create_restore(
                 backup_id=backup.id,
                 target_namespace=f"styrmin-{deployment.id}",
                 uow=uow,
             )
+
+        # The refusal names the restore it collided with — never "unknown".
+        assert excinfo.value.existing_restore_id == str(existing_restore.id)
+
+    @pytest.mark.anyio
+    async def test_create_restore_blocks_while_the_first_is_still_pending(self) -> None:
+        """The dispatch window counts: rows are written PENDING, not IN_PROGRESS.
+
+        ``create_restore`` creates the row ``PENDING`` and only
+        ``execute_restore_workflow`` promotes it to ``IN_PROGRESS``, so a second
+        request landing before the flow starts must still be refused — and must
+        name the pending row.
+        """
+        deployment, instance, backup = make_chain(
+            deployment_status=DeploymentState.RESTORING
+        )
+        pending_restore = Restore(
+            name="pending-restore",
+            status=RestoreStatus.PENDING,
+            target_namespace=f"styrmin-{deployment.id}",
+            backup_id=backup.id,
+        )
+        uow = make_uow(
+            backups=[backup],
+            restores=[pending_restore],
+            instances=[instance],
+            deployments=[deployment],
+        )
+
+        with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
+            await create_restore(
+                backup_id=backup.id,
+                target_namespace=f"styrmin-{deployment.id}",
+                uow=uow,
+            )
+
+        assert excinfo.value.existing_restore_id == str(pending_restore.id)
+
+    @pytest.mark.anyio
+    async def test_restoring_state_without_an_in_flight_restore_does_not_block(
+        self,
+    ) -> None:
+        """A deployment left in RESTORING by a dead restore is not a conflict.
+
+        Refusing here could name no restore ("unknown"), which is the tell that
+        there is nothing to be concurrent with: the only rows for this
+        deployment are terminal, so a fresh restore is exactly the recovery the
+        operator wants.
+        """
+        deployment, instance, backup = make_chain(
+            deployment_status=DeploymentState.RESTORING
+        )
+        dead_restore = Restore(
+            name="dead-restore",
+            status=RestoreStatus.FAILED,
+            target_namespace=f"styrmin-{deployment.id}",
+            backup_id=backup.id,
+        )
+        uow = make_uow(
+            backups=[backup],
+            restores=[dead_restore],
+            instances=[instance],
+            deployments=[deployment],
+        )
+
+        restore, deployment_id = await create_restore(
+            backup_id=backup.id,
+            target_namespace=f"styrmin-{deployment.id}",
+            uow=uow,
+        )
+
+        assert restore.status == RestoreStatus.PENDING
+        assert deployment_id == deployment.id
 
     @pytest.mark.anyio
     async def test_create_restore_already_in_progress(self) -> None:
@@ -629,7 +702,14 @@ class TestCreateRestoreCrossTarget:
         assert restore.status == RestoreStatus.PENDING
 
     @pytest.mark.anyio
-    async def test_restoring_target_blocks_a_second_restore(self) -> None:
+    async def test_in_flight_restore_on_the_target_blocks_a_second_restore(
+        self,
+    ) -> None:
+        """What blocks is the in-flight ``Restore`` row, not the target's state.
+
+        The counterpart is ``RESTORING`` *and* has a live restore aimed at it;
+        the second one is refused and the refusal names the first.
+        """
         source, instance, backup = make_chain()
         counterpart, _ = make_counterpart(status=DeploymentState.RESTORING)
         existing_restore = Restore(
@@ -645,13 +725,89 @@ class TestCreateRestoreCrossTarget:
             deployments=[source, counterpart],
         )
 
-        with pytest.raises(RestoreAlreadyInProgressError):
+        with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
             await create_restore(
                 backup_id=backup.id,
                 target_namespace=f"styrmin-{counterpart.id}",
                 uow=uow,
                 target_deployment_id=counterpart.id,
             )
+
+        assert excinfo.value.existing_restore_id == str(existing_restore.id)
+        # Nothing was written for the refused request.
+        assert [r.id for r in uow.restores.models] == [existing_restore.id]
+
+    @pytest.mark.anyio
+    async def test_restoring_counterpart_without_a_restore_row_is_allowed(self) -> None:
+        """The clone path: a counterpart parked in RESTORING awaits its data.
+
+        ``deploy_application(skip_initial_reconcile=True)`` creates every
+        counterpart in ``RESTORING`` so nothing reconciles it before its data
+        arrives (research D5). That state is the *precondition* of the first
+        cross-target restore, not a conflict with it — gating on the state
+        instead of on a live ``Restore`` row failed every clone.
+        """
+        source, instance, backup = make_chain()
+        counterpart, counterpart_instance = make_counterpart(
+            status=DeploymentState.RESTORING
+        )
+        assert counterpart_instance is not None
+        uow = make_uow(
+            backups=[backup],
+            instances=[instance],
+            deployments=[source, counterpart],
+        )
+
+        restore, deployment_id = await create_restore(
+            backup_id=backup.id,
+            target_namespace=f"styrmin-{counterpart.id}",
+            uow=uow,
+            target_deployment_id=counterpart.id,
+        )
+
+        assert deployment_id == counterpart.id
+        assert restore.status == RestoreStatus.PENDING
+        assert restore.target_instance_id == counterpart_instance.id
+        stored_counterpart = await uow.deployments.find(counterpart.id)
+        assert stored_counterpart is not None
+        assert stored_counterpart.status == DeploymentState.RESTORING
+
+    @pytest.mark.anyio
+    async def test_a_third_restore_into_the_same_counterpart_is_refused(self) -> None:
+        """The guard still serialises: the row the first call wrote blocks the next.
+
+        Same sequence as a clone, run twice — proof the permissive first call
+        does not leave the counterpart unguarded afterwards.
+        """
+        source, instance, backup = make_chain()
+        second_backup = Backup(
+            name="second-backup",
+            status=BackupStatus.COMPLETED,
+            instance_id=instance.id,
+        )
+        counterpart, _ = make_counterpart(status=DeploymentState.RESTORING)
+        uow = make_uow(
+            backups=[backup, second_backup],
+            instances=[instance],
+            deployments=[source, counterpart],
+        )
+
+        first, _ = await create_restore(
+            backup_id=backup.id,
+            target_namespace=f"styrmin-{counterpart.id}",
+            uow=uow,
+            target_deployment_id=counterpart.id,
+        )
+
+        with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
+            await create_restore(
+                backup_id=second_backup.id,
+                target_namespace=f"styrmin-{counterpart.id}",
+                uow=uow,
+                target_deployment_id=counterpart.id,
+            )
+
+        assert excinfo.value.existing_restore_id == str(first.id)
 
     @pytest.mark.anyio
     async def test_restoring_source_does_not_block_a_cross_target_restore(self) -> None:

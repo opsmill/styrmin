@@ -82,6 +82,9 @@ from styrmin_backend.services.backup.environment import (
     DeploymentSnapshot,
     create_environment_backup,
 )
+from styrmin_backend.services.backup.service import (
+    create_restore as create_restore_service,
+)
 from styrmin_backend.services.env_vars.exceptions import InvalidEnvVarNameError
 from styrmin_backend.services.environments import update_environment
 from styrmin_backend.services.exceptions import (
@@ -1082,6 +1085,77 @@ async def test_counterpart_adopts_the_captured_release_reference(
         SOURCE_RELEASE_REFERENCE
     }
     assert all(call["skip_initial_reconcile"] for call in flow_harness["deploy"])
+
+
+@pytest.mark.asyncio
+async def test_fanout_runs_against_the_real_create_restore(
+    scenario: _Scenario,
+    prefect_manager_mock,
+    flow_harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one test in this file that does **not** stub ``create_restore``.
+
+    Stubbing it is why a contradiction between two shipped services survived:
+    the flow parks every counterpart in ``RESTORING`` (research D5) and
+    ``create_restore`` used to read that same state as "a restore is already in
+    progress", so every clone failed its whole fan-out with
+    ``RestoreAlreadyInProgressError`` while these tests stayed green. Running
+    the real service against the real counterpart rows is what makes that class
+    of contradiction impossible to reintroduce silently.
+
+    It also pins the same-backup guard against the fan-out: each counterpart is
+    restored from its **own** per-instance constituent backup, so no two
+    restores in one clone share a ``backup_id``.
+    """
+
+    async def _recording_create_restore(**kwargs: Any):
+        flow_harness["restore"].append(kwargs)
+        # Deliberately the service function itself, not
+        # ``clone_flow.create_restore`` — the harness has already replaced that
+        # attribute with its stub by the time this test body runs.
+        return await create_restore_service(**kwargs)
+
+    monkeypatch.setattr(clone_flow, "create_restore", _recording_create_restore)
+    flow_harness["restore"].clear()
+
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    entries = _results(refreshed)
+    # Both deployments cloned — none attributed a restore failure.
+    assert {name: entry["outcome"] for name, entry in entries.items()} == {
+        "postgres-main": "cloned",
+        "api": "cloned",
+    }
+    assert [entry.get("reason") for entry in entries.values()] == [None, None]
+
+    # Two real Restore rows, one per counterpart, each from its own backup.
+    restores = scenario.uow.restores.models
+    assert len(restores) == 2
+    assert len({restore.backup_id for restore in restores}) == 2
+    assert {str(restore.id) for restore in restores} == {
+        entry["restore_id"] for entry in entries.values()
+    }
+
+    for entry in entries.values():
+        counterpart_id = UUID(entry["counterpart_deployment_id"])
+        restore = next(r for r in restores if str(r.id) == entry["restore_id"])
+        assert restore.status == RestoreStatus.PENDING
+        assert restore.target_namespace == f"styrmin-{counterpart_id}"
+        counterpart = await scenario.uow.deployments.find(counterpart_id)
+        assert counterpart is not None
+        assert counterpart.status == DeploymentState.RESTORING
+
+    # The sources are untouched by their counterparts' restores (SC-002).
+    for source_deployment in scenario.deployments:
+        stored = await scenario.uow.deployments.find(source_deployment.id)
+        assert stored is not None
+        assert stored.status is DeploymentState.RUNNING
 
 
 @pytest.mark.asyncio
