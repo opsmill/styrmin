@@ -796,6 +796,10 @@ class Mutation:
             created_by_user_id=current_user.id,
             driver_version_id=driver_version_id,
         )
+        # ``deploy_application`` only returns ``None`` when the caller asks it
+        # to skip the initial reconcile (clone counterparts, research D5).
+        # This mutation never does, so a Task is always dispatched.
+        assert task is not None, "deploy_application must dispatch a Task"
         return Task.from_instance(task)
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])

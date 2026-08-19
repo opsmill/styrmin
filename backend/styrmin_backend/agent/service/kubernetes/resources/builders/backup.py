@@ -52,21 +52,35 @@ def build_velero_restore(
     driver_name: str,
     existing_resource_policy: str | None = None,
     hooks: list[VeleroRestoreHook] | None = None,
+    target_instance_id: str | None = None,
 ) -> VeleroRestore:
-    """Build a VeleroRestore resource for an Styrmin instance."""
+    """Build a VeleroRestore resource for an Styrmin instance.
+
+    ``instance_id`` identifies the instance the backup was taken from. For a
+    **cross-target** restore (environment clone) that is the source instance,
+    which is not what the Restore CR should be attributed to — pass
+    ``target_instance_id`` and ``styrmin.io/instance`` names the counterpart
+    instance the data lands in, with the source recorded under
+    ``styrmin.io/source-instance`` so provenance is not lost (research D2.6).
+    Omitting it keeps the in-place labelling untouched.
+    """
     namespace_mapping = None
     if source_namespace != target_namespace:
         namespace_mapping = {source_namespace: target_namespace}
+
+    labels = {
+        "styrmin.io/instance": target_instance_id or instance_id,
+        "styrmin.io/driver": driver_name,
+    }
+    if target_instance_id is not None and target_instance_id != instance_id:
+        labels["styrmin.io/source-instance"] = instance_id
 
     return VeleroRestore(
         name=name,
         namespace=velero_namespace,
         backup_name=backup_name,
         namespace_mapping=namespace_mapping,
-        labels={
-            "styrmin.io/instance": instance_id,
-            "styrmin.io/driver": driver_name,
-        },
+        labels=labels,
         hooks=hooks or [],
         restore_pvs=False,
         existing_resource_policy=existing_resource_policy,

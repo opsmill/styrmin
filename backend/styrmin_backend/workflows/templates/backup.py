@@ -176,6 +176,8 @@ async def execute_velero_restore_flow(
     velero_namespace: str,
     target_namespace: str,
     timeout: int = 7200,
+    restored_crd_name: str | None = None,
+    counterpart_crd_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a Velero Restore CRD and poll until completion.
 
@@ -190,6 +192,19 @@ async def execute_velero_restore_flow(
         velero_namespace: Namespace where Velero resources live.
         target_namespace: K8s namespace to delete before restoring.
         timeout: Maximum seconds to wait for restore completion.
+        restored_crd_name: Name of the ``StyrminDeployment`` CR that Velero
+            recreates. Velero's ``namespaceMapping`` rewrites namespaces but
+            **preserves object names**, so under a cross-target restore the
+            recreated CR still carries the *source* deployment's name
+            (``styrmin-<source_deployment_id>``) inside the target namespace
+            — the old ``crd_name = target_namespace`` assumption 404s there
+            (research D2.3). Defaults to ``target_namespace`` when omitted,
+            which is what an in-place restore recreates.
+        counterpart_crd_body: Pre-rendered ``StyrminDeployment`` CR body for
+            the **counterpart** deployment. Present only for a cross-target
+            restore, where the restored CR carries the source's identity and
+            must be replaced (research D2.4). Built by the INTERNAL flow,
+            which is the side with database access.
 
     Returns:
         The final Velero Restore resource dict from the K8s API.
@@ -269,35 +284,60 @@ async def execute_velero_restore_flow(
             mark_failed,
             mark_restoring,
             reapply_and_finalize,
+            reapply_with_counterpart_identity,
         )
 
         velero_status = result.get("status", {})
         velero_phase = velero_status.get("phase", "")
-        # CRD name matches the target namespace (one StyrminDeployment per
-        # deployment namespace).
-        crd_name = target_namespace
+        # The recreated CR's name, passed in explicitly: for an in-place
+        # restore it equals the target namespace (one StyrminDeployment per
+        # deployment namespace), but a cross-target restore recreates the
+        # *source*-named CR inside the target namespace because Velero's
+        # namespaceMapping preserves object names (research D2.3).
+        crd_name = restored_crd_name or target_namespace
+
+        # Every CR name the failure path may need to mark. In-place: exactly
+        # one, identical to the pre-existing behaviour. Cross-target: the
+        # restored source-named CR *and* the counterpart CR, since a failure
+        # can land either side of the swap and ``mark_failed`` tolerates a
+        # missing CR.
+        failure_crd_names = [crd_name]
+        if counterpart_crd_body is not None:
+            counterpart_name = counterpart_crd_body.get("metadata", {}).get("name")
+            if counterpart_name and counterpart_name != crd_name:
+                failure_crd_names.append(counterpart_name)
 
         recovery_status: dict[str, Any] = {"recovered": False, "error": None}
         if velero_phase == "Completed":
             try:
                 await mark_restoring(api_client, target_namespace, crd_name)
-                await reapply_and_finalize(api_client, target_namespace, crd_name)
+                if counterpart_crd_body is None:
+                    await reapply_and_finalize(api_client, target_namespace, crd_name)
+                else:
+                    await reapply_with_counterpart_identity(
+                        api_client,
+                        target_namespace,
+                        crd_name,
+                        counterpart_crd_body,
+                    )
                 recovery_status["recovered"] = True
             except Exception as exc:
                 error_msg = f"Restore reapply failed: {exc}"
                 logger.error(error_msg)
-                await mark_failed(api_client, target_namespace, crd_name, error_msg)
+                for name in failure_crd_names:
+                    await mark_failed(api_client, target_namespace, name, error_msg)
                 recovery_status["error"] = error_msg
         else:
             failure_reason = velero_status.get("failureReason") or (
                 f"Velero restore phase: {velero_phase}"
             )
-            await mark_failed(
-                api_client,
-                target_namespace,
-                crd_name,
-                f"Velero restore failed: {failure_reason}",
-            )
+            for name in failure_crd_names:
+                await mark_failed(
+                    api_client,
+                    target_namespace,
+                    name,
+                    f"Velero restore failed: {failure_reason}",
+                )
 
         # Store result for cross-worker retrieval via Prefect Variable
         await Variable.set(  # type: ignore[misc]
@@ -625,12 +665,53 @@ async def execute_backup_workflow(
         raise
 
 
+async def _build_counterpart_crd_body(deployment_id: UUID, uow: Any) -> dict[str, Any]:
+    """Render the ``StyrminDeployment`` CR body for a cross-target counterpart.
+
+    The counterpart deployment already has its service rows and an active
+    instance (``deploy_application(skip_initial_reconcile=True)`` still runs
+    ``create_services_for_deployment`` and
+    ``generate_instance_from_deployment`` — research D5); what it does not
+    have is a reconciled CR, because reconciling before the restore would
+    only create resources the restore flow's namespace delete-and-wait
+    immediately destroys (research D2.5).
+
+    Raises:
+        RuntimeError: When the counterpart deployment or its active instance
+            is missing — without them the restored namespace would keep the
+            source's identity, which is worse than a failed restore.
+    """
+    from styrmin_backend.operator.crd.builder import build_styrmin_deployment_body
+
+    async with uow:
+        deployment = await uow.deployments.find(deployment_id)
+        if deployment is None:
+            raise RuntimeError(
+                f"Cross-target restore: counterpart deployment {deployment_id} "
+                "not found"
+            )
+        instance = deployment.active_instance
+        if instance is None:
+            raise RuntimeError(
+                f"Cross-target restore: counterpart deployment {deployment_id} has "
+                "no active instance to build its StyrminDeployment CR from"
+            )
+        context = instance.context
+        return build_styrmin_deployment_body(
+            context=context,
+            release_reference=context.instance.release_reference,
+            namespace=context.instance.namespace,
+            internal=deployment.internal,
+        )
+
+
 @flow(name="execute_restore")
 async def execute_restore_workflow(
     restore_id: str,
     backup_id: str,
     deployment_id: str,
     target_namespace: str,
+    source_deployment_id: str | None = None,
 ) -> None:
     """Execute a restore operation: build Velero CRD, dispatch USER flow, update status.
 
@@ -638,14 +719,28 @@ async def execute_restore_workflow(
     actual K8s operations to the ``execute_velero_restore`` USER flow via
     ``arun_deployment``.
 
+    Source identity and the status-write target are separate inputs
+    (research D2.2). For an in-place restore they are the same deployment and
+    ``source_deployment_id`` is omitted, which reproduces the shipped
+    behaviour exactly. For a cross-target restore (environment clone) the
+    backup was taken from ``source_deployment_id`` — which is all that
+    ``source_namespace`` derives from — while ``deployment_id`` names the
+    counterpart whose ``deployment.status`` and CR this flow writes.
+
     Args:
         restore_id: The Styrmin restore record ID (passed as string for serialization).
         backup_id: The Styrmin backup ID.
-        deployment_id: The Styrmin deployment ID.
+        deployment_id: The Styrmin deployment ID that receives the restore
+            and whose status this flow writes (the counterpart, for a clone).
         target_namespace: The target Kubernetes namespace for the restore.
+        source_deployment_id: The deployment the backup was taken from, used
+            solely to derive the Velero source namespace and the recreated
+            CR's name. Defaults to ``deployment_id`` (in-place restore).
     """
     restore_uuid = UUID(restore_id)
     backup_uuid = UUID(backup_id)
+    resolved_source_deployment_id = source_deployment_id or deployment_id
+    is_cross_target = resolved_source_deployment_id != deployment_id
 
     config.SETTINGS.initialize_and_exit()
 
@@ -673,7 +768,13 @@ async def execute_restore_workflow(
         velero_restore_name = restore.name
 
         velero_namespace = "styrmin"
-        source_namespace = f"styrmin-{deployment_id}"
+        source_namespace = f"styrmin-{resolved_source_deployment_id}"
+        # Velero's namespaceMapping rewrites namespaces but preserves object
+        # names, so the recreated StyrminDeployment CR keeps the *source*
+        # deployment's name. Namespace and release reference are the same
+        # string for a deployment (``get_kubernetes_reference``), so the
+        # source namespace *is* the restored CR's name (research D2.3).
+        restored_crd_name = source_namespace
 
         # Build restore hooks from backup's component configs
         restore_hooks: list[VeleroRestoreHook] = []
@@ -698,8 +799,31 @@ async def execute_restore_workflow(
             driver_name="styrmin",
             existing_resource_policy="update",
             hooks=restore_hooks,
+            # Attribute a cross-target Restore CR to the counterpart instance
+            # the data lands in rather than the source instance the backup was
+            # taken from (research D2.6). ``target_instance_id`` is only
+            # honoured for a genuine cross-target restore so in-place renders
+            # stay byte-for-byte unchanged.
+            target_instance_id=(
+                str(restore.target_instance_id)
+                if is_cross_target and restore.target_instance_id is not None
+                else None
+            ),
         )
         crd_body = velero_restore.render()
+
+        # A cross-target restore recreates the source's CR (source name,
+        # source identity: deploymentId, instanceId, releaseReference and the
+        # full resolved context) inside the counterpart's namespace. The
+        # counterpart's own CR body replaces it during post-velero recovery
+        # (research D2.4). Built here because the INTERNAL flow is the side
+        # with database access; the USER flow only applies it.
+        counterpart_crd_body: dict[str, Any] | None = None
+        if is_cross_target:
+            uow = await get_unit_of_work()
+            counterpart_crd_body = await _build_counterpart_crd_body(
+                deployment_id=UUID(deployment_id), uow=uow
+            )
 
         # Determine timeout
         timeout = 7200
@@ -715,6 +839,8 @@ async def execute_restore_workflow(
                 "velero_namespace": velero_namespace,
                 "target_namespace": target_namespace,
                 "timeout": timeout,
+                "restored_crd_name": restored_crd_name,
+                "counterpart_crd_body": counterpart_crd_body,
             },
             poll_interval=POLL_INTERVAL,
         )

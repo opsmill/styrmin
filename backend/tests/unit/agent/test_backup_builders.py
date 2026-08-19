@@ -163,3 +163,67 @@ class TestBuildVeleroRestore:
         )
         rendered = restore.render()
         assert "hooks" not in rendered["spec"]
+
+    def test_cross_target_restore_labels_the_counterpart_instance(self) -> None:
+        """research D2.6: a cross-target Restore CR is attributed to the target.
+
+        ``instance_id`` names the instance the *backup* was taken from. For an
+        environment clone the restore lands in a different (counterpart)
+        instance, and labelling the CR with the source would misattribute it.
+        """
+        restore = build_velero_restore(
+            name="test-restore",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="styrmin-source",
+            target_namespace="styrmin-counterpart",
+            instance_id="source-inst",
+            driver_name="mydriver",
+            target_instance_id="counterpart-inst",
+        )
+        rendered = restore.render()
+        labels = rendered["metadata"]["labels"]
+        assert labels["styrmin.io/instance"] == "counterpart-inst"
+        # Provenance is preserved rather than dropped.
+        assert labels["styrmin.io/source-instance"] == "source-inst"
+        assert labels["styrmin.io/driver"] == "mydriver"
+        assert rendered["spec"]["namespaceMapping"] == {
+            "styrmin-source": "styrmin-counterpart"
+        }
+
+    def test_in_place_restore_labels_are_unchanged_without_target_instance(
+        self,
+    ) -> None:
+        """Omitting ``target_instance_id`` renders exactly the shipped labels."""
+        restore = build_velero_restore(
+            name="test-restore",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="app-ns",
+            target_namespace="app-ns",
+            instance_id="inst-123",
+            driver_name="mydriver",
+        )
+        rendered = restore.render()
+        assert rendered["metadata"]["labels"] == {
+            "styrmin.io/instance": "inst-123",
+            "styrmin.io/driver": "mydriver",
+        }
+
+    def test_target_instance_equal_to_source_adds_no_provenance_label(self) -> None:
+        """A "cross-target" restore that is really in-place stays clean."""
+        restore = build_velero_restore(
+            name="test-restore",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="app-ns",
+            target_namespace="app-ns",
+            instance_id="inst-123",
+            driver_name="mydriver",
+            target_instance_id="inst-123",
+        )
+        rendered = restore.render()
+        assert rendered["metadata"]["labels"] == {
+            "styrmin.io/instance": "inst-123",
+            "styrmin.io/driver": "mydriver",
+        }

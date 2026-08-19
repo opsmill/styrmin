@@ -141,7 +141,19 @@ async def reapply_and_finalize(
     """
     crd = await _read_crd(api_client, namespace, name)
     crd_spec = crd.get("spec", {})
+    await _reapply_phases_and_finalize(api_client, namespace, name, crd_spec)
 
+
+async def _reapply_phases_and_finalize(
+    api_client: ApiClient, namespace: str, name: str, crd_spec: dict[str, Any]
+) -> None:
+    """Run the prerequisite + utility phases for ``crd_spec``, then mark Ready.
+
+    Shared by the in-place recovery path (``reapply_and_finalize``, whose
+    spec comes from the restored CR) and the cross-target one
+    (``reapply_with_counterpart_identity``, whose spec comes from the
+    counterpart's own CR body).
+    """
     prerequisites = await execute_phase_prerequisites(
         crd_spec=crd_spec, namespace=namespace
     )
@@ -200,6 +212,130 @@ async def reapply_and_finalize(
         },
     )
     logger.info("Restore lifecycle complete for %s/%s", namespace, name)
+
+
+async def _upsert_crd(
+    api_client: ApiClient, namespace: str, body: dict[str, Any]
+) -> None:
+    """Create the CR, falling back to a merge patch when it already exists."""
+    custom_api = k8s_client.CustomObjectsApi(api_client)
+    try:
+        await custom_api.create_namespaced_custom_object(
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+            plural=CRD_PLURAL,
+            body=body,
+        )
+    except k8s_client.ApiException as exc:
+        if exc.status != 409:
+            raise
+        await custom_api.patch_namespaced_custom_object(
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+            plural=CRD_PLURAL,
+            name=body["metadata"]["name"],
+            body=body,
+            _content_type="application/merge-patch+json",  # type: ignore[call-arg]
+        )
+
+
+async def _delete_crd(api_client: ApiClient, namespace: str, name: str) -> None:
+    """Delete a CR, tolerating a CR that is already gone."""
+    custom_api = k8s_client.CustomObjectsApi(api_client)
+    try:
+        await custom_api.delete_namespaced_custom_object(
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+            plural=CRD_PLURAL,
+            name=name,
+        )
+    except k8s_client.ApiException as exc:
+        if exc.status != 404:
+            raise
+
+
+async def reapply_with_counterpart_identity(
+    api_client: ApiClient,
+    namespace: str,
+    restored_crd_name: str,
+    counterpart_crd_body: dict[str, Any],
+) -> None:
+    """Swap a cross-target restore's CR to the counterpart's identity, then finalize.
+
+    A cross-target restore (environment clone) rides Velero's
+    ``namespaceMapping``: the *data* lands in the counterpart's namespace, but
+    every restored object keeps its source name — including the
+    ``StyrminDeployment`` CR, whose spec still carries the source's
+    ``deploymentId``, ``instanceId``, ``releaseReference`` and full resolved
+    context (FQDNs embed the source deployment id and environment name). Left
+    as-is, the counterpart's namespace would be reconciled forever under the
+    source's identity (research D2.4).
+
+    Steps, in order:
+
+    1. Apply the counterpart's own CR body into the restored namespace,
+       carrying over kopf's state-tracking annotations from the restored CR.
+       Carrying them is deliberate and mirrors ``reapply_and_finalize``: a CR
+       without ``last-handled-configuration`` makes kopf fire ``on.create``,
+       which would race — and then undo — the finalize below.
+    2. Delete the restored source-named CR, so exactly one
+       ``StyrminDeployment`` owns the namespace. Data (PVC contents) survives;
+       only identity objects are re-rendered.
+    3. Re-apply prerequisites + utility resources from the **counterpart's**
+       spec and mark the counterpart CR Ready — the same finalize the in-place
+       path performs.
+
+    Caller is responsible for catching exceptions and translating to
+    ``mark_failed`` (same contract as ``reapply_and_finalize``).
+    """
+    counterpart_name = counterpart_crd_body.get("metadata", {}).get("name")
+    if not counterpart_name:
+        raise RuntimeError(
+            "Cross-target restore recovery requires a named counterpart CR body"
+        )
+
+    restored_crd = await _read_crd(api_client, namespace, restored_crd_name)
+    inherited_annotations = {
+        key: value
+        for key, value in (
+            (restored_crd.get("metadata") or {}).get("annotations") or {}
+        ).items()
+        if key in _KOPF_STATE_ANNOTATIONS
+    }
+
+    body = {
+        **counterpart_crd_body,
+        "metadata": {
+            **counterpart_crd_body.get("metadata", {}),
+            "namespace": namespace,
+            "annotations": {
+                **(counterpart_crd_body.get("metadata", {}).get("annotations") or {}),
+                **inherited_annotations,
+            },
+        },
+    }
+    await _upsert_crd(api_client, namespace, body)
+    logger.info(
+        "Applied counterpart StyrminDeployment %s/%s over restored CR %s",
+        namespace,
+        counterpart_name,
+        restored_crd_name,
+    )
+
+    if counterpart_name != restored_crd_name:
+        await _delete_crd(api_client, namespace, restored_crd_name)
+        logger.info(
+            "Deleted restored source-named StyrminDeployment %s/%s",
+            namespace,
+            restored_crd_name,
+        )
+
+    await _reapply_phases_and_finalize(
+        api_client, namespace, counterpart_name, counterpart_crd_body.get("spec", {})
+    )
 
 
 async def mark_failed(
