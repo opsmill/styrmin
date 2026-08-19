@@ -33,8 +33,8 @@ It's a thin wrapper over the GraphQL API — it never talks to the
 database or the agent directly.
 
 Its top-level command groups are `clusters`, `environments`,
-`deployments`, `drivers`, `backups`, `env-backups`, `backup-locations`,
-`tasks`, `auth`, and `telemetry`. `login`, `logout`, and `whoami` are
+`deployments`, `drivers`, `backups`, `env-backups`, `env-clones`,
+`backup-locations`, `tasks`, `auth`, and `telemetry`. `login`, `logout`, and `whoami` are
 also registered at the top level as shorthands for their `auth`
 sub-commands. Everything else — restoring a backup, upgrading a
 deployment's version — is a sub-command inside one of those groups, not a
@@ -160,6 +160,125 @@ including while its constituents are still running. That is the escape
 hatch for an environment blocked by a constituent backup that never got
 picked up — deleting the snapshot releases the environment for new
 environment-level operations.
+
+:::
+
+### `env-clones` — clone an environment
+
+The `env-clones` group copies a live environment into a **new**
+environment on the same cluster, built from a fresh environment backup of
+the source, and tracks the operation afterwards. For the semantics behind
+these commands — selection, the config override, what a clone is and
+isn't isolated from — read [Cloning an
+environment](../concepts-and-architecture/backups-and-restores.md#cloning-an-environment).
+
+Three commands:
+
+| Command | What it does |
+|---------|--------------|
+| `env-clones create [ENVIRONMENT] --name <new-name>` | Clone an environment into a new one. Requires the administrator role. |
+| `env-clones get <ENVIRONMENT_CLONE_ID>` | Show one clone: derived status, per-deployment outcomes, operation-level events. |
+| `env-clones list [ENVIRONMENT]` | List the clones taken **of** an environment, newest first. |
+
+`create` and `list` target the source environment exactly the way
+`env-backups` does: a positional name, or a UUID with `--id`, resolved
+within `--cluster` (default `default`) or `--cluster-id`. Passing both a
+name and `--id` — or neither — is an error.
+
+`list` is scoped by **source**. A clone-born environment's own provenance
+is an entry in its *source's* list, not in its own; read it from the
+clone record or the environment's `clonedFrom` field.
+
+#### `create` options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `--name` | *required* | Name of the new environment to create. |
+| `--deployment` | all eligible | A source deployment to include, by **name or UUID**. Repeat for several. Omit to include every eligible deployment. |
+| `--config-override` | none | JSON `UpdateEnvironmentInput` merged over the captured config, inline or `@path/to/file.json`. camelCase or snake_case keys. |
+| `--clear-config-field` | none | A captured config field to remove before the merge, by **snake_case** field name. Repeat for several. |
+| `--wait` | off | Block until the clone reaches a terminal state. |
+| `--max-wait` | `1800` | Seconds to wait, with `--wait`. Clones capture, create and restore, so the default is longer than `env-backups`'. |
+| `--interval` | `5` | Poll interval in seconds, with `--wait`. |
+
+`--deployment` accepts deployment **names**, resolved within the source
+environment, as well as UUIDs. A name with no match in the source is
+rejected by the CLI before the mutation is sent.
+
+Omitting `--deployment` and passing an **empty** selection are different
+requests. Omit it for "every eligible deployment"; pass Cyclopts'
+generated `--empty-deployment` for "no applications at all", which clones
+the environment's configuration only and reports `COMPLETED`.
+
+`--config-override` is an `UpdateEnvironmentInput` payload, so `envVars`
+is a list of `{name, value}` entries rather than a map. camelCase keys
+(`backupTtl`, `fqdnSuffix`) are the GraphQL spelling and always work;
+the CLI also accepts their snake_case equivalents. `--clear-config-field`
+names, by contrast, are **only** snake_case — that list is validated
+against the config's own field names, not against the input type.
+
+`create` prints the clone's id, its derived status, the source name, and
+a `cloned/skipped/failed/total` deployment count, then one line per
+source deployment with its outcome and reason, then any operation-level
+events.
+
+```bash
+# Everything eligible, wait for it
+styrminctl env-clones create production --name prod-rehearsal --wait
+
+# Two deployments by name, with the outbound integration removed and
+# safe environment variables merged in
+styrminctl env-clones create production \
+  --name prod-rehearsal \
+  --deployment api \
+  --deployment worker \
+  --clear-config-field external_dns_endpoints_type \
+  --config-override '{"envVars": [{"name": "EMAIL_MODE", "value": "disabled"}]}'
+
+# Override from a file, source addressed by UUID
+styrminctl env-clones create --id <environment-uuid> \
+  --name prod-rehearsal \
+  --config-override @rehearsal-config.json
+
+# Configuration only — create the environment, bring no applications
+styrminctl env-clones create production --name prod-config-only --empty-deployment
+```
+
+Track and inspect afterwards:
+
+```bash
+styrminctl env-clones list production
+styrminctl env-clones get <environment-clone-id>
+```
+
+#### Exit codes
+
+`create` exits **0 on `COMPLETED`**, and **1 on both `PARTIAL` and
+`FAILED`** — `PARTIAL` with an explicit warning, because you asked for a
+copy of an environment and did not get every deployment you selected.
+
+The status is derived on every read, so a clone can already be terminal
+when the mutation returns: a clone whose every selected deployment was
+skipped up front, or one that failed at registration, is finished before
+there is anything to wait for. `create` therefore checks the status twice
+— once right after the mutation, and again after `--wait` — and exits
+non-zero at the first terminal-and-not-`COMPLETED` reading rather than
+reporting success for a clone that does not exist.
+
+Without `--wait`, a clone that is still working exits 0 once it has been
+accepted. As with `env-backups`, a `--wait` that runs out of `--max-wait`
+also exits 1: the CLI prints the non-terminal status it last saw and
+stops waiting. Nothing has been abandoned — raise `--max-wait` rather
+than reading that as a failed clone.
+
+:::note There is no `env-clones delete`
+
+A clone is discarded by deleting the **environment it created**
+(`styrminctl environments delete <name>`), which works in any state and
+frees the name for an immediate re-clone. If the clone stalled before its
+environment appeared, delete its backing snapshot with `env-backups
+delete <id>` instead. See [Discarding a
+clone](../concepts-and-architecture/backups-and-restores.md#discarding-a-clone).
 
 :::
 
