@@ -63,6 +63,7 @@ from styrmin_backend.services.environments import resolve_environment
 from styrmin_backend.services.exceptions import (
     EnvironmentAlreadyExistsError,
     EnvironmentCloneNotFoundError,
+    InvalidCloneDeploymentSelectionError,
     InvalidContextError,
     UnknownEnvironmentConfigFieldError,
 )
@@ -202,6 +203,15 @@ CLONE_STEPS = frozenset(
 CLONE_REASON_NOT_SELECTED = "not included in the requested deployment selection"
 #: The deployment cannot contribute a constituent backup at all.
 CLONE_REASON_NOT_ELIGIBLE = "deployment has no active instance"
+#: The selection named the environment's platform-managed deployment. Only ever
+#: attributed to an *explicitly selected* internal deployment: an unselected one
+#: is left off the list entirely (it is not part of the environment's
+#: application topology), but silently dropping something the operator asked for
+#: by id would break SC-003's accounting.
+CLONE_REASON_INTERNAL = "deployment is internal platform infrastructure"
+#: The selection named a deleted deployment. Same rule as
+#: :data:`CLONE_REASON_INTERNAL`: attributed only when explicitly selected.
+CLONE_REASON_TOMBSTONED = "deployment has been deleted"
 #: The capture never produced a constituent ``Backup`` row for it.
 CLONE_REASON_CAPTURE_FAILED = "constituent backup failed at capture"
 #: The constituent exists but did not reach ``COMPLETED``.
@@ -667,34 +677,88 @@ def _validate_cleared_config_fields(cleared_fields: Sequence[str] | None) -> Non
         )
 
 
+def _validate_deployment_selection(
+    deployment_ids: Sequence[UUID] | None,
+    deployments: Sequence[DeploymentEntity],
+) -> None:
+    """Reject a selection naming deployments the source does not have (FR-011).
+
+    The selection carries exactly one hard failure, and it is a *request* error
+    rather than a state one: an id that names nothing, or names a deployment in
+    a **different** environment. Both are indistinguishable from the source's
+    point of view — the id is simply not one of its deployments — and both are
+    rejected the same way, upfront, with zero side effects (``NOT_FOUND``).
+    Cloning the wrong environment's deployment is never what the caller meant,
+    and attributing it as a skip would bury a typo in a report.
+
+    Everything else about the selection is *not* an error (FR-004): a selected
+    deployment that exists here but cannot be cloned — no active instance,
+    internal, deleted — is attributed as ``SKIPPED`` with a reason by
+    :func:`_plan_deployment_results`.
+
+    ``deployments`` must therefore be the environment's **full** roster,
+    including tombstoned and internal rows, or a legal-but-ineligible id would
+    be misreported as unknown.
+
+    Raises:
+        InvalidCloneDeploymentSelectionError: When any selected id is not a
+            deployment of the source environment.
+    """
+    if deployment_ids is None:
+        return
+    known = {deployment.id for deployment in deployments}
+    # ``dict.fromkeys`` de-duplicates a repeated id while keeping the order the
+    # caller sent, so the error names each offender once and reads predictably.
+    unknown = [
+        str(deployment_id)
+        for deployment_id in dict.fromkeys(deployment_ids)
+        if deployment_id not in known
+    ]
+    if unknown:
+        raise InvalidCloneDeploymentSelectionError(deployment_ids=unknown)
+
+
 def _plan_deployment_results(
     deployments: Sequence[DeploymentEntity], deployment_ids: Sequence[UUID] | None
 ) -> list[CloneDeploymentResult]:
     """Account for every source deployment before the capture is registered.
 
-    SC-003 wants 100% attribution, and the two outcomes that are already known
-    at registration time are recorded here so they survive even a clone whose
-    flow never runs:
+    SC-003 wants 100% attribution, and every outcome that is already known at
+    registration time is recorded here so it survives even a clone whose flow
+    never runs:
 
     * a deployment an explicit selection left out → ``SKIPPED``;
-    * a deployment that cannot contribute a constituent backup (no active
-      instance) → ``SKIPPED`` with the reason, never an error (FR-004).
+    * a deployment that cannot contribute a constituent backup → ``SKIPPED``
+      with the reason, never an error (FR-004). Ineligibility comes in three
+      flavours and each gets its own reason: no active instance (never
+      deployed), internal, deleted.
 
     Everything else starts ``PENDING`` and the flow resolves it.
 
-    Internal deployments are deliberately **not** listed: they are
-    platform-managed infrastructure (the per-environment ingress controller),
-    never part of an environment's application topology, and the cloned
-    environment gets its own through ``_ensure_ingress_controller``. Tombstoned
-    deployments are already excluded by ``find_all_by_environment``.
+    Deployments that are not part of the environment's application topology —
+    internal ones (platform-managed infrastructure; the cloned environment gets
+    its own through ``_ensure_ingress_controller``) and tombstoned ones — are
+    listed **only when the selection names them explicitly**. Left out of an
+    unfiltered clone they would be noise on every clone record of every
+    environment; named by the caller they are an answer the caller is owed.
+
+    ``deployments`` is the full roster (``include_deleted=True``) so that the
+    explicit case above is expressible at all.
     """
     selected = set(deployment_ids) if deployment_ids is not None else None
     results: list[CloneDeploymentResult] = []
     for deployment in deployments:
-        if deployment.internal:
-            continue
-        if selected is not None and deployment.id not in selected:
-            reason: str | None = CLONE_REASON_NOT_SELECTED
+        explicitly_selected = selected is not None and deployment.id in selected
+        if deployment.deleted_at is not None or deployment.internal:
+            if not explicitly_selected:
+                continue
+            reason: str | None = (
+                CLONE_REASON_TOMBSTONED
+                if deployment.deleted_at is not None
+                else CLONE_REASON_INTERNAL
+            )
+        elif selected is not None and not explicitly_selected:
+            reason = CLONE_REASON_NOT_SELECTED
         elif not is_eligible_for_environment_backup(deployment):
             reason = CLONE_REASON_NOT_ELIGIBLE
         else:
@@ -741,8 +805,9 @@ async def clone_environment(
     1. **Upfront validation with zero side effects** (spec FR-011): resolve the
        source (ADR-031 dual identifier), canonicalise/validate the config
        override and the cleared-field names, check the target environment name
-       is free in the source's cluster, and apply the environment-level
-       concurrency guard to the source (research D8).
+       is free in the source's cluster, check every selected deployment id is
+       one of the source's, and apply the environment-level concurrency guard
+       to the source (research D8).
     2. **One registration transaction**: the clone record, its per-deployment
        attribution (including the skips already knowable — FR-004), and the
        whole capture (parent snapshot + constituent ``Backup`` rows + recorded
@@ -771,8 +836,11 @@ async def clone_environment(
         environment_name: The source environment's name; needs cluster context.
         cluster_id: Cluster context for ``environment_name``.
         cluster_name: Cluster context for ``environment_name``.
-        deployment_ids: Optional selection; ``None`` means every eligible
-            deployment (spec FR-003).
+        deployment_ids: Optional selection of the source's deployments.
+            ``None`` means every eligible deployment (spec FR-003); ``[]`` is a
+            legal empty selection and clones nothing. An id the source does not
+            have is rejected upfront; a selected id that exists but is
+            ineligible is attributed as a skip (spec FR-004).
         config_override: Optional environment-config override, merged over the
             captured config by the flow (spec FR-006, research D7).
         clear_config_fields: Optional captured-config field names to drop
@@ -787,6 +855,8 @@ async def clone_environment(
         AmbiguousIdentifierError: When the source identifiers conflict.
         EnvironmentAlreadyExistsError: When ``name`` is already taken in the
             source's cluster.
+        InvalidCloneDeploymentSelectionError: When ``deployment_ids`` names a
+            deployment that is unknown or belongs to another environment.
         InvalidContextError: When ``config_override`` is not a valid
             environment config.
         UnknownEnvironmentConfigFieldError: When ``clear_config_fields`` names
@@ -825,9 +895,20 @@ async def clone_environment(
                 f"An environment named {name!r} already exists in this cluster."
             )
 
+        # The full roster, tombstones included: the selection is validated
+        # against what the source *has* (a deleted deployment is ineligible,
+        # not unknown — FR-004 vs FR-011), and the planner needs the same list
+        # to attribute an explicitly selected internal or deleted deployment.
+        deployments = await uow.deployments.find_all_by_environment(
+            source.id, include_deleted=True
+        )
+        # Request validation before the state-dependent guard: a selection
+        # naming a deployment the source does not have is wrong no matter what
+        # else is running (FR-011).
+        _validate_deployment_selection(deployment_ids, deployments)
+
         await _guard_no_environment_operation_in_progress(source.id, uow)
 
-        deployments = await uow.deployments.find_all_by_environment(source.id)
         results = _plan_deployment_results(deployments, deployment_ids)
 
         clone_id = uuid4()
