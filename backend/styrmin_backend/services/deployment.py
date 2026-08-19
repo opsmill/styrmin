@@ -1489,3 +1489,47 @@ async def delete_deployment(
         result = await uow.tasks.find(id=task.id)
         assert result is not None, "Task not found"
         return result
+
+
+async def request_cluster_teardown(deployment_id: UUID) -> bool:
+    """Ask the operator to tear a deployment's cluster resources down.
+
+    Flips ``spec.deletionRequested`` on the ``StyrminDeployment`` CR — the same
+    single signal :func:`delete_deployment` uses. The operator's
+    ``deletionRequested`` handler removes the Services, the HelmRelease (so Flux
+    uninstalls the chart), the NetworkPolicies and Secrets, and finally the
+    namespace itself.
+
+    Unlike :func:`delete_deployment` this writes nothing to the database and
+    enforces no state guard, because its caller —
+    :func:`~styrmin_backend.services.environments.delete_environment` — removes
+    the deployment *rows* wholesale and must work from any state, including the
+    ``RESTORING`` counterparts of an in-flight clone (spec SC-005: discarding a
+    clone is always allowed).
+
+    Best-effort by design: a deployment whose CR was never created (a clone
+    counterpart that never reconciled) or that is already torn down has nothing
+    to patch, and an unreachable cluster must not strand the database rows that
+    keep the environment undeletable.
+
+    Returns:
+        ``True`` when the CR was patched, ``False`` when it could not be.
+    """
+    crd_name = get_kubernetes_reference(deployment_id)
+    try:
+        await patch_custom_resource(
+            plural=CRD_PLURAL,
+            reference=crd_name,
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=crd_name,
+            patch=[{"op": "add", "path": "/spec/deletionRequested", "value": True}],
+        )
+    except Exception as exc:
+        logger.warning(
+            "deployment_teardown_request_failed deployment_id={} error={}",
+            deployment_id,
+            exc,
+        )
+        return False
+    return True

@@ -650,6 +650,19 @@ class FakeDeploymentRepository(DeploymentRepository):
             and (include_deleted or d.deleted_at is None)
         ]
 
+    async def delete_all_for_environment(self, environment_id: UUID) -> list[UUID]:
+        """Drop every deployment of an environment, tombstones included.
+
+        The SQL repository also cascades the deployments' dependent rows; the
+        fakes hold each table independently, so there is nothing here to
+        cascade into.
+        """
+        doomed = [d.id for d in self._deployments if d.environment_id == environment_id]
+        self._deployments = [
+            d for d in self._deployments if d.environment_id != environment_id
+        ]
+        return doomed
+
 
 class FakeDeployedServiceRepository(
     FakeRepository[DeployedService], DeployedServiceRepository

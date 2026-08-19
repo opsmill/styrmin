@@ -183,6 +183,49 @@ async def test_delete_environment(
         await get_environment(environment_id=environment.id, uow=uow)
 
 
+async def test_delete_environment_cascades_its_deployments(
+    uow: FakeUnitOfWork,
+    fake_cluster: Cluster,
+    mocker,
+):
+    """``deployment.environment_id`` is non-nullable, so the rows must go too.
+
+    Without the cascade the environment delete fails on a NOT NULL violation
+    the moment the environment has ever held a deployment — which made the
+    clone discard path (spec SC-005) unreachable, because a clone's created
+    environment always owns at least its counterparts and an internal ingress
+    controller. Each deployment is also asked to tear its cluster resources
+    down, so a discarded clone does not strand a namespace.
+    """
+    teardown = mocker.patch(
+        "styrmin_backend.services.environments.request_cluster_teardown",
+        autospec=True,
+        return_value=True,
+    )
+    environment = await _seed_environment_and_deployments(
+        uow,
+        cluster=fake_cluster,
+        deployments=[
+            _make_fanout_deployment(
+                environment_id=uuid4(), name="counterpart", active_env_config=None
+            ),
+            _make_fanout_deployment(
+                environment_id=uuid4(),
+                name="styrmin-ingress-controller-1",
+                active_env_config=None,
+                internal=True,
+            ),
+        ],
+    )
+
+    await delete_environment(environment_id=environment.id, uow=uow)
+
+    assert await uow.deployments.find_all_by_environment(environment.id) == []
+    assert teardown.await_count == 2
+    with pytest.raises(EnvironmentNotFoundError):
+        await get_environment(environment_id=environment.id, uow=uow)
+
+
 async def test_delete_environment_that_does_not_exist(
     uow: FakeUnitOfWork,
     fake_cluster: Cluster,

@@ -18,7 +18,10 @@ from styrmin_backend.services.backup.environment import (
 )
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.clusters import resolve_cluster
-from styrmin_backend.services.deployment import redeploy_for_environment_update
+from styrmin_backend.services.deployment import (
+    redeploy_for_environment_update,
+    request_cluster_teardown,
+)
 from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
@@ -428,7 +431,7 @@ async def update_environment(
 async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
     """Delete an environment, settling its clone records and snapshots first.
 
-    Three steps, and the order is load-bearing.
+    Four steps, and the order is load-bearing.
 
     1. **Clone records are settled before anything else** (010 research D9).
        An environment can appear on a clone record in two roles, and each has
@@ -459,7 +462,18 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
        snapshotted into a constraint violation surfacing as an opaque
        ``INTERNAL_ERROR``.
 
-    3. **The environment row goes.**
+    3. **Deployments cascade.** ``deployment.environment_id`` is non-nullable
+       too, so the same reasoning applies one level down: every deployment of
+       the environment is asked to tear its cluster resources down (the
+       operator's ``deletionRequested`` path, which ends by deleting the
+       namespace) and then its rows — instances, components, services, tasks,
+       pod/CRD status, schedules and its own backups — are deleted. Without
+       this, deleting *any* environment that ever held a deployment fails on a
+       NOT NULL violation, which is what made the clone discard path (spec
+       SC-005) unreachable: a clone's created environment always holds at least
+       its counterparts and an internal ingress controller.
+
+    4. **The environment row goes.**
 
     Raises:
         EnvironmentNotFoundError: When ``environment_id`` does not exist.
@@ -493,6 +507,21 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
 
     cascaded = await delete_environment_backups_for_environment(environment_id, uow)
 
+    # Cluster teardown is requested before the rows go, because the request is
+    # keyed by deployment id and there is nothing left to enumerate afterwards.
+    # It is best-effort (see ``request_cluster_teardown``): a deployment whose
+    # CR never existed must not keep the environment undeletable.
+    async with uow:
+        live_deployments = await uow.deployments.find_all_by_environment(environment_id)
+    for deployment in live_deployments:
+        await request_cluster_teardown(deployment.id)
+
+    async with uow:
+        deleted_deployment_ids = await uow.deployments.delete_all_for_environment(
+            environment_id
+        )
+        await uow.commit()
+
     async with uow:
         environment = await uow.environments.get(environment_id)
         if environment is None:
@@ -503,9 +532,12 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
 
     logger.info(
         "environment_deleted environment_id={} environment_backups_deleted={} "
-        "clones_discarded={} source_clones_kept={} source_clones_deleted={}",
+        "deployments_deleted={} teardown_requested={} clones_discarded={} "
+        "source_clones_kept={} source_clones_deleted={}",
         environment_id,
         cascaded,
+        len(deleted_deployment_ids),
+        len(live_deployments),
         discarded_clones,
         source_clones.kept,
         source_clones.deleted,
