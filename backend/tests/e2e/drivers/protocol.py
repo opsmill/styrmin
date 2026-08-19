@@ -34,6 +34,7 @@ from tests.e2e.drivers.refs import (
     DeploymentRef,
     DriverVersionRef,
     EnvironmentBackupRef,
+    EnvironmentCloneRef,
     EnvironmentRef,
     EnvironmentRestoreRef,
     RestoreRef,
@@ -295,4 +296,79 @@ class ScenarioDriver(Protocol):
 
         Legal regardless of derived status — the FR-010 escape hatch for a
         snapshot pinned in progress by a constituent that was never picked up.
+        """
+
+    # --- Environment clone ------------------------------------------------
+    #
+    # Ordering contract: the UI flow lives on the environment detail page's
+    # Clones tab, scoped by the clone's **source** environment.
+    # ``clone_environment`` takes that environment explicitly and stashes it;
+    # the two read methods only carry the clone's own id and reuse the stash,
+    # raising ``ScenarioActionError`` when the driver has never been told which
+    # environment a clone belongs to. The API driver ignores the stash — the
+    # clone id is addressable on its own — so scenarios need no ``driver_mode``
+    # branch.
+
+    async def clone_environment(
+        self,
+        *,
+        environment_id: str,
+        name: str,
+        deployment_ids: list[str] | None = None,
+        config_override: dict[str, Any] | None = None,
+        clear_config_fields: list[str] | None = None,
+    ) -> EnvironmentCloneRef:
+        """Clone ``environment_id`` into a new environment called ``name``.
+
+        ADMIN-only on both entrypoints — a clone creates an environment and
+        reads every included deployment's data, so the UI wraps the whole
+        surface (trigger included) in ``IfRole minimum="ADMIN"`` rather than
+        merely disabling it.
+
+        ``deployment_ids`` is **tri-state** and implementations must preserve
+        the distinction: ``None`` omits the argument entirely ("every eligible
+        deployment", FR-003), while ``[]`` is a legal and *different* request
+        meaning "clone the environment configuration only". Never pass ``[]``
+        to mean "no filter".
+
+        ``config_override`` is a ``dict`` in the **camelCase**
+        ``UpdateEnvironmentInput`` spelling (``{"envVars": [...],
+        "backupTtl": "..."}``) — the same shape the UI's override textarea takes
+        and the shape the API driver validates through the typed input model.
+        ``clear_config_fields`` names **snake_case** top-level
+        ``EnvironmentConfig`` fields (``"backup_ttl"``), which is the persisted
+        spelling both entrypoints use.
+
+        Returns as soon as the clone record exists, so the returned ``status``
+        is normally ``PENDING`` or ``IN_PROGRESS`` — an upfront skip already
+        counts as progress, so ``PENDING`` is not guaranteed as a first
+        observation.
+
+        Entrypoint asymmetry: the UI can only express what the dialog renders.
+        A ``deployment_ids`` entry naming an *ineligible* deployment, or a
+        ``clear_config_fields`` entry naming a field the source's config does
+        not set, has no checkbox to tick — the UI driver raises
+        ``ScenarioActionError`` rather than silently sending a different
+        request.
+        """
+
+    async def get_environment_clone(
+        self, *, environment_clone_id: str
+    ) -> EnvironmentCloneRef:
+        """Read one clone record, including its per-deployment attribution.
+
+        Raises ``ResourceNotFound`` when the record no longer exists, so a
+        scenario can assert that deleting a source environment removed a
+        still-running clone.
+        """
+
+    async def wait_for_environment_clone(
+        self, *, environment_clone_id: str, max_wait: float = 1800.0
+    ) -> EnvironmentCloneRef:
+        """Poll until the *derived* clone status is terminal.
+
+        Terminal means ``COMPLETED`` / ``PARTIAL`` / ``FAILED``. The default
+        budget is the widest of the environment-level waiters because a clone
+        contains a whole capture *and* a whole cross-target restore, with an
+        environment and its counterpart deployments created in between.
         """

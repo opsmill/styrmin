@@ -16,6 +16,8 @@ from styrmin_sdk.exceptions import ResourceNotFoundError
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import (
     EnvironmentBackupRef,
+    EnvironmentCloneDeploymentResultRef,
+    EnvironmentCloneRef,
     ResourceNotFound,
     ScenarioDriver,
 )
@@ -84,6 +86,69 @@ MAINTENANCE_OVERDUE_SENTINEL = "1970-01-01T00:00:00Z"
 
 # Parked on the repository after the forced cycle so the shared cluster stops maintaining.
 MAINTENANCE_FREQUENCY_AFTER_CHECK = "24h"
+
+# --- Environment clone (spec 010-environment-clone) -------------------------
+
+# The retention policy set on the *source* environment before the clone, so the
+# captured config has a field the clone can be asked to **clear** (FR-006 /
+# US3). A retention policy is the cheapest such field on this session-shared
+# environment: it renders to nothing in Helm, so the redeploy fanout it triggers
+# is a no-op that still walks the whole reconcile path. Deliberately distinct
+# from every other TTL constant in this module so no assertion can pass on a
+# coincidence.
+CLONE_SOURCE_BACKUP_TTL = "1800h"
+
+# The env var the clone-time config override injects, asserted verbatim on the
+# created environment's config. The override is the entire reason a clone of
+# production is safe to start (US3's non-interference motive), so the value must
+# be one nothing else in the suite sets.
+CLONE_OVERRIDE_ENV_VAR_NAME = "CLONE_OVERRIDE_MARKER"
+CLONE_OVERRIDE_ENV_VAR_VALUE = "clone-override-sink"
+
+# The captured-config field the clone clears. Snake_case: ``clearConfigFields``
+# names persisted ``EnvironmentConfig`` fields, not GraphQL input fields.
+CLONE_CLEARED_CONFIG_FIELD = "backup_ttl"
+
+# The attribution reason recorded for a source deployment an explicit selection
+# left out. Free text by contract (the vocabulary is open and the backend may
+# add to it), so it is asserted as text — mirrored by hand from
+# ``services.backup.clone.CLONE_REASON_NOT_SELECTED`` rather than imported, to
+# keep the scenario off the service layer's import graph. If the wording
+# changes, this is the one place that fails.
+CLONE_REASON_NOT_SELECTED = "not included in the requested deployment selection"
+
+# The ``clone_errors`` step prefix written when the environment a clone created
+# is deleted through ordinary environment deletion — the supported discard path
+# (SC-005). Entries arrive pre-rendered as ``"step: error"``.
+CLONE_DISCARD_STEP_PREFIX = "created_environment_deleted:"
+
+# One whole clone reaching a terminal derived status: the capture fan-out, the
+# environment and counterpart creation, and the cross-target constituent
+# restore. Calibrated as the sum of the budgets this module already allows for
+# those three pieces (``ENVIRONMENT_BACKUP_FANOUT_TIMEOUT_SECONDS`` +
+# ``DEPLOYMENT_RUNNING_TIMEOUT_SECONDS`` + ``ENVIRONMENT_RESTORE_TIMEOUT_
+# SECONDS``) plus the derived-status slack the UI entrypoint's list refetch
+# needs, rather than guessed.
+ENVIRONMENT_CLONE_TIMEOUT_SECONDS = (
+    ENVIRONMENT_BACKUP_FANOUT_TIMEOUT_SECONDS
+    + DEPLOYMENT_RUNNING_TIMEOUT_SECONDS
+    + ENVIRONMENT_RESTORE_TIMEOUT_SECONDS
+    + DERIVED_STATUS_TIMEOUT_SECONDS
+)
+
+# A *configuration-only* clone (empty selection) reaching terminal: a capture
+# with no constituents derives ``COMPLETED`` on its first read, the environment
+# is created, and there are no counterparts and no restores. Only the clone
+# flow's own poll interval stands between registration and terminality, so this
+# is deliberately far below ``ENVIRONMENT_CLONE_TIMEOUT_SECONDS`` — a
+# config-only clone taking many minutes is a defect, not slowness.
+CONFIG_ONLY_CLONE_TIMEOUT_SECONDS = 300.0
+
+# Pods in the *cloned* namespace becoming ready after the cross-target restore.
+# Recovery replaces the Velero-restored source-named CR with the counterpart's
+# own CR body and Flux rolls the workload, so this is a fresh install's worth of
+# waiting on top of the restore rather than a restart.
+CLONE_PODS_READY_TIMEOUT_SECONDS = 300.0
 
 
 @asynccontextmanager
@@ -1141,3 +1206,520 @@ async def test_restore_failure_marks_failed_not_indefinite(
         f"Failed restore must not change deployment status; was {pre_status!r}, "
         f"now {after.status!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Environment clone (spec 010-environment-clone)
+# ---------------------------------------------------------------------------
+
+
+def _clone_results_by_deployment(
+    clone: EnvironmentCloneRef,
+) -> dict[str, EnvironmentCloneDeploymentResultRef]:
+    """Index a clone's attribution entries, asserting each deployment appears once.
+
+    The uniqueness check is half of SC-003: "every source deployment considered
+    appears exactly once" is only a coverage guarantee if a duplicate entry
+    cannot hide a contradicting one.
+    """
+    results = {result.deployment_id: result for result in clone.deployment_results}
+    assert len(results) == len(clone.deployment_results), (
+        "a source deployment appears twice on the clone record: "
+        f"{[r.deployment_id for r in clone.deployment_results]!r}"
+    )
+    return results
+
+
+@pytest.mark.ci
+async def test_environment_clone_lifecycle(
+    scenario_driver: ScenarioDriver,
+    scenario_environment_id: str,
+    styrmin_resources: dict,
+    deployed_simple_app: dict,
+    velero_ready: None,  # noqa: ARG001 — ensures Velero is up before the capture
+    vcluster: dict,
+) -> None:
+    """One clone of a live environment, then its discard and a re-clone.
+
+    Covers the whole 010-environment-clone feature in one dual-entrypoint node
+    (Constitution §V "reuse before you boot", research D12): US1 (running,
+    data-bearing copy), US2 (explicit deployment selection), US3 (clone-time
+    config override including field clearing) and US4 (derived tracking, full
+    attribution, discard-and-re-clone). It reuses the stack the environment
+    backup/restore node already deploys — ``scenario_environment_id``,
+    ``deployed_simple_app``, ``velero_ready`` — and adds one peer deployment so
+    the selection has something to exclude.
+
+    Success criteria asserted here:
+
+    * **SC-001** — a single operation yields a counterpart deployment that
+      reaches ``running`` in a brand-new environment, with zero per-deployment
+      operator steps.
+    * **SC-002** — the source is untouched: its config is byte-identical either
+      side of the clone, its deployment roster is unchanged, and the only
+      source-side artefact gained is the one environment backup the clone was
+      built from.
+    * **SC-003** — every source deployment considered is attributed exactly
+      once: the selected one ``CLONED`` with a counterpart and a restore, the
+      unselected one ``SKIPPED`` with a reason. Internal deployments are omitted
+      entirely (not reported as skips), which is what makes set *equality* the
+      right assertion.
+    * **SC-004** — the clone holds the data as of the capture, not the source
+      mutation written after it, proved by an **authenticated write** against
+      the counterpart (step 9 explains why ``/count`` is that write).
+    * **SC-005** — deleting the created environment discards the clone and frees
+      its name: a second clone under the same name is accepted and materialises.
+
+    Also FR-006: the created environment's config is the captured config with
+    one field cleared and the override merged over the rest, asserted as an
+    exact dict.
+    """
+    from uuid import uuid4
+
+    client: StyrminClient = styrmin_resources["client"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+
+    primary_deployment_id = deployed_simple_app["deployment_id"]
+    primary_namespace = deployed_simple_app["namespace"]
+    primary_name = (await client.deployments.get(primary_deployment_id)).name
+
+    suffix = uuid4().hex[:8]
+    clone_name = f"clone-target-{suffix}"
+
+    # A second eligible deployment is what makes the selection meaningful: with
+    # only one, "clone exactly what I selected" and "clone everything" are the
+    # same request. The shared environment enforces per-env service-name
+    # uniqueness, hence the override (see ``scenario_environment_id``).
+    excluded = await scenario_driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+        name=f"env-clone-{suffix}",
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": f"envclone{suffix}"}
+        ],
+    )
+    excluded_deployment_id = excluded.id
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=excluded_deployment_id,
+        timeout=DEPLOYMENT_RUNNING_TIMEOUT_SECONDS,
+    )
+    excluded_name = (await client.deployments.get(excluded_deployment_id)).name
+
+    previous_backup_ttl = (
+        (await client.environments.get(environment_id=scenario_environment_id)).config
+        or {}
+    ).get("backup_ttl")
+    source_backups_before = {
+        str(backup.id)
+        for backup in await client.environment_backups.list(scenario_environment_id)
+    }
+    created_environment_ids: list[str] = []
+
+    try:
+        # 1. Give the source a config field worth clearing (FR-006 / US3), then
+        #    let the redeploy fanout settle before anything is captured — the
+        #    environment is session-shared and a capture must not race a
+        #    reconcile (the same rule the sibling snapshot node follows).
+        pre_ttl_timeline = {
+            deployment_id: len(
+                await client.deployments.get_timeline(deployment_id=deployment_id)
+            )
+            for deployment_id in (primary_deployment_id, excluded_deployment_id)
+        }
+        await scenario_driver.set_environment_backup_ttl(
+            environment_id=scenario_environment_id,
+            ttl=CLONE_SOURCE_BACKUP_TTL,
+        )
+        await asyncio.gather(
+            *(
+                wait_for_env_fanout_steady_state(
+                    client, deployment_id=deployment_id, pre_timeline_length=length
+                )
+                for deployment_id, length in pre_ttl_timeline.items()
+            )
+        )
+        await wait_for_pods_ready(kubeconfig_path, primary_namespace)
+
+        # The retention write left the UI driver on the environment detail page;
+        # the marker write below needs the primary deployment's page. For the API
+        # driver ``attach_to_deployment`` is a no-op and the wait is one SDK read
+        # on an already-running deployment, so this needs no ``driver_mode``
+        # branch.
+        scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=primary_deployment_id
+        )
+
+        # 2. Write the data marker the clone must reproduce (SC-004).
+        async with portforward_simple_app(kubeconfig_path, primary_namespace) as port:
+            async with httpx.AsyncClient() as http_client:
+                for _ in range(5):
+                    await http_client.get(f"http://localhost:{port}/count", timeout=10)
+                resp = await http_client.get(
+                    f"http://localhost:{port}/count", timeout=10
+                )
+                marker_count = resp.json()["counter"]
+
+        source_config_before = (
+            await client.environments.get(environment_id=scenario_environment_id)
+        ).config
+        assert (source_config_before or {}).get("backup_ttl") == (
+            CLONE_SOURCE_BACKUP_TTL
+        ), (
+            "the captured config must actually carry the field the clone is "
+            f"asked to clear, got {source_config_before!r}"
+        )
+        source_deployments_before = await instanced_deployment_ids(
+            client, scenario_environment_id
+        )
+        assert {primary_deployment_id, excluded_deployment_id} <= (
+            source_deployments_before
+        ), (
+            "both source deployments must carry an active instance before the "
+            f"clone, got {source_deployments_before!r}"
+        )
+
+        # 3. One operation clones the environment: only the primary is selected
+        #    (US2), the override injects an env var and clears the captured
+        #    retention policy (US3).
+        clone = await scenario_driver.clone_environment(
+            environment_id=scenario_environment_id,
+            name=clone_name,
+            deployment_ids=[primary_deployment_id],
+            config_override={
+                "envVars": [
+                    {
+                        "name": CLONE_OVERRIDE_ENV_VAR_NAME,
+                        "value": CLONE_OVERRIDE_ENV_VAR_VALUE,
+                    }
+                ]
+            },
+            clear_config_fields=[CLONE_CLEARED_CONFIG_FIELD],
+        )
+        assert clone.name == clone_name
+        # ``PENDING`` is deliberately not required: an upfront skip is recorded
+        # with the clone row itself, which is already enough progress for the
+        # derivation to read ``IN_PROGRESS`` on the very first observation.
+        assert clone.status in {"PENDING", "IN_PROGRESS"}, (
+            f"a just-registered clone must not be terminal, got {clone.status!r}"
+        )
+        assert clone.created_environment_id is None, (
+            "nothing may materialise before the capture reaches a restorable "
+            f"terminal status (FR-002), got {clone.created_environment_id!r}"
+        )
+        environment_backup_id = clone.environment_backup_id
+        assert environment_backup_id is not None, (
+            "registration must link the capture the clone is built from (FR-002)"
+        )
+
+        # Both source deployments are accounted for from the very first read
+        # (SC-003). The environment also owns an internal ingress-controller
+        # deployment with an active instance, and it is *omitted* rather than
+        # reported as a skip, which is why equality is the right assertion.
+        registered = _clone_results_by_deployment(clone)
+        assert set(registered) == {primary_deployment_id, excluded_deployment_id}, (
+            "every source deployment considered must be attributed, internal "
+            f"deployments omitted (SC-003): got {set(registered)!r}"
+        )
+        assert registered[excluded_deployment_id].outcome == "SKIPPED"
+        assert registered[excluded_deployment_id].deployment_name == excluded_name, (
+            "a skip is attributed by deployment name (SC-003); got "
+            f"{registered[excluded_deployment_id].deployment_name!r}"
+        )
+        assert registered[excluded_deployment_id].reason == (
+            CLONE_REASON_NOT_SELECTED
+        ), f"unexpected skip reason {registered[excluded_deployment_id].reason!r}"
+
+        # 4. The capture is the *selected* deployment only (US2 at the cluster
+        #    level, not merely in the record), and it goes terminal before the
+        #    source is mutated again.
+        capture = await scenario_driver.wait_for_environment_backup(
+            environment_backup_id=environment_backup_id,
+            max_wait=ENVIRONMENT_BACKUP_FANOUT_TIMEOUT_SECONDS,
+        )
+        assert capture.status == "COMPLETED", (
+            "the clone's capture must complete for the clone to be built from "
+            f"it (FR-002); got {capture.status!r}"
+        )
+        assert {c.deployment_id for c in capture.constituents} == {
+            primary_deployment_id
+        }, (
+            "the selection must filter the capture itself, not just the clone "
+            f"record (US2 / FR-003); got {[c.deployment_id for c in capture.constituents]!r}"
+        )
+
+        # 5. Mutate the source data *after* the capture. The finished clone must
+        #    not contain this (FR-007: the clone is built entirely from the
+        #    capture; the live source is never re-read).
+        async with portforward_simple_app(kubeconfig_path, primary_namespace) as port:
+            async with httpx.AsyncClient() as http_client:
+                for _ in range(5):
+                    await http_client.get(f"http://localhost:{port}/count", timeout=10)
+                resp = await http_client.get(
+                    f"http://localhost:{port}/count", timeout=10
+                )
+                post_capture_count = resp.json()["counter"]
+        assert post_capture_count > marker_count, (
+            "the post-capture write must actually diverge from the marker, "
+            "otherwise SC-004 would pass without the capture point mattering: "
+            f"{post_capture_count} !> {marker_count}"
+        )
+
+        # 6. The clone reaches a terminal derived status with full attribution.
+        finished = await scenario_driver.wait_for_environment_clone(
+            environment_clone_id=clone.id,
+            max_wait=ENVIRONMENT_CLONE_TIMEOUT_SECONDS,
+        )
+        assert finished.status == "COMPLETED", (
+            "the selected deployment cloned and restored cleanly, so the derived "
+            f"status must be COMPLETED; got {finished.status!r} with events "
+            f"{finished.clone_errors!r}"
+        )
+        assert not finished.discarded
+        created_environment_id = finished.created_environment_id
+        assert created_environment_id is not None, (
+            "a COMPLETED clone must have created its environment"
+        )
+        created_environment_ids.append(created_environment_id)
+
+        results = _clone_results_by_deployment(finished)
+        assert set(results) == {primary_deployment_id, excluded_deployment_id}, (
+            f"attribution must still cover every source deployment (SC-003): "
+            f"got {set(results)!r}"
+        )
+        cloned_result = results[primary_deployment_id]
+        assert cloned_result.outcome == "CLONED", (
+            f"the selected deployment must be cloned, got {cloned_result.outcome!r} "
+            f"({cloned_result.reason!r})"
+        )
+        assert cloned_result.deployment_name == primary_name
+        counterpart_deployment_id = cloned_result.counterpart_deployment_id
+        assert counterpart_deployment_id is not None, (
+            "a CLONED entry must name the counterpart deployment it created"
+        )
+        assert cloned_result.restore_id is not None, (
+            "a CLONED entry must name the cross-target restore carrying its data"
+        )
+        skipped_result = results[excluded_deployment_id]
+        assert skipped_result.outcome == "SKIPPED"
+        assert skipped_result.counterpart_deployment_id is None, (
+            "an unselected deployment must not get a counterpart"
+        )
+
+        # 7. SC-002 — the source is untouched. Read through the SDK on both
+        #    entrypoints: this is the source's *state*, not a UI affordance, and
+        #    the frontend surfaces neither the persisted config dict nor the
+        #    full deployment roster in a comparable form.
+        source_after = await client.environments.get(
+            environment_id=scenario_environment_id
+        )
+        assert source_after.config == source_config_before, (
+            "cloning must not mutate the source environment's config (SC-002): "
+            f"{source_after.config!r} != {source_config_before!r}"
+        )
+        assert (
+            await instanced_deployment_ids(client, scenario_environment_id)
+        ) == source_deployments_before, (
+            "cloning must not create or delete a source deployment (SC-002)"
+        )
+        source_backups_after = {
+            str(backup.id)
+            for backup in await client.environment_backups.list(scenario_environment_id)
+        }
+        assert source_backups_after - source_backups_before == {
+            environment_backup_id
+        }, (
+            "the only source-side artefact a clone leaves behind is the "
+            "environment backup it was built from (SC-002); gained "
+            f"{source_backups_after - source_backups_before!r}"
+        )
+
+        # 8. FR-006 — the created environment's config is the captured config
+        #    with the named field cleared and the override merged over the rest.
+        #    Asserted as an exact dict: "override present" alone would pass even
+        #    if the cleared field survived.
+        created_environment = await client.environments.get(
+            environment_id=created_environment_id
+        )
+        assert created_environment.name == clone_name
+        assert created_environment.config == {
+            "env_vars": {CLONE_OVERRIDE_ENV_VAR_NAME: CLONE_OVERRIDE_ENV_VAR_VALUE}
+        }, (
+            "the cloned environment's config must be the captured config with "
+            f"{CLONE_CLEARED_CONFIG_FIELD!r} cleared and the override merged "
+            f"over it (FR-006); got {created_environment.config!r}"
+        )
+
+        # 9. SC-001 / SC-004 — the counterpart is running in the new environment
+        #    and holds the data as of the capture.
+        scenario_driver.attach_to_deployment(environment_id=created_environment_id)
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=counterpart_deployment_id,
+            timeout=DEPLOYMENT_RUNNING_TIMEOUT_SECONDS,
+        )
+        counterpart_namespace = f"styrmin-{counterpart_deployment_id}"
+        await wait_for_pods_ready(
+            kubeconfig_path,
+            counterpart_namespace,
+            timeout=CLONE_PODS_READY_TIMEOUT_SECONDS,
+        )
+        async with portforward_simple_app(
+            kubeconfig_path, counterpart_namespace
+        ) as port:
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.get(
+                    f"http://localhost:{port}/count", timeout=10
+                )
+        # ``/count`` is an *authenticated write*, which is the whole point of
+        # reading it here rather than a read-only endpoint (research D2): the
+        # app opens a PostgreSQL session with the credentials in the restored
+        # Secret and commits an UPDATE. So a 200 proves the counterpart's
+        # re-rendered credentials still match the restored data — the failure
+        # mode a chart that generates credentials at install time would produce
+        # — while the value proves the capture point. A 500 here means
+        # credentials; a wrong counter means the wrong data.
+        assert resp.status_code == 200, (
+            "an authenticated write against the counterpart must succeed — a "
+            "failure here means the restored data is unreachable with the "
+            f"counterpart's credentials (research D2); got {resp.status_code} "
+            f"{resp.text!r}"
+        )
+        assert resp.json()["counter"] == marker_count + 1, (
+            "the clone must hold the source's data as of the capture, not the "
+            f"post-capture write (SC-004 / FR-007): expected "
+            f"{marker_count + 1} (the +1 is this read itself), post-capture "
+            f"source value was {post_capture_count}"
+        )
+
+        # 10. SC-005 — discard the clone by deleting the environment it created.
+        #     Driven through the SDK on both entrypoints: the frontend exposes no
+        #     delete-environment surface at all (the UI driver refuses the call
+        #     by contract), so there is no UI flow to exercise here. What *is*
+        #     under test is the record's reaction, and that is read back through
+        #     the dual-entrypoint driver below.
+        await client.environments.delete(environment_id=created_environment_id)
+        created_environment_ids.remove(created_environment_id)
+        discarded = await scenario_driver.get_environment_clone(
+            environment_clone_id=clone.id
+        )
+        assert discarded.created_environment_id is None, (
+            "discarding must release the created environment on the record"
+        )
+        assert discarded.discarded, (
+            "the record must say it was discarded rather than merely showing no "
+            f"environment; events: {discarded.clone_errors!r}"
+        )
+        assert any(
+            entry.startswith(CLONE_DISCARD_STEP_PREFIX)
+            for entry in discarded.clone_errors
+        ), (
+            "the discard must be attributed as an event, not left implicit: "
+            f"{discarded.clone_errors!r}"
+        )
+        assert discarded.status == "COMPLETED", (
+            "discarding the environment of a clone that already finished keeps "
+            f"the finished outcome as history; got {discarded.status!r}"
+        )
+
+        # 11. SC-005 — the name is free again and a re-clone materialises.
+        #     Deliberately a *configuration-only* re-clone (empty selection, a
+        #     legal request distinct from omitting the argument): the restore
+        #     path is already proven by the first cycle, and a second full cycle
+        #     would put this node roughly 2.5 clone-cycles deep on the heaviest
+        #     shard (research D12). What SC-005 needs is that the name is free,
+        #     the record is created, and the environment row exists.
+        reclone = await scenario_driver.clone_environment(
+            environment_id=scenario_environment_id,
+            name=clone_name,
+            deployment_ids=[],
+        )
+        assert reclone.id != clone.id
+        assert reclone.name == clone_name, (
+            "re-cloning under the discarded clone's name must be accepted "
+            "(SC-005) — the clone record's name is deliberately not unique"
+        )
+        rematerialised = await scenario_driver.wait_for_environment_clone(
+            environment_clone_id=reclone.id,
+            max_wait=CONFIG_ONLY_CLONE_TIMEOUT_SECONDS,
+        )
+        assert rematerialised.status == "COMPLETED", (
+            "a configuration-only clone has nothing that can fail, so it must "
+            f"reach COMPLETED; got {rematerialised.status!r} with events "
+            f"{rematerialised.clone_errors!r}"
+        )
+        recreated_environment_id = rematerialised.created_environment_id
+        assert recreated_environment_id is not None, (
+            "the re-clone must materialise an environment (SC-005)"
+        )
+        created_environment_ids.append(recreated_environment_id)
+        assert recreated_environment_id != created_environment_id, (
+            "the re-clone must create a new environment, not resurrect the "
+            "discarded one"
+        )
+        recreated = await client.environments.get(
+            environment_id=recreated_environment_id
+        )
+        assert recreated.name == clone_name
+        # Coverage identity holds for a configuration-only clone too: both
+        # source deployments are accounted for, neither is included.
+        reclone_results = _clone_results_by_deployment(rematerialised)
+        assert set(reclone_results) == {
+            primary_deployment_id,
+            excluded_deployment_id,
+        }, f"SC-003 must hold for a config-only clone too: {set(reclone_results)!r}"
+        assert all(
+            result.outcome == "SKIPPED" for result in reclone_results.values()
+        ), (
+            "an empty selection includes nothing, so every source deployment is "
+            f"a skip: {[(r.deployment_id, r.outcome) for r in reclone_results.values()]!r}"
+        )
+    finally:
+        # Every cleanup step below is best-effort *except* the retention revert:
+        # the environment is session-shared, so leaving a 1800h policy behind
+        # would silently hand it to every later ``shard_backup`` test. A cleanup
+        # timeout must never mask the test's own failure.
+        #
+        # Clone-created environments go first: deleting them settles any clone
+        # record still non-terminal (which is what releases the environment-level
+        # guards) before anything else touches the source.
+        for environment_id in created_environment_ids:
+            with suppress(Exception):
+                await client.environments.delete(environment_id=environment_id)
+
+        revert_timeline = {
+            deployment_id: len(
+                await client.deployments.get_timeline(deployment_id=deployment_id)
+            )
+            for deployment_id in (primary_deployment_id, excluded_deployment_id)
+        }
+        await scenario_driver.set_environment_backup_ttl(
+            environment_id=scenario_environment_id, ttl=previous_backup_ttl
+        )
+        with suppress(AssertionError):
+            await asyncio.gather(
+                *(
+                    wait_for_env_fanout_steady_state(
+                        client,
+                        deployment_id=deployment_id,
+                        pre_timeline_length=length,
+                        timeout=CLEANUP_WAIT_TIMEOUT_SECONDS,
+                    )
+                    for deployment_id, length in revert_timeline.items()
+                )
+            )
+        # Delete the peer this test created. The environment is session-shared,
+        # so leaving it behind hands every later ``shard_backup`` test an extra
+        # constituent in any snapshot, an extra redeploy in any env-config
+        # fanout, and a service name the next ``simple-app`` peer must avoid.
+        with suppress(Exception):
+            await client.deployments.delete(excluded_deployment_id)
+        # The UI driver's page is session-scoped and sibling tests act on
+        # whatever page is open, so hand it back on the source environment's
+        # primary deployment.
+        scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
+        with suppress(Exception):
+            await scenario_driver.wait_for_deployment_running(
+                deployment_id=primary_deployment_id,
+                timeout=CLEANUP_WAIT_TIMEOUT_SECONDS,
+            )

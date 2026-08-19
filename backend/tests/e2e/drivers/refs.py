@@ -59,14 +59,17 @@ class RestoreRef:
 
 
 #: Derived environment-operation statuses that never change again, as the raw
-#: GraphQL enum *names* :class:`EnvironmentBackupRef` / :class:`EnvironmentRestoreRef`
-#: carry. ``PARTIAL`` is terminal: it means some constituents failed and the
-#: rest completed, which is a final outcome, not a transitional one.
+#: GraphQL enum *names* :class:`EnvironmentBackupRef` /
+#: :class:`EnvironmentRestoreRef` / :class:`EnvironmentCloneRef` carry.
+#: ``PARTIAL`` is terminal: it means some constituents failed and the rest
+#: completed, which is a final outcome, not a transitional one.
 #:
-#: Deliberately plain strings rather than the SDK's two
-#: ``TERMINAL_ENVIRONMENT_{BACKUP,RESTORE}_STATUSES`` frozensets — those hold
-#: distinct Python enum types that would never both match one ref field, and
-#: the UI driver reads the value out of the DOM as a string anyway.
+#: Deliberately plain strings rather than the SDK's three
+#: ``TERMINAL_ENVIRONMENT_{BACKUP,RESTORE,CLONE}_STATUSES`` frozensets — those
+#: hold distinct Python enum types that would never both match one ref field,
+#: and the UI driver reads the value out of the DOM as a string anyway. All
+#: three environment-level operations share this vocabulary by design (ADR-0055),
+#: so one frozenset covers them.
 TERMINAL_ENVIRONMENT_OPERATION_STATUSES = frozenset({"COMPLETED", "PARTIAL", "FAILED"})
 
 
@@ -134,6 +137,67 @@ class EnvironmentRestoreRef:
     status: str
     restore_ids: tuple[str, ...]
     skipped: tuple[EnvironmentRestoreSkipRef, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EnvironmentCloneDeploymentResultRef:
+    """One source deployment's outcome inside an environment clone.
+
+    Every source deployment the clone *considered* gets exactly one of these
+    (spec SC-003), so the tuple on :class:`EnvironmentCloneRef` is the coverage
+    identity a scenario asserts against. Note what "considered" excludes:
+    internal and tombstoned deployments are **omitted entirely** unless the
+    caller named them in the selection — they are not reported as skips.
+
+    ``outcome`` is the raw ``EnvironmentCloneDeploymentOutcome`` enum name
+    (``PENDING`` / ``CLONED`` / ``SKIPPED`` / ``FAILED``); the frontend
+    publishes it verbatim as ``data-outcome`` and the API driver reads the same
+    string off the generated enum's ``.value``, so both entrypoints report
+    identical values.
+
+    ``reason`` is free text by contract (open vocabulary — the backend may add
+    to it), so scenarios assert on it as text rather than switching on it.
+    """
+
+    deployment_id: str
+    deployment_name: str
+    outcome: str
+    reason: str | None
+    counterpart_deployment_id: str | None
+    restore_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class EnvironmentCloneRef:
+    """One clone of an environment into a new environment (spec 010).
+
+    ``status`` carries the raw ``EnvironmentCloneStatus`` enum name, *derived*
+    on every read from the backing capture, whether the created environment
+    still exists, the cross-target constituent restores and the recorded clone
+    errors — never stored. A clone can already read ``IN_PROGRESS`` the instant
+    it is registered (an upfront skip counts as progress), so nothing may assume
+    a ``PENDING``-first progression.
+
+    ``created_environment_id`` is ``None`` in two different situations that must
+    not be conflated: the environment has not materialised yet, and the
+    environment was deleted (the supported discard path — SC-005). ``discarded``
+    tells them apart, derived the same way on both entrypoints: from a
+    ``created_environment_deleted`` entry in ``clone_errors``.
+
+    ``clone_errors`` holds the operation-level events pre-rendered as
+    ``"step: error"``. It is **not** an error list in the "clone failed" sense:
+    a terminal clone whose backing capture or created environment was later
+    deleted carries a non-fatal entry while keeping its recorded outcome.
+    """
+
+    id: str
+    name: str
+    status: str
+    created_environment_id: str | None
+    environment_backup_id: str | None
+    discarded: bool
+    deployment_results: tuple[EnvironmentCloneDeploymentResultRef, ...]
+    clone_errors: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
