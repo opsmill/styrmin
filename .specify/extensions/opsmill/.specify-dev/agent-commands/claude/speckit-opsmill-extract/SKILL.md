@@ -1,11 +1,12 @@
 ---
-description: Extract knowledge, guidelines, and ADRs from one or more completed spec
-  directories into the project documentation system.
+name: speckit-opsmill-extract
+description: Extract knowledge, guidelines, and ADRs from one or more completed spec directories into the project documentation system.
+compatibility: Requires spec-kit project structure with .specify/ directory
+metadata:
+  author: github-spec-kit
+  source: opsmill:commands/extract.md
 ---
 
-
-<!-- Extension: opsmill -->
-<!-- Config: .specify/extensions/opsmill/ -->
 ## User Input
 
 ```text

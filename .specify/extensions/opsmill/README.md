@@ -23,12 +23,22 @@ independently installable artifacts:
      Claude Code session next to `spec.md` / `plan.md` in the active feature
      directory.
 
-2. **Presets** — drop-in overrides for native spec-kit commands. Each preset
-   is installed independently of the extension. Currently one ships:
+2. **Presets** — drop-in overrides for spec-kit commands (native or
+   extension-provided). Each preset is installed independently of the
+   extension. Currently two ship:
    - [`taskstoissues-jira`](presets/taskstoissues-jira/README.md) — overrides
      `/speckit.taskstoissues` with a Jira-flavored implementation that fans
      `tasks.md` out into Jira issues under a single Epic (one issue per
      `## Phase N:` block) via the Atlassian MCP.
+   - [`reconcile-opsmill`](presets/reconcile-opsmill/README.md) — overrides
+     `/speckit.reconcile.run` from the
+     [stn1slv/spec-kit-reconcile](https://github.com/stn1slv/spec-kit-reconcile)
+     extension with an OpsMill-adapted command body: remediation tasks
+     stay inside `## Phase <N>:` blocks, `[P]` keeps its core
+     "parallelizable" meaning, the compliance gate reads
+     `dev/guidelines/` + `dev/adr/`, and the report is
+     Jira-aware. Requires the `reconcile` extension to be
+     installed in the consumer repo.
 
 ## Requires
 
@@ -36,6 +46,14 @@ independently installable artifacts:
 - `check-prerequisites.sh` (shipped by spec-kit core; present at
   `.specify/scripts/bash/check-prerequisites.sh` in any spec-kit-initialized
   repo). Used by the `summary` command via the `{SCRIPT}` placeholder.
+- **Two companion extensions.** The `prep`, `auto`, and `implement` commands
+  invoke skills provided by separate extensions:
+  - [`critique`](https://github.com/arunt14/spec-kit-critique) — provides the
+    `speckit-critique-run` skill used by `prep` and `auto`.
+  - [`review`](https://github.com/ismaelJimenez/spec-kit-review) — provides the
+    `speckit-review-run` skill used by `implement` and `auto`.
+
+  Install both before using `prep`, `auto`, or `implement` (see below).
 
 ## Install
 
@@ -57,6 +75,19 @@ Local development install (from a working tree):
 
 ```bash
 specify extension add --dev /path/to/opsmill-speckit
+```
+
+### Companion extensions
+
+The `prep`, `auto`, and `implement` commands depend on two other extensions.
+Install both:
+
+```bash
+specify extension add review \
+  --from https://github.com/ismaelJimenez/spec-kit-review/archive/refs/tags/v1.0.1.zip
+
+specify extension add critique \
+  --from https://github.com/arunt14/spec-kit-critique/archive/refs/tags/v1.0.0.zip
 ```
 
 ## Commands
@@ -102,6 +133,25 @@ specify preset add taskstoissues-jira \
 
 See [`presets/taskstoissues-jira/README.md`](presets/taskstoissues-jira/README.md)
 for config (`dev/jira.yml`) and failure-mode details.
+
+### `/speckit.reconcile.run` (preset override)
+
+The `/speckit.reconcile.run` command comes from the
+[stn1slv/spec-kit-reconcile](https://github.com/stn1slv/spec-kit-reconcile)
+extension; the [`reconcile-opsmill`](presets/reconcile-opsmill/README.md)
+preset overrides its body. Install the extension first (it must be
+present in the consumer repo), then the preset:
+
+```bash
+specify extension add reconcile \
+  --from https://github.com/stn1slv/spec-kit-reconcile/archive/886f1dd.zip
+
+git clone https://github.com/opsmill/opsmill-speckit
+specify preset add --dev opsmill-speckit/presets/reconcile-opsmill
+```
+
+See [`presets/reconcile-opsmill/README.md`](presets/reconcile-opsmill/README.md)
+for provenance and behavior.
 
 ## Hooks (auto-fire during SDD)
 
