@@ -25,6 +25,7 @@ from styrmin_backend.services.backup.strategies.postgres import PostgresBackupSt
 from styrmin_backend.services.exceptions import (
     BackupAlreadyInProgressError,
     BackupNotFoundError,
+    DeploymentNotFoundError,
     InternalDeploymentError,
     RestoreAlreadyInProgressError,
     RestoreNotFoundError,
@@ -344,12 +345,14 @@ async def create_restore(
     target_instance_id: UUID | None = None,
     timeout: int = DEFAULT_RESTORE_TIMEOUT,
     environment_restore_id: UUID | None = None,
+    target_deployment_id: UUID | None = None,
 ) -> tuple[Restore, UUID]:
     """Create a new restore operation from a backup.
 
-    Resolves the target deployment from the backup, blocks restoring an
-    internal deployment, blocks a second concurrent restore on the same
-    deployment, and flips the deployment to RESTORING in the same
+    Resolves the target deployment (from the backup for an in-place restore,
+    or from ``target_deployment_id`` for a cross-target one), blocks
+    restoring an internal deployment, blocks a second concurrent restore on
+    the same deployment, and flips that deployment to RESTORING in the same
     transaction so the UI reflects the lifecycle immediately.
 
     Args:
@@ -357,30 +360,61 @@ async def create_restore(
             as one of its constituents. ``None`` (the default) for a
             standalone per-deployment restore; the constituent's own
             lifecycle is otherwise identical (spec FR-014).
+        target_deployment_id: Restore into a **different** deployment than
+            the one the backup was taken from (environment clone — research
+            D2.1). When given, every guard (``internal``, ``RESTORING``) and
+            the ``RESTORING`` flip apply to that deployment, never to the
+            backup's source deployment, and ``target_instance_id`` defaults
+            to the target's active instance so the row records which
+            counterpart the data landed in. ``None`` (the default) keeps the
+            shipped in-place behaviour: the target is resolved from the
+            backup.
 
     Returns:
-        Tuple of ``(restore_record, deployment_id)``. The deployment id
-        is returned so the caller can dispatch the restore workflow
-        without re-resolving it.
+        Tuple of ``(restore_record, deployment_id)``. The deployment id is
+        the **status-write target** — the deployment flipped to
+        ``RESTORING`` — so the caller can dispatch the restore workflow
+        without re-resolving it. For a cross-target restore that is the
+        counterpart, and the caller is responsible for also passing the
+        source deployment id to ``execute_restore_workflow`` (research
+        D2.2).
     """
     async with uow:
         backup = await uow.backups.get(backup_id)
         if backup is None:
             raise BackupNotFoundError(f"Backup {backup_id} not found")
 
-        # Resolve the target deployment via backup -> instance -> deployment.
-        instance = await uow.application_instances.get(backup.instance_id)
-        if instance is None or instance.deployment_id is None:
-            raise BackupNotFoundError(
-                f"Backup {backup_id} has no associated deployment"
-            )
-        deployment_id = instance.deployment_id
+        if target_deployment_id is None:
+            # In-place restore: resolve the target deployment via
+            # backup -> instance -> deployment.
+            instance = await uow.application_instances.get(backup.instance_id)
+            if instance is None or instance.deployment_id is None:
+                raise BackupNotFoundError(
+                    f"Backup {backup_id} has no associated deployment"
+                )
+            deployment_id = instance.deployment_id
 
-        deployment = await uow.deployments.find(deployment_id)
-        if deployment is None:
-            raise BackupNotFoundError(
-                f"Backup {backup_id}: deployment {deployment_id} not found"
-            )
+            deployment = await uow.deployments.find(deployment_id)
+            if deployment is None:
+                raise BackupNotFoundError(
+                    f"Backup {backup_id}: deployment {deployment_id} not found"
+                )
+        else:
+            # Cross-target restore: the caller names the deployment the data
+            # lands in. The backup's own deployment is deliberately never
+            # resolved here — the source must not be guarded, flipped, or
+            # required to still exist (SC-002).
+            deployment_id = target_deployment_id
+            deployment = await uow.deployments.find(deployment_id)
+            if deployment is None:
+                raise DeploymentNotFoundError(
+                    f"Target deployment {deployment_id} not found"
+                )
+            if target_instance_id is None:
+                active_instance = deployment.active_instance
+                target_instance_id = (
+                    active_instance.id if active_instance is not None else None
+                )
 
         if deployment.internal:
             raise InternalDeploymentError(
@@ -434,6 +468,12 @@ async def create_restore(
             f"Created restore {restore.id} ({restore.name}) "
             f"from backup {backup_id} to namespace {target_namespace}"
         )
+        if target_deployment_id is not None:
+            logger.info(
+                f"Restore {restore.id} is cross-target: source instance "
+                f"{backup.instance_id} -> deployment {target_deployment_id} "
+                f"(instance {target_instance_id})"
+            )
         return restore, deployment_id
 
 

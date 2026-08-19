@@ -56,8 +56,12 @@ class RestoreRun:
     status_calls: list[dict[str, Any]] = field(default_factory=list)
     #: ``build_velero_restore`` kwargs (the flow calls it at most once).
     velero_kwargs: dict[str, Any] | None = None
+    #: ``arun_deployment`` parameters handed to the USER flow.
+    dispatch_parameters: dict[str, Any] | None = None
     #: ``_set_deployment_status_failed`` kwargs, in call order.
     deployment_failed_calls: list[dict[str, Any]] = field(default_factory=list)
+    #: ``_set_deployment_status_running`` kwargs, in call order.
+    deployment_running_calls: list[dict[str, Any]] = field(default_factory=list)
     #: What the flow body raised, when the caller asked for it to be captured.
     raised: BaseException | None = None
 
@@ -73,6 +77,8 @@ async def _run_restore_workflow(
     recovered: bool = True,
     record_deleted_after_status_writes: int | None = None,
     capture_exception: bool = False,
+    source_deployment_id: UUID | None = None,
+    target_instance_id: UUID | None = None,
 ) -> RestoreRun:
     """Drive the flow body once with every boundary faked.
 
@@ -87,6 +93,12 @@ async def _run_restore_workflow(
             propagated.
         capture_exception: Store what the body raised on ``run.raised`` instead
             of letting it escape, so the run record stays inspectable.
+        source_deployment_id: Drive the flow as a **cross-target** restore
+            (environment clone) whose backup came from this deployment while
+            ``deployment_id`` names the counterpart (research D2.2). ``None``
+            drives the shipped in-place path.
+        target_instance_id: The counterpart instance recorded on the restore
+            row, used for the cross-target Restore CR label (research D2.6).
 
     Returns:
         A :class:`RestoreRun` recording what the body did.
@@ -108,6 +120,7 @@ async def _run_restore_workflow(
     restore = MagicMock()
     restore.name = "styrmin-restore-1"
     restore.metadata_ = {"timeout": 1800}
+    restore.target_instance_id = target_instance_id
 
     def _record_status(**kwargs: Any) -> None:
         run.status_calls.append(kwargs)
@@ -128,6 +141,18 @@ async def _run_restore_workflow(
 
     async def _record_deployment_failed(**kwargs: Any) -> None:
         run.deployment_failed_calls.append(kwargs)
+
+    async def _record_deployment_running(**kwargs: Any) -> None:
+        run.deployment_running_calls.append(kwargs)
+
+    counterpart_crd_body = {
+        "metadata": {"name": f"styrmin-{deployment_uuid}"},
+        "spec": {"deploymentId": str(deployment_uuid)},
+    }
+
+    async def _record_dispatch(**kwargs: Any) -> MagicMock:
+        run.dispatch_parameters = kwargs.get("parameters")
+        return flow_run
 
     flow_run = MagicMock()
     flow_run.id = uuid4()
@@ -152,12 +177,19 @@ async def _run_restore_workflow(
         patch(f"{SERVICE_MODULE}.get_restore", AsyncMock(return_value=restore)),
         patch(f"{MODULE}.update_restore_status", AsyncMock(side_effect=_record_status)),
         patch(f"{MODULE}.build_velero_restore", MagicMock(side_effect=_record_build)),
-        patch(f"{MODULE}.arun_deployment", AsyncMock(return_value=flow_run)),
+        patch(f"{MODULE}.arun_deployment", AsyncMock(side_effect=_record_dispatch)),
         patch(f"{MODULE}.Variable", variable),
-        patch(f"{MODULE}._set_deployment_status_running", AsyncMock()),
+        patch(
+            f"{MODULE}._set_deployment_status_running",
+            AsyncMock(side_effect=_record_deployment_running),
+        ),
         patch(
             f"{MODULE}._set_deployment_status_failed",
             AsyncMock(side_effect=_record_deployment_failed),
+        ),
+        patch(
+            f"{MODULE}._build_counterpart_crd_body",
+            AsyncMock(return_value=counterpart_crd_body),
         ),
     ):
         if capture_exception:
@@ -167,6 +199,11 @@ async def _run_restore_workflow(
                     backup_id=str(backup_uuid),
                     deployment_id=str(deployment_uuid),
                     target_namespace=f"styrmin-{deployment_uuid}",
+                    source_deployment_id=(
+                        str(source_deployment_id)
+                        if source_deployment_id is not None
+                        else None
+                    ),
                 )
             except BaseException as exc:  # noqa: BLE001 - the test inspects it
                 run.raised = exc
@@ -176,6 +213,11 @@ async def _run_restore_workflow(
                 backup_id=str(backup_uuid),
                 deployment_id=str(deployment_uuid),
                 target_namespace=f"styrmin-{deployment_uuid}",
+                source_deployment_id=(
+                    str(source_deployment_id)
+                    if source_deployment_id is not None
+                    else None
+                ),
             )
 
     return run
@@ -257,3 +299,90 @@ async def test_a_deleted_restore_record_still_marks_the_deployment_failed() -> N
     assert call["deployment_id"] == run.deployment_id
     # And it reports the original cause, not the handler's bookkeeping failure.
     assert "#2" in call["error_message"], call
+
+
+# ---------------------------------------------------------------------------
+# Source identity vs status-write target (research D2.2 / D2.3 / D2.6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_in_place_restore_dispatch_is_unchanged() -> None:
+    """Omitting ``source_deployment_id`` reproduces the shipped in-place call.
+
+    Source namespace, restored CR name and target namespace all collapse to the
+    same string, no counterpart CR body is built, and the Restore CR keeps the
+    source instance label.
+    """
+    run = await _run_restore_workflow()
+
+    assert run.velero_kwargs is not None
+    namespace = f"styrmin-{run.deployment_id}"
+    assert run.velero_kwargs["source_namespace"] == namespace
+    assert run.velero_kwargs["target_namespace"] == namespace
+    assert run.velero_kwargs["target_instance_id"] is None
+
+    assert run.dispatch_parameters is not None
+    assert run.dispatch_parameters["restored_crd_name"] == namespace
+    assert run.dispatch_parameters["counterpart_crd_body"] is None
+
+    assert [call["deployment_id"] for call in run.deployment_running_calls] == [
+        run.deployment_id
+    ]
+
+
+@pytest.mark.anyio
+async def test_cross_target_restore_splits_source_from_status_target() -> None:
+    """A clone restore reads the *source* namespace and writes the counterpart.
+
+    Velero's ``namespaceMapping`` preserves object names, so the recreated CR
+    is still ``styrmin-<source_deployment_id>`` even though it now lives in the
+    counterpart's namespace — the flow must hand that name to the USER flow
+    rather than assuming ``crd_name == target_namespace`` (research D2.3).
+    """
+    source_deployment_id = uuid4()
+    counterpart_instance_id = uuid4()
+
+    run = await _run_restore_workflow(
+        source_deployment_id=source_deployment_id,
+        target_instance_id=counterpart_instance_id,
+    )
+
+    source_namespace = f"styrmin-{source_deployment_id}"
+    counterpart_namespace = f"styrmin-{run.deployment_id}"
+    assert run.velero_kwargs is not None
+    assert run.velero_kwargs["source_namespace"] == source_namespace
+    assert run.velero_kwargs["target_namespace"] == counterpart_namespace
+    # research D2.6 — the Restore CR is attributed to the counterpart instance.
+    assert run.velero_kwargs["target_instance_id"] == str(counterpart_instance_id)
+
+    assert run.dispatch_parameters is not None
+    assert run.dispatch_parameters["restored_crd_name"] == source_namespace
+    # research D2.4 — the counterpart's own CR body rides along to the recovery.
+    assert run.dispatch_parameters["counterpart_crd_body"] == {
+        "metadata": {"name": counterpart_namespace},
+        "spec": {"deploymentId": str(run.deployment_id)},
+    }
+
+    # The status-write target is the counterpart, never the source (SC-002).
+    assert [call["deployment_id"] for call in run.deployment_running_calls] == [
+        run.deployment_id
+    ]
+    assert run.deployment_failed_calls == []
+
+
+@pytest.mark.anyio
+async def test_cross_target_failure_marks_the_counterpart_not_the_source() -> None:
+    """A failed clone restore must not push the source deployment to FAILED."""
+    source_deployment_id = uuid4()
+
+    run = await _run_restore_workflow(
+        velero_phase="Failed",
+        recovered=False,
+        source_deployment_id=source_deployment_id,
+    )
+
+    assert [call["deployment_id"] for call in run.deployment_failed_calls] == [
+        run.deployment_id
+    ]
+    assert run.deployment_running_calls == []

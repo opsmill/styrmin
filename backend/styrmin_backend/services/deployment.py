@@ -905,7 +905,7 @@ async def update_deployment_version(
 async def redeploy_for_environment_update(
     deployment: Deployment,
     uow: UnitOfWork,
-) -> Task:
+) -> Task | None:
     """Redeploy a deployment in response to an environment-config change.
 
     Generates a new :class:`ApplicationInstance` from the deployment (which
@@ -931,7 +931,24 @@ async def redeploy_for_environment_update(
     reconcile on driver change) that is not relevant to a same-version
     redeploy. The duplication is intentional and bounded — see the comment
     inside ``update_deployment_version`` for the cross-reference.
+
+    Returns ``None`` without touching the deployment when it is ``RESTORING``:
+    a restore is about to delete and recreate that namespace wholesale, so a
+    concurrent ``apply_state`` races Velero for the same objects with an
+    undefined outcome. ``restore_environment_backup`` already excludes the
+    deployments it is restoring by construction; this guard closes the gap
+    ADR-055 flagged for restores started outside the current fan-out — and it
+    is what protects a clone's counterparts, which sit in ``RESTORING`` until
+    their cross-target restore lands (research D8).
     """
+    if deployment.status == DeploymentState.RESTORING:
+        logger.info(
+            "redeploy_skipped_restoring deployment_id={} environment_id={}",
+            deployment.id,
+            deployment.environment_id,
+        )
+        return None
+
     current_instance = deployment.active_instance
 
     new_instance = await generate_instance_from_deployment(
@@ -1079,7 +1096,8 @@ async def deploy_application(
     deployment_name: str | None = None,
     service_name_overrides: dict[str, str] | None = None,
     driver_version_id: UUID | None = None,
-) -> Task:
+    skip_initial_reconcile: bool = False,
+) -> Task | None:
     """Instantiate an application in the given environment.
 
     Args:
@@ -1098,6 +1116,22 @@ async def deploy_application(
         driver_version_id: Pin a specific driver version instead of latest-wins
             resolution. Must belong to ``driver_name`` and support the resolved
             application version.
+        skip_initial_reconcile: Create the deployment without dispatching the
+            initial ``apply_state`` reconciliation, and start it in the
+            ``RESTORING`` state instead of ``PENDING``. Used for an
+            environment clone's counterpart deployments (research D5): the
+            cross-target restore rebuilds their namespace from the capture and
+            deletes whatever is in it first, so reconciling here would only
+            create resources the restore immediately destroys. Everything
+            else still runs — ``_ensure_ingress_controller`` (whose internal
+            ingress deployment is never part of a capture),
+            ``create_services_for_deployment`` and
+            ``generate_instance_from_deployment`` — because the counterpart's
+            service rows and instance context are what the restore's recovery
+            step builds its CR body from. Returns ``None`` in this mode, since
+            no Task is dispatched. The ``RESTORING`` state also makes the
+            existing restoring-deployment mutation guards protect the
+            counterpart until its restore lands (research D8).
 
     Raises:
         InvalidContextError: If the context is invalid.
@@ -1108,7 +1142,8 @@ async def deploy_application(
             the resolved version, or the pin belongs to a different driver.
 
     Returns:
-        Task: the task created for the application instantiation.
+        Task: the task created for the application instantiation, or ``None``
+        when ``skip_initial_reconcile`` is set (no reconciliation dispatched).
     """
 
     if deployment_config is None:
@@ -1271,6 +1306,12 @@ async def deploy_application(
             name=resolved_name,
         )
 
+        if skip_initial_reconcile:
+            # A counterpart is not "pending deployment" — it is waiting on its
+            # cross-target restore, and the existing restoring-deployment
+            # guards keep ordinary mutations off it until then (research D8).
+            deployment.set_status(DeploymentState.RESTORING)
+
         for component in application_driver_version.component_configs:
             deployment.add_component(
                 component=Component.create(
@@ -1304,6 +1345,22 @@ async def deploy_application(
         )
         # Set the new instance as the active one
         deployment.set_active_instance(instance=instance)
+
+        if skip_initial_reconcile:
+            # No apply_state: the deployment row, its services and its active
+            # instance are persisted, but nothing is reconciled into the
+            # cluster. The caller (the clone flow) drives convergence through
+            # the cross-target restore instead.
+            await uow.deployments.save(deployment=deployment)
+            await uow.commit()
+            logger.info(
+                "deploy_application_reconcile_skipped deployment_id={} "
+                "environment_id={} instance_id={}",
+                deployment.id,
+                environment_id,
+                instance.id,
+            )
+            return None
 
         # Get the task from the reconciliation workflow
         task = await apply_state(
