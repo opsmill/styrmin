@@ -1,0 +1,20 @@
+mutation CloneEnvironment(
+  $name: String!
+  $environmentId: UUID
+  $deploymentIds: [UUID!]
+  $configOverride: UpdateEnvironmentInput
+  $clearConfigFields: [String!]
+) {
+  cloneEnvironment(
+    name: $name
+    environmentId: $environmentId
+    deploymentIds: $deploymentIds
+    configOverride: $configOverride
+    clearConfigFields: $clearConfigFields
+  ) {
+    id
+    name
+    status
+    createdOn
+  }
+}

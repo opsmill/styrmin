@@ -1,0 +1,26 @@
+query ListEnvironmentClones($environmentId: UUID!) {
+  environmentClones(environmentId: $environmentId) {
+    id
+    name
+    status
+    sourceEnvironmentName
+    createdOn
+    updatedOn
+    cloneErrors
+    createdEnvironment {
+      id
+      name
+    }
+    environmentBackup {
+      id
+      name
+      status
+    }
+    deploymentResults {
+      deploymentId
+      deploymentName
+      outcome
+      reason
+    }
+  }
+}
