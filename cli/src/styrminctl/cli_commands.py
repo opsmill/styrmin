@@ -18,6 +18,11 @@ app.command(
     help="Manage environment-level backups and restores.",
 )
 app.command(
+    "styrminctl.commands.environment_clones:environment_clones_app",
+    name="env-clones",
+    help="Clone environments and track clone operations.",
+)
+app.command(
     "styrminctl.commands.backup_storage_locations:backup_storage_locations_app",
     name="backup-locations",
     help="Manage backup storage locations.",

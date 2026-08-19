@@ -47,6 +47,10 @@ from styrmin_sdk.models import (
     EnvironmentBackup,
     EnvironmentBackupConstituent,
     EnvironmentBackupStatus,
+    EnvironmentClone,
+    EnvironmentCloneDeploymentOutcome,
+    EnvironmentCloneDeploymentResult,
+    EnvironmentCloneStatus,
     EnvironmentRestore,
     EnvironmentRestoreStatus,
     HelmChart,
@@ -54,6 +58,7 @@ from styrmin_sdk.models import (
     Restore,
     SkippedConstituent,
     Task,
+    UpdateEnvironmentInput,
     resolve_overrides,
 )
 
@@ -84,6 +89,10 @@ __all__ = [
     "EnvironmentBackup",
     "EnvironmentBackupConstituent",
     "EnvironmentBackupStatus",
+    "EnvironmentClone",
+    "EnvironmentCloneDeploymentOutcome",
+    "EnvironmentCloneDeploymentResult",
+    "EnvironmentCloneStatus",
     "EnvironmentNotFoundError",
     "EnvironmentRestore",
     "EnvironmentRestoreStatus",
@@ -107,5 +116,6 @@ __all__ = [
     "StyrminTransportError",
     "Task",
     "Transport",
+    "UpdateEnvironmentInput",
     "resolve_overrides",
 ]

@@ -106,6 +106,7 @@ TaskId = Annotated[str, Parameter(help="UUID of the task.", validator=validate_u
 BackupId = Annotated[str, Parameter(help="UUID of the backup.", validator=validate_uuid)]
 EnvironmentBackupId = Annotated[str, Parameter(help="UUID of the environment backup.", validator=validate_uuid)]
 EnvironmentRestoreId = Annotated[str, Parameter(help="UUID of the environment restore.", validator=validate_uuid)]
+EnvironmentCloneId = Annotated[str, Parameter(help="UUID of the environment clone.", validator=validate_uuid)]
 BslId = Annotated[str, Parameter(help="UUID of the backup storage location.", validator=validate_uuid)]
 RestoreId = Annotated[str, Parameter(help="UUID of the restore operation.", validator=validate_uuid)]
 InstanceId = Annotated[str, Parameter(help="UUID of the application instance.", validator=validate_uuid)]
