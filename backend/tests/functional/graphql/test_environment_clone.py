@@ -24,6 +24,7 @@ must have survived a real round-trip.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 from uuid import UUID, uuid4
@@ -44,6 +45,7 @@ from styrmin_backend.db.models import (
     Backup,
     BackupStatus,
     Cluster,
+    Deployment,
     Environment,
     EnvironmentBackup,
     EnvironmentClone,
@@ -59,6 +61,8 @@ from styrmin_backend.services.backup.clone import (
     EnvironmentCloneDeploymentOutcome,
     EnvironmentCloneStatus,
 )
+from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
+from styrmin_backend.workflows.templates import clone as clone_flow
 
 from ._queries import load_query
 from .conftest import gql
@@ -838,6 +842,357 @@ async def test_clone_environment_rejects_an_unknown_clear_config_field(
     errors = response.json()["errors"]
     assert errors[0]["extensions"]["code"] == "VALIDATION_ERROR"
     await _assert_no_clone_was_written(session)
+
+
+# ---------------------------------------------------------------------------
+# cloneEnvironment — config override semantics (US3: FR-006)
+# ---------------------------------------------------------------------------
+#
+# ``configOverride`` and ``clearConfigFields`` are persisted by the mutation
+# (covered above) but only *mean* something downstream of it: the merge runs
+# inside ``EXECUTE_ENVIRONMENT_CLONE``, over the captured config, and its result
+# is both the created environment's config and the config every counterpart's
+# first instance context is resolved from. A test that stopped at the mutation
+# response would pass on an implementation that stored the override and then
+# ignored it.
+#
+# So these tests register the clone through GraphQL, drive its capture terminal
+# in the database, run the real flow over the test session, and assert on the
+# rows it wrote — re-read after ``expire_all()`` so nothing is answered out of
+# the identity map.
+
+
+def _set_fields(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop the ``None``-valued keys of a rendered config section.
+
+    A resolved context carries every ``EnvironmentConfig`` field, unset ones as
+    nulls, while the stored config carries only what was set. Comparing the set
+    fields makes "the override landed and the cleared field did not" a single
+    equality rather than a field-by-field walk.
+    """
+    return {key: value for key, value in config.items() if value is not None}
+
+
+async def _complete_capture_constituents(
+    session: AsyncSession, environment_backup_id: UUID
+) -> None:
+    """Drive a registered capture's constituents to ``COMPLETED``.
+
+    The clone flow gates on the capture's *derived* status, so making the
+    capture restorable means making its constituent ``Backup`` rows terminal —
+    there is no parent status column to set.
+    """
+    result = await session.exec(
+        select(Backup).where(Backup.environment_backup_id == environment_backup_id)
+    )
+    for backup in result.all():
+        backup.status = BackupStatus.COMPLETED
+        session.add(backup)
+    await session.commit()
+
+
+async def _run_clone_flow(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch, clone_id: UUID
+) -> list[dict[str, Any]]:
+    """Run ``EXECUTE_ENVIRONMENT_CLONE`` against the test session.
+
+    Only the flow's two outbound edges are replaced:
+
+    * ``get_unit_of_work`` — the flow builds units of work from the global
+      engine; here it must use the test session's;
+    * ``create_restore`` / ``get_manager`` — the Kubernetes-facing dispatch,
+      which has its own suite in
+      ``backend/tests/unit/services/backup/test_restore.py``. It is stubbed
+      rather than run because a counterpart is created in ``RESTORING`` and
+      ``create_restore``'s concurrency guard refuses a ``RESTORING`` target —
+      an interaction owned by US1, not by the config merge under test here.
+
+    Everything the merge touches runs for real: the capture gate, the merge
+    itself, ``create_environment`` (capabilities recomputed rather than
+    copied — ADR-0027) and ``deploy_application`` with its service rows and
+    instance-context generation.
+
+    Returns:
+        The keyword arguments of every cross-target restore the flow created.
+    """
+    restore_calls: list[dict[str, Any]] = []
+    uow = SqlModelUnitOfWork(session=session)
+
+    async def _get_unit_of_work() -> SqlModelUnitOfWork:
+        return uow
+
+    async def _create_restore(**kwargs: Any) -> tuple[Restore, UUID]:
+        restore_calls.append(kwargs)
+        restore_id = uuid4()
+        restore = Restore(
+            id=restore_id,
+            name=f"styrmin-{restore_id}",
+            status=RestoreStatus.PENDING,
+            target_namespace=kwargs["target_namespace"],
+            backup_id=kwargs["backup_id"],
+        )
+        session.add(restore)
+        await session.commit()
+        return restore, kwargs["target_deployment_id"]
+
+    class _Manager:
+        async def run_action(self, **kwargs: Any) -> None:
+            return None
+
+    monkeypatch.setattr(clone_flow, "get_unit_of_work", _get_unit_of_work)
+    monkeypatch.setattr(clone_flow, "get_run_logger", lambda: logging.getLogger("test"))
+    monkeypatch.setattr(clone_flow, "create_restore", _create_restore)
+    monkeypatch.setattr(clone_flow, "get_manager", lambda: _Manager())
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone_id))
+    return restore_calls
+
+
+async def _clone_and_materialise(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    variables: dict[str, Any],
+) -> EnvironmentClone:
+    """Register a clone through GraphQL and run it to its counterparts.
+
+    Returns the clone record re-read from the database with everything the flow
+    wrote on it.
+    """
+    data = await gql(fresh_client, "clone_environment", variables)
+    clone_id = UUID(data["cloneEnvironment"]["id"])
+
+    registered = await session.get(EnvironmentClone, clone_id)
+    assert registered is not None
+    assert registered.environment_backup_id is not None
+    await _complete_capture_constituents(session, registered.environment_backup_id)
+
+    await _run_clone_flow(session, monkeypatch, clone_id)
+
+    session.expire_all()
+    materialised = await session.get(EnvironmentClone, clone_id)
+    assert materialised is not None
+    assert materialised.created_environment_id is not None, (
+        f"the clone never materialised an environment: {materialised.clone_errors}"
+    )
+    return materialised
+
+
+async def _counterpart_instance_context(
+    session: AsyncSession, clone: EnvironmentClone, deployment_name: str
+) -> dict[str, Any]:
+    """The first instance context of a cloned deployment's counterpart."""
+    entries = {
+        entry["deployment_name"]: entry for entry in clone.deployment_results or []
+    }
+    entry = entries[deployment_name]
+    assert entry["outcome"] == EnvironmentCloneDeploymentOutcome.CLONED.value, entry
+    counterpart = await session.get(
+        Deployment, UUID(entry["counterpart_deployment_id"])
+    )
+    assert counterpart is not None
+    assert counterpart.environment_id == clone.created_environment_id
+    assert counterpart.active_application_instance_id is not None
+    instance = await session.get(
+        ApplicationInstance, counterpart.active_application_instance_id
+    )
+    assert instance is not None and instance.context is not None
+    return instance.context
+
+
+@pytest.mark.asyncio
+async def test_clone_environment_creates_the_environment_from_the_merged_config(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+) -> None:
+    """FR-006: override merged over the capture, cleared field gone entirely.
+
+    Spec US3 scenarios 1 and 3 in one materialisation: ``fqdn_suffix`` is
+    replaced, ``ingress_class`` is **absent** from the created config (not null,
+    not a default), and the untouched ``db_size`` survives from the capture.
+    """
+    source = await seed_environment(session, name="prod-us3-merge")
+    source.config = {
+        "fqdn_suffix": "prod.example.com",
+        "ingress_class": "prod-nginx",
+        "db_size": "50Gi",
+    }
+    session.add(source)
+    await session.commit()
+    adv = await seed_application_driver_version(session)
+    await seed_running_deployment(session, environment=source, adv=adv, name="infrahub")
+    # Held before materialising: ``_clone_and_materialise`` expires the identity
+    # map, after which attribute access on ``source`` would lazy-load.
+    source_id = source.id
+
+    clone = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {
+            "environmentId": str(source_id),
+            "name": "prod-us3-merge-rehearsal",
+            "configOverride": {"fqdnSuffix": "rehearsal.example.com"},
+            "clearConfigFields": ["ingress_class"],
+        },
+    )
+
+    assert clone.created_environment_id is not None
+    created = await session.get(Environment, clone.created_environment_id)
+    assert created is not None
+    assert created.config == {
+        "fqdn_suffix": "rehearsal.example.com",
+        "db_size": "50Gi",
+    }
+    # Absent, not present-and-null: a cleared field must not reappear as a key
+    # the renderer can read back as an empty value.
+    assert "ingress_class" not in (created.config or {})
+
+    # SC-002: the source and the capture it was read from are untouched.
+    # Re-read rather than walked off the seeded instance: materialising the
+    # clone expired the identity map, so the attribute would lazy-load.
+    reloaded_source = await session.get(Environment, source_id)
+    assert reloaded_source is not None
+    assert reloaded_source.config == {
+        "fqdn_suffix": "prod.example.com",
+        "ingress_class": "prod-nginx",
+        "db_size": "50Gi",
+    }
+    assert clone.environment_backup_id is not None
+    capture = await session.get(EnvironmentBackup, clone.environment_backup_id)
+    assert capture is not None
+    assert capture.environment_config == {
+        "fqdn_suffix": "prod.example.com",
+        "ingress_class": "prod-nginx",
+        "db_size": "50Gi",
+    }
+
+    # The clone row still reports the request that produced it, canonicalised.
+    assert clone.config_override == {"fqdn_suffix": "rehearsal.example.com"}
+    assert clone.cleared_config_fields == ["ingress_class"]
+
+    # ...and the read surface projects the created environment's merged config.
+    payload = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    assert payload["environmentClone"]["createdEnvironment"]["id"] == str(created.id)
+
+
+@pytest.mark.asyncio
+async def test_cloned_counterparts_first_instance_context_uses_the_merged_config(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+) -> None:
+    """FR-006: the merge lands before any counterpart comes up.
+
+    This is the non-interference guarantee proper. A counterpart's *first*
+    instance context is resolved by ``generate_instance_from_deployment`` from
+    the environment row, so if the merge happened after counterpart creation the
+    first context — the one the initial reconcile would render from — would
+    still carry production configuration.
+    """
+    source = await seed_environment(session, name="prod-us3-context")
+    source.config = {
+        "fqdn_suffix": "prod.example.com",
+        "ingress_class": "prod-nginx",
+        "env_vars": {"SMTP_HOST": "smtp.prod.example.com"},
+    }
+    session.add(source)
+    await session.commit()
+    adv = await seed_application_driver_version(session)
+    await seed_running_deployment(session, environment=source, adv=adv, name="infrahub")
+    source_id = source.id
+
+    clone = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {
+            "environmentId": str(source_id),
+            "name": "prod-us3-context-rehearsal",
+            "configOverride": {
+                "fqdnSuffix": "rehearsal.example.com",
+                "envVars": [{"name": "SMTP_HOST", "value": "localhost"}],
+            },
+            "clearConfigFields": ["ingress_class"],
+        },
+    )
+
+    merged = {
+        "fqdn_suffix": "rehearsal.example.com",
+        "env_vars": {"SMTP_HOST": "localhost"},
+    }
+    assert clone.config_override == merged
+
+    context = await _counterpart_instance_context(session, clone, "infrahub")
+    # The context carries the whole ``EnvironmentConfig`` shape, so unset fields
+    # are present as nulls; what matters is that the *set* fields are exactly
+    # the merged config — the cleared ``ingress_class`` among the nulls.
+    assert _set_fields(context["environment"]["config"]) == merged
+    assert context["environment"]["config"]["ingress_class"] is None
+    # The resolved (deepest-wins) config the renderer actually reads, too.
+    assert context["instance"]["config"]["fqdn_suffix"] == "rehearsal.example.com"
+    assert context["instance"]["config"]["ingress_class"] is None
+    assert context["instance"]["config"]["env_vars"] == {"SMTP_HOST": "localhost"}
+
+    # SC-002: the source environment is byte-identical to before the clone.
+    reloaded_source = await session.get(Environment, source_id)
+    assert reloaded_source is not None
+    assert reloaded_source.config == {
+        "fqdn_suffix": "prod.example.com",
+        "ingress_class": "prod-nginx",
+        "env_vars": {"SMTP_HOST": "smtp.prod.example.com"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_clone_environment_without_an_override_copies_the_captured_config(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+) -> None:
+    """Spec US3 scenario 2: no override → the clone's config *is* the capture's.
+
+    The negative control for the two tests above: the same materialisation path,
+    with nothing overridden and nothing cleared, must reproduce the captured
+    config verbatim in both the environment row and the counterpart's first
+    instance context.
+    """
+    source = await seed_environment(session, name="prod-us3-plain")
+    source.config = {
+        "fqdn_suffix": "prod.example.com",
+        "ingress_class": "prod-nginx",
+    }
+    session.add(source)
+    await session.commit()
+    adv = await seed_application_driver_version(session)
+    await seed_running_deployment(session, environment=source, adv=adv, name="infrahub")
+    source_id = source.id
+
+    clone = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {
+            "environmentId": str(source_id),
+            "name": "prod-us3-plain-rehearsal",
+        },
+    )
+
+    captured = {"fqdn_suffix": "prod.example.com", "ingress_class": "prod-nginx"}
+    assert clone.config_override is None
+    assert clone.cleared_config_fields is None
+    assert clone.created_environment_id is not None
+    created = await session.get(Environment, clone.created_environment_id)
+    assert created is not None and created.config == captured
+
+    context = await _counterpart_instance_context(session, clone, "infrahub")
+    assert _set_fields(context["environment"]["config"]) == captured
 
 
 # ---------------------------------------------------------------------------

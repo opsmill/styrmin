@@ -1,6 +1,6 @@
 """Unit tests for the environment clone service, guard and flow.
 
-Three things are pinned here, all of them load-bearing for the 010 spec:
+Four things are pinned here, all of them load-bearing for the 010 spec:
 
 * **registration is atomic and side-effect-free until it succeeds** — an
   invalid override, an unknown cleared field or a taken target name costs the
@@ -13,7 +13,11 @@ Three things are pinned here, all of them load-bearing for the 010 spec:
 * **the flow's error paths** — a wholly failed capture materialises nothing, a
   partial capture proceeds with what it has, a target name lost to a race ends
   the clone ``FAILED``, and a vanished driver version fails one deployment
-  without taking its peers down (FR-002, FR-011, research D5).
+  without taking its peers down (FR-002, FR-011, research D5);
+* **the config override's ordering** — the merge is the *creation input* of the
+  cloned environment, and every counterpart is created after it, so no
+  counterpart's first instance context can ever resolve against the captured
+  (production) config (FR-006, research D7).
 """
 
 from __future__ import annotations
@@ -865,14 +869,53 @@ def flow_harness(monkeypatch: pytest.MonkeyPatch, scenario: _Scenario):
     pin is the flow's *attribution*, and both services have their own unit
     suites. Everything else — the capture gate, the config merge, the
     environment creation, the driver-version pin — runs for real.
+
+    Three extra recordings serve the US3 ordering guarantee (T029):
+
+    * ``calls["order"]`` is the flow's step sequence, each step carrying the
+      value that step was *given*: ``("merge", merged_config)``,
+      ``("create_environment", config_passed_to_it)`` and
+      ``("deploy", deployment_name)``. Recording the argument rather than only
+      the step name is what makes the ordering assertion bite — an
+      implementation that created the environment from the captured config and
+      patched it afterwards has the same step order but a different
+      ``create_environment`` input.
+    * ``calls["observed_config"]`` is the created environment's config read
+      back through the unit of work at the moment each counterpart is created
+      — the config ``generate_instance_from_deployment`` resolves the
+      counterpart's first instance context from (it re-reads the environment
+      row).
     """
-    calls: dict[str, list[Any]] = {"deploy": [], "restore": [], "dispatch": []}
+    calls: dict[str, list[Any]] = {
+        "deploy": [],
+        "restore": [],
+        "dispatch": [],
+        "order": [],
+        "observed_config": [],
+    }
+
+    real_merge = clone_flow.merge_environment_config
+    real_create_environment = clone_flow.create_environment
 
     async def _get_uow():
         return scenario.uow
 
+    def _merge_environment_config(*args: Any, **kwargs: Any):
+        merged = real_merge(*args, **kwargs)
+        calls["order"].append(("merge", dict(merged)))
+        return merged
+
+    async def _create_environment(**kwargs: Any):
+        calls["order"].append(("create_environment", dict(kwargs.get("config") or {})))
+        return await real_create_environment(**kwargs)
+
     async def _deploy_application(**kwargs: Any):
+        calls["order"].append(("deploy", kwargs["deployment_name"]))
         calls["deploy"].append(kwargs)
+        async with scenario.uow:
+            environment = await scenario.uow.environments.get(kwargs["environment_id"])
+        assert environment is not None, "counterpart created without an environment"
+        calls["observed_config"].append(dict(environment.config or {}))
         counterpart = DeploymentEntity(
             id=uuid4(),
             name=kwargs["deployment_name"],
@@ -909,6 +952,10 @@ def flow_harness(monkeypatch: pytest.MonkeyPatch, scenario: _Scenario):
     monkeypatch.setattr(clone_flow, "deploy_application", _deploy_application)
     monkeypatch.setattr(clone_flow, "create_restore", _create_restore)
     monkeypatch.setattr(clone_flow, "get_manager", lambda: _Manager())
+    monkeypatch.setattr(
+        clone_flow, "merge_environment_config", _merge_environment_config
+    )
+    monkeypatch.setattr(clone_flow, "create_environment", _create_environment)
     return calls
 
 
@@ -1149,6 +1196,103 @@ async def test_merged_config_is_applied_to_the_created_environment(
     # source is untouched (SC-002).
     assert created.config == {"db_size": "5Gi"}
     assert scenario.source.config == {"fqdn_suffix": "prod.example.com"}
+
+
+# ---------------------------------------------------------------------------
+# T029 — US3: nothing observes the config before the merge
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_merge_precedes_environment_creation_and_counterpart_creation(
+    scenario: _Scenario, prefect_manager_mock, flow_harness
+) -> None:
+    """US3's ordering guarantee, pinned as an order rather than a value.
+
+    The merge must run **before** ``create_environment``, and every counterpart
+    must be created **after** it. Any implementation that created the
+    environment from the captured config and patched it afterwards — or that
+    generated counterparts first — would still end with the right environment
+    row, but its counterparts' first instance contexts would have resolved
+    against production configuration, which is exactly the interference US3
+    exists to prevent.
+    """
+    clone = await scenario.clone(
+        config_override={"db_size": "5Gi"}, clear_config_fields=["fqdn_suffix"]
+    )
+    await _complete_capture(scenario)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    merged = {"db_size": "5Gi"}
+    # Merged exactly once (the environment config is one decision, not one per
+    # counterpart), then handed straight to ``create_environment`` as its
+    # *creation* input, and only then are the two counterparts created.
+    assert flow_harness["order"] == [
+        ("merge", merged),
+        ("create_environment", merged),
+        ("deploy", "postgres-main"),
+        ("deploy", "api"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_counterparts_are_created_against_the_merged_environment_config(
+    scenario: _Scenario, prefect_manager_mock, flow_harness
+) -> None:
+    """FR-006: the merged config is *persisted* before any counterpart exists.
+
+    ``deploy_application`` runs ``generate_instance_from_deployment``, which
+    re-reads the environment row through the unit of work to resolve the
+    counterpart's first instance context. So the assertion that matters is not
+    "the merge returned the right dict" but "the environment row already held
+    the merged config when the counterpart was created" — which is what the
+    harness records at each ``deploy_application`` call.
+    """
+    scenario.source.config = {
+        "fqdn_suffix": "prod.example.com",
+        "ingress_class": "prod-nginx",
+        "db_size": "50Gi",
+    }
+    clone = await scenario.clone(
+        config_override={"fqdn_suffix": "rehearsal.example.com"},
+        clear_config_fields=["ingress_class"],
+    )
+    await _complete_capture(scenario)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    merged = {"fqdn_suffix": "rehearsal.example.com", "db_size": "50Gi"}
+    assert flow_harness["observed_config"] == [merged, merged]
+    assert ("create_environment", merged) in flow_harness["order"]
+    # And the row itself agrees — the observation above was not of a
+    # not-yet-committed in-memory object.
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None and refreshed.created_environment_id is not None
+    created = await scenario.uow.environments.get(refreshed.created_environment_id)
+    assert created is not None and created.config == merged
+
+
+@pytest.mark.asyncio
+async def test_no_override_creates_the_environment_with_the_captured_config(
+    scenario: _Scenario, prefect_manager_mock, flow_harness
+) -> None:
+    """FR-006 / spec US3 scenario 2: no override means a faithful copy."""
+    scenario.source.config = {
+        "fqdn_suffix": "prod.example.com",
+        "ingress_class": "prod-nginx",
+    }
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    captured = {"fqdn_suffix": "prod.example.com", "ingress_class": "prod-nginx"}
+    assert flow_harness["order"][:2] == [
+        ("merge", captured),
+        ("create_environment", captured),
+    ]
+    assert flow_harness["observed_config"] == [captured, captured]
 
 
 @pytest.mark.asyncio

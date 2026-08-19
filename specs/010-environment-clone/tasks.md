@@ -85,9 +85,9 @@
 
 **Independent Test**: propagation test — created environment's config equals captured ⊕ override with cleared fields absent; first counterpart instance contexts observe the merged config.
 
-- [ ] T029 [US3] Wire `configOverride`/`clearConfigFields` through mutation → service → flow environment creation (merge happens before `create_environment`; persisted on the clone row) in `backend/styrmin_backend/services/backup/clone.py` + `backend/styrmin_backend/workflows/templates/clone.py`; unit test that counterpart instance generation happens after the merge
-- [ ] T030 [US3] Propagation tests: override merged over captured config; cleared scalar field absent from the created environment's config; unknown clear-field name → `VALIDATION_ERROR`; no override → config equals captured; first instances' contexts reflect the merged config
-- [ ] T031 [P] [US3] Override/clear argument coverage in SDK and CLI tests (JSON inline + `@file` parse for `--config-override`)
+- [X] T029 [US3] Wire `configOverride`/`clearConfigFields` through mutation → service → flow environment creation (merge happens before `create_environment`; persisted on the clone row) in `backend/styrmin_backend/services/backup/clone.py` + `backend/styrmin_backend/workflows/templates/clone.py`; unit test that counterpart instance generation happens after the merge
+- [X] T030 [US3] Propagation tests: override merged over captured config; cleared scalar field absent from the created environment's config; unknown clear-field name → `VALIDATION_ERROR`; no override → config equals captured; first instances' contexts reflect the merged config
+- [X] T031 [P] [US3] Override/clear argument coverage in SDK and CLI tests (JSON inline + `@file` parse for `--config-override`)
 
 **Checkpoint**: non-interference override provable at the functional tier.
 
