@@ -13,6 +13,9 @@ from styrmin_backend.db.models import Deployment as DeploymentDBModel
 from styrmin_backend.db.models import Environment as EnvironmentModel
 
 if TYPE_CHECKING:
+    from styrmin_backend.api.definitions.backup.environment_clone import (
+        EnvironmentClone,
+    )
     from styrmin_backend.api.definitions.backup_storage_location.model import (
         BackupStorageLocation,
     )
@@ -98,6 +101,53 @@ class Environment:
         return BackupStorageLocation.from_instance(
             self.instance.backup_storage_location
         )
+
+    @strawberry.field(
+        description=(
+            "The clone that created this environment, or null when it was not "
+            "clone-born. The provenance back-reference: `environmentClones` is "
+            "scoped by *source* environment, so this is how a cloned "
+            "environment points back at where it came from — and it keeps "
+            "working after the source environment is deleted, since a terminal "
+            "clone survives with `sourceEnvironmentName` intact."
+        )
+    )
+    async def cloned_from(
+        self, info: strawberry.Info
+    ) -> (
+        Annotated[
+            "EnvironmentClone",
+            strawberry.lazy("styrmin_backend.api.definitions.backup.environment_clone"),
+        ]
+        | None
+    ):
+        """Resolve the clone record that created this environment.
+
+        Lazily annotated and imported inside the resolver because
+        ``environment_clone`` imports this module for its own
+        ``sourceEnvironment`` / ``createdEnvironment`` links — a hoisted import
+        would make the two a cycle.
+
+        At most one clone creates a given environment, but
+        ``created_environment_id`` carries no unique constraint, so the
+        repository returns a sequence newest-first and the newest is the answer.
+        The referenced restores are fetched alongside so the nested ``status``
+        derivation costs one query rather than one per attribution entry.
+        """
+        from styrmin_backend.api.definitions.backup.environment_clone import (
+            EnvironmentClone as EnvironmentCloneType,
+        )
+
+        uow = info.context["uow"]
+        async with uow:
+            clones = await uow.environment_clones.get_by_created_environment_id(
+                self.instance.id
+            )
+            if not clones:
+                return None
+            clone = clones[0]
+            restores = await uow.environment_clones.get_referenced_restores([clone])
+        return EnvironmentCloneType.from_instance(clone, restores)
 
     @strawberry.field(
         description=(

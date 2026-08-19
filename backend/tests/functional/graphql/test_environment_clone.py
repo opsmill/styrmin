@@ -1692,3 +1692,506 @@ def test_environment_clone_deployment_outcome_mirrors_the_service_enum() -> None
     assert {
         member.name: member.value for member in EnvironmentCloneDeploymentOutcomeType
     } == {member.name: member.value for member in EnvironmentCloneDeploymentOutcome}
+
+
+# ---------------------------------------------------------------------------
+# Environment.clonedFrom — the provenance back-reference (T034)
+# ---------------------------------------------------------------------------
+#
+# ``environmentClones`` is scoped by **source** environment, so without this
+# field a cloned environment has no way to say where it came from — and the
+# clone record deliberately outlives its source, which is exactly when the
+# question gets asked.
+
+
+@pytest.mark.asyncio
+async def test_environment_cloned_from_projects_the_clone_that_created_it(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """The back-reference resolves the whole clone, derived status included."""
+    source, instance = await _seed_source_with_instance(session)
+    created = await _sibling_environment(session, source, "prod-rehearsal-provenance")
+    clone = await _seed_clone(
+        session,
+        source=source,
+        instance=instance,
+        name="prod-rehearsal-provenance",
+        capture_statuses=[BackupStatus.COMPLETED],
+        created_environment=created,
+        results=[("cloned", RestoreStatus.COMPLETED)],
+    )
+
+    data = await gql(
+        fresh_client, "get_environment_cloned_from", {"environmentId": str(created.id)}
+    )
+    row = data["environment"]["clonedFrom"]
+
+    assert row["id"] == str(clone.id)
+    assert row["name"] == "prod-rehearsal-provenance"
+    assert row["status"] == "COMPLETED"
+    assert row["sourceEnvironment"]["id"] == str(source.id)
+    assert row["sourceEnvironmentName"] == source.name
+    assert row["createdEnvironment"]["id"] == str(created.id)
+    assert row["environmentBackup"]["id"] == str(clone.environment_backup_id)
+    assert [entry["outcome"] for entry in row["deploymentResults"]] == ["CLONED"]
+
+
+@pytest.mark.asyncio
+async def test_environment_cloned_from_is_null_when_no_clone_created_it(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """The reference points one way: a *source* is not itself clone-born.
+
+    The source of the seeded clone is the interesting negative case — an
+    implementation that matched on either environment id would answer with the
+    clone here and quietly invert the provenance.
+    """
+    source, instance = await _seed_source_with_instance(session)
+    created = await _sibling_environment(session, source, "prod-rehearsal-oneway")
+    await _seed_clone(
+        session,
+        source=source,
+        instance=instance,
+        capture_statuses=[BackupStatus.COMPLETED],
+        created_environment=created,
+        results=[("cloned", RestoreStatus.COMPLETED)],
+    )
+
+    data = await gql(
+        fresh_client, "get_environment_cloned_from", {"environmentId": str(source.id)}
+    )
+
+    assert data["environment"]["clonedFrom"] is None
+
+
+@pytest.mark.asyncio
+async def test_environment_cloned_from_survives_deleting_the_source(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """T035: provenance outlives the source environment (research D9).
+
+    The whole reason ``source_environment_id`` is nullable. Deleting the source
+    goes through the real mutation, so the clone-settling cascade, the
+    environment-backup cascade **and** the FR-008 guard all run for real — the
+    guard being the thing that would otherwise refuse to delete the capture
+    this terminal clone still references.
+
+    The seeded instance lives in the *created* environment (it is what a
+    counterpart looks like), which is also what leaves the source free of
+    deployment rows so it can actually be deleted.
+    """
+    source = await seed_environment(session, name="prod-to-be-deleted")
+    created = await _sibling_environment(session, source, "prod-rehearsal-orphan")
+    adv = await seed_application_driver_version(session)
+    _counterpart, instance = await seed_running_deployment(
+        session, environment=created, adv=adv, name="infrahub"
+    )
+    clone = await _seed_clone(
+        session,
+        source=source,
+        instance=instance,
+        name="prod-rehearsal-orphan",
+        capture_statuses=[BackupStatus.COMPLETED],
+        created_environment=created,
+        results=[("cloned", RestoreStatus.COMPLETED)],
+    )
+    source_id = source.id
+    source_name = source.name
+
+    await gql(fresh_client, "delete_environment", {"environmentId": str(source_id)})
+
+    data = await gql(
+        fresh_client, "get_environment_cloned_from", {"environmentId": str(created.id)}
+    )
+    row = data["environment"]["clonedFrom"]
+
+    assert row["id"] == str(clone.id)
+    # The link is gone, the readable provenance is not.
+    assert row["sourceEnvironment"] is None
+    assert row["sourceEnvironmentName"] == source_name
+    assert row["createdEnvironment"]["id"] == str(created.id)
+    # The source's capture cascaded with it, which the record says out loud —
+    # non-fatally, because the clone had already finished.
+    assert row["environmentBackup"] is None
+    assert row["cloneErrors"] == [
+        f"{CLONE_STEP_ENVIRONMENT_BACKUP_DELETED}: "
+        f"the backing environment backup {clone.environment_backup_id} was deleted"
+    ]
+    assert row["status"] == "COMPLETED"
+    # ...and the source-scoped list can no longer reach it, which is precisely
+    # why the back-reference has to exist.
+    assert (
+        await gql(
+            fresh_client, "list_environment_clones", {"environmentId": str(source_id)}
+        )
+    )["environmentClones"] == []
+
+
+@pytest.mark.asyncio
+async def test_discarding_a_cloned_environment_keeps_the_record_and_fails_it(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """SC-005 through the real mutation: the discard path is always open.
+
+    A half-built clone is exactly what an operator discards, and the deletion
+    has to leave a record that says *discarded* rather than a clone stuck
+    ``IN_PROGRESS`` forever.
+    """
+    source, instance = await _seed_source_with_instance(session)
+    created = await _sibling_environment(session, source, "prod-rehearsal-discarded")
+    clone = await _seed_clone(
+        session,
+        source=source,
+        instance=instance,
+        capture_statuses=[BackupStatus.COMPLETED],
+        created_environment=created,
+        results=[("pending", None)],
+    )
+    before = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    assert before["environmentClone"]["status"] == "IN_PROGRESS"
+
+    await gql(fresh_client, "delete_environment", {"environmentId": str(created.id)})
+
+    data = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    row = data["environmentClone"]
+
+    assert row["createdEnvironment"] is None
+    assert row["cloneErrors"] == [
+        f"{CLONE_STEP_CREATED_ENVIRONMENT_DELETED}: "
+        f"the created environment {created.id} was deleted"
+    ]
+    assert row["status"] == "FAILED"
+
+
+# ---------------------------------------------------------------------------
+# deleteEnvironmentBackup — the FR-008 window on the wire (T032/T035)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_capture_in_flight_is_refused_with_in_use(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """FR-008 on the wire: the typed ``IN_USE`` code, and nothing deleted."""
+    source, instance = await _seed_source_with_instance(session)
+    clone = await _seed_clone(
+        session,
+        source=source,
+        instance=instance,
+        name="prod-rehearsal-in-use",
+        capture_statuses=[BackupStatus.IN_PROGRESS],
+        results=[("pending", None)],
+    )
+
+    response = await fresh_client.post(
+        "/graphql",
+        json={
+            "query": load_query("delete_environment_backup"),
+            "variables": {"environmentBackupId": str(clone.environment_backup_id)},
+        },
+    )
+
+    assert response.status_code == 200
+    errors = response.json()["errors"]
+    assert errors[0]["extensions"]["code"] == "IN_USE"
+    assert "prod-rehearsal-in-use" in errors[0]["message"]
+    # Refused, not partially applied.
+    data = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    assert data["environmentClone"]["environmentBackup"]["id"] == str(
+        clone.environment_backup_id
+    )
+    assert data["environmentClone"]["cloneErrors"] == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_landed_capture_is_the_escape_hatch_for_a_stuck_clone(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """FR-008 on the wire: post-capture deletion ends a stuck clone, attributed."""
+    source, instance = await _seed_source_with_instance(session)
+    clone = await _seed_clone(
+        session,
+        source=source,
+        instance=instance,
+        capture_statuses=[BackupStatus.COMPLETED],
+        results=[("pending", None)],
+    )
+    environment_backup_id = clone.environment_backup_id
+
+    await gql(
+        fresh_client,
+        "delete_environment_backup",
+        {"environmentBackupId": str(environment_backup_id)},
+    )
+
+    data = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    row = data["environmentClone"]
+
+    assert row["environmentBackup"] is None
+    assert row["cloneErrors"] == [
+        f"{CLONE_STEP_ENVIRONMENT_BACKUP_DELETED}: "
+        f"the backing environment backup {environment_backup_id} was deleted"
+    ]
+    assert row["status"] == "FAILED"
+
+
+# ---------------------------------------------------------------------------
+# deploymentResults — the join projection and the coverage identity (T035)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_environment_clone_projects_every_outcome_with_its_reason_and_ids(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """All four outcomes in one read, each with the ids the UI links on.
+
+    ``restoreId`` is the only pointer to the cross-target restore — it lives
+    inside a JSON entry, so no foreign key or relationship checks it and only a
+    read like this one proves the id that was written is the id that comes
+    back.
+    """
+    source, instance = await _seed_source_with_instance(session)
+    created = await _sibling_environment(session, source, "prod-rehearsal-outcomes")
+    landed = await _seed_restore(
+        session, instance=instance, status=RestoreStatus.COMPLETED
+    )
+    running = await _seed_restore(
+        session, instance=instance, status=RestoreStatus.IN_PROGRESS
+    )
+    capture = await _seed_capture(
+        session,
+        environment=source,
+        instance=instance,
+        constituent_statuses=[BackupStatus.COMPLETED, BackupStatus.FAILED],
+    )
+    counterpart_id = uuid4()
+    entries = {
+        "infrahub": _result_entry(
+            deployment_id=uuid4(),
+            deployment_name="infrahub",
+            outcome="cloned",
+            counterpart_deployment_id=counterpart_id,
+            restore_id=landed.id,
+        ),
+        "netbox": _result_entry(
+            deployment_id=uuid4(),
+            deployment_name="netbox",
+            outcome="cloned",
+            counterpart_deployment_id=uuid4(),
+            restore_id=running.id,
+        ),
+        "never-deployed": _result_entry(
+            deployment_id=uuid4(),
+            deployment_name="never-deployed",
+            outcome="skipped",
+            reason=CLONE_REASON_NOT_ELIGIBLE,
+        ),
+        "grafana": _result_entry(
+            deployment_id=uuid4(),
+            deployment_name="grafana",
+            outcome="failed",
+            reason=CLONE_REASON_NOT_SELECTED,
+        ),
+        "prometheus": _result_entry(
+            deployment_id=uuid4(),
+            deployment_name="prometheus",
+            outcome="pending",
+        ),
+    }
+    clone = EnvironmentClone(
+        name="prod-rehearsal-outcomes",
+        source_environment_id=source.id,
+        source_environment_name=source.name,
+        environment_backup_id=capture.id,
+        created_environment_id=created.id,
+        deployment_results=list(entries.values()),
+    )
+    session.add(clone)
+    await session.commit()
+
+    data = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    row = data["environmentClone"]
+    by_name = {entry["deploymentName"]: entry for entry in row["deploymentResults"]}
+
+    assert set(by_name) == set(entries)
+    assert {name: entry["outcome"] for name, entry in by_name.items()} == {
+        "infrahub": "CLONED",
+        "netbox": "CLONED",
+        "never-deployed": "SKIPPED",
+        "grafana": "FAILED",
+        "prometheus": "PENDING",
+    }
+    assert by_name["infrahub"]["restoreId"] == str(landed.id)
+    assert by_name["infrahub"]["counterpartDeploymentId"] == str(counterpart_id)
+    assert by_name["infrahub"]["deploymentId"] == entries["infrahub"]["deployment_id"]
+    assert by_name["netbox"]["restoreId"] == str(running.id)
+    assert by_name["never-deployed"]["reason"] == CLONE_REASON_NOT_ELIGIBLE
+    assert by_name["never-deployed"]["restoreId"] is None
+    assert by_name["grafana"]["reason"] == CLONE_REASON_NOT_SELECTED
+    assert by_name["grafana"]["counterpartDeploymentId"] is None
+    assert by_name["prometheus"]["reason"] is None
+    # The join is what decides the status: one referenced restore is still
+    # running and one entry is still pending, so the clone is not done.
+    assert row["status"] == "IN_PROGRESS"
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_clone_accounts_for_every_deployment_exactly_once(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+) -> None:
+    """SC-003's coverage identity, asserted where it matters: at terminality.
+
+    Registration-time attribution is covered above; this runs the real flow to
+    a **terminal** clone and asserts the two halves of the identity in
+    ``data-model.md`` — one entry per source deployment considered, and not one
+    of them left ``PENDING``. A flow that dropped a deployment on the floor
+    between registration and terminality would still satisfy the earlier test.
+
+    "Considered" is the eligible-plus-explicitly-selected set: the internal and
+    tombstoned deployments seeded here are part of the environment and
+    deliberately absent from the list (FR-003), which is why the assertion is an
+    exact set rather than a count.
+    """
+    source = await seed_environment(session, name="prod-coverage")
+    adv = await seed_application_driver_version(session)
+    await seed_running_deployment(session, environment=source, adv=adv, name="infrahub")
+    await seed_running_deployment(session, environment=source, adv=adv, name="netbox")
+    # Eligible-looking but never deployed: no active instance, so it is a skip
+    # with a reason rather than an omission.
+    await seed_deployment(session, environment=source, adv=adv, name="never-deployed")
+    internal = await seed_deployment(
+        session, environment=source, adv=adv, name="ingress-controller"
+    )
+    internal.internal = True
+    tombstoned = await seed_deployment(
+        session, environment=source, adv=adv, name="deleted-app"
+    )
+    tombstoned.deleted_at = datetime.now(timezone.utc)
+    session.add(internal)
+    session.add(tombstoned)
+    await session.commit()
+    source_id = source.id
+
+    clone = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {"environmentId": str(source_id), "name": "prod-coverage-rehearsal"},
+    )
+    # The stubbed cross-target restores land, which is what makes the clone
+    # terminal — the derivation folds their status, not the flow's exit.
+    result = await session.exec(select(Restore))
+    for restore in result.all():
+        restore.status = RestoreStatus.COMPLETED
+        session.add(restore)
+    await session.commit()
+
+    data = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    row = data["environmentClone"]
+    entries = row["deploymentResults"]
+
+    assert row["status"] == "COMPLETED"
+    assert {entry["deploymentName"] for entry in entries} == {
+        "infrahub",
+        "netbox",
+        "never-deployed",
+    }
+    assert len(entries) == 3
+    assert EnvironmentCloneDeploymentOutcomeType.PENDING.value.upper() not in {
+        entry["outcome"] for entry in entries
+    }
+    assert {entry["deploymentName"]: entry["outcome"] for entry in entries} == {
+        "infrahub": "CLONED",
+        "netbox": "CLONED",
+        "never-deployed": "SKIPPED",
+    }
+    # Every non-skipped entry carries the two ids that make it auditable.
+    for entry in entries:
+        if entry["outcome"] == "CLONED":
+            assert entry["counterpartDeploymentId"] is not None
+            assert entry["restoreId"] is not None
+        else:
+            assert entry["reason"]
+
+
+@pytest.mark.asyncio
+async def test_environment_clone_renders_clone_errors_in_recorded_order(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """``cloneErrors`` is a flat ``step: error`` list, fatal or not.
+
+    The ``fatal`` flag drives the derivation and is deliberately **not** on the
+    wire — a client that filtered on it would be re-deriving the status the
+    server already computed. What the operator needs is the sequence of what
+    happened, in the order it happened.
+    """
+    source, instance = await _seed_source_with_instance(session)
+    clone = await _seed_clone(
+        session,
+        source=source,
+        instance=instance,
+        capture_statuses=[BackupStatus.FAILED],
+        results=[("failed", None)],
+        clone_errors=[
+            {
+                "step": CLONE_STEP_CAPTURE_FAILED,
+                "error": "the capture never became restorable",
+                "fatal": True,
+            },
+            {
+                "step": CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
+                "error": "cleaned up afterwards",
+                "fatal": False,
+            },
+        ],
+    )
+
+    data = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+
+    assert data["environmentClone"]["cloneErrors"] == [
+        f"{CLONE_STEP_CAPTURE_FAILED}: the capture never became restorable",
+        f"{CLONE_STEP_ENVIRONMENT_BACKUP_DELETED}: cleaned up afterwards",
+    ]
+    assert data["environmentClone"]["status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_environment_clone_renders_no_clone_errors_as_an_empty_list(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """A clean clone reports ``[]``, never null: the field is non-null."""
+    source, instance = await _seed_source_with_instance(session)
+    created = await _sibling_environment(session, source, "prod-rehearsal-clean")
+    clone = await _seed_clone(
+        session,
+        source=source,
+        instance=instance,
+        capture_statuses=[BackupStatus.COMPLETED],
+        created_environment=created,
+        results=[("cloned", RestoreStatus.COMPLETED)],
+    )
+
+    data = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+
+    assert data["environmentClone"]["cloneErrors"] == []
+    assert data["environmentClone"]["status"] == "COMPLETED"

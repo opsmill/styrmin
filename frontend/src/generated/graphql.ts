@@ -466,6 +466,8 @@ export type Environment = {
   __typename?: 'Environment';
   backupStorageLocation?: Maybe<BackupStorageLocation>;
   capabilities: Scalars['JSON']['output'];
+  /** The clone that created this environment, or null when it was not clone-born. The provenance back-reference: `environmentClones` is scoped by *source* environment, so this is how a cloned environment points back at where it came from — and it keeps working after the source environment is deleted, since a terminal clone survives with `sourceEnvironmentName` intact. */
+  clonedFrom?: Maybe<EnvironmentClone>;
   cluster: Cluster;
   config: Scalars['JSON']['output'];
   deployments: Array<Deployment>;

@@ -70,6 +70,8 @@ from styrmin_backend.services.backup.clone import (
     CLONE_REASON_NOT_SELECTED,
     CLONE_REASON_TOMBSTONED,
     CLONE_STEP_CAPTURE_FAILED,
+    CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
+    CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
     CLONE_STEP_TARGET_NAME_TAKEN,
     EnvironmentCloneDeploymentOutcome,
     EnvironmentCloneStatus,
@@ -81,14 +83,16 @@ from styrmin_backend.services.backup.environment import (
     ConstituentError,
     DeploymentSnapshot,
     create_environment_backup,
+    delete_environment_backup,
 )
 from styrmin_backend.services.backup.service import (
     create_restore as create_restore_service,
 )
 from styrmin_backend.services.env_vars.exceptions import InvalidEnvVarNameError
-from styrmin_backend.services.environments import update_environment
+from styrmin_backend.services.environments import delete_environment, update_environment
 from styrmin_backend.services.exceptions import (
     EnvironmentAlreadyExistsError,
+    EnvironmentBackupInUseByCloneError,
     EnvironmentOperationInProgressError,
     InvalidCloneDeploymentSelectionError,
     InvalidContextError,
@@ -1419,3 +1423,442 @@ def test_no_terminal_clone_keeps_a_pending_entry() -> None:
         EnvironmentCloneDeploymentOutcome.CLONED,
     ]
     assert updated[0].reason == "because"
+
+
+# ---------------------------------------------------------------------------
+# T032 — FR-008 delete guard and the environment-backup cascade (research D9)
+# ---------------------------------------------------------------------------
+#
+# Three timing windows, and the whole point of D9 is that they behave
+# differently: during the capture the deletion is refused, after the capture it
+# is the escape hatch that ends a stuck clone, and after the clone itself
+# finished it is routine TTL cleanup that must not rewrite history.
+
+
+def _clone_errors_by_step(clone: EnvironmentClone) -> dict[str, dict[str, Any]]:
+    """The recorded operation-level events keyed by step."""
+    return {entry["step"]: entry for entry in clone.clone_errors or []}
+
+
+async def _finish_clone(
+    scenario: _Scenario, clone: EnvironmentClone, *, name: str = "prod-rehearsal"
+) -> Environment:
+    """Drive ``clone`` to a terminal ``COMPLETED`` without running the flow.
+
+    The capture lands, the environment materialises, and both deployments are
+    attributed — the shape a finished clone actually has, written directly so
+    the deletion paths are tested against state they did not produce.
+    """
+    await _complete_capture(scenario)
+    created = Environment(name=name, cluster_id=scenario.cluster.id)
+    scenario.uow.environments.models.append(created)
+    clone.created_environment_id = created.id
+    clone.deployment_results = [
+        {
+            "deployment_id": str(scenario.first.id),
+            "deployment_name": "postgres-main",
+            "outcome": "cloned",
+            "reason": None,
+            "counterpart_deployment_id": str(uuid4()),
+            "restore_id": None,
+        },
+        {
+            "deployment_id": str(scenario.second.id),
+            "deployment_name": "api",
+            "outcome": "skipped",
+            "reason": CLONE_REASON_NOT_ELIGIBLE,
+            "counterpart_deployment_id": None,
+            "restore_id": None,
+        },
+    ]
+    await scenario.uow.environment_clones.save(clone)
+    assert (
+        derive_environment_clone_status_from_record(clone)
+        is EnvironmentCloneStatus.COMPLETED
+    )
+    return created
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_capture_during_the_capture_is_refused_as_in_use(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """Window 1 (FR-008): the one window where deletion strands work."""
+    clone = await scenario.clone()
+    assert clone.environment_backup_id is not None
+
+    with pytest.raises(EnvironmentBackupInUseByCloneError) as excinfo:
+        await delete_environment_backup(
+            environment_backup_id=clone.environment_backup_id, uow=scenario.uow
+        )
+
+    assert excinfo.value.error_code == "IN_USE"
+    assert excinfo.value.clone_id == str(clone.id)
+    assert excinfo.value.clone_name == "prod-rehearsal"
+    # Refused means refused: nothing about the snapshot or the clone moved.
+    assert [parent.id for parent in scenario.uow.environment_backups.models] == [
+        clone.environment_backup_id
+    ]
+    assert len(scenario.uow.backups.models) == 2
+    assert clone.clone_errors is None
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_capture_after_it_lands_fails_a_running_clone(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """Window 2 (FR-008): the escape hatch, attributed on the record."""
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+    environment_backup_id = clone.environment_backup_id
+    assert environment_backup_id is not None
+    assert (
+        derive_environment_clone_status_from_record(clone)
+        is EnvironmentCloneStatus.IN_PROGRESS
+    )
+
+    await delete_environment_backup(
+        environment_backup_id=environment_backup_id, uow=scenario.uow
+    )
+
+    assert scenario.uow.environment_backups.models == []
+    assert scenario.uow.backups.models == []
+    # The record survives, released from the deleted capture and honest about
+    # why it stopped.
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.environment_backup_id is None
+    marker = _clone_errors_by_step(refreshed)[CLONE_STEP_ENVIRONMENT_BACKUP_DELETED]
+    assert marker["fatal"] is True
+    assert str(environment_backup_id) in marker["error"]
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.FAILED
+    )
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_capture_of_a_finished_clone_keeps_its_outcome(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """Window 3 (FR-008): TTL cleanup must not rewrite history."""
+    clone = await scenario.clone()
+    await _finish_clone(scenario, clone)
+    environment_backup_id = clone.environment_backup_id
+    assert environment_backup_id is not None
+
+    await delete_environment_backup(
+        environment_backup_id=environment_backup_id, uow=scenario.uow
+    )
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.environment_backup_id is None
+    marker = _clone_errors_by_step(refreshed)[CLONE_STEP_ENVIRONMENT_BACKUP_DELETED]
+    assert marker["fatal"] is False
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.COMPLETED
+    )
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_capture_of_a_mid_restore_clone_is_attributed_fatally(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """Terminality is snapshotted before the cascade eats its own inputs.
+
+    A clone whose counterpart restore is still running is non-terminal *because
+    of that restore row* — and the cascade deletes it along with the constituent
+    backup it was taken from. Re-deriving afterwards would read the clone as
+    having finished; the deletion has to be judged against the state the
+    operator asked about.
+    """
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+    created = Environment(name="prod-rehearsal", cluster_id=scenario.cluster.id)
+    scenario.uow.environments.models.append(created)
+    constituent = scenario.uow.backups.models[0]
+    restore = Restore(
+        name="cross-target-restore",
+        status=RestoreStatus.IN_PROGRESS,
+        target_namespace="styrmin-counterpart",
+        backup_id=constituent.id,
+    )
+    scenario.uow.restores.models.append(restore)
+    clone.created_environment_id = created.id
+    clone.deployment_results = [
+        {
+            "deployment_id": str(scenario.first.id),
+            "deployment_name": "postgres-main",
+            "outcome": "cloned",
+            "reason": None,
+            "counterpart_deployment_id": str(uuid4()),
+            "restore_id": str(restore.id),
+        }
+    ]
+    await scenario.uow.environment_clones.save(clone)
+    assert (
+        derive_environment_clone_status_from_record(clone, {restore.id: restore})
+        is EnvironmentCloneStatus.IN_PROGRESS
+    )
+
+    await delete_environment_backup(
+        environment_backup_id=clone.environment_backup_id, uow=scenario.uow
+    )
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    marker = _clone_errors_by_step(refreshed)[CLONE_STEP_ENVIRONMENT_BACKUP_DELETED]
+    assert marker["fatal"] is True
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.FAILED
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_clone_never_blocks_deleting_its_capture(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """The guard's second conjunct: terminality releases it unconditionally.
+
+    A clone that recorded a fatal error while its capture was still queued is
+    terminal with a non-terminal capture. It has nothing in flight left to
+    strand, so refusing here would recreate the wedge D9 exists to prevent.
+    """
+    clone = await scenario.clone()
+    clone.clone_errors = [
+        {
+            "step": CLONE_STEP_TARGET_NAME_TAKEN,
+            "error": "the name was taken in the meantime",
+            "fatal": True,
+        }
+    ]
+    await scenario.uow.environment_clones.save(clone)
+    assert (
+        derive_environment_clone_status_from_record(clone)
+        is EnvironmentCloneStatus.FAILED
+    )
+
+    await delete_environment_backup(
+        environment_backup_id=clone.environment_backup_id, uow=scenario.uow
+    )
+
+    assert scenario.uow.environment_backups.models == []
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert (
+        _clone_errors_by_step(refreshed)[CLONE_STEP_ENVIRONMENT_BACKUP_DELETED]["fatal"]
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_unrelated_capture_leaves_the_clone_alone(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """The cascade is keyed on the capture, not on the environment."""
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+    unrelated = await create_environment_backup(
+        environment_id=scenario.source.id, uow=scenario.uow
+    )
+
+    await delete_environment_backup(
+        environment_backup_id=unrelated.id, uow=scenario.uow
+    )
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.environment_backup_id == clone.environment_backup_id
+    assert refreshed.clone_errors is None
+
+
+# ---------------------------------------------------------------------------
+# T033 — clone-aware ``delete_environment`` (research D9, spec SC-005)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_discarding_the_created_environment_fails_a_running_clone(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """The discard path always works, and drives a stuck clone terminal."""
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+    created = Environment(name="prod-rehearsal", cluster_id=scenario.cluster.id)
+    scenario.uow.environments.models.append(created)
+    clone.created_environment_id = created.id
+    await scenario.uow.environment_clones.save(clone)
+    assert (
+        derive_environment_clone_status_from_record(clone)
+        is EnvironmentCloneStatus.IN_PROGRESS
+    )
+
+    await delete_environment(environment_id=created.id, uow=scenario.uow)
+
+    assert created.id not in {
+        environment.id for environment in scenario.uow.environments.models
+    }
+    # The clone record survives as history — nulled FK plus the marker that
+    # tells "deleted" apart from "not yet created".
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.created_environment_id is None
+    marker = _clone_errors_by_step(refreshed)[CLONE_STEP_CREATED_ENVIRONMENT_DELETED]
+    assert marker["fatal"] is True
+    assert str(created.id) in marker["error"]
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.FAILED
+    )
+
+
+@pytest.mark.asyncio
+async def test_discarding_the_environment_of_a_finished_clone_keeps_its_outcome(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """Deleting a finished clone's environment records the event, not a failure."""
+    clone = await scenario.clone()
+    created = await _finish_clone(scenario, clone)
+
+    await delete_environment(environment_id=created.id, uow=scenario.uow)
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.created_environment_id is None
+    marker = _clone_errors_by_step(refreshed)[CLONE_STEP_CREATED_ENVIRONMENT_DELETED]
+    assert marker["fatal"] is False
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.COMPLETED
+    )
+
+
+@pytest.mark.asyncio
+async def test_discarding_a_clone_frees_the_name_for_an_immediate_re_clone(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """SC-005: nothing a discarded clone leaves behind blocks re-cloning it.
+
+    Three things have to be true at once for this to work, and each has bitten
+    a design before: the environment row is gone (so the name is free), the
+    clone record is terminal (so it no longer occupies the source), and
+    ``EnvironmentClone.name`` carries no unique constraint (so the history of
+    the failed attempt can coexist with the retry).
+    """
+    first = await scenario.clone()
+    await _complete_capture(scenario)
+    created = Environment(name="prod-rehearsal", cluster_id=scenario.cluster.id)
+    scenario.uow.environments.models.append(created)
+    first.created_environment_id = created.id
+    await scenario.uow.environment_clones.save(first)
+
+    await delete_environment(environment_id=created.id, uow=scenario.uow)
+
+    second = await scenario.clone()
+
+    assert second.id != first.id
+    assert second.name == first.name == "prod-rehearsal"
+    assert {clone.id for clone in scenario.uow.environment_clones.models} == {
+        first.id,
+        second.id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_source_keeps_a_finished_clone_as_provenance(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """A created environment outlives its source; its provenance must too."""
+    clone = await scenario.clone()
+    created = await _finish_clone(scenario, clone)
+
+    await delete_environment(environment_id=scenario.source.id, uow=scenario.uow)
+
+    assert created.id in {
+        environment.id for environment in scenario.uow.environments.models
+    }
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.source_environment_id is None
+    assert refreshed.source_environment_name == "prod"
+    assert refreshed.created_environment_id == created.id
+    # The source's snapshots cascaded, which detached the capture too — but on a
+    # terminal clone that is history, not a failure.
+    assert refreshed.environment_backup_id is None
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.COMPLETED
+    )
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_source_mid_capture_removes_the_clone_without_wedging(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """The ordering guarantee: clone records are settled *before* backups.
+
+    The clone's capture is in flight, so the FR-008 guard would refuse to delete
+    the snapshot the environment cascade has to remove. Settling the clone
+    records first means the guard has nothing left to refuse — and a
+    non-terminal clone has no outcome worth keeping, so it goes.
+    """
+    clone = await scenario.clone()
+
+    await delete_environment(environment_id=scenario.source.id, uow=scenario.uow)
+
+    assert scenario.uow.environments.models == []
+    assert scenario.uow.environment_backups.models == []
+    assert scenario.uow.backups.models == []
+    assert await scenario.uow.environment_clones.get(clone.id) is None
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_source_of_a_terminal_clone_with_a_live_capture(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """The same no-wedge guarantee for a clone the guard's first conjunct sees.
+
+    A terminal clone is *kept*, so it is still referencing the capture when the
+    cascade reaches it. Only the guard's terminality conjunct keeps that from
+    refusing the environment deletion.
+    """
+    clone = await scenario.clone()
+    clone.clone_errors = [
+        {
+            "step": CLONE_STEP_TARGET_NAME_TAKEN,
+            "error": "the name was taken in the meantime",
+            "fatal": True,
+        }
+    ]
+    await scenario.uow.environment_clones.save(clone)
+
+    await delete_environment(environment_id=scenario.source.id, uow=scenario.uow)
+
+    assert scenario.uow.environments.models == []
+    assert scenario.uow.environment_backups.models == []
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.source_environment_id is None
+    assert refreshed.environment_backup_id is None
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_unrelated_environment_leaves_clone_records_alone(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """Both cascades are scoped by id, in both clone roles."""
+    clone = await scenario.clone()
+    created = await _finish_clone(scenario, clone)
+    bystander = Environment(name="staging", cluster_id=scenario.cluster.id)
+    scenario.uow.environments.models.append(bystander)
+
+    await delete_environment(environment_id=bystander.id, uow=scenario.uow)
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.source_environment_id == scenario.source.id
+    assert refreshed.created_environment_id == created.id
+    assert refreshed.clone_errors is None
