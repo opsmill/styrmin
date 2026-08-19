@@ -77,7 +77,7 @@ The clone runs asynchronously. The operator watches its progress through a first
 - **Clone name already taken**: rejected upfront with a typed validation error and zero side effects. If the name is lost in the window between validation and creation (TOCTOU), the clone ends `FAILED` with the conflict attributed.
 - **Captured application driver version vanishes mid-clone**: that deployment is attributed as failed; the remaining deployments proceed; the clone ends `PARTIAL`.
 - **Clone of a clone**: allowed; no special casing.
-- **Concurrent clones of one source**: allowed; each captures its own independent environment backup; no locking between them.
+- **Concurrent clones of one source**: allowed, each built from its own independent environment backup; there is no lock spanning a whole clone. Refinement from planning: the capture window counts as an environment-level operation on the source (same rule as environment backup/restore), so a second clone started while the first is still *capturing* is rejected upfront with a typed busy error; once the capture completes, further clones may start while earlier ones are still building their environments.
 - **Deleting the backing environment backup while a clone is in flight**: refused with a typed error while the clone depends on it.
 - **Clone status boundary**: the clone record covers environment/deployment creation and data restoration only; ongoing workload health remains the existing deployment-state machinery's job.
 - **Recovery from `PARTIAL`/`FAILED`/stuck clones**: discard-and-retry via ordinary environment deletion; no per-deployment repair in v1.
