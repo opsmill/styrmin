@@ -1,0 +1,35 @@
+query GetEnvironmentClone($environmentCloneId: UUID!) {
+  environmentClone(environmentCloneId: $environmentCloneId) {
+    id
+    name
+    status
+    sourceEnvironmentName
+    createdOn
+    updatedOn
+    requestedDeploymentIds
+    configOverride
+    clearConfigFields
+    cloneErrors
+    sourceEnvironment {
+      id
+      name
+    }
+    environmentBackup {
+      id
+      name
+      status
+    }
+    createdEnvironment {
+      id
+      name
+    }
+    deploymentResults {
+      deploymentId
+      deploymentName
+      outcome
+      reason
+      counterpartDeploymentId
+      restoreId
+    }
+  }
+}

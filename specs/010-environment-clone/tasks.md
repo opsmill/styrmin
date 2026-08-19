@@ -103,10 +103,10 @@
 - [X] T033 [US4] Clone-aware `delete_environment` in `backend/styrmin_backend/services/environments.py`: created-environment deletion writes `created_environment_deleted` (+ null FK, fatal iff non-terminal); source deletion handles clone records **before** backups cascade (terminal → keep with nulled source FK; non-terminal → delete); unit tests incl. SC-005 re-clone-after-discard and no-IN_USE-wedge
 - [X] T034 [P] [US4] `Environment.clonedFrom` field in `backend/styrmin_backend/api/definitions/environment/model.py` + propagation test; regenerate schema + types
 - [X] T035 [US4] Propagation tests: `deploymentResults` join projection (outcomes, reasons, counterpart/restore ids), coverage identity on terminal clones, `cloneErrors` rendering, provenance surviving source deletion
-- [ ] T036 [P] [US4] Frontend GraphQL operations (`clone_environment.graphql`, `get_environment_clone.graphql`, `list_environment_clones.graphql`) in `frontend/src/graphql/` + `pnpm codegen`
-- [ ] T037 [US4] `CloneEnvironmentDialog` (name, deployment checkboxes with ineligible rows disabled + reason tooltip, config override, clear-fields; `IfRole minimum="ADMIN"`; invalidation in `onSuccess`) in `frontend/src/components/environment/CloneEnvironmentDialog.tsx`
-- [ ] T038 [US4] `EnvironmentClonesSection` (derived status badge, per-deployment outcomes, `createdOn`-relative age, links to created environment + backing backup, tab-scoped 10s polling) in `frontend/src/components/environment/EnvironmentClonesSection.tsx` + entry point on `frontend/src/pages/environments/EnvironmentDetailPage.tsx`
-- [ ] T039 [P] [US4] Frontend Vitest coverage (dialog validation/submission, list rendering per status, role gating) in `frontend/src/__tests__/environments/EnvironmentClone*.test.tsx`
+- [X] T036 [P] [US4] Frontend GraphQL operations (`clone_environment.graphql`, `get_environment_clone.graphql`, `list_environment_clones.graphql`) in `frontend/src/graphql/` + `pnpm codegen`
+- [X] T037 [US4] `CloneEnvironmentDialog` (name, deployment checkboxes with ineligible rows disabled + reason tooltip, config override, clear-fields; `IfRole minimum="ADMIN"`; invalidation in `onSuccess`) in `frontend/src/components/environment/CloneEnvironmentDialog.tsx`
+- [X] T038 [US4] `EnvironmentClonesSection` (derived status badge, per-deployment outcomes, `createdOn`-relative age, links to created environment + backing backup, tab-scoped 10s polling) in `frontend/src/components/environment/EnvironmentClonesSection.tsx` + entry point on `frontend/src/pages/environments/EnvironmentDetailPage.tsx`
+- [X] T039 [P] [US4] Frontend Vitest coverage (dialog validation/submission, list rendering per status, role gating) in `frontend/src/__tests__/environments/EnvironmentClone*.test.tsx`
 
 **Checkpoint**: all four stories functional on all four surfaces.
 

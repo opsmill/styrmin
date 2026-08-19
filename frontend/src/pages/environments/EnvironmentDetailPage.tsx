@@ -30,12 +30,14 @@ import { useEffectiveRole } from "@/auth/useEffectiveRole";
 import EnvironmentConfigurationTab from "./EnvironmentConfigurationTab";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { EnvironmentBackupsTab } from "@/components/environment/EnvironmentBackupsTab";
+import { EnvironmentClonesSection } from "@/components/environment/EnvironmentClonesSection";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "parameters", label: "Parameters" },
   { id: "configuration", label: "Configuration" },
   { id: "backups", label: "Backups" },
+  { id: "clones", label: "Clones" },
 ];
 
 export default function EnvironmentDetailPage() {
@@ -389,6 +391,23 @@ export default function EnvironmentDetailPage() {
             tab's own polls have to honour the same flag. */}
         <EnvironmentBackupsTab
           environmentId={environmentId}
+          autoRefreshEnabled={autoRefreshEnabled}
+        />
+      </TabPanel>
+
+      {/* Clones Tab */}
+      <TabPanel active={activeTab === "clones"}>
+        {/* The picker and the clear-field list are built from the source
+            environment this page already fetched, so the dialog needs no query
+            of its own. Deleted deployments only reach the picker (as disabled
+            rows) while "Show deleted" is on — otherwise they are simply not in
+            the list. */}
+        <EnvironmentClonesSection
+          environmentId={environmentId}
+          environmentName={environment.name}
+          deployments={environment.deployments}
+          config={environment.config}
+          isActive={activeTab === "clones"}
           autoRefreshEnabled={autoRefreshEnabled}
         />
       </TabPanel>

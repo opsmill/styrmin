@@ -1500,6 +1500,17 @@ export type ChangePasswordMutationVariables = Exact<{
 
 export type ChangePasswordMutation = { __typename?: 'Mutation', changePassword: boolean };
 
+export type CloneEnvironmentMutationVariables = Exact<{
+  name: Scalars['String']['input'];
+  environmentId?: InputMaybe<Scalars['UUID']['input']>;
+  deploymentIds?: InputMaybe<Array<Scalars['UUID']['input']> | Scalars['UUID']['input']>;
+  configOverride?: InputMaybe<UpdateEnvironmentInput>;
+  clearConfigFields?: InputMaybe<Array<Scalars['String']['input']> | Scalars['String']['input']>;
+}>;
+
+
+export type CloneEnvironmentMutation = { __typename?: 'Mutation', cloneEnvironment: { __typename?: 'EnvironmentClone', id: string, name: string, status: EnvironmentCloneStatus, createdOn: any } };
+
 export type CreateBackupMutationVariables = Exact<{
   instanceId: Scalars['UUID']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
@@ -1685,6 +1696,13 @@ export type GetEnvironmentQueryVariables = Exact<{
 
 export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, applicationDriverVersionId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', name: string } }, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
 
+export type GetEnvironmentCloneQueryVariables = Exact<{
+  environmentCloneId: Scalars['UUID']['input'];
+}>;
+
+
+export type GetEnvironmentCloneQuery = { __typename?: 'Query', environmentClone: { __typename?: 'EnvironmentClone', id: string, name: string, status: EnvironmentCloneStatus, sourceEnvironmentName: string, createdOn: any, updatedOn?: any | null, requestedDeploymentIds?: Array<string> | null, configOverride?: Record<string, unknown> | null, clearConfigFields?: Array<string> | null, cloneErrors: Array<string>, sourceEnvironment?: { __typename?: 'Environment', id: string, name: string } | null, environmentBackup?: { __typename?: 'EnvironmentBackup', id: string, name: string, status: EnvironmentBackupStatus } | null, createdEnvironment?: { __typename?: 'Environment', id: string, name: string } | null, deploymentResults: Array<{ __typename?: 'EnvironmentCloneDeploymentResult', deploymentId: string, deploymentName: string, outcome: EnvironmentCloneDeploymentOutcome, reason?: string | null, counterpartDeploymentId?: string | null, restoreId?: string | null }> } };
+
 export type GetGroupQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -1737,6 +1755,13 @@ export type ListEnvironmentBackupsQueryVariables = Exact<{
 
 
 export type ListEnvironmentBackupsQuery = { __typename?: 'Query', environmentBackups: Array<{ __typename?: 'EnvironmentBackup', id: string, name: string, status: EnvironmentBackupStatus, createdOn: any, constituents: Array<{ __typename?: 'EnvironmentBackupConstituent', deploymentId: string, deploymentName: string, error?: string | null, backup?: { __typename?: 'Backup', id: string, name: string, status: string, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null } | null }> }> };
+
+export type ListEnvironmentClonesQueryVariables = Exact<{
+  environmentId: Scalars['UUID']['input'];
+}>;
+
+
+export type ListEnvironmentClonesQuery = { __typename?: 'Query', environmentClones: Array<{ __typename?: 'EnvironmentClone', id: string, name: string, status: EnvironmentCloneStatus, sourceEnvironmentName: string, createdOn: any, updatedOn?: any | null, cloneErrors: Array<string>, createdEnvironment?: { __typename?: 'Environment', id: string, name: string } | null, environmentBackup?: { __typename?: 'EnvironmentBackup', id: string, name: string, status: EnvironmentBackupStatus } | null, deploymentResults: Array<{ __typename?: 'EnvironmentCloneDeploymentResult', deploymentId: string, deploymentName: string, outcome: EnvironmentCloneDeploymentOutcome, reason?: string | null }> }> };
 
 export type ListEnvironmentRestoresQueryVariables = Exact<{
   environmentBackupId: Scalars['UUID']['input'];
@@ -1927,6 +1952,36 @@ export const useChangePasswordMutation = <
       {
     mutationKey: ['ChangePassword'],
     mutationFn: (variables?: ChangePasswordMutationVariables) => graphqlFetcher<ChangePasswordMutation, ChangePasswordMutationVariables>(ChangePasswordDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const CloneEnvironmentDocument = `
+    mutation CloneEnvironment($name: String!, $environmentId: UUID, $deploymentIds: [UUID!], $configOverride: UpdateEnvironmentInput, $clearConfigFields: [String!]) {
+  cloneEnvironment(
+    name: $name
+    environmentId: $environmentId
+    deploymentIds: $deploymentIds
+    configOverride: $configOverride
+    clearConfigFields: $clearConfigFields
+  ) {
+    id
+    name
+    status
+    createdOn
+  }
+}
+    `;
+
+export const useCloneEnvironmentMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<CloneEnvironmentMutation, TError, CloneEnvironmentMutationVariables, TContext>) => {
+    
+    return useMutation<CloneEnvironmentMutation, TError, CloneEnvironmentMutationVariables, TContext>(
+      {
+    mutationKey: ['CloneEnvironment'],
+    mutationFn: (variables?: CloneEnvironmentMutationVariables) => graphqlFetcher<CloneEnvironmentMutation, CloneEnvironmentMutationVariables>(CloneEnvironmentDocument, variables)(),
     ...options
   }
     )};
@@ -2726,6 +2781,62 @@ export const useGetEnvironmentQuery = <
 
 useGetEnvironmentQuery.getKey = (variables: GetEnvironmentQueryVariables) => ['GetEnvironment', variables];
 
+export const GetEnvironmentCloneDocument = `
+    query GetEnvironmentClone($environmentCloneId: UUID!) {
+  environmentClone(environmentCloneId: $environmentCloneId) {
+    id
+    name
+    status
+    sourceEnvironmentName
+    createdOn
+    updatedOn
+    requestedDeploymentIds
+    configOverride
+    clearConfigFields
+    cloneErrors
+    sourceEnvironment {
+      id
+      name
+    }
+    environmentBackup {
+      id
+      name
+      status
+    }
+    createdEnvironment {
+      id
+      name
+    }
+    deploymentResults {
+      deploymentId
+      deploymentName
+      outcome
+      reason
+      counterpartDeploymentId
+      restoreId
+    }
+  }
+}
+    `;
+
+export const useGetEnvironmentCloneQuery = <
+      TData = GetEnvironmentCloneQuery,
+      TError = Error
+    >(
+      variables: GetEnvironmentCloneQueryVariables,
+      options?: Omit<UseQueryOptions<GetEnvironmentCloneQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetEnvironmentCloneQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetEnvironmentCloneQuery, TError, TData>(
+      {
+    queryKey: ['GetEnvironmentClone', variables],
+    queryFn: graphqlFetcher<GetEnvironmentCloneQuery, GetEnvironmentCloneQueryVariables>(GetEnvironmentCloneDocument, variables),
+    ...options
+  }
+    )};
+
+useGetEnvironmentCloneQuery.getKey = (variables: GetEnvironmentCloneQueryVariables) => ['GetEnvironmentClone', variables];
+
 export const GetGroupDocument = `
     query GetGroup {
   groups {
@@ -3041,6 +3152,53 @@ export const useListEnvironmentBackupsQuery = <
     )};
 
 useListEnvironmentBackupsQuery.getKey = (variables: ListEnvironmentBackupsQueryVariables) => ['ListEnvironmentBackups', variables];
+
+export const ListEnvironmentClonesDocument = `
+    query ListEnvironmentClones($environmentId: UUID!) {
+  environmentClones(environmentId: $environmentId) {
+    id
+    name
+    status
+    sourceEnvironmentName
+    createdOn
+    updatedOn
+    cloneErrors
+    createdEnvironment {
+      id
+      name
+    }
+    environmentBackup {
+      id
+      name
+      status
+    }
+    deploymentResults {
+      deploymentId
+      deploymentName
+      outcome
+      reason
+    }
+  }
+}
+    `;
+
+export const useListEnvironmentClonesQuery = <
+      TData = ListEnvironmentClonesQuery,
+      TError = Error
+    >(
+      variables: ListEnvironmentClonesQueryVariables,
+      options?: Omit<UseQueryOptions<ListEnvironmentClonesQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<ListEnvironmentClonesQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<ListEnvironmentClonesQuery, TError, TData>(
+      {
+    queryKey: ['ListEnvironmentClones', variables],
+    queryFn: graphqlFetcher<ListEnvironmentClonesQuery, ListEnvironmentClonesQueryVariables>(ListEnvironmentClonesDocument, variables),
+    ...options
+  }
+    )};
+
+useListEnvironmentClonesQuery.getKey = (variables: ListEnvironmentClonesQueryVariables) => ['ListEnvironmentClones', variables];
 
 export const ListEnvironmentRestoresDocument = `
     query ListEnvironmentRestores($environmentBackupId: UUID!) {
