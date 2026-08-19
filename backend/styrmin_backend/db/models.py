@@ -560,6 +560,84 @@ class EnvironmentRestore(StyrminModel, table=True):
     restores: list["Restore"] = Relationship(back_populates="environment_restore")
 
 
+class EnvironmentClone(StyrminModel, table=True):
+    """One clone of an environment into a brand-new environment.
+
+    Records the whole operation: the capture it is built from, the environment
+    it created, the selection/override it was asked for, and one attribution
+    entry per source deployment considered.
+
+    There is deliberately **no status column** — like
+    :class:`EnvironmentBackup` and :class:`EnvironmentRestore`, the status is
+    derived at read time (``services/backup/clone.py``) from the backing
+    capture's own derived status, the existence of ``created_environment_id``,
+    the constituent ``Restore`` rows reachable through
+    ``deployment_results[].restore_id``, and ``clone_errors``. A stored status
+    could contradict any of them.
+
+    ``name`` is **not** unique here: a failed clone must never block re-cloning
+    under the same name. Uniqueness of the target environment name lives where
+    it belongs, on ``Environment(name, cluster_id)``.
+
+    Both environment foreign keys are nullable so provenance survives deletion:
+    deleting the source nulls ``source_environment_id`` on terminal clones
+    (``source_environment_name`` keeps the record readable), and deleting the
+    created environment nulls ``created_environment_id``. Every such deletion
+    also appends a ``clone_errors`` entry — ``{"step": str, "error": str,
+    "fatal": bool}`` — because a bare NULL is not distinguishable from "not yet
+    created". ``fatal: true`` drives the derivation to ``FAILED``; deletions
+    that touch an already-terminal clone are recorded with ``fatal: false`` so
+    history is kept without rewriting the outcome.
+    """
+
+    name: str
+
+    source_environment_id: UUID | None = Field(
+        default=None, foreign_key="environment.id"
+    )
+    source_environment: Optional["Environment"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[EnvironmentClone.source_environment_id]"
+        },
+    )
+
+    #: The source's name at clone time, denormalised so provenance stays
+    #: readable once the source environment is gone.
+    source_environment_name: str
+
+    environment_backup_id: UUID | None = Field(
+        default=None, foreign_key="environmentbackup.id"
+    )
+    environment_backup: Optional["EnvironmentBackup"] = Relationship()
+
+    created_environment_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("environment.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    created_environment: Optional["Environment"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[EnvironmentClone.created_environment_id]"
+        },
+    )
+
+    #: The explicit deployment selection, verbatim; ``None`` means all eligible.
+    requested_deployment_ids: list | None = Field(default=None, sa_column=Column(JSON))
+    #: The environment config override as supplied, before merging.
+    config_override: dict | None = Field(default=None, sa_column=Column(JSON))
+    #: Config field names to drop from the captured config before the merge.
+    cleared_config_fields: list | None = Field(default=None, sa_column=Column(JSON))
+    #: One attribution entry per source deployment considered.
+    deployment_results: list | None = Field(default=None, sa_column=Column(JSON))
+    #: Operation-level events outside any single deployment; entries carry a
+    #: ``fatal`` flag (see the class docstring).
+    clone_errors: list | None = Field(default=None, sa_column=Column(JSON))
+
+    created_by_user_id: UUID | None = Field(default=None, foreign_key="user.id")
+
+
 class Backup(StyrminModel, table=True):
     name: str = Field(unique=True)
     status: BackupStatus = Field(sa_column=Column(SQLModelEnum(BackupStatus)))

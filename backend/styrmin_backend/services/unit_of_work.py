@@ -54,6 +54,10 @@ from styrmin_backend.repository.environment_backup import (
     SQLModelEnvironmentBackupRepository,
     SQLModelEnvironmentRestoreRepository,
 )
+from styrmin_backend.repository.environment_clone import (
+    EnvironmentCloneRepository,
+    SQLModelEnvironmentCloneRepository,
+)
 from styrmin_backend.repository.helm_chart import (
     HelmChartRepository,
     SQLModelHelmChartRepository,
@@ -101,6 +105,7 @@ class UnitOfWork(ABC):
     restores: RestoreRepository
     environment_backups: EnvironmentBackupRepository
     environment_restores: EnvironmentRestoreRepository
+    environment_clones: EnvironmentCloneRepository
     backup_schedules: BackupScheduleRepository
     pod_statuses: PodStatusRepository
     deployment_statuses: DeploymentStatusRepository
@@ -146,6 +151,7 @@ class SqlModelUnitOfWork(UnitOfWork):
     restores: SQLModelRestoreRepository
     environment_backups: SQLModelEnvironmentBackupRepository
     environment_restores: SQLModelEnvironmentRestoreRepository
+    environment_clones: SQLModelEnvironmentCloneRepository
     backup_schedules: SQLModelBackupScheduleRepository
     pod_statuses: SQLModelPodStatusRepository
     deployment_statuses: SQLModelDeploymentStatusRepository
@@ -182,6 +188,9 @@ class SqlModelUnitOfWork(UnitOfWork):
             session=self.session
         )
         self.environment_restores = SQLModelEnvironmentRestoreRepository(
+            session=self.session
+        )
+        self.environment_clones = SQLModelEnvironmentCloneRepository(
             session=self.session
         )
         self.backup_schedules = SQLModelBackupScheduleRepository(session=self.session)
