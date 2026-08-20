@@ -32,6 +32,7 @@ from styrmin_backend.services.backup.clone import (
     CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
     CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
     CLONE_STEP_ENVIRONMENT_CREATION_FAILED,
+    CLONE_STEP_SOURCE_ENVIRONMENT_DELETED,
     CLONE_STEP_TARGET_NAME_TAKEN,
     CLONE_STEPS,
     TERMINAL_ENVIRONMENT_CLONE_STATUSES,
@@ -114,7 +115,7 @@ def test_terminal_set_is_completed_partial_failed() -> None:
 
 
 def test_outcome_and_step_vocabularies_are_fixed() -> None:
-    """The four write-side outcomes and the five recorded steps (data-model.md)."""
+    """The four write-side outcomes and the six recorded steps (data-model.md)."""
     assert {outcome.value for outcome in EnvironmentCloneDeploymentOutcome} == {
         "pending",
         "cloned",
@@ -127,6 +128,7 @@ def test_outcome_and_step_vocabularies_are_fixed() -> None:
         CLONE_STEP_ENVIRONMENT_CREATION_FAILED,
         CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
         CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
+        CLONE_STEP_SOURCE_ENVIRONMENT_DELETED,
     }
 
 
@@ -622,8 +624,16 @@ def test_a_deleted_created_environment_is_told_apart_from_a_missing_one() -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_malformed_entries_are_ignored_rather_than_raising() -> None:
-    """One unreadable JSON entry must not break every read of the clone."""
+def test_malformed_entries_are_counted_rather_than_raising() -> None:
+    """One unreadable JSON entry must not break every read of the clone — and
+    must not disappear from the account either.
+
+    An unreadable ``deployment_results`` entry is a source deployment nobody can
+    say anything about, so it is counted as a failure: the clone reads
+    ``PARTIAL`` next to a real success rather than ``COMPLETED``. An unreadable
+    ``clone_errors`` entry is skipped instead, because a non-entry cannot be a
+    *fatal* event and inventing one would rewrite a standing outcome.
+    """
     restore = _restore(RestoreStatus.COMPLETED)
     assert (
         derive_environment_clone_status(
@@ -633,7 +643,26 @@ def test_malformed_entries_are_ignored_rather_than_raising() -> None:
             clone_errors=["nonsense"],
             restores=_restores(restore),
         )
-        == EnvironmentCloneStatus.COMPLETED
+        == EnvironmentCloneStatus.PARTIAL
+    )
+
+
+def test_a_wholly_unreadable_result_list_can_never_read_completed() -> None:
+    """The coverage identity's teeth (SC-003).
+
+    ``['a', 'b', 'c']`` used to derive ``COMPLETED``: every entry was dropped,
+    so nothing failed, so the clone claimed success with **zero** of its source
+    deployments accounted for — the most confident possible lie about a clone.
+    """
+    assert (
+        derive_environment_clone_status(
+            capture_status=COMPLETED_CAPTURE,
+            created_environment_id=uuid4(),
+            deployment_results=["a", "b", "c"],
+            clone_errors=None,
+            restores={},
+        )
+        == EnvironmentCloneStatus.FAILED
     )
 
 

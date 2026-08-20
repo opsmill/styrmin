@@ -605,16 +605,23 @@ Two more handles, for the cases where there is no environment to delete
 yet:
 
 - **Deleting the backing environment backup** is refused (`IN_USE`) only
-  while that clone's *capture* is still running. Once the capture has
-  landed, deleting it is allowed — and it is the escape hatch for a clone
-  that stalled before its environment appeared. On a still-running clone
-  the deletion is recorded and the clone ends `FAILED`; on a clone that
-  already finished, the recorded outcome stands.
-- **Deleting the source environment** keeps a finished clone as
-  provenance: the source link is cleared, the source's *name* stays on the
-  record, and an unfinished clone's record is removed instead. Because the
-  source's snapshots cascade with it, a finished clone also picks up a
-  non-fatal note that its backing capture is gone.
+  while that clone's *capture* is still running, and only for as long as
+  the clone could still be waiting for it (two hours, the clone's own
+  wait budget). Once the capture has landed — or that budget has run out,
+  which is what a capture whose constituent work was never picked up
+  eventually does — deleting it is allowed, and it is the escape hatch for
+  a clone that stalled before its environment appeared. On a still-running
+  clone the deletion is recorded and the clone ends `FAILED`; on a clone
+  that already finished, the recorded outcome stands.
+- **Deleting the source environment** keeps the clone record whenever it
+  has an environment to be the provenance of: the source link is cleared
+  and the source's *name* stays on the record. A clone that was still
+  building that environment also picks up a fatal
+  `source_environment_deleted` event and ends `FAILED` — its capture goes
+  with the source, so it can make no further progress. Only a clone that
+  never created anything is removed outright. Because the source's
+  snapshots cascade with it, a finished clone also picks up a non-fatal
+  note that its backing capture is gone.
 
 :::note Deleting an environment now removes its deployments
 

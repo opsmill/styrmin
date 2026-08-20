@@ -284,11 +284,17 @@ spec's edge case is updated to say exactly this.
 ## D9 — FR-008 delete guard scoped to the capture window; deletion is otherwise the escape hatch
 
 **Decision**: `delete_environment_backup` gains one guard: if a clone references the
-backup **and that clone's capture is still non-terminal**, raise a new
+backup **and that clone's capture is still non-terminal and young enough that the clone
+flow could still be waiting for it** (`CAPTURE_IN_FLIGHT_GUARD_SECONDS`, which *is* the
+flow's `CAPTURE_POLL_TIMEOUT_SECONDS`), raise a new
 `EnvironmentBackupInUseByCloneError` (`error_code="IN_USE"`, metadata: clone id/name)
 — precedent `BackupStorageLocationInUseError` (`services/exceptions.py:443-459`).
-Once the capture is terminal, deletion is allowed and becomes the documented escape
-hatch:
+The time bound is not cosmetic: a constituent whose `EXECUTE_BACKUP` dispatch failed (or
+that no worker ever picked up) stays `PENDING` for ever, so the capture — and the clone —
+derive non-terminal for ever, and a state-only guard left *no* escape hatch at all (the
+source stayed occupied, the capture undeletable, and there was no created environment to
+discard). Once the capture is terminal, or that budget is spent, deletion is allowed and
+becomes the documented escape hatch:
 
 - on a **non-terminal** clone, the deletion (in the same transaction) nulls the
   clone's `environment_backup_id` and appends a fatal `clone_errors` entry
@@ -321,12 +327,15 @@ belt-and-braces only):
   no computable marker).
 - **`delete_environment` (source environment)**: handles the source's clone records
   *before* cascading its environment backups (avoiding a spurious `IN_USE` from the
-  clone guard): terminal clones survive as history with `source_environment_id`
-  nulled (the FK is nullable for this reason — provenance must not die with the
-  source); non-terminal clones are deleted outright, and the clone flow tolerates its
-  row vanishing mid-flight (mirrors `execute_restore_workflow`'s
-  `RestoreNotFoundError` handling, `workflows/templates/backup.py:794-808`). Created
-  environments are ordinary environments and survive.
+  clone guard). The split is on what the clone **created**: a clone with a
+  `created_environment_id` survives as history with `source_environment_id` nulled (the
+  FK is nullable for this reason — provenance must not die with the source), plus a fatal
+  `source_environment_deleted` entry when it was still building, so it comes to rest
+  instead of reporting progress it can no longer make; a non-terminal clone that
+  materialised nothing is deleted outright, and the clone flow tolerates its row
+  vanishing mid-flight (mirrors `execute_restore_workflow`'s `RestoreNotFoundError`
+  handling, `workflows/templates/backup.py:794-808`). Created environments are ordinary
+  environments and survive.
 
 ## D10 — GraphQL surface
 

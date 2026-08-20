@@ -50,8 +50,8 @@ environment_clones_app = App(name="env-clones", help="Clone environments and tra
 
 
 #: Terminal clone statuses that mean "not everything made it into the clone".
-#: The status is derived synchronously, so the mutation can already return one of
-#: these — see :func:`create`.
+#: Reached by polling (``--wait``); the mutation itself cannot return one — see
+#: :func:`create`.
 _FAILED_STATUSES = frozenset({"FAILED", "PARTIAL"})
 
 
@@ -87,9 +87,9 @@ class _EnvironmentCloneLike(Protocol):
     """A clone as returned by either the clone mutation or the get query.
 
     Both carry the same derived status, per-deployment attribution and
-    operation-level errors, and the terminal report is reached from both paths
-    (the mutation can already return a terminal status), so the reporter is
-    typed structurally rather than against one of the two generated shapes.
+    operation-level errors, and both are handed to the same reporter (the
+    mutation's own defensive check and the ``--wait`` poll), so it is typed
+    structurally rather than against one of the two generated shapes.
     """
 
     @property
@@ -281,12 +281,13 @@ async def create(
             )
 
             if environment_clone.status.value in _FAILED_STATUSES:
-                # The status is derived synchronously, so a clone that failed at
-                # registration (or one whose only deployments were skipped
-                # upfront) comes back terminal from the mutation itself.
-                # Printing "Success" and exiting 0 there would report a clone
-                # that does not exist as one that does. Nothing is polled:
-                # FAILED and PARTIAL are terminal already.
+                # Defensive only, and deliberately kept as such: registration
+                # writes no ``clone_errors`` and always returns with no created
+                # environment, so the derivation cannot reach FAILED or PARTIAL
+                # here — the first reading is PENDING or IN_PROGRESS. If a
+                # future registration path ever *can* end terminal, printing
+                # "Success" and exiting 0 would report a clone that does not
+                # exist as one that does, so the check stays.
                 console.print(summary)
                 _report_terminal_status(environment_clone)
 
@@ -336,7 +337,18 @@ async def get(environment_clone_id: EnvironmentCloneId) -> None:
         )
         console.print(f"    Config: {environment_clone.created_environment.config}")
     requested = environment_clone.requested_deployment_ids
-    console.print(f"  Requested deployments: {', '.join(str(d) for d in requested) if requested else 'all eligible'}")
+    # ``None`` and ``[]`` are different requests and the backend returns them
+    # verbatim: no selection means every eligible deployment, an *empty*
+    # selection (``--empty-deployment``) means a configuration-only clone.
+    # A falsy check collapsed the second into the first and reported a
+    # config-only clone as a full one.
+    if requested is None:
+        requested_summary = "all eligible"
+    elif not requested:
+        requested_summary = "none (configuration only)"
+    else:
+        requested_summary = ", ".join(str(d) for d in requested)
+    console.print(f"  Requested deployments: {requested_summary}")
     # Stored and returned as canonical snake_case EnvironmentConfig JSON, even
     # though it is *sent* as a camelCase UpdateEnvironmentInput.
     console.print(f"  Config override: {environment_clone.config_override or 'none'}")

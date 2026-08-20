@@ -17,6 +17,13 @@ closed enum — the write-side vocabulary is fixed at four values by
 so the wire can afford the type safety. ``reason`` stays a free string
 (ADR-0055 decision 4).
 
+**The read path is never stricter than the derivation.** Both JSON columns are
+projected through readers that degrade a single unreadable entry
+(``EnvironmentCloneDeploymentResult.from_stored``, ``read_clone_errors``)
+instead of raising. A stricter projection meant one malformed row failed the
+whole ``environmentClone`` query as a masked ``INTERNAL_ERROR`` — hiding the
+record precisely when an operator needs to read it.
+
 **N+1 avoidance.** Deriving one clone's status needs the ``Restore`` rows named
 by its JSON ids, which no ORM relationship can eager-load. Resolving that per
 clone would be one query per entry, so the rows are fetched for the whole batch
@@ -36,6 +43,7 @@ from typing import Any, Mapping
 from uuid import UUID
 
 import strawberry
+from loguru import logger
 
 from styrmin_backend.api.definitions.backup.environment_backup import (
     EnvironmentBackup as EnvironmentBackupType,
@@ -48,9 +56,15 @@ from styrmin_backend.db.models import EnvironmentClone as EnvironmentCloneModel
 from styrmin_backend.db.models import Restore as RestoreModel
 from styrmin_backend.services.backup.clone import (
     CloneDeploymentResult as CloneDeploymentResultModel,
-    CloneError as CloneErrorModel,
     derive_environment_clone_status_from_record,
+    read_clone_errors,
 )
+
+#: Stand-in ``deploymentId`` for an entry whose own id could not be read.
+#: ``deploymentId`` is non-null on the wire, and widening it to please the one
+#: unreadable row would weaken the type for every healthy one — so the nil UUID
+#: says "unknown" while ``reason`` says why, keeping the entry visible.
+_UNREADABLE_DEPLOYMENT_ID = UUID(int=0)
 
 
 @strawberry.enum(
@@ -134,6 +148,51 @@ class EnvironmentCloneDeploymentResult:
             reason=result.reason,
             counterpart_deployment_id=result.counterpart_deployment_id,
             restore_id=result.restore_id,
+        )
+
+    @classmethod
+    def from_stored(cls, raw: Any, index: int) -> EnvironmentCloneDeploymentResult:
+        """Project one stored entry, degrading instead of failing the query.
+
+        The wire type is stricter than the column: ``outcome`` is a closed enum
+        here and free JSON there, and the derivation deliberately tolerates both
+        an unrecognised outcome and an entry that is not a mapping at all
+        (counting either as a failure, so the coverage identity holds). A bare
+        ``model_validate`` therefore made the *whole* ``environmentClone`` query
+        fail with a masked ``INTERNAL_ERROR`` over one bad row — leaving the
+        operator unable to read the record on any surface, which is exactly when
+        they need to.
+
+        A degraded entry keeps whatever was readable and says what was not: the
+        index, the field, and the raw value, in ``reason``. Its ``outcome`` is
+        ``FAILED``, matching how the derivation counts it — an entry nobody can
+        read is a source deployment nobody can account for, not a success.
+        """
+        try:
+            return cls.from_model(CloneDeploymentResultModel.model_validate(raw))
+        except Exception as exc:  # noqa: BLE001 — one bad row must stay readable
+            logger.warning(
+                "Projecting unreadable deployment_results[{}] entry as FAILED: "
+                "{!r} ({})",
+                index,
+                raw,
+                exc,
+            )
+        entry = raw if isinstance(raw, dict) else {}
+        return cls(
+            deployment_id=_read_optional_uuid(entry.get("deployment_id"))
+            or _UNREADABLE_DEPLOYMENT_ID,
+            deployment_name=str(
+                entry.get("deployment_name") or f"<unreadable entry {index}>"
+            ),
+            outcome=EnvironmentCloneDeploymentOutcome.FAILED,
+            reason=(
+                f"this attribution entry (index {index}) could not be read: {raw!r}"
+            ),
+            counterpart_deployment_id=_read_optional_uuid(
+                entry.get("counterpart_deployment_id")
+            ),
+            restore_id=_read_optional_uuid(entry.get("restore_id")),
         )
 
 
@@ -260,10 +319,8 @@ class EnvironmentClone:
     )
     def deployment_results(self) -> list[EnvironmentCloneDeploymentResult]:
         return [
-            EnvironmentCloneDeploymentResult.from_model(
-                CloneDeploymentResultModel.model_validate(raw)
-            )
-            for raw in self.db_model.deployment_results or []
+            EnvironmentCloneDeploymentResult.from_stored(raw, index)
+            for index, raw in enumerate(self.db_model.deployment_results or [])
         ]
 
     @strawberry.field(
@@ -276,12 +333,14 @@ class EnvironmentClone:
         )
     )
     def clone_errors(self) -> list[str]:
+        # Read through the *derivation's* reader, not ``model_validate``:
+        # ``fatal`` is required on the model but optional in practice (the
+        # derivation reads a missing flag as non-fatal on purpose), so
+        # validating here made one flag-less entry fail the whole clone query.
+        # A read path may never be stricter than the write path it renders.
         return [
             f"{entry.step}: {entry.error}"
-            for entry in (
-                CloneErrorModel.model_validate(raw)
-                for raw in self.db_model.clone_errors or []
-            )
+            for entry in read_clone_errors(self.db_model.clone_errors)
         ]
 
     @classmethod
@@ -311,6 +370,20 @@ class EnvironmentClone:
 def _read_uuid(value: Any) -> UUID:
     """Read a JSON-stored id back as a ``UUID``."""
     return value if isinstance(value, UUID) else UUID(str(value))
+
+
+def _read_optional_uuid(value: Any) -> UUID | None:
+    """Read a JSON-stored id, or ``None`` when it is absent or unreadable.
+
+    Used only on the degraded projection path: an entry that already failed
+    validation must not fail again on one of its ids.
+    """
+    if value is None:
+        return None
+    try:
+        return _read_uuid(value)
+    except TypeError, ValueError:
+        return None
 
 
 async def _resolve_optional(

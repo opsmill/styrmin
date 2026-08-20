@@ -1,8 +1,10 @@
+import io
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from loguru import logger
 
 from styrmin_backend.context.models.config import (
     ClusterConfig,
@@ -224,6 +226,53 @@ async def test_delete_environment_cascades_its_deployments(
     assert teardown.await_count == 2
     with pytest.raises(EnvironmentNotFoundError):
         await get_environment(environment_id=environment.id, uow=uow)
+
+
+async def test_delete_environment_audits_a_failed_teardown_as_a_failure(
+    uow: FakeUnitOfWork,
+    fake_cluster: Cluster,
+    mocker,
+):
+    """A teardown the cluster refused must not be counted as one it accepted.
+
+    ``request_cluster_teardown`` is best-effort and returns ``False`` when the
+    CR could not be patched, but the deployment *rows* are deleted regardless.
+    So an unreachable cluster leaves N namespaces running with nothing in the
+    database pointing at them, and the audit line is the only trace of it — one
+    that used to report the number of *attempts* as ``teardown_requested``,
+    making a total failure indistinguishable from a clean teardown.
+    """
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="INFO", format="{level}|{message}")
+    mocker.patch(
+        "styrmin_backend.services.environments.request_cluster_teardown",
+        autospec=True,
+        return_value=False,
+    )
+    environment = await _seed_environment_and_deployments(
+        uow,
+        cluster=fake_cluster,
+        deployments=[
+            _make_fanout_deployment(
+                environment_id=uuid4(), name="counterpart", active_env_config=None
+            ),
+        ],
+    )
+
+    try:
+        await delete_environment(environment_id=environment.id, uow=uow)
+    finally:
+        logger.remove(handler_id)
+
+    # The rows still go — an unreachable cluster must not make the environment
+    # undeletable (that is why the call is best-effort in the first place).
+    assert await uow.deployments.find_all_by_environment(environment.id) == []
+    logged = sink.getvalue()
+    audit = next(line for line in logged.splitlines() if "environment_deleted" in line)
+    assert "teardown_requested=0" in audit
+    assert "teardown_failed=1" in audit
+    # And the failure is named, not only counted.
+    assert "environment_delete_teardown_incomplete" in logged
 
 
 async def test_delete_environment_that_does_not_exist(

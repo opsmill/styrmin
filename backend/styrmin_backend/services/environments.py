@@ -437,12 +437,15 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
        An environment can appear on a clone record in two roles, and each has
        its own rule:
 
-       * as the clone's **source** — a terminal clone survives with
-         ``source_environment_id`` nulled, because its created environment is an
-         ordinary environment that outlives the source and must keep its
-         provenance (``source_environment_name`` keeps it readable); a
-         non-terminal clone is deleted outright, and the clone flow tolerates
-         its row vanishing mid-flight.
+       * as the clone's **source** — a clone that has a created environment
+         survives with ``source_environment_id`` nulled, because that
+         environment is an ordinary environment which outlives the source and
+         must keep its provenance (``source_environment_name`` keeps it
+         readable); if it was still building, it also picks up a fatal
+         ``source_environment_deleted`` marker so it comes to rest instead of
+         reporting progress it can no longer make. A non-terminal clone that
+         never created anything is deleted outright, and the clone flow
+         tolerates its row vanishing mid-flight.
        * as the clone's **created** environment — this is the *discard* path
          (spec SC-005) and is always allowed. The record survives as history
          with ``created_environment_id`` nulled plus a
@@ -451,7 +454,8 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
 
        Settling first is what keeps step 2 from wedging: deleting an environment
        backup refuses while a clone's capture of it is in flight (FR-008), and
-       that clone is exactly the non-terminal record this step has just removed.
+       after this step every clone the guard can still see is terminal — the
+       others are gone.
 
     2. **Environment backups cascade.** ``environmentbackup.environment_id`` is
        a non-nullable FK, so a snapshot outliving its environment is not
@@ -513,8 +517,28 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
     # CR never existed must not keep the environment undeletable.
     async with uow:
         live_deployments = await uow.deployments.find_all_by_environment(environment_id)
+    # Counted, not assumed: the rows below are deleted whether or not the
+    # cluster answered, so a teardown that failed is a namespace left running
+    # with nothing in the database pointing at it. The audit line has to say how
+    # many actually got the signal — reporting the number of *attempts* as
+    # ``teardown_requested`` made an unreachable cluster indistinguishable from
+    # a clean teardown.
+    teardown_requested = 0
+    teardown_failed: list[UUID] = []
     for deployment in live_deployments:
-        await request_cluster_teardown(deployment.id)
+        if await request_cluster_teardown(deployment.id):
+            teardown_requested += 1
+        else:
+            teardown_failed.append(deployment.id)
+    if teardown_failed:
+        logger.warning(
+            "environment_delete_teardown_incomplete environment_id={} "
+            "teardown_failed={} deployment_ids={} cluster resources may remain; "
+            "their database rows are being removed anyway",
+            environment_id,
+            len(teardown_failed),
+            [str(deployment_id) for deployment_id in teardown_failed],
+        )
 
     async with uow:
         deleted_deployment_ids = await uow.deployments.delete_all_for_environment(
@@ -532,13 +556,16 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
 
     logger.info(
         "environment_deleted environment_id={} environment_backups_deleted={} "
-        "deployments_deleted={} teardown_requested={} clones_discarded={} "
-        "source_clones_kept={} source_clones_deleted={}",
+        "deployments_deleted={} teardown_requested={} teardown_failed={} "
+        "clones_discarded={} source_clones_kept={} source_clones_deleted={} "
+        "source_clones_failed={}",
         environment_id,
         cascaded,
         len(deleted_deployment_ids),
-        len(live_deployments),
+        teardown_requested,
+        len(teardown_failed),
         discarded_clones,
         source_clones.kept,
         source_clones.deleted,
+        source_clones.failed,
     )

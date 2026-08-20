@@ -31,6 +31,7 @@ whose inputs have been cleaned up underneath it (``data-model.md``):
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Mapping, NamedTuple, Sequence
 from uuid import UUID, uuid4
@@ -179,9 +180,16 @@ CLONE_STEP_ENVIRONMENT_BACKUP_DELETED = "environment_backup_deleted"
 #: The created environment was deleted — the discard path (spec SC-005).
 #: Fatal iff the clone was still non-terminal.
 CLONE_STEP_CREATED_ENVIRONMENT_DELETED = "created_environment_deleted"
+#: The source environment was deleted while the clone was still building the
+#: environment it had already created (research D9). Only ever written on a
+#: **non-terminal** clone that is being *kept* — one that never created an
+#: environment is deleted outright instead — and therefore always fatal: the
+#: clone can never make progress again (its capture goes with the source), and
+#: the record survives as the created environment's provenance.
+CLONE_STEP_SOURCE_ENVIRONMENT_DELETED = "source_environment_deleted"
 
-#: Every step name the clone paths write. The derivation keys on the two
-#: deletion markers; the rest are always fatal and so are only read as history.
+#: Every step name the clone paths write. The derivation keys on the deletion
+#: markers; the rest are always fatal and so are only read as history.
 CLONE_STEPS = frozenset(
     {
         CLONE_STEP_CAPTURE_FAILED,
@@ -189,8 +197,23 @@ CLONE_STEPS = frozenset(
         CLONE_STEP_ENVIRONMENT_CREATION_FAILED,
         CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
         CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
+        CLONE_STEP_SOURCE_ENVIRONMENT_DELETED,
     }
 )
+
+#: How long the FR-008 ``IN_USE`` guard keeps protecting a clone's capture.
+#:
+#: The guard exists so an operator cannot delete a capture the clone flow is
+#: still waiting on, and the flow waits for exactly this long
+#: (``workflows.templates.clone.CAPTURE_POLL_TIMEOUT_SECONDS`` *is* this
+#: constant, so the two cannot drift). Past that budget the flow has given up,
+#: so nothing is left to strand — and the guard has to stop refusing, because a
+#: capture can stay non-terminal *forever*: a constituent whose
+#: ``EXECUTE_BACKUP`` dispatch failed, or that no worker ever picked up, sits
+#: ``PENDING`` with nothing to move it. Refusing there would wedge the source
+#: environment permanently with no escape hatch left, which is the exact state
+#: ADR-0055 decision 6 and spec.md's recovery note exist to prevent.
+CAPTURE_IN_FLIGHT_GUARD_SECONDS = 7200
 
 
 # ---------------------------------------------------------------------------
@@ -338,13 +361,25 @@ def merge_environment_config(
 # ---------------------------------------------------------------------------
 
 
+#: The synthetic ``outcome`` an entry gets when the stored value cannot be read
+#: as an entry at all (not a mapping). It is deliberately not one of the four
+#: write-side outcomes, so the fold below counts it as a failure: an entry
+#: nobody can read is a source deployment nobody can account for, and letting
+#: it vanish would let a clone derive ``COMPLETED`` with a deployment
+#: unaccounted for (spec SC-003).
+UNREADABLE_RESULT_OUTCOME = "<unreadable>"
+
+
 class _ResultView(NamedTuple):
     """A ``deployment_results`` entry read leniently for the derivation.
 
     The stored ``outcome`` is a free JSON string, so it is kept raw rather than
     coerced into :class:`EnvironmentCloneDeploymentOutcome`: an entry written by
     a future (or broken) writer must still be *counted*, since the coverage
-    identity depends on every entry being accounted for.
+    identity depends on every entry being accounted for. An entry that is not a
+    mapping at all is counted too, under
+    :data:`UNREADABLE_RESULT_OUTCOME` — dropping it was the one way the promise
+    in this docstring could be broken.
     """
 
     outcome: str
@@ -377,7 +412,15 @@ def _read_restore_id(raw: Any, *, index: int) -> UUID | None:
 def _read_deployment_results(
     deployment_results: Sequence[Any] | None,
 ) -> list[_ResultView]:
-    """Read ``deployment_results`` into the shape the derivation folds."""
+    """Read ``deployment_results`` into the shape the derivation folds.
+
+    Every stored entry produces exactly one view, including one that cannot be
+    read as an entry at all: it is counted under
+    :data:`UNREADABLE_RESULT_OUTCOME`, which the fold treats as a failure. The
+    alternative — skipping it — silently shrinks the account of the source's
+    deployments, so ``['a', 'b', 'c']`` would derive ``COMPLETED`` with nothing
+    accounted for (spec SC-003).
+    """
     views: list[_ResultView] = []
     for index, entry in enumerate(deployment_results or ()):
         if isinstance(entry, CloneDeploymentResult):
@@ -387,7 +430,12 @@ def _read_deployment_results(
             continue
         if not isinstance(entry, dict):
             logger.warning(
-                "Ignoring malformed deployment_results[{}] entry: {!r}", index, entry
+                "Counting unreadable deployment_results[{}] entry as a failure: {!r}",
+                index,
+                entry,
+            )
+            views.append(
+                _ResultView(outcome=UNREADABLE_RESULT_OUTCOME, restore_id=None)
             )
             continue
         views.append(
@@ -399,13 +447,18 @@ def _read_deployment_results(
     return views
 
 
-def _read_clone_errors(clone_errors: Sequence[Any] | None) -> list[CloneError]:
+def read_clone_errors(clone_errors: Sequence[Any] | None) -> list[CloneError]:
     """Read ``clone_errors``, defaulting a missing ``fatal`` flag to ``False``.
 
     Defaulting to non-fatal is the safe direction: a writer that forgot the flag
     leaves a stuck clone visibly non-terminal (recoverable through the FR-008
     escape hatch), whereas defaulting to fatal would rewrite a finished clone's
     outcome — the one thing resolution rule 1 exists to prevent.
+
+    Public because the GraphQL projection reads the column through this very
+    function: a read path stricter than the derivation would make one entry
+    missing its ``fatal`` flag fail the *whole* clone query, so the operator
+    could no longer see the record the entry is on.
     """
     entries: list[CloneError] = []
     for index, entry in enumerate(clone_errors or ()):
@@ -516,7 +569,7 @@ def derive_environment_clone_status(
     Returns:
         The derived status. Never persisted.
     """
-    errors = _read_clone_errors(clone_errors)
+    errors = read_clone_errors(clone_errors)
     if any(error.fatal for error in errors):
         return EnvironmentCloneStatus.FAILED
 
@@ -696,6 +749,33 @@ async def _derive_statuses(
     }
 
 
+def _capture_could_still_be_awaited(
+    environment_backup: EnvironmentBackup | None, now: datetime
+) -> bool:
+    """Is the clone flow still plausibly waiting for this capture?
+
+    The FR-008 guard's whole justification is "a flow is waiting on this row",
+    and the flow waits for :data:`CAPTURE_IN_FLIGHT_GUARD_SECONDS` before giving
+    up. Past that the answer is no, whatever the capture's constituents say —
+    which is what keeps the guard from becoming permanent for a capture that can
+    never terminalise on its own (a constituent whose dispatch failed stays
+    ``PENDING`` forever, and the derivation reads the capture as non-terminal
+    forever with it).
+
+    A capture whose ``created_on`` is not set yet has not been through the
+    database (it is a server default), so it belongs to the transaction in
+    flight: brand new, and protected.
+    """
+    if environment_backup is None:
+        return False
+    created_on = environment_backup.created_on
+    if created_on is None:
+        return True
+    if created_on.tzinfo is None:
+        created_on = created_on.replace(tzinfo=timezone.utc)
+    return (now - created_on).total_seconds() < CAPTURE_IN_FLIGHT_GUARD_SECONDS
+
+
 async def guard_no_clone_capturing_environment_backup(
     environment_backup_id: UUID, uow: UnitOfWork
 ) -> dict[UUID, bool]:
@@ -716,6 +796,19 @@ async def guard_no_clone_capturing_environment_backup(
     would recreate exactly the wedge D9 exists to prevent — most visibly on the
     source-deletion cascade, which must never be blocked by a record it has
     already resolved.
+
+    **The window is bounded in time as well as in state** (see
+    :data:`CAPTURE_IN_FLIGHT_GUARD_SECONDS`), because "the capture is
+    non-terminal" is not a self-healing condition. A constituent whose
+    ``EXECUTE_BACKUP`` dispatch failed — or that no worker ever picked up —
+    stays ``PENDING`` with nothing to move it, so the capture derives
+    non-terminal forever and the clone with it. Refusing on state alone
+    therefore produced the permanent wedge FR-008's own escape hatch exists to
+    prevent: the source environment stayed occupied for every environment-level
+    operation *and* ``update_environment``, the backing capture could not be
+    deleted, and there was no created environment to discard. Once the flow's
+    own budget is spent the flow has given up, so deletion can no longer pull
+    anything out from under it and the escape hatch opens.
 
     This is also the **snapshot point** for how each referencing clone stood
     when the operator asked for the deletion, and the return value is not a
@@ -744,17 +837,32 @@ async def guard_no_clone_capturing_environment_backup(
         clone_id: status in TERMINAL_ENVIRONMENT_CLONE_STATUSES
         for clone_id, status in statuses.items()
     }
+    now = datetime.now(timezone.utc)
     for clone in clones:
         if terminality[clone.id]:
             continue
         capture_status = derive_clone_capture_status(clone.environment_backup)
         if (
-            capture_status is not None
-            and capture_status not in TERMINAL_ENVIRONMENT_OPERATION_STATUSES
+            capture_status is None
+            or capture_status in TERMINAL_ENVIRONMENT_OPERATION_STATUSES
         ):
-            raise EnvironmentBackupInUseByCloneError(
-                clone_id=str(clone.id), clone_name=clone.name
+            continue
+        if not _capture_could_still_be_awaited(clone.environment_backup, now):
+            # The escape hatch, opened: nothing is waiting on this capture any
+            # more, so releasing it is the only way the clone (and its source)
+            # can ever come unstuck.
+            logger.warning(
+                "clone_capture_guard_expired environment_clone_id={} "
+                "environment_backup_id={} capture_status={} allowing the "
+                "deletion so the clone can be released",
+                clone.id,
+                environment_backup_id,
+                capture_status.value,
             )
+            continue
+        raise EnvironmentBackupInUseByCloneError(
+            clone_id=str(clone.id), clone_name=clone.name
+        )
     return terminality
 
 
@@ -876,10 +984,16 @@ async def detach_clones_from_created_environment(
 class SourceCloneResolution(NamedTuple):
     """What became of a deleted source environment's clone records."""
 
-    #: Terminal clones kept as provenance, with ``source_environment_id`` nulled.
+    #: Clones kept as provenance, with ``source_environment_id`` nulled. Every
+    #: terminal clone, plus every non-terminal clone that had already created an
+    #: environment (those also get the fatal marker counted in :attr:`failed`).
     kept: int
-    #: Non-terminal clones deleted outright.
+    #: Non-terminal clones deleted outright — the ones that never materialised
+    #: anything, so there is no provenance to keep.
     deleted: int
+    #: How many of :attr:`kept` were non-terminal and were therefore failed by
+    #: the deletion (a subset of ``kept``, not a third bucket).
+    failed: int = 0
 
 
 async def resolve_clones_of_deleted_source_environment(
@@ -887,50 +1001,81 @@ async def resolve_clones_of_deleted_source_environment(
 ) -> SourceCloneResolution:
     """Settle a source environment's clone records before it goes (D9).
 
-    Two outcomes, and the split is the whole point:
+    Two outcomes, and the split is on **what the clone created**, not on its
+    status alone:
 
-    * a **terminal** clone survives with ``source_environment_id`` nulled. Its
-      created environment is an ordinary environment that outlives the source,
-      and that environment's provenance must not die with it —
-      ``source_environment_name`` keeps the record readable (which is why the FK
-      is nullable at all).
-    * a **non-terminal** clone is deleted outright. There is no outcome worth
-      keeping, its capture is about to be cascaded away with the environment,
-      and the clone flow tolerates its row vanishing mid-flight (the same
-      contract ``execute_restore_workflow`` has with ``RestoreNotFoundError``).
+    * a clone that has a created environment — terminal or not — survives with
+      ``source_environment_id`` nulled. That environment is an ordinary
+      environment which outlives the source, and its provenance must not die
+      with it (``source_environment_name`` keeps the record readable, which is
+      why the FK is nullable at all). A clone still *building* that environment
+      also gets the fatal :data:`CLONE_STEP_SOURCE_ENVIRONMENT_DELETED` marker:
+      its capture is about to be cascaded away with the source, so it can never
+      progress again, and without the marker the record would sit
+      ``IN_PROGRESS`` forever — non-terminal, still occupying its created
+      environment, still refusing the FR-008 guard below.
+    * a **non-terminal** clone that never created an environment is deleted
+      outright. There is nothing to be the provenance *of*, no outcome worth
+      keeping, and the clone flow tolerates its row vanishing mid-flight (the
+      same contract ``execute_restore_workflow`` has with
+      ``RestoreNotFoundError``).
+
+    Deleting a clone that had already created an environment was the bug this
+    split fixes: it destroyed the provenance of a live environment, and the
+    backup cascade behind it then deleted the constituent backups *and the
+    in-flight cross-target restores* of counterparts nothing was left to
+    attribute.
 
     **Must run before the environment's backups cascade.** Deleting those
     backups goes through :func:`guard_no_clone_capturing_environment_backup`,
-    and a clone whose capture is still in flight would refuse it — wedging the
-    deletion of the very environment that owns both rows. Settling the clones
-    first means the guard has nothing left to refuse.
+    and a non-terminal clone whose capture is still in flight would refuse it —
+    wedging the deletion of the very environment that owns both rows. Settling
+    the clones first means the guard has nothing left to refuse: the deleted
+    ones are gone, and the kept ones are all terminal by the time it runs.
 
     Returns:
-        How many records were kept and how many were deleted.
+        How many records were kept, how many were deleted, and how many of the
+        kept ones the deletion failed.
     """
     clones = await uow.environment_clones.get_by_source_environment_id(environment_id)
     if not clones:
-        return SourceCloneResolution(kept=0, deleted=0)
+        return SourceCloneResolution(kept=0, deleted=0, failed=0)
     statuses = await _derive_statuses(clones, uow)
     kept = 0
     deleted = 0
+    failed = 0
     for clone in clones:
-        if statuses[clone.id] in TERMINAL_ENVIRONMENT_CLONE_STATUSES:
-            clone.source_environment_id = None
-            clone.source_environment = None
-            await uow.environment_clones.save(clone)
-            kept += 1
+        terminal = statuses[clone.id] in TERMINAL_ENVIRONMENT_CLONE_STATUSES
+        if not terminal and clone.created_environment_id is None:
+            await uow.environment_clones.delete(clone)
+            deleted += 1
             continue
-        await uow.environment_clones.delete(clone)
-        deleted += 1
+        if not terminal:
+            _append_clone_error(
+                clone,
+                CloneError(
+                    step=CLONE_STEP_SOURCE_ENVIRONMENT_DELETED,
+                    error=(
+                        f"the source environment {environment_id} was deleted "
+                        "while the clone was still building"
+                    ),
+                    fatal=True,
+                ),
+            )
+            failed += 1
+        clone.source_environment_id = None
+        clone.source_environment = None
+        await uow.environment_clones.save(clone)
+        kept += 1
     logger.info(
         "clone_source_environment_deleted environment_id={} clones_kept={} "
-        "clones_deleted={}",
+        "clones_deleted={} clones_failed={}",
         environment_id,
         kept,
         deleted,
+        failed,
     )
-    return SourceCloneResolution(kept=kept, deleted=deleted)
+    return SourceCloneResolution(kept=kept, deleted=deleted, failed=failed)
 
 
 # ---------------------------------------------------------------------------

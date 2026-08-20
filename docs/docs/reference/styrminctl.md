@@ -186,8 +186,11 @@ within `--cluster` (default `default`) or `--cluster-id`. Passing both a
 name and `--id` — or neither — is an error.
 
 `list` is scoped by **source**. A clone-born environment's own provenance
-is an entry in its *source's* list, not in its own; read it from the
-clone record or the environment's `clonedFrom` field.
+is an entry in its *source's* list, not in its own: run `env-clones list`
+against the **source** environment, or `env-clones get <id>` on the clone
+record itself. (The reverse lookup — from the created environment back to
+the clone that made it — is the `Environment.clonedFrom` field, which the
+UI and the GraphQL API expose; no `styrminctl` command reads it.)
 
 #### `create` options
 
@@ -208,7 +211,9 @@ rejected by the CLI before the mutation is sent.
 Omitting `--deployment` and passing an **empty** selection are different
 requests. Omit it for "every eligible deployment"; pass Cyclopts'
 generated `--empty-deployment` for "no applications at all", which clones
-the environment's configuration only and reports `COMPLETED`.
+the environment's configuration only and settles on `COMPLETED` once that
+environment exists. `env-clones get` tells the two apart: `all eligible`
+versus `none (configuration only)`.
 
 `--config-override` is an `UpdateEnvironmentInput` payload, so `envVars`
 is a list of `{name, value}` entries rather than a map. camelCase keys
@@ -257,13 +262,12 @@ styrminctl env-clones get <environment-clone-id>
 `FAILED`** — `PARTIAL` with an explicit warning, because you asked for a
 copy of an environment and did not get every deployment you selected.
 
-The status is derived on every read, so a clone can already be terminal
-when the mutation returns: a clone whose every selected deployment was
-skipped up front, or one that failed at registration, is finished before
-there is anything to wait for. `create` therefore checks the status twice
-— once right after the mutation, and again after `--wait` — and exits
-non-zero at the first terminal-and-not-`COMPLETED` reading rather than
-reporting success for a clone that does not exist.
+The status is derived on every read, and the first reading — the one the
+mutation returns — is always non-terminal: `PENDING`, or `IN_PROGRESS`
+once anything has been recorded (an up-front skip counts). Even an
+all-skipped, configuration-only clone reads `IN_PROGRESS` until its
+environment exists. So a terminal status only ever comes from polling:
+`create` reaches it with `--wait`, and `get` shows it afterwards.
 
 Without `--wait`, a clone that is still working exits 0 once it has been
 accepted. As with `env-backups`, a `--wait` that runs out of `--max-wait`
