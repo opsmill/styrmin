@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, Sequence
 
 import httpx
 import kr8s.asyncio
@@ -669,6 +669,47 @@ async def instanced_deployment_ids(
         for deployment in deployments
         if deployment.application_instance is not None
     }
+
+
+async def source_deployment_state(
+    client: StyrminClient, deployment_ids: Sequence[str]
+) -> dict[str, dict[str, Any]]:
+    """The declared state of each source deployment a clone must leave alone.
+
+    SC-002 says the source is *byte-identical* before and after, and a set of
+    deployment ids cannot see what that sentence is actually protecting against:
+    a cross-target restore whose target resolved to the source would flip that
+    deployment out of ``running``, delete and rebuild its namespace, and hand
+    the source's services back with whatever names the counterpart wanted —
+    all with the id roster unchanged.
+
+    ``parameters`` is deliberately absent: ``GetDeployment`` does not project
+    it, and widening an SDK query is a production change. The source-vs-clone
+    parameter comparison lives in the functional propagation suite
+    (``test_the_counterpart_row_reproduces_the_source_declared_state``).
+    """
+    state: dict[str, dict[str, Any]] = {}
+    for deployment_id in deployment_ids:
+        deployment = await client.deployments.get(deployment_id)
+        driver_version = deployment.application_driver_version
+        instance = deployment.application_instance
+        state[str(deployment.id)] = {
+            "name": deployment.name,
+            "status": deployment.status,
+            "config": deployment.config,
+            "application_version": deployment.application_version,
+            "driver_version_id": str(deployment.application_driver_version_id),
+            "driver_version": driver_version.version,
+            "driver_fingerprint": (
+                driver_version.content_hash or driver_version.source_commit_sha
+            ),
+            "instance_id": str(instance.id) if instance is not None else None,
+            "services": sorted(
+                (service.driver_service_name, service.resolved_name)
+                for service in deployment.deployed_services
+            ),
+        }
+    return state
 
 
 async def wait_for_constituent_outcomes(
@@ -1379,6 +1420,15 @@ async def test_environment_clone_lifecycle(
             "both source deployments must carry an active instance before the "
             f"clone, got {source_deployments_before!r}"
         )
+        source_state_before = await source_deployment_state(
+            client, (primary_deployment_id, excluded_deployment_id)
+        )
+        assert all(
+            entry["status"] == "running" for entry in source_state_before.values()
+        ), (
+            "the SC-002 baseline must be taken with both source deployments "
+            f"settled, otherwise the comparison is meaningless: {source_state_before!r}"
+        )
 
         # 3. One operation clones the environment: only the primary is selected
         #    (US2), the override injects an env var and clears the captured
@@ -1522,6 +1572,48 @@ async def test_environment_clone_lifecycle(
             await instanced_deployment_ids(client, scenario_environment_id)
         ) == source_deployments_before, (
             "cloning must not create or delete a source deployment (SC-002)"
+        )
+        # ...and the roster is only the shallow half of "byte-identical". Each
+        # source deployment's own declared state — its state machine position,
+        # its config, its driver pin and fingerprint, its active instance and
+        # its resolved service names — must be exactly what it was.
+        assert (
+            await source_deployment_state(
+                client, (primary_deployment_id, excluded_deployment_id)
+            )
+        ) == source_state_before, (
+            "cloning mutated a source deployment's declared state (SC-002); "
+            f"expected {source_state_before!r}"
+        )
+        # The source's *health*, asserted where a failure can actually fail the
+        # test. This used to exist only in the ``finally`` block below, wrapped
+        # in ``suppress(Exception)`` for the UI driver's page hand-back, so a
+        # source left in RESTORING or FAILED by a mis-targeted cross-target
+        # restore could not be reported by this node at all.
+        scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=primary_deployment_id,
+            timeout=DEPLOYMENT_RUNNING_TIMEOUT_SECONDS,
+        )
+        # The source's *data*, which is what a restore aimed at the source
+        # namespace would silently roll back: the post-capture write from step 5
+        # must still be there. A source rebuilt from the capture would read back
+        # around ``marker_count``, far below this.
+        async with portforward_simple_app(kubeconfig_path, primary_namespace) as port:
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.get(
+                    f"http://localhost:{port}/count", timeout=10
+                )
+        assert resp.status_code == 200, (
+            "the source app must still serve authenticated writes after the "
+            f"clone (SC-002); got {resp.status_code} {resp.text!r}"
+        )
+        source_count_after = resp.json()["counter"]
+        assert source_count_after > post_capture_count, (
+            "the clone rolled the source's data back to the capture point "
+            f"(SC-002): expected {post_capture_count + 1} (the +1 is this read "
+            f"itself), got {source_count_after} with the pre-capture marker at "
+            f"{marker_count}"
         )
         source_backups_after = {
             str(backup.id)
@@ -1716,7 +1808,9 @@ async def test_environment_clone_lifecycle(
             await client.deployments.delete(excluded_deployment_id)
         # The UI driver's page is session-scoped and sibling tests act on
         # whatever page is open, so hand it back on the source environment's
-        # primary deployment.
+        # primary deployment. Teardown only — the load-bearing source health
+        # check is the un-suppressed one in step 7; this one exists so a
+        # cleanup timeout cannot mask the test's own failure.
         scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
         with suppress(Exception):
             await scenario_driver.wait_for_deployment_running(

@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Sequence
+from typing import Any, NamedTuple, Sequence
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -41,11 +42,14 @@ from styrmin_backend.api.definitions.backup.environment_clone import (
     EnvironmentCloneStatus as EnvironmentCloneStatusType,
 )
 from styrmin_backend.db.models import (
+    ApplicationDriver,
     ApplicationInstance,
     Backup,
     BackupStatus,
     Cluster,
+    DeployedService,
     Deployment,
+    DeploymentState,
     Environment,
     EnvironmentBackup,
     EnvironmentClone,
@@ -955,16 +959,30 @@ async def _run_clone_flow(
     return restore_calls
 
 
+class _Materialised(NamedTuple):
+    """A materialised clone plus what its fan-out asked ``create_restore`` for.
+
+    The restore calls are part of the result rather than dropped on the floor:
+    ``create_restore`` is the one boundary this harness stubs, so its arguments
+    are the *only* evidence that a cross-target restore targets the counterpart
+    rather than the source it was captured from — and ``target_deployment_id``
+    used to be pinned only incidentally, by a ``KeyError`` inside the stub.
+    """
+
+    clone: EnvironmentClone
+    restore_calls: list[dict[str, Any]]
+
+
 async def _clone_and_materialise(
     fresh_client: AsyncClient,
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
     variables: dict[str, Any],
-) -> EnvironmentClone:
+) -> _Materialised:
     """Register a clone through GraphQL and run it to its counterparts.
 
     Returns the clone record re-read from the database with everything the flow
-    wrote on it.
+    wrote on it, alongside every ``create_restore`` call the fan-out made.
     """
     data = await gql(fresh_client, "clone_environment", variables)
     clone_id = UUID(data["cloneEnvironment"]["id"])
@@ -974,7 +992,7 @@ async def _clone_and_materialise(
     assert registered.environment_backup_id is not None
     await _complete_capture_constituents(session, registered.environment_backup_id)
 
-    await _run_clone_flow(session, monkeypatch, clone_id)
+    restore_calls = await _run_clone_flow(session, monkeypatch, clone_id)
 
     session.expire_all()
     materialised = await session.get(EnvironmentClone, clone_id)
@@ -982,13 +1000,13 @@ async def _clone_and_materialise(
     assert materialised.created_environment_id is not None, (
         f"the clone never materialised an environment: {materialised.clone_errors}"
     )
-    return materialised
+    return _Materialised(clone=materialised, restore_calls=restore_calls)
 
 
-async def _counterpart_instance_context(
+async def _counterpart_deployment(
     session: AsyncSession, clone: EnvironmentClone, deployment_name: str
-) -> dict[str, Any]:
-    """The first instance context of a cloned deployment's counterpart."""
+) -> Deployment:
+    """The counterpart ``Deployment`` row a cloned source deployment produced."""
     entries = {
         entry["deployment_name"]: entry for entry in clone.deployment_results or []
     }
@@ -999,12 +1017,32 @@ async def _counterpart_instance_context(
     )
     assert counterpart is not None
     assert counterpart.environment_id == clone.created_environment_id
+    return counterpart
+
+
+async def _counterpart_instance_context(
+    session: AsyncSession, clone: EnvironmentClone, deployment_name: str
+) -> dict[str, Any]:
+    """The first instance context of a cloned deployment's counterpart."""
+    counterpart = await _counterpart_deployment(session, clone, deployment_name)
     assert counterpart.active_application_instance_id is not None
     instance = await session.get(
         ApplicationInstance, counterpart.active_application_instance_id
     )
     assert instance is not None and instance.context is not None
     return instance.context
+
+
+async def _counterpart_service_names(
+    session: AsyncSession, deployment_id: UUID
+) -> set[tuple[str, str]]:
+    """``(driver_service_name, resolved_name)`` for one deployment's services."""
+    result = await session.exec(
+        select(DeployedService).where(DeployedService.deployment_id == deployment_id)
+    )
+    return {
+        (service.driver_service_name, service.resolved_name) for service in result.all()
+    }
 
 
 @pytest.mark.asyncio
@@ -1034,7 +1072,7 @@ async def test_clone_environment_creates_the_environment_from_the_merged_config(
     # map, after which attribute access on ``source`` would lazy-load.
     source_id = source.id
 
-    clone = await _clone_and_materialise(
+    clone, _ = await _clone_and_materialise(
         fresh_client,
         session,
         monkeypatch,
@@ -1114,7 +1152,7 @@ async def test_cloned_counterparts_first_instance_context_uses_the_merged_config
     await seed_running_deployment(session, environment=source, adv=adv, name="infrahub")
     source_id = source.id
 
-    clone = await _clone_and_materialise(
+    clone, _ = await _clone_and_materialise(
         fresh_client,
         session,
         monkeypatch,
@@ -1181,7 +1219,7 @@ async def test_clone_environment_without_an_override_copies_the_captured_config(
     await seed_running_deployment(session, environment=source, adv=adv, name="infrahub")
     source_id = source.id
 
-    clone = await _clone_and_materialise(
+    clone, _ = await _clone_and_materialise(
         fresh_client,
         session,
         monkeypatch,
@@ -1200,6 +1238,377 @@ async def test_clone_environment_without_an_override_copies_the_captured_config(
 
     context = await _counterpart_instance_context(session, clone, "infrahub")
     assert _set_fields(context["environment"]["config"]) == captured
+
+
+# ---------------------------------------------------------------------------
+# FR-005 / SC-002 — the counterpart IS the source, and the source is untouched
+# ---------------------------------------------------------------------------
+#
+# FR-005's own verification note asks for exactly this ("propagation test
+# comparing source vs clone records") and nothing did it: the unit suite records
+# every ``deploy_application`` kwarg but asserts only the three the release-name
+# work introduced, and the functional suite asserted only the *environment*
+# config. So a ``_resolve_pinned_driver_version`` that ignored the captured pin
+# and resolved latest-wins, or a fan-out that dropped
+# ``service_name_overrides=snapshot.service_name_overrides``, left the whole
+# fast suite green.
+#
+# The three tests below share one source fixture, because they are three views
+# of the same materialisation: what the counterpart row inherited (FR-005), what
+# the cross-target restore was pointed at (SC-002), and what a later
+# environment-config fan-out does to the release name the counterpart adopted
+# (``_resolve_release_reference`` rule 2 — research D2).
+
+
+async def _seed_pinned_clone_source(
+    session: AsyncSession, environment_name: str
+) -> dict[str, Any]:
+    """A source deployment whose pin is deliberately **not** the latest version.
+
+    Three versions on one driver, all declaring the same parameters and
+    services so a mis-resolution produces a *wrong pin* rather than an early
+    validation error (an error would fail the clone for the wrong reason and
+    make the pin assertion vacuous):
+
+    * ``decoy`` — same version string as the pin, different provenance
+      fingerprint (ADR-0053 identity). Seeded first so it is what a
+      fingerprint-blind ``candidates[0]`` would pick.
+    * ``pinned`` — what the source is actually bound to.
+    * ``newer`` — a higher version string, i.e. what latest-wins resolution
+      would pick.
+    """
+    source = await seed_environment(session, name=environment_name)
+    source.config = {"fqdn_suffix": "prod.example.com"}
+    session.add(source)
+    await session.commit()
+
+    parameters = [{"name": "license", "label": "License", "kind": "string"}]
+    services = [
+        {
+            "name": "simple-app",
+            "kind": "http",
+            "scope": "internal",
+            "port": 8080,
+            "component": "web",
+        }
+    ]
+
+    decoy = await seed_application_driver_version(
+        session,
+        driver_name=f"{environment_name}-driver",
+        version="1.2.0",
+        source_commit_sha="b" * 40,
+    )
+    driver_id = decoy.application_driver_id
+    driver = await session.get(ApplicationDriver, driver_id)
+    assert driver is not None
+    pinned = await seed_application_driver_version(
+        session, driver=driver, version="1.2.0", content_hash="a" * 64
+    )
+    newer = await seed_application_driver_version(
+        session, driver=driver, version="9.9.9", content_hash="c" * 64
+    )
+    for adv in (decoy, pinned, newer):
+        adv.parameters = parameters
+        adv.services = services
+        session.add(adv)
+        await session.commit()
+
+    deployment, instance = await seed_running_deployment(
+        session,
+        environment=source,
+        adv=pinned,
+        name="infrahub",
+        config={"db_size": "20Gi", "env_vars": {"DEPLOY_SCOPED": "yes"}},
+        parameters={"license": "ent"},
+    )
+    # The source's resolved service name differs from the driver default, which
+    # is the only thing that makes ``service_name_overrides`` observable: with
+    # the default name a dropped override renders identically.
+    session.add(
+        DeployedService(
+            driver_service_name="simple-app",
+            resolved_name="renamed-app",
+            kind="http",
+            scope="internal",
+            port=8080,
+            component="web",
+            deployment_id=deployment.id,
+            environment_id=source.id,
+        )
+    )
+    await session.commit()
+
+    # The realistic release name for a source deployment, so a counterpart that
+    # recomputed its own would be observably different (see the release-name
+    # stickiness test below).
+    context = dict(instance.context or {})
+    context["instance"] = {
+        **context["instance"],
+        "deployment_id": str(deployment.id),
+        "namespace": f"styrmin-{deployment.id}",
+        "release_reference": f"styrmin-{deployment.id}",
+    }
+    instance.context = context
+    session.add(instance)
+    await session.commit()
+
+    return {
+        "source_id": source.id,
+        "deployment_id": deployment.id,
+        "pinned_id": pinned.id,
+        "decoy_id": decoy.id,
+        "newer_id": newer.id,
+        "pinned_chart_id": pinned.helm_chart_id,
+        "release_reference": f"styrmin-{deployment.id}",
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_counterpart_row_reproduces_the_source_declared_state(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+) -> None:
+    """FR-005: config, parameters and the **pinned** driver version, source vs clone.
+
+    Every assertion here compares the counterpart row against the source row
+    re-read from the database, not against a literal, so this is the
+    source-vs-clone comparison FR-005 asks for rather than a restatement of the
+    seed. The driver pin is the sharp end: the source is bound to a version that
+    is neither the newest on its driver nor the first candidate with its version
+    string, so resolving latest-wins **or** ignoring the provenance fingerprint
+    produces a different id here.
+    """
+    seeded = await _seed_pinned_clone_source(session, "prod-fr005")
+
+    clone, _ = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {
+            "environmentId": str(seeded["source_id"]),
+            "name": "prod-fr005-rehearsal",
+        },
+    )
+
+    counterpart = await _counterpart_deployment(session, clone, "infrahub")
+    source_row = await session.get(Deployment, seeded["deployment_id"])
+    assert source_row is not None
+
+    # --- the captured driver version, not the latest one -------------------
+    assert counterpart.application_driver_version_id == (
+        source_row.application_driver_version_id
+    ), (
+        "the counterpart must be bound to the driver version the capture "
+        "recorded (FR-005)"
+    )
+    assert counterpart.application_driver_version_id == seeded["pinned_id"]
+    assert counterpart.application_driver_version_id != seeded["newer_id"], (
+        "latest-wins resolution instead of the captured pin"
+    )
+    assert counterpart.application_driver_version_id != seeded["decoy_id"], (
+        "the version string matched but the provenance fingerprint was ignored "
+        "(ADR-0053 identity)"
+    )
+
+    # --- application version, config and parameters ------------------------
+    assert counterpart.application_version == source_row.application_version
+    assert counterpart.config == source_row.config
+    assert counterpart.config == {
+        "db_size": "20Gi",
+        "env_vars": {"DEPLOY_SCOPED": "yes"},
+    }
+    assert counterpart.parameters == source_row.parameters
+    assert counterpart.parameters == {"license": "ent"}
+
+    # --- resolved service names -------------------------------------------
+    # Sibling FQDNs are built on these, and a counterpart is created in a
+    # different environment so the source's overridden name is free there:
+    # dropping the overrides silently renames the service to the driver default.
+    assert (
+        await _counterpart_service_names(session, counterpart.id)
+    ) == await _counterpart_service_names(session, source_row.id)
+    assert (await _counterpart_service_names(session, counterpart.id)) == {
+        ("simple-app", "renamed-app")
+    }
+
+    # --- and the pin reaches what actually gets rendered -------------------
+    # Each seeded driver version owns its own chart row, so the chart id in the
+    # counterpart's first instance context is independent evidence that the pin
+    # was honoured all the way through context resolution.
+    context = await _counterpart_instance_context(session, clone, "infrahub")
+    assert context["app"]["helm"]["chart"]["id"] == str(seeded["pinned_chart_id"])
+    assert context["parameters"] == {"license": "ent"}
+    assert {service["resolved_name"] for service in context["deployed_services"]} == {
+        "renamed-app"
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_cross_target_restore_targets_the_counterpart_not_the_source(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+) -> None:
+    """SC-002: the fan-out's restore must never name the source as its target.
+
+    ``create_restore`` is the boundary this harness stubs, so its arguments are
+    the only place the target is observable here — and a restore pointed at the
+    source's namespace or deployment would wipe and rebuild the *source*
+    namespace from the capture, which is the worst failure this feature can
+    have. Previously the stub collected the calls and the harness threw them
+    away, leaving only ``target_deployment_id``'s presence pinned incidentally
+    by a ``KeyError``.
+    """
+    seeded = await _seed_pinned_clone_source(session, "prod-restore-target")
+
+    clone, restore_calls = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {
+            "environmentId": str(seeded["source_id"]),
+            "name": "prod-restore-target-rehearsal",
+        },
+    )
+
+    counterpart = await _counterpart_deployment(session, clone, "infrahub")
+    source_deployment_id = seeded["deployment_id"]
+
+    assert len(restore_calls) == 1, (
+        f"one cross-target restore per cloned deployment; got {restore_calls!r}"
+    )
+    call = restore_calls[0]
+    assert call["target_deployment_id"] == counterpart.id
+    assert call["target_namespace"] == f"styrmin-{counterpart.id}"
+    # Spelled out as inequalities too: the assertions above would also hold for
+    # a stub that echoed whatever it was given, but these name the mistake.
+    assert call["target_deployment_id"] != source_deployment_id
+    assert call["target_namespace"] != f"styrmin-{source_deployment_id}"
+
+    # The data comes from the source's own constituent backup, and the restore
+    # record the flow attributed on the entry is the one it created.
+    assert clone.environment_backup_id is not None
+    result = await session.exec(
+        select(Backup).where(
+            Backup.environment_backup_id == clone.environment_backup_id
+        )
+    )
+    constituents = list(result.all())
+    assert [call["backup_id"]] == [backup.id for backup in constituents]
+
+    entry = {
+        result["deployment_name"]: result for result in (clone.deployment_results or [])
+    }["infrahub"]
+    restore = await session.get(Restore, UUID(entry["restore_id"]))
+    assert restore is not None
+    assert restore.target_namespace == f"styrmin-{counterpart.id}"
+
+
+@pytest.mark.asyncio
+async def test_a_post_clone_config_update_keeps_the_counterpart_release_name(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+) -> None:
+    """``_resolve_release_reference`` rule 2, on the only deployment it can bite.
+
+    A deployment's Helm release name is chosen once and must never change:
+    renaming it makes the next Flux reconciliation *install* a second release
+    over objects Helm already owns. For an ordinary deployment rule 2 (inherit
+    the active instance's value) and rule 3 (compute ``styrmin-<deployment
+    id>``) return the same string, so a broken inheritance chain is
+    unobservable. A clone counterpart is the exception: it adopted the
+    **source's** release name, so regenerating its context — which is exactly
+    what an environment-config update fans out and does — must not recompute
+    one from its own id.
+
+    The fan-out here is the real one, driven through ``updateEnvironment``.
+    """
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+
+    seeded = await _seed_pinned_clone_source(session, "prod-release-sticky")
+
+    clone, _ = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {
+            "environmentId": str(seeded["source_id"]),
+            "name": "prod-release-sticky-rehearsal",
+        },
+    )
+    created_environment_id = clone.created_environment_id
+    assert created_environment_id is not None
+
+    counterpart = await _counterpart_deployment(session, clone, "infrahub")
+    counterpart_id = counterpart.id
+    first_instance_id = counterpart.active_application_instance_id
+    assert first_instance_id is not None
+
+    adopted = seeded["release_reference"]
+    assert adopted != f"styrmin-{counterpart_id}", (
+        "the counterpart must have adopted a release name it could not have "
+        "recomputed, otherwise this test cannot fail"
+    )
+    context = await _counterpart_instance_context(session, clone, "infrahub")
+    assert context["instance"]["release_reference"] == adopted
+    assert context["instance"]["namespace"] == f"styrmin-{counterpart_id}"
+
+    # Settle the clone so the environment-level guard releases the created
+    # environment (research D8), and take the counterpart out of RESTORING so
+    # the fan-out does not skip it. Both are what the cross-target restore
+    # landing would have done; it is stubbed in this harness.
+    result = await session.exec(
+        select(Restore).where(Restore.target_namespace == f"styrmin-{counterpart_id}")
+    )
+    for restore in result.all():
+        restore.status = RestoreStatus.COMPLETED
+        session.add(restore)
+        await session.commit()
+    counterpart.status = DeploymentState.RUNNING
+    session.add(counterpart)
+    await session.commit()
+
+    # The fan-out proper: a new environment config regenerates every
+    # deployment's context, with no release reference supplied anywhere.
+    await gql(
+        fresh_client,
+        "update_environment",
+        {
+            "environmentId": str(created_environment_id),
+            "input": {"envVars": [{"name": "POST_CLONE_TWEAK", "value": "applied"}]},
+        },
+    )
+
+    session.expire_all()
+    refreshed = await session.get(Deployment, counterpart_id)
+    assert refreshed is not None
+    assert refreshed.active_application_instance_id != first_instance_id, (
+        "the config update did not regenerate the counterpart's context, so "
+        "this test would pass without exercising the release-name resolution"
+    )
+    regenerated = await session.get(
+        ApplicationInstance, refreshed.active_application_instance_id
+    )
+    assert regenerated is not None and regenerated.context is not None
+    assert regenerated.context["instance"]["release_reference"] == adopted, (
+        "the regenerated context renamed the counterpart's Helm release; Flux "
+        "would install a second release over Helm-owned objects"
+    )
+    # The namespace is emphatically *not* sticky — it is always the
+    # deployment's own — so the two stay divergent across regeneration.
+    assert regenerated.context["instance"]["namespace"] == (f"styrmin-{counterpart_id}")
+    # ...and the update the fan-out was reacting to did land in the context.
+    assert regenerated.context["environment"]["config"]["env_vars"] == {
+        "POST_CLONE_TWEAK": "applied"
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2093,7 +2502,7 @@ async def test_a_terminal_clone_accounts_for_every_deployment_exactly_once(
     await session.commit()
     source_id = source.id
 
-    clone = await _clone_and_materialise(
+    clone, _ = await _clone_and_materialise(
         fresh_client,
         session,
         monkeypatch,
