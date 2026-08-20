@@ -64,6 +64,7 @@ from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
 from styrmin_backend.services.backup.clone import (
     CLONE_REASON_CAPTURE_FAILED,
+    CLONE_REASON_CAPTURE_UNUSABLE,
     CLONE_REASON_DRIVER_VERSION_GONE,
     CLONE_REASON_INTERNAL,
     CLONE_REASON_NOT_ELIGIBLE,
@@ -72,6 +73,7 @@ from styrmin_backend.services.backup.clone import (
     CLONE_STEP_CAPTURE_FAILED,
     CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
     CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
+    CLONE_STEP_ENVIRONMENT_CREATION_FAILED,
     CLONE_STEP_TARGET_NAME_TAKEN,
     TERMINAL_ENVIRONMENT_CLONE_STATUSES,
     EnvironmentCloneDeploymentOutcome,
@@ -1191,6 +1193,158 @@ async def test_target_name_lost_to_a_race_ends_the_clone_failed(
         derive_environment_clone_status_from_record(refreshed)
         is EnvironmentCloneStatus.FAILED
     )
+
+
+# ---------------------------------------------------------------------------
+# The fatal environment-creation branches (T4)
+# ---------------------------------------------------------------------------
+#
+# ``_create_cloned_environment`` has four exits that end the clone without an
+# environment. Only the TOCTOU one (above) was reached by a test; the other
+# three were dead code as far as the suite was concerned, even though they are
+# the handlers that stop a clone from sitting ``IN_PROGRESS`` forever with
+# ``pending`` attribution entries — the permanently non-terminal record this
+# whole design works to avoid. A handler that forgot ``_fail_pending``, or wrote
+# ``fatal=False``, would have shipped green.
+
+
+async def _assert_fatal_environment_creation_failure(
+    scenario: _Scenario,
+    clone_id: UUID,
+    flow_harness: dict[str, list[Any]],
+    *,
+    error_contains: str,
+) -> EnvironmentClone:
+    """The invariant every fatal creation branch owes: terminal, and complete.
+
+    Terminal (a fatal ``environment_creation_failed`` marker → ``FAILED``), with
+    nothing materialised, and — the part a broken handler loses — **no
+    ``pending`` entry left**, because those deployments will never be attempted.
+    """
+    refreshed = await scenario.uow.environment_clones.get(clone_id)
+    assert refreshed is not None
+
+    assert refreshed.created_environment_id is None
+    assert flow_harness["deploy"] == [], "a counterpart was created anyway"
+    assert flow_harness["restore"] == [], "a restore was dispatched anyway"
+
+    assert refreshed.clone_errors is not None
+    assert [entry["step"] for entry in refreshed.clone_errors] == [
+        CLONE_STEP_ENVIRONMENT_CREATION_FAILED
+    ]
+    marker = refreshed.clone_errors[0]
+    assert marker["fatal"] is True, (
+        "a non-fatal marker leaves the clone reading IN_PROGRESS forever"
+    )
+    assert error_contains in marker["error"], marker["error"]
+
+    entries = _results(refreshed)
+    assert entries, "the attribution entries were lost"
+    assert {entry["outcome"] for entry in entries.values()} == {"failed"}, (
+        f"a terminal clone must carry no pending entry: {entries!r}"
+    )
+    assert all(
+        entry["reason"] == CLONE_REASON_CAPTURE_UNUSABLE for entry in entries.values()
+    ), entries
+
+    status = derive_environment_clone_status_from_record(refreshed)
+    assert status is EnvironmentCloneStatus.FAILED
+    assert status in TERMINAL_ENVIRONMENT_CLONE_STATUSES
+    return refreshed
+
+
+@pytest.mark.asyncio
+async def test_a_vanished_source_environment_fails_the_clone_terminally(
+    scenario: _Scenario, prefect_manager_mock, flow_harness
+) -> None:
+    """research D9: the record outlived its source by a race.
+
+    Non-terminal clones are deleted with their source, so reaching the flow's
+    ``source_environment is None`` branch means the deletion cascade and this
+    flow interleaved. There is no cluster left to create an environment in, so
+    the clone has to end terminal here rather than wait for one.
+    """
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+    scenario.uow.environments.models.remove(scenario.source)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    await _assert_fatal_environment_creation_failure(
+        scenario,
+        clone.id,
+        flow_harness,
+        error_contains="the source environment no longer exists",
+    )
+    assert scenario.uow.environments.models == [], (
+        "nothing may be created once the source is gone"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_captured_config_that_no_longer_validates_fails_the_clone(
+    scenario: _Scenario, prefect_manager_mock, flow_harness
+) -> None:
+    """The merge is re-run at flow time, and the capture can have gone stale.
+
+    A snapshot taken before a config field was removed no longer validates, and
+    ``merge_environment_config`` says so loudly rather than silently creating an
+    environment whose config differs from what was captured. The mutation
+    validated the *override*, never the captured side, so this is only reachable
+    here — and it must not crash the flow run, which would leave the clone
+    non-terminal with the Prefect log as the only record of why.
+    """
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+    environment_backup = await scenario.uow.environment_backups.get(
+        clone.environment_backup_id
+    )
+    assert environment_backup is not None
+    environment_backup.environment_config = {"retired_field": "no longer exists"}
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    await _assert_fatal_environment_creation_failure(
+        scenario,
+        clone.id,
+        flow_harness,
+        error_contains="the cloned environment config is invalid",
+    )
+    assert [env.name for env in scenario.uow.environments.models] == ["prod"]
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_create_environment_failure_fails_the_clone(
+    scenario: _Scenario,
+    prefect_manager_mock,
+    flow_harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The catch-all: anything ``create_environment`` can raise is attributed.
+
+    Not ``EnvironmentAlreadyExistsError`` (that is the TOCTOU branch above) but
+    the generic case — a capability computation blowing up, a constraint nobody
+    anticipated. Unhandled it would fail the flow run and pin the clone
+    ``IN_PROGRESS`` with ``pending`` entries and no recovery except deleting a
+    capture that is already terminal.
+    """
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+
+    async def _explode(**kwargs: Any):
+        raise RuntimeError("capability probe timed out")
+
+    monkeypatch.setattr(clone_flow, "create_environment", _explode)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    await _assert_fatal_environment_creation_failure(
+        scenario,
+        clone.id,
+        flow_harness,
+        error_contains="capability probe timed out",
+    )
+    assert [env.name for env in scenario.uow.environments.models] == ["prod"]
 
 
 @pytest.mark.asyncio

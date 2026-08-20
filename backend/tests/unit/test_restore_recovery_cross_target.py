@@ -15,6 +15,7 @@ away.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -23,6 +24,14 @@ from styrmin_backend.operator import restore_recovery
 from styrmin_backend.operator.config import CRD_PLURAL
 from styrmin_backend.operator.crd.schema import DeploymentPhase, DisplayState
 from styrmin_backend.operator.pipeline import PhaseResult
+
+from tests.unit.counterpart_crd_fixtures import (
+    COUNTERPART_DEPLOYMENT_ID,
+    COUNTERPART_NAMESPACE,
+    SOURCE_DEPLOYMENT_ID,
+    SOURCE_RELEASE_REFERENCE,
+    build_counterpart_body,
+)
 
 
 KOPF_ANNOTATION = "kopf.zalando.org/last-handled-configuration"
@@ -187,9 +196,15 @@ def phase_order(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return order
 
 
-NAMESPACE = "styrmin-counterpart-id"
-RESTORED_NAME = "styrmin-source-id"
-COUNTERPART_NAME = "styrmin-counterpart-id"
+#: Both names are derived from the shared counterpart fixture rather than spelled
+#: out here, so the body this module feeds the consumer and the body the producer
+#: renders can never disagree.
+NAMESPACE = COUNTERPART_NAMESPACE
+RESTORED_NAME = SOURCE_RELEASE_REFERENCE
+COUNTERPART_NAME = COUNTERPART_NAMESPACE
+SOURCE_ID = str(SOURCE_DEPLOYMENT_ID)
+COUNTERPART_ID = str(COUNTERPART_DEPLOYMENT_ID)
+KOPF_STATE = json.dumps({"spec": {"deploymentId": SOURCE_ID}})
 
 
 def restored_crd() -> dict[str, Any]:
@@ -204,34 +219,43 @@ def restored_crd() -> dict[str, Any]:
             # so the restored CR arrives still holding kopf's.
             "finalizers": ["kopf.zalando.org/KopfFinalizerMarker"],
             "annotations": {
-                KOPF_ANNOTATION: '{"spec":{"deploymentId":"source-id"}}',
+                KOPF_ANNOTATION: KOPF_STATE,
                 "unrelated.io/keep": "yes",
             },
         },
         "spec": {
-            "deploymentId": "source-id",
+            "deploymentId": SOURCE_ID,
             "releaseReference": RESTORED_NAME,
         },
     }
 
 
-def counterpart_body() -> dict[str, Any]:
+async def counterpart_body() -> dict[str, Any]:
     """The counterpart's own CR body, as ``_build_counterpart_crd_body`` renders it.
 
-    Note the deliberate split (010 research D2): the CR is named after the
+    Literally as it renders it: this calls the real producer through
+    :func:`build_counterpart_body` instead of hand-writing a look-alike. A
+    hand-written fixture is how the producer's most important decision — the CR
+    is named after the **namespace**, the Helm release name goes to
+    ``spec.releaseReference`` only (010 research D2) — stayed asserted on both
+    sides of a contract that nothing actually joined, so a revert on the
+    producer would have failed only the 20-minute E2E.
+
+    Note the deliberate split the body carries: the CR is named after the
     counterpart's namespace, while ``releaseReference`` is the **source's** —
     the counterpart adopts the restored Helm release rather than installing a
     second one over objects Helm already owns.
     """
-    return {
-        "apiVersion": "styrmin.io/v1alpha1",
-        "kind": "StyrminDeployment",
-        "metadata": {"name": COUNTERPART_NAME, "namespace": NAMESPACE},
-        "spec": {
-            "deploymentId": "counterpart-id",
-            "releaseReference": RESTORED_NAME,
-        },
-    }
+    body = await build_counterpart_body()
+    assert body["metadata"]["name"] == COUNTERPART_NAME, (
+        "the producer no longer names the counterpart CR after its namespace; "
+        f"got {body['metadata']['name']!r}"
+    )
+    assert body["spec"]["releaseReference"] == RESTORED_NAME, (
+        "the producer no longer has the counterpart adopt the source's Helm "
+        f"release name; got {body['spec']['releaseReference']!r}"
+    )
+    return body
 
 
 @pytest.mark.anyio
@@ -245,13 +269,13 @@ async def test_counterpart_identity_replaces_the_restored_source_named_crd(
         api_client,  # type: ignore[arg-type]
         NAMESPACE,
         RESTORED_NAME,
-        counterpart_body(),
+        await counterpart_body(),
     )
 
     # The counterpart CR now owns the namespace ...
     assert (NAMESPACE, COUNTERPART_NAME) in api_client.objects
     applied = api_client.objects[(NAMESPACE, COUNTERPART_NAME)]
-    assert applied["spec"]["deploymentId"] == "counterpart-id"
+    assert applied["spec"]["deploymentId"] == COUNTERPART_ID
     # The adopted Helm release keeps the source's name — that is the point.
     assert applied["spec"]["releaseReference"] == RESTORED_NAME
     # ... and the restored source-named CR is gone.
@@ -260,7 +284,7 @@ async def test_counterpart_identity_replaces_the_restored_source_named_crd(
     # All three pipeline phases ran against the counterpart's spec, never the
     # restored source spec.
     assert len(phase_spy) == 3
-    assert all(spec["deploymentId"] == "counterpart-id" for spec in phase_spy)
+    assert all(spec["deploymentId"] == COUNTERPART_ID for spec in phase_spy)
 
     # The counterpart CR is the one finalized to Ready/Running.
     status = applied["status"]
@@ -285,13 +309,13 @@ async def test_kopf_state_annotations_are_carried_over(
         api_client,  # type: ignore[arg-type]
         NAMESPACE,
         RESTORED_NAME,
-        counterpart_body(),
+        await counterpart_body(),
     )
 
     annotations = api_client.objects[(NAMESPACE, COUNTERPART_NAME)]["metadata"][
         "annotations"
     ]
-    assert annotations[KOPF_ANNOTATION] == '{"spec":{"deploymentId":"source-id"}}'
+    assert annotations[KOPF_ANNOTATION] == KOPF_STATE
     # Only kopf state annotations are inherited — nothing else from the source.
     assert "unrelated.io/keep" not in annotations
 
@@ -313,7 +337,7 @@ async def test_ordering_applies_before_deleting(
         api_client,  # type: ignore[arg-type]
         NAMESPACE,
         RESTORED_NAME,
-        counterpart_body(),
+        await counterpart_body(),
     )
 
     verbs = [verb for verb, _ in api_client.calls]
@@ -327,8 +351,8 @@ async def test_existing_counterpart_crd_is_patched_not_duplicated(
     phase_spy: list[dict[str, Any]],
 ) -> None:
     """Recovery is idempotent: a retried restore must not 409-crash."""
-    stale_counterpart = counterpart_body()
-    stale_counterpart["spec"] = {"deploymentId": "counterpart-id", "stale": True}
+    stale_counterpart = await counterpart_body()
+    stale_counterpart["spec"] = {"deploymentId": COUNTERPART_ID, "stale": True}
     api_client = FakeApiClient(
         {RESTORED_NAME: restored_crd(), COUNTERPART_NAME: stale_counterpart}
     )
@@ -337,14 +361,14 @@ async def test_existing_counterpart_crd_is_patched_not_duplicated(
         api_client,  # type: ignore[arg-type]
         NAMESPACE,
         RESTORED_NAME,
-        counterpart_body(),
+        await counterpart_body(),
     )
 
     applied = api_client.objects[(NAMESPACE, COUNTERPART_NAME)]
     # A merge patch overwrites the fields the counterpart body carries; a
     # leftover key it does not mention survives here and is pruned server-side
     # by the CRD's structural schema in a real cluster.
-    assert applied["spec"]["deploymentId"] == "counterpart-id"
+    assert applied["spec"]["deploymentId"] == COUNTERPART_ID
     assert applied["spec"]["releaseReference"] == RESTORED_NAME
     assert ("patch", COUNTERPART_NAME) in api_client.calls
 
@@ -373,7 +397,7 @@ async def test_already_deleted_restored_crd_is_tolerated(
         api_client,  # type: ignore[arg-type]
         NAMESPACE,
         RESTORED_NAME,
-        counterpart_body(),
+        await counterpart_body(),
     )
 
     assert (NAMESPACE, COUNTERPART_NAME) in api_client.objects
@@ -385,7 +409,7 @@ async def test_unnamed_counterpart_body_is_rejected(
     phase_spy: list[dict[str, Any]],
 ) -> None:
     api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
-    body = counterpart_body()
+    body = await counterpart_body()
     body["metadata"] = {"namespace": NAMESPACE}
 
     with pytest.raises(RuntimeError, match="named counterpart CR body"):
@@ -419,7 +443,7 @@ async def test_phase_failure_propagates_and_does_not_mark_ready(
             api_client,  # type: ignore[arg-type]
             NAMESPACE,
             RESTORED_NAME,
-            counterpart_body(),
+            await counterpart_body(),
         )
 
     assert "status" not in api_client.objects[(NAMESPACE, COUNTERPART_NAME)]
@@ -444,7 +468,7 @@ async def test_in_place_reapply_and_finalize_is_unchanged(
         RESTORED_NAME,
     )
 
-    assert [spec["deploymentId"] for spec in phase_spy] == ["source-id", "source-id"]
+    assert [spec["deploymentId"] for spec in phase_spy] == [SOURCE_ID, SOURCE_ID]
     status = api_client.objects[(NAMESPACE, RESTORED_NAME)]["status"]
     assert status["phase"] == DeploymentPhase.READY.value
     assert status["displayState"] == DisplayState.RUNNING.value
@@ -470,7 +494,7 @@ async def test_cross_target_reruns_the_helmrelease_phase_in_pipeline_order(
         api_client,  # type: ignore[arg-type]
         NAMESPACE,
         RESTORED_NAME,
-        counterpart_body(),
+        await counterpart_body(),
     )
 
     assert phase_order == ["prerequisites", "helmrelease", "services"]
@@ -512,7 +536,7 @@ async def test_restored_crd_finalizers_are_cleared_before_it_is_deleted(
         api_client,  # type: ignore[arg-type]
         NAMESPACE,
         RESTORED_NAME,
-        counterpart_body(),
+        await counterpart_body(),
     )
 
     restored_patches = [
@@ -559,7 +583,7 @@ async def test_restored_crd_is_not_deleted_while_finalizers_remain(
             api_client,  # type: ignore[arg-type]
             NAMESPACE,
             RESTORED_NAME,
-            counterpart_body(),
+            await counterpart_body(),
         )
 
     assert ("delete", RESTORED_NAME) not in api_client.calls
