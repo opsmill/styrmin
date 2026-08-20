@@ -2204,3 +2204,90 @@ async def test_environment_clone_renders_no_clone_errors_as_an_empty_list(
 
     assert data["environmentClone"]["cloneErrors"] == []
     assert data["environmentClone"]["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_environment_clone_stays_readable_with_a_flagless_clone_error(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """The read path may never be stricter than the derivation.
+
+    ``CloneError.fatal`` is required on the model but optional in practice — the
+    derivation reads a missing flag as non-fatal on purpose — so validating it in
+    the resolver made one flag-less entry raise ``ValidationError``, get masked
+    as ``INTERNAL_ERROR`` ("An internal error occurred"), and fail the **whole**
+    ``environmentClone`` query. The operator was left with no field, no index and
+    no row id, unable to read the clone on any surface, at exactly the moment
+    something had gone wrong with it.
+    """
+    source, instance = await _seed_source_with_instance(session)
+    created = await _sibling_environment(session, source, "prod-rehearsal-flagless")
+    clone = await _seed_clone(
+        session,
+        source=source,
+        instance=instance,
+        capture_statuses=[BackupStatus.COMPLETED],
+        created_environment=created,
+        results=[("cloned", RestoreStatus.COMPLETED)],
+        clone_errors=[{"step": "mystery", "error": "written without a flag"}],
+    )
+
+    data = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    row = data["environmentClone"]
+
+    assert row["id"] == str(clone.id)
+    assert row["cloneErrors"] == ["mystery: written without a flag"]
+    # Read as non-fatal, exactly as the derivation reads it.
+    assert row["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_environment_clone_projects_an_unreadable_result_entry(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """An entry the wire type cannot express is degraded, never fatal to the query.
+
+    ``outcome`` is a closed enum on the wire and free JSON in the column, and the
+    derivation deliberately counts an unrecognised or unreadable entry as a
+    failure. The projection now says the same thing — and says *which* entry, by
+    index, so the operator can go and fix the row.
+    """
+    source, instance = await _seed_source_with_instance(session)
+    created = await _sibling_environment(session, source, "prod-rehearsal-unreadable")
+    good_deployment_id = uuid4()
+    clone = EnvironmentClone(
+        name="prod-rehearsal-unreadable",
+        source_environment_id=source.id,
+        source_environment_name=source.name,
+        created_environment_id=created.id,
+        deployment_results=[
+            _result_entry(
+                deployment_id=good_deployment_id,
+                deployment_name="infrahub",
+                outcome="cloned",
+            ),
+            {"deployment_name": "half-written", "outcome": "teleported"},
+            "nonsense",
+        ],
+    )
+    session.add(clone)
+    await session.commit()
+
+    data = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    row = data["environmentClone"]
+
+    entries = row["deploymentResults"]
+    assert len(entries) == 3, "an unreadable entry must not vanish from the account"
+    assert entries[0]["deploymentId"] == str(good_deployment_id)
+    assert entries[0]["outcome"] == "CLONED"
+    # Both unreadable shapes: an unknown outcome, and a non-entry.
+    assert [entry["outcome"] for entry in entries[1:]] == ["FAILED", "FAILED"]
+    assert "index 1" in entries[1]["reason"]
+    assert entries[2]["deploymentName"] == "<unreadable entry 2>"
+    assert entries[2]["deploymentId"] == "00000000-0000-0000-0000-000000000000"
+    # And the clone is honest about it rather than claiming COMPLETED.
+    assert row["status"] == "PARTIAL"

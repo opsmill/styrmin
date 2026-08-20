@@ -620,6 +620,34 @@ def test_env_clones_get_renders_a_clone_that_outlived_its_inputs(
     assert "all eligible" in output
 
 
+def test_env_clones_get_distinguishes_an_empty_selection_from_no_selection(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``[]`` and ``None`` are different requests, and the CLI must say so.
+
+    No selection means "every eligible deployment"; an *empty* selection
+    (``env-clones create --empty-deployment``) means "no applications at all —
+    clone the configuration only". The backend keeps them apart and returns
+    ``[]`` verbatim, so a falsy check reported a config-only clone as a full one:
+    the CLI said "all eligible" about a clone that cloned nothing.
+    """
+    mock_client.environment_clones.get = AsyncMock(
+        return_value=_make_environment_clone(
+            status=EnvironmentCloneStatus.COMPLETED,
+            created_environment=_make_created_environment(),
+            requested_deployment_ids=[],
+            deployment_results=[],
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["env-clones", "get", CLONE_UUID])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "Requested deployments: none (configuration only)" in output
+    assert "all eligible" not in output
+
+
 def test_env_clones_get_not_found(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
     mock_client.environment_clones.get = AsyncMock(
         side_effect=ResourceNotFoundError("Environment clone not found", "NOT_FOUND")

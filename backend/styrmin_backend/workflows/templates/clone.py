@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Sequence
+from typing import Any, Sequence
 from uuid import UUID
 
 from prefect import flow
@@ -43,8 +43,9 @@ from prefect.logging import get_run_logger
 
 from styrmin_backend import config
 from styrmin_backend.agent.tasks.shared import POLL_RETRY_DELAY_SECONDS
-from styrmin_backend.db.models import BackupStatus, EnvironmentClone
+from styrmin_backend.db.models import BackupStatus, EnvironmentClone, RestoreStatus
 from styrmin_backend.services.backup.clone import (
+    CAPTURE_IN_FLIGHT_GUARD_SECONDS,
     CLONE_REASON_BACKUP_DELETED,
     CLONE_REASON_BACKUP_EXPIRED,
     CLONE_REASON_BACKUP_NOT_COMPLETED,
@@ -68,7 +69,10 @@ from styrmin_backend.services.backup.environment import (
     EnvironmentOperationStatus,
     _backup_expires_at,
 )
-from styrmin_backend.services.backup.service import create_restore
+from styrmin_backend.services.backup.service import (
+    create_restore,
+    update_restore_status,
+)
 from styrmin_backend.services.deployment import deploy_application
 from styrmin_backend.services.environments import create_environment
 from styrmin_backend.services.exceptions import (
@@ -79,13 +83,25 @@ from styrmin_backend.services.unit_of_work import UnitOfWork, get_unit_of_work
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.models import PrefectAction
 
+# The restore flow's own "this restore is over" writer, reused rather than
+# reimplemented so an undispatched restore lands in exactly the state a failed
+# one does. Private by name, shared by intent — see
+# ``_settle_undispatched_restore``.
+from styrmin_backend.workflows.templates.backup import _set_deployment_status_failed
+
 #: How long the flow waits for the capture to reach a terminal derived status.
 #: Matches the per-restore budget in ``execute_restore_workflow`` — a capture is
 #: a fan-out of Velero backups and can legitimately run for hours on a large
 #: environment. Exceeding it fails the *flow run* on purpose and leaves the
 #: clone non-terminal: research D9 makes that the operator-visible state, with
 #: backup deletion as the escape hatch.
-CAPTURE_POLL_TIMEOUT_SECONDS = 7200
+#:
+#: It **is** the FR-008 guard's window (``CAPTURE_IN_FLIGHT_GUARD_SECONDS``)
+#: rather than merely equal to it, because the guard's justification is "this
+#: flow is still waiting": the moment that stops being true, the escape hatch
+#: has to open. Two independently maintained numbers could disagree, and the
+#: disagreement would either wedge the backup or unprotect a live capture.
+CAPTURE_POLL_TIMEOUT_SECONDS = CAPTURE_IN_FLIGHT_GUARD_SECONDS
 
 #: Prefix of the per-deployment namespace a counterpart's restore targets.
 _NAMESPACE_PREFIX = "styrmin-"
@@ -103,11 +119,15 @@ async def _load_clone(clone_id: UUID, uow: UnitOfWork) -> EnvironmentClone:
 
 
 def _read_results(clone: EnvironmentClone) -> list[CloneDeploymentResult]:
-    """Read the attribution entries as typed models.
+    """Read the attribution entries this flow can work with, as typed models.
 
-    Unparseable entries are dropped with a warning rather than failing the
-    flow: the coverage identity is worth less than finishing the clone, and a
-    dropped entry is visible in the record.
+    An entry that will not parse is skipped *here* — the flow has nothing it
+    could do with it — but it is never removed from the record:
+    :func:`_merge_results` writes this list back **into** the stored one rather
+    than over it, so an unreadable entry stays exactly where it was. That
+    matters because the derivation counts it (as a failure), which is what stops
+    a clone from reading ``COMPLETED`` with a source deployment nobody can
+    account for (spec SC-003).
     """
     results: list[CloneDeploymentResult] = []
     for entry in clone.deployment_results or []:
@@ -115,11 +135,48 @@ def _read_results(clone: EnvironmentClone) -> list[CloneDeploymentResult]:
             results.append(CloneDeploymentResult.model_validate(entry))
         except Exception:  # noqa: BLE001 — a malformed entry must not stop the clone
             get_run_logger().warning(
-                "Ignoring malformed deployment_results entry on clone %s: %r",
+                "Keeping but not updating an unreadable deployment_results entry "
+                "on clone %s: %r",
                 clone.id,
                 entry,
             )
     return results
+
+
+def _merge_results(
+    stored: Sequence[Any] | None, results: Sequence[CloneDeploymentResult]
+) -> list[Any] | None:
+    """Write the flow's typed entries back into the stored list, in place.
+
+    The flow only ever *updates* entries the mutation already registered, so
+    rebinding ``deployment_results`` to the flow's own list would delete
+    anything the flow could not read — the exact entry the coverage identity
+    must not lose (spec SC-003), and the one whose disappearance would leave the
+    Prefect log as the only record it ever existed.
+
+    Matching is by ``deployment_id``. An entry the flow does not know about is
+    kept verbatim (unreadable, or written by a future writer); a result with no
+    stored counterpart is appended, so the merge is never lossy in either
+    direction.
+    """
+    dumped = {
+        str(result.deployment_id): result.model_dump(mode="json") for result in results
+    }
+    merged: list[Any] = []
+    matched: set[str] = set()
+    for entry in stored or []:
+        key = (
+            str(entry.get("deployment_id"))
+            if isinstance(entry, dict) and entry.get("deployment_id") is not None
+            else None
+        )
+        if key is not None and key in dumped:
+            merged.append(dumped[key])
+            matched.add(key)
+            continue
+        merged.append(entry)
+    merged.extend(payload for key, payload in dumped.items() if key not in matched)
+    return merged or None
 
 
 async def _save_progress(
@@ -132,7 +189,9 @@ async def _save_progress(
     """Persist the derivation inputs this flow owns, in one transaction.
 
     Re-reads the record first so a concurrent writer (a deletion cascade
-    appending its own ``clone_errors`` entry) is never clobbered wholesale.
+    appending its own ``clone_errors`` entry) is never clobbered wholesale, and
+    merges the attribution entries into what is stored rather than replacing the
+    list (see :func:`_merge_results`).
     """
     uow = await get_unit_of_work()
     async with uow:
@@ -142,9 +201,7 @@ async def _save_progress(
                 f"Environment clone {clone_id} not found"
             )
         if results is not None:
-            clone.deployment_results = [
-                result.model_dump(mode="json") for result in results
-            ] or None
+            clone.deployment_results = _merge_results(clone.deployment_results, results)
         if error is not None:
             clone.clone_errors = [
                 *(clone.clone_errors or []),
@@ -192,17 +249,29 @@ async def _await_capture_terminal(
         attributed the deletion on the record (research D9), so the flow has
         nothing left to decide.
 
+    One unit of work serves the whole loop. Nothing in this codebase closes an
+    ``AsyncSession`` (``UnitOfWork.__aexit__`` only rolls back on an exception),
+    so asking for a fresh one per iteration would open up to
+    ``CAPTURE_POLL_TIMEOUT_SECONDS / POLL_RETRY_DELAY_SECONDS`` sessions — 720 —
+    against a connection pool of a few dozen, for a single clone. The
+    ``rollback`` between iterations is what makes reuse *correct* rather than
+    merely cheap: the session's identity map would otherwise keep serving the
+    first read of the capture, and the poll would never see it terminalise.
+
     Raises:
         EnvironmentCloneNotFoundError: When the record vanished mid-flight.
         RuntimeError: When the capture is still non-terminal after
             :data:`CAPTURE_POLL_TIMEOUT_SECONDS`. Failing the flow run rather
             than the clone is deliberate: the capture may still finish, and the
-            clone stays non-terminal until an operator uses an escape hatch.
+            clone stays non-terminal until an operator uses an escape hatch —
+            which, past this same budget, includes deleting the capture itself
+            (the FR-008 guard stops protecting it, see
+            ``CAPTURE_IN_FLIGHT_GUARD_SECONDS``).
     """
     logger = get_run_logger()
     elapsed = 0
+    uow = await get_unit_of_work()
     while True:
-        uow = await get_unit_of_work()
         clone = await _load_clone(clone_id, uow)
         capture_status = derive_clone_capture_status(clone.environment_backup)
         if capture_status is None:
@@ -217,6 +286,11 @@ async def _await_capture_terminal(
             )
         await asyncio.sleep(POLL_RETRY_DELAY_SECONDS)
         elapsed += POLL_RETRY_DELAY_SECONDS
+        # Forget this iteration's read (and end its transaction) so the next one
+        # re-reads the capture instead of the identity map's copy of it. Placed
+        # after the sleep, never after a ``return``: the clone instance the
+        # callers go on to use must not be expired out from under them.
+        await uow.rollback()
 
 
 class _UsableConstituent:
@@ -375,6 +449,69 @@ async def _create_counterpart(
     return counterpart.id
 
 
+class _CounterpartError(Exception):
+    """A per-deployment clone failure that names what it already created.
+
+    Counterpart failures are isolated per deployment (research D5), so the
+    attribution entry is all the operator gets — and everything the step created
+    before it failed has to be *on* that entry. An orphaned counterpart or
+    restore row nobody can name is an orphan nobody can clean up, and the clone
+    itself reads terminal and settled while it sits there.
+
+    ``str(...)`` is the reason recorded on the entry, exactly as for any other
+    exception the loop catches.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        counterpart_deployment_id: UUID | None = None,
+        restore_id: UUID | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.counterpart_deployment_id = counterpart_deployment_id
+        self.restore_id = restore_id
+
+
+async def _settle_undispatched_restore(
+    restore_id: UUID, deployment_id: UUID, *, error: str
+) -> None:
+    """Close out a restore row whose dispatch never happened.
+
+    ``create_restore`` **commits** a ``PENDING`` row and parks the counterpart in
+    ``RESTORING`` before the flow run is dispatched, so a dispatch failure
+    leaves behind a restore nothing will ever pick up. Left alone that row is
+    worse than invisible: ``_find_in_flight_restore`` counts ``PENDING`` as in
+    flight, so it refuses **every** future restore into that counterpart —
+    naming a restore that never ran — and no ``PENDING``-restore reaper exists
+    anywhere to settle it.
+
+    Settled the way ``execute_restore_workflow`` settles a restore it could not
+    finish (restore ``FAILED`` with the reason, counterpart ``FAILED``), so a
+    dispatch failure and a Velero failure leave the same recoverable state.
+    """
+    logger = get_run_logger()
+    uow = await get_unit_of_work()
+    try:
+        await update_restore_status(
+            restore_id=restore_id,
+            status=RestoreStatus.FAILED,
+            uow=uow,
+            error_message=error,
+        )
+    except Exception:  # noqa: BLE001 — the counterpart flip below still matters
+        logger.exception(
+            "env_clone_restore_settle_error restore_id=%s could not be marked "
+            "FAILED after its dispatch failed",
+            restore_id,
+        )
+    uow = await get_unit_of_work()
+    await _set_deployment_status_failed(
+        deployment_id=deployment_id, uow=uow, error_message=error
+    )
+
+
 async def _dispatch_cross_target_restore(
     constituent: _UsableConstituent, counterpart_deployment_id: UUID
 ) -> UUID:
@@ -386,8 +523,18 @@ async def _dispatch_cross_target_restore(
     D2.1/D2.2). ``target_instance_id`` is left unset — ``create_restore``
     derives it from the counterpart's active instance.
 
+    The two halves are not atomic and cannot be: the row has to exist before it
+    can be dispatched. So a dispatch failure is settled rather than propagated
+    raw — the row is closed out (:func:`_settle_undispatched_restore`) and the
+    error carries both ids so the attribution entry can name what was left
+    behind.
+
     Returns:
         The restore id.
+
+    Raises:
+        _CounterpartError: When the restore row was created but its flow run
+            could not be dispatched.
     """
     target_namespace = f"{_NAMESPACE_PREFIX}{counterpart_deployment_id}"
     uow = await get_unit_of_work()
@@ -399,16 +546,27 @@ async def _dispatch_cross_target_restore(
     )
 
     manager = get_manager()
-    await manager.run_action(
-        action=PrefectAction.EXECUTE_RESTORE,
-        parameters={
-            "restore_id": str(restore.id),
-            "backup_id": str(constituent.backup_id),
-            "deployment_id": str(status_target_deployment_id),
-            "target_namespace": target_namespace,
-            "source_deployment_id": str(constituent.snapshot.deployment_id),
-        },
-    )
+    try:
+        await manager.run_action(
+            action=PrefectAction.EXECUTE_RESTORE,
+            parameters={
+                "restore_id": str(restore.id),
+                "backup_id": str(constituent.backup_id),
+                "deployment_id": str(status_target_deployment_id),
+                "target_namespace": target_namespace,
+                "source_deployment_id": str(constituent.snapshot.deployment_id),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — settled and attributed, never lost
+        error = f"the cross-target restore was created but never dispatched: {exc}"
+        await _settle_undispatched_restore(
+            restore.id, status_target_deployment_id, error=error
+        )
+        raise _CounterpartError(
+            error,
+            counterpart_deployment_id=counterpart_deployment_id,
+            restore_id=restore.id,
+        ) from exc
     return restore.id
 
 
@@ -599,6 +757,8 @@ async def _run_environment_clone(clone_id: UUID) -> None:
     for constituent in usable:
         deployment_id = constituent.snapshot.deployment_id
         entry = by_deployment.get(deployment_id)
+        counterpart_deployment_id: UUID | None = None
+        restore_id: UUID | None = None
         try:
             counterpart_deployment_id = await _create_counterpart(
                 clone, created_environment_id, constituent
@@ -608,16 +768,29 @@ async def _run_environment_clone(clone_id: UUID) -> None:
             )
         except Exception as exc:  # noqa: BLE001 — per-deployment isolation (D5)
             failed += 1
+            if isinstance(exc, _CounterpartError):
+                counterpart_deployment_id = (
+                    exc.counterpart_deployment_id or counterpart_deployment_id
+                )
+                restore_id = exc.restore_id or restore_id
             logger.exception(
-                "env_clone_counterpart_error environment_clone_id=%s deployment_id=%s",
+                "env_clone_counterpart_error environment_clone_id=%s deployment_id=%s "
+                "counterpart_deployment_id=%s restore_id=%s",
                 clone_id,
                 deployment_id,
+                counterpart_deployment_id,
+                restore_id,
             )
             if entry is not None:
+                # The ids go on the entry even though the outcome is a failure:
+                # whatever this step managed to create is real, and the
+                # attribution entry is the only place an operator can find it.
                 by_deployment[deployment_id] = entry.model_copy(
                     update={
                         "outcome": EnvironmentCloneDeploymentOutcome.FAILED,
                         "reason": str(exc),
+                        "counterpart_deployment_id": counterpart_deployment_id,
+                        "restore_id": restore_id,
                     }
                 )
             continue

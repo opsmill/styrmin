@@ -47,9 +47,14 @@ from styrmin_backend.operator.pipeline import (
 )
 
 
-# Kopf state-tracking annotations that velero restores along with the rest
-# of the CRD metadata. Keeping them defeats kopf's create/resume detection,
-# so the restore flow strips them post-velero.
+# Kopf state-tracking annotations that velero restores along with the rest of
+# the CRD metadata. They are deliberately **kept**: an annotated CR reads to
+# kopf as already-handled, which is what this module wants — it does the work
+# ``on.create`` would have done, and a stripped annotation makes kopf fire
+# ``on.create`` after the finalize and oscillate ``displayState`` back to
+# ``Deploying`` (see ``reapply_and_finalize``). The one remaining use is
+# ``reapply_with_counterpart_identity``, which *inherits* them from the restored
+# CR onto the counterpart's own CR body for exactly that reason.
 _KOPF_STATE_ANNOTATIONS = (
     "kopf.zalando.org/last-handled-configuration",
     "kopf.zalando.org/touch-dummy",

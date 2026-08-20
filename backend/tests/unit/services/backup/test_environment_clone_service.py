@@ -23,7 +23,7 @@ Four things are pinned here, all of them load-bearing for the 010 spec:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -73,6 +73,7 @@ from styrmin_backend.services.backup.clone import (
     CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
     CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
     CLONE_STEP_TARGET_NAME_TAKEN,
+    TERMINAL_ENVIRONMENT_CLONE_STATUSES,
     EnvironmentCloneDeploymentOutcome,
     EnvironmentCloneStatus,
     clone_environment,
@@ -82,6 +83,7 @@ from styrmin_backend.services.backup.clone import (
 from styrmin_backend.services.backup.environment import (
     ConstituentError,
     DeploymentSnapshot,
+    EnvironmentOperationStatus,
     create_environment_backup,
     delete_environment_backup,
 )
@@ -1862,3 +1864,400 @@ async def test_deleting_an_unrelated_environment_leaves_clone_records_alone(
     assert refreshed.source_environment_id == scenario.source.id
     assert refreshed.created_environment_id == created.id
     assert refreshed.clone_errors is None
+
+
+# ---------------------------------------------------------------------------
+# Review fixes — the escape hatch, provenance, and dispatch atomicity
+# ---------------------------------------------------------------------------
+
+
+async def _no_sleep(_seconds: float) -> None:
+    """Stand in for ``asyncio.sleep`` so the poll loop runs at test speed."""
+    return None
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_capture_that_can_never_terminalise_is_allowed(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """FR-008's escape hatch has to be reachable, not merely documented.
+
+    The state under test is what a Prefect outage produces: the constituent
+    ``EXECUTE_BACKUP`` dispatches never happened, so every constituent stays
+    ``PENDING``, the capture derives ``PENDING`` for ever, and the clone derives
+    non-terminal for ever with it. A guard keyed on that state alone refused the
+    deletion permanently — the source stayed occupied for every environment-level
+    operation *and* ``update_environment``, the capture was undeletable, and
+    there was no created environment to discard, so the only way out was hand
+    -deleting each constituent ``Backup`` row.
+
+    Past the clone flow's own wait budget nothing is left waiting on the
+    capture, so the deletion is allowed and does what FR-008 says it does:
+    the clone ends ``FAILED`` with the deletion attributed, and the source is
+    released.
+    """
+    clone = await scenario.clone()
+    environment_backup_id = clone.environment_backup_id
+    assert environment_backup_id is not None
+    capture = await scenario.uow.environment_backups.get(environment_backup_id)
+    assert capture is not None
+    # Nothing ever picked the constituents up.
+    assert {backup.status for backup in scenario.uow.backups.models} == {
+        BackupStatus.PENDING
+    }
+    # And that has been true for longer than the flow waits.
+    capture.created_on = datetime.now(timezone.utc) - timedelta(hours=3)
+
+    await delete_environment_backup(
+        environment_backup_id=environment_backup_id, uow=scenario.uow
+    )
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.environment_backup_id is None
+    marker = _clone_errors_by_step(refreshed)[CLONE_STEP_ENVIRONMENT_BACKUP_DELETED]
+    assert marker["fatal"] is True
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.FAILED
+    )
+    # The source is free again: a released clone occupies nothing.
+    assert (
+        await find_clone_occupying_environment(scenario.source.id, scenario.uow) is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_young_capture_in_flight_is_still_protected(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """The other half of the time bound: a live capture keeps its protection.
+
+    Same state as above minus the age, so the narrowing cannot be mistaken for
+    "the guard was dropped".
+    """
+    clone = await scenario.clone()
+    assert clone.environment_backup_id is not None
+    capture = await scenario.uow.environment_backups.get(clone.environment_backup_id)
+    assert capture is not None
+    capture.created_on = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+    with pytest.raises(EnvironmentBackupInUseByCloneError):
+        await delete_environment_backup(
+            environment_backup_id=clone.environment_backup_id, uow=scenario.uow
+        )
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_source_keeps_a_clone_that_already_created_an_environment(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """A live environment's provenance must not die with the source (D9).
+
+    A clone whose counterparts are mid-restore is non-terminal, and deleting
+    such a record outright destroyed the only link between the environment it
+    created and where that environment came from — while the backup cascade
+    behind it deleted the constituent backups *and the in-flight restores* of
+    counterparts nothing was left to attribute.
+
+    Kept instead, with the deletion attributed fatally: the clone comes to rest
+    (it can never progress — its capture goes with the source), so it stops
+    occupying the environment it created, and the record still says what it was
+    cloned from.
+    """
+    from styrmin_backend.services.backup.clone import (
+        CLONE_STEP_SOURCE_ENVIRONMENT_DELETED,
+    )
+
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+    created = Environment(name="prod-rehearsal", cluster_id=scenario.cluster.id)
+    scenario.uow.environments.models.append(created)
+    constituent = scenario.uow.backups.models[0]
+    restore = Restore(
+        name="cross-target-restore",
+        status=RestoreStatus.IN_PROGRESS,
+        target_namespace="styrmin-counterpart",
+        backup_id=constituent.id,
+    )
+    scenario.uow.restores.models.append(restore)
+    clone.created_environment_id = created.id
+    clone.deployment_results = [
+        {
+            "deployment_id": str(scenario.first.id),
+            "deployment_name": "postgres-main",
+            "outcome": "cloned",
+            "reason": None,
+            "counterpart_deployment_id": str(uuid4()),
+            "restore_id": str(restore.id),
+        }
+    ]
+    await scenario.uow.environment_clones.save(clone)
+    assert (
+        derive_environment_clone_status_from_record(clone, {restore.id: restore})
+        is EnvironmentCloneStatus.IN_PROGRESS
+    )
+
+    await delete_environment(environment_id=scenario.source.id, uow=scenario.uow)
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None, "the created environment lost its provenance"
+    assert refreshed.source_environment_id is None
+    assert refreshed.source_environment_name == "prod"
+    assert refreshed.created_environment_id == created.id
+    marker = _clone_errors_by_step(refreshed)[CLONE_STEP_SOURCE_ENVIRONMENT_DELETED]
+    assert marker["fatal"] is True
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.FAILED
+    )
+    # Terminal, so it no longer occupies the environment it created.
+    assert await find_clone_occupying_environment(created.id, scenario.uow) is None
+    # The created environment itself is untouched — it is an ordinary environment.
+    assert created.id in {
+        environment.id for environment in scenario.uow.environments.models
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_failed_restore_dispatch_is_settled_and_attributed(
+    scenario: _Scenario,
+    prefect_manager_mock,
+    flow_harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dispatch failure must leave nothing nameless and nothing wedged.
+
+    ``create_restore`` commits a ``PENDING`` row and parks the counterpart in
+    ``RESTORING`` *before* the flow run is dispatched. When the dispatch then
+    fails, the clone still derives terminal and looks settled — so unless the
+    row is closed out and both ids recorded, a real counterpart sits
+    ``RESTORING`` for ever behind an invisible ``PENDING`` restore, and the
+    in-flight-restore guard refuses every future restore into it while naming a
+    restore that never ran.
+    """
+
+    class _FailingManager:
+        async def run_action(self, **kwargs: Any) -> None:
+            if kwargs["action"] is PrefectAction.EXECUTE_RESTORE:
+                raise RuntimeError("prefect is down")
+
+    monkeypatch.setattr(clone_flow, "get_manager", lambda: _FailingManager())
+
+    clone = await scenario.clone(deployment_ids=[scenario.first.id])
+    await _complete_capture(scenario)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    entry = _results(refreshed)["postgres-main"]
+    assert entry["outcome"] == "failed"
+    assert "never dispatched" in entry["reason"]
+    # Both orphans are nameable from the record itself.
+    assert entry["counterpart_deployment_id"] is not None
+    assert entry["restore_id"] is not None
+
+    # The stranded row is settled, so the in-flight guard cannot wedge the
+    # counterpart, and the counterpart is not left claiming to be restoring.
+    restore = next(
+        row
+        for row in scenario.uow.restores.models
+        if str(row.id) == entry["restore_id"]
+    )
+    assert restore.status is RestoreStatus.FAILED
+    counterpart = await scenario.uow.deployments.find(
+        UUID(entry["counterpart_deployment_id"])
+    )
+    assert counterpart is not None
+    # Compared by value: the fake repository holds domain entities, whose
+    # ``DeploymentState`` is a different class from the db-model one the
+    # settle path writes.
+    assert counterpart.status.value == DeploymentState.FAILED.value
+    # And the clone is terminal rather than pinned by a PENDING restore row.
+    restores = {row.id: row for row in scenario.uow.restores.models}
+    assert derive_environment_clone_status_from_record(refreshed, restores) in (
+        EnvironmentCloneStatus.FAILED,
+        EnvironmentCloneStatus.PARTIAL,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_attribution_entry_is_never_erased_from_the_record(
+    scenario: _Scenario, prefect_manager_mock, flow_harness
+) -> None:
+    """The flow updates ``deployment_results``; it must not rewrite it.
+
+    An entry the flow cannot parse is skipped for the flow's own purposes, but
+    rebinding the column to the flow's reduced list *deleted it from the
+    database* — leaving the Prefect log as the only record that a source
+    deployment was ever there, and letting the clone derive ``COMPLETED`` with
+    it unaccounted for (spec SC-003).
+    """
+    clone = await scenario.clone(deployment_ids=[scenario.first.id])
+    await _complete_capture(scenario)
+    # A row a future (or broken) writer left behind, alongside the real ones.
+    clone.deployment_results = [*(clone.deployment_results or []), "nonsense"]
+    await scenario.uow.environment_clones.save(clone)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert "nonsense" in (refreshed.deployment_results or []), (
+        "the flow erased an entry it could not read"
+    )
+    # The readable entries still landed.
+    readable = {
+        entry["deployment_name"]: entry
+        for entry in refreshed.deployment_results or []
+        if isinstance(entry, dict)
+    }
+    assert readable["postgres-main"]["outcome"] == "cloned"
+    # And the unreadable one keeps the clone honest: it is counted, so the
+    # clone cannot read COMPLETED with a deployment unaccounted for.
+    restores = {row.id: row for row in scenario.uow.restores.models}
+    for row in restores.values():
+        row.status = RestoreStatus.COMPLETED
+    assert (
+        derive_environment_clone_status_from_record(refreshed, restores)
+        is EnvironmentCloneStatus.PARTIAL
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_capture_poll_reuses_one_unit_of_work(
+    scenario: _Scenario, prefect_manager_mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing closes an ``AsyncSession``, so the poll may not open one per turn.
+
+    At the shipped poll interval and timeout a single clone could churn 720
+    sessions against a pool of a few dozen. The loop therefore holds one unit of
+    work and rolls it back between turns — which is also what makes the poll
+    *see* the capture terminalise, instead of the identity map's first read.
+    """
+    sessions: list[Any] = []
+    rollbacks: list[int] = []
+    real_rollback = scenario.uow.rollback
+
+    async def _get_uow():
+        sessions.append(scenario.uow)
+        return scenario.uow
+
+    async def _rollback() -> None:
+        rollbacks.append(1)
+        # Terminalise on the second turn, the way a real capture would land
+        # between two reads.
+        for backup in scenario.uow.backups.models:
+            backup.status = BackupStatus.COMPLETED
+        await real_rollback()
+
+    monkeypatch.setattr(clone_flow, "get_unit_of_work", _get_uow)
+    monkeypatch.setattr(clone_flow, "get_run_logger", lambda: logging.getLogger("test"))
+    monkeypatch.setattr(clone_flow.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr(scenario.uow, "rollback", _rollback)
+
+    clone = await scenario.clone()
+    sessions.clear()
+
+    capture_status, _ = await clone_flow._await_capture_terminal(clone.id)
+
+    assert capture_status is EnvironmentOperationStatus.COMPLETED
+    assert rollbacks, "the loop never discarded a read, so it would poll a stale one"
+    assert len(sessions) == 1, (
+        f"the poll opened {len(sessions)} units of work; one is enough and "
+        "nothing ever closes them"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "deployment_ids",
+    [
+        pytest.param(None, id="all-eligible"),
+        pytest.param([], id="empty-selection-everything-skipped"),
+    ],
+)
+async def test_registration_never_returns_a_terminal_clone(
+    scenario: _Scenario, prefect_manager_mock, deployment_ids: list[UUID] | None
+) -> None:
+    """What the mutation returns is always still moving (documented contract).
+
+    Registration writes no ``clone_errors`` and always returns with
+    ``created_environment_id IS NULL``, so the derivation falls through to
+    ``PENDING``/``IN_PROGRESS`` — ``PARTIAL`` and ``FAILED`` are unreachable
+    here, and even an all-skipped, configuration-only clone reads
+    ``IN_PROGRESS`` rather than ``COMPLETED`` until its environment exists.
+    Pinned because three places documented the opposite: the CLI's terminal
+    check and the ``env-clones`` exit-code reference both promised operators a
+    terminal status straight from the mutation.
+    """
+    clone = await scenario.clone(deployment_ids=deployment_ids)
+
+    status = derive_environment_clone_status_from_record(clone)
+    assert status not in TERMINAL_ENVIRONMENT_CLONE_STATUSES
+    assert status in (
+        EnvironmentCloneStatus.PENDING,
+        EnvironmentCloneStatus.IN_PROGRESS,
+    )
+    assert clone.created_environment_id is None
+    assert clone.clone_errors is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_environment_deletion_converges_on_retry(
+    scenario: _Scenario, prefect_manager_mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``delete_environment`` is multi-transaction; the retry has to converge.
+
+    The clone settlement commits in its own transaction before the backup
+    cascade runs, so a later step failing leaves a clone already reporting "the
+    created environment was deleted" while the environment is still there. That
+    window is inherent to a cascade that spans several transactions (the backup
+    cascade is itself many), and the property that makes it safe is recorded
+    here: the marker lands **with** the FK release, so a retry finds no clone by
+    that environment id, attributes nothing a second time, and finishes the job.
+    """
+    from styrmin_backend.services import environments as environments_service
+
+    clone = await scenario.clone()
+    created = await _finish_clone(scenario, clone)
+    real_cascade = environments_service.delete_environment_backups_for_environment
+    attempts = {"count": 0}
+
+    async def _failing_cascade(environment_id: UUID, uow: Any) -> int:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("the snapshot store was unreachable")
+        return await real_cascade(environment_id, uow)
+
+    monkeypatch.setattr(
+        environments_service,
+        "delete_environment_backups_for_environment",
+        _failing_cascade,
+    )
+
+    with pytest.raises(RuntimeError):
+        await delete_environment(environment_id=created.id, uow=scenario.uow)
+
+    # The honest description of the window: attributed already, not deleted yet.
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert [entry["step"] for entry in refreshed.clone_errors or []] == [
+        CLONE_STEP_CREATED_ENVIRONMENT_DELETED
+    ]
+    assert created.id in {
+        environment.id for environment in scenario.uow.environments.models
+    }
+
+    await delete_environment(environment_id=created.id, uow=scenario.uow)
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    steps = [entry["step"] for entry in refreshed.clone_errors or []]
+    assert steps.count(CLONE_STEP_CREATED_ENVIRONMENT_DELETED) == 1, (
+        "the retry attributed the same deletion twice"
+    )
+    assert created.id not in {
+        environment.id for environment in scenario.uow.environments.models
+    }

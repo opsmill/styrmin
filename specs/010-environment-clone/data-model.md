@@ -12,7 +12,7 @@ Follows `StyrminModel` (`id: UUID` pk, `created_on`, `updated_on`).
 | Field | Type | Constraints | Meaning |
 |---|---|---|---|
 | `name` | `str` | non-null | The requested target environment name (also the created environment's name once it exists). Not unique on this table — a failed clone must not block re-cloning under the same name (SC-005); uniqueness of the *environment* name stays on `Environment(name, cluster_id)`. |
-| `source_environment_id` | `UUID \| None` | FK → `environment.id`, nullable | The environment that was cloned. Nullable so provenance survives source deletion: deleting the source nulls this on **terminal** clones (the record lives on as the created environment's provenance) and deletes **non-terminal** clone records outright (see Deletion semantics). |
+| `source_environment_id` | `UUID \| None` | FK → `environment.id`, nullable | The environment that was cloned. Nullable so provenance survives source deletion: deleting the source nulls this on every clone that **created an environment** (the record lives on as that environment's provenance; a still-building one also gets a fatal `source_environment_deleted` marker) and deletes only the clones that materialised nothing outright (see Deletion semantics). |
 | `source_environment_name` | `str` | non-null | The source's name at clone time, denormalised so provenance stays readable after the source is gone. |
 | `environment_backup_id` | `UUID \| None` | FK → `environmentbackup.id`, nullable | The capture the clone is built from. Set in the same transaction that creates the capture; null only if registration itself failed. |
 | `created_environment_id` | `UUID \| None` | FK → `environment.id`, nullable, `ON DELETE SET NULL` | The environment the clone created. Null until the capture succeeds and the environment materialises; reset to null when the created environment is deleted (which drives the clone terminal — D9). |
@@ -20,7 +20,7 @@ Follows `StyrminModel` (`id: UUID` pk, `created_on`, `updated_on`).
 | `config_override` | `dict \| None` | JSON, nullable | The override supplied at clone time (canonicalised `UpdateEnvironmentInput` dict), before merging. Persisted so the merge is reproducible/inspectable (FR-006). |
 | `cleared_config_fields` | `list \| None` | JSON, nullable | The `clearConfigFields` names supplied at clone time (research D7); popped from the captured config before the override merge. |
 | `deployment_results` | `list \| None` | JSON, nullable | Per-source-deployment attribution list (see below). Written by the mutation (skips known upfront) and updated by the clone flow as steps land. |
-| `clone_errors` | `list \| None` | JSON, nullable | Operation-level events that occurred outside any single deployment (capture failed, name lost in the TOCTOU window, environment creation failed, scaffolding deleted). Each entry: `{"step": str, "error": str, "fatal": bool}` — `fatal: true` drives the derivation to `FAILED`; deletions that touch an already-terminal clone are recorded with `fatal: false` so history is kept without rewriting the outcome. |
+| `clone_errors` | `list \| None` | JSON, nullable | Operation-level events that occurred outside any single deployment (capture failed, name lost in the TOCTOU window, environment creation failed, an input deleted underneath the clone). Each entry: `{"step": str, "error": str, "fatal": bool}` — `fatal: true` drives the derivation to `FAILED`; deletions that touch an already-terminal clone are recorded with `fatal: false` so history is kept without rewriting the outcome. |
 | `created_by_user_id` | `UUID \| None` | FK → `user.id`, nullable | Who invoked the clone (matches `Deployment.created_by_user_id` convention). |
 
 **Deliberately no status column** (FR-009, ADR-055 decision 2 — the docstring states
@@ -43,7 +43,11 @@ One entry per source deployment considered (SC-003: 100% accounted for):
 
 - `outcome` values on the wire are free strings inside JSON (like
   `SkippedConstituent.reason` — ADR-055 decision 4: open vocabulary, zero silent
-  skips), but the service writes only the four above.
+  skips), but the service writes only the four above. An entry the readers cannot
+  parse at all is still **counted** — as a failure, both in the derivation and in
+  the GraphQL projection — and is never dropped from the stored list: dropping it
+  would let a clone derive `COMPLETED` with a source deployment unaccounted for,
+  breaking the coverage identity below.
 - `pending` is the transient value between registration and the step landing; a
   terminal clone contains no `pending` entries (that is part of the derivation, below).
 - `reason` examples: `"deployment has no active instance"` (skip),
@@ -149,15 +153,24 @@ transaction — see the resolution rules above); the DB-level `ON DELETE SET NUL
   it is recorded `fatal: false` and the outcome stands. The clone *record* survives
   as history.
 - **Delete source environment** → handles the source's clone records **before**
-  cascading its environment backups, so the D9 guard cannot wedge the deletion:
-  terminal clones survive with `source_environment_id` nulled (provenance for the
-  created environment outlives the source; `source_environment_name` keeps it
-  readable); non-terminal clones are deleted outright and the clone flow tolerates
-  its row vanishing (mirrors `RestoreNotFoundError` handling in the restore flow).
-  Then backups cascade as today. Created environments survive — they are ordinary
-  independent environments.
+  cascading its environment backups, so the D9 guard cannot wedge the deletion.
+  The split is on what the clone **created**, not on its status alone: a clone
+  with a `created_environment_id` survives with `source_environment_id` nulled
+  (provenance for the created environment outlives the source;
+  `source_environment_name` keeps it readable), and if it was still building it
+  also gets the fatal `source_environment_deleted` entry — its capture is about
+  to cascade away, so it can never progress again, and the marker is what stops
+  it reporting `IN_PROGRESS` for ever (and stops it refusing the FR-008 guard
+  one step later). A non-terminal clone that materialised **nothing** is deleted
+  outright, and the clone flow tolerates its row vanishing (mirrors
+  `RestoreNotFoundError` handling in the restore flow). Then backups cascade as
+  today. Created environments survive — they are ordinary independent
+  environments.
 - **Delete backing environment backup** → refused (`IN_USE`) only while a referencing
-  clone's **capture** is in flight. Otherwise allowed: nulls `environment_backup_id`
+  clone's **capture** is in flight *and* the clone flow could still be waiting for it
+  (`CAPTURE_IN_FLIGHT_GUARD_SECONDS`, which is the flow's own poll budget — a capture
+  whose constituent work was never dispatched stays non-terminal for ever, so a
+  state-only guard had no escape hatch left). Otherwise allowed: nulls `environment_backup_id`
   on referencing clones; on a **non-terminal** clone it also appends the fatal
   `environment_backup_deleted` entry (→ `FAILED`, the escape hatch for a stuck
   clone); on a **terminal** clone the outcome stands (routine TTL cleanup must not

@@ -76,6 +76,18 @@ Two shapes are specific to clone rather than inherited:
   the derivation to `FAILED`; a deletion that touches an already-terminal clone is
   recorded `fatal: false` so history is kept without rewriting the outcome.
 
+  **What survives a source deletion is decided by what the clone created, not by its
+  status alone.** A clone that has a `created_environment_id` is kept: that environment is
+  an ordinary environment which outlives the source, and its provenance must not die with
+  it. If such a clone was still *building*, it also gets a fatal
+  `source_environment_deleted` entry — its capture cascades away with the source, so it can
+  never progress again, and without the marker the record would sit `IN_PROGRESS` for ever,
+  still occupying the environment it created. Only a non-terminal clone that never
+  materialised anything is deleted outright. Keying the split on terminality alone
+  destroyed the provenance of live environments, and let the backup cascade behind it
+  delete the constituent backups *and the in-flight cross-target restores* of counterparts
+  that nothing was left to attribute.
+
 A first read can therefore legitimately be `IN_PROGRESS` rather than `PENDING`: an
 upfront skip is recorded with the clone row, and recorded progress is progress. Nothing
 in the platform may assume `PENDING` comes first.
@@ -137,6 +149,15 @@ restore whose flow died is restorable again instead of permanently wedged. `PEND
 counts as in flight, so nothing that was refused before is accepted now on the strength
 of a not-yet-started restore.
 
+Counting `PENDING` comes with an obligation, and the clone fan-out carries it.
+`create_restore` **commits** its `PENDING` row and parks the counterpart in `RESTORING`
+*before* the flow run is dispatched, so a dispatch failure leaves a row nothing will ever
+pick up — and because `PENDING` counts, that phantom row would then refuse *every* future
+restore into the counterpart, naming a restore that never ran. No `PENDING`-restore reaper
+exists, so the fan-out settles the row itself: an undispatched restore is marked `FAILED`
+and its counterpart `FAILED`, exactly as the restore flow marks one it could not finish,
+and both ids are recorded on the clone's attribution entry so nothing is left unnameable.
+
 ### 5. The `IN_USE` guard is scoped to the capture window — a narrowing of ADR-055 decision 6
 
 FR-008 wanted the backing capture protected while a clone depends on it; ADR-055 decision
@@ -153,10 +174,25 @@ non-terminal clone it nulls the link and appends a fatal `environment_backup_del
 entry (the clone derives `FAILED`, attributed); on a terminal clone the recorded outcome
 stands, because backups are TTL-governed and routine cleanup must not rewrite history.
 
-Two honest deviations from the naive reading of that guard, both deliberate:
+Three honest deviations from the naive reading of that guard, all deliberate:
 
 - the guard additionally requires the clone itself to be non-terminal, so a finished clone
   never blocks cleanup of its capture;
+- **the window is bounded in time as well as in state** (`CAPTURE_IN_FLIGHT_GUARD_SECONDS`,
+  which *is* the clone flow's own `CAPTURE_POLL_TIMEOUT_SECONDS`, so the two cannot
+  drift). "The capture is non-terminal" is not a self-healing condition: a constituent
+  whose `EXECUTE_BACKUP` dispatch failed — or that no worker ever picked up — stays
+  `PENDING` with nothing to move it, so the capture derives non-terminal *forever* and
+  the clone with it. Refusing on state alone therefore reproduced the very wedge this
+  decision exists to prevent, one step earlier than the case it reasoned about: the
+  source environment stayed occupied for every environment-level operation *and*
+  `update_environment`, the capture could not be deleted, and there was no created
+  environment to discard — leaving hand-deleting each constituent `Backup` row as the
+  only way out. Once the flow's budget is spent the flow has given up, so nothing is
+  left for a deletion to pull the rug out from under, and the escape hatch spec.md
+  names ("for a clone stuck before the environment materialised, delete the backing
+  environment backup") is always reachable. Within the budget a genuinely running
+  capture is still protected;
 - **terminality is snapshotted at the guard rather than re-derived after the cascade.**
   The cascade deletes `Backup` and `Restore` rows that are themselves inputs to the
   derivation, so re-deriving afterwards would read a status computed from rows the
