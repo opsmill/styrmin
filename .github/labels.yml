@@ -75,3 +75,22 @@
 - name: "help wanted"
   description: "Extra attention is needed"
   color: "008672"
+
+# ----------------------------------
+# bug-fixing pipeline (shared catalog)
+# ----------------------------------
+- name: "state/ai-pipeline-ready"
+  description: "Approval gate: this issue/PR may be handled by the bug-fixing pipeline"
+  color: "0e8a16"
+
+- name: "state/need-more-info"
+  description: "Bug pipeline: analyst needs more information to proceed"
+  color: "fbca04"
+
+- name: "state/needs-human-test"
+  description: "Bug pipeline: the test stage could not proceed and needs a human"
+  color: "d93f0b"
+
+- name: "state/needs-human-fix"
+  description: "Bug pipeline: the fix stage could not proceed and needs a human"
+  color: "d93f0b"
