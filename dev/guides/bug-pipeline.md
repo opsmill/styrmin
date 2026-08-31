@@ -1,212 +1,117 @@
 # Bug-Fixing Pipeline
 
-The bug-fixing pipeline is a four-stage AI-assisted flow for taking a reported bug from triage to a reviewed pull request. Each stage is a standalone Claude Code skill that you can invoke from a GitHub comment or directly from the local Claude Code CLI — same logic, same observable side effects. The pipeline does **not** replace the existing general-purpose `@claude review` workflow defined in `.github/workflows/claude.yml`; that one stays as the catch-all reviewer. The bug pipeline is **pipeline-aware** — it cross-checks the diff against an analyst summary on the source issue and owns the draft → ready-for-review state transition.
+The bug-fixing pipeline is a human-gated, four-stage AI-assisted flow for taking a reported bug from triage to a reviewed pull request. styrmin runs the **shared** pipeline hosted in [`opsmill/opsmill-cicd-workflows`](https://github.com/opsmill/opsmill-cicd-workflows): the agent logic lives there as the single source of truth, and styrmin commits only a relay, a test profile, and the four worker workflows installed from the central catalog.
+
+All four stages run **on styrmin's own runners** with styrmin's **own `GITHUB_TOKEN`** — no cross-repo dispatch. The test and fix stages execute styrmin's tests locally (write a failing test → run → prove red; apply the fix → run → prove green). styrmin's ordinary CI check on the draft PR is the reviewer's empirical proof gate.
+
+This pipeline does **not** replace the general-purpose `@claude review` workflow in `.github/workflows/claude.yml`; that stays as the catch-all reviewer.
+
+## What styrmin hosts
+
+| File | Role | Edit? |
+|------|------|-------|
+| `.github/workflows/bug-pipeline-relay.yml` | The dispatcher. Listens for slash commands + PR CI conclusions, enforces the approval gate, dispatches the matching worker locally. Generic and **identical across every consumer**. | Verbatim — never customize |
+| `.github/workflows/bug-agent-{analyst,test,review,fix}.{md,lock.yml}` | The four workers, installed from the central catalog via `gh aw add`. The `.md` is a bot-managed stub; the `.lock.yml` is `gh aw compile` output. | Never by hand — refreshed via `gh aw update` PRs |
+| `.github/bug-pipeline/profile.yml` | styrmin's executable test profile (base branch, authoritative check, setup/test/format/lint commands). Consumed by the test/fix workers. | Yes — repo-specific values |
+| `.github/labels.yml` | Declares the four `state/*` pipeline labels (synced by the `Sync Labels` workflow). | Yes |
+
+The worker sources of truth live centrally at `workflows/bug-agent-*.md`; styrmin carries bot-managed copies. The gh-aw toolchain version is pinned in `.github/aw/actions-lock.json` (currently v0.86.2).
 
 ## The four stages at a glance
 
-| Command | Run on | What it does | Next stage |
-|---------|--------|--------------|------------|
-| `/bug-analyze <issue>` | Issue comment | Fetches the issue + comments, investigates the codebase, posts an analyst comment with hypothesis, affected files, reproduction steps, and a fenced YAML summary block | `/bug-fix <issue>` |
-| `/bug-fix <issue>` | Issue comment | Reads the most recent analyst summary, creates `bug/<NNN>-<short_description>` from `develop`, applies the fix, runs `uv run invoke format lint`, opens a draft PR with `Closes #<NNN>` and the analyst summary in `<details>` | `/bug-test <issue\|pr>` |
-| `/bug-test <issue\|pr>` | Issue or PR comment | Locates the open draft PR, writes or extends regression tests on the **same branch** as the fix, runs the project test command, posts a PR comment | `/bug-review <pr>` |
-| `/bug-review <pr>` | PR comment | Reviews the diff against project conventions and the analyst hypothesis. On satisfied → marks PR ready-for-review; on not-satisfied → keeps it draft and lists requested changes | (terminal stage) |
-
-## How to trigger from GitHub
-
-Post a comment on the issue (or PR for the test/review stages) whose **first line** starts with the slash command:
-
-```text
-/bug-analyze 206
+```
+/bug-analyze ─► analyst  ─► root-cause comment        (AGENT_ANALYSIS_COMPLETE)
+/bug-tdd     ─► test     ─► draft PR w/ failing test  (AGENT_TEST_COMPLETE)
+ (CI concludes) ─► reviewer ─► verdict comment        (AGENT_REVIEW_VERDICT: TEST_APPROVED)
+/bug-fix     ─► fixer    ─► fix commits on the PR     (AGENT_FIX_COMPLETE)
+ (CI concludes) ─► reviewer ─► verdict comment        (AGENT_REVIEW_VERDICT: FIX_APPROVED) ─► human merges
 ```
 
-```text
-/bug-fix 206
-```
+The pipeline is **test-first**: `/bug-tdd` opens a draft PR whose new test *fails* — a **red** `Unit Tests` check on the test-only PR is the *expected* signal that the bug reproduces. `/bug-fix` then makes it pass. Each transition is driven by a maintainer's slash command and gated by the marker the prior stage left; the reviewer is not a slash command — it fires automatically when CI concludes on a pipeline PR.
 
-```text
-/bug-test 206
-```
+## How to trigger
 
-```text
-/bug-review 231
-```
+1. On a bug **issue**, a maintainer adds the `state/ai-pipeline-ready` label. This is the approval gate — without it, every command is silently ignored.
+2. Comment `/bug-analyze` → the analyst posts a root-cause analysis.
+3. Comment `/bug-tdd` → the test-writer opens a draft PR (branch `ai-bug-pipeline-*`) with a failing regression test. When CI concludes, the reviewer auto-runs and should post `TEST_APPROVED`.
+4. Comment `/bug-fix` **on the pull request** → the fixer pushes the fix; CI goes green; the reviewer auto-runs and posts `FIX_APPROVED`. A human merges.
 
-The trigger matcher is strict: the comment must **start** with the command. Quoting it in a blockquote (`> /bug-analyze 206`) or burying it mid-paragraph will not fire the workflow. This is intentional — it keeps discussion of the commands from accidentally re-triggering them.
+The trigger matcher is strict: the comment's first token must be exactly `/bug-analyze`, `/bug-tdd`, or `/bug-fix` (a blockquote or mid-paragraph mention will not fire). Only actors with a write-ish role (`OWNER`/`MEMBER`/`COLLABORATOR`) can run it. `/bug-fix` must be run on the PR, not the issue.
 
-You also need write access to issues and pull requests on the repository — GitHub's repository-level role gating is what restricts who can run the pipeline. In addition, comments posted by Cloudflare-related bots (`cloudflare-pages[bot]`, `cloudflare-workers-and-pages[bot]`) are explicitly excluded via the `skip-bots` frontmatter on each stage, so deployment-preview comments never spawn a run regardless of their content or author association.
+If a stage can't proceed safely it stops and applies a `state/needs-human-*` label with an explanation instead of advancing.
 
-## How to trigger locally from Claude Code
+### The state labels
 
-From a Claude Code session in the repo, invoke the same commands directly:
+| Label | Meaning |
+|-------|---------|
+| `state/ai-pipeline-ready` | Approval gate — the pipeline may act on this issue/PR |
+| `state/need-more-info` | Analyst needs more information to proceed |
+| `state/needs-human-test` | The test stage could not proceed and needs a human |
+| `state/needs-human-fix` | The fix stage could not proceed and needs a human |
 
-```text
-/bug-analyze 206
-/bug-fix 206
-/bug-test 206
-/bug-review 231
-```
+## Identity & security model
 
-Local prerequisites:
+The shared App private key is never in scope of a code-executing (or any agent) job:
 
-- `gh` CLI authenticated against the target repository.
-- Write access to issues and pull requests via your personal `gh auth login` token. CI uses a separate, read-only repository token plus GHAW Safe-Outputs to route writes.
-- A clean git working tree on `develop` for `/bug-fix` (the skill creates a new branch and refuses to proceed on an existing one).
+- **The relay** runs with `permissions: {}` and per-job `actions: write` / `contents: read`, using styrmin's own `GITHUB_TOKEN`. It holds **no** App key and **no** `ANTHROPIC_API_KEY`.
+- **Each worker's agent job** (the one that runs the engine and executes styrmin's tests) runs **read-only** (`contents`/`issues`/`pull-requests: read`) with `GITHUB_TOKEN` + `ANTHROPIC_API_KEY` only.
+- **`BUG_PIPELINE_APP_ID` / `BUG_PIPELINE_APP_PRIVATE_KEY`** are referenced **only** inside each worker's isolated safe-output jobs (`conclusion`, `safe_outputs`), which mint a short-lived App token and write back as `opsmill-bug-pipeline[bot]` (needed for marker attribution and to trigger CI on the draft PR).
 
-Local and CI runs produce **identical** observable side effects (same comment shape, same branch naming, same PR body). The only difference is the argument source — locally you type the issue number, in CI it comes from `github.event.issue.number`.
+## Prerequisites (org / repo configuration)
 
-## Argument formats
+- **Org secrets**, restricted to onboarded repos and available to styrmin: `BUG_PIPELINE_APP_ID`, `BUG_PIPELINE_APP_PRIVATE_KEY`, `ANTHROPIC_API_KEY` (used **by the workers**, not the relay).
+- **The `opsmill-bug-pipeline` GitHub App** installed on styrmin.
+- **Actions variable** `GH_AW_GITHUB_APPROVAL_LABELS=state/ai-pipeline-ready` — **required**. Without it, the workers' `min-integrity: approved` read filter blocks reading an approved issue and the agent stops.
 
-Every stage accepts the issue/PR argument in either form:
+  ```bash
+  gh variable set GH_AW_GITHUB_APPROVAL_LABELS --body 'state/ai-pipeline-ready'
+  ```
 
-- **Bare integer**: `/bug-analyze 206`
-- **Full URL**: `/bug-analyze https://github.com/opsmill/styrmin/issues/206` (or `…/pull/231`)
+## Maintaining the installed workers
 
-Both canonicalise to the same `(number, url)` pair internally. An empty or malformed argument produces a usage comment on the same issue/PR and stops — the skill never proceeds with a guessed value.
-
-## Stage chaining
-
-The pipeline uses a **hybrid** chaining model: every stage is human-triggered, and on success the previous stage's output comment ends with a suggested next command:
-
-```text
-> Next: `/bug-fix 206`
-```
-
-On failure, no next-command line is appended. There is no auto-fire — a human always types the next command. This keeps the reviewer in control: you can pause the pipeline at any stage, fix the input, or step out entirely.
-
-## Editing the workflows
-
-The four CI workflows are authored as GitHub Agentic Workflow (GHAW) Markdown source files at `.github/workflows/bug-agent-*.md`. The corresponding `.github/workflows/bug-agent-*.lock.yml` files are the GitHub Actions YAML artefacts generated by `gh aw compile` — never edit them by hand.
-
-One-time setup:
+The workers are bot-managed installs — **never hand-edit** the `.md` stubs or `.lock.yml` artefacts. Updates from the central catalog arrive as `gh aw update` PRs. If you ever need to recompile locally (e.g. after a gh-aw version bump), do it by path and re-approve the manifest:
 
 ```bash
-gh extension install github/gh-aw
+gh aw compile --approve   # records any new secrets/actions in .github/aw/actions-lock.json — review first
 ```
 
-Edit cycle:
+`yamllint` ignores `.github/workflows/*.lock.yml` (configured in `.yamllint.yml`), and `.gitattributes` marks them `linguist-generated`.
 
-1. Edit the `.md` source (e.g., `.github/workflows/bug-agent-fix.md`).
-2. Recompile: `gh aw compile .github/workflows/bug-agent-fix.md`.
-3. Commit both the `.md` and the regenerated `.lock.yml` together.
-
-Permissions in the `.md` source must be **read-only** under GHAW strict mode; write capabilities are declared per stage in the `safe-outputs:` block. Strict mode rejects `contents: write`, `issues: write`, etc. Do not attempt to change them.
-
-Per-stage `safe-outputs:` catalogue:
-
-- **analyst** (`bug-agent-analyst.md`) → `add-comment`
-- **fix** (`bug-agent-fix.md`) → `create-pull-request` (draft) + `add-comment`
-- **test** (`bug-agent-test.md`) → `push-to-pull-request-branch` + `add-comment`
-- **review** (`bug-agent-review.md`) → `add-comment` + `mark-pull-request-as-ready-for-review`
-
-`yamllint` ignores `.github/workflows/*.lock.yml` (configured in `.yamllint.yml`) so the generated artefacts don't trip the linter. Drift between `.md` sources and their `.lock.yml` artefacts is currently caught only by reviewer attention; a CI check that re-runs `gh aw compile --no-emit` and fails on diff is a planned follow-up (FR-029).
-
-## Failure paths
-
-Each stage has a defined failure shape — no silent-pass behaviour anywhere in the pipeline:
-
-- **`/bug-analyze`** — when the issue lacks reproduction info or keywords match nothing meaningful, the skill posts a prose-only failure comment naming what was investigated and why it stopped. **No** YAML summary block, **no** `Next:` suggestion. Re-run after the issue gets more detail.
-- **`/bug-fix`** — failure paths include: no analyst comment found, branch already exists, lint/format failure on the diff. The skill posts a failure comment on the issue (with the lint output included verbatim, when relevant) and **does not** push a branch or open a PR. Per FR-010 / FR-012 a fix that fails lint never reaches a PR.
-- **`/bug-test`** — failure paths include: no open draft PR for the issue, branch mismatch with the `bug/<NNN>-*` pattern, tests don't pass. The skill posts a failure comment on the PR (or issue, if no PR was found) and **does not** commit the failing tests.
-- **`/bug-review`** — when not satisfied, the skill keeps the PR in draft, lists requested changes in the review comment, and **does not** flip ready-for-review. There is no "review failure" comment — a not-satisfied review *is* the structured output.
-
-## Concurrency
-
-Each workflow uses a `concurrency:` block keyed on the workflow name and issue number:
-
-```yaml
-concurrency:
-  group: bug-pipeline-${{ github.workflow }}-${{ github.event.issue.number }}
-  cancel-in-progress: false
-```
-
-Same-stage invocations on the same issue serialise — a second `/bug-analyze 206` queues behind a still-running one. Cross-stage invocations on the same issue (e.g., `/bug-analyze 206` and `/bug-fix 206`) are independent: each stage has its own queue. Different issues are independent.
-
-The `${{ github.workflow }}` qualifier is load-bearing: every issue comment registers all four workflows simultaneously, so a shared group key would let later arrivals evict the matching workflow from GitHub's single-pending-slot queue before its activation gate could run.
-
-## Inspecting the analyst summary
-
-The analyst comment closes with a fenced YAML block bracketed by deterministic HTML-comment markers:
-
-```markdown
-<!-- bug-pipeline:summary:start -->
-
-```yaml
-schema_version: 1
-issue:
-  number: 206
-  url: https://github.com/opsmill/styrmin/issues/206
-hypothesis: |
-  …
-affected_files:
-  - backend/styrmin_backend/services/cluster.py
-reproduction:
-  - "Apply the manifest"
-short_description: cluster-pod-crashloop-on-empty-spec
-next_command: /bug-fix 206
-```
-
-<!-- bug-pipeline:summary:end -->
-```
-
-The full schema (field types, required fields, regex constraints, versioning rules) is in [`specs/010-bug-pipeline-skills/contracts/analyst-summary-schema.md`](../../specs/010-bug-pipeline-skills/contracts/analyst-summary-schema.md). Downstream stages locate the **most recent** analyst comment that contains both markers and parse the YAML between them — no fuzzy matching.
-
-To eyeball a summary from the CLI:
+To re-onboard from scratch (or add a consumer), follow the central operator guide at [`docs/docs/bug-pipeline/readme.md`](https://github.com/opsmill/opsmill-cicd-workflows/blob/main/docs/docs/bug-pipeline/readme.md) and the styrmin recipe at [`docs/docs/bug-pipeline/styrmin.md`](https://github.com/opsmill/opsmill-cicd-workflows/blob/main/docs/docs/bug-pipeline/styrmin.md):
 
 ```bash
-gh issue view 206 --json comments --jq '.comments[-1].body'
+gh aw add opsmill/opsmill-cicd-workflows/bug-agent-analyst
+gh aw add opsmill/opsmill-cicd-workflows/bug-agent-test
+gh aw add opsmill/opsmill-cicd-workflows/bug-agent-review
+gh aw add opsmill/opsmill-cicd-workflows/bug-agent-fix
 ```
 
-## Smoke-test walkthrough
+## Local human-facing skills
 
-For an end-to-end exercise of all four stages on a real issue (success paths, failure paths, local-vs-CI parity check), follow [`specs/010-bug-pipeline-skills/quickstart.md`](../../specs/010-bug-pipeline-skills/quickstart.md). It is the canonical v1 manual smoke-test procedure and the reference for what each stage should produce.
+The interactive skills `.agents/skills/bug-{analyze,tdd,fix}` remain — they are the human-facing variant of the method, invokable directly from a Claude Code session in the repo. The pipeline itself no longer runs them; it runs the central catalog workers.
+
+> The method intentionally lives in two places — the central worker prompts (pipeline) and the local skills (humans) — maintained separately.
+
+## The test profile
+
+`.github/bug-pipeline/profile.yml` is composed from the central `compose.py base python-uv node-pnpm` and then edited to match styrmin:
+
+- `base_branch: develop` — the branch pipeline PRs target.
+- `authoritative_checks: [Unit Tests]` — the backend pytest CI job (`unit-tests` in `ci.yml`, surfaced as the **Unit Tests** check) that proves fail→pass.
+- `setup` / `runners` / `format` / `lint` — styrmin's real invocations (`uv sync`, `uv run invoke format|lint`, and the `cd frontend && pnpm …` tasks) that the local test/fix agents run.
 
 ## Troubleshooting
 
-- **Workflow doesn't fire** — confirm the comment body starts with the slash command followed by a space (e.g., `/bug-analyze 206`, not `/bug-analyze:206`, and not quoted in a blockquote `> /bug-analyze 206`).
-- **"No analyst comment found"** in the fix stage — check that the most recent comment on the issue contains the `<!-- bug-pipeline:summary:start -->` / `:end -->` markers and a parseable YAML block. Re-run `/bug-analyze` if the prior run failed.
-- **Branch already exists** in the fix stage — the skill fails loudly on collision rather than auto-suffixing. Delete or rename the existing `bug/<NNN>-*` branch and re-trigger.
-- **Lint failure in fix stage** — the failure comment includes the lint output verbatim. Fix the violation manually on the branch, push, then trigger `/bug-test` to continue.
-- **Tests don't pass in test stage** — the skill posts a failure comment and does not commit. Inspect the comment for the failure detail; either tighten the analyst's reproduction scenario (re-run `/bug-analyze`) or fix the test locally before re-running.
-- **Review keeps flipping the PR back to draft** — that's the gate working. Read the requested changes in the review comment, address them on the branch, and re-run `/bug-review`.
-
-## Design rationale
-
-### `SKILL.md` is the source of truth; workflow files are thin slash-command wrappers
-
-Every stage of the pipeline lives as `.agents/skills/bug-<stage>/SKILL.md`. Both invocation paths — the local Claude Code CLI and the GHAW workflow on GitHub — load the same skill. The GHAW `.md` source is a frontmatter block plus exactly one body line: the slash-command invocation. **No agent prompt, no branch-naming logic, no comment templates, no summary parsing.** Anything that is *agent logic* lives in the skill.
-
-This is the prescribed pattern for any future agentic workflow in this repo. The rejected alternatives — inlining prompt text in the workflow YAML, an umbrella `bug-pipeline/` skill with sub-commands, a shared instruction module across the four skills — all reintroduce the duplication or skill-coupling the pattern exists to prevent. A reviewer reads a workflow `.md` in under 30 seconds and confirms "the body is one slash-command line"; the invariant is mechanically verifiable.
-
-Concurrency uses `cancel-in-progress: false` deliberately — cancelling an in-flight fix mid-write could leave a half-pushed branch.
-
-### Inter-stage data contract — fenced YAML between HTML-comment markers
-
-Stages don't share process state; the only persistent channel between them is what they write into GitHub (issue comments, PR body, PR comments). For a downstream stage to act on upstream output, it needs to read structured data the upstream stage produced — without parsing prose and without hiding the payload from the human reviewer.
-
-The contract is: the analyst stage ends its issue comment with a fenced YAML block bracketed by `<!-- bug-pipeline:summary:start -->` / `<!-- bug-pipeline:summary:end -->`. The fix stage embeds the **verbatim** YAML inside a `<details>` block in the PR body so the test and review stages can re-derive context from the PR alone. The fenced block is the **only** inter-stage data channel — stages MUST NOT read each other's process state or prior comments other than the marker-framed YAML. That keeps each stage rerunnable in isolation.
-
-The marker pair is load-bearing: GitHub's renderer strips comment content but preserves the structural delimiters in the API source, so a `gh issue view … --json comments` flow can locate the block deterministically without fuzzy matching. `schema_version` is the first key in the YAML so future stages can branch on contract evolution; adding fields is non-breaking (older consumers ignore unknown keys), changing semantics bumps the version.
-
-Rejected alternatives (recorded so they don't get re-proposed): parsing the analyst's prose (brittle, forces constrained vocabulary), hidden HTML-comment-only payloads (loses human readability — the maintainer should be able to eyeball what the next stage will see), JSON in the fence (harder for humans to scan with multi-line strings), committing the summary to a separate file in the branch (forces the analyst stage to commit before the fix stage has chosen a branch), and locating the block by "last yaml fence in the comment" (fragile if future stages add their own YAML blocks).
+- **Command doesn't fire** — the comment's first token must be exactly the command (`/bug-tdd`, not `/bug-tddx` or `> /bug-tdd`), the actor must have write access, and the issue/PR must carry `state/ai-pipeline-ready`.
+- **Worker stops immediately / can't read the issue** — confirm the `GH_AW_GITHUB_APPROVAL_LABELS` variable is set (see Prerequisites).
+- **`Unit Tests` is red after `/bug-tdd`** — that is the expected signal on a test-only PR (the bug reproduces). It should go green after `/bug-fix`.
+- **Reviewer didn't run** — it fires on `check_suite: completed` for `ai-bug-pipeline-*` branches; confirm CI actually concluded on the PR.
+- **A `state/needs-human-*` label appeared** — the stage stopped and needs a human; read the accompanying comment for what blocked it.
 
 ## References
 
-- Skill files:
-  - [`.agents/skills/bug-analyze/SKILL.md`](../../.agents/skills/bug-analyze/SKILL.md)
-  - [`.agents/skills/bug-fix/SKILL.md`](../../.agents/skills/bug-fix/SKILL.md)
-  - [`.agents/skills/bug-test/SKILL.md`](../../.agents/skills/bug-test/SKILL.md)
-  - [`.agents/skills/bug-review/SKILL.md`](../../.agents/skills/bug-review/SKILL.md)
-- Workflow source files (GHAW Markdown — edit these):
-  - [`.github/workflows/bug-agent-analyst.md`](../../.github/workflows/bug-agent-analyst.md)
-  - [`.github/workflows/bug-agent-fix.md`](../../.github/workflows/bug-agent-fix.md)
-  - [`.github/workflows/bug-agent-test.md`](../../.github/workflows/bug-agent-test.md)
-  - [`.github/workflows/bug-agent-review.md`](../../.github/workflows/bug-agent-review.md)
-- Generated workflow artefacts (`gh aw compile` output — do not edit):
-  - `.github/workflows/bug-agent-analyst.lock.yml`
-  - `.github/workflows/bug-agent-fix.lock.yml`
-  - `.github/workflows/bug-agent-test.lock.yml`
-  - `.github/workflows/bug-agent-review.lock.yml`
-- Contracts:
-  - [`specs/010-bug-pipeline-skills/contracts/analyst-summary-schema.md`](../../specs/010-bug-pipeline-skills/contracts/analyst-summary-schema.md)
-  - [`specs/010-bug-pipeline-skills/contracts/slash-command-protocol.md`](../../specs/010-bug-pipeline-skills/contracts/slash-command-protocol.md)
-- Spec: [`specs/010-bug-pipeline-skills/`](../../specs/010-bug-pipeline-skills/)
+- Central operator guide: [`docs/docs/bug-pipeline/readme.md`](https://github.com/opsmill/opsmill-cicd-workflows/blob/main/docs/docs/bug-pipeline/readme.md)
+- styrmin onboarding recipe: [`docs/docs/bug-pipeline/styrmin.md`](https://github.com/opsmill/opsmill-cicd-workflows/blob/main/docs/docs/bug-pipeline/styrmin.md)
+- Placement rationale: ADR-0016 (uniform consumer-side placement) in the central repo.
+- Local skills: [`.agents/skills/bug-analyze/SKILL.md`](../../.agents/skills/bug-analyze/SKILL.md), [`.agents/skills/bug-tdd/SKILL.md`](../../.agents/skills/bug-tdd/SKILL.md), [`.agents/skills/bug-fix/SKILL.md`](../../.agents/skills/bug-fix/SKILL.md)
+- Historical (pre-central) design: [`specs/archive/010-bug-pipeline-skills/`](../../specs/archive/010-bug-pipeline-skills/)
