@@ -1,0 +1,182 @@
+# Bug-pipeline relay — the small dispatcher a consumer repo commits.
+#
+# Generic and identical across every consumer: it carries NO agent logic, no
+# prompts, no ANTHROPIC_API_KEY, and no App token. It listens for the bug-pipeline
+# slash commands (and pipeline-owned PR events), enforces the human approval gate
+# LOCALLY, then dispatches the matching worker — all installed IN THIS repo via
+# `gh aw add` and run on this repo's own runners. Dispatch uses this repo's own
+# GITHUB_TOKEN; the shared App key lives only inside the workers' isolated
+# safe-output jobs, never in the relay.
+#
+# Copy this file verbatim to `.github/workflows/bug-pipeline-relay.yml`.
+# Prerequisites (see docs/docs/bug-pipeline/readme.md):
+#   - The four workers installed here:
+#       gh aw add opsmill/opsmill-cicd-workflows/bug-agent-analyst
+#       gh aw add opsmill/opsmill-cicd-workflows/bug-agent-test
+#       gh aw add opsmill/opsmill-cicd-workflows/bug-agent-review
+#       gh aw add opsmill/opsmill-cicd-workflows/bug-agent-fix
+#   - Org secrets BUG_PIPELINE_APP_ID / BUG_PIPELINE_APP_PRIVATE_KEY and
+#     ANTHROPIC_API_KEY available here (used BY THE WORKERS, not the relay).
+#   - A composed test profile at .github/bug-pipeline/profile.yml.
+#   - The label `state/ai-pipeline-ready` (the approval gate) created here.
+#   - The Actions variable GH_AW_GITHUB_APPROVAL_LABELS=state/ai-pipeline-ready set
+#     here (required — the workers' min-integrity:approved read filter needs it).
+---
+name: Bug-pipeline relay
+
+on:
+  issue_comment:
+    types: [created]
+  # The reviewer is dispatched when the consumer CI CONCLUDES on a pipeline PR, so
+  # it always reads a settled authoritative check (no pending-review race).
+  check_suite:
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: bug-pipeline-relay-${{ github.event.issue.number || github.event.check_suite.pull_requests[0].number }}
+  cancel-in-progress: false
+
+env:
+  APPROVAL_LABEL: state/ai-pipeline-ready
+
+jobs:
+  # --- Slash-command path: /bug-analyze, /bug-tdd, /bug-fix -------------------
+  command:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      (startsWith(github.event.comment.body, '/bug-analyze') ||
+       startsWith(github.event.comment.body, '/bug-tdd') ||
+       startsWith(github.event.comment.body, '/bug-fix'))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write    # dispatch the installed workers via `gh workflow run`
+      contents: read    # read .github/bug-pipeline/profile.yml to resolve base_branch
+    steps:
+      - name: Gate + resolve dispatch parameters
+        id: gate
+        # All externally-influenced values are bound through env first, never
+        # interpolated into the script body (hardening posture).
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          IS_PR: ${{ github.event.issue.pull_request != null }}
+          NUMBER: ${{ github.event.issue.number }}
+          LABELS_JSON: ${{ toJSON(github.event.issue.labels.*.name) }}
+          APPROVAL_LABEL: ${{ env.APPROVAL_LABEL }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # 1) Authorization: actor must hold a write-ish role on this repo.
+          case "$AUTHOR_ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR) ;;
+            *) echo "::notice::Ignoring bug-pipeline command from unauthorized actor ($AUTHOR_ASSOCIATION)."; exit 0 ;;
+          esac
+
+          # 2) Approval gate: the issue/PR must carry the approval label.
+          if ! echo "$LABELS_JSON" | jq -e --arg l "$APPROVAL_LABEL" 'index($l)' >/dev/null; then
+            echo "::notice::Ignoring bug-pipeline command: approval label '$APPROVAL_LABEL' not present."
+            exit 0
+          fi
+
+          # 3) Resolve the command kind from the first token of the comment.
+          first_word="$(printf '%s' "$COMMENT_BODY" | head -n1 | awk '{print $1}')"
+          # Exact-token match: the job-level `if` uses startsWith, so a prefix like
+          # `/bug-analyzed` reaches here — ignore it rather than hard-failing the run.
+          case "$first_word" in
+            /bug-analyze) kind=bug-analyze; workflow=bug-agent-analyst.lock.yml ;;
+            /bug-tdd)     kind=bug-tdd;     workflow=bug-agent-test.lock.yml ;;
+            /bug-fix)     kind=bug-fix;     workflow=bug-agent-fix.lock.yml ;;
+            *) echo "::notice::Ignoring comment: '$first_word' is not an exact bug-pipeline command."; exit 0 ;;
+          esac
+
+          # 4) For the test-writer, resolve the base branch from the composed test
+          #    profile (falls back to the repo default branch).
+          base_branch=""
+          if [ "$kind" = "bug-tdd" ]; then
+            profile_value="$(gh api "repos/$REPO/contents/.github/bug-pipeline/profile.yml" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null \
+              | sed -n 's/^[[:space:]]*base_branch:[[:space:]]*//p' | head -n1 || true)"
+            # The profile line is hand-edited, so tolerate a YAML inline comment
+            # (whitespace + '#') and surrounding quotes. A git ref never contains
+            # whitespace, so strip quotes + all whitespace after dropping the comment.
+            profile_value="${profile_value%%[[:space:]]#*}"
+            profile_value="$(printf '%s' "$profile_value" | tr -d '"'\''[:space:]')"
+            base_branch="$profile_value"
+            if [ -z "$base_branch" ]; then
+              base_branch="$(gh api "repos/$REPO" --jq '.default_branch' 2>/dev/null || true)"
+            fi
+            if [ -z "$base_branch" ]; then
+              echo "::error::Could not resolve base_branch from profile.yml or the repo default branch."
+              exit 1
+            fi
+          fi
+
+          {
+            echo "kind=$kind"
+            echo "workflow=$workflow"
+            echo "is_pr=$IS_PR"
+            echo "number=$NUMBER"
+            echo "base_branch=$base_branch"
+            echo "authorized=true"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch the worker (installed locally)
+        if: steps.gate.outputs.authorized == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}   # `gh workflow run` has no checkout to infer the repo from
+          WORKFLOW: ${{ steps.gate.outputs.workflow }}
+          KIND: ${{ steps.gate.outputs.kind }}
+          IS_PR: ${{ steps.gate.outputs.is_pr }}
+          NUMBER: ${{ steps.gate.outputs.number }}
+          BASE_BRANCH: ${{ steps.gate.outputs.base_branch }}
+        run: |
+          set -euo pipefail
+          case "$KIND" in
+            bug-analyze)
+              gh workflow run "$WORKFLOW" -f issue_number="$NUMBER"
+              ;;
+            bug-tdd)
+              if [ "$IS_PR" = "true" ]; then
+                gh workflow run "$WORKFLOW" -f pr_number="$NUMBER" -f base_branch="$BASE_BRANCH"
+              else
+                gh workflow run "$WORKFLOW" -f issue_number="$NUMBER" -f base_branch="$BASE_BRANCH"
+              fi
+              ;;
+            bug-fix)
+              # The fixer operates on the pipeline PR; a PR number is required.
+              if [ "$IS_PR" != "true" ]; then
+                echo "::error::/bug-fix must be run on the pipeline pull request, not on an issue."
+                exit 1
+              fi
+              gh workflow run "$WORKFLOW" -f pr_number="$NUMBER"
+              ;;
+          esac
+          echo "::notice::Dispatched '$KIND' locally (#$NUMBER)."
+
+  # --- Reviewer path: dispatch the reviewer once CI concludes on a pipeline PR --
+  # Filtered to bot-owned pipeline branches (`ai-bug-pipeline-*`). This fires after
+  # each CI cycle (test PR opened, and again after the fixer pushes), so the
+  # reviewer always sees a concluded authoritative check.
+  review:
+    if: >-
+      github.event_name == 'check_suite' &&
+      startsWith(github.event.check_suite.head_branch, 'ai-bug-pipeline-') &&
+      github.event.check_suite.pull_requests[0].number
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch the local reviewer (CI concluded)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.check_suite.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          gh workflow run bug-agent-review.lock.yml -f pr_number="$PR_NUMBER"
+          echo "::notice::Dispatched 'bug-review' (CI concluded) locally (PR #$PR_NUMBER)."
