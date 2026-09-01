@@ -22,12 +22,14 @@ import { formatRelativeTime } from "@/pages/drivers/driver-detail/relative-time"
 import {
   type DriverListVersion,
   type FilteredDriver,
-  filterDrivers,
+  cappedVersions,
   flattenVersions,
+  filterDrivers,
   showsLatestBadge,
+  shownVersionCount,
   versionSource,
 } from "@/pages/drivers/lib/driverList";
-import { Plus, Search, X } from "lucide-react";
+import { ChevronRight, Plus, Search, X } from "lucide-react";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 type ViewMode = "grouped" | "flat";
@@ -55,6 +57,14 @@ export default function DriverListPage() {
       to: "/drivers/$driverId",
       params: { driverId },
       search: { version: versionId },
+    });
+
+  // No version pinned: the detail page falls back to its own default.
+  const openDriver = (driverId: string) =>
+    navigate({
+      to: "/drivers/$driverId",
+      params: { driverId },
+      search: {},
     });
 
   const hasAnyDrivers = !!data && data.applicationDrivers.length > 0;
@@ -97,6 +107,8 @@ export default function DriverListPage() {
             onViewModeChange={setViewMode}
             query={rawQuery}
             onQueryChange={setRawQuery}
+            driverCount={filtered.length}
+            versionCount={shownVersionCount(filtered)}
           />
 
           {filtered.length === 0 ? (
@@ -108,7 +120,9 @@ export default function DriverListPage() {
                   key={driver.id}
                   driver={driver}
                   query={query}
+                  isFiltering={query.trim().length > 0}
                   onOpen={openVersion}
+                  onOpenDriver={openDriver}
                 />
               ))}
             </div>
@@ -126,14 +140,20 @@ function Toolbar({
   onViewModeChange,
   query,
   onQueryChange,
+  driverCount,
+  versionCount,
 }: {
   viewMode: ViewMode;
   onViewModeChange: (v: ViewMode) => void;
   query: string;
   onQueryChange: (q: string) => void;
+  driverCount: number;
+  versionCount: number;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    // Negative margins bleed the bar to the content column's edges and cancel
+    // PageLayout's top padding, so rows scroll under it.
+    <div className="sticky top-0 z-20 -mx-6 -mt-6 flex flex-wrap items-center gap-3 border-b border-border bg-background px-6 pb-4 pt-6">
       <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-0.5">
         <SegButton
           active={viewMode === "grouped"}
@@ -148,6 +168,12 @@ function Toolbar({
           Flat list
         </SegButton>
       </div>
+
+      <span className="text-[13px] text-muted-foreground">
+        {driverCount} application{driverCount !== 1 ? "s" : ""} · {versionCount}{" "}
+        driver version{versionCount !== 1 ? "s" : ""}
+        {viewMode === "flat" && " · every loaded version, newest first"}
+      </span>
 
       <div className="relative ml-auto w-full sm:w-72">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -269,6 +295,7 @@ function VersionRow({
           onOpen(driver.id, version.id);
         }
       }}
+      data-testid="driver-version-row"
       className={cn(
         GRID_COLS,
         "cursor-pointer items-center border-b border-border/60 px-4 py-2.5 text-[13px] last:border-b-0 hover:bg-primary/5",
@@ -296,14 +323,19 @@ function VersionRow({
 function AppGroup({
   driver,
   query,
+  isFiltering,
   onOpen,
+  onOpenDriver,
 }: {
   driver: FilteredDriver;
   query: string;
+  isFiltering: boolean;
   onOpen: (driverId: string, versionId: string) => void;
+  onOpenDriver: (driverId: string) => void;
 }) {
   const colliding = collidingVersions(driver.versions);
   const description = driver.latestVersion?.description;
+  const { visible, hiddenCount } = cappedVersions(driver, isFiltering);
   return (
     <div
       data-testid="driver-group"
@@ -326,13 +358,16 @@ function AppGroup({
             </ClampedText>
           )}
         </div>
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-          {driver.versions.length} driver version
-          {driver.versions.length !== 1 ? "s" : ""}
+        <span
+          data-testid="driver-group-count"
+          className="shrink-0 text-xs text-muted-foreground"
+        >
+          {driver.totalVersions} driver version
+          {driver.totalVersions !== 1 ? "s" : ""} loaded
         </span>
       </div>
       <ColumnHeaders />
-      {driver.versions.map((version) => (
+      {visible.map((version) => (
         <VersionRow
           key={version.id}
           driver={driver}
@@ -343,10 +378,56 @@ function AppGroup({
           onOpen={onOpen}
         />
       ))}
+      {hiddenCount > 0 && (
+        <OlderVersionsRow
+          driverId={driver.id}
+          hiddenCount={hiddenCount}
+          onOpenDriver={onOpenDriver}
+        />
+      )}
     </div>
   );
 }
 
+/** Full-width row closing a truncated group; the whole strip is the link. */
+function OlderVersionsRow({
+  driverId,
+  hiddenCount,
+  onOpenDriver,
+}: {
+  driverId: string;
+  hiddenCount: number;
+  onOpenDriver: (driverId: string) => void;
+}) {
+  return (
+    <div
+      data-testid="driver-older-versions"
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpenDriver(driverId)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenDriver(driverId);
+        }
+      }}
+      className="flex cursor-pointer items-center gap-2 px-4 py-2.5 text-xs text-muted-foreground hover:bg-primary/5 hover:text-foreground"
+    >
+      <span>
+        {hiddenCount} older version{hiddenCount !== 1 ? "s" : ""}
+      </span>
+      <span className="ml-auto flex shrink-0 items-center gap-1 font-medium">
+        Open driver
+        <ChevronRight className="h-3 w-3" />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Flat view — one row per loaded version, application name plus version,
+ * newest first, uncapped.
+ */
 function FlatTable({
   drivers,
   query,

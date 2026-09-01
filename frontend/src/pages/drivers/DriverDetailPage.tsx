@@ -8,11 +8,15 @@ import { ErrorState } from "@/components/ErrorState";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
 import {
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
+  Combobox,
+  ComboboxTrigger,
+  ComboboxContent,
+  ComboboxSearch,
+  ComboboxList,
+  ComboboxItem,
+  ComboboxEmpty,
+  ComboboxFooter,
+} from "@/components/ui/combobox";
 import { LatestBadge, OlderBadge } from "./VersionStatusBadge";
 import { DriverLogo } from "./DriverLogo";
 import { ClampedText } from "@/components/ClampedText";
@@ -48,6 +52,7 @@ export default function DriverDetailPage() {
   const { version: versionParam } = useSearch({ from: "/drivers/$driverId" });
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  const [versionQuery, setVersionQuery] = useState("");
 
   const { data, isLoading, error, refetch } = useGetDriverQuery({
     applicationDriverId: driverId,
@@ -72,6 +77,14 @@ export default function DriverDetailPage() {
 
   const isLatest = selected.id === latest?.id;
   const colliding = collidingVersions(versions);
+
+  // `label` is what the search matches on, so it carries the displayed string
+  // including the `@<short>` suffix added when two versions collide.
+  const versionOptions = versions.map((v) => ({
+    value: v.id,
+    label: displayDriverVersion(v, colliding),
+    loaded: formatRelativeTime(v.createdOn),
+  }));
 
   const goToVersion = (versionId: string) =>
     navigate({
@@ -100,35 +113,55 @@ export default function DriverDetailPage() {
         className="max-w-4xl"
       >
         {/* Header: version identity + status on one row. */}
-        <div className="flex flex-wrap items-center gap-3 pb-5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-5">
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground">Version</span>
             {versions.length > 1 ? (
-              <Select value={selected.id} onValueChange={goToVersion}>
-                <SelectTrigger
+              <Combobox
+                items={versionOptions}
+                value={selected.id}
+                onValueChange={goToVersion}
+                inputValue={versionQuery}
+                onInputValueChange={setVersionQuery}
+              >
+                <ComboboxTrigger
                   aria-label="Switch version"
                   className="h-8 w-auto gap-2 px-2.5 font-mono text-base font-medium"
                 >
                   {displayDriverVersion(selected, colliding)}
-                </SelectTrigger>
-                <SelectContent>
-                  {versions.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      <span className="flex items-center gap-2.5">
-                        <span className="font-mono">
-                          {displayDriverVersion(v, colliding)}
+                </ComboboxTrigger>
+                <ComboboxContent className="w-72">
+                  <ComboboxSearch
+                    placeholder={`Search ${versions.length} versions…`}
+                    aria-label="Search versions"
+                  />
+                  <ComboboxList>
+                    {(option: (typeof versionOptions)[number]) => (
+                      <ComboboxItem key={option.value} value={option.value}>
+                        <span className="flex w-full items-center gap-2.5">
+                          <span className="font-mono font-medium">
+                            {option.label}
+                          </span>
+                          {option.value === latest?.id && (
+                            <Badge variant="success">Latest</Badge>
+                          )}
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            {option.loaded}
+                          </span>
                         </span>
-                        <span className="text-xs text-muted-foreground">
-                          {formatRelativeTime(v.createdOn)}
-                        </span>
-                        {v.id === latest?.id && (
-                          <Badge variant="success">Latest</Badge>
-                        )}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                      </ComboboxItem>
+                    )}
+                  </ComboboxList>
+                  <ComboboxEmpty>
+                    No version matches "{versionQuery.trim()}"
+                  </ComboboxEmpty>
+                  <ComboboxFooter>
+                    {versionQuery.trim()
+                      ? `Searching all ${versions.length} loaded versions`
+                      : `Newest first · type to search all ${versions.length} versions`}
+                  </ComboboxFooter>
+                </ComboboxContent>
+              </Combobox>
             ) : (
               <span className="font-mono text-base font-medium">
                 {displayDriverVersion(selected, colliding)}
@@ -137,8 +170,11 @@ export default function DriverDetailPage() {
             {isLatest && <LatestBadge />}
           </div>
 
-          {/* Older-only notice, kept on the same row (badge + explanation as
-              one unit) so it clearly belongs to the selected version.
+          {/* Older-only notice: the badge and its explanation are a single
+              claim, so they share one bordered, tinted surface — the sentence
+              reads as the badge's caption rather than as a stray line under
+              the row. The badge still occupies the same slot as "Latest",
+              directly after the picker.
 
               NOTE (v1): the copy is intentionally generic — it states the
               latest-wins rule only, with no per-version detail. We deliberately
@@ -151,9 +187,12 @@ export default function DriverDetailPage() {
               "used by N deployments" with links and make this message specific.
               See the drivers-v1 scope note. */}
           {!isLatest && (
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-border bg-muted/40 px-3.5 py-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-warning/40 bg-warning/10 py-1.5 pl-1.5 pr-3">
               <OlderBadge />
-              <span className="text-[13px] text-muted-foreground">
+              {/* Full foreground, not muted: muted-foreground at 13px over the
+                  tinted surface measures 3.95:1, under the 4.5:1 AA floor.
+                  The DS's own Alert uses foreground on a notice surface. */}
+              <span className="text-[13px] text-foreground">
                 New deployments and upgrades use the{" "}
                 <Tooltip content={LOADED_SCOPE_NOTE}>
                   <span className="cursor-help underline decoration-dotted underline-offset-2">
@@ -163,6 +202,12 @@ export default function DriverDetailPage() {
                 .
               </span>
             </div>
+          )}
+
+          {versions.length > 1 && (
+            <span className="text-[13px] text-muted-foreground">
+              {versions.length} driver versions loaded
+            </span>
           )}
         </div>
 

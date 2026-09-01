@@ -94,6 +94,22 @@ the `applicationDrivers` field through the GraphQL API. Versions are
 immutable once loaded — to "update" a driver, load a new version and
 upgrade the deployments that pin the old one.
 
+The **Drivers** view offers two layouts, switched from the toolbar:
+
+- **Group by application** — one card per application driver, showing its
+  three newest **application driver versions**. Drivers with a longer
+  history close with a row reading `N older versions`, which opens the
+  driver's detail page where the full history lives. A driver with three
+  or fewer loaded versions shows all of them and no such row. Filtering
+  suspends the cap: while a filter is active every matching version is
+  listed, so a search can never hide its own matches.
+- **Flat list** — one row per loaded version across all drivers, newest
+  first and uncapped.
+
+On a driver's detail page, the version selector carries a search field,
+so a driver with a long history stays reachable without scrolling. The
+count beside it states how many versions are loaded in total.
+
 Every driver-version label in the UI, CLI, and SDK is rendered as
 `<version>@<short>`, where `<short>` is the first 7 hex chars of the
 **provenance fingerprint** — the content hash for local drivers, the

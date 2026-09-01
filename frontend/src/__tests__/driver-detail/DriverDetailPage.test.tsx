@@ -267,6 +267,49 @@ describe("DriverDetailPage", () => {
     expect(screen.getByLabelText("Switch version")).toBeInTheDocument();
   });
 
+  it("searches the version picker down to a single match", async () => {
+    // Long histories are the reason the picker is searchable at all: scrolling
+    // is not a way to find one version among many.
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v3",
+            version: "3.2.1",
+            createdOn: "2026-03-01T00:00:00Z",
+          }),
+          makeVersion({
+            id: "v2",
+            version: "3.0.7",
+            createdOn: "2026-02-01T00:00:00Z",
+          }),
+          makeVersion({
+            id: "v1",
+            version: "2.9.9",
+            createdOn: "2026-01-01T00:00:00Z",
+          }),
+        ]),
+      ),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+
+    expect(
+      await screen.findByText("3 driver versions loaded"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Switch version"));
+    await user.type(await screen.findByLabelText("Search versions"), "3.0");
+
+    await waitFor(() => {
+      expect(screen.queryByText("2.9.9")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("3.0.7")).toBeInTheDocument();
+    expect(
+      screen.getByText("Searching all 3 loaded versions"),
+    ).toBeInTheDocument();
+  });
+
   it("selects the ?version version and flags Update available on an older one", async () => {
     useGetDriverQueryMock.mockReturnValue(makeQueryResult(twoVersions()));
 

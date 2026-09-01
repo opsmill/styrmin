@@ -132,3 +132,30 @@ export function flattenVersions(drivers: readonly FilteredDriver[]): Array<{
       compareVersionsLatestFirst(a.version, b.version),
   );
 }
+
+/** Versions a group renders before the rest collapse into the footer row. */
+export const GROUPED_VERSION_CAP = 3;
+
+/**
+ * The versions a group shows, plus how many the footer row stands in for.
+ *
+ * The cap does not fire while a query is active: the filter matches version
+ * strings, sources and supported ranges, so capping would hide matches.
+ */
+export function cappedVersions(
+  driver: FilteredDriver,
+  isFiltering: boolean,
+): { visible: DriverListVersion[]; hiddenCount: number } {
+  if (isFiltering || driver.versions.length <= GROUPED_VERSION_CAP) {
+    return { visible: driver.versions, hiddenCount: 0 };
+  }
+  return {
+    visible: driver.versions.slice(0, GROUPED_VERSION_CAP),
+    hiddenCount: driver.versions.length - GROUPED_VERSION_CAP,
+  };
+}
+
+/** Versions on screen across a driver set. */
+export function shownVersionCount(drivers: readonly FilteredDriver[]): number {
+  return drivers.reduce((n, d) => n + d.versions.length, 0);
+}

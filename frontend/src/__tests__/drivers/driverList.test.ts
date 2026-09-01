@@ -9,6 +9,8 @@ import {
   filterDrivers,
   flattenVersions,
   showsLatestBadge,
+  cappedVersions,
+  shownVersionCount,
 } from "@/pages/drivers/lib/driverList";
 
 function mkVersion(
@@ -253,5 +255,57 @@ describe("flattenVersions", () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].isLatest).toBe(false);
+  });
+});
+
+describe("cappedVersions", () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      mkVersion({
+        id: `v${i}`,
+        version: `${n - i}.0.0`,
+        createdOn: `2026-01-${String(n - i).padStart(2, "0")}T00:00:00Z`,
+      }),
+    );
+
+  const filtered = (versions: DriverListVersion[]): FilteredDriver =>
+    filterDrivers([mkDriver("infrahub", versions)], "")[0];
+
+  it("shows only the newest three and counts the rest as hidden", () => {
+    const { visible, hiddenCount } = cappedVersions(filtered(many(47)), false);
+    expect(visible).toHaveLength(3);
+    expect(hiddenCount).toBe(44);
+  });
+
+  it("does not fire for a driver at or below the cap", () => {
+    const { visible, hiddenCount } = cappedVersions(filtered(many(3)), false);
+    expect(visible).toHaveLength(3);
+    expect(hiddenCount).toBe(0);
+  });
+
+  it("shows every match uncapped while a filter is active", () => {
+    // The filter matches version strings, so capping here would hide rows the
+    // user searched for and label them "older".
+    const { visible, hiddenCount } = cappedVersions(filtered(many(47)), true);
+    expect(visible).toHaveLength(47);
+    expect(hiddenCount).toBe(0);
+  });
+});
+
+describe("shownVersionCount", () => {
+  it("sums the versions actually on screen, not the loaded total", () => {
+    const drivers = filterDrivers(
+      [
+        mkDriver("grafana", [
+          mkVersion({ id: "g1", version: "1.4.2", createdOn: "2026-02-01" }),
+          mkVersion({ id: "g2", version: "1.4.1", createdOn: "2026-01-01" }),
+        ]),
+        mkDriver("infrahub", [
+          mkVersion({ id: "i1", version: "2.0.3", createdOn: "2026-01-01" }),
+        ]),
+      ],
+      "1.4.2",
+    );
+    expect(shownVersionCount(drivers)).toBe(1);
   });
 });
