@@ -27,7 +27,9 @@ from (#375).
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import kr8s.asyncio
 import pytest
@@ -37,25 +39,30 @@ from kr8s.asyncio.objects import Service as AsyncService
 from prefect.client.orchestration import PrefectClient
 from prefect.client.schemas.filters import DeploymentFilter, DeploymentFilterTags
 from styrmin_sdk import StyrminClient
+from playwright.async_api import expect
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.pages.drivers_list import DriversListPage
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 pytestmark = [
     pytest.mark.shard_general,
 ]
 
 
-async def _publish_next_driver_version(
-    *, vcluster: dict, tmp_path: Path, branch: str = "reselect-next"
+async def _publish_driver_version(
+    *, vcluster: dict, tmp_path: Path, offset: int, branch: str
 ) -> str:
-    """Push the next driver-version build of simple-app to the harness git server.
+    """Push a build of simple-app with ``spec.version`` = fixture + ``offset``.
 
     Clones the already-rewritten repo from the in-cluster git server (so the
-    helm chart location keeps pointing at the chart server), bumps only
+    helm chart location keeps pointing at the chart server), sets only
     ``spec.version``, and pushes the commit to ``branch``. Returns the branch
     name to load.
     """
-    repo_dir = tmp_path / "simple-app-v2"
+    repo_dir = tmp_path / f"simple-app-{branch}"
     kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
     git_svc = await AsyncService.get("git-server", namespace="default", api=kr8s_api)
     async with _portforward(git_svc, remote_port=9418) as local_port:
@@ -65,7 +72,8 @@ async def _publish_next_driver_version(
         spec_path = repo_dir / "driver.styrmin.yml"
         spec = yaml.safe_load(spec_path.read_text())
         # Bump relative to the fixture so example-driver version bumps don't break this.
-        spec["spec"]["version"] = str(int(spec["spec"]["version"]) + 1)
+        version = str(int(spec["spec"]["version"]) + offset)
+        spec["spec"]["version"] = version
         # supported_versions intentionally untouched — the overlap is the point.
         spec_path.write_text(yaml.dump(spec, default_flow_style=False))
 
@@ -75,7 +83,7 @@ async def _publish_next_driver_version(
         await asyncio.to_thread(
             porcelain.commit,
             str(repo_dir),
-            message=b"bump driver version to 2 (same supported range)",
+            message=f"set driver version to {version} (same supported range)".encode(),
             author=b"test <test@test.com>",
             committer=b"test <test@test.com>",
         )
@@ -139,7 +147,9 @@ async def test_driver_version_reselection(
     assert original_commit is not None
 
     # Publish the next driver version with the same supported range and load it.
-    branch = await _publish_next_driver_version(vcluster=vcluster, tmp_path=tmp_path)
+    branch = await _publish_driver_version(
+        vcluster=vcluster, tmp_path=tmp_path, offset=1, branch="reselect-next"
+    )
     new_version = await scenario_driver.load_driver_version(
         git_url=git_server["simple-app"], ref=branch
     )
@@ -176,3 +186,76 @@ async def test_driver_version_reselection(
     deployment = await client.deployments.get(deployment_id)
     assert str(deployment.application_driver_version_id) == original_binding
     assert deployment.application_version == app_version
+
+
+@pytest.mark.ci
+@pytest.mark.ui_only(
+    reason="Asserts how the drivers list renders a long version history "
+    "(3-newest cap, truncation strip) and that the detail page's version "
+    "picker is searchable. Both are rendering concerns with no SDK equivalent."
+)
+async def test_drivers_list_caps_long_histories(
+    styrmin_resources: dict,
+    git_server: dict[str, str],
+    vcluster: dict,
+    tmp_path: Path,
+    session_ui_page: "Page",
+) -> None:
+    """A driver with more versions than the cap shows 3 + one truncation row.
+
+    Shares this module's session-scoped stack. Counts are read from the page
+    (``DriverResource`` exposes no read operation), asserting the invariant
+    rows + hidden == loaded.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+
+    # The cap needs >3 versions to fire. simple-app carries one; add three.
+    newest = None
+    for offset in (2, 3, 4):
+        branch = await _publish_driver_version(
+            vcluster=vcluster,
+            tmp_path=tmp_path,
+            offset=offset,
+            branch=f"caplist-{offset}",
+        )
+        newest = await client.drivers.load_version(
+            repository_url=git_server["simple-app"], branch=branch
+        )
+    assert newest is not None
+    driver_id = str(newest.application_driver_id)
+
+    drivers_list = DriversListPage(session_ui_page)
+    await drivers_list.open()
+
+    # The header states how many versions are loaded in total.
+    header = await drivers_list.versions_loaded_label("simple-app")
+    match = re.search(r"(\d+) driver versions? loaded", header)
+    assert match, f"group header should state the loaded count, got {header!r}"
+    total = int(match.group(1))
+    assert total > 3, f"cap needs >3 versions to fire, header reports {total}"
+
+    # 1) The group renders the 3 newest versions, not the whole history.
+    visible = await drivers_list.visible_version_count("simple-app")
+    assert visible == 3, f"expected the 3 newest versions, rendered {visible}"
+
+    # 2) The strip accounts for every hidden version: rows + hidden == loaded.
+    label = await drivers_list.older_versions_label("simple-app")
+    assert label is not None, "a truncated group must show the older-versions strip"
+    assert f"{total - visible} older version" in label, (
+        f"strip should account for every hidden version ({total - visible}), "
+        f"got {label!r}"
+    )
+    assert "Open driver" in label
+
+    # 3) The strip is the link: it opens the driver, unpinned.
+    opened = await drivers_list.open_driver_from_older_versions("simple-app")
+    assert opened == driver_id
+
+    # 4) The detail picker filters down to the searched version.
+    await session_ui_page.get_by_label("Switch version").click()
+    search = session_ui_page.get_by_label("Search versions")
+    await search.wait_for()
+    await search.fill(newest.version)
+    await expect(
+        session_ui_page.locator("[data-value]").filter(has_text=newest.version)
+    ).to_have_count(1)

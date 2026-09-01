@@ -29,6 +29,56 @@ class DriversListPage:
             "[data-testid=driver-logo]"
         )
 
+    async def open(self) -> None:
+        """Navigate to the list and wait for at least one group to render."""
+        await self._page.goto("/drivers")
+        await self._page.locator("[data-testid=driver-group]").first.wait_for()
+
+    def group(self, driver_name: str) -> "Locator":
+        """The card for one application driver."""
+        return self._page.locator(
+            f"[data-testid=driver-group][data-driver-name={driver_name!r}]"
+        )
+
+    async def visible_version_count(self, driver_name: str) -> int:
+        """How many version rows the group renders (the cap's observable effect)."""
+        return (
+            await self.group(driver_name)
+            .locator("[data-testid=driver-version-row]")
+            .count()
+        )
+
+    async def versions_loaded_label(self, driver_name: str) -> str:
+        """Text of the group header's "N versions loaded" counter."""
+        return (
+            await self.group(driver_name)
+            .locator("[data-testid=driver-group-count]")
+            .inner_text()
+        ).strip()
+
+    async def older_versions_label(self, driver_name: str) -> str | None:
+        """Text of the "N older versions" strip, or None when the cap did not fire."""
+        strip = self.group(driver_name).locator("[data-testid=driver-older-versions]")
+        if await strip.count() == 0:
+            return None
+        return (await strip.inner_text()).strip()
+
+    async def open_driver_from_older_versions(self, driver_name: str) -> str:
+        """Click the truncation strip; returns the driver id it navigated to."""
+        await (
+            self.group(driver_name)
+            .locator("[data-testid=driver-older-versions]")
+            .click()
+        )
+        detail_root = self._page.locator("[data-testid=driver-detail]").first
+        await detail_root.wait_for()
+        driver_id = await detail_root.get_attribute("data-driver-id")
+        if not driver_id:
+            raise ScenarioActionError(
+                "driver detail page rendered without data-driver-id"
+            )
+        return driver_id
+
     async def load_remote_version(self, *, git_url: str, ref: str) -> DriverVersionRef:
         """Drive the Load Driver drawer (Git tab) and return the new version ref.
 

@@ -121,6 +121,19 @@ const DRIVERS: Driver[] = [
   } as Driver,
 ];
 
+/** Five versions — enough for the 3-version cap to fire. */
+const BIG_DRIVER: Driver = {
+  id: "id-netbox",
+  name: "netbox",
+  versions: [
+    mkVersion("n1", "1.0.0", "2026-01-01T00:00:00Z"),
+    mkVersion("n2", "2.0.0", "2026-02-01T00:00:00Z"),
+    mkVersion("n3", "3.0.0", "2026-03-01T00:00:00Z"),
+    mkVersion("n4", "4.0.0", "2026-04-01T00:00:00Z"),
+    mkVersion("n5", "5.0.0", "2026-05-01T00:00:00Z"),
+  ],
+} as Driver;
+
 function makeRouter() {
   const rootRoute = createRootRoute();
   const listRoute = createRoute({
@@ -424,6 +437,64 @@ describe("DriverListPage", () => {
     expect(
       screen.queryByText(INFRAHUB_NEW_DESCRIPTION),
     ).not.toBeInTheDocument();
+  });
+
+  it("caps a group at the 3 newest versions and offers the rest as one row", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data([BIG_DRIVER])));
+    await renderPage();
+
+    // 3 newest rendered, the 4th and 5th collapsed into the footer strip.
+    expect(await screen.findByText("5.0.0")).toBeInTheDocument();
+    expect(screen.getByText("4.0.0")).toBeInTheDocument();
+    expect(screen.getByText("3.0.0")).toBeInTheDocument();
+    expect(screen.queryByText("2.0.0")).not.toBeInTheDocument();
+    expect(screen.getByText("2 older versions")).toBeInTheDocument();
+    expect(screen.getByText("5 driver versions loaded")).toBeInTheDocument();
+  });
+
+  it("opens the driver without pinning a version from the older-versions row", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data([BIG_DRIVER])));
+    await renderPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText("2 older versions"));
+    await waitFor(() => {
+      expect(screen.getByText("driver detail page")).toBeInTheDocument();
+    });
+  });
+
+  it("shows every match uncapped while filtering", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data([BIG_DRIVER])));
+    await renderPage();
+    const user = userEvent.setup();
+
+    // A name match keeps the whole group, so all five versions must render —
+    // the cap must not turn two of them into an "older versions" row.
+    await user.type(screen.getByLabelText("Filter drivers"), "netbox");
+    await waitFor(() => {
+      expect(screen.getByText("1.0.0")).toBeInTheDocument();
+    });
+    expect(screen.getByText("2.0.0")).toBeInTheDocument();
+    expect(screen.queryByText(/older versions/)).not.toBeInTheDocument();
+  });
+
+  it("lists every loaded version uncapped in the flat view", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data([BIG_DRIVER])));
+    await renderPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText("Flat list"));
+
+    // No cap and no folding here — the whole history, one row per version,
+    // each carrying its application name.
+    await waitFor(() => {
+      expect(screen.getAllByText("netbox")).toHaveLength(
+        BIG_DRIVER.versions.length,
+      );
+    });
+    expect(screen.getByText("5.0.0")).toBeInTheDocument();
+    expect(screen.getByText("1.0.0")).toBeInTheDocument();
+    expect(screen.queryByText(/older versions/)).not.toBeInTheDocument();
   });
 
   it("hides the Load driver action for a read-only user", async () => {
