@@ -57,6 +57,67 @@ rather than deleting the key.
 under `helm/` (and the committed values overlays) and fails if any `limits`
 key resolves to a non-empty mapping.
 
+## Velero subchart naming
+
+**Rule:** the `velero` subchart section of `helm/styrmin/values.yaml` MUST keep
+`fullnameOverride: velero`, and no committed values overlay may change it.
+
+### Why
+
+Velero's repository-maintenance controller resolves **its own Deployment by the
+hardcoded name `velero`** in the Velero namespace
+(`pkg/repository/manager/manager.go`, `buildMaintenanceJob`) to copy the image,
+env, volumes, and service account into the kopia maintenance Job. The name is
+not configurable in Velero.
+
+The subchart's default fullname is `<release>-velero`, so without the override
+every maintenance cycle fails:
+
+```text
+level=warning msg="error pruning repository" error="error to build maintenance
+job: Deployment.apps \"velero\" not found"
+```
+
+The failure is invisible from the outside: backups and restores keep working,
+but kopia never prunes, so the data behind expired backups is never reclaimed
+and the bucket grows without bound. Velero also does not back off — it does not
+stamp `status.lastMaintenanceTime` on failure, so the warning repeats on every
+5-minute reconcile of every `BackupRepository`.
+
+### What the name pins
+
+Pinning the fullname also makes the subchart's resource names independent of the
+Helm release name. `VELERO_RESTORE_PVC_PATCH_CONFIGMAP` in
+`agent/service/kubernetes/resources/builders/backup.py` depends on that: the
+chart renders `configMaps` entries as `<fullname>-<key>`, and every Velero
+Restore Styrmin builds points `spec.resourceModifier` at that ConfigMap by name.
+Rename either side alone and Velero rejects every restore.
+
+### Enforcement
+
+`backend/tests/unit/test_helm_velero_naming.py` asserts the override, the
+ConfigMap name agreement, and that no overlay re-points the fullname.
+`test_backup_and_restore_lifecycle` (E2E, `shard_backup`) forces a maintenance
+cycle on the repository a real backup wrote to and fails if Velero cannot
+complete it.
+
+## Reconcile cadence for third-party controllers
+
+`velero server` defaults `--backup-sync-period` and
+`--store-validation-frequency` to 1m. Each cycle spawns and then kills a
+`velero-plugin-for-aws` process, and the teardown trips an open upstream bug
+that logs, at error level, a spurious
+`error encountered while scanning stdout ... read |0: file already closed`
+([velero#7892](https://github.com/vmware-tanzu/velero/issues/7892)). At the
+default cadence that is ~7 lines/minute of noise per BSL, which buries the logs
+that matter during a real backup.
+
+`helm/styrmin/values.yaml` therefore sets both to `5m`. Styrmin names the BSL
+explicitly on every `Backup` and tracks backup state in its own database, so it
+never depends on fast BSL revalidation or on Velero's bucket sync. Prefer
+slowing a third-party reconcile loop over dropping the log level: `logLevel:
+warning` would also hide the lines a real backup failure needs.
+
 ## Sizing requests
 
 Requests should reflect the component's steady-state footprint, not its worst

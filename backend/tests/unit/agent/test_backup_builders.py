@@ -73,7 +73,7 @@ class TestBuildVeleroRestore:
         assert rendered["spec"]["preserveNodePorts"] is False
         assert rendered["spec"]["resourceModifier"] == {
             "kind": "ConfigMap",
-            "name": "styrmin-velero-velero-restore-pvc-patch",
+            "name": "velero-restore-pvc-patch",
         }
         assert "namespaceMapping" not in rendered["spec"]
         assert "existingResourcePolicy" not in rendered["spec"]

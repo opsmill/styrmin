@@ -123,6 +123,13 @@ Every Velero backup Styrmin creates carries a **TTL** — the duration
 Velero keeps it before garbage-collecting the backup and the data behind
 it. Left alone, that's **`720h`** (30 days).
 
+Expiry and bucket space are two separate steps: garbage collection drops
+the expired backup, and a periodic **repository maintenance** pass then
+reclaims the storage behind it. Maintenance runs hourly per backup
+repository, and it deliberately leaves recently written data alone for
+safety, so expect bucket usage to trail your retention policy rather
+than fall the moment a backup expires.
+
 Set `backup_ttl` in config to choose your own. It takes a Go duration
 string in `h`, `m`, or `s` units: `2160h` (90 days), `8760h` (a year),
 `1h30m`, `1.5h`. There is deliberately **no day unit** — `30d` is not a

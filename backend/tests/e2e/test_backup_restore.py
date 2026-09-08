@@ -32,6 +32,16 @@ FANOUT_RECONCILE_TIMEOUT_SECONDS = 480.0
 # ``TaskStatus`` values that mean "this Task is still in flight".
 _NON_TERMINAL_TASK_STATUSES = frozenset({"pending", "running"})
 
+# Backdated stamp written onto a BackupRepository's ``status.lastMaintenanceTime``
+# to make kopia maintenance overdue. It doubles as the "not maintained yet"
+# marker the poll waits to see replaced, so it must be a value Velero would never
+# write itself.
+MAINTENANCE_OVERDUE_SENTINEL = "1970-01-01T00:00:00Z"
+
+# Parked on the repository once the forced cycle has been observed, so the
+# session-shared cluster is not left running a maintenance Job on every reconcile.
+MAINTENANCE_FREQUENCY_AFTER_CHECK = "24h"
+
 
 @asynccontextmanager
 async def portforward_simple_app(
@@ -122,6 +132,155 @@ async def assert_velero_backup_uses_bsl(
     actual = velero_backup["spec"].get("storageLocation")
     expected = f"styrmin-bsl-{expected_bsl_name}"
     assert actual == expected, f"Expected storageLocation '{expected}', got '{actual}'"
+
+
+async def assert_backup_repository_maintenance_succeeds(
+    kubeconfig_path: str,
+    timeout: float = 300.0,
+) -> None:
+    """Force a kopia maintenance cycle and assert Velero can complete it.
+
+    Velero builds the repository-maintenance Job out of its *own* Deployment,
+    which it resolves under the hardcoded name ``velero`` in the Velero
+    namespace (``pkg/repository/manager/manager.go``, ``buildMaintenanceJob``).
+    When the Helm fullname drifts off that name — the subchart's default is
+    ``<release>-velero`` — every cycle fails with ``error to build maintenance
+    job: Deployment.apps "velero" not found``, kopia never prunes, and deleted
+    backups keep occupying object storage forever. Nothing in the backup or
+    restore flow notices, which is why the assertion lives here.
+
+    Velero stamps ``status.lastMaintenanceTime`` when it *initialises* a
+    repository and only maintains again one ``spec.maintenanceFrequency`` later,
+    so a repository this young would never maintain inside a test run.
+    Backdating the stamp makes it overdue; the frequency edit in the same patch
+    is what wakes the controller, which reconciles on spec changes only.
+    """
+    import time
+
+    from kubernetes_asyncio import client as kubeclient
+    from kubernetes_asyncio import config as k8s_config
+    from kubernetes_asyncio.client import CustomObjectsApi
+
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    custom_api = CustomObjectsApi(api_client)
+    repository_crd = {
+        "group": "velero.io",
+        "version": "v1",
+        "namespace": "styrmin",
+        "plural": "backuprepositories",
+    }
+
+    name = ""
+    deadline = time.time() + timeout
+    try:
+        # Only a Ready repository takes the controller's maintenance branch, and
+        # only an initialised one already carries the `status` object the patch
+        # below writes into.
+        while True:
+            listed = await custom_api.list_namespaced_custom_object(**repository_crd)
+            ready = [
+                repository
+                for repository in listed["items"]
+                if (repository.get("status") or {}).get("phase") == "Ready"
+            ]
+            if ready:
+                break
+            assert time.time() < deadline, (
+                "A completed file-system backup should have left a Ready Velero "
+                "BackupRepository in the styrmin namespace; found "
+                + str(
+                    [
+                        (
+                            repository["metadata"]["name"],
+                            (repository.get("status") or {}).get("phase"),
+                        )
+                        for repository in listed["items"]
+                    ]
+                )
+            )
+            await asyncio.sleep(5)
+
+        name = ready[0]["metadata"]["name"]
+
+        await custom_api.patch_namespaced_custom_object(
+            **repository_crd,
+            name=name,
+            body=[
+                {
+                    "op": "add",
+                    "path": "/status/lastMaintenanceTime",
+                    "value": MAINTENANCE_OVERDUE_SENTINEL,
+                },
+                {"op": "replace", "path": "/spec/maintenanceFrequency", "value": "1s"},
+            ],
+        )
+
+        # Read the sentinel back before waiting on it. `BackupRepository` has no
+        # status subresource today, so patching `/status` through the main
+        # endpoint lands — but if that ever changes the API server drops the
+        # status half silently, `lastMaintenanceTime` keeps its original value,
+        # and the poll below would return on its first iteration having proved
+        # nothing.
+        patched = await custom_api.get_namespaced_custom_object(
+            **repository_crd, name=name
+        )
+        assert (patched.get("status") or {}).get(
+            "lastMaintenanceTime"
+        ) == MAINTENANCE_OVERDUE_SENTINEL, (
+            f"Backdating status.lastMaintenanceTime on {name!r} did not stick "
+            f"(got {(patched.get('status') or {}).get('lastMaintenanceTime')!r}), "
+            "so this assertion cannot tell a maintained repository from an "
+            "untouched one. `BackupRepository` has probably gained a status "
+            "subresource — patch it through that instead."
+        )
+
+        status: dict = {}
+        while time.time() < deadline:
+            repository = await custom_api.get_namespaced_custom_object(
+                **repository_crd, name=name
+            )
+            status = repository.get("status") or {}
+            # Velero writes the failure onto `status.message` and leaves
+            # `lastMaintenanceTime` untouched, so a non-empty message is a
+            # verdict, not a transient state — fail on it instead of burning
+            # the whole timeout.
+            message = status.get("message") or ""
+            assert not message, (
+                f"Velero could not maintain backup repository {name!r}: "
+                f'{message}. A `Deployment.apps "velero" not found` here '
+                "means the Velero Deployment is no longer named `velero` — see "
+                "backend/tests/unit/test_helm_velero_naming.py."
+            )
+            if status.get("lastMaintenanceTime") != MAINTENANCE_OVERDUE_SENTINEL:
+                return
+            await asyncio.sleep(5)
+
+        raise AssertionError(
+            f"Velero did not maintain backup repository {name!r} within "
+            f"{timeout}s: status.lastMaintenanceTime is still the backdated "
+            f"sentinel and status.message is empty (phase "
+            f"{status.get('phase')!r})"
+        )
+    finally:
+        # Park the frequency well beyond the session so the remaining tests do
+        # not share the cluster with a maintenance Job every reconcile. Runs
+        # even on failure: the 1s frequency must not outlive this assertion.
+        if name:
+            with suppress(Exception):
+                await custom_api.patch_namespaced_custom_object(
+                    **repository_crd,
+                    name=name,
+                    body=[
+                        {
+                            "op": "replace",
+                            "path": "/spec/maintenanceFrequency",
+                            "value": MAINTENANCE_FREQUENCY_AFTER_CHECK,
+                        }
+                    ],
+                )
+        await api_client.close()
+        await api_client.close()
 
 
 async def assert_velero_backup_ttl(
@@ -324,6 +483,11 @@ async def test_backup_and_restore_lifecycle(
         assert recorded_backup.expires_at is not None, (
             "A completed backup must record Velero's expiration timestamp"
         )
+
+        # 2d. Velero can actually maintain (kopia-prune) the repository the
+        #     backup just wrote to. Without this the repository grows forever
+        #     while every backup and restore keeps passing.
+        await assert_backup_repository_maintenance_succeeds(kubeconfig_path)
 
         # 3. Write more data (counter goes higher)
         async with portforward_simple_app(kubeconfig_path, namespace) as port:
