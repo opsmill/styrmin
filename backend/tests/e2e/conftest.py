@@ -1040,10 +1040,12 @@ async def velero_ready(
     api: kubeclient.ApiClient = vcluster["api"]
     core_api = kubeclient.CoreV1Api(api)
 
-    # Wait for Velero server pod to be ready
+    # Wait for Velero server pod to be ready. The Service (and Deployment) is
+    # named exactly `velero` because `helm/styrmin/values.yaml` pins
+    # `velero.fullnameOverride` — see `test_velero_deployment_name_is_maintainable`.
     await _wait_for_service_ready(
         core_api,
-        name="styrmin-velero",
+        name="velero",
         namespace="styrmin",
         label_selector="app.kubernetes.io/name=velero",
         pod_timeout=180.0,

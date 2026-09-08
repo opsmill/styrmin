@@ -349,6 +349,18 @@ prefect-server:
 # =============================================================================
 velero:
   enabled: true
+  # Velero's repository-maintenance controller resolves its own Deployment by the
+  # hardcoded name "velero" in the Velero namespace
+  # (`pkg/repository/manager/manager.go`, `buildMaintenanceJob`) to derive the
+  # image, env, volumes, and service account for the kopia maintenance Job. The
+  # subchart's default fullname is `<release>-velero`, so without this override
+  # every maintenance cycle fails with
+  # `error pruning repository ... Deployment.apps "velero" not found` — kopia
+  # never prunes, and the backup repository grows without bound in object
+  # storage. Pinning the fullname also makes the resource names below
+  # release-name independent, which `VELERO_RESTORE_PVC_PATCH_CONFIGMAP` in
+  # `agent/service/kubernetes/resources/builders/backup.py` relies on.
+  fullnameOverride: velero
   kubectl:
     image:
       repository: bitnamilegacy/kubectl
@@ -361,13 +373,30 @@ velero:
         - name: plugins
           mountPath: /target
   backupsEnabled: false
-  configuration: {}
+  configuration:
+    # `velero server` defaults both of these to 1m. Every cycle re-validates each
+    # BackupStorageLocation and re-syncs backups from the bucket, and each one
+    # spawns then kills a `velero-plugin-for-aws` process. The teardown trips an
+    # open upstream bug that logs, at error level, a spurious
+    # `error encountered while scanning stdout ... read |0: file already closed`
+    # (velero#7892, introduced by go-plugin >= 1.5.1), so the default cadence
+    # emits ~7 lines/minute of pure noise per BSL and buries the logs that matter
+    # during a real backup. Styrmin names the BSL explicitly on every Backup and
+    # tracks backup state in its own database, so it never depends on fast BSL
+    # revalidation or on Velero's bucket sync.
+    backupSyncPeriod: 5m
+    storeValidationFrequency: 5m
   deployNodeAgent: true
   snapshotsEnabled: false
   credentials:
     useSecret: false
   configMaps:
-    velero-restore-pvc-patch: # This resourceModifier is required to properly restore PVCs
+    # Rendered as `<fullname>-<key>`, i.e. `velero-restore-pvc-patch`. Keep in
+    # sync with `VELERO_RESTORE_PVC_PATCH_CONFIGMAP` in
+    # `agent/service/kubernetes/resources/builders/backup.py`, which references
+    # this ConfigMap from every Velero Restore's `spec.resourceModifier`
+    # (guarded by `backend/tests/unit/test_helm_velero_naming.py`).
+    restore-pvc-patch: # This resourceModifier is required to properly restore PVCs
       labels: {}
       data:
         resource-patch.yaml: |

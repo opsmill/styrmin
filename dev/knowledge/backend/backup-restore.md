@@ -369,6 +369,33 @@ Backups and restores track status at the component level. The overall status is 
 - `build_velero_backup()` — Creates Velero Backup CRD spec with labels, hooks, and TTL. `ttl` is a **required** parameter (as it is on the `VeleroBackup` dataclass in `agent/service/kubernetes/velero/resources.py`): neither layer carries a fallback literal, so `services/backup/ttl.py` stays the single home of the default
 - `build_velero_restore()` — Creates Velero Restore CRD spec with namespace mapping and hooks
 
+### Install constraints (`helm/styrmin/values.yaml`)
+
+Two Velero-side details the Python layer depends on, neither visible from the
+code that uses them:
+
+- **The Velero Deployment is named exactly `velero`.** Velero's
+  repository-maintenance controller resolves its own Deployment by that
+  hardcoded name to build the kopia maintenance Job, so the `velero` subchart
+  ships `fullnameOverride: velero`. Any other fullname leaves kopia unable to
+  prune: backups and restores still succeed, but the data behind expired
+  backups is never reclaimed from the bucket. See
+  [helm.md](../../guidelines/helm.md) ("Velero subchart naming").
+- **`VELERO_RESTORE_PVC_PATCH_CONFIGMAP`** (`builders/backup.py`) names the
+  ConfigMap holding the `resourceModifier` rules that strip `spec.volumeName`
+  from restored PVCs. The chart renders `configMaps` entries as
+  `<fullname>-<key>`, so the pinned fullname is what makes
+  `velero-restore-pvc-patch` a stable name rather than a release-name
+  derivative. Every Restore references it; a mismatch fails all of them.
+
+Both are asserted by `backend/tests/unit/test_helm_velero_naming.py`, and the
+maintenance path is exercised end to end by
+`test_backup_and_restore_lifecycle`'s
+`assert_backup_repository_maintenance_succeeds`, which backdates
+`status.lastMaintenanceTime` on the `BackupRepository` the backup created (and
+shortens `spec.maintenanceFrequency`, the spec change being what wakes the
+controller) so a cycle runs inside the test instead of an hour later.
+
 ### Volume Annotations (`agent/service/kubernetes/resources/builders/backup_annotations.py`)
 
 - `build_backup_volume_annotation_patches()` — Generates Kustomize patches that inject `backup.velero.io/backup-volumes` annotations on pod templates
