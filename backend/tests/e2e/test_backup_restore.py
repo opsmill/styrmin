@@ -280,7 +280,6 @@ async def assert_backup_repository_maintenance_succeeds(
                     ],
                 )
         await api_client.close()
-        await api_client.close()
 
 
 async def assert_velero_backup_ttl(
