@@ -56,6 +56,45 @@ class BackupStrategy(ABC):
 - **Postgres / Mariadb / Mongodb / Neo4j:** Pre-backup hooks run a dump command (e.g. `pg_dump`, `mariadb-dump`, `mongodump`, `neo4j-admin dump`) into an extra volume mounted at `backup_mount_path` (default `/backup`); post-restore hooks run the corresponding restore command. Default backup volume is `"backup"`.
 - **Action:** No hooks or volumes — backup is handled entirely by the driver's Prefect action
 
+### Hook timeouts: `timeout` vs `execTimeout`
+
+Backup and restore hooks do **not** share a field name for their timeout, and getting it wrong fails silently:
+
+| Hook | Velero field | Dataclass attribute |
+|------|--------------|---------------------|
+| `VeleroBackupHookExec` | `timeout` | `timeout` |
+| `VeleroRestoreHookExec` | `execTimeout` (plus optional `waitTimeout`) | `exec_timeout`, `wait_timeout` |
+
+The Restore CRD has a structural schema, so an unknown `timeout` key on a restore hook is pruned by the API server without an error and velero applies its own **30 s** default — a hook declaring `600s` shows up in the velero log as `hookTimeout="{30s}"` and any longer-running restore command is killed mid-flight. `backend/tests/unit/services/backup/test_strategies.py::test_restore_hooks_never_render_a_bare_timeout` guards every strategy against the regression.
+
+`waitTimeout` (how long velero waits for the container to be ready before running the command) is left unset on purpose: unset means "wait indefinitely", and a finite value would reintroduce the readiness failure the postgres hook's own polling exists to avoid.
+
+### The postgres restore hook is fenced
+
+A restore deletes and recreates the target namespace, and `build_velero_restore` sets `restorePVs: false` while `PostgresBackupStrategy.get_backup_volumes` only captures the `backup` volume — never PGDATA. Postgres therefore comes up on an **empty** data volume and initdb builds an empty database. The application that owns that database is restored into the same namespace at the same time, connects as soon as postgres is reachable, and starts running its own schema migrations against that empty database — concurrently with the post-restore `pg_restore`.
+
+Interleaving the two corrupts the schema. The observed signature (`hooks.py`, Prefect's database):
+
+```text
+pg_restore: error: ... cannot drop constraint pk_work_queue ... because other objects depend on it
+pg_restore: error: ... relation "work_pool" already exists
+pg_restore: error: ... column "status" of relation "work_pool" does not exist
+```
+
+The last one is diagnostic: the dump has the column, the live table does not, because the table had just been recreated by an *older* Alembic revision. The window is small, so this surfaces as a rare `PartiallyFailed` restore rather than a consistent one — but the database is left neither the backup's schema nor the application's.
+
+`postgres_restore_hooks()` closes it with three things:
+
+1. **A readiness poll** instead of `sleep 5`. Velero's `waitForReady` only waits for the container's readiness probe, which bitnami satisfies while initdb is still creating the role and the database — the old `FATAL: role "..." does not exist` failure.
+2. **A fence.** A background loop terminates every backend on the target database whose `application_name` is not the hook's own `PGAPPNAME` (`styrmin-restore`), so `pg_restore` is the only writer for the duration. A NULL `application_name` counts as a rival: `pg_stat_activity` hides that column for backends owned by another role. The loop is torn down by a `trap` on `EXIT INT TERM`. This needs no superuser — the role bitnami creates owns the database, which is enough to terminate its own backends. A connection limit was rejected as the alternative: the application's connection pool simply takes the slot and holds it.
+3. **`--single-transaction`.** Each attempt is all-or-nothing, so losing a race rolls back cleanly instead of leaving a half-restored schema, which in turn makes the bounded retry loop safe.
+
+`--clean --if-exists` stays rather than `DROP SCHEMA public CASCADE`: schema `public` is owned by `postgres`, and the hook runs as the database owner, not a superuser.
+
+The same race applies in principle to the mariadb, mongodb and neo4j hooks; only postgres has a documented occurrence and only postgres is fenced today.
+
+E2E coverage lives in `test_infrahub_backup_restore.py::test_infrahub_enterprise_backup_and_restore_lifecycle`, which is the one scenario that boots an application with a live writer against a `kind: postgres` component. It seeds a marker row plus a schema fingerprint before the backup, drifts both afterwards, and asserts both come back — the fingerprint is what catches an interleaved restore that velero still reports as done.
+
 ## Data Models
 
 ### Status Enums

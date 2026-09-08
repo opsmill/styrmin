@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from styrmin_backend.services.backup.strategies.action import ActionBackupStrategy
 from styrmin_backend.services.backup.strategies.disk import DiskSnapshotStrategy
 from styrmin_backend.services.backup.strategies.mariadb import MariadbBackupStrategy
@@ -117,6 +119,96 @@ class TestPostgresBackupStrategy:
             config={"kind": "postgres", "container": "my-pg"},
         )
         assert hooks[0].post[0].container == "my-pg"
+
+    def test_get_restore_hooks_custom_mount_path(self) -> None:
+        strategy = PostgresBackupStrategy()
+        hooks = strategy.get_restore_hooks(
+            namespace="test-ns",
+            component_name="db",
+            config={"kind": "postgres", "backup_mount_path": "/custom/backup"},
+        )
+        for hook_exec in hooks[0].post:
+            assert "/custom/backup/pre-snapshot.dump" in " ".join(hook_exec.command)
+
+    def test_restore_fences_concurrent_writers(self) -> None:
+        """pg_restore must be the only writer while it rewrites the schema.
+
+        A restore recreates the namespace, so the application pods boot
+        against an empty database and run their own schema migrations
+        concurrently with the restore. Interleaving the two leaves tables at
+        an older migration revision and COPY failing on columns that no
+        longer exist. The hook terminates rival backends on a loop for the
+        duration; its own connections are tagged via PGAPPNAME so the loop
+        cannot kill them.
+        """
+        strategy = PostgresBackupStrategy()
+        hooks = strategy.get_restore_hooks(
+            namespace="test-ns",
+            component_name="db",
+            config={"kind": "postgres"},
+        )
+        script = hooks[0].post[0].command[2]
+        assert "PGAPPNAME=styrmin-restore" in script
+        assert "pg_terminate_backend(pid)" in script
+        assert "pid <> pg_backend_pid()" in script
+        # A backend owned by another role has its application_name hidden;
+        # treating that NULL as "one of ours" would silently disable the fence.
+        assert "coalesce(application_name, '') <> 'styrmin-restore'" in script
+        # The fence must be torn down however the hook exits.
+        assert "trap 'kill \"$fence_pid\" 2>/dev/null || true' EXIT INT TERM" in script
+
+    def test_restore_is_atomic_and_retried(self) -> None:
+        """Each attempt is all-or-nothing, which is what makes retrying safe.
+
+        Without --single-transaction a lost race leaves a half-dropped,
+        half-recreated schema behind and a retry compounds it.
+        """
+        strategy = PostgresBackupStrategy()
+        hooks = strategy.get_restore_hooks(
+            namespace="test-ns",
+            component_name="db",
+            config={"kind": "postgres"},
+        )
+        script = hooks[0].post[0].command[2]
+        assert "--single-transaction" in script
+        assert "--clean --if-exists" in script
+        assert "pg_restore attempt $attempt aborted; retrying" in script
+
+    def test_restore_waits_for_the_database_rather_than_sleeping(self) -> None:
+        """velero's waitForReady only covers the container's readiness probe.
+
+        bitnami satisfies that probe while initdb is still creating the role
+        and database, which is what produced ``FATAL: role "..." does not
+        exist``. Poll for a query that has to succeed instead of guessing at
+        a sleep.
+        """
+        strategy = PostgresBackupStrategy()
+        hooks = strategy.get_restore_hooks(
+            namespace="test-ns",
+            component_name="db",
+            config={"kind": "postgres"},
+        )
+        script = hooks[0].post[0].command[2]
+        assert "sleep 5 &&" not in script
+        assert "while ! psql" in script
+        assert "-tAc 'SELECT 1'" in script
+
+    def test_restore_hooks_declare_exec_timeout(self) -> None:
+        """Restore hooks carry ``execTimeout``; a bare ``timeout`` is pruned.
+
+        The Restore CRD's structural schema drops unknown keys without
+        complaint, so a mis-named timeout silently became velero's 30s
+        default and killed any longer restore.
+        """
+        strategy = PostgresBackupStrategy()
+        hooks = strategy.get_restore_hooks(
+            namespace="test-ns",
+            component_name="db",
+            config={"kind": "postgres"},
+        )
+        rendered = hooks[0].render()["postHooks"]
+        assert rendered[0]["exec"]["execTimeout"] == "600s"
+        assert all("timeout" not in post["exec"] for post in rendered)
 
     def test_get_backup_volumes_default(self) -> None:
         strategy = PostgresBackupStrategy()
@@ -465,3 +557,32 @@ class TestActionBackupStrategy:
             config={"kind": "action"},
         )
         assert volumes == []
+
+
+@pytest.mark.parametrize(
+    ("strategy", "kind"),
+    [
+        (PostgresBackupStrategy(), "postgres"),
+        (MariadbBackupStrategy(), "mariadb"),
+        (MongodbBackupStrategy(), "mongodb"),
+        (Neo4jBackupStrategy(), "neo4j"),
+    ],
+)
+def test_restore_hooks_never_render_a_bare_timeout(strategy: object, kind: str) -> None:
+    """Regression: every restore hook must use ``execTimeout``.
+
+    ``timeout`` is the *backup* hook field. On a Restore it is not part of
+    velero's ExecRestoreHook, so the CRD's structural schema prunes it and
+    velero applies its own 30s default -- silently capping every database
+    restore, whatever the strategy declared.
+    """
+    hooks = strategy.get_restore_hooks(  # type: ignore[attr-defined]
+        namespace="test-ns",
+        component_name="db",
+        config={"kind": kind},
+    )
+    rendered = [post for hook in hooks for post in hook.render()["postHooks"]]
+    assert rendered, f"{kind} declares no restore hooks"
+    for post in rendered:
+        assert "timeout" not in post["exec"]
+        assert post["exec"]["execTimeout"]

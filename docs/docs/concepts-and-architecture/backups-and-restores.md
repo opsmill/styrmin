@@ -89,8 +89,20 @@ A restore is the same machinery, run in reverse:
    dump and replaying it.
 3. The agent creates a Velero `Restore` object with the right hooks.
 4. Velero pulls the data back from the BSL and lays it down.
-5. The restore hooks run, the application comes back up, and the
-   deployment is now serving the restored data.
+5. The restore hooks run and the deployment is now serving the restored
+   data.
+
+A restore recreates the namespace from scratch, so your application pods
+come back up **while** the restore hooks are still replaying data — Velero
+starts everything at once and does not hold the application back. For a
+Postgres component that matters: the database the application first
+connects to is empty, and an application that migrates its own schema on
+startup will try to do so on top of the restore. Styrmin's Postgres
+restore hook handles this by locking other clients out of the database
+until the dump has been replayed, and by replaying it in a single
+transaction so a restore either lands whole or not at all. Your
+application may log a few connection errors during that window; it should
+reconnect on its own once the restore finishes.
 
 ### Why one BSL per environment?
 
