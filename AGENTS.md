@@ -131,13 +131,20 @@ kubectl get pods -A
 kubectl logs -n styrmin-<deployment-id> <pod> --all-containers
 ```
 
-**When running via a non-interactive shell (background job, agent tool, CI), prefix the command with `sleep infinity |`** so pdb's stdin stays open instead of immediately hitting EOF and exiting (which tears the cluster down):
+**When running via a non-interactive shell (background job, agent tool, CI)**, pdb's stdin hits EOF the moment the test fails, so pytest exits and the vcluster is torn down before you can look at it. Hold stdin open with a FIFO:
 
 ```bash
-sleep infinity | uv run pytest backend/tests/e2e/<node_id> -v -s --pdb 2>&1 | tee /tmp/pdb.log
+FIFO=$(mktemp -u) && mkfifo "$FIFO"
+sleep infinity > "$FIFO" & HOLDER=$!
+uv run pytest backend/tests/e2e/<node_id> -v -s --pdb < "$FIFO" 2>&1 | tee /tmp/pdb.log
+RC=${PIPESTATUS[0]}
+kill "$HOLDER" 2>/dev/null; rm -f "$FIFO"
+(exit "$RC")
 ```
 
-Pytest stays paused indefinitely; pdb can't receive commands over the dummy stdin, so inspect with `kubectl` from a separate shell, then kill the process group (`pkill -f pytest` or kill the job) when done.
+**Do not use `sleep infinity | uv run pytest …`.** It holds stdin open, but `sleep` never writes, so it never takes SIGPIPE when pytest exits and the shell waits on it forever — the command hangs after the run finishes, **including when the test passes**. A background job started that way never reports completion, and any consumer that buffers rather than streams (`tail`, a pager) discards the output when you finally kill it. The FIFO gives pdb the same never-EOF stdin, is cleaned up the moment pytest returns, and propagates pytest's own exit code.
+
+On failure pytest stays paused. pdb can't receive commands over the dummy stdin, so inspect with `kubectl` from a separate shell, then kill **that** pytest by PID or job id when you're done. Do not `pkill -f pytest`: the pattern matches every pytest on the host, and on a shared dev box or a multi-worktree checkout that kills other people's runs (and orphans their vclusters — clean those up with `vcluster delete <name>`).
 
 Use `.agents/skills/e2e-troubleshoot/SKILL.md` for the structured multi-iteration variant of this `--pdb` workflow.
 

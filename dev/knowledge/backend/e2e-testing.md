@@ -173,7 +173,7 @@ the same rule for tests that share the session-wide env (e.g.
 
 A first deployment never needs the override — only peers do.
 
-`pytest-rerunfailures` is intentionally not in the dependency set — it is incompatible with `--pdb` (the project's standard E2E debugging workflow); see `dev/CLAUDE.md` (Debugging E2E Tests).
+`pytest-rerunfailures` is intentionally not in the dependency set — it is incompatible with `--pdb` (the project's standard E2E debugging workflow); see `AGENTS.md` (Debugging E2E Tests).
 
 ## Test Environment
 
@@ -524,7 +524,7 @@ vcluster ───────────────────────�
 
 ### Always run with `--pdb`
 
-The project standard is to run E2E tests with `--pdb`. See `dev/CLAUDE.md` (Debugging E2E Tests) for the full workflow, including the `sleep infinity |` trick for non-interactive shells.
+The project standard is to run E2E tests with `--pdb`. See `AGENTS.md` (Debugging E2E Tests) for the full workflow, including the FIFO recipe that keeps pdb's stdin open in non-interactive shells.
 
 ### Automatic Log Dump on Failure
 
@@ -553,7 +553,7 @@ kubectl get helmreleases -A
 
 ### UI-variant troubleshooting
 
-When diagnosing a `[ui-chromium]` failure, drive the investigation through the Playwright MCP server rather than adding screenshot/HTML-dump instrumentation to the page object — see `dev/CLAUDE.md` for the full loop.
+When diagnosing a `[ui-chromium]` failure, drive the investigation through the Playwright MCP server rather than adding screenshot/HTML-dump instrumentation to the page object — see `AGENTS.md` for the full loop.
 
 ## Prerequisites
 
@@ -578,7 +578,7 @@ cd backend && uv run pytest tests/e2e/test_deploy_app.py -v
 #           test_deploy_app.py::test_deploy[ui-chromium]
 ```
 
-For debugging, prefer `-v -s --pdb` (see `dev/CLAUDE.md`).
+For debugging, prefer `-v -s --pdb` (see `AGENTS.md`).
 
 ## Key Files
 

@@ -86,10 +86,15 @@ investigation_log = []   # Append to this after every iteration
 Increment `iteration` by 1.
 
 ```bash
-sleep infinity | uv run pytest backend/tests/e2e/<test_node_id> -v -s --tb=long --pdb 2>&1 | tee /tmp/e2e-pdb.log
+FIFO=$(mktemp -u) && mkfifo "$FIFO"
+sleep infinity > "$FIFO" & HOLDER=$!
+uv run pytest backend/tests/e2e/<test_node_id> -v -s --tb=long --pdb < "$FIFO" 2>&1 | tee /tmp/e2e-pdb.log
+RC=${PIPESTATUS[0]}
+kill "$HOLDER" 2>/dev/null; rm -f "$FIFO"
+(exit "$RC")
 ```
 
-Use the `sleep infinity |` prefix for non-interactive shells so pdb's stdin stays open on failure instead of immediately receiving EOF and tearing the cluster down.
+The FIFO keeps pdb's stdin from hitting EOF on failure, which would otherwise exit pytest and tear the cluster down before Phase 2 can look at it. Do **not** substitute `sleep infinity | uv run pytest …`: `sleep` never writes, so it never takes SIGPIPE when pytest exits and the command hangs forever even on a pass. See `AGENTS.md` (Debugging E2E Tests) for the full rationale.
 
 **Capture the full output.** Parse `/tmp/e2e-pdb.log` for:
 

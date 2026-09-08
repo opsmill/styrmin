@@ -65,7 +65,12 @@ Matrix sharding does NOT change the per-test debugging recipe.
 AGENTS.md's `--pdb` workflow continues to apply:
 
 ```bash
-sleep infinity | uv run pytest backend/tests/e2e/<node_id> -v -s --pdb 2>&1 | tee /tmp/pdb.log
+FIFO=$(mktemp -u) && mkfifo "$FIFO"
+sleep infinity > "$FIFO" & HOLDER=$!
+uv run pytest backend/tests/e2e/<node_id> -v -s --pdb < "$FIFO" 2>&1 | tee /tmp/pdb.log
+RC=${PIPESTATUS[0]}
+kill "$HOLDER" 2>/dev/null; rm -f "$FIFO"
+(exit "$RC")
 ```
 
 Each shard still runs single-threaded inside its CI job — no
