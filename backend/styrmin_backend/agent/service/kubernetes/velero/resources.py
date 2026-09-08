@@ -161,7 +161,20 @@ class VeleroRestoreHookExec:
     command: list[str]
     container: str | None = None
     on_error: str = "Fail"
-    timeout: str = "600s"
+    # Restore hooks name their timeouts `execTimeout` / `waitTimeout`; only
+    # *backup* hooks use a bare `timeout` (see VeleroBackupHookExec). The
+    # Restore CRD has a structural schema, so a stray `timeout` key is pruned
+    # by the API server without complaint and velero silently applies its own
+    # 30s default -- which is how a hook declaring 600s ended up logged as
+    # `hookTimeout="{30s}"` and how a pg_restore longer than 30s would be
+    # killed mid-flight. Keep these names aligned with velero's
+    # ExecRestoreHook (pkg/apis/velero/v1/restore_types.go).
+    exec_timeout: str = "600s"
+    # How long to wait for the container to become ready before running the
+    # command. Left unset velero waits indefinitely, which is what we want:
+    # the hook does its own readiness polling and a finite value here would
+    # only reintroduce the "database not initialized yet" failure.
+    wait_timeout: str | None = None
     wait_for_ready: bool = True
 
 
@@ -186,9 +199,11 @@ class VeleroRestoreHook:
         exec_spec: dict[str, Any] = {
             "command": h.command,
             "onError": h.on_error,
-            "timeout": h.timeout,
+            "execTimeout": h.exec_timeout,
             "waitForReady": h.wait_for_ready,
         }
+        if h.wait_timeout:
+            exec_spec["waitTimeout"] = h.wait_timeout
         if h.container:
             exec_spec["container"] = h.container
         return {"exec": exec_spec}

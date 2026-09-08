@@ -116,7 +116,7 @@ class TestVeleroRestore:
                     container="postgresql",
                     command=["/bin/sh", "-c", "pg_restore ..."],
                     on_error="Fail",
-                    timeout="600s",
+                    exec_timeout="600s",
                 )
             ],
         )
@@ -147,13 +147,13 @@ class TestVeleroRestoreHook:
                     container="postgresql",
                     command=["/bin/sh", "-c", "pg_restore ..."],
                     on_error="Fail",
-                    timeout="600s",
+                    exec_timeout="600s",
                 ),
                 VeleroRestoreHookExec(
                     container="postgresql",
                     command=["/bin/sh", "-c", "rm -f /backup/pre-snapshot.dump"],
                     on_error="Continue",
-                    timeout="30s",
+                    exec_timeout="30s",
                 ),
             ],
         )
@@ -165,9 +165,50 @@ class TestVeleroRestoreHook:
         assert result["postHooks"][0]["exec"]["container"] == "postgresql"
         assert result["postHooks"][0]["exec"]["onError"] == "Fail"
         assert result["postHooks"][0]["exec"]["waitForReady"] is True
+        assert result["postHooks"][0]["exec"]["execTimeout"] == "600s"
         assert result["postHooks"][1]["exec"]["onError"] == "Continue"
-        assert result["postHooks"][1]["exec"]["timeout"] == "30s"
+        assert result["postHooks"][1]["exec"]["execTimeout"] == "30s"
         assert result["postHooks"][1]["exec"]["waitForReady"] is True
+
+    def test_render_uses_exec_timeout_not_timeout(self) -> None:
+        """Restore hooks name the field ``execTimeout``; ``timeout`` is backup-only.
+
+        The Restore CRD's structural schema prunes unknown keys silently, so
+        rendering ``timeout`` did not fail -- velero just fell back to its 30s
+        default and killed any longer-running restore command.
+        """
+        hook = VeleroRestoreHook(
+            name="db-postgres-restore",
+            included_namespaces=["app-ns"],
+            label_selector={"matchLabels": {"styrmin/component": "db"}},
+            post=[
+                VeleroRestoreHookExec(
+                    command=["/bin/sh", "-c", "pg_restore ..."],
+                    exec_timeout="600s",
+                )
+            ],
+        )
+        exec_spec = hook.render()["postHooks"][0]["exec"]
+        assert exec_spec["execTimeout"] == "600s"
+        assert "timeout" not in exec_spec
+
+    def test_render_omits_wait_timeout_by_default(self) -> None:
+        """Unset ``waitTimeout`` means velero waits indefinitely for readiness.
+
+        A finite value would reintroduce the failure the hook's own readiness
+        polling exists to avoid, so it is only emitted when explicitly set.
+        """
+        post = [VeleroRestoreHookExec(command=["true"])]
+        hook = VeleroRestoreHook(
+            name="db-restore",
+            included_namespaces=["ns1"],
+            label_selector={"matchLabels": {"styrmin/component": "db"}},
+            post=post,
+        )
+        assert "waitTimeout" not in hook.render()["postHooks"][0]["exec"]
+
+        post[0].wait_timeout = "300s"
+        assert hook.render()["postHooks"][0]["exec"]["waitTimeout"] == "300s"
 
     def test_render_omits_container_when_none(self) -> None:
         hook = VeleroRestoreHook(
