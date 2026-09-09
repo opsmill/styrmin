@@ -7,13 +7,8 @@ from styrmin_backend.agent.service.kubernetes.velero.resources import (
     VeleroRestoreHook,
 )
 
-# ConfigMap holding the resourceModifier rules that strip `spec.volumeName` from
-# restored PVCs. Shipped by the `velero` subchart as `configMaps.restore-pvc-patch`
-# in `helm/styrmin/values.yaml`, which the chart renders as `<fullname>-<key>`.
-# The fullname is pinned to `velero` there (Velero resolves its own Deployment by
-# that hardcoded name), which is what keeps this reference independent of the Helm
-# release name. `backend/tests/unit/test_helm_velero_naming.py` fails if the two
-# ever drift — a stale name here makes Velero reject every restore.
+# `<fullname>-<key>` of `velero.configMaps.restore-pvc-patch` in helm/styrmin/values.yaml;
+# every Velero Restore references it. Guarded by backend/tests/unit/test_helm_velero_naming.py.
 VELERO_RESTORE_PVC_PATCH_CONFIGMAP = "velero-restore-pvc-patch"
 
 

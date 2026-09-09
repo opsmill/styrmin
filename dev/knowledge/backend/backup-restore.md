@@ -394,7 +394,9 @@ maintenance path is exercised end to end by
 `assert_backup_repository_maintenance_succeeds`, which backdates
 `status.lastMaintenanceTime` on the `BackupRepository` the backup created (and
 shortens `spec.maintenanceFrequency`, the spec change being what wakes the
-controller) so a cycle runs inside the test instead of an hour later.
+controller) so a cycle runs inside the test instead of an hour later, then waits
+for the stamp to move and fails fast on a `Failed` entry in
+`status.recentMaintenance`.
 
 ### Volume Annotations (`agent/service/kubernetes/resources/builders/backup_annotations.py`)
 

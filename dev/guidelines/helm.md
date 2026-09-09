@@ -66,7 +66,7 @@ key resolves to a non-empty mapping.
 
 Velero's repository-maintenance controller resolves **its own Deployment by the
 hardcoded name `velero`** in the Velero namespace
-(`pkg/repository/manager/manager.go`, `buildMaintenanceJob`) to copy the image,
+(`pkg/repository/maintenance/maintenance.go`, `buildJob`) to copy the image,
 env, volumes, and service account into the kopia maintenance Job. The name is
 not configurable in Velero.
 
@@ -80,9 +80,10 @@ job: Deployment.apps \"velero\" not found"
 
 The failure is invisible from the outside: backups and restores keep working,
 but kopia never prunes, so the data behind expired backups is never reclaimed
-and the bucket grows without bound. Velero also does not back off — it does not
-stamp `status.lastMaintenanceTime` on failure, so the warning repeats on every
-5-minute reconcile of every `BackupRepository`.
+and the bucket grows without bound. Velero also does not back off — a failed
+cycle is appended to `status.recentMaintenance` without stamping
+`status.lastMaintenanceTime`, so the warning repeats on every 5-minute reconcile
+of every `BackupRepository`.
 
 ### What the name pins
 

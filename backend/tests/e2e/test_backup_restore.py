@@ -32,14 +32,11 @@ FANOUT_RECONCILE_TIMEOUT_SECONDS = 480.0
 # ``TaskStatus`` values that mean "this Task is still in flight".
 _NON_TERMINAL_TASK_STATUSES = frozenset({"pending", "running"})
 
-# Backdated stamp written onto a BackupRepository's ``status.lastMaintenanceTime``
-# to make kopia maintenance overdue. It doubles as the "not maintained yet"
-# marker the poll waits to see replaced, so it must be a value Velero would never
-# write itself.
+# Backdated ``status.lastMaintenanceTime`` that makes kopia maintenance overdue. Velero
+# never writes this value itself, so it also marks "not maintained yet" for the poll.
 MAINTENANCE_OVERDUE_SENTINEL = "1970-01-01T00:00:00Z"
 
-# Parked on the repository once the forced cycle has been observed, so the
-# session-shared cluster is not left running a maintenance Job on every reconcile.
+# Parked on the repository after the forced cycle so the shared cluster stops maintaining.
 MAINTENANCE_FREQUENCY_AFTER_CHECK = "24h"
 
 
@@ -136,24 +133,13 @@ async def assert_velero_backup_uses_bsl(
 
 async def assert_backup_repository_maintenance_succeeds(
     kubeconfig_path: str,
-    timeout: float = 300.0,
+    ready_timeout: float = 120.0,
+    maintenance_timeout: float = 300.0,
 ) -> None:
-    """Force a kopia maintenance cycle and assert Velero can complete it.
+    """Force a kopia maintenance cycle on a Ready BackupRepository and wait for it to succeed.
 
-    Velero builds the repository-maintenance Job out of its *own* Deployment,
-    which it resolves under the hardcoded name ``velero`` in the Velero
-    namespace (``pkg/repository/manager/manager.go``, ``buildMaintenanceJob``).
-    When the Helm fullname drifts off that name — the subchart's default is
-    ``<release>-velero`` — every cycle fails with ``error to build maintenance
-    job: Deployment.apps "velero" not found``, kopia never prunes, and deleted
-    backups keep occupying object storage forever. Nothing in the backup or
-    restore flow notices, which is why the assertion lives here.
-
-    Velero stamps ``status.lastMaintenanceTime`` when it *initialises* a
-    repository and only maintains again one ``spec.maintenanceFrequency`` later,
-    so a repository this young would never maintain inside a test run.
-    Backdating the stamp makes it overdue; the frequency edit in the same patch
-    is what wakes the controller, which reconciles on spec changes only.
+    Velero builds the maintenance Job from a Deployment it looks up by the hardcoded name
+    ``velero``, so this fails whenever the Helm fullname drifts off that name.
     """
     import time
 
@@ -172,11 +158,9 @@ async def assert_backup_repository_maintenance_succeeds(
     }
 
     name = ""
-    deadline = time.time() + timeout
     try:
-        # Only a Ready repository takes the controller's maintenance branch, and
-        # only an initialised one already carries the `status` object the patch
-        # below writes into.
+        # Only a Ready repository takes the controller's maintenance branch.
+        deadline = time.time() + ready_timeout
         while True:
             listed = await custom_api.list_namespaced_custom_object(**repository_crd)
             ready = [
@@ -202,7 +186,11 @@ async def assert_backup_repository_maintenance_succeeds(
             await asyncio.sleep(5)
 
         name = ready[0]["metadata"]["name"]
+        history_before = len(
+            (ready[0].get("status") or {}).get("recentMaintenance") or []
+        )
 
+        # Backdating makes the repository overdue; the spec change is what wakes the controller.
         await custom_api.patch_namespaced_custom_object(
             **repository_crd,
             name=name,
@@ -212,44 +200,43 @@ async def assert_backup_repository_maintenance_succeeds(
                     "path": "/status/lastMaintenanceTime",
                     "value": MAINTENANCE_OVERDUE_SENTINEL,
                 },
-                {"op": "replace", "path": "/spec/maintenanceFrequency", "value": "1s"},
+                {"op": "add", "path": "/spec/maintenanceFrequency", "value": "1s"},
             ],
         )
 
-        # Read the sentinel back before waiting on it. `BackupRepository` has no
-        # status subresource today, so patching `/status` through the main
-        # endpoint lands — but if that ever changes the API server drops the
-        # status half silently, `lastMaintenanceTime` keeps its original value,
-        # and the poll below would return on its first iteration having proved
-        # nothing.
+        # Read the sentinel back so a silently dropped status patch cannot pass the poll below.
         patched = await custom_api.get_namespaced_custom_object(
             **repository_crd, name=name
         )
-        assert (patched.get("status") or {}).get(
-            "lastMaintenanceTime"
-        ) == MAINTENANCE_OVERDUE_SENTINEL, (
-            f"Backdating status.lastMaintenanceTime on {name!r} did not stick "
-            f"(got {(patched.get('status') or {}).get('lastMaintenanceTime')!r}), "
-            "so this assertion cannot tell a maintained repository from an "
-            "untouched one. `BackupRepository` has probably gained a status "
-            "subresource — patch it through that instead."
+        stamped = (patched.get("status") or {}).get("lastMaintenanceTime")
+        assert stamped == MAINTENANCE_OVERDUE_SENTINEL, (
+            f"Backdating status.lastMaintenanceTime on {name!r} did not stick (got "
+            f"{stamped!r}); BackupRepository has probably gained a status subresource -- "
+            "patch through it instead."
         )
 
+        deadline = time.time() + maintenance_timeout
         status: dict = {}
         while time.time() < deadline:
             repository = await custom_api.get_namespaced_custom_object(
                 **repository_crd, name=name
             )
             status = repository.get("status") or {}
-            # Velero writes the failure onto `status.message` and leaves
-            # `lastMaintenanceTime` untouched, so a non-empty message is a
-            # verdict, not a transient state — fail on it instead of burning
-            # the whole timeout.
-            message = status.get("message") or ""
-            assert not message, (
+            assert status.get("phase") == "Ready", (
+                f"BackupRepository {name!r} left Ready while waiting for maintenance: "
+                f"phase {status.get('phase')!r}, message {status.get('message')!r}"
+            )
+            # A failed cycle is appended to recentMaintenance instead of stamping
+            # lastMaintenanceTime, so a new Failed entry is a verdict, not a transient.
+            failed = [
+                entry
+                for entry in (status.get("recentMaintenance") or [])[history_before:]
+                if entry.get("result") == "Failed"
+            ]
+            assert not failed, (
                 f"Velero could not maintain backup repository {name!r}: "
-                f'{message}. A `Deployment.apps "velero" not found` here '
-                "means the Velero Deployment is no longer named `velero` — see "
+                f'{failed[0].get("message")!r}. A `Deployment.apps "velero" not found` '
+                "here means the Velero Deployment is no longer named `velero` -- see "
                 "backend/tests/unit/test_helm_velero_naming.py."
             )
             if status.get("lastMaintenanceTime") != MAINTENANCE_OVERDUE_SENTINEL:
@@ -258,14 +245,11 @@ async def assert_backup_repository_maintenance_succeeds(
 
         raise AssertionError(
             f"Velero did not maintain backup repository {name!r} within "
-            f"{timeout}s: status.lastMaintenanceTime is still the backdated "
-            f"sentinel and status.message is empty (phase "
-            f"{status.get('phase')!r})"
+            f"{maintenance_timeout}s: status.lastMaintenanceTime is still the backdated "
+            f"sentinel (recentMaintenance {status.get('recentMaintenance')!r})"
         )
     finally:
-        # Park the frequency well beyond the session so the remaining tests do
-        # not share the cluster with a maintenance Job every reconcile. Runs
-        # even on failure: the 1s frequency must not outlive this assertion.
+        # Runs even on failure: the 1s frequency must not outlive this assertion.
         if name:
             with suppress(Exception):
                 await custom_api.patch_namespaced_custom_object(
@@ -273,7 +257,7 @@ async def assert_backup_repository_maintenance_succeeds(
                     name=name,
                     body=[
                         {
-                            "op": "replace",
+                            "op": "add",
                             "path": "/spec/maintenanceFrequency",
                             "value": MAINTENANCE_FREQUENCY_AFTER_CHECK,
                         }
@@ -483,9 +467,7 @@ async def test_backup_and_restore_lifecycle(
             "A completed backup must record Velero's expiration timestamp"
         )
 
-        # 2d. Velero can actually maintain (kopia-prune) the repository the
-        #     backup just wrote to. Without this the repository grows forever
-        #     while every backup and restore keeps passing.
+        # 2d. Velero can kopia-prune the repository the backup just wrote to.
         await assert_backup_repository_maintenance_succeeds(kubeconfig_path)
 
         # 3. Write more data (counter goes higher)
