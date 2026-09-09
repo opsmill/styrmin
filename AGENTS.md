@@ -131,18 +131,16 @@ kubectl get pods -A
 kubectl logs -n styrmin-<deployment-id> <pod> --all-containers
 ```
 
-**When running via a non-interactive shell (background job, agent tool, CI)**, pdb's stdin hits EOF the moment the test fails, so pytest exits and the vcluster is torn down before you can look at it. Hold stdin open with a FIFO:
+**When running via a non-interactive shell (background job, agent tool, CI)**, pdb's stdin hits EOF the moment the test fails, so pytest exits and the vcluster is torn down before you can look at it. Use the wrapper:
 
 ```bash
-FIFO=$(mktemp -u) && mkfifo "$FIFO"
-sleep infinity > "$FIFO" & HOLDER=$!
-uv run pytest backend/tests/e2e/<node_id> -v -s --pdb < "$FIFO" 2>&1 | tee /tmp/pdb.log
-RC=${PIPESTATUS[0]}
-kill "$HOLDER" 2>/dev/null; rm -f "$FIFO"
-(exit "$RC")
+scripts/e2e-pdb.sh backend/tests/e2e/<node_id>
+scripts/e2e-pdb.sh "backend/tests/e2e/test_x.py::test_y[ui-chromium]" --tb=long
 ```
 
-**Do not use `sleep infinity | uv run pytest …`.** It holds stdin open, but `sleep` never writes, so it never takes SIGPIPE when pytest exits and the shell waits on it forever — the command hangs after the run finishes, **including when the test passes**. A background job started that way never reports completion, and any consumer that buffers rather than streams (`tail`, a pager) discards the output when you finally kill it. The FIFO gives pdb the same never-EOF stdin, is cleaned up the moment pytest returns, and propagates pytest's own exit code.
+The wrapper holds pdb's stdin open with a FIFO, appends `-v -s --pdb`, writes a combined log to `$E2E_PDB_LOG` (default `/tmp/pdb.log`), exits with pytest's own status, and cleans up the FIFO and its holder process even when the run is interrupted. Extra arguments are passed through to pytest.
+
+**Do not hand-roll `sleep infinity | uv run pytest …`.** It holds stdin open, but `sleep` never writes, so it never takes SIGPIPE when pytest exits and the shell waits on it forever — the command hangs after the run finishes, **including when the test passes**. A background job started that way never reports completion, and any consumer that buffers rather than streams (`tail`, a pager) discards the output when you finally kill it.
 
 On failure pytest stays paused. pdb can't receive commands over the dummy stdin, so inspect with `kubectl` from a separate shell, then kill **that** pytest by PID or job id when you're done. Do not `pkill -f pytest`: the pattern matches every pytest on the host, and on a shared dev box or a multi-worktree checkout that kills other people's runs (and orphans their vclusters — clean those up with `vcluster delete <name>`).
 
