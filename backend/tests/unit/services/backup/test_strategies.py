@@ -154,8 +154,12 @@ class TestPostgresBackupStrategy:
         # A backend owned by another role has its application_name hidden;
         # treating that NULL as "one of ours" would silently disable the fence.
         assert "coalesce(application_name, '') <> 'styrmin-restore'" in script
-        # The fence must be torn down however the hook exits.
+        # Only backends this role may signal: one foreign-role row would abort
+        # the whole statement and silently disable the fence.
+        assert "pg_has_role(usesysid, 'MEMBER')" in script
+        # Torn down however the hook exits, including a signal that skips the trap.
         assert "trap 'kill \"$fence_pid\" 2>/dev/null || true' EXIT INT TERM" in script
+        assert 'while kill -0 "$$" 2>/dev/null; do' in script
 
     def test_restore_is_atomic_and_retried(self) -> None:
         """Each attempt is all-or-nothing, which is what makes retrying safe.

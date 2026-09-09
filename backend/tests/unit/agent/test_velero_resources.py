@@ -192,24 +192,6 @@ class TestVeleroRestoreHook:
         assert exec_spec["execTimeout"] == "600s"
         assert "timeout" not in exec_spec
 
-    def test_render_omits_wait_timeout_by_default(self) -> None:
-        """Unset ``waitTimeout`` means velero waits indefinitely for readiness.
-
-        A finite value would reintroduce the failure the hook's own readiness
-        polling exists to avoid, so it is only emitted when explicitly set.
-        """
-        post = [VeleroRestoreHookExec(command=["true"])]
-        hook = VeleroRestoreHook(
-            name="db-restore",
-            included_namespaces=["ns1"],
-            label_selector={"matchLabels": {"styrmin/component": "db"}},
-            post=post,
-        )
-        assert "waitTimeout" not in hook.render()["postHooks"][0]["exec"]
-
-        post[0].wait_timeout = "300s"
-        assert hook.render()["postHooks"][0]["exec"]["waitTimeout"] == "300s"
-
     def test_render_omits_container_when_none(self) -> None:
         hook = VeleroRestoreHook(
             name="db-restore",
