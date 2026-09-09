@@ -63,11 +63,11 @@ Backup and restore hooks do **not** share a field name for their timeout, and ge
 | Hook | Velero field | Dataclass attribute |
 |------|--------------|---------------------|
 | `VeleroBackupHookExec` | `timeout` | `timeout` |
-| `VeleroRestoreHookExec` | `execTimeout` (plus optional `waitTimeout`) | `exec_timeout`, `wait_timeout` |
+| `VeleroRestoreHookExec` | `execTimeout` | `exec_timeout` |
 
 The Restore CRD has a structural schema, so an unknown `timeout` key on a restore hook is pruned by the API server without an error and velero applies its own **30 s** default — a hook declaring `600s` shows up in the velero log as `hookTimeout="{30s}"` and any longer-running restore command is killed mid-flight. `backend/tests/unit/services/backup/test_strategies.py::test_restore_hooks_never_render_a_bare_timeout` guards every strategy against the regression.
 
-`waitTimeout` (how long velero waits for the container to be ready before running the command) is left unset on purpose: unset means "wait indefinitely", and a finite value would reintroduce the readiness failure the postgres hook's own polling exists to avoid.
+`waitTimeout` is not modelled: unset means velero waits indefinitely for the container, and the hooks poll for readiness themselves.
 
 ### The postgres restore hook is fenced
 
@@ -86,14 +86,14 @@ The last one is diagnostic: the dump has the column, the live table does not, be
 `postgres_restore_hooks()` closes it with three things:
 
 1. **A readiness poll** instead of `sleep 5`. Velero's `waitForReady` only waits for the container's readiness probe, which bitnami satisfies while initdb is still creating the role and the database — the old `FATAL: role "..." does not exist` failure.
-2. **A fence.** A background loop terminates every backend on the target database whose `application_name` is not the hook's own `PGAPPNAME` (`styrmin-restore`), so `pg_restore` is the only writer for the duration. A NULL `application_name` counts as a rival: `pg_stat_activity` hides that column for backends owned by another role. The loop is torn down by a `trap` on `EXIT INT TERM`. This needs no superuser — the role bitnami creates owns the database, which is enough to terminate its own backends. A connection limit was rejected as the alternative: the application's connection pool simply takes the slot and holds it.
+2. **A fence.** A background loop terminates every backend on the target database whose `application_name` is not the hook's own `PGAPPNAME` (`styrmin-restore`), so `pg_restore` is the only writer for the duration. A NULL `application_name` counts as a rival: `pg_stat_activity` hides that column for backends owned by another role. The statement is restricted with `pg_has_role(usesysid, 'MEMBER')` to backends the hook's role may signal — `pg_terminate_backend` raises an error on any other backend, and that error aborts the whole statement, so a single foreign-role connection (an autovacuum worker, a metrics exporter connecting as `postgres`) would otherwise disable the fence silently. No superuser is needed as long as the application connects as the same role the hook uses (`POSTGRES_USER`); database ownership by itself grants no right to signal other roles' backends, and those are left alone. The loop runs `while kill -0 "$$"`, i.e. only as long as the hook shell is alive, and is also killed by a `trap` on `EXIT INT TERM`. The liveness check matters: a shell killed by a signal (SIGPIPE once velero has closed the exec stream on `execTimeout`) runs no trap, and an orphaned fence would keep the database unusable until the pod restarts. A connection limit was rejected as the alternative: the application's connection pool simply takes the slot and holds it.
 3. **`--single-transaction`.** Each attempt is all-or-nothing, so losing a race rolls back cleanly instead of leaving a half-restored schema, which in turn makes the bounded retry loop safe.
 
-`--clean --if-exists` stays rather than `DROP SCHEMA public CASCADE`: schema `public` is owned by `postgres`, and the hook runs as the database owner, not a superuser.
+`--clean --if-exists` stays rather than `DROP SCHEMA public CASCADE`: on PostgreSQL 14 and older schema `public` is owned by `postgres`, and the hook runs as the database owner, not a superuser. PostgreSQL 15 hands `public` to `pg_database_owner`, which would allow the drop, but `--clean` works on every version.
 
 The same race applies in principle to the mariadb, mongodb and neo4j hooks; only postgres has a documented occurrence and only postgres is fenced today.
 
-E2E coverage lives in `test_infrahub_backup_restore.py::test_infrahub_enterprise_backup_and_restore_lifecycle`, which is the one scenario that boots an application with a live writer against a `kind: postgres` component. It seeds a marker row plus a schema fingerprint before the backup, drifts both afterwards, and asserts both come back — the fingerprint is what catches an interleaved restore that velero still reports as done.
+The fence is covered at unit level only: `backend/tests/unit/services/backup/test_strategies.py` asserts the rendered script's fence, role filter, liveness bound, atomicity and retry. There is deliberately no E2E for the race — the one scenario with a live writer against a `kind: postgres` component is the enterprise backup/restore lifecycle, and probing Prefect's schema from it was judged too heavy for what it proved.
 
 ## Data Models
 

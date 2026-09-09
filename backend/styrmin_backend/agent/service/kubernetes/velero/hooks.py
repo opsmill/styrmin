@@ -5,56 +5,23 @@ from styrmin_backend.agent.service.kubernetes.velero.resources import (
     VeleroRestoreHookExec,
 )
 
-# Marker put on every libpq connection the postgres restore hook opens, via
-# PGAPPNAME. The fence below terminates every backend on the target database
-# that is *not* tagged with it, which is how pg_restore stays the only writer
-# without needing a superuser or a connection limit.
+# Tag on the hook's own libpq connections; the fence spares backends carrying it.
 _PG_RESTORE_APPNAME = "styrmin-restore"
-
-# Seconds to wait for postgres to answer a trivial query before giving up.
 _PG_READY_TIMEOUT_SECONDS = 120
-
-# How many times to re-run pg_restore if an attempt aborts. Each attempt is a
-# single transaction, so a failed one leaves the database untouched and a
-# retry starts from the same state.
 _PG_RESTORE_ATTEMPTS = 3
 
-# Restoring a deployment deletes and recreates its namespace, so postgres comes
-# up on an empty data volume and the application pods -- restored alongside it
-# -- boot against an empty database and start running their own schema
-# migrations. Those migrations interleave with pg_restore's drop/create pass
-# and leave a database that is neither the backup's schema nor the
-# application's: tables recreated at an older migration revision, COPY failing
-# on columns that no longer exist, foreign keys missing. The window is small,
-# so this surfaces as a rare PartiallyFailed restore rather than a consistent
-# one.
-#
-# Two things close it:
-#
-#   * a background loop that terminates every rival backend for the duration
-#     of the restore, so nothing else can write while pg_restore runs;
-#   * --single-transaction, which makes each attempt all-or-nothing. Losing a
-#     race now rolls back cleanly instead of corrupting the schema, which in
-#     turn makes retrying safe.
-#
-# --clean --if-exists stays: DROP SCHEMA public CASCADE would be tidier but
-# schema `public` is owned by `postgres`, and the role the hook runs as is the
-# database owner, not a superuser.
+# The application is restored alongside its database and migrates the empty
+# postgres while pg_restore replays the dump. The fence keeps pg_restore the only
+# writer; --single-transaction makes each attempt all-or-nothing so retrying is safe.
 _POSTGRES_RESTORE_SCRIPT = """\
 set -e
 
-# See the matching backup hook for the rationale on resolving
-# $POSTGRES_PASSWORD_FILE with a $POSTGRES_PASSWORD fallback.
 PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE" 2>/dev/null || printf %s "$POSTGRES_PASSWORD")"
 export PGPASSWORD
 PGAPPNAME={appname}
 export PGAPPNAME
 
-# velero's waitForReady only waits for the container's readiness probe, which
-# bitnami satisfies while initdb is still creating the role and the database.
-# Poll for a query the restore actually needs to succeed instead -- this is
-# what the old `sleep 5` was reaching for, and why restores used to fail with
-# `FATAL: role "..." does not exist`.
+# waitForReady only covers the readiness probe, which passes before initdb has created the role.
 waited=0
 while ! psql -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc 'SELECT 1' >/dev/null 2>&1; do
   waited=$((waited + 1))
@@ -65,12 +32,9 @@ while ! psql -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc 'SELECT 1' >/dev/n
   sleep 1
 done
 
-# Fence: keep pg_restore the only writer. coalesce() treats a NULL
-# application_name as a rival -- pg_stat_activity hides that column for
-# backends owned by another role, and a rival we cannot identify is still a
-# rival. Our own backends are tagged via PGAPPNAME.
-while :; do
-  psql -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND coalesce(application_name, '') <> '{appname}'" >/dev/null 2>&1 || true
+# Fence: terminate every rival backend this role may signal, for as long as the hook shell lives.
+while kill -0 "$$" 2>/dev/null; do
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND pg_has_role(usesysid, 'MEMBER') AND coalesce(application_name, '') <> '{appname}'" >/dev/null 2>&1 || true
   sleep 1
 done &
 fence_pid=$!
