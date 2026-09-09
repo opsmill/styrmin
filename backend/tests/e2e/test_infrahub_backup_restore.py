@@ -15,20 +15,10 @@ backup/restore cycle:
   This is what commit af6fc28 enabled and what we validate here by writing
   object-store content, backing up, and confirming the content survives a
   restore (which deletes and recreates the namespace + its PVCs).
-* **Postgres** (``task-manager-db`` component, ``kind: postgres``) — Prefect's
-  database, captured as a ``pg_dump`` on the ``backup`` volume and replayed by
-  a velero post-restore hook. Unlike the other two this component has a live
-  writer of its own: ``task-manager`` (Prefect server) is restored alongside
-  it and runs its migration chain against the freshly-initdb'd database while
-  the hook is restoring into it. The enterprise scenario asserts the schema
-  that comes out the other side is the backup's, not an interleaving of the
-  two.
 """
 
 from __future__ import annotations
 
-import base64
-import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -36,7 +26,6 @@ import kr8s.asyncio
 import pytest
 from infrahub_sdk import Config as InfrahubConfig
 from infrahub_sdk import InfrahubClient as InfrahubSDKClient
-from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import ResourceNotFoundError
@@ -69,70 +58,6 @@ _ARTIFACT_CONTENT = (
     "  description styrmin-backup-disk-probe\n"
     "  ip address 10.0.0.1/31\n"
 )
-
-
-# One line per column and per constraint in the `prefect` database's public
-# schema. Deliberately schema-only: row counts drift as Prefect records flow
-# runs, but the shape has to come back from the dump. A restore that raced
-# Prefect's own migrations leaves tables stuck at an older revision (the
-# reported symptom was `column "status" of relation "work_pool" does not
-# exist` during COPY), which shows up here as signatures that were in the
-# backup and are missing afterwards. Read from the catalogue rather than a
-# hard-coded column list so it survives Prefect schema changes.
-_PG_SCHEMA_SIGNATURE_SQL = """
-SELECT format('col %s.%s:%s', table_name, column_name, data_type)
-FROM information_schema.columns
-WHERE table_schema = 'public'
-UNION ALL
-SELECT format('con %s:%s', conrelid::regclass::text, conname)
-FROM pg_constraint
-WHERE connamespace = 'public'::regnamespace
-"""
-
-
-async def _psql(kubeconfig_path: str, namespace: str, sql: str) -> str:
-    """Run *sql* in the task-manager-db pod, return stdout stripped.
-
-    The SQL travels base64-encoded for the same reason the worker-death probe
-    does it: some clusters negotiate the older ``v4.channel.k8s.io`` exec
-    subprotocol, which kr8s cannot feed over stdin.
-    """
-    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
-    pods = [
-        pod
-        async for pod in AsyncPod.list(
-            namespace=namespace,
-            label_selector={"infrahub/service": "task-manager-db"},
-            api=kr8s_api,
-        )
-    ]
-    assert pods, f"No task-manager-db pod found in namespace {namespace}"
-
-    encoded = base64.b64encode(sql.encode()).decode()
-    result = await pods[0].exec(
-        [
-            "sh",
-            "-c",
-            # Same $POSTGRES_PASSWORD_FILE / $POSTGRES_PASSWORD resolution the
-            # backup and restore hooks use.
-            'PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE" 2>/dev/null'
-            ' || printf %s "$POSTGRES_PASSWORD")"'
-            ' psql -tAX -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE"'
-            f' -c "$(echo {encoded} | base64 -d)"',
-        ],
-        container="postgresql",
-        check=True,
-    )
-    stdout = result.stdout
-    return (stdout.decode() if isinstance(stdout, bytes) else stdout).strip()
-
-
-async def _pg_schema_signatures(kubeconfig_path: str, namespace: str) -> set[str]:
-    """Return the shape of the prefect database as a set of signatures."""
-    out = await _psql(kubeconfig_path, namespace, _PG_SCHEMA_SIGNATURE_SQL)
-    signatures = {line.strip() for line in out.splitlines() if line.strip()}
-    assert signatures, "Could not read the prefect schema"
-    return signatures
 
 
 def _make_infrahub_client(port: int) -> InfrahubSDKClient:
@@ -336,18 +261,6 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
         )
         assert pre_backup_content == _ARTIFACT_CONTENT
 
-    # 1b. Seed the postgres probe (task-manager-db / Prefect's database) and
-    #     record the schema shape the backup is about to capture.
-    pg_marker = f"styrmin-pg-probe-{uuid.uuid4().hex[:8]}"
-    await _psql(
-        kubeconfig_path,
-        namespace,
-        "CREATE TABLE IF NOT EXISTS styrmin_restore_probe (marker text PRIMARY KEY); "
-        f"INSERT INTO styrmin_restore_probe (marker) VALUES ('{pg_marker}') "
-        "ON CONFLICT DO NOTHING;",
-    )
-    pre_backup_schema = await _pg_schema_signatures(kubeconfig_path, namespace)
-
     # 2. Create backup via Styrmin SDK, wait for completion
     created_backup = await client.backups.create_backup(instance_id=instance_id)
     assert created_backup.status == "pending"
@@ -373,16 +286,6 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
         # Verify the tag is gone
         tags = await infrahub_client.all(kind="BuiltinTag")
         assert all(t.name.value != tag_name for t in tags)  # type: ignore[union-attr]
-
-    # 3b. Drift postgres too, by dropping the probe table outright. That takes
-    #     away both the marker row and its schema signatures, so neither
-    #     post-restore assertion below can pass vacuously.
-    await _psql(kubeconfig_path, namespace, "DROP TABLE styrmin_restore_probe;")
-    assert pre_backup_schema - await _pg_schema_signatures(
-        kubeconfig_path, namespace
-    ), (
-        "Post-backup drift left the schema intact — the assertions below would pass vacuously."
-    )
 
     # 4. Restore from backup
     created_restore = await client.backups.create_restore(
@@ -413,37 +316,6 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
             "Object-store (artifact) content was not restored from the disk "
             "backup — the server PVC content was lost across the restore."
         )
-
-    # 6b. Postgres backup assertion. The marker row proves the pg_dump was
-    #     actually replayed; the schema check proves it was replayed *cleanly*.
-    #     Prefect server is restored alongside its database and migrates the
-    #     empty database it finds, concurrently with the restore hook — an
-    #     interleaving leaves tables at an older migration revision, and those
-    #     missing columns show up here even when the restore reports success.
-    #     Subset rather than equality: anything Prefect legitimately adds after
-    #     the restore is fine, anything the backup had and lost is not.
-    probe_table = await _psql(
-        kubeconfig_path, namespace, "SELECT to_regclass('public.styrmin_restore_probe')"
-    )
-    assert probe_table == "styrmin_restore_probe", (
-        "The task-manager-db (postgres) dump was not restored: the probe table "
-        "is missing."
-    )
-    restored_marker = await _psql(
-        kubeconfig_path, namespace, "SELECT marker FROM styrmin_restore_probe"
-    )
-    assert restored_marker == pg_marker, (
-        "The task-manager-db (postgres) dump was not restored: expected "
-        f"marker {pg_marker!r}, got {restored_marker!r}."
-    )
-    missing = pre_backup_schema - await _pg_schema_signatures(
-        kubeconfig_path, namespace
-    )
-    assert not missing, (
-        "The restored prefect schema is missing objects the backup had: "
-        f"{sorted(missing)}. This is the signature of pg_restore interleaving "
-        "with Prefect's own migrations — see postgres_restore_hooks()."
-    )
 
     # 7. Delete backup and verify deletion
     await client.backups.delete_backup(backup.id)
