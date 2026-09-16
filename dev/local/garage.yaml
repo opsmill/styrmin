@@ -1,0 +1,172 @@
+# Single-node Garage, the S3-compatible object store Velero writes local
+# backups to. Credentials are fixed demo values, not secrets.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: garage
+  labels:
+    app: garage
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = "sqlite"
+
+    # Single node, so one copy of every block is all there is.
+    replication_factor = 1
+
+    rpc_bind_addr = "[::]:3901"
+    rpc_public_addr = "127.0.0.1:3901"
+
+    [s3_api]
+    s3_region = "garage"
+    api_bind_addr = "[::]:3900"
+
+    [admin]
+    api_bind_addr = "[::]:3903"
+
+  bootstrap.sh: |
+    #!/bin/sh
+    # A fresh Garage node holds no data until a layout is assigned, and the
+    # bucket and access key Velero uses have to be created through the admin
+    # API. Every step is skipped when it is already in place, so the script
+    # survives a restart.
+    set -eu
+
+    ADMIN_URL="${GARAGE_ADMIN_URL:-http://127.0.0.1:3903}"
+
+    api() {
+      method="$1"
+      endpoint="$2"
+      shift 2
+      curl -sSf -X "$method" "${ADMIN_URL}/v2/${endpoint}" \
+        -H "Authorization: Bearer ${GARAGE_ADMIN_TOKEN}" \
+        -H "Content-Type: application/json" "$@"
+    }
+
+    # First value of a string field in the JSON response read from stdin.
+    field() {
+      grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed 's/.*"\(.*\)"$/\1/'
+    }
+
+    echo "Waiting for the Garage admin API on ${ADMIN_URL}..."
+    until api GET GetClusterStatus >/dev/null 2>&1; do sleep 1; done
+
+    layout_version=$(api GET GetClusterStatus |
+      grep -o '"layoutVersion"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | tr -cd '0-9')
+    if [ "${layout_version:-0}" -eq 0 ]; then
+      node_id=$(api GET "GetNodeInfo?node=self" | field nodeId)
+      echo "Assigning the storage layout to node ${node_id}..."
+      api POST UpdateClusterLayout -d "{\"roles\":[{\"id\":\"${node_id}\",\"zone\":\"${GARAGE_ZONE}\",\"capacity\":${GARAGE_CAPACITY},\"tags\":[]}]}" >/dev/null
+      api POST ApplyClusterLayout -d '{"version":1}' >/dev/null
+    fi
+
+    if ! api GET "GetKeyInfo?id=${GARAGE_ACCESS_KEY_ID}" >/dev/null 2>&1; then
+      echo "Importing access key ${GARAGE_ACCESS_KEY_ID}..."
+      api POST ImportKey -d "{\"accessKeyId\":\"${GARAGE_ACCESS_KEY_ID}\",\"secretAccessKey\":\"${GARAGE_SECRET_ACCESS_KEY}\",\"name\":\"styrmin\"}" >/dev/null
+    fi
+
+    if bucket=$(api GET "GetBucketInfo?globalAlias=${GARAGE_BUCKET}" 2>/dev/null); then
+      bucket_id=$(printf '%s' "$bucket" | field id)
+    else
+      echo "Creating bucket ${GARAGE_BUCKET}..."
+      bucket_id=$(api POST CreateBucket -d "{\"globalAlias\":\"${GARAGE_BUCKET}\"}" | field id)
+    fi
+
+    api POST AllowBucketKey -d "{\"bucketId\":\"${bucket_id}\",\"accessKeyId\":\"${GARAGE_ACCESS_KEY_ID}\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":true}}" >/dev/null
+
+    echo "Garage is ready: bucket ${GARAGE_BUCKET} (${bucket_id})"
+    touch /tmp/garage-bootstrapped
+    while true; do sleep 3600; done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: garage
+  labels:
+    app: garage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: garage
+  template:
+    metadata:
+      labels:
+        app: garage
+    spec:
+      volumes:
+        - name: config
+          configMap:
+            name: garage
+        - name: data
+          emptyDir: {}
+      containers:
+        - name: garage
+          image: dxflrs/garage:v2.4.1
+          env:
+            - name: GARAGE_RPC_SECRET
+              value: "a0b1c2d3e4f5061728394a5b6c7d8e9fa0b1c2d3e4f5061728394a5b6c7d8e9f"
+            - name: GARAGE_ADMIN_TOKEN
+              value: "styrmin-dev-admin-token"
+          ports:
+            - containerPort: 3900
+              name: s3
+            - containerPort: 3903
+              name: admin
+          volumeMounts:
+            - name: config
+              mountPath: /etc/garage.toml
+              subPath: garage.toml
+            - name: data
+              mountPath: /var/lib/garage
+          readinessProbe:
+            # Reports healthy only once the layout is applied.
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 5
+        - name: bootstrap
+          image: curlimages/curl:8.22.0
+          command: ["sh", "/etc/garage/bootstrap.sh"]
+          env:
+            - name: GARAGE_ADMIN_TOKEN
+              value: "styrmin-dev-admin-token"
+            - name: GARAGE_ACCESS_KEY_ID
+              value: "GKdeadbeefdeadbeefdeadbeef"
+            - name: GARAGE_SECRET_ACCESS_KEY
+              value: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            - name: GARAGE_BUCKET
+              value: "velero"
+            - name: GARAGE_ZONE
+              value: "styrmin"
+            - name: GARAGE_CAPACITY
+              value: "10000000000"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/garage
+          readinessProbe:
+            # Gates pod readiness on the bucket and key actually existing.
+            exec:
+              command: ["test", "-f", "/tmp/garage-bootstrapped"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: garage
+  labels:
+    app: garage
+spec:
+  selector:
+    app: garage
+  ports:
+    - port: 3900
+      targetPort: 3900
+      name: s3
+    - port: 3903
+      targetPort: 3903
+      name: admin

@@ -1,7 +1,7 @@
 # Local Demo on vCluster
 
 A turnkey local Styrmin environment — server, agent, Prefect, Postgres,
-MinIO, Velero, and a Traefik ingress — running entirely inside a vCluster.
+Garage, Velero, and a Traefik ingress — running entirely inside a vCluster.
 Four top-level invoke commands drive the full lifecycle.
 
 ## Prerequisites
@@ -10,8 +10,8 @@ Four top-level invoke commands drive the full lifecycle.
 |------|----------|
 | `docker` | Runs the vCluster node and builds the Styrmin image |
 | `vcluster` | Creates the virtual Kubernetes cluster |
-| `helm` | Installs Styrmin, Traefik, Velero, and MinIO |
-| `kubectl` | Waits for deployments and port-forwards Traefik |
+| `helm` | Installs Styrmin, Traefik, and Velero |
+| `kubectl` | Applies the Garage manifest, waits for deployments, port-forwards Traefik |
 
 DNS for the demo hostname `styrmin.local.styrmin.io` is provided by the
 Cloudflare-hosted wildcard `*.local.styrmin.io` → `127.0.0.1`; no
@@ -45,13 +45,16 @@ the flow is identical across platforms.
 
 The GraphQL endpoint is the same base URL + `/graphql`.
 
-The MinIO console is reachable on demand via:
+Garage has no web console. Its S3 endpoint is reachable on demand via:
 
 ```bash
-kubectl port-forward svc/minio 9001:9001 -n styrmin
+kubectl port-forward svc/garage 3900:3900 -n styrmin
 ```
 
-Credentials: `minioadmin / minioadmin`.
+Credentials: access key `GKdeadbeefdeadbeefdeadbeef`, secret key
+`deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef`,
+region `garage`, bucket `velero`. Point any S3 client at
+`http://localhost:3900` with path-style addressing.
 
 ## Platform notes
 
