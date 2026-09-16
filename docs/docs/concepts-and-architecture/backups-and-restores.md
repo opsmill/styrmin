@@ -21,7 +21,7 @@ explains how.
   tool that snapshots volumes and ships them to S3-compatible object
   storage. Styrmin uses Velero under the hood.
 - **A Backup Storage Location (BSL)** — an S3-compatible bucket (DO
-  Spaces, MinIO, AWS S3, …) that Velero writes backups to. You
+  Spaces, Garage, AWS S3, …) that Velero writes backups to. You
   configure one per environment.
 - **A backup strategy per component** — declared by the driver. Tells
   Styrmin _how_ to back up that specific component.

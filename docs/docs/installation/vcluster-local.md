@@ -16,7 +16,8 @@ By the end you'll have:
 
 - a Docker-backed vCluster named `styrmin` running on your machine,
 - [Traefik](https://traefik.io/) acting as the cluster's ingress controller,
-- an in-cluster [MinIO](https://min.io/) for S3-compatible Velero backups,
+- an in-cluster [Garage](https://garagehq.deuxfleurs.fr/) for S3-compatible
+  Velero backups,
 - Styrmin (server + agent + Prefect + Postgres) installed via the
   bundled Helm chart,
 - one **Cluster**, one **Environment**, one **Backup Storage Location**,
@@ -38,7 +39,7 @@ corresponding invoke task instead — they're independent and idempotent.
 | 2. Create vCluster | `vcluster create styrmin …` | `uv run invoke cluster.create` |
 | 3. Connect kubeconfig | `vcluster connect styrmin …` | `uv run invoke cluster.connect` |
 | 4. Install Traefik | `helm upgrade --install traefik …` | `uv run invoke cluster.traefik` |
-| 5. Install MinIO | `kubectl apply -f dev/local/minio.yaml …` | `uv run invoke cluster.minio` |
+| 5. Install Garage | `kubectl apply -f dev/local/garage.yaml …` | `uv run invoke cluster.garage` |
 | 6. Build the image | `docker build …` | `uv run invoke build` |
 | 7. Install Styrmin chart | `helm upgrade --install styrmin …` | (part of `start`) |
 | 8. Port-forward Traefik | `kubectl port-forward …` | (part of `start`) |
@@ -146,20 +147,30 @@ Two things to note:
   enables `publishedService` so Ingress objects know which Service they
   resolve through.
 
-### 5. Install MinIO (backup storage)
+### 5. Install Garage (backup storage)
 
 Velero — Styrmin's backup engine — needs an S3-compatible object store.
-For local use we run MinIO inside the same namespace.
+For local use we run Garage inside the same namespace.
 
 ```shell
-kubectl apply -f dev/local/minio.yaml -n styrmin
-kubectl rollout status deployment/minio -n styrmin --timeout=120s
+kubectl apply -f dev/local/garage.yaml -n styrmin
+kubectl rollout status deployment/garage -n styrmin --timeout=120s
 ```
 
-The manifest creates a single-replica `Deployment` plus a `Service`
-exposing the S3 API on port `9000` and the console on port `9001`.
-Credentials are `minioadmin` / `minioadmin` (used by Velero and by the
-Backup Storage Location you'll create in step 9).
+The manifest creates a `ConfigMap` (Garage's config plus a bootstrap
+script), a single-replica `Deployment`, and a `Service` exposing the S3
+API on port `3900` and the admin API on port `3903`.
+
+A fresh Garage node stores nothing until a cluster layout is assigned, so
+the pod runs a second container that waits for the admin API, assigns the
+layout, then creates the `velero` bucket and the access key for it. The
+pod only reports ready once that has finished — `kubectl rollout status`
+returning means the bucket is there.
+
+The access key is `GKdeadbeefdeadbeefdeadbeef` with secret
+`deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef` (used
+by Velero and by the Backup Storage Location you'll create in step 9).
+They are fixed demo values — pick your own for anything long-lived.
 
 ### 6. Build the Styrmin container image
 
@@ -224,7 +235,7 @@ styrmin:
   sessionCookieSecure: false   # demo is plain HTTP; cookies would be dropped otherwise
 
 velero:
-  backupsEnabled: false        # MinIO is wired up by the BSL in step 9 instead
+  backupsEnabled: false        # Garage is wired up by the BSL in step 9 instead
 ```
 
 Confirm the server is up:
@@ -296,15 +307,15 @@ Record the returned `id` — referred to as `<ENVIRONMENT_ID>` below.
 
 #### 9d. Create the Backup Storage Location
 
-Point a BSL at the in-cluster MinIO from step 5:
+Point a BSL at the in-cluster Garage from step 5:
 
 ```shell
 uv run styrminctl backup-locations create local \
-  --endpoint http://minio.styrmin.svc:9000 \
+  --endpoint http://garage.styrmin.svc:3900 \
   --bucket velero \
-  --region minio \
-  --access-key-id minioadmin \
-  --secret-access-key minioadmin
+  --region garage \
+  --access-key-id GKdeadbeefdeadbeefdeadbeef \
+  --secret-access-key deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 ```
 
 Record the returned `id` — referred to as `<BSL_ID>` below.

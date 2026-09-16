@@ -68,15 +68,15 @@ def traefik(context: Context) -> None:
 
 
 @task
-def minio(context: Context) -> None:
-    """Install MinIO for local S3-compatible backup storage."""
-    print_header("Deploying MinIO for backup storage...")
+def garage(context: Context) -> None:
+    """Install Garage for local S3-compatible backup storage."""
+    print_header("Deploying Garage for backup storage...")
     context.run(
-        f"kubectl apply -f {DEV_LOCAL_DIR / 'minio.yaml'} -n {KUBERNETES_ROOT_NAMESPACE}",
+        f"kubectl apply -f {DEV_LOCAL_DIR / 'garage.yaml'} -n {KUBERNETES_ROOT_NAMESPACE}",
         pty=True,
     )
-    print_header("Waiting for MinIO to be ready...")
+    print_header("Waiting for Garage to be ready...")
     context.run(
-        f"kubectl rollout status deployment/minio -n {KUBERNETES_ROOT_NAMESPACE} --timeout=120s",
+        f"kubectl rollout status deployment/garage -n {KUBERNETES_ROOT_NAMESPACE} --timeout=120s",
         pty=True,
     )

@@ -22,6 +22,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The local demo and the E2E suite now provision
+  [Garage](https://garagehq.deuxfleurs.fr/) instead of MinIO as the in-cluster
+  S3-compatible store Velero writes backups to. `uv run invoke cluster.minio`
+  becomes `uv run invoke cluster.garage`, the manifest moves from
+  `dev/local/minio.yaml` to `dev/local/garage.yaml`, and the bootstrapped
+  Backup Storage Location points at `http://garage.styrmin.svc:3900`
+  (region `garage`). Nothing about the product's S3 support changes — any
+  S3-compatible bucket still works.
 - The `styrmin-agent` Helm chart now defaults `image.tag` to the chart's
   `appVersion` instead of the hardcoded `latest`, matching the `styrmin`
   chart. A default install of a released chart now pins the agent to that

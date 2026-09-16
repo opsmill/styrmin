@@ -582,15 +582,16 @@ async def styrmin_deployment(
         check=True,
     )
 
-    # Deploy MinIO for Velero backup storage (before Styrmin, since Velero needs it)
-    minio_manifest_path = FIXTURES_DIR / "minio" / "deployment.yaml"
-    with open(minio_manifest_path) as f:
-        minio_docs = list(yaml.safe_load_all(f))
+    # Deploy Garage for Velero backup storage (before Styrmin, since Velero
+    # needs it). Same manifest the local demo uses.
+    garage_manifest_path = PROJECT_ROOT / "dev" / "local" / "garage.yaml"
+    with open(garage_manifest_path) as f:
+        garage_docs = [doc for doc in yaml.safe_load_all(f) if doc]
 
     apps_api = kubeclient.AppsV1Api(api)
     core_api = kubeclient.CoreV1Api(api)
 
-    # Ensure styrmin namespace exists for MinIO
+    # Ensure styrmin namespace exists for Garage
     try:
         await core_api.create_namespace(
             body=kubeclient.V1Namespace(
@@ -601,11 +602,13 @@ async def styrmin_deployment(
         if exc.status != 409:
             raise
 
-    for doc in minio_docs:
+    for doc in garage_docs:
         if doc["kind"] == "Deployment":
             await apps_api.create_namespaced_deployment(namespace="styrmin", body=doc)
         elif doc["kind"] == "Service":
             await core_api.create_namespaced_service(namespace="styrmin", body=doc)
+        elif doc["kind"] == "ConfigMap":
+            await core_api.create_namespaced_config_map(namespace="styrmin", body=doc)
 
     # Install styrmin via helm
     helm_args = [
@@ -942,11 +945,11 @@ async def styrmin_resources(
 
     bsl = await driver.create_backup_storage_location(
         name="test-bsl",
-        endpoint="http://minio.styrmin.svc:9000",
+        endpoint="http://garage.styrmin.svc:3900",
         bucket="velero",
-        region="minio",
-        access_key_id="minioadmin",
-        secret_access_key="minioadmin",
+        region="garage",
+        access_key_id="GKdeadbeefdeadbeefdeadbeef",
+        secret_access_key="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
     )
 
     await driver.assign_bsl_to_environment(environment_id=environment.id, bsl_id=bsl.id)

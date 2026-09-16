@@ -13,6 +13,14 @@ TASKS_DIRECTORY_PATH = Path(__file__).parent
 BACKEND_DIRECTORY = "backend"
 GRAPHQL_DIR = MAIN_DIRECTORY_PATH / "tasks" / "graphql"
 
+# In-cluster Garage, the S3-compatible store Velero writes local backups to.
+# These match dev/local/garage.yaml and are demo values, not secrets.
+GARAGE_ENDPOINT = f"http://garage.{KUBERNETES_ROOT_NAMESPACE}.svc:3900"
+GARAGE_BUCKET = "velero"
+GARAGE_REGION = "garage"
+GARAGE_ACCESS_KEY_ID = "GKdeadbeefdeadbeefdeadbeef"
+GARAGE_SECRET_ACCESS_KEY = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"  # noqa: S105
+
 
 def print_header(message: str) -> str:
     console = Console()

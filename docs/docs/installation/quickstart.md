@@ -8,7 +8,7 @@ description: Bring up the built-in Styrmin demo cluster end-to-end in two comman
 
 The Styrmin repository ships with a one-command demo that spins up a local
 [vCluster](https://www.vcluster.com/), installs Styrmin into it, wires up
-Traefik, MinIO, and the bundled drivers, and prints the URL to log in. It is
+Traefik, Garage, and the bundled drivers, and prints the URL to log in. It is
 the fastest way to see Styrmin running end-to-end on your own machine.
 
 This guide walks you through:
@@ -82,8 +82,8 @@ uv run invoke start
 1. Creates a vCluster named `styrmin-demo` running in Docker.
 2. Connects to it and exports a kubeconfig under `.vcluster/`.
 3. Installs the [Traefik](https://traefik.io/) ingress controller and
-   [MinIO](https://min.io/) (the in-cluster S3-compatible store used for
-   Velero backups).
+   [Garage](https://garagehq.deuxfleurs.fr/) (the in-cluster S3-compatible
+   store used for Velero backups).
 4. Installs Styrmin into the cluster via `helm upgrade --install`, using
    the values file at
    [`dev/local/demo-values.yaml`](https://github.com/opsmill/styrmin/blob/develop/dev/local/demo-values.yaml).
@@ -92,7 +92,7 @@ uv run invoke start
    - creates a **Cluster** named `local`
    - creates an **Environment** named `local` bound to that cluster
    - creates a **Backup Storage Location** pointing at the in-cluster
-     MinIO and assigns it to the environment
+     Garage and assigns it to the environment
    - loads the bundled **Application Driver Versions**
      ([`driver/examples/infrahub`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/infrahub)
      and
@@ -113,8 +113,8 @@ When the command finishes, you should see something like:
 │  Styrmin UI:     http://styrmin.local.styrmin.io:8080             │
 │  GraphQL:        http://styrmin.local.styrmin.io:8080/graphql     │
 │  Admin login:    admin / styrmin                                  │
-│  MinIO console:  kubectl port-forward svc/minio 9001:9001 …       │
-│  MinIO creds:    minioadmin / minioadmin                          │
+│  Garage S3:      kubectl port-forward svc/garage 3900:3900 …      │
+│  Garage creds:   GKdeadbeef… / deadbeef…                          │
 │                                                                   │
 │  Deployments:                                                     │
 │  styrmin-server   1/1   1   1   1m                                │

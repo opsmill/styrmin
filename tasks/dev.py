@@ -1,7 +1,16 @@
 from invoke import Context, task
 from rich.console import Console
 
-from .utils import graphql, load_query, print_header
+from .utils import (
+    GARAGE_ACCESS_KEY_ID,
+    GARAGE_BUCKET,
+    GARAGE_ENDPOINT,
+    GARAGE_REGION,
+    GARAGE_SECRET_ACCESS_KEY,
+    graphql,
+    load_query,
+    print_header,
+)
 
 # Default credentials seeded by the helm/compose dev fixtures (see
 # dev/local/demo-values.yaml + docker-compose.yml). admin/styrmin is the
@@ -128,19 +137,19 @@ def _bootstrap_environment(console: Console, api_url: str, cluster_id: str, toke
 
 
 def _bootstrap_backup_storage(console: Console, api_url: str, environment_id: str | None, token: str) -> None:
-    # Create a backup storage location pointing at the in-cluster MinIO and
+    # Create a backup storage location pointing at the in-cluster Garage and
     # assign it to the environment. Mirrors the e2e bootstrap flow.
-    print_header("Creating backup storage location (MinIO)...")
+    print_header("Creating backup storage location (Garage)...")
     result = graphql(
         api_url,
         load_query("create_backup_storage_location"),
         {
             "name": "local",
-            "endpoint": "http://minio.styrmin.svc:9000",
-            "bucket": "velero",
-            "region": "minio",
-            "accessKeyId": "minioadmin",
-            "secretAccessKey": "minioadmin",
+            "endpoint": GARAGE_ENDPOINT,
+            "bucket": GARAGE_BUCKET,
+            "region": GARAGE_REGION,
+            "accessKeyId": GARAGE_ACCESS_KEY_ID,
+            "secretAccessKey": GARAGE_SECRET_ACCESS_KEY,
         },
         token=token,
     )

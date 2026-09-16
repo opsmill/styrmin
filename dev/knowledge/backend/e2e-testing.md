@@ -435,7 +435,8 @@ For debugging, prefer `-v -s --pdb` (see `dev/CLAUDE.md`).
 | [tests/e2e/drivers/api_driver.py](backend/tests/e2e/drivers/api_driver.py) | `ApiScenarioDriver` (SDK driver) |
 | [tests/e2e/drivers/ui_driver.py](backend/tests/e2e/drivers/ui_driver.py) | `UiScenarioDriver` (Playwright driver) |
 | [tests/e2e/pages/](backend/tests/e2e/pages/) | Playwright page objects (deploy form, deployment detail, etc.) |
-| [tests/e2e/fixtures/](backend/tests/e2e/fixtures/) | Chart-server, git-server, MinIO, and Helm values |
+| [tests/e2e/fixtures/](backend/tests/e2e/fixtures/) | Chart-server, git-server, and Helm values |
+| [dev/local/garage.yaml](dev/local/garage.yaml) | Single-node Garage (S3 store for Velero); shared with the local demo |
 | [tests/e2e/test_deploy_app.py](backend/tests/e2e/test_deploy_app.py) | Canonical end-to-end deploy test |
 | [driver/examples/simple-app/](driver/examples/simple-app/) | Test application (FastAPI + PostgreSQL + Helm chart) |
 | [python_sdk/](python_sdk/) | Python SDK used by the api driver |

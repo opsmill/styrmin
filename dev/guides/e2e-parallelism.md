@@ -13,7 +13,7 @@ The seven shards:
 | `general` | `shard_general` | Readonly readers + short-mutation tests (deploy, delete, admin, auth, smoke) | `test_ui_smoke`, `test_deploy_app`, `test_admin_*`, `test_service_discovery` |
 | `env` | `shard_env` | `test_deployment_env_vars.py` + `test_environment_update.py` (env-var precedence and env-level fan-out) | `test_us1_deployment_level_env_var`, `test_us1_environment_update_fans_out_to_all_deployments` |
 | `compute` | `shard_compute` | `test_pod_scheduling.py` + `test_ingress_controller.py` (scheduling / ingress) | `test_scheduling_end_to_end`, `test_ingress_controller` |
-| `backup` | `shard_backup` | Velero + MinIO; cluster-wide state (kept isolated to avoid cross-test pollution) | `test_backup_restore`, `test_backup_restore_databases` |
+| `backup` | `shard_backup` | Velero + Garage; cluster-wide state (kept isolated to avoid cross-test pollution) | `test_backup_restore`, `test_backup_restore_databases` |
 | `infrahub` | `shard_infrahub` | Infrahub-stack backup/restore (boots full Infrahub server + DB; isolated from `shard_backup` so simple-app backup tests aren't blocked by Infrahub boot) | `test_infrahub_backup_restore` |
 | `configuration` | `shard_configuration` | `backend/tests/e2e/configuration/` — unified config-drawer UI flows | `test_drawer_env_vars_edit`, `test_drawer_scheduling_edit` |
 

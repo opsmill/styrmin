@@ -42,7 +42,7 @@ starve a shared shard. It MUST live in its own file and its own
 shard.
 
 - **Shards:**
-  - `backup` (Velero / MinIO) — simple-app + database backup/restore.
+  - `backup` (Velero / Garage) — simple-app + database backup/restore.
   - `infrahub` (Infrahub stack) — boots a full Infrahub server + DB;
     split out of `backup` so debug iteration on the simple-app backup
     tests doesn't pay for the Infrahub boot.
@@ -95,7 +95,7 @@ Net new heavy boots: zero.
 ## Decision tree
 
 1. Does it touch the Infrahub stack (full Infrahub server + DB)? → Yes: `infrahub` (isolated).
-2. Does it touch Velero or MinIO? → Yes: `backup` (isolated).
+2. Does it touch Velero or Garage? → Yes: `backup` (isolated).
 3. Is it a config-drawer UI flow? → Yes: `configuration`.
 4. Is it about env vars or environment updates? → Yes: `env`.
 5. Is it about pod scheduling or the ingress controller? → Yes: `compute`.

@@ -26,7 +26,14 @@ from rich.panel import Panel
 
 from tasks import agent, cluster, dev
 
-from .utils import KUBERNETES_ROOT_NAMESPACE, MAIN_DIRECTORY_PATH, VCLUSTER_NAME, print_header
+from .utils import (
+    GARAGE_ACCESS_KEY_ID,
+    GARAGE_SECRET_ACCESS_KEY,
+    KUBERNETES_ROOT_NAMESPACE,
+    MAIN_DIRECTORY_PATH,
+    VCLUSTER_NAME,
+    print_header,
+)
 
 DEMO_HOSTNAME = "styrmin.local.styrmin.io"
 DEMO_FQDN_SUFFIX = "local.styrmin.io"
@@ -118,7 +125,7 @@ def start(context: Context, build_image: bool = False) -> None:
     cluster.create(context)
     cluster.connect(context)
     cluster.traefik(context)
-    cluster.minio(context)
+    cluster.garage(context)
 
     print_header(f"Deploying the Styrmin Helm chart (release={DEMO_RELEASE})...")
     context.run(
@@ -221,8 +228,8 @@ def _print_summary(context: Context) -> None:
         f"[bold]Styrmin UI:[/bold]     {url}\n"
         f"[bold]GraphQL:[/bold]        {url}/graphql\n"
         f"[bold]Admin login:[/bold]    {admin_username} / {admin_password}\n"
-        f"[bold]MinIO console:[/bold]  kubectl port-forward svc/minio 9001:9001 -n {KUBERNETES_ROOT_NAMESPACE}\n"
-        f"[bold]MinIO creds:[/bold]    minioadmin / minioadmin\n\n"
+        f"[bold]Garage S3:[/bold]      kubectl port-forward svc/garage 3900:3900 -n {KUBERNETES_ROOT_NAMESPACE}\n"
+        f"[bold]Garage creds:[/bold]   {GARAGE_ACCESS_KEY_ID} / {GARAGE_SECRET_ACCESS_KEY}\n\n"
         f"[bold]Deployments:[/bold]\n{deploy_output}"
     )
     console.print(Panel(body, title="[bold green]Styrmin demo is ready", style="green"))
