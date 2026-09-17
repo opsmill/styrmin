@@ -101,6 +101,12 @@ carries the bare `Styrmin` as the pre-mount default.
   The fallback names the page rather than showing a placeholder, so the tab is
   never blank and never briefly wrong.
 
+- **A full-page fallback that replaces the page body owns its own title.**
+  `AccessDenied` (rendered by `AdminOnly` when the effective role is too low) and
+  the root route's `NotFound` never mount the page component, so the page's own
+  call never runs. Without their own call the tab keeps the title of whatever
+  page the user came from.
+
 The title is deliberately **not** declared on the route. TanStack Router's `head`
 option only sees route params and loader data, and these pages fetch through
 TanStack Query inside the component, so a route-level title could not name the

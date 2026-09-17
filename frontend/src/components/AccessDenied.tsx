@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageLayout } from "@/components/PageLayout";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 interface AccessDeniedProps {
   /**
@@ -23,6 +24,11 @@ interface AccessDeniedProps {
  * bookmarked or deep-linked URL appeared not to work.
  */
 export function AccessDenied({ area, requiredRole }: AccessDeniedProps) {
+  // This fallback replaces the page component entirely, so the page's own
+  // useDocumentTitle never runs — without this the tab would keep the title
+  // of whatever page the user came from.
+  useDocumentTitle("Access denied");
+
   return (
     <PageLayout
       title="Access denied"
