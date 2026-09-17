@@ -27,6 +27,7 @@ import { useState, useMemo, useEffect } from "react";
 import { IfRole } from "@/auth/IfRole";
 import { ParameterField } from "@/components/deployment/configuration/ParameterField";
 import { formatDriverVersionLabel } from "@/lib/driverVersion";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const deployFormSchema = z.object({
   name: z.string().min(1, "Deployment name is required"),
@@ -37,6 +38,7 @@ const deployFormSchema = z.object({
 });
 
 export default function DeployFormPage() {
+  useDocumentTitle("Deploy");
   const { environmentId } = useParams({
     from: "/environments/$environmentId/deploy",
   });

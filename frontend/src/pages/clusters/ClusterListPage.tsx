@@ -9,8 +9,10 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { IfRole } from "@/auth/IfRole";
 import { CreateClusterDialog } from "@/pages/settings/CreateClusterDialog";
 import { ConfigSummary } from "./ConfigSummary";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 export default function ClusterListPage() {
+  useDocumentTitle("Clusters");
   const { data, isLoading, error, refetch } = useListClustersQuery();
 
   const refresh = () => {

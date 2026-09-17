@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { IfRole } from "@/auth/IfRole";
 import { CreateEnvironmentDialog } from "./CreateEnvironmentDialog";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 function deriveEnvHealth(deployments: { status: string }[]): string {
   if (deployments.length === 0) return "pending";
@@ -27,6 +28,7 @@ function deriveEnvHealth(deployments: { status: string }[]): string {
 }
 
 export default function EnvironmentListPage() {
+  useDocumentTitle("Environments");
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const { data, isLoading, error, refetch, dataUpdatedAt } =
     useListEnvironmentsQuery(undefined, {

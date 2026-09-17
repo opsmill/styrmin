@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select";
 
 import { CreateUserDialog } from "./CreateUserDialog";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 type UserRow = ListUsersQuery["users"][number];
 
@@ -51,6 +52,7 @@ function roleBadgeVariant(role: Role): "default" | "secondary" | "outline" {
 }
 
 export default function UsersListPage() {
+  useDocumentTitle("Users");
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("any");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("any");
   const [search, setSearch] = useState("");

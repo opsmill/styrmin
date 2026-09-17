@@ -55,6 +55,7 @@ import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
 import { IfRole } from "@/auth/IfRole";
 import { PodsTab } from "./PodsTab";
 import { formatDriverVersionLabel } from "@/lib/driverVersion";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const DEPLOYMENT_TABS = [
   { id: "overview", label: "Overview" },
@@ -80,6 +81,7 @@ export default function DeploymentDetailPage() {
     );
 
   const deployment = data?.deployment;
+  useDocumentTitle(deployment?.name ?? "Deployment");
 
   const { data: timelineData } = useGetDeploymentTimelineQuery(
     { deploymentId },
