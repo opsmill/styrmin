@@ -7,7 +7,11 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, act, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from "@tanstack/react-query";
 import {
   createRouter,
   createRootRoute,
@@ -197,5 +201,30 @@ describe("deployment detail document title", () => {
     await renderPage();
 
     await waitFor(() => expect(document.title).toBe("Deployment · Styrmin"));
+  });
+  it("retitles from the fallback to the deployment name when data arrives", async () => {
+    // The flow from issue #332: the tab must not sit on the fallback once the
+    // deployment resolves. The two endpoint states asserted in isolation above
+    // would both still pass on a page that never re-reads the name after mount,
+    // so drive a real pending -> resolved query transition here.
+    let resolveDeployment!: (value: GetDeploymentQuery) => void;
+    const pending = new Promise<GetDeploymentQuery>((resolve) => {
+      resolveDeployment = resolve;
+    });
+    useGetDeploymentQueryMock.mockImplementation(() =>
+      useQuery({
+        queryKey: ["GetDeployment", "dep-1"],
+        queryFn: () => pending,
+      }),
+    );
+
+    await renderPage();
+    await waitFor(() => expect(document.title).toBe("Deployment · Styrmin"));
+
+    await act(async () => {
+      resolveDeployment({ deployment: makeDeployment() } as GetDeploymentQuery);
+    });
+
+    await waitFor(() => expect(document.title).toBe("web · Styrmin"));
   });
 });

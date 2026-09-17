@@ -210,17 +210,16 @@ async def test_browser_tab_title_names_page_and_product(
     """
     page = session_ui_page
 
-    # 1. A static page names itself.
+    # 1. A static page names itself. `to_have_title` retries: the title is set
+    # from a useEffect, which flushes after the render commit, so a one-shot
+    # page.title() read can land before it and still see the shell title.
     await page.goto("/drivers")
-    await expect(page.get_by_role("heading", name="Drivers", level=1)).to_be_visible()
-    assert await page.title() == "Drivers · Styrmin", (
-        f"drivers list should be titled 'Drivers · Styrmin', got {await page.title()!r}"
-    )
+    await expect(page).to_have_title("Drivers · Styrmin")
 
-    # 2. A detail page names the object it is showing. The only two titles the
-    # page can produce are "<deployment name> · Styrmin" and the in-flight
-    # fallback "Deployment · Styrmin", so ruling out the fallback proves the
-    # loaded name reached the tab.
+    # 2. A detail page names the object it is showing. Compare against the
+    # deployment name the page itself rendered (its only <h1>) rather than
+    # merely ruling out the loading fallback — a title hard-coded to some other
+    # constant would pass that weaker check while the dynamic title regressed.
     detail_page = DeploymentDetailPage(page)
     await detail_page.goto(
         environment_id=scenario_environment_id,
@@ -228,11 +227,9 @@ async def test_browser_tab_title_names_page_and_product(
     )
     await detail_page.wait_for_status(expected="running", timeout=120.0)
 
-    title = await page.title()
-    assert title.endswith(" · Styrmin"), (
-        f"deployment detail title should end with ' · Styrmin', got {title!r}"
-    )
-    assert title != "Deployment · Styrmin", (
-        "deployment detail title is stuck on the loading fallback; the loaded "
-        "deployment name never reached the tab title"
-    )
+    heading = page.get_by_role("heading", level=1)
+    await expect(heading).to_be_visible()
+    deployment_name = (await heading.inner_text()).strip()
+    assert deployment_name, "deployment detail page rendered an empty <h1>"
+
+    await expect(page).to_have_title(f"{deployment_name} · Styrmin")
