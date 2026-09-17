@@ -565,3 +565,76 @@ describe("DeployFormPage component replicas (023)", () => {
     );
   });
 });
+
+describe("DeployFormPage application version validation (#329)", () => {
+  const drivers: DriversShape = [
+    {
+      id: "drv-simple",
+      name: "simple-app",
+      versions: [
+        {
+          id: "v-simple-1",
+          version: "0.1.0",
+          supportedVersions: ">=0.1.0,<1.0.0",
+          defaultVersion: null,
+          contentHash: "a".repeat(64),
+          sourceCommitSha: null,
+          parameters: [],
+        },
+      ],
+    },
+  ] as DriversShape;
+
+  async function fillForm(applicationVersion: string) {
+    useListApplicationDriversQueryMock.mockReturnValue(
+      makeQueryResult(drivers),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Deployment Name"), "my-app");
+    await user.click(await screen.findByTestId("driver-version-select"));
+    await user.click(await screen.findByText("simple-app v0.1.0@aaaaaaa"));
+    const versionInput = screen.getByLabelText(/Application Version/);
+    await user.clear(versionInput);
+    await user.type(versionInput, applicationVersion);
+    return user;
+  }
+
+  beforeEach(() => {
+    useListApplicationDriversQueryMock.mockReset();
+    noopMutationResult.mutateAsync.mockClear();
+  });
+
+  it("rejects a non-version value on the field without calling the mutation", async () => {
+    const user = await fillForm("tata");
+
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    // Message quotes the selected driver version's range with an example
+    // derived from its lower bound.
+    expect(
+      await screen.findByText(
+        "Enter a version in the supported range >=0.1.0,<1.0.0, for example 0.1.0",
+      ),
+    ).toBeInTheDocument();
+    expect(noopMutationResult.mutateAsync).not.toHaveBeenCalled();
+    // The generic submit banner must not appear for a client-side error.
+    expect(screen.queryByText("Deployment failed")).not.toBeInTheDocument();
+  });
+
+  it("submits a dotted numeric version", async () => {
+    const user = await fillForm("0.2.0");
+
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    await waitFor(() => {
+      expect(noopMutationResult.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+    expect(noopMutationResult.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ driver: "simple-app", version: "0.2.0" }),
+    );
+    expect(
+      screen.queryByText(/Enter a version in the supported range/),
+    ).not.toBeInTheDocument();
+  });
+});

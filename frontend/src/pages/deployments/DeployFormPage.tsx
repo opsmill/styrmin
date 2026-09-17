@@ -34,14 +34,32 @@ import {
 } from "@/lib/driverVersion";
 import { replicaFieldError, replicaParameterFor } from "@/lib/replicas";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import {
+  invalidApplicationVersionMessage,
+  isApplicationVersionShape,
+} from "@/lib/applicationVersion";
 
-const deployFormSchema = z.object({
-  name: z.string().min(1, "Deployment name is required"),
-  applicationDriverVersionId: z
-    .string()
-    .min(1, "Application driver version is required"),
-  applicationVersion: z.string().optional(),
-});
+/**
+ * Static shape of the form. The version field's message depends on the
+ * selected driver version, so the schema is built per submit by
+ * {@link buildDeployFormSchema}.
+ */
+function buildDeployFormSchema(supportedVersions: string | null | undefined) {
+  return z.object({
+    name: z.string().min(1, "Deployment name is required"),
+    applicationDriverVersionId: z
+      .string()
+      .min(1, "Application driver version is required"),
+    // Empty means "use the driver's default version" (the mutation treats an
+    // empty string as no version); anything else must look like a version.
+    // Range enforcement stays server-side; see lib/applicationVersion.ts.
+    applicationVersion: z
+      .string()
+      .refine((v) => v === "" || isApplicationVersionShape(v), {
+        message: invalidApplicationVersionMessage(supportedVersions),
+      }),
+  });
+}
 
 export default function DeployFormPage() {
   useDocumentTitle("Deploy");
@@ -64,6 +82,17 @@ export default function DeployFormPage() {
     deploymentId?: string | null;
   } | null>(null);
 
+  const allVersions = useMemo(() => {
+    if (!driversData) return [];
+    // Newest first, so the first option of a driver is the version a deploy
+    // without a choice would bind to.
+    return driversData.applicationDrivers.flatMap((driver) =>
+      [...driver.versions]
+        .sort(compareVersionsLatestFirst)
+        .map((v) => ({ ...v, driverName: driver.name })),
+    );
+  }, [driversData]);
+
   const form = useForm({
     defaultValues: {
       name: "",
@@ -72,7 +101,12 @@ export default function DeployFormPage() {
     },
     validators: {
       onSubmit: ({ value }) => {
-        const result = deployFormSchema.safeParse(value);
+        const chosen = allVersions.find(
+          (v) => v.id === value.applicationDriverVersionId,
+        );
+        const result = buildDeployFormSchema(
+          chosen?.supportedVersions,
+        ).safeParse(value);
         if (result.success) return undefined;
         const fieldErrors: Record<string, string> = {};
         for (const issue of result.error.issues) {
@@ -142,17 +176,6 @@ export default function DeployFormPage() {
     form.store,
     (s) => s.values.applicationDriverVersionId,
   );
-
-  const allVersions = useMemo(() => {
-    if (!driversData) return [];
-    // Newest first, so the first option of a driver is the version a deploy
-    // without a choice would bind to.
-    return driversData.applicationDrivers.flatMap((driver) =>
-      [...driver.versions]
-        .sort(compareVersionsLatestFirst)
-        .map((v) => ({ ...v, driverName: driver.name })),
-    );
-  }, [driversData]);
 
   const selectedVersion = allVersions.find((v) => v.id === selectedVersionId);
   // The options of the driver version select. Passed to its `items`, so that

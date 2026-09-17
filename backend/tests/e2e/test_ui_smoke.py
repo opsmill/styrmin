@@ -112,6 +112,34 @@ async def test_deploy_form_shows_driver_label_after_selection(
     )
 
 
+async def test_deploy_form_rejects_invalid_application_version(
+    session_ui_page: "Page",
+    scenario_environment_id: str,
+) -> None:
+    """A non-version value is rejected on the field before submit (#329).
+
+    Regression guard for the deploy form accepting free text and the server
+    answering with the masked "An internal error occurred".
+    """
+    page = DeployFormPage(session_ui_page)
+    await page.goto(environment_id=scenario_environment_id)
+    await page.fill(driver="simple-app", version="tata", name="invalid-version-app")
+
+    await session_ui_page.get_by_role("button", name="Deploy", exact=True).click()
+
+    # simple-app declares supported_versions ">=0.1,<1.0"; the field error
+    # quotes that range with an example taken from its lower bound.
+    await expect(
+        session_ui_page.get_by_text(
+            "Enter a version in the supported range >=0.1,<1.0, for example 0.1.0"
+        )
+    ).to_be_visible()
+    await expect(session_ui_page.get_by_text("Deployment failed")).to_have_count(0)
+    await expect(
+        session_ui_page.get_by_role("link", name="View Deployment")
+    ).to_have_count(0)
+
+
 # ---- from test_deployment_pods_tab.py ----
 async def test_pods_tab_copy_logs_command(
     deployed_simple_app: dict,

@@ -13,11 +13,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
 from styrmin_backend.db.models import ApplicationDriver, ApplicationDriverVersion
 from styrmin_backend.services.deployment import (
     _driver_version_sort_key,
+    _ensure_pin_supports_version,
     _resolve_latest_matching_version,
 )
+from styrmin_backend.services.exceptions import InvalidVersionSyntaxError
 
 
 def _adv(
@@ -112,3 +116,20 @@ class TestResolveLatestMatchingVersion:
         second_build = _adv("1", supported=">=0.1,<1.0", created_on=_T2)
         driver = _driver([first_build, second_build])
         assert _resolve_latest_matching_version(driver, "0.5.0") is second_build
+
+
+class TestUnparseableRequestedVersion:
+    """A non-version string from the user must raise the typed syntax error
+    (``VALIDATION_ERROR``) rather than leak ``packaging.version.InvalidVersion``,
+    which the API would mask as an internal error (#329).
+    """
+
+    def test_resolve_latest_matching_version_raises_typed_error(self) -> None:
+        driver = _driver([_adv("1.0.0", supported=">=1.0.0")])
+        with pytest.raises(InvalidVersionSyntaxError, match="'tata'"):
+            _resolve_latest_matching_version(driver, "tata")
+
+    def test_ensure_pin_supports_version_raises_typed_error(self) -> None:
+        pinned = _adv("1.0.0", supported=">=1.0.0")
+        with pytest.raises(InvalidVersionSyntaxError, match="'tata'"):
+            _ensure_pin_supports_version(pinned, "tata")
