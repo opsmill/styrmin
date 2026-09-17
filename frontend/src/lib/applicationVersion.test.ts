@@ -39,6 +39,19 @@ describe("exampleVersionForRange", () => {
     expect(exampleVersionForRange("~=1.4.2")).toBe("1.4.2");
   });
 
+  it("drops the example when a != clause rules the lower bound out", () => {
+    expect(exampleVersionForRange(">=1.5,<2.0,!=1.5.0")).toBeNull();
+    expect(exampleVersionForRange(">=1.5,<2.0,!=1.5")).toBeNull();
+    expect(exampleVersionForRange(">=1.5,<2.0,!=1.5.*")).toBeNull();
+    expect(exampleVersionForRange(">=1.5.0,<2.0,!=1.5")).toBeNull();
+  });
+
+  it("keeps the example when the exclusion targets another version", () => {
+    expect(exampleVersionForRange(">=1.5,<2.0,!=1.6.0")).toBe("1.5.0");
+    expect(exampleVersionForRange(">=1.5,<2.0,!=1.50")).toBe("1.5.0");
+    expect(exampleVersionForRange(">=1.5,<2.0,!=1.5.1")).toBe("1.5.0");
+  });
+
   it("skips exclusive or upper-only clauses", () => {
     expect(exampleVersionForRange("<2.0")).toBeNull();
     expect(exampleVersionForRange(">1.0,<2.0")).toBeNull();

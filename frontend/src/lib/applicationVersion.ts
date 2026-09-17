@@ -29,19 +29,48 @@ const GENERIC_MESSAGE = "Enter a valid application version such as 1.0.0";
 /** Clauses whose version is itself inside the range, usable as an example. */
 const INCLUSIVE_LOWER_BOUND = /^(?:>=|==|~=)\s*(\d+(?:\.\d+)*)/;
 
+/** Exclusion clauses: exact (`!=1.5`, equal to `1.5.0`) or wildcard (`!=1.5.*`). */
+const EXCLUSION = /^!=\s*(\d+(?:\.\d+)*)(\.\*)?$/;
+
+/** Zero-pad a dotted numeric version to at least `length` components. */
+function padVersion(version: string, length: number): string {
+  const parts = version.split(".");
+  while (parts.length < length) parts.push("0");
+  return parts.join(".");
+}
+
+/** Whether a `!=` clause in the range rules out `candidate`. */
+function isExcluded(candidate: string, clauses: string[]): boolean {
+  return clauses.some((clause) => {
+    const match = EXCLUSION.exec(clause);
+    if (!match) return false;
+    const excluded = match[1]!;
+    if (match[2]) {
+      // `!=1.5.*` excludes 1.5 and every 1.5.x.
+      return candidate === excluded || candidate.startsWith(`${excluded}.`);
+    }
+    const width = Math.max(
+      candidate.split(".").length,
+      excluded.split(".").length,
+    );
+    return padVersion(candidate, width) === padVersion(excluded, width);
+  });
+}
+
 /**
  * Pick a concrete version the user could type for a supported range, taken
  * from its inclusive lower bound and padded to three components
  * (`>=1.5,<2.0` → `1.5.0`). Returns `null` when the range has no inclusive
- * lower bound to borrow from (`<2.0`, `>1.0`, `!=1.2`).
+ * lower bound to borrow from (`<2.0`, `>1.0`, `!=1.2`), or when a `!=`
+ * clause rules that bound back out (`>=1.5,<2.0,!=1.5.0`).
  */
 export function exampleVersionForRange(range: string): string | null {
-  for (const clause of range.split(",")) {
-    const match = INCLUSIVE_LOWER_BOUND.exec(clause.trim());
+  const clauses = range.split(",").map((clause) => clause.trim());
+  for (const clause of clauses) {
+    const match = INCLUSIVE_LOWER_BOUND.exec(clause);
     if (!match) continue;
-    const parts = match[1]!.split(".");
-    while (parts.length < 3) parts.push("0");
-    return parts.join(".");
+    const candidate = padVersion(match[1]!, 3);
+    return isExcluded(candidate, clauses) ? null : candidate;
   }
   return null;
 }
