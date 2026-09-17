@@ -24,6 +24,7 @@ import { useState } from "react";
 import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
 import { IfRole } from "@/auth/IfRole";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const updateCredentialsSchema = z.object({
   accessKeyId: z.string().min(1, "Access key ID is required"),
@@ -86,6 +87,7 @@ export default function BackupStorageLocationDetailPage() {
   };
 
   const bsl = data?.backupStorageLocation;
+  useDocumentTitle(bsl?.name ?? "Backup Storage Location");
 
   return (
     <PageLayout

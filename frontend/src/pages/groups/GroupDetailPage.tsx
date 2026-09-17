@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 type GroupRow = ListGroupsQuery["groups"][number];
 
@@ -72,6 +73,7 @@ export default function GroupDetailPage() {
     () => groupsQuery.data?.groups.find((g) => g.id === id),
     [groupsQuery.data, id],
   );
+  useDocumentTitle(group?.name ?? "Group");
 
   const allUsers = useMemo(
     () => usersQuery.data?.users ?? [],

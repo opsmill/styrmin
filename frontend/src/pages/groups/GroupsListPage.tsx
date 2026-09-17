@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 import { CreateGroupDialog } from "./CreateGroupDialog";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 type GroupRow = ListGroupsQuery["groups"][number];
 
@@ -51,6 +52,7 @@ function roleBadgeVariant(role: Role): "default" | "secondary" | "outline" {
 }
 
 export default function GroupsListPage() {
+  useDocumentTitle("Groups");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [deleteError, setDeleteError] = useState<string | null>(null);

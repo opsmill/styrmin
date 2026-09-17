@@ -195,3 +195,44 @@ async def test_driver_detail_inspects_versions_via_tabs(
     assert pre_count == 0, (
         f"Components tab must render zero <pre> JSON blocks; found {pre_count}"
     )
+
+
+# ---- issue #332: browser tab title ----
+async def test_browser_tab_title_names_page_and_product(
+    deployed_simple_app: dict,
+    session_ui_page: "Page",
+    scenario_environment_id: str,
+) -> None:
+    """The tab title names the product, and the page, on every route.
+
+    Regression guard for #332, where the Vite scaffold default ``frontend``
+    was left in the HTML shell and no route ever replaced it.
+    """
+    page = session_ui_page
+
+    # 1. A static page names itself.
+    await page.goto("/drivers")
+    await expect(page.get_by_role("heading", name="Drivers", level=1)).to_be_visible()
+    assert await page.title() == "Drivers · Styrmin", (
+        f"drivers list should be titled 'Drivers · Styrmin', got {await page.title()!r}"
+    )
+
+    # 2. A detail page names the object it is showing. The only two titles the
+    # page can produce are "<deployment name> · Styrmin" and the in-flight
+    # fallback "Deployment · Styrmin", so ruling out the fallback proves the
+    # loaded name reached the tab.
+    detail_page = DeploymentDetailPage(page)
+    await detail_page.goto(
+        environment_id=scenario_environment_id,
+        deployment_id=deployed_simple_app["deployment_id"],
+    )
+    await detail_page.wait_for_status(expected="running", timeout=120.0)
+
+    title = await page.title()
+    assert title.endswith(" · Styrmin"), (
+        f"deployment detail title should end with ' · Styrmin', got {title!r}"
+    )
+    assert title != "Deployment · Styrmin", (
+        "deployment detail title is stuck on the loading fallback; the loaded "
+        "deployment name never reached the tab title"
+    )

@@ -78,3 +78,30 @@ See [`knowledge/frontend/routing.md`](../../knowledge/frontend/routing.md) → "
 
 - Every test that renders a routed component goes through the `customRender` in `src/test/utils.tsx`, which builds a fresh `Router` per test from `createMemoryHistory`. Do not import `MemoryRouter` from `react-router` (it has been removed) and do not share router instances across tests.
 - For tests that need a typed `useParams`, register the relevant route in the test router rather than mocking the hook.
+
+<!-- Added for issue #332 on 2026-09-17 -->
+
+### Browser tab titles
+
+Every page component calls `useDocumentTitle()` from `@/hooks/use-document-title`
+exactly once, producing a tab title in the `<page> · Styrmin` shape. `index.html`
+carries the bare `Styrmin` as the pre-mount default.
+
+- **Call it before any early return.** Detail pages return early for loading and
+  error state; a hook placed after those returns breaks the rules of hooks.
+- **Pass a static label on list and form pages**, matching the sidebar or the
+  `PageLayout` title so the tab and the page agree: `useDocumentTitle("Drivers")`.
+- **Pass the loaded object's name on detail pages, with a static fallback** for
+  the window where the query is still in flight:
+
+  ```tsx
+  useDocumentTitle(deployment?.name ?? "Deployment");
+  ```
+
+  The fallback names the page rather than showing a placeholder, so the tab is
+  never blank and never briefly wrong.
+
+The title is deliberately **not** declared on the route. TanStack Router's `head`
+option only sees route params and loader data, and these pages fetch through
+TanStack Query inside the component, so a route-level title could not name the
+object. One mechanism that covers both cases beats two that each cover half.

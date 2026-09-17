@@ -27,6 +27,7 @@ import {
 } from "@/lib/driverVersion";
 import { isPlainObject } from "./driver-detail/json-guards";
 import type { DriverVersionDetail } from "./driver-detail/types";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 type DetailTab = "overview" | "parameters" | "components";
 
@@ -51,6 +52,7 @@ export default function DriverDetailPage() {
   });
 
   const driver = data?.applicationDriver;
+  useDocumentTitle(driver?.name ?? "Driver");
   const versions = useMemo(
     () => [...(driver?.versions ?? [])].sort(compareVersionsLatestFirst),
     [driver?.versions],

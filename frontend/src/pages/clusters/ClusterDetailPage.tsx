@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ConfigSection } from "@/components/ConfigSection";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString();
@@ -22,6 +23,7 @@ export default function ClusterDetailPage() {
   );
 
   const cluster = data?.cluster;
+  useDocumentTitle(cluster?.name ?? "Cluster");
 
   if (isLoading) return <LoadingState message="Loading cluster..." />;
 

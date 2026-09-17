@@ -16,8 +16,10 @@ import { HardDrive } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { IfRole } from "@/auth/IfRole";
 import { CreateBackupStorageLocationDialog } from "./CreateBackupStorageLocationDialog";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 export default function BackupStorageLocationListPage() {
+  useDocumentTitle("Backup Storage");
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const { data, isLoading, error, refetch, dataUpdatedAt } =
     useListBackupStorageLocationsQuery(undefined, {

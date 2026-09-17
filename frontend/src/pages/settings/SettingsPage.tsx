@@ -3,8 +3,10 @@ import { PageLayout } from "@/components/PageLayout";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Users, UsersRound } from "lucide-react";
 import { IfRole } from "@/auth/IfRole";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 export default function SettingsPage() {
+  useDocumentTitle("Settings");
   return (
     <PageLayout title="Settings" breadcrumbs={[{ label: "Settings" }]}>
       <IfRole minimum="ADMIN">

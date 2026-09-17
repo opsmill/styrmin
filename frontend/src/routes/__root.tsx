@@ -1,5 +1,6 @@
 import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
+import { NotFound } from "@/components/NotFound";
 import { safeNext } from "@/lib/safe-next";
 import type { AuthContextValue } from "@/auth/AuthProvider";
 
@@ -37,5 +38,5 @@ function requireAuth({
 export const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: AppShell,
   beforeLoad: requireAuth,
-  notFoundComponent: () => <div>Page not found</div>,
+  notFoundComponent: NotFound,
 });

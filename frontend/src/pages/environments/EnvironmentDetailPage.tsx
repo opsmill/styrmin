@@ -28,6 +28,7 @@ import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { IfRole } from "@/auth/IfRole";
 import { useEffectiveRole } from "@/auth/useEffectiveRole";
 import EnvironmentConfigurationTab from "./EnvironmentConfigurationTab";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -59,6 +60,7 @@ export default function EnvironmentDetailPage() {
   const canWrite = effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";
 
   const environment = data?.environment;
+  useDocumentTitle(environment?.name ?? "Environment");
 
   const handleBslChange = async (value: string) => {
     try {

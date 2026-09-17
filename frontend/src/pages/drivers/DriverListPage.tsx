@@ -26,10 +26,12 @@ import {
   versionSource,
 } from "@/pages/drivers/lib/driverList";
 import { Package, Plus, Search, X } from "lucide-react";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 type ViewMode = "grouped" | "flat";
 
 export default function DriverListPage() {
+  useDocumentTitle("Drivers");
   const navigate = useNavigate();
   const effectiveRole = useEffectiveRole();
   const canWrite = effectiveRole === "READ_WRITE" || effectiveRole === "ADMIN";

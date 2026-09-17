@@ -21,6 +21,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 interface CodeError extends Error {
   code?: string;
@@ -42,6 +43,7 @@ function errorMessage(err: unknown): string {
 }
 
 export default function ProfilePage() {
+  useDocumentTitle("Profile");
   const { currentUser, refresh } = useAuth();
 
   // ----- Display name form state -----

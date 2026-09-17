@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const GENERIC_ERROR = "Invalid username or password.";
 
 export default function LoginPage() {
+  useDocumentTitle("Sign in");
   const { refresh } = useAuth();
   const navigate = useNavigate();
   // The /login route's `validateSearch` has already filtered `next` through
