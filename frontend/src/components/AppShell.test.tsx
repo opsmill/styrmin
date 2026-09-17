@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen, userEvent } from "@/test/utils";
+import { render, screen, userEvent, within } from "@/test/utils";
 import { AppShell } from "./AppShell";
 import {
   AuthContext,
@@ -111,6 +111,14 @@ describe("AppShell", () => {
   it("renders the Styrmin brand name", async () => {
     await render(<Shell />);
     expect(screen.getByText("Styrmin")).toBeInTheDocument();
+  });
+
+  it("renders the theme toggle in the shared header, on every route", async () => {
+    await render(<Shell role="ADMIN" />);
+
+    const header = screen.getByTestId("app-header");
+    expect(within(header).getByLabelText("Light mode")).toBeInTheDocument();
+    expect(within(header).getByLabelText("Dark mode")).toBeInTheDocument();
   });
 
   it("hides labels and brand when sidebar is collapsed", async () => {
