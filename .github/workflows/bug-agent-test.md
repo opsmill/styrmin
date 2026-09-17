@@ -55,7 +55,7 @@ safe-outputs:
   add-labels:
     max: 2
   missing-tool:
-source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-test.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6
+source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-test.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745
 ---
 
 # Bug test-writer agent

@@ -1,5 +1,5 @@
-# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"92425c518ba37e48b7809f8047cb1ec00ec42dfba0e389604e21338e85e5b1e0","body_hash":"17e091e616417bdce3e48a02d47b81bb3342cf803adac0dff5a7e7c90dc86bf7","compiler_version":"v0.86.2","strict":true,"agent_id":"claude","engine_versions":{"claude":"2.1.227"}}
-# gh-aw-manifest: {"version":1,"secrets":["ANTHROPIC_API_KEY","BUG_PIPELINE_APP_ID","BUG_PIPELINE_APP_PRIVATE_KEY","COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN"],"actions":[{"repo":"actions/cache/restore","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/cache/save","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/create-github-app-token","sha":"bcd2ba49218906704ab6c1aa796996da409d3eb1","version":"v3.2.0"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"6aab9e5b5c91c615506061f09bedd81a23babe3c","version":"v0.86.2"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44","digest":"sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44@sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44","digest":"sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44","digest":"sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.9","digest":"sha256:e5a1569aeaf41820fa7bdee3e94468cae448133cdbf00119ad24f5b74db1ab9f","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.9@sha256:e5a1569aeaf41820fa7bdee3e94468cae448133cdbf00119ad24f5b74db1ab9f"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196","pinned_image":"ghcr.io/github/gh-aw-node@sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196"},{"image":"ghcr.io/github/github-mcp-server:v1.9.0","digest":"sha256:881b53d6f75f69bdbc1b5b10fc2f1361717c19054143b3a8529fb5c32061a50e","pinned_image":"ghcr.io/github/github-mcp-server:v1.9.0@sha256:881b53d6f75f69bdbc1b5b10fc2f1361717c19054143b3a8529fb5c32061a50e"}]}
+# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"ec87454c792b80a6b40c249dd2024a0fc967f5bac25d731f6dfd7f9fced37c40","body_hash":"17e091e616417bdce3e48a02d47b81bb3342cf803adac0dff5a7e7c90dc86bf7","compiler_version":"v0.86.2","strict":true,"agent_id":"claude","engine_versions":{"claude":"2.1.227"}}
+# gh-aw-manifest: {"version":1,"secrets":["ANTHROPIC_API_KEY","BUG_PIPELINE_APP_ID","BUG_PIPELINE_APP_PRIVATE_KEY","COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN"],"actions":[{"repo":"actions/cache/restore","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/cache/save","sha":"55cc8345863c7cc4c66a329aec7e433d2d1c52a9","version":"v6.1.0"},{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/create-github-app-token","sha":"bcd2ba49218906704ab6c1aa796996da409d3eb1","version":"v3.2.0"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"6aab9e5b5c91c615506061f09bedd81a23babe3c","version":"v0.86.2"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44","digest":"sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.27.44@sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44","digest":"sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44","digest":"sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.9","digest":"sha256:e5a1569aeaf41820fa7bdee3e94468cae448133cdbf00119ad24f5b74db1ab9f","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.9@sha256:e5a1569aeaf41820fa7bdee3e94468cae448133cdbf00119ad24f5b74db1ab9f"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:87366cb93b06d7a4e3db08a705875efc027b6c394da336119e7a067abacbb39b","pinned_image":"ghcr.io/github/gh-aw-node@sha256:87366cb93b06d7a4e3db08a705875efc027b6c394da336119e7a067abacbb39b"},{"image":"ghcr.io/github/github-mcp-server:v1.9.0","digest":"sha256:881b53d6f75f69bdbc1b5b10fc2f1361717c19054143b3a8529fb5c32061a50e","pinned_image":"ghcr.io/github/github-mcp-server:v1.9.0@sha256:881b53d6f75f69bdbc1b5b10fc2f1361717c19054143b3a8529fb5c32061a50e"}]}
 # This file was automatically generated by gh-aw (v0.86.2). DO NOT EDIT. To debug this workflow, load the skill at https://github.com/github/gh-aw/blob/main/debug.md
 #
 #    ___                   _   _
@@ -17,7 +17,7 @@
 #  \/  \/ \___/|_| |_|\_\|_| |_|\___/ \_/\_/ |___/
 #
 #
-# To update this file, edit opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6 and run:
+# To update this file, edit opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745 and run:
 #   gh aw compile
 # Not all edits will cause changes to this file.
 #
@@ -25,7 +25,7 @@
 #
 # Bug-pipeline REVIEWER (consumer-side). Installed into a consumer via `gh aw add` and triggered locally by the consumer's bug-pipeline relay on pipeline-owned PR events. Runs on the CONSUMER's own runners: reviews the test (then the fix) on a bug-pipeline PR in THIS repo and posts a single verdict comment.
 #
-# Source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6
+# Source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745
 #
 # Secrets used:
 #   - ANTHROPIC_API_KEY
@@ -53,7 +53,7 @@
 #   - ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7
 #   - ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627
 #   - ghcr.io/github/gh-aw-mcpg:v0.4.9@sha256:e5a1569aeaf41820fa7bdee3e94468cae448133cdbf00119ad24f5b74db1ab9f
-#   - ghcr.io/github/gh-aw-node@sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196
+#   - ghcr.io/github/gh-aw-node@sha256:87366cb93b06d7a4e3db08a705875efc027b6c394da336119e7a067abacbb39b
 #   - ghcr.io/github/github-mcp-server:v1.9.0@sha256:881b53d6f75f69bdbc1b5b10fc2f1361717c19054143b3a8529fb5c32061a50e
 
 name: "Bug reviewer agent"
@@ -137,7 +137,7 @@ jobs:
           GH_AW_INFO_AWMG_VERSION: ""
           GH_AW_INFO_FIREWALL_TYPE: "squid"
           GH_AW_INFO_AGENT_RUNTIME: ""
-          GH_AW_INFO_FRONTMATTER_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6"
+          GH_AW_INFO_FRONTMATTER_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745"
           GH_AW_INFO_BODY_MODIFIED: "false"
           GH_AW_COMPILED_STRICT: "true"
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -500,7 +500,7 @@ jobs:
           GH_AW_SKILL_DIR: ".claude/skills"
         run: bash "${RUNNER_TEMP}/gh-aw/actions/restore_inline_skills.sh"
       - name: Download container images
-        run: bash "${RUNNER_TEMP}/gh-aw/actions/download_docker_images.sh" ghcr.io/github/gh-aw-firewall/agent:0.27.44@sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4 ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7 ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627 ghcr.io/github/gh-aw-mcpg:v0.4.9@sha256:e5a1569aeaf41820fa7bdee3e94468cae448133cdbf00119ad24f5b74db1ab9f ghcr.io/github/gh-aw-node@sha256:0d9f1fb5fd6610c0ac1f5194a38e45a8a1e81f8a390d5142d8e4e6f26a4b3196 ghcr.io/github/github-mcp-server:v1.9.0@sha256:881b53d6f75f69bdbc1b5b10fc2f1361717c19054143b3a8529fb5c32061a50e
+        run: bash "${RUNNER_TEMP}/gh-aw/actions/download_docker_images.sh" ghcr.io/github/gh-aw-firewall/agent:0.27.44@sha256:0d727725c737b58c7bdf51f640cffb928385ec46517e0917c7f1a02f1bada8b4 ghcr.io/github/gh-aw-firewall/api-proxy:0.27.44@sha256:b50fbadba138f6e9aba94aca09711335c489bb3b15861220cb66f6092e042dc7 ghcr.io/github/gh-aw-firewall/squid:0.27.44@sha256:83e48bbe12c634be8c228a576832fe45f66c529ac3659db92bddbcf2eeb6d627 ghcr.io/github/gh-aw-mcpg:v0.4.9@sha256:e5a1569aeaf41820fa7bdee3e94468cae448133cdbf00119ad24f5b74db1ab9f ghcr.io/github/gh-aw-node@sha256:87366cb93b06d7a4e3db08a705875efc027b6c394da336119e7a067abacbb39b ghcr.io/github/github-mcp-server:v1.9.0@sha256:881b53d6f75f69bdbc1b5b10fc2f1361717c19054143b3a8529fb5c32061a50e
       - name: Generate Safe Outputs Config
         run: |
           mkdir -p "${RUNNER_TEMP}/gh-aw/safeoutputs"
@@ -1190,8 +1190,8 @@ jobs:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_NOOP_MAX: "1"
           GH_AW_WORKFLOW_NAME: "Bug reviewer agent"
-          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/eb898c8deb8857496cab9412b3b9f85ec9ebc3c6/workflows/bug-agent-review.md"
+          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/b376723a0cac214db01f3b8aa8e9750ac5dbe745/workflows/bug-agent-review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
           GH_AW_NOOP_REPORT_AS_ISSUE: "false"
@@ -1212,8 +1212,8 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_WORKFLOW_NAME: "Bug reviewer agent"
-          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/eb898c8deb8857496cab9412b3b9f85ec9ebc3c6/workflows/bug-agent-review.md"
+          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/b376723a0cac214db01f3b8aa8e9750ac5dbe745/workflows/bug-agent-review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_DETECTION_CONCLUSION: ${{ needs.detection.outputs.detection_conclusion }}
           GH_AW_DETECTION_REASON: ${{ needs.detection.outputs.detection_reason }}
@@ -1232,8 +1232,8 @@ jobs:
           GH_AW_MISSING_TOOL_CREATE_ISSUE: "false"
           GH_AW_MISSING_TOOL_TITLE_PREFIX: "[missing tool]"
           GH_AW_WORKFLOW_NAME: "Bug reviewer agent"
-          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/eb898c8deb8857496cab9412b3b9f85ec9ebc3c6/workflows/bug-agent-review.md"
+          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/b376723a0cac214db01f3b8aa8e9750ac5dbe745/workflows/bug-agent-review.md"
         with:
           github-token: ${{ steps.safe-outputs-app-token.outputs.token }}
           script: |
@@ -1248,8 +1248,8 @@ jobs:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_REPORT_INCOMPLETE_CREATE_ISSUE: "true"
           GH_AW_WORKFLOW_NAME: "Bug reviewer agent"
-          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/eb898c8deb8857496cab9412b3b9f85ec9ebc3c6/workflows/bug-agent-review.md"
+          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/b376723a0cac214db01f3b8aa8e9750ac5dbe745/workflows/bug-agent-review.md"
         with:
           github-token: ${{ steps.safe-outputs-app-token.outputs.token }}
           script: |
@@ -1264,8 +1264,8 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_WORKFLOW_NAME: "Bug reviewer agent"
-          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/eb898c8deb8857496cab9412b3b9f85ec9ebc3c6/workflows/bug-agent-review.md"
+          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/b376723a0cac214db01f3b8aa8e9750ac5dbe745/workflows/bug-agent-review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
           GH_AW_WORKFLOW_ID: "bug-agent-review"
@@ -1315,8 +1315,8 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
           GH_AW_WORKFLOW_NAME: "Bug reviewer agent"
-          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6"
-          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/eb898c8deb8857496cab9412b3b9f85ec9ebc3c6/workflows/bug-agent-review.md"
+          GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745"
+          GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/b376723a0cac214db01f3b8aa8e9750ac5dbe745/workflows/bug-agent-review.md"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_REPORT_FAILED_JOBS: "true"
         with:
@@ -1607,8 +1607,8 @@ jobs:
       GH_AW_THREAT_DETECTION_AIC: ${{ needs.detection.outputs.aic }}
       GH_AW_WORKFLOW_ID: "bug-agent-review"
       GH_AW_WORKFLOW_NAME: "Bug reviewer agent"
-      GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@eb898c8deb8857496cab9412b3b9f85ec9ebc3c6"
-      GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/eb898c8deb8857496cab9412b3b9f85ec9ebc3c6/workflows/bug-agent-review.md"
+      GH_AW_WORKFLOW_SOURCE: "opsmill/opsmill-cicd-workflows/workflows/bug-agent-review.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745"
+      GH_AW_WORKFLOW_SOURCE_URL: "${{ github.server_url }}/opsmill/opsmill-cicd-workflows/blob/b376723a0cac214db01f3b8aa8e9750ac5dbe745/workflows/bug-agent-review.md"
     outputs:
       app_token_minting_failed: ${{ steps.safe-outputs-app-token.outcome == 'failure' }}
       code_push_failure_count: ${{ steps.process_safe_outputs.outputs.code_push_failure_count }}
