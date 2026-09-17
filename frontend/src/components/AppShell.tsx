@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/use-theme";
 import { useAuth } from "@/auth/AuthProvider";
 import { HeaderUserMenu } from "@/components/HeaderUserMenu";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { IfRole } from "@/auth/IfRole";
 import type { Role } from "@/generated/graphql";
 
@@ -105,14 +106,16 @@ export function AppShell() {
 
   if (isLoginRoute) {
     // Login is a full-screen experience; we still render the shared top
-    // header so global affordances (future theme toggle, etc.) remain visible,
-    // but the navigation sidebar and the authenticated user menu are hidden.
+    // header so global affordances (the theme toggle) remain visible, but the
+    // navigation sidebar and the authenticated user menu are hidden.
     return (
       <div className="flex min-h-screen flex-col">
         <header
           className="flex h-12 items-center justify-end border-b border-border bg-background px-4"
           data-testid="app-header"
-        />
+        >
+          <ThemeToggle />
+        </header>
         <main className="flex-1 overflow-auto">
           <Outlet />
         </main>
@@ -189,6 +192,7 @@ export function AppShell() {
           className="flex h-12 items-center justify-end gap-3 border-b border-border bg-background px-4"
           data-testid="app-header"
         >
+          <ThemeToggle />
           {currentUser !== null && (
             <HeaderUserMenu user={currentUser} onLogout={logout} />
           )}

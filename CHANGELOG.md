@@ -38,3 +38,11 @@ All notable changes to this project will be documented in this file.
   need a locally-built or otherwise floating image must now set
   `styrmin-agent.image.tag` explicitly — see `helm/styrmin/README.md`
   ("Running against a locally-built image").
+
+### Fixed
+
+- The light/dark theme toggle now lives in the shared application header, so it
+  is reachable from every page — Environments, Clusters, Deployments, Drivers,
+  Backup Storage, Settings, Profile — and from the login screen. It previously
+  rendered inside the Environments page content, which meant switching theme
+  from anywhere else required navigating back to Environments first.
