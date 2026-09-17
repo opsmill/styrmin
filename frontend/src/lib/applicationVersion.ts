@@ -9,13 +9,16 @@
  */
 
 /**
- * Dotted numeric core (`1`, `1.0`, `1.0.0`) with an optional pre-release /
- * post / build suffix (`2.0rc1`, `1.0.post1`, `1.0.0-beta+build.1`).
- * Deliberately permissive — it mirrors what the backend's version parser
- * accepts for normal versions so a valid value is never blocked here.
+ * Optional `v` prefix and numeric epoch (`v1.6.0`, `1!1.6.0`), a dotted
+ * numeric core (`1`, `1.0`, `1.0.0`) and an optional pre-release / post /
+ * build suffix (`2.0rc1`, `1.0.post1`, `1.0.0-beta+build.1`). Deliberately
+ * permissive — it mirrors the forms the backend's version parser accepts so
+ * a value the server would take is never blocked here. Whether such a value
+ * falls inside the driver's range (pre-releases usually do not) is the
+ * server's call.
  */
 export const APPLICATION_VERSION_PATTERN =
-  /^\d+(\.\d+)*([-+.]?[0-9A-Za-z][0-9A-Za-z.+-]*)?$/;
+  /^[vV]?(\d+!)?\d+(\.\d+)*([-+.]?[0-9A-Za-z][0-9A-Za-z.+-]*)?$/;
 
 export function isApplicationVersionShape(value: string): boolean {
   return APPLICATION_VERSION_PATTERN.test(value);

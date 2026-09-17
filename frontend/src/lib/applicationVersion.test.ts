@@ -15,11 +15,15 @@ describe("isApplicationVersionShape", () => {
     "2.0rc1",
     "1.0.post1",
     "1.0.0-beta+build.1",
+    // Forms the backend parser also accepts (PEP 440 v-prefix and epoch).
+    "v1.6.0",
+    "V1.6.0",
+    "1!1.6.0",
   ])("accepts %s", (value) => {
     expect(isApplicationVersionShape(value)).toBe(true);
   });
 
-  it.each(["tata", "", "v1.0.0", "1.", ".1", "1..0", "latest"])(
+  it.each(["tata", "", "v", "vv1.0.0", "!1.0", "1.", ".1", "1..0", "latest"])(
     "rejects %j",
     (value) => {
       expect(isApplicationVersionShape(value)).toBe(false);
