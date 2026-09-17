@@ -5,7 +5,6 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { IfRole } from "@/auth/IfRole";
 import { CreateEnvironmentDialog } from "./CreateEnvironmentDialog";
@@ -54,7 +53,6 @@ export default function EnvironmentListPage() {
             lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
             onRefreshNow={() => refetch()}
           />
-          <ThemeToggle />
           <IfRole minimum="READ_WRITE">
             <CreateEnvironmentDialog onCreated={() => refetch()} />
           </IfRole>
