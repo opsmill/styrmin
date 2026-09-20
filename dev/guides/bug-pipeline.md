@@ -11,7 +11,7 @@ This pipeline does **not** replace the general-purpose `@claude review` workflow
 | File | Role | Edit? |
 |------|------|-------|
 | `.github/workflows/bug-pipeline-relay.yml` | The dispatcher. Listens for slash commands + PR CI conclusions, enforces the approval gate, dispatches the matching worker locally. Generic and **identical across every consumer**. | Verbatim — never customize |
-| `.github/workflows/bug-agent-{analyst,test,review,fix}.{md,lock.yml}` | The four workers, installed from the central catalog via `gh aw add`. The `.md` is a bot-managed stub; the `.lock.yml` is `gh aw compile` output. | Never by hand — refreshed via `gh aw update` PRs |
+| `.github/workflows/bug-agent-{analyst,test,review,fix}.{md,lock.yml}` | The four workers, installed from the central catalog via `gh aw add`. The `.md` is a bot-managed copy of the central prompt source; the `.lock.yml` is `gh aw compile` output. | Never by hand — refreshed via `gh aw update` PRs |
 | `.github/bug-pipeline/profile.yml` | styrmin's executable test profile (base branch, authoritative check, setup/test/format/lint commands). Consumed by the test/fix workers. | Yes — repo-specific values |
 | `.github/labels.yml` | Declares the four `state/*` pipeline labels (synced by the `Sync Labels` workflow). | Yes |
 
@@ -69,7 +69,7 @@ The shared App private key is never in scope of a code-executing (or any agent) 
 
 ## Maintaining the installed workers
 
-The workers are bot-managed installs — **never hand-edit** the `.md` stubs or `.lock.yml` artefacts. Updates from the central catalog arrive as `gh aw update` PRs. If you ever need to recompile locally (e.g. after a gh-aw version bump), do it by path and re-approve the manifest:
+The workers are bot-managed installs — **never hand-edit** the `.md` copies or `.lock.yml` artefacts. Updates from the central catalog arrive as `gh aw update` PRs. If you ever need to recompile locally (e.g. after a gh-aw version bump), do it by path and re-approve the manifest:
 
 ```bash
 gh aw compile --approve   # records any new secrets/actions in .github/aw/actions-lock.json — review first
