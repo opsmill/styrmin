@@ -81,6 +81,10 @@ nfs-server-provisioner:
 prefect-server:
   enabled: true
   fullnameOverride: styrmin-task-manager
+  global:
+    prefect:
+      image:
+        prefectTag: "{{ app.version }}"
   # Expose the Prefect UI through the per-environment ingress
   ingress:
     enabled: true
