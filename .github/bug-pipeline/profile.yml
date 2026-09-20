@@ -8,8 +8,8 @@ version: 1
 profile:
   base_branch: develop
   test_layout:
-    backend: pytest suites (backend/tests/unit, backend/tests/component, ...); mirror
-      backend/styrmin_backend/foo.py -> backend/tests/unit/test_foo.py
+    backend: pytest suites (backend/tests/unit, backend/tests/functional, backend/tests/integration,
+      backend/tests/e2e); mirror backend/styrmin_backend/foo.py -> backend/tests/unit/test_foo.py
     frontend: vitest unit/component tests colocated with source as *.test.ts under frontend/
   setup:
     - uv sync
