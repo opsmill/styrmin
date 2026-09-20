@@ -15,7 +15,7 @@ This pipeline does **not** replace the general-purpose `@claude review` workflow
 | `.github/bug-pipeline/profile.yml` | styrmin's executable test profile (base branch, authoritative check, setup/test/format/lint commands). Consumed by the test/fix workers. | Yes — repo-specific values |
 | `.github/labels.yml` | Declares the four `state/*` pipeline labels (synced by the `Sync Labels` workflow). | Yes |
 
-The worker sources of truth live centrally at `workflows/bug-agent-*.md`; styrmin carries bot-managed copies. The gh-aw toolchain version is pinned in `.github/aw/actions-lock.json` (currently v0.86.2).
+The gh-aw toolchain version is pinned in `.github/aw/actions-lock.json` (currently v0.86.2).
 
 ## The four stages at a glance
 
@@ -88,13 +88,11 @@ gh aw add opsmill/opsmill-cicd-workflows/bug-agent-fix
 
 ## Local human-facing skills
 
-The interactive skills `.agents/skills/bug-{analyze,tdd,fix}` remain — they are the human-facing variant of the method, invokable directly from a Claude Code session in the repo. The pipeline itself no longer runs them; it runs the central catalog workers.
-
-> The method intentionally lives in two places — the central worker prompts (pipeline) and the local skills (humans) — maintained separately.
+The interactive skills `.agents/skills/bug-{analyze,tdd,fix}` remain — they are the human-facing variant of the method, invokable directly from a Claude Code session in the repo.
 
 ## The test profile
 
-`.github/bug-pipeline/profile.yml` is composed from the central `compose.py base python-uv node-pnpm` and then edited to match styrmin:
+`.github/bug-pipeline/profile.yml` is composed from the central `compose.py base python-uv node-pnpm`, with these styrmin-specific values:
 
 - `base_branch: develop` — the branch pipeline PRs target.
 - `authoritative_checks: [Unit Tests]` — the backend pytest CI job (`unit-tests` in `ci.yml`, surfaced as the **Unit Tests** check) that proves fail→pass.
