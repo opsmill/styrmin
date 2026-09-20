@@ -1,0 +1,1 @@
+Replaced hand-edited changelog entries with towncrier newsfragments: `CHANGELOG.md` is now generated at release time from files in `changelog/`, using the same towncrier configuration and rules as infrahub.

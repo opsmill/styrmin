@@ -120,6 +120,32 @@ jobs:
           echo "Updated helm/agent/Chart.yaml:"
           yq '.version, .appVersion' helm/agent/Chart.yaml
 
+      - name: Build changelog from news fragments
+        env:
+          NEW_VERSION: ${{ needs.check-changes.outputs.new_version }}
+        run: |
+          # Draft first: `build --yes` consumes the fragments, so render the
+          # section for the GitHub Release body while they still exist.
+          uv run towncrier build --draft --version "$NEW_VERSION" \
+            > "${RUNNER_TEMP}/changelog-section.md" 2>/dev/null
+
+          # Drop towncrier's own title line -- the GitHub Release already shows
+          # the version -- and any blank lines it leaves behind.
+          awk 'NR == 1 && /^## \[/ { next } { print }' \
+            "${RUNNER_TEMP}/changelog-section.md" \
+            | sed '/[^[:space:]]/,$!d' > "${RUNNER_TEMP}/release-notes.md"
+
+          if grep -q '^No significant changes\.$' "${RUNNER_TEMP}/release-notes.md"; then
+            # Releases are scheduled, so some carry only internal commits.
+            # Leave CHANGELOG.md alone rather than filling it with empty sections.
+            echo "::notice::No news fragments for ${NEW_VERSION} — leaving CHANGELOG.md unchanged"
+          else
+            uv run towncrier build --yes --version "$NEW_VERSION"
+          fi
+
+          echo "Release notes:"
+          cat "${RUNNER_TEMP}/release-notes.md"
+
       - name: Commit and tag
         if: ${{ !inputs.dry_run }}
         id: tag
@@ -133,6 +159,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add pyproject.toml uv.lock helm/styrmin/Chart.yaml helm/agent/Chart.yaml
+          git add --all CHANGELOG.md changelog
           git commit -m "chore: release ${TAG} [skip ci]"
           git tag "$TAG"
           git push origin develop
@@ -147,7 +174,7 @@ jobs:
           TAG="v${NEW_VERSION}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "::notice::DRY RUN — would create tag $TAG and push to develop"
-          echo "::notice::DRY RUN — version files updated locally but not committed"
+          echo "::notice::DRY RUN — version files and CHANGELOG.md updated locally but not committed"
 
       - name: Create GitHub Release
         if: ${{ !inputs.dry_run }}
@@ -156,6 +183,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           gh release create "$TAG" \
+            --notes-file "${RUNNER_TEMP}/release-notes.md" \
             --generate-notes \
             --target develop
 
