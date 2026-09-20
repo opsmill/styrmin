@@ -51,6 +51,7 @@ dev = [
     "ariadne-codegen>=0.14",
     "ty>=0.0.24",
     "pyright>=1.1.409",
+    "towncrier>=24.8,<25",
 ]
 
 [tool.ty]
@@ -281,6 +282,59 @@ disable = [
 [tool.rumdl.MD024]
 siblings_only = true
 
+
+[tool.towncrier]
+
+# Mirrors the towncrier setup in opsmill/infrahub. CHANGELOG.md is generated --
+# never edit it by hand; record changes as news fragments under changelog/.
+# See dev/guidelines/changelog.md.
+#
+# `package` is intentionally unset: unlike infrahub there is no importable
+# module carrying the released version, so `towncrier build` needs an explicit
+# --version (the release workflow and `invoke release.draft` both pass one).
+directory = "changelog"
+filename = "CHANGELOG.md"
+start_string = "<!-- towncrier release notes start -->\n"
+underlines = ["", "", ""]
+title_format = "## [Styrmin - v{version}](https://github.com/opsmill/styrmin/tree/v{version}) - {project_date}"
+issue_format = "[#{issue}](https://github.com/opsmill/styrmin/issues/{issue})"
+orphan_prefix = "+"
+template = "changelog/towncrier.md.template"
+
+[[tool.towncrier.type]]
+directory = "security"
+name = "Security"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removed"
+name = "Removed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecated"
+name = "Deprecated"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "added"
+name = "Added"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "changed"
+name = "Changed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "fixed"
+name = "Fixed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "housekeeping"
+name = "Housekeeping"
+showcontent = true
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "session"

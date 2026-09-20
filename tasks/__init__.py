@@ -40,7 +40,7 @@ def _bytes_to_read_patched(input_: IO[Any]) -> int:
 _invoke_terminals.bytes_to_read = _bytes_to_read_patched  # ty: ignore[invalid-assignment]
 _invoke_runners.bytes_to_read = _bytes_to_read_patched  # ty: ignore[invalid-assignment]
 
-from tasks import agent, cluster, demo, dev, graphql_validate, pre_commit  # noqa: E402
+from tasks import agent, cluster, demo, dev, graphql_validate, pre_commit, release  # noqa: E402
 from tasks import format as fmt  # noqa: E402
 
 from .utils import print_header  # noqa: E402
@@ -51,6 +51,7 @@ ns = Collection()
 ns.add_collection(dev)
 ns.add_collection(agent)
 ns.add_collection(cluster)
+ns.add_collection(release)
 
 
 @task(name="format")

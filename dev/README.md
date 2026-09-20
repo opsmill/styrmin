@@ -49,6 +49,7 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [frontend/ui-primitives.md](guidelines/frontend/ui-primitives.md) - Base UI wrapper layer, data-attribute selectors, polymorphic Button
 - [cyclopts.md](guidelines/cyclopts.md) - Cyclopts CLI conventions: parameters, validators, type aliases, lazy loading
 - [helm.md](guidelines/helm.md) - Styrmin chart rules: requests only, never resource limits
+- [changelog.md](guidelines/changelog.md) - towncrier newsfragments: types, naming, and how releases assemble CHANGELOG.md
 - [markdown.md](guidelines/markdown.md) - Markdown conventions and document structure
 
 ## Current ADRs
