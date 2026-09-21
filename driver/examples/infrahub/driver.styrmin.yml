@@ -21,7 +21,7 @@ spec:
   helm:
     main:
       location: oci://registry.opsmill.io/opsmill/chart/infrahub
-      version: 4.16.3
+      version: 4.33.2
 
   parameters:
     - name: replicas_server
