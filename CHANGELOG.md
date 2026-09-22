@@ -46,3 +46,7 @@ All notable changes to this project will be documented in this file.
   Backup Storage, Settings, Profile — and from the login screen. It previously
   rendered inside the Environments page content, which meant switching theme
   from anywhere else required navigating back to Environments first.
+- Renaming a backup storage location to a name already in use is now rejected
+  with a typed `ALREADY_EXISTS` error instead of an opaque "An internal error
+  occurred". The update path skipped the uniqueness check the create path
+  performs, so the database unique constraint failed at commit time.
