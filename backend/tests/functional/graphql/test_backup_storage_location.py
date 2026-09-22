@@ -11,6 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import BackupStorageLocation, Environment
 
+from ._queries import load_query
 from .conftest import gql
 from .seeds import seed_backup_storage_location, seed_environment
 
@@ -71,6 +72,46 @@ async def test_update_bsl_persists_field_changes(
     refreshed = await session.get(BackupStorageLocation, bsl_id)
     assert refreshed is not None
     assert getattr(refreshed, db_attr) == new_value
+
+
+@pytest.mark.asyncio
+async def test_update_bsl_rename_to_existing_name_is_rejected(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Renaming a BSL to a name another BSL already owns must fail with a
+    typed ``ALREADY_EXISTS`` error and leave the target row unchanged.
+
+    Regression: the update path skipped the name-uniqueness check the
+    create path performs, so the unique index failed at commit and the
+    client received ``INTERNAL_ERROR`` instead of ``ALREADY_EXISTS``.
+    """
+    taken = await seed_backup_storage_location(session, name="taken-name")
+    target = await seed_backup_storage_location(session, name="target-name")
+    target_id = target.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_backup_storage_location"),
+            "variables": {
+                "backupStorageLocationId": str(target_id),
+                "name": taken.name,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("errors"), f"expected a typed error, got: {payload}"
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "ALREADY_EXISTS", (
+        f"expected ALREADY_EXISTS, got {extensions!r}"
+    )
+
+    session.expire_all()
+    refreshed = await session.get(BackupStorageLocation, target_id)
+    assert refreshed is not None
+    assert refreshed.name == "target-name"
 
 
 @pytest.mark.asyncio
