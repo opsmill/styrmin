@@ -90,6 +90,13 @@ async def update_backup_storage_location(
 
         name_changed = name is not None and name != bsl.name
 
+        if name_changed:
+            existing = await uow.backup_storage_locations.get_by_name(name)
+            if existing is not None:
+                raise BackupStorageLocationAlreadyExistsError(
+                    f"A backup storage location with name '{name}' already exists."
+                )
+
         if name is not None:
             bsl.name = name
         if endpoint is not None:
