@@ -56,7 +56,7 @@ Releases are automated. The [release workflow](../../.github/workflows/release.y
 1. Deletes the individual newsfragment files.
 1. Commits both alongside the version bump in the `chore: release vX.Y.Z` commit.
 
-The same rendered section becomes the GitHub Release body, with GitHub's auto-generated commit notes appended below it. Scheduled releases that carry no fragments leave `CHANGELOG.md` untouched rather than adding an empty section.
+The same rendered section is the GitHub Release body — `gh release create` is deliberately called without `--generate-notes`, so the release notes are exactly what the fragments say rather than a commit dump. Scheduled releases that carry no fragments leave `CHANGELOG.md` untouched rather than adding an empty section.
 
 Unlike infrahub, `[tool.towncrier]` here sets no `package`: no importable module carries the released version, so `towncrier build` always needs an explicit `--version`. Both the workflow and `invoke release.draft` pass one.
 
