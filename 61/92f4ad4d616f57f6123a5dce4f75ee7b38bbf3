@@ -1,0 +1,20 @@
+backend/styrmin_backend/api/schema/mutation.py
+  h_cd48b1f80f2aa5 80,254,272,329,348
+backend/styrmin_backend/services/auth/ids.py
+  h_cd48b1f80f2aa5 1-39
+backend/tests/unit/services/auth/test_ids.py
+  h_cd48b1f80f2aa5 1-60
+changelog/351.fixed.md
+  h_cd48b1f80f2aa5 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6192f4ad4d616f57f6123a5dce4f75ee7b38bbf3",
+  "prompts": {},
+  "humans": {
+    "h_cd48b1f80f2aa5": {
+      "author": "Simon AURA--SCUSSEL <simon@opsmill.com>"
+    }
+  }
+}
