@@ -184,7 +184,6 @@ jobs:
         run: |
           gh release create "$TAG" \
             --notes-file "${RUNNER_TEMP}/release-notes.md" \
-            --generate-notes \
             --target develop
 
       - name: Create GitHub Release (dry run)
@@ -192,7 +191,7 @@ jobs:
         env:
           TAG: ${{ steps.tag-dry.outputs.tag }}
         run: |
-          echo "::notice::DRY RUN — would create GitHub Release for $TAG with auto-generated notes"
+          echo "::notice::DRY RUN — would create GitHub Release for $TAG from the changelog section"
 
   publish-docker:
     needs: create-release
