@@ -1,0 +1,50 @@
+dev/knowledge/architecture.md
+  s_a2176cfc9b041c::t_68ca2dc8a984af 35,47-48,74,227,268,289
+dev/knowledge/backend/orchestration-flows.md
+  s_a2176cfc9b041c::t_6ffb4755d8f076 34
+dev/knowledge/backend/hooks-and-actions.md
+  s_a2176cfc9b041c::t_c1e15a242e973b 247
+dev/knowledge/frontend/routing.md
+  s_a2176cfc9b041c::t_44f5053b047b8e 9
+dev/guidelines/frontend/ui-primitives.md
+  s_a2176cfc9b041c::t_ef5792b58a36a0 5
+dev/guidelines/frontend/data-fetching.md
+  s_a2176cfc9b041c::t_e601236acdacd6 5
+dev/README.md
+  s_a2176cfc9b041c::t_88deb221b47544 68
+  s_a2176cfc9b041c::t_77c805dc2e1716 50-62,64-67
+  s_a2176cfc9b041c::t_aad13fe9770282 63
+dev/knowledge/agent/overview.md
+  s_a2176cfc9b041c::t_e4aebbd88aa1d9 9,96
+  s_a2176cfc9b041c::t_347557eb5746d5 110
+dev/adr/0019-pre-commit-hooks-via-prek.md
+  s_a2176cfc9b041c::t_d75f9242a2d926 1
+dev/knowledge/backend/data-models.md
+  s_a2176cfc9b041c::t_f553c644ee6f45 263
+dev/guidelines/frontend/forms.md
+  s_a2176cfc9b041c::t_c6456788dd7376 5
+dev/knowledge/frontend/data-fetching.md
+  s_a2176cfc9b041c::t_d1d94428b7dcf3 9
+dev/knowledge/frontend/forms.md
+  s_a2176cfc9b041c::t_d0fa9e71b4ee2a 11
+dev/guidelines/frontend/routing.md
+  s_a2176cfc9b041c::t_dc38d03f1181bf 5
+dev/knowledge/frontend/ui-primitives.md
+  s_a2176cfc9b041c::t_19ae55a967f030 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "2a9edc4a46570e89dbbfbc3c6dd06b815327bc3a",
+  "prompts": {},
+  "sessions": {
+    "s_a2176cfc9b041c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f7c829fe-24b1-4834-a286-1e595e784668",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Benoit Kohler <bkohler@mbpbenoitkohler.tailc018d.ts.net>"
+    }
+  }
+}

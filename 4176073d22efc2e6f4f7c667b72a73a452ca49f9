@@ -1,0 +1,21 @@
+.github/dependabot.yml
+  s_6804202d5a20d7::t_080cec7b55f049 51
+.github/workflows/ci.yml
+  s_6804202d5a20d7::t_1931bfca875446 59-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "4176073d22efc2e6f4f7c667b72a73a452ca49f9",
+  "prompts": {},
+  "sessions": {
+    "s_6804202d5a20d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dbfa3949-cc7c-49af-9280-e6547f215d8f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Benoit Kohler <bkohler@mbpbenoitkohler.tailc018d.ts.net>"
+    }
+  }
+}
