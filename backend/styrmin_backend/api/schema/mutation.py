@@ -85,6 +85,7 @@ from styrmin_backend.services.auth.groups import (
     delete_group as delete_group_service,
     update_group as update_group_service,
 )
+from styrmin_backend.services.auth.ids import parse_uuid_list
 from styrmin_backend.services.auth.users import (
     CreateUserData,
     UpdateUserData,
@@ -267,11 +268,7 @@ class Mutation:
             password=input.password,
             display_name=input.display_name,
             role=Role[input.role.value],
-            group_ids=(
-                [UUID(str(gid)) for gid in input.group_ids]
-                if input.group_ids is not None
-                else None
-            ),
+            group_ids=parse_uuid_list(input.group_ids, field="groupIds"),
         )
         user = await create_user_service(uow, input=data, actor_user_id=current_user.id)
         return UserType.from_instance(user)
@@ -289,11 +286,7 @@ class Mutation:
             display_name=input.display_name,
             role=Role[input.role.value] if input.role is not None else None,
             active=input.active,
-            group_ids=(
-                [UUID(str(gid)) for gid in input.group_ids]
-                if input.group_ids is not None
-                else None
-            ),
+            group_ids=parse_uuid_list(input.group_ids, field="groupIds"),
         )
         user = await update_user_service(
             uow,
@@ -350,11 +343,7 @@ class Mutation:
         data = CreateGroupData(
             name=input.name,
             role=Role[input.role.value],
-            member_ids=(
-                [UUID(str(mid)) for mid in input.member_ids]
-                if input.member_ids is not None
-                else None
-            ),
+            member_ids=parse_uuid_list(input.member_ids, field="memberIds"),
         )
         group = await create_group_service(
             uow, input=data, actor_user_id=current_user.id
@@ -373,11 +362,7 @@ class Mutation:
         data = UpdateGroupData(
             name=input.name,
             role=Role[input.role.value] if input.role is not None else None,
-            member_ids=(
-                [UUID(str(mid)) for mid in input.member_ids]
-                if input.member_ids is not None
-                else None
-            ),
+            member_ids=parse_uuid_list(input.member_ids, field="memberIds"),
         )
         group = await update_group_service(
             uow,
