@@ -13,6 +13,8 @@ declarative-manifest UI lands (US-future).
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -25,10 +27,9 @@ from styrmin_sdk.models.deployment_manifest import ResolvedManifest
 
 from tests.e2e.drivers import ScenarioDriver
 
-# Apply is a short create/update mutation flow — same shard as the
-# canonical deploy/upgrade lifecycle tests (see
-# `dev/guides/e2e-deployment-sharing.md` decision tree).
-pytestmark = [pytest.mark.ci, pytest.mark.shard_general]
+# Own shard: every test here is api_only and deploys fresh simple-apps, which
+# made it the bulk of `general` (see `dev/guides/e2e-parallelism.md`).
+pytestmark = [pytest.mark.ci, pytest.mark.shard_apply]
 
 
 async def _create_apply_env(
@@ -96,185 +97,6 @@ async def apply_environment_id_secondary(
         await _drop_apply_env(client, env_id)
 
 
-@pytest.mark.api_only(
-    reason="apply has no UI flow; api/sdk and ui variants would re-run identical SDK calls",
-)
-async def test_apply_creates_then_updates_deployment(
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-    apply_environment_id: str,
-    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver loaded
-    simple_app_image: str,  # noqa: ARG001 — ensures the image is built
-    tmp_path: Path,
-) -> None:
-    """Apply twice: first call creates, second call updates with a new config.
-
-    The first ``apply`` resolves a manifest with empty config → ``action="created"``
-    and the deployment reaches ``RUNNING``. The second ``apply`` re-authors the
-    same manifest with a flipped ``ip_whitelist`` → ``action="updated"``,
-    same ``deployment_id``, and the cluster-side deployment's config reflects
-    the new value (full replacement, not merge).
-    """
-    driver, client = session_scenario_driver
-
-    # Resolve the environment name so the manifest can target it the way a real
-    # user would (manifest references env by name, not internal UUID).
-    environment = await client.environments.get(environment_id=apply_environment_id)
-    env_name = environment.name
-
-    # Unique deployment name keeps the test independent of any other deployment
-    # already running in the shared session env (e.g. ``deployed_simple_app``).
-    deployment_name = f"apply-e2e-{tmp_path.name[-8:]}"
-
-    # --- Step 1: write a manifest file and apply it via the SDK ----------
-    manifest_path = tmp_path / "deployment.yaml"
-    manifest_doc = {
-        "apiVersion": "styrmin/v1",
-        "kind": "Deployment",
-        "metadata": {"name": deployment_name},
-        "spec": {
-            "driver": "simple-app",
-            "version": "0.1.0",
-            "environment": env_name,
-            "config": {},
-            "parameters": {},
-        },
-    }
-    manifest_path.write_text(yaml.safe_dump(manifest_doc))
-
-    # ``apply_files`` lands in US2; for US1 we round-trip through the file (so
-    # the test still exercises the user-visible "edit a YAML, apply it" loop)
-    # and feed the parsed result into ``apply()`` directly.
-    parsed = yaml.safe_load(manifest_path.read_text())
-    resolved = ResolvedManifest(
-        name=parsed["metadata"]["name"],
-        driver=parsed["spec"]["driver"],
-        version=parsed["spec"]["version"],
-        environment=parsed["spec"]["environment"],
-        config=parsed["spec"].get("config", {}),
-        parameters=parsed["spec"].get("parameters", {}),
-        source_path=manifest_path,
-    )
-
-    create_outcome = await client.deployments.apply(resolved)
-
-    assert create_outcome.action == "created", (
-        f"first apply should create the deployment, got action={create_outcome.action!r} "
-        f"(reason={create_outcome.failure_reason!r})"
-    )
-    assert create_outcome.deployment_id is not None
-    deployment_id = str(create_outcome.deployment_id)
-
-    # Wait for reconciliation. ``--wait`` is US4 (T040+); for US1 we lean on
-    # the existing scenario-driver helper, which polls ``deployment.status``.
-    await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
-
-    # --- Step 2: re-author the manifest with a changed config and re-apply
-    new_config = {"ip_whitelist": ["10.0.0.0/8"]}
-    manifest_doc["spec"]["config"] = new_config
-    manifest_path.write_text(yaml.safe_dump(manifest_doc))
-    parsed = yaml.safe_load(manifest_path.read_text())
-    resolved_v2 = ResolvedManifest(
-        name=parsed["metadata"]["name"],
-        driver=parsed["spec"]["driver"],
-        version=parsed["spec"]["version"],
-        environment=parsed["spec"]["environment"],
-        config=parsed["spec"].get("config", {}),
-        parameters=parsed["spec"].get("parameters", {}),
-        source_path=manifest_path,
-    )
-
-    update_outcome = await client.deployments.apply(resolved_v2)
-
-    assert update_outcome.action == "updated", (
-        f"second apply should update the existing deployment, got "
-        f"action={update_outcome.action!r} (reason={update_outcome.failure_reason!r})"
-    )
-    assert update_outcome.deployment_id is not None
-    assert str(update_outcome.deployment_id) == deployment_id, (
-        "update should target the same deployment_id, not create a new one"
-    )
-
-    # Wait for the update reconciliation to settle before reading config back
-    # (the operator may briefly flip status while applying the new config).
-    await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
-
-    # Read back via SDK and verify the config is the *new* dict (full
-    # replacement, per ``contracts/sdk-apply.md``: config/parameters are not
-    # merged — the manifest is the source of truth).
-    refreshed = await client.deployments.get_by_name(
-        deployment_name, environment_id=apply_environment_id
-    )
-    assert refreshed is not None, (
-        f"deployment {deployment_name!r} should exist after apply-update"
-    )
-    assert refreshed.config == new_config, (
-        f"deployment config was not replaced by the second apply; "
-        f"expected {new_config!r}, got {refreshed.config!r}"
-    )
-
-
-@pytest.mark.api_only(
-    reason="apply has no UI flow; api/sdk and ui variants would re-run identical SDK calls",
-)
-async def test_apply_create_with_env_vars_list(
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-    apply_environment_id: str,
-    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver loaded
-    simple_app_image: str,  # noqa: ARG001 — ensures the image is built
-    tmp_path: Path,
-) -> None:
-    """Regression for the reported create-path env-var bug: a manifest whose
-    ``config.env_vars`` is a ``[{name, value}]`` list must be accepted by the
-    create branch of ``apply`` (it previously failed validation because the
-    ``deploy`` mutation took a freeform ``JSON`` config validated as a
-    ``dict[str, str]`` map).
-
-    The create now shares ``DeploymentConfigInput`` with update, so the list
-    shape is accepted, flattened to ``{name: value}``, and persisted on the
-    cluster-side deployment config.
-    """
-    driver, client = session_scenario_driver
-
-    environment = await client.environments.get(environment_id=apply_environment_id)
-    env_name = environment.name
-    deployment_name = f"apply-env-{tmp_path.name[-8:]}"
-
-    manifest_doc = {
-        "apiVersion": "styrmin/v1",
-        "kind": "Deployment",
-        "metadata": {"name": deployment_name},
-        "spec": {
-            "driver": "simple-app",
-            "version": "0.1.0",
-            "environment": env_name,
-            "config": {"env_vars": [{"name": "MY_ENV", "value": "value01"}]},
-            "parameters": {},
-        },
-    }
-    resolved = _resolve_manifest_from_doc(manifest_doc, tmp_path / "deployment.yaml")
-
-    create_outcome = await client.deployments.apply(resolved)
-
-    assert create_outcome.action == "created", (
-        f"create with env_vars list should succeed, got action={create_outcome.action!r} "
-        f"(reason={create_outcome.failure_reason!r})"
-    )
-    assert create_outcome.deployment_id is not None
-    deployment_id = str(create_outcome.deployment_id)
-
-    await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
-
-    refreshed = await client.deployments.get_by_name(
-        deployment_name, environment_id=apply_environment_id
-    )
-    assert refreshed is not None
-    # The list-shaped env_vars was flattened to the canonical {name: value}
-    # dict and persisted — the same shape updateDeployment produces.
-    assert refreshed.config == {"env_vars": {"MY_ENV": "value01"}}, (
-        f"env_vars list did not flatten/persist on create; got {refreshed.config!r}"
-    )
-
-
 def _resolve_manifest_from_doc(doc: dict, path: Path) -> ResolvedManifest:
     """Round-trip a manifest doc through YAML and into a ``ResolvedManifest``.
 
@@ -295,30 +117,54 @@ def _resolve_manifest_from_doc(doc: dict, path: Path) -> ResolvedManifest:
     )
 
 
+async def _wait_for_task_success(
+    client: StyrminClient, deployment_id: str, task_id: str, timeout: float
+) -> None:
+    """Poll the timeline until ``task_id`` succeeds.
+
+    ``Deployment.status`` is still ``running`` from before an update, so it
+    cannot tell whether the update's reconcile has finished.
+    """
+    deadline = time.time() + timeout
+    status = None
+    while time.time() < deadline:
+        timeline = await client.deployments.get_timeline(deployment_id)
+        status = next(
+            (e.task.status for e in timeline if str(e.task.id) == task_id), None
+        )
+        if status == "success":
+            return
+        assert status != "failed", f"task {task_id} failed"
+        await asyncio.sleep(1)
+    raise AssertionError(f"task {task_id} did not succeed in {timeout}s: {status!r}")
+
+
 @pytest.mark.api_only(
     reason="apply has no UI flow; api/sdk and ui variants would re-run identical SDK calls",
 )
-async def test_apply_unchanged_manifest_is_noop(
+async def test_apply_creates_updates_then_noops(
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
     apply_environment_id: str,
     styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver loaded
     simple_app_image: str,  # noqa: ARG001 — ensures the image is built
     tmp_path: Path,
 ) -> None:
-    """Re-applying an identical manifest is a clean server-side no-op (SC-001/002).
+    """One deployment through the apply lifecycle: create, update, no-op.
 
-    Apply a manifest, wait for RUNNING, snapshot the deployment's task count
-    (one timeline entry per reconcile ``Task``), active-instance pointer, and
-    status. Re-apply the byte-identical manifest and assert the outcome is
-    ``unchanged`` with no new task, the active-instance pointer untouched, and
-    the status untouched — i.e. zero realised-state churn.
+    - Create from a manifest whose ``config.env_vars`` is a ``[{name, value}]``
+      list: ``created``, persisted flattened to ``{name: value}`` (the create
+      path used to reject the list shape).
+    - Re-apply with a different config: ``updated`` on the same deployment,
+      and the config is replaced, not merged (US1, ``contracts/sdk-apply.md``).
+    - Re-apply the byte-identical manifest: ``unchanged``, no new task, and
+      the active instance and status untouched (SC-001/002).
     """
     driver, client = session_scenario_driver
 
+    # Target the environment by name, the way a user's manifest would.
     environment = await client.environments.get(environment_id=apply_environment_id)
-    env_name = environment.name
-
-    deployment_name = f"apply-noop-e2e-{tmp_path.name[-8:]}"
+    deployment_name = f"apply-e2e-{tmp_path.name[-8:]}"
+    manifest_path = tmp_path / "deployment.yaml"
     manifest_doc = {
         "apiVersion": "styrmin/v1",
         "kind": "Deployment",
@@ -326,37 +172,70 @@ async def test_apply_unchanged_manifest_is_noop(
         "spec": {
             "driver": "simple-app",
             "version": "0.1.0",
-            "environment": env_name,
-            "config": {"ip_whitelist": ["10.0.0.0/8"]},
+            "environment": environment.name,
+            "config": {"env_vars": [{"name": "MY_ENV", "value": "value01"}]},
             "parameters": {},
         },
     }
-    manifest_path = tmp_path / "deployment.yaml"
-    resolved = _resolve_manifest_from_doc(manifest_doc, manifest_path)
 
-    create_outcome = await client.deployments.apply(resolved)
+    # --- Create ------------------------------------------------------------
+    create_outcome = await client.deployments.apply(
+        _resolve_manifest_from_doc(manifest_doc, manifest_path)
+    )
     assert create_outcome.action == "created", (
         f"first apply should create the deployment, got action="
         f"{create_outcome.action!r} (reason={create_outcome.failure_reason!r})"
     )
     assert create_outcome.deployment_id is not None
     deployment_id = str(create_outcome.deployment_id)
-
     await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
 
-    # --- Snapshot realised state BEFORE the no-op re-apply -----------------
+    created = await client.deployments.get_by_name(
+        deployment_name, environment_id=apply_environment_id
+    )
+    assert created is not None
+    assert created.config == {"env_vars": {"MY_ENV": "value01"}}, (
+        f"env_vars list did not flatten/persist on create; got {created.config!r}"
+    )
+
+    # --- Update: the new config replaces the old one -----------------------
+    new_config = {"ip_whitelist": ["10.0.0.0/8"]}
+    manifest_doc["spec"]["config"] = new_config
+    update_outcome = await client.deployments.apply(
+        _resolve_manifest_from_doc(manifest_doc, manifest_path)
+    )
+    assert update_outcome.action == "updated", (
+        f"second apply should update the existing deployment, got action="
+        f"{update_outcome.action!r} (reason={update_outcome.failure_reason!r})"
+    )
+    assert str(update_outcome.deployment_id) == deployment_id, (
+        "update should target the same deployment_id, not create a new one"
+    )
+    assert update_outcome.task_id is not None, "a real change must dispatch a task"
+    await _wait_for_task_success(
+        client, deployment_id, str(update_outcome.task_id), timeout=300.0
+    )
+    await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
+
+    refreshed = await client.deployments.get_by_name(
+        deployment_name, environment_id=apply_environment_id
+    )
+    assert refreshed is not None
+    assert refreshed.config == new_config, (
+        f"deployment config was not replaced by the second apply; "
+        f"expected {new_config!r}, got {refreshed.config!r}"
+    )
+
+    # --- No-op: the byte-identical manifest changes nothing ----------------
     before = await client.deployments.get(deployment_id)
     before_task_count = len(await client.deployments.get_timeline(deployment_id))
     assert before.application_instance is not None, (
-        "a created+running deployment must have an active instance to compare against"
+        "a running deployment must have an active instance to compare against"
     )
-    before_active_instance_id = str(before.application_instance.id)
-    before_status = before.status
 
-    # --- Re-apply the BYTE-IDENTICAL manifest ------------------------------
-    resolved_again = _resolve_manifest_from_doc(manifest_doc, manifest_path)
-    noop_outcome = await client.deployments.apply(resolved_again)
-
+    noop_outcome = await client.deployments.apply(
+        _resolve_manifest_from_doc(manifest_doc, manifest_path)
+    )
     assert noop_outcome.action == "unchanged", (
         f"re-applying an identical manifest must be a no-op, got action="
         f"{noop_outcome.action!r} (reason={noop_outcome.failure_reason!r})"
@@ -366,23 +245,19 @@ async def test_apply_unchanged_manifest_is_noop(
         f"{noop_outcome.task_id!r}"
     )
 
-    # --- Snapshot AFTER and assert zero churn ------------------------------
     after = await client.deployments.get(deployment_id)
     after_task_count = len(await client.deployments.get_timeline(deployment_id))
     assert after.application_instance is not None
-    after_active_instance_id = str(after.application_instance.id)
-
     assert after_task_count == before_task_count, (
         f"no-op re-apply must not create a reconcile task; task count went "
         f"{before_task_count} -> {after_task_count}"
     )
-    assert after_active_instance_id == before_active_instance_id, (
-        f"no-op re-apply must not move the active-instance pointer; "
-        f"{before_active_instance_id} -> {after_active_instance_id}"
+    assert str(after.application_instance.id) == str(before.application_instance.id), (
+        "no-op re-apply must not move the active-instance pointer"
     )
-    assert after.status == before_status, (
+    assert after.status == before.status, (
         f"no-op re-apply must not change deployment status; "
-        f"{before_status!r} -> {after.status!r}"
+        f"{before.status!r} -> {after.status!r}"
     )
 
 

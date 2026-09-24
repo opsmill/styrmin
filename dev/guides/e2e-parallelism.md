@@ -16,6 +16,7 @@ The seven shards:
 | `backup` | `shard_backup` | Velero + Garage; cluster-wide state (kept isolated to avoid cross-test pollution) | `test_backup_restore`, `test_backup_restore_databases` |
 | `infrahub` | `shard_infrahub` | Infrahub-stack backup/restore (boots full Infrahub server + DB; isolated from `shard_backup` so simple-app backup tests aren't blocked by Infrahub boot) | `test_infrahub_backup_restore` |
 | `configuration` | `shard_configuration` | `backend/tests/e2e/configuration/` — unified config-drawer UI flows | `test_drawer_env_vars_edit`, `test_drawer_scheduling_edit` |
+| `apply` | `shard_apply` | `test_deployments_apply.py` — manifest `apply` / `apply_files` flows (all `api_only`, each test deploys fresh simple-apps; split out of `general`, where it was the bulk of the run) | `test_apply_creates_updates_then_noops`, `test_apply_files_batch_continues_past_failure` |
 
 The two entrypoints (`api`, `ui`) continue as before — each shard runs
 twice unless every test in it carries `@pytest.mark.api_only` or
@@ -35,7 +36,8 @@ the marker rules.
        pytest.mark.shard_general,           # one of shard_general,
                                              # shard_env, shard_compute,
                                              # shard_backup, shard_infrahub,
-                                             # shard_configuration
+                                             # shard_configuration,
+                                             # shard_apply
    ]
    ```
 

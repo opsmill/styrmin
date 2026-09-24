@@ -68,6 +68,7 @@ _VALID_SHARDS = frozenset(
         "shard_backup",
         "shard_infrahub",
         "shard_configuration",
+        "shard_apply",
     }
 )
 

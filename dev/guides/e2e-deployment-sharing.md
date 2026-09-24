@@ -28,7 +28,8 @@ must not depend on another's state.
 
 - **Shard:** `general` for most short mutation tests, `env` for
   env-var / env-update tests, `compute` for pod-scheduling or
-  ingress-controller tests.
+  ingress-controller tests, `apply` for manifest `apply` /
+  `apply_files` tests.
 - **Examples:** `test_deploy_app`, `test_delete_deployment_*`,
   `test_environment_update`.
 - **Review rule:** Reuse `deployed_simple_app` if your test only reads —
@@ -97,9 +98,10 @@ Net new heavy boots: zero.
 1. Does it touch the Infrahub stack (full Infrahub server + DB)? → Yes: `infrahub` (isolated).
 2. Does it touch Velero or Garage? → Yes: `backup` (isolated).
 3. Is it a config-drawer UI flow? → Yes: `configuration`.
-4. Is it about env vars or environment updates? → Yes: `env`.
-5. Is it about pod scheduling or the ingress controller? → Yes: `compute`.
-6. Otherwise → `general`.
+4. Is it a manifest `apply` / `apply_files` flow? → Yes: `apply`.
+5. Is it about env vars or environment updates? → Yes: `env`.
+6. Is it about pod scheduling or the ingress controller? → Yes: `compute`.
+7. Otherwise → `general`.
 
 A `configuration` module does not create its own deployment. Declare it
 at module level — `DRAWER_DEPLOYMENT = DrawerDeployment(name="drawer-…")`,
@@ -114,9 +116,10 @@ Seed the baseline through `config` rather than a follow-up
 
 Every `@pytest.mark.ci` E2E test MUST carry exactly one bare-name
 shard marker (`shard_general`, `shard_env`, `shard_compute`,
-`shard_backup`, `shard_infrahub`, or `shard_configuration`). The
-conftest collection hook (`enforce_shard_markers`) rejects the suite
-if any test is missing the marker or carries more than one.
+`shard_backup`, `shard_infrahub`, `shard_configuration`, or
+`shard_apply`). The conftest collection hook (`enforce_shard_markers`)
+rejects the suite if any test is missing the marker or carries more
+than one.
 
 Apply at module scope when all tests in the file share the same
 shard:
@@ -125,6 +128,6 @@ shard:
 pytestmark = [
     pytest.mark.ci,
     pytest.mark.api_only(reason="..."),  # if applicable
-    pytest.mark.shard_readonly,
+    pytest.mark.shard_general,
 ]
 ```

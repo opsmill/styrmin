@@ -21,6 +21,10 @@ What it covers:
   FR-012).
 * The deletion event appears on the deployment timeline (US11,
   FR-011).
+* A new deployment can reclaim the tombstoned deployment's service name
+  in the same environment (regression: tombstones' ``DeployedService``
+  rows used to hold the name, failing the redeploy with
+  ``ServiceNameConflictError``).
 
 Out of scope for this test:
 
@@ -125,7 +129,7 @@ async def test_delete_deployment_api(
     simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ) -> None:
-    """End-to-end deletion: deploy → backup → delete → tombstone."""
+    """End-to-end deletion: deploy → backup → delete → tombstone → redeploy."""
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
@@ -232,3 +236,17 @@ async def test_delete_deployment_api(
         "Timeline must contain at least one DELETE_DEPLOYMENT entry; "
         f"observed types: {[e.task.type_ for e in timeline]}"
     )
+
+    # 10. The freed service name can be claimed again in the same env.
+    redeployed = await scenario_driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": override}
+        ],
+    )
+    redeployed = await scenario_driver.wait_for_deployment_running(
+        deployment_id=redeployed.id, timeout=300.0
+    )
+    assert redeployed.id != deployment_id, "Redeploy must create a distinct deployment"
