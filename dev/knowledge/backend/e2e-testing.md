@@ -191,10 +191,14 @@ values file therefore also sets `PREFECT_WORKER_QUERY_SECONDS: "1"` in
 Rolling updates that re-render the simple-app **PostgreSQL** pod
 (scheduling, env-var and toleration edits) used to stall for exactly
 31s: SIGTERM is a Postgres "smart" shutdown, which waits for the app's
-open connections until the default 30s grace period kills the pod. The
-simple-app driver (`driver/examples/simple-app/values.j2.yml`) caps
-`postgresql.primary.terminationGracePeriodSeconds` at 5s, which brings
-each restart down to ~6s. With the polling fixes, `configuration` / `ui`
+open connections (simple-app never closes its pool) until the default
+30s grace period kills the pod. The simple-app driver
+(`driver/examples/simple-app/values.j2.yml`) now runs
+`pg_ctl stop -m fast --no-wait` in a `preStop` hook, which disconnects
+clients and checkpoints, so each restart is a clean ~1-2s shutdown.
+`--no-wait` matters: Postgres is PID 1, so a waiting `pg_ctl` is killed
+with the container and the hook would fail. The grace period (10s) is
+only a backstop. With the polling fixes, `configuration` / `ui`
 runs in **489s (−25% from 648s)** and `general` / `api` in **711s
 (−27% from 969s)**.
 
