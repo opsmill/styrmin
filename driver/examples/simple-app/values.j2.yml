@@ -53,6 +53,9 @@ postgresql:
       periodSeconds: 1
       timeoutSeconds: 1
       failureThreshold: 60
+    # SIGTERM is a Postgres "smart" shutdown, which waits for the app's open
+    # connections; during a rolling update that always ran into the 30s default.
+    terminationGracePeriodSeconds: 5
     persistence:
       enabled: true
       size: 1Gi

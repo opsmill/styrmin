@@ -101,6 +101,15 @@ Net new heavy boots: zero.
 5. Is it about pod scheduling or the ingress controller? → Yes: `compute`.
 6. Otherwise → `general`.
 
+A `configuration` module does not create its own deployment. Declare it
+at module level — `DRAWER_DEPLOYMENT = DrawerDeployment(name="drawer-…")`,
+with `config=DeploymentConfigInput(...)` for a non-default baseline — and
+take the `drawer_deployment` fixture. `configuration/conftest.py` creates
+every selected, non-skipped module's environment + deployment
+concurrently through the SDK, so a new module adds almost no wall-clock.
+Seed the baseline through `config` rather than a follow-up
+`deployments.update`: each update is another reconcile.
+
 ## Adding a new test
 
 Every `@pytest.mark.ci` E2E test MUST carry exactly one bare-name

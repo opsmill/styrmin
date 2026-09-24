@@ -24,21 +24,19 @@ GraphQL payload that the UI is asserted on here.
 
 from __future__ import annotations
 
-import uuid
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING
 
 import pytest
 from playwright.async_api import expect
-from styrmin_sdk import StyrminClient
 from styrmin_sdk.graphql._generated.input_types import (
+    DeploymentConfigInput,
     EnvVarInput,
     ResourceRequirementsInput,
     ResourceSpecInput,
     SchedulingInput,
-    UpdateDeploymentInput,
 )
 
-from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.configuration.conftest import DrawerDeployment
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 
 if TYPE_CHECKING:
@@ -46,99 +44,23 @@ if TYPE_CHECKING:
 
 pytestmark = [pytest.mark.shard_configuration]
 
-RECONCILE_TIMEOUT_SECONDS = 480.0
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-async def config_tab_environment(
-    styrmin_resources: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-) -> AsyncGenerator[dict, None]:
-    """Dedicated environment for the Configuration-tab read scenario.
-
-    Empty config so the inherited-vs-overridden assertions key off the
-    deployment-side overrides we seed below (the bootstrap
-    ``test-environment`` would muddy the baseline by carrying
-    cluster-side inherited values).
-    """
-    driver, client = session_scenario_driver
-    cluster_id = styrmin_resources["cluster_id"]
-    env = await driver.create_environment(
-        name=f"cfg-tab-read-{uuid.uuid4().hex[:8]}",
-        cluster_id=cluster_id,
-        config={},
-    )
-    yield {
-        "environment_id": str(env.id),
-        "client": client,
-    }
-
-
-@pytest.fixture(scope="module")
-async def config_tab_deployment(
-    config_tab_environment: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-    simple_app_image: str,  # noqa: ARG001 — builds the image
-) -> dict:
-    """Provision a simple-app deployment, then seed mixed overrides
-    spanning Scheduling, Env Vars, and Storage.
-
-    Networking is left untouched so the corresponding card is rendered
-    with the ``inherited`` badge — that's the negative half of the
-    inheritance assertion the test relies on.
-    """
-    driver, client = session_scenario_driver
-    deployment = await driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=config_tab_environment["environment_id"],
-        name="cfg-tab-read",
-    )
-    deployment = await driver.wait_for_deployment_running(
-        deployment_id=deployment.id, timeout=RECONCILE_TIMEOUT_SECONDS
-    )
-
-    # Seed a mixed-shape config that overrides three sections in one
-    # mutation. The exact values are not load-bearing — only the fact
-    # that each section is overridden (so its card shows the blue
-    # "overridden (N)" badge).
-    #
-    # Seeding goes through the SDK directly (not ``driver.update_deployment``)
-    # because:
-    #   - The fixture is preparing state, not exercising the UI write path
-    #     (the UI write path has its own dedicated drawer-edit tests).
-    #   - The UI scenario driver's ``update_deployment`` is restricted to
-    #     the scheduling sub-tree today; the SDK route lets us seed
-    #     scheduling + env vars + storage atomically without coupling this
-    #     read-tab assertion to drawer evolution.
-    await client.deployments.update(
-        str(deployment.id),
-        input=UpdateDeploymentInput(
-            scheduling=SchedulingInput(
-                resources=ResourceRequirementsInput(
-                    requests=ResourceSpecInput(cpu="150m", memory="128Mi"),
-                ),
+DRAWER_DEPLOYMENT = DrawerDeployment(
+    name="cfg-tab-read",
+    # Overrides across Scheduling, Env Vars and Storage; Networking stays
+    # untouched so its card renders as inherited.
+    config=DeploymentConfigInput(
+        scheduling=SchedulingInput(
+            resources=ResourceRequirementsInput(
+                requests=ResourceSpecInput(cpu="150m", memory="128Mi"),
             ),
-            envVars=[
-                EnvVarInput(name="LOG_LEVEL", value="debug"),
-                EnvVarInput(name="FEATURE_FLAG", value="on"),
-            ],
-            dbSize="5Gi",
         ),
-    )
-    await driver.wait_for_deployment_running(
-        deployment_id=str(deployment.id), timeout=RECONCILE_TIMEOUT_SECONDS
-    )
-
-    return {
-        "deployment_id": str(deployment.id),
-        "namespace": f"styrmin-{deployment.id}",
-    }
+        envVars=[
+            EnvVarInput(name="LOG_LEVEL", value="debug"),
+            EnvVarInput(name="FEATURE_FLAG", value="on"),
+        ],
+        dbSize="5Gi",
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -157,13 +79,12 @@ async def config_tab_deployment(
     ),
 )
 async def test_configuration_tab_renders_inheritance_and_overrides(
-    config_tab_environment: dict,
-    config_tab_deployment: dict,
+    drawer_deployment: dict,
     session_ui_page: "Page",
 ) -> None:
     page = session_ui_page
-    environment_id = config_tab_environment["environment_id"]
-    deployment_id = config_tab_deployment["deployment_id"]
+    environment_id = drawer_deployment["environment_id"]
+    deployment_id = drawer_deployment["deployment_id"]
 
     detail_page = DeploymentDetailPage(page)
     await detail_page.goto(environment_id=environment_id, deployment_id=deployment_id)
