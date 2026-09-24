@@ -13,6 +13,8 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 
+from styrmin_sdk import StyrminClient
+
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 
@@ -21,46 +23,48 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(scope="module")
+async def discovery_deployments(
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    scenario_environment_id: str,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+) -> dict[str, str]:
+    """Running ``intent`` and ``executor`` simple-apps, shared by both tests.
+
+    Created through the session driver, so the UI variant still drives the
+    deploy form; the api-only rename test reuses ``executor``.
+    """
+    driver, _ = session_scenario_driver
+    ids: dict[str, str] = {}
+    for name in ("intent", "executor"):
+        deployment = await driver.create_deployment(
+            driver="simple-app",
+            version="0.1.0",
+            environment_id=scenario_environment_id,
+            service_name_overrides=[
+                {"driverServiceName": "simple-app", "overrideName": name}
+            ],
+        )
+        ids[name] = deployment.id
+    for deployment_id in ids.values():
+        await driver.wait_for_deployment_running(
+            deployment_id=deployment_id, timeout=300.0
+        )
+    return ids
+
+
 @pytest.mark.ci
 async def test_service_discovery_between_apps(
-    scenario_driver: ScenarioDriver,
-    scenario_environment_id: str,
-    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver
-    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    discovery_deployments: dict[str, str],
     vcluster: dict,
 ) -> None:
-    """Deploy two simple-app instances and verify they can discover each other via DNS."""
+    """Two simple-app instances can discover each other via DNS."""
     kubeconfig_path = vcluster["kubeconfig_path"]
-
-    intent = await scenario_driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-        service_name_overrides=[
-            {"driverServiceName": "simple-app", "overrideName": "intent"}
-        ],
-    )
-    executor = await scenario_driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-        service_name_overrides=[
-            {"driverServiceName": "simple-app", "overrideName": "executor"}
-        ],
-    )
-
-    # Wait for both deployments to be running
-    await scenario_driver.wait_for_deployment_running(
-        deployment_id=intent.id, timeout=300.0
-    )
-    await scenario_driver.wait_for_deployment_running(
-        deployment_id=executor.id, timeout=300.0
-    )
 
     # Find the executor service via kr8s.
     # The service-discovery utility creates the service asynchronously after
     # the deployment reaches "running", so we need to poll until it appears.
-    executor_namespace = f"styrmin-{executor.id}"
+    executor_namespace = f"styrmin-{discovery_deployments['executor']}"
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     executor_svc = None
     svc_deadline = time.time() + 120
@@ -124,36 +128,22 @@ async def test_service_discovery_between_apps(
 @pytest.mark.ci
 async def test_service_rename_creates_new_kubernetes_service(
     scenario_driver: ScenarioDriver,
-    scenario_environment_id: str,
-    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver
-    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    discovery_deployments: dict[str, str],
     vcluster: dict,
 ) -> None:
     """#237: renaming a deployed service must create the new Service object."""
     kubeconfig_path = vcluster["kubeconfig_path"]
-
-    dep = await scenario_driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scenario_environment_id,
-        service_name_overrides=[
-            {"driverServiceName": "simple-app", "overrideName": "before-rename"}
-        ],
-    )
-    await scenario_driver.wait_for_deployment_running(
-        deployment_id=dep.id, timeout=300.0
-    )
-
-    namespace = f"styrmin-{dep.id}"
+    deployment_id = discovery_deployments["executor"]
+    namespace = f"styrmin-{deployment_id}"
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
 
-    # Pre-rename: Service "before-rename" exists.
-    before = await _find_service(kr8s_api, namespace, "before-rename")
+    # Pre-rename: Service "executor" exists.
+    before = await _find_service(kr8s_api, namespace, "executor")
     assert before is not None, "Pre-rename Service should exist"
 
     # Trigger the rename via the same path that #237 broke.
     await scenario_driver.update_deployment(
-        deployment_id=dep.id,
+        deployment_id=deployment_id,
         config={
             "service_name_overrides": [
                 {"driverServiceName": "simple-app", "overrideName": "after-rename"}
@@ -161,7 +151,7 @@ async def test_service_rename_creates_new_kubernetes_service(
         },
     )
     await scenario_driver.wait_for_deployment_running(
-        deployment_id=dep.id, timeout=300.0
+        deployment_id=deployment_id, timeout=300.0
     )
 
     # Post-rename: Service "after-rename" exists. Without the #237 fix this

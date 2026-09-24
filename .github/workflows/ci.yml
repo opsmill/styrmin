@@ -231,7 +231,7 @@ jobs:
       fail-fast: false
       matrix:
         entrypoint: [api, ui]
-        shard: [general, env, compute, backup, infrahub, configuration]
+        shard: [general, env, compute, backup, infrahub, configuration, apply]
         exclude:
           # Shards whose every test carries @pytest.mark.api_only — the UI
           # cell would collect 0 tests and exit with code 5, failing the
@@ -239,6 +239,7 @@ jobs:
           # dual-entrypoint test is ever added.
           - {entrypoint: ui, shard: backup}
           - {entrypoint: ui, shard: infrahub}
+          - {entrypoint: ui, shard: apply}
           # configuration/ is entirely ui_only — drawer flows have no SDK equivalent
           - {entrypoint: api, shard: configuration}
     steps:

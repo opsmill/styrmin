@@ -9,7 +9,8 @@
 Deleting a deployment and then recreating one that resolves to the same
 service name failed with `ServiceNameConflictError` ("Service name '…' already
 exists in environment"). An E2E reproduction
-(`backend/tests/e2e/test_redeploy_after_delete_api.py`) confirmed the flow:
+(`backend/tests/e2e/test_redeploy_after_delete_api.py`, since folded into
+`test_delete_deployment_api.py`) confirmed the flow:
 deploy → delete (to terminal `DELETED`) → recreate with the same service name
 raises `ALREADY_EXISTS`.
 
@@ -65,7 +66,7 @@ This diverges from the ADR-011 convention deliberately, because
 
 - **Fixed**: redeploying with a previously-used service name succeeds once the
   prior deployment reaches `DELETED`. Covered by
-  `test_redeploy_after_delete_api.py` (E2E) and
+  `test_delete_deployment_api.py` (E2E, step 10) and
   `test_deployment_status_service.py::test_deleted_cleans_up_deployed_services`
   / `::test_deleting_does_not_clean_up_deployed_services` (unit).
 - **Fixed**: a deleted deployment's services no longer leak into other

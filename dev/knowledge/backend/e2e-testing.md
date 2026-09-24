@@ -210,6 +210,15 @@ seeded at create time instead of by a follow-up update. That took the
 shard from **489s to 217s**: the seven deployments cost one deploy of
 wall-clock between them.
 
+`general` / `api` was then dominated by the manifest-apply tests: six
+`api_only` tests, each deploying fresh simple-apps, were 343s of its 922s
+in CI. They now run as their own `apply` shard, with the create / update
+/ no-op scenarios folded into one lifecycle test. The
+delete-then-redeploy regression and the service-rename test also reuse
+deployments their siblings already pay for. Locally, `general` / `api`
+went from **711s to 344s**, and the new `apply` / `api` cell runs in
+**296s**.
+
 **Two plausible fixture optimisations that do *not* pay** — both were
 measured and rejected, so don't re-derive them:
 
