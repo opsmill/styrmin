@@ -150,6 +150,10 @@ CONFIG_ONLY_CLONE_TIMEOUT_SECONDS = 300.0
 # waiting on top of the restore rather than a restart.
 CLONE_PODS_READY_TIMEOUT_SECONDS = 300.0
 
+# The counterpart's HelmRelease finishing its last reconcile: every Helm upgrade the
+# clone causes has run by then, so a prune of the source's objects has happened too.
+COUNTERPART_HELMRELEASE_SETTLED_TIMEOUT_SECONDS = 300.0
+
 
 @asynccontextmanager
 async def portforward_simple_app(
@@ -207,6 +211,71 @@ async def wait_for_pods_ready(
         await asyncio.sleep(5)
     await api_client.close()
     raise TimeoutError(f"Pods in {namespace} did not become ready within {timeout}s")
+
+
+async def workload_object_names(kubeconfig_path: str, namespace: str) -> set[str]:
+    """``kind/name`` of every Deployment, StatefulSet and Service in *namespace*."""
+    from kubernetes_asyncio import client as kubeclient, config as k8s_config
+
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    try:
+        apps_api = kubeclient.AppsV1Api(api_client)
+        core_api = kubeclient.CoreV1Api(api_client)
+        deployments = await apps_api.list_namespaced_deployment(namespace=namespace)
+        stateful_sets = await apps_api.list_namespaced_stateful_set(namespace=namespace)
+        services = await core_api.list_namespaced_service(namespace=namespace)
+    finally:
+        await api_client.close()
+    return (
+        {f"deployment/{item.metadata.name}" for item in deployments.items}
+        | {f"statefulset/{item.metadata.name}" for item in stateful_sets.items}
+        | {f"service/{item.metadata.name}" for item in services.items}
+    )
+
+
+async def wait_for_helmreleases_settled(
+    kubeconfig_path: str, namespace: str, timeout: float
+) -> None:
+    """Wait until every HelmRelease in *namespace* is Ready at its latest generation."""
+    import time
+
+    from kubernetes_asyncio import client as kubeclient, config as k8s_config
+
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    custom_api = kubeclient.CustomObjectsApi(api_client)
+    deadline = time.time() + timeout
+    releases: list[dict[str, Any]] = []
+    try:
+        while time.time() < deadline:
+            releases = (
+                await custom_api.list_namespaced_custom_object(
+                    group="helm.toolkit.fluxcd.io",
+                    version="v2",
+                    namespace=namespace,
+                    plural="helmreleases",
+                )
+            )["items"]
+            if releases and all(_helmrelease_settled(release) for release in releases):
+                return
+            await asyncio.sleep(3)
+    finally:
+        await api_client.close()
+    raise TimeoutError(
+        f"HelmReleases in {namespace} did not settle within {timeout}s: "
+        f"{[release.get('status') for release in releases]!r}"
+    )
+
+
+def _helmrelease_settled(release: dict[str, Any]) -> bool:
+    status = release.get("status") or {}
+    if status.get("observedGeneration") != release["metadata"].get("generation"):
+        return False
+    return any(
+        condition.get("type") == "Ready" and condition.get("status") == "True"
+        for condition in status.get("conditions") or []
+    )
 
 
 async def read_velero_backup(kubeconfig_path: str, backup_name: str) -> dict:
@@ -1423,6 +1492,9 @@ async def test_environment_clone_lifecycle(
         source_state_before = await source_deployment_state(
             client, (primary_deployment_id, excluded_deployment_id)
         )
+        source_objects_before = await workload_object_names(
+            kubeconfig_path, primary_namespace
+        )
         assert all(
             entry["status"] == "running" for entry in source_state_before.values()
         ), (
@@ -1584,6 +1656,22 @@ async def test_environment_clone_lifecycle(
         ) == source_state_before, (
             "cloning mutated a source deployment's declared state (SC-002); "
             f"expected {source_state_before!r}"
+        )
+        # The source's *objects*. The counterpart's Helm upgrade diffs against the
+        # restored release record, which names the source namespace; left
+        # unretargeted it deletes the source's namespace-pinned chart objects
+        # (its postgres). Waiting for that upgrade makes the check deterministic.
+        await wait_for_helmreleases_settled(
+            kubeconfig_path,
+            f"styrmin-{counterpart_deployment_id}",
+            timeout=COUNTERPART_HELMRELEASE_SETTLED_TIMEOUT_SECONDS,
+        )
+        missing_source_objects = source_objects_before - await workload_object_names(
+            kubeconfig_path, primary_namespace
+        )
+        assert not missing_source_objects, (
+            "cloning deleted objects from the source namespace (SC-002): "
+            f"{sorted(missing_source_objects)!r}"
         )
         # The source's *health*, asserted where a failure can actually fail the
         # test. This used to exist only in the ``finally`` block below, wrapped

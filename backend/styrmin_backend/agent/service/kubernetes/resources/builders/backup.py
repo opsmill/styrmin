@@ -11,6 +11,11 @@ from styrmin_backend.agent.service.kubernetes.velero.resources import (
 # every Velero Restore references it. Guarded by backend/tests/unit/test_helm_velero_naming.py.
 VELERO_RESTORE_PVC_PATCH_CONFIGMAP = "velero-restore-pvc-patch"
 
+# Left out of a cross-target restore: Flux would upgrade the restored HelmRelease
+# at once from the source's release storage and prune the source's objects.
+# Recovery re-renders it after retargeting that storage.
+CROSS_TARGET_EXCLUDED_RESOURCES = ["helmreleases.helm.toolkit.fluxcd.io"]
+
 
 def build_velero_backup(
     name: str,
@@ -63,10 +68,15 @@ def build_velero_restore(
     instance the data lands in, with the source recorded under
     ``styrmin.io/source-instance`` so provenance is not lost (research D2.6).
     Omitting it keeps the in-place labelling untouched.
+
+    A cross-target restore also leaves out the HelmRelease
+    (``CROSS_TARGET_EXCLUDED_RESOURCES``); recovery re-renders it.
     """
     namespace_mapping = None
+    excluded_resources: list[str] = []
     if source_namespace != target_namespace:
         namespace_mapping = {source_namespace: target_namespace}
+        excluded_resources = list(CROSS_TARGET_EXCLUDED_RESOURCES)
 
     labels = {
         "styrmin.io/instance": target_instance_id or instance_id,
@@ -86,4 +96,5 @@ def build_velero_restore(
         existing_resource_policy=existing_resource_policy,
         preserve_node_ports=False,
         resource_modifier_ref=VELERO_RESTORE_PVC_PATCH_CONFIGMAP,
+        excluded_resources=excluded_resources,
     )

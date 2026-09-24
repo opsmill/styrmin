@@ -208,6 +208,7 @@ class VeleroRestore:
     existing_resource_policy: str | None = None
     preserve_node_ports: bool = True
     resource_modifier_ref: str | None = None
+    excluded_resources: list[str] = field(default_factory=list)
 
     def render(self) -> dict[str, Any]:
         spec: dict[str, Any] = {
@@ -217,6 +218,8 @@ class VeleroRestore:
         }
         if self.namespace_mapping:
             spec["namespaceMapping"] = self.namespace_mapping
+        if self.excluded_resources:
+            spec["excludedResources"] = self.excluded_resources
         if self.existing_resource_policy:
             spec["existingResourcePolicy"] = self.existing_resource_policy
         if self.resource_modifier_ref:

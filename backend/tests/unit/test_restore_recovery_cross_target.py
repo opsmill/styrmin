@@ -15,7 +15,10 @@ away.
 
 from __future__ import annotations
 
+import base64
+import gzip
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -70,6 +73,8 @@ class FakeApiClient:
         for name, body in (objects or {}).items():
             namespace = body["metadata"]["namespace"]
             self.objects[(namespace, name)] = body
+        # Secrets keyed by (namespace, name), as the API returns them.
+        self.secrets: dict[tuple[str, str], SimpleNamespace] = {}
         self.calls: list[tuple[str, str]] = []
 
 
@@ -147,10 +152,35 @@ class FakeCustomObjectsApi:
         return existing
 
 
+class FakeCoreV1Api:
+    """The two Secret calls Helm-storage retargeting makes."""
+
+    def __init__(self, api_client: FakeApiClient) -> None:
+        self._client = api_client
+
+    async def list_namespaced_secret(
+        self, *, namespace: str, label_selector: str
+    ) -> SimpleNamespace:
+        key, _, value = label_selector.partition("=")
+        items = [
+            secret
+            for (ns, _name), secret in self._client.secrets.items()
+            if ns == namespace and secret.metadata.labels.get(key) == value
+        ]
+        return SimpleNamespace(items=items)
+
+    async def patch_namespaced_secret(
+        self, *, name: str, namespace: str, body: dict[str, Any]
+    ) -> None:
+        self._client.calls.append(("patch_secret", name))
+        self._client.secrets[(namespace, name)].data.update(body["data"])
+
+
 class FakeK8sClientModule:
     """Namespace object replacing ``restore_recovery.k8s_client``."""
 
     CustomObjectsApi = FakeCustomObjectsApi
+    CoreV1Api = FakeCoreV1Api
     ApiException = FakeApiException
 
 
@@ -588,3 +618,114 @@ async def test_restored_crd_is_not_deleted_while_finalizers_remain(
 
     assert ("delete", RESTORED_NAME) not in api_client.calls
     assert (NAMESPACE, RESTORED_NAME) in api_client.objects
+
+
+SOURCE_NAMESPACE = RESTORED_NAME
+HELM_SECRET_NAME = f"sh.helm.release.v1.{RESTORED_NAME}.v3"
+
+#: A Bitnami-style object pinned to the source namespace next to one that is not.
+SOURCE_MANIFEST = f"""---
+# Source: simple-app/charts/postgresql/templates/primary/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: styrmin-postgresql
+  namespace: "{SOURCE_NAMESPACE}"
+---
+# Source: simple-app/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: styrmin-simple-app
+"""
+
+
+def _helm_payload(release: dict[str, Any]) -> str:
+    """Encode a release the way Helm's Secret driver stores it, as the API returns it."""
+    helm_encoded = base64.b64encode(gzip.compress(json.dumps(release).encode()))
+    return base64.b64encode(helm_encoded).decode()
+
+
+def _helm_release(data: str) -> dict[str, Any]:
+    return json.loads(gzip.decompress(base64.b64decode(base64.b64decode(data))))
+
+
+def _seed_secret(
+    api_client: FakeApiClient,
+    name: str,
+    *,
+    secret_type: str = "helm.sh/release.v1",
+    release: dict[str, Any] | None = None,
+) -> None:
+    release = release or {
+        "name": RESTORED_NAME,
+        "namespace": SOURCE_NAMESPACE,
+        "version": 3,
+        "manifest": SOURCE_MANIFEST,
+        "hooks": [{"name": "hook", "manifest": f"namespace: {SOURCE_NAMESPACE}"}],
+    }
+    api_client.secrets[(NAMESPACE, name)] = SimpleNamespace(
+        metadata=SimpleNamespace(name=name, labels={"owner": "helm"}),
+        type=secret_type,
+        data={"release": _helm_payload(release)},
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_restored_helm_release_is_retargeted_before_the_helmrelease_phase(
+    monkeypatch: pytest.MonkeyPatch,
+    phase_spy: list[dict[str, Any]],
+) -> None:
+    """An upgrade from the source's manifest would delete the source's pinned objects.
+
+    The StatefulSet above carries an explicit source namespace, so Helm would
+    see it as dropped from the chart and delete it *in the source namespace* —
+    which is how a clone used to take its source's database down.
+    """
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+    _seed_secret(api_client, HELM_SECRET_NAME)
+    seen_at_helmrelease: list[dict[str, Any]] = []
+
+    async def _helmrelease(*, crd_spec: dict[str, Any], namespace: str) -> PhaseResult:
+        secret = api_client.secrets[(NAMESPACE, HELM_SECRET_NAME)]
+        seen_at_helmrelease.append(_helm_release(secret.data["release"]))
+        return PhaseResult(success=True)
+
+    monkeypatch.setattr(restore_recovery, "execute_phase_helmrelease", _helmrelease)
+
+    await restore_recovery.reapply_with_counterpart_identity(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+        await counterpart_body(),
+    )
+
+    assert len(seen_at_helmrelease) == 1, "the HelmRelease phase must run once"
+    release = seen_at_helmrelease[0]
+    assert release["namespace"] == NAMESPACE
+    assert SOURCE_NAMESPACE not in release["manifest"]
+    assert f'namespace: "{NAMESPACE}"' in release["manifest"]
+    assert release["hooks"][0]["manifest"] == f"namespace: {NAMESPACE}"
+    # Everything Helm keys the release on is left alone.
+    assert (release["name"], release["version"]) == (RESTORED_NAME, 3)
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_only_helm_release_secrets_are_rewritten(
+    phase_spy: list[dict[str, Any]],
+) -> None:
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+    _seed_secret(api_client, HELM_SECRET_NAME)
+    _seed_secret(api_client, "not-helm-storage", secret_type="Opaque")
+
+    await restore_recovery.reapply_with_counterpart_identity(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+        await counterpart_body(),
+    )
+
+    patched = [name for verb, name in api_client.calls if verb == "patch_secret"]
+    assert patched == [HELM_SECRET_NAME]
