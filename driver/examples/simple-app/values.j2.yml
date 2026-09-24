@@ -53,9 +53,14 @@ postgresql:
       periodSeconds: 1
       timeoutSeconds: 1
       failureThreshold: 60
-    # SIGTERM is a Postgres "smart" shutdown, which waits for the app's open
-    # connections; during a rolling update that always ran into the 30s default.
-    terminationGracePeriodSeconds: 5
+    # SIGTERM is a "smart" shutdown that waits for clients, and simple-app never
+    # closes its pool; preStop does a fast shutdown instead (disconnects clients,
+    # checkpoints). The grace period is only a backstop.
+    lifecycleHooks:
+      preStop:
+        exec:
+          command: ["/opt/bitnami/postgresql/bin/pg_ctl", "stop", "-m", "fast", "--no-wait"]
+    terminationGracePeriodSeconds: 10
     persistence:
       enabled: true
       size: 1Gi
