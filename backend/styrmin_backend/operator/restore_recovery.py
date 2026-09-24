@@ -17,9 +17,10 @@ The kopf state annotations are deliberately **kept** — see
 oscillate.
 
 A cross-target restore (environment clone) takes the same route through
-``reapply_with_counterpart_identity``, with two additions: the restored
-source-named CR is replaced by the counterpart's own CR body, and Phase 2
-(HelmRelease) is re-rendered from the counterpart's spec.
+``reapply_with_counterpart_identity``, with three additions: the restored
+source-named CR is replaced by the counterpart's own CR body, the restored Helm
+release storage is retargeted at the new namespace, and Phase 2 (HelmRelease,
+which the Restore CR leaves out) is re-rendered from the counterpart's spec.
 
 Each step is idempotent (server-side apply for resources, JSON patch for
 the CRD status).
@@ -27,6 +28,9 @@ the CRD status).
 
 from __future__ import annotations
 
+import base64
+import gzip
+import json
 from typing import Any
 
 from kubernetes_asyncio import client as k8s_client
@@ -59,6 +63,12 @@ _KOPF_STATE_ANNOTATIONS = (
     "kopf.zalando.org/last-handled-configuration",
     "kopf.zalando.org/touch-dummy",
 )
+
+# Helm's Secret storage driver: every revision is a Secret of this type, labelled
+# ``owner=helm``, holding ``base64(gzip(release JSON))`` under ``data.release``.
+_HELM_RELEASE_SECRET_TYPE = "helm.sh/release.v1"
+_HELM_RELEASE_SECRET_SELECTOR = "owner=helm"
+_GZIP_MAGIC = b"\x1f\x8b"
 
 
 async def _read_crd(api_client: ApiClient, namespace: str, name: str) -> dict[str, Any]:
@@ -337,6 +347,71 @@ async def _delete_restored_crd_without_teardown(
     await _delete_crd(api_client, namespace, name)
 
 
+def _decode_helm_release(data: str) -> dict[str, Any]:
+    raw = base64.b64decode(base64.b64decode(data))
+    if raw.startswith(_GZIP_MAGIC):
+        raw = gzip.decompress(raw)
+    return json.loads(raw)
+
+
+def _encode_helm_release(release: dict[str, Any]) -> str:
+    raw = gzip.compress(json.dumps(release).encode())
+    return base64.b64encode(base64.b64encode(raw)).decode()
+
+
+def retarget_helm_release(
+    release: dict[str, Any], source_namespace: str, target_namespace: str
+) -> dict[str, Any]:
+    """Point a restored Helm release record at the namespace it now lives in.
+
+    Left as restored, the record names the source namespace, and so does every
+    object a chart pins with ``metadata.namespace`` (all Bitnami subcharts). Helm
+    upgrades under the record's namespace, Flux then sees the release namespace
+    change and uninstalls it, and the pinned objects go with it — in the
+    *source* namespace. The manifest is only the upgrade's "before" snapshot, so
+    replacing the (UUID-derived, unique) namespace string is enough.
+    """
+    retargeted = {**release, "namespace": target_namespace}
+    retargeted["manifest"] = (release.get("manifest") or "").replace(
+        source_namespace, target_namespace
+    )
+    retargeted["hooks"] = [
+        {
+            **hook,
+            "manifest": (hook.get("manifest") or "").replace(
+                source_namespace, target_namespace
+            ),
+        }
+        for hook in release.get("hooks") or []
+    ]
+    return retargeted
+
+
+async def _retarget_helm_release_storage(
+    api_client: ApiClient, namespace: str, source_namespace: str
+) -> int:
+    """Rewrite every restored Helm release Secret in ``namespace``; return the count."""
+    core_v1 = k8s_client.CoreV1Api(api_client)
+    secrets = await core_v1.list_namespaced_secret(
+        namespace=namespace, label_selector=_HELM_RELEASE_SECRET_SELECTOR
+    )
+    rewritten = 0
+    for secret in secrets.items:
+        data = (secret.data or {}).get("release")
+        if secret.type != _HELM_RELEASE_SECRET_TYPE or not data:
+            continue
+        release = retarget_helm_release(
+            _decode_helm_release(data), source_namespace, namespace
+        )
+        await core_v1.patch_namespaced_secret(
+            name=secret.metadata.name,
+            namespace=namespace,
+            body={"data": {"release": _encode_helm_release(release)}},
+        )
+        rewritten += 1
+    return rewritten
+
+
 async def reapply_with_counterpart_identity(
     api_client: ApiClient,
     namespace: str,
@@ -370,18 +445,22 @@ async def reapply_with_counterpart_identity(
        ``_delete_restored_crd_without_teardown``: that teardown would delete
        the counterpart's own HelmRelease and, through Flux, the restored
        volumes). Data survives; only identity objects are re-rendered.
-    3. Re-apply prerequisites, **re-render the HelmRelease from the
+    3. Retarget the restored Helm release storage at this namespace
+       (``retarget_helm_release``).
+    4. Re-apply prerequisites, **re-render the HelmRelease from the
        counterpart's spec** and re-apply utility resources, then mark the
        counterpart CR Ready.
 
     The HelmRelease is where the identity swap is subtle. The counterpart keeps
     the *source's* Helm release name (``spec.releaseReference``, pinned at
-    counterpart creation — research D2), so this upsert **updates** the restored
-    HelmRelease rather than installing a second release: Flux performs a Helm
-    *upgrade*, which rewrites the ``meta.helm.sh/release-*`` ownership
-    annotations the restored objects carry from the source. A counterpart-named
-    release would instead be a fresh *install* over objects Helm already owns
-    and would fail its ownership check outright.
+    counterpart creation — research D2), so the HelmRelease it creates adopts
+    the restored release storage rather than installing a second release: Flux
+    performs a Helm *upgrade*, which rewrites the ``meta.helm.sh/release-*``
+    ownership annotations the restored objects carry from the source. A
+    counterpart-named release would instead be a fresh *install* over objects
+    Helm already owns and would fail its ownership check outright. The Restore
+    CR leaves the HelmRelease itself out, so Flux cannot run that upgrade before
+    step 3 has retargeted the storage it diffs against.
 
     Caller is responsible for catching exceptions and translating to
     ``mark_failed`` (same contract as ``reapply_and_finalize``).
@@ -429,6 +508,17 @@ async def reapply_with_counterpart_identity(
             namespace,
             restored_crd_name,
         )
+
+    # The restored CR is named after the source namespace (research D2.3).
+    retargeted = await _retarget_helm_release_storage(
+        api_client, namespace, source_namespace=restored_crd_name
+    )
+    logger.info(
+        "Retargeted %d restored Helm release revision(s) in %s from %s",
+        retargeted,
+        namespace,
+        restored_crd_name,
+    )
 
     await _reapply_phases_and_finalize(
         api_client,

@@ -227,3 +227,30 @@ class TestBuildVeleroRestore:
             "styrmin.io/instance": "inst-123",
             "styrmin.io/driver": "mydriver",
         }
+
+    def test_cross_target_restore_leaves_out_the_helmrelease(self) -> None:
+        """Flux would upgrade a restored HelmRelease before recovery retargets its storage."""
+        restore = build_velero_restore(
+            name="test-restore",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="styrmin-source",
+            target_namespace="styrmin-counterpart",
+            instance_id="source-inst",
+            driver_name="mydriver",
+        )
+        assert restore.render()["spec"]["excludedResources"] == [
+            "helmreleases.helm.toolkit.fluxcd.io"
+        ]
+
+    def test_in_place_restore_excludes_nothing(self) -> None:
+        restore = build_velero_restore(
+            name="test-restore",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="app-ns",
+            target_namespace="app-ns",
+            instance_id="inst-123",
+            driver_name="mydriver",
+        )
+        assert "excludedResources" not in restore.render()["spec"]

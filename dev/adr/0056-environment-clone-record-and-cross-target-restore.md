@@ -115,19 +115,30 @@ This is the least obvious decision and the one with a visible operator consequen
 
 A counterpart keeps its **own** `StyrminDeployment` CR identity (CR name = namespace =
 `styrmin-<counterpart_id>`) but pins its **Helm release name to the source's**
-(`styrmin-<source_deployment_id>`). Velero restores the source-named `HelmRelease` and
-the source's Helm release-storage secret into the counterpart's namespace, and every
-restored chart object carries the source's `meta.helm.sh/release-name`. Re-rendering the
-release under a counterpart name would be a fresh Helm *install* over objects Helm
-already owns, and would fail its ownership check outright; matching the source name makes
-it an *upgrade*, which rewrites the ownership annotations consistently.
+(`styrmin-<source_deployment_id>`). Velero restores the source's Helm release-storage
+secret into the counterpart's namespace, and every restored chart object carries the
+source's `meta.helm.sh/release-name`. Re-rendering the release under a counterpart name
+would be a fresh Helm *install* over objects Helm already owns, and would fail its
+ownership check outright; matching the source name makes it an *upgrade*, which rewrites
+the ownership annotations consistently.
+
+That upgrade diffs against the restored release record, which still names the **source**
+namespace — both its `namespace` field and every object a chart pins with an explicit
+`metadata.namespace` (all Bitnami subcharts). Upgrading from it as-is renders the release
+under the source namespace; Flux then sees the release namespace change and uninstalls it,
+deleting those pinned objects **from the source namespace** — which is how an early build
+of this feature took the source's database down. So a cross-target Restore CR **excludes
+the `HelmRelease`**
+(nothing can upgrade before recovery runs), and recovery rewrites the source namespace to
+the counterpart's in every restored release revision before it re-renders the HelmRelease.
 
 To keep that pin from being silently undone, release-reference resolution became sticky:
 explicit override → the value the active instance already carries → the computed default.
 A later configuration fan-out can no longer rename a live release.
 
 Cross-target recovery replaces the restored source-named CR with the counterpart's own CR
-body, carries kopf's state annotations over, re-runs prerequisites → HelmRelease →
+body, carries kopf's state annotations over, retargets the restored release storage,
+re-runs prerequisites → HelmRelease →
 services against the counterpart's spec, and **clears and verifies finalizers before
 deleting the restored CR** — deleting it with kopf's finalizer intact would fire the
 delete handler and tear down the very HelmRelease keeping the just-restored data alive.

@@ -852,12 +852,24 @@ changed is our own coupling:
 **Counterpart identity is split on purpose.** A counterpart keeps its own
 `StyrminDeployment` CR identity (CR name = namespace = `styrmin-<counterpart_id>`) but
 pins its **Helm release name to the source's** (`styrmin-<source_deployment_id>`). Velero
-restores the source-named `HelmRelease` and the source's Helm release-storage secret into
-the counterpart namespace, and restored chart objects carry the source's
-`meta.helm.sh/release-name`. Matching the name makes the recovery upsert a Helm
-*upgrade* — which rewrites those ownership annotations consistently; a counterpart-named
-release would be a fresh *install* over objects Helm already owns and would fail its
-ownership check. The pin is kept honest by
+restores the source's Helm release-storage secret into the counterpart namespace, and
+restored chart objects carry the source's `meta.helm.sh/release-name`. Matching the name
+makes the recovery upsert a Helm *upgrade* — which rewrites those ownership annotations
+consistently; a counterpart-named release would be a fresh *install* over objects Helm
+already owns and would fail its ownership check.
+
+**The restored release storage must be retargeted before that upgrade.** It still names
+the source namespace — in its `namespace` field and on every object a chart pins with an
+explicit `metadata.namespace` (all Bitnami subcharts, e.g. simple-app's postgres). An
+upgrade straight from the restored record renders the release under the source namespace;
+Flux then logs `release target configuration changed (release namespace): running
+uninstall` and the uninstall deletes those pinned objects **from the source namespace**.
+Two changes prevent it: a cross-target Restore CR sets
+`excludedResources: [helmreleases.helm.toolkit.fluxcd.io]`
+(`resources/builders/backup.py::CROSS_TARGET_EXCLUDED_RESOURCES`), so Flux has nothing to
+upgrade until recovery re-renders the HelmRelease; and
+`restore_recovery.py::retarget_helm_release` rewrites the source namespace to the
+counterpart's in every restored `helm.sh/release.v1` Secret before it does. The pin is kept honest by
 `services/context.py::_resolve_release_reference`, whose order is: explicit override → the
 value the active instance already carries → `styrmin-<deployment id>`. A later config
 fan-out therefore cannot silently rename a live release.
@@ -871,7 +883,8 @@ carrying kopf's state annotations over from the restored CR (a CR without
 `last-handled-configuration` would make kopf fire `on.create` and race the finalize);
 deletes the restored source-named CR **after clearing and verifying its finalizers**
 (deleting it with kopf's finalizer intact fires the delete handler, which would tear down
-the counterpart's HelmRelease and, through Flux, the volumes just restored); and re-runs
+the counterpart's HelmRelease and, through Flux, the volumes just restored); retargets the
+restored release storage; and re-runs
 prerequisites → HelmRelease → services against the counterpart's spec before marking it
 Ready. Data survives; only identity objects are re-rendered.
 
