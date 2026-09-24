@@ -44,6 +44,9 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.shard_configuration]
 
 RECONCILE_TIMEOUT_SECONDS = 480.0
+# The config persists when the Apply mutation commits, not after the
+# reconcile; a longer wait only delays reporting a lost edit (#260).
+PERSIST_TIMEOUT_SECONDS = 60.0
 
 
 DRAWER_DEPLOYMENT = DrawerDeployment(name="drawer-sched")
@@ -199,7 +202,7 @@ async def test_drawer_scheduling_edit(
 
     # Persisted state asserts.
     await _wait_for_persisted_cpu(
-        client, deployment_id, new_cpu, timeout=RECONCILE_TIMEOUT_SECONDS
+        client, deployment_id, new_cpu, timeout=PERSIST_TIMEOUT_SECONDS
     )
 
     # Pods must have rolled — comparing UID sets is enough to prove the
@@ -301,5 +304,5 @@ async def test_drawer_scheduling_edit_keyboard_only(
     await expect(diff_dialog).to_be_hidden(timeout=60_000)
 
     await _wait_for_persisted_cpu(
-        client, deployment_id, new_cpu, timeout=RECONCILE_TIMEOUT_SECONDS
+        client, deployment_id, new_cpu, timeout=PERSIST_TIMEOUT_SECONDS
     )
