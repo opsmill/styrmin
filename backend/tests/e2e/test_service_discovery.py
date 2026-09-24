@@ -11,6 +11,7 @@ import time
 import httpx
 import kr8s.asyncio
 import pytest
+from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 
 from styrmin_sdk import StyrminClient
@@ -61,38 +62,32 @@ async def test_service_discovery_between_apps(
     """Two simple-app instances can discover each other via DNS."""
     kubeconfig_path = vcluster["kubeconfig_path"]
 
-    # Find the executor service via kr8s.
-    # The service-discovery utility creates the service asynchronously after
-    # the deployment reaches "running", so we need to poll until it appears.
+    # Target the executor pod, not its Service: the rename test renames that
+    # Service, so the two tests must not depend on each other's order.
     executor_namespace = f"styrmin-{discovery_deployments['executor']}"
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
-    executor_svc = None
-    svc_deadline = time.time() + 120
-    while time.time() < svc_deadline:
-        services: list[AsyncService] = [
-            svc
-            async for svc in AsyncService.list(
-                namespace=executor_namespace, api=kr8s_api
-            )
-            if isinstance(svc, AsyncService)
-        ]
-        executor_svc = next(
-            (
-                svc
-                for svc in services
-                if "executor" in svc.name and "postgresql" not in svc.name
-            ),
-            None,
-        )
-        if executor_svc is not None:
+    executor_pod = None
+    pod_deadline = time.time() + 120
+    while time.time() < pod_deadline:
+        async for pod in AsyncPod.list(
+            namespace=executor_namespace,
+            label_selector="app.kubernetes.io/name=simple-app",
+            api=kr8s_api,
+        ):
+            if (
+                isinstance(pod, AsyncPod)
+                and not pod.metadata.get("deletionTimestamp")
+                and await pod.ready()
+            ):
+                executor_pod = pod
+                break
+        if executor_pod is not None:
             break
         await asyncio.sleep(5)
 
-    assert executor_svc, (
-        f"Could not find executor service. Available: {[svc.name for svc in services]}"
-    )
+    assert executor_pod, f"No ready simple-app pod in {executor_namespace}"
 
-    async with _portforward(executor_svc, remote_port=8000) as local_port:
+    async with _portforward(executor_pod, remote_port=8000) as local_port:
         await _wait_for_http(
             f"http://localhost:{local_port}/health",
             timeout=30.0,
