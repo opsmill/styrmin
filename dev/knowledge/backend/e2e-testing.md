@@ -212,8 +212,9 @@ wall-clock between them.
 
 `general` / `api` was then dominated by the manifest-apply tests: six
 `api_only` tests, each deploying fresh simple-apps, were 343s of its 922s
-in CI. They now run as their own `apply` shard, with the create / update
-/ no-op scenarios folded into one lifecycle test. The
+in CI. They now run as their own `apply` shard, where the create / update
+/ no-op scenarios are folded into one lifecycle test, leaving four tests
+in the shard. The
 delete-then-redeploy regression and the service-rename test also reuse
 deployments their siblings already pay for. Locally, `general` / `api`
 went from **711s to 344s**, and the new `apply` / `api` cell runs in
