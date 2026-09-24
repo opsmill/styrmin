@@ -176,6 +176,36 @@ upgrade and delete slept ~60s *after* Kubernetes had finished:
 duration, check this value reached the agent pod before looking anywhere
 else.
 
+The next cost is **Prefect scheduling latency**. The agent runs its own
+Prefect `ProcessWorker` (`entrypoint/combined.py`), which polls its work
+pool every `PREFECT_WORKER_QUERY_SECONDS` — Prefect's default is 10s —
+and a simple-app create chains three agent flow runs (main flow,
+pre-hook, post-hook). Each one started ~9s late on average. The same
+values file therefore also sets `PREFECT_WORKER_QUERY_SECONDS: "1"` in
+`agent.extraEnv`, and `run_deployment_or_fail`
+(`agent/tasks/utils.py`) polls sub-flows every 1s instead of Prefect's
+5s default. Together they took `general` / `api` from **969s to 727s
+(−25%)** and `configuration` / `ui` from **648s to 543s (−16%)**. The
+~4s left per flow run is Prefect process start-up, not polling.
+
+Rolling updates that re-render the simple-app **PostgreSQL** pod
+(scheduling, env-var and toleration edits) used to stall for exactly
+31s: SIGTERM is a Postgres "smart" shutdown, which waits for the app's
+open connections until the default 30s grace period kills the pod. The
+simple-app driver (`driver/examples/simple-app/values.j2.yml`) caps
+`postgresql.primary.terminationGracePeriodSeconds` at 5s, which brings
+each restart down to ~6s. With the polling fixes, `configuration` / `ui`
+runs in **489s (−25% from 648s)** and `general` / `api` in **711s
+(−27% from 969s)**.
+
+The `configuration` shard used to create each module's deployment
+serially through the UI deploy form, then wait on the detail page's 10s
+refetch. `configuration/conftest.py` now creates all selected modules'
+deployments concurrently through the SDK, with any baseline config
+seeded at create time instead of by a follow-up update. That took the
+shard from **489s to 217s**: the seven deployments cost one deploy of
+wall-clock between them.
+
 **Two plausible fixture optimisations that do *not* pay** — both were
 measured and rejected, so don't re-derive them:
 
@@ -194,7 +224,7 @@ measured and rejected, so don't re-derive them:
    Same reasoning — the environment itself is cheap; only deployments
    cost time.
 
-What *is* still expensive is irreducible: each deploy is ~40s and each
+What *is* still expensive is irreducible: each deploy is ~30s and each
 full delete-to-tombstone is ~25-60s (namespace finalisers), so the way
 to speed a shard up further is to **reduce the number of
 deploy/upgrade/delete cycles**, not to reshuffle environment fixtures.

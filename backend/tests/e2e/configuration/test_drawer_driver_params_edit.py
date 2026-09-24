@@ -9,9 +9,10 @@ declares no parameters in ``driver.styrmin.yml``. Until a driver with a
 boolean ``enable_pdb`` (or equivalent) parameter is bootstrapped into
 the E2E git-server fixture, the test discovers the available
 parameters at runtime, picks the first boolean parameter it finds, and
-toggles its value. If the seeded driver still has zero parameters, the
-test ``pytest.skip``s with a clear message so the suite stays green and
-the gap is visible in CI output — the chunk-4f integrator can wire a
+toggles its value. If the seeded driver declares no boolean parameter,
+the test is skipped at collection time (so nothing is provisioned
+for it), with a clear message so the suite stays green and the gap
+is visible in CI output — the chunk-4f integrator can wire a
 parameter-bearing driver in and the test starts asserting real
 behaviour.
 
@@ -25,14 +26,16 @@ from __future__ import annotations
 
 import asyncio
 import time
-import uuid
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
+import yaml
 from playwright.async_api import expect
 from styrmin_sdk import StyrminClient
 
-from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.configuration.conftest import DrawerDeployment
+from tests.e2e.conftest import PROJECT_ROOT
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 
 if TYPE_CHECKING:
@@ -42,47 +45,18 @@ pytestmark = [pytest.mark.shard_configuration]
 
 RECONCILE_TIMEOUT_SECONDS = 480.0
 
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-async def driver_params_edit_environment(
-    styrmin_resources: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-) -> AsyncGenerator[dict, None]:
-    driver, client = session_scenario_driver
-    cluster_id = styrmin_resources["cluster_id"]
-    env = await driver.create_environment(
-        name=f"drawer-params-{uuid.uuid4().hex[:8]}",
-        cluster_id=cluster_id,
-        config={},
-    )
-    yield {"environment_id": str(env.id), "client": client}
+SIMPLE_APP_DRIVER_SPEC = (
+    PROJECT_ROOT / "driver" / "examples" / "simple-app" / "driver.styrmin.yml"
+)
 
 
-@pytest.fixture(scope="module")
-async def driver_params_edit_deployment(
-    driver_params_edit_environment: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-    simple_app_image: str,  # noqa: ARG001 — builds the image
-) -> dict:
-    driver, _ = session_scenario_driver
-    deployment = await driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=driver_params_edit_environment["environment_id"],
-        name="drawer-params",
-    )
-    deployment = await driver.wait_for_deployment_running(
-        deployment_id=deployment.id, timeout=RECONCILE_TIMEOUT_SECONDS
-    )
-    return {
-        "deployment_id": str(deployment.id),
-        "namespace": f"styrmin-{deployment.id}",
-    }
+def _declares_boolean_parameter(spec_path: Path) -> bool:
+    spec = yaml.safe_load(spec_path.read_text())
+    parameters = spec["spec"].get("parameters") or []
+    return any(parameter.get("kind") == "boolean" for parameter in parameters)
+
+
+DRAWER_DEPLOYMENT = DrawerDeployment(name="drawer-params")
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +105,15 @@ async def _wait_for_parameter_value(
 # ---------------------------------------------------------------------------
 
 
+# Decided at collection time so the shared fixture never provisions for it.
+@pytest.mark.skipif(
+    not _declares_boolean_parameter(SIMPLE_APP_DRIVER_SPEC),
+    reason=(
+        "simple-app declares no boolean driver parameter to toggle through "
+        "the Driver Parameters section. Re-enable by adding one (e.g. "
+        "enable_pdb) to driver/examples/simple-app/driver.styrmin.yml."
+    ),
+)
 @pytest.mark.ci
 @pytest.mark.ui_only(
     reason=(
@@ -140,14 +123,13 @@ async def _wait_for_parameter_value(
     ),
 )
 async def test_drawer_driver_params_edit(
-    driver_params_edit_environment: dict,
-    driver_params_edit_deployment: dict,
+    drawer_deployment: dict,
     session_ui_page: "Page",
 ) -> None:
     page = session_ui_page
-    client: StyrminClient = driver_params_edit_environment["client"]
-    environment_id = driver_params_edit_environment["environment_id"]
-    deployment_id = driver_params_edit_deployment["deployment_id"]
+    client: StyrminClient = drawer_deployment["client"]
+    environment_id = drawer_deployment["environment_id"]
+    deployment_id = drawer_deployment["deployment_id"]
 
     detail = DeploymentDetailPage(page)
     await detail.goto(environment_id=environment_id, deployment_id=deployment_id)

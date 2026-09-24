@@ -28,15 +28,14 @@ from __future__ import annotations
 
 import asyncio
 import time
-import uuid
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from kubernetes_asyncio import client as kubeclient
 from playwright.async_api import expect
 from styrmin_sdk import StyrminClient
 
-from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.configuration.conftest import DrawerDeployment
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 
 if TYPE_CHECKING:
@@ -47,48 +46,7 @@ pytestmark = [pytest.mark.shard_configuration]
 RECONCILE_TIMEOUT_SECONDS = 480.0
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-async def scheduling_edit_environment(
-    styrmin_resources: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-) -> AsyncGenerator[dict, None]:
-    driver, client = session_scenario_driver
-    cluster_id = styrmin_resources["cluster_id"]
-    env = await driver.create_environment(
-        name=f"drawer-sched-{uuid.uuid4().hex[:8]}",
-        cluster_id=cluster_id,
-        config={},
-    )
-    yield {"environment_id": str(env.id), "client": client}
-
-
-@pytest.fixture(scope="module")
-async def scheduling_edit_deployment(
-    scheduling_edit_environment: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-    simple_app_image: str,  # noqa: ARG001 — builds the image
-    vcluster: dict,
-) -> dict:
-    driver, _ = session_scenario_driver
-    deployment = await driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=scheduling_edit_environment["environment_id"],
-        name="drawer-sched",
-    )
-    deployment = await driver.wait_for_deployment_running(
-        deployment_id=deployment.id, timeout=RECONCILE_TIMEOUT_SECONDS
-    )
-    return {
-        "deployment_id": str(deployment.id),
-        "namespace": f"styrmin-{deployment.id}",
-        "kubeconfig_path": vcluster["kubeconfig_path"],
-    }
+DRAWER_DEPLOYMENT = DrawerDeployment(name="drawer-sched")
 
 
 # ---------------------------------------------------------------------------
@@ -179,16 +137,15 @@ async def _open_drawer_to_scheduling(page: "Page", deployment_id: str) -> None:
     ),
 )
 async def test_drawer_scheduling_edit(
-    scheduling_edit_environment: dict,
-    scheduling_edit_deployment: dict,
+    drawer_deployment: dict,
     session_ui_page: "Page",
     vcluster: dict,
 ) -> None:
     page = session_ui_page
-    client: StyrminClient = scheduling_edit_environment["client"]
-    environment_id = scheduling_edit_environment["environment_id"]
-    deployment_id = scheduling_edit_deployment["deployment_id"]
-    namespace = scheduling_edit_deployment["namespace"]
+    client: StyrminClient = drawer_deployment["client"]
+    environment_id = drawer_deployment["environment_id"]
+    deployment_id = drawer_deployment["deployment_id"]
+    namespace = drawer_deployment["namespace"]
 
     detail = DeploymentDetailPage(page)
     await detail.goto(environment_id=environment_id, deployment_id=deployment_id)
@@ -284,8 +241,7 @@ async def test_drawer_scheduling_edit(
     ),
 )
 async def test_drawer_scheduling_edit_keyboard_only(
-    scheduling_edit_environment: dict,
-    scheduling_edit_deployment: dict,
+    drawer_deployment: dict,
     session_ui_page: "Page",
 ) -> None:
     """Repeat the primary flow with keyboard-only navigation.
@@ -299,9 +255,9 @@ async def test_drawer_scheduling_edit_keyboard_only(
     keyboard-routing-sensitive observable side-effects.
     """
     page = session_ui_page
-    client: StyrminClient = scheduling_edit_environment["client"]
-    environment_id = scheduling_edit_environment["environment_id"]
-    deployment_id = scheduling_edit_deployment["deployment_id"]
+    client: StyrminClient = drawer_deployment["client"]
+    environment_id = drawer_deployment["environment_id"]
+    deployment_id = drawer_deployment["deployment_id"]
 
     detail = DeploymentDetailPage(page)
     await detail.goto(environment_id=environment_id, deployment_id=deployment_id)

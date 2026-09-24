@@ -59,12 +59,11 @@ styrmin-agent:
       # to a sane rate while cutting ~55s off every lifecycle transition.
       - name: STYRMIN_OPERATOR_RECONCILE_INTERVAL
         value: "5"
-  prefect-worker:
-    worker:
-      config:
-        queryInterval: 1
-      extraEnvVarsCMs:
-        - styrmin-config
+      # The agent's embedded Prefect worker polls its work pool at Prefect's
+      # 10s default; every create chains 3 agent flow runs (main, pre-hook,
+      # post-hook), so each start waited ~9s on average.
+      - name: PREFECT_WORKER_QUERY_SECONDS
+        value: "1"
 
 postgresql:
   primary:

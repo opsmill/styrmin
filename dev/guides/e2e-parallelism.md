@@ -72,7 +72,7 @@ Actions UI as the cell that takes longer than its siblings):
    the test's `@pytest.mark.shard_*` marker), or split the shard in half.
 3. Re-run; confirm the new slowest cell is faster than the old one.
 
-Before reaching for any of that, check the two things that dominate a
+Before reaching for any of that, check the three things that dominate a
 shard's wall-clock — reshuffling tests between shards only moves time
 around, it does not remove it:
 
@@ -83,8 +83,12 @@ around, it does not remove it:
   ~60s after Kubernetes has already finished, because the kopf timer is
   the only path that advances a deployment to `Running` or `Deleted`.
   This one value is worth ~50% of the shard.
+- **Is `PREFECT_WORKER_QUERY_SECONDS` reaching the agent pod?** Same
+  file, same `agent.extraEnv`, set to `1`. At Prefect's 10s default
+  every agent flow run (a create chains three) starts ~9s late; the
+  value is worth ~15-25% of a shard.
 - **How many deploy / upgrade / delete cycles does the shard perform?**
-  Each deploy is ~40s and each full delete-to-tombstone ~25-60s, and
+  Each deploy is ~30s and each full delete-to-tombstone ~25-60s, and
   that is irreducible. Cutting cycles (per the read-only tier in
   [`e2e-deployment-sharing.md`](e2e-deployment-sharing.md)) is the only
   other real lever. Environment fixtures are *not* a lever — the
@@ -93,5 +97,5 @@ around, it does not remove it:
 
 See [`dev/knowledge/backend/e2e-testing.md`](../knowledge/backend/e2e-testing.md)
 (§ "Where the wall-clock actually goes") for the measurements behind
-both points, including two environment-sharing optimisations that were
+all three, including two environment-sharing optimisations that were
 measured and rejected.

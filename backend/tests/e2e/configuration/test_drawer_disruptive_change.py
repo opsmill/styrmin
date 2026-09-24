@@ -25,19 +25,18 @@ already cover.
 from __future__ import annotations
 
 import time
-import uuid
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from playwright.async_api import expect
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.graphql._generated.input_types import (
+    DeploymentConfigInput,
     SchedulingInput,
     TolerationInput,
-    UpdateDeploymentInput,
 )
 
-from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.configuration.conftest import DrawerDeployment
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 
 if TYPE_CHECKING:
@@ -48,73 +47,22 @@ pytestmark = [pytest.mark.shard_configuration]
 RECONCILE_TIMEOUT_SECONDS = 480.0
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-async def disruptive_environment(
-    styrmin_resources: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-) -> AsyncGenerator[dict, None]:
-    driver, client = session_scenario_driver
-    cluster_id = styrmin_resources["cluster_id"]
-    env = await driver.create_environment(
-        name=f"drawer-disruptive-{uuid.uuid4().hex[:8]}",
-        cluster_id=cluster_id,
-        config={},
-    )
-    yield {"environment_id": str(env.id), "client": client, "driver": driver}
-
-
-@pytest.fixture(scope="module")
-async def disruptive_deployment(
-    disruptive_environment: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-    simple_app_image: str,  # noqa: ARG001 — builds the image
-    vcluster: dict,
-) -> dict:
-    driver, client = session_scenario_driver
-    deployment = await driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=disruptive_environment["environment_id"],
-        name="drawer-disruptive",
-    )
-    deployment = await driver.wait_for_deployment_running(
-        deployment_id=deployment.id, timeout=RECONCILE_TIMEOUT_SECONDS
-    )
-    # Seed the baseline toleration directly via the SDK rather than going
-    # through ``driver.update_deployment``: the UI scenario driver's
-    # update path drives the legacy Scheduling header button, which was
-    # removed in feature 011's drawer cleanup. The SDK path is the
-    # mutation path the drawer ultimately uses anyway.
-    await client.deployments.update(
-        str(deployment.id),
-        input=UpdateDeploymentInput(
-            scheduling=SchedulingInput(
-                tolerations=[
-                    TolerationInput(
-                        key="dedicated",
-                        operator="EQUAL",
-                        value="batch",
-                        effect="PREFER_NO_SCHEDULE",
-                    )
-                ],
-            ),
+DRAWER_DEPLOYMENT = DrawerDeployment(
+    name="drawer-disruptive",
+    # Baseline toleration the drawer then flips to a disruptive effect.
+    config=DeploymentConfigInput(
+        scheduling=SchedulingInput(
+            tolerations=[
+                TolerationInput(
+                    key="dedicated",
+                    operator="EQUAL",
+                    value="batch",
+                    effect="PREFER_NO_SCHEDULE",
+                )
+            ],
         ),
-    )
-    # Wait for the seed update to converge so the drawer reads the new
-    # baseline rather than the empty pre-seed config.
-    await driver.wait_for_deployment_running(
-        deployment_id=str(deployment.id), timeout=RECONCILE_TIMEOUT_SECONDS
-    )
-    return {
-        "deployment_id": str(deployment.id),
-        "namespace": f"styrmin-{deployment.id}",
-        "kubeconfig_path": vcluster["kubeconfig_path"],
-    }
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -168,14 +116,13 @@ async def _wait_for_persisted_toleration_effect(
     ),
 )
 async def test_drawer_disruptive_toleration_effect_change(
-    disruptive_environment: dict,
-    disruptive_deployment: dict,
+    drawer_deployment: dict,
     session_ui_page: "Page",
 ) -> None:
     page = session_ui_page
-    client: StyrminClient = disruptive_environment["client"]
-    environment_id = disruptive_environment["environment_id"]
-    deployment_id = disruptive_deployment["deployment_id"]
+    client: StyrminClient = drawer_deployment["client"]
+    environment_id = drawer_deployment["environment_id"]
+    deployment_id = drawer_deployment["deployment_id"]
 
     detail = DeploymentDetailPage(page)
     await detail.goto(environment_id=environment_id, deployment_id=deployment_id)

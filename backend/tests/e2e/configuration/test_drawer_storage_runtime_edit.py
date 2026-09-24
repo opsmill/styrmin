@@ -15,14 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import time
-import uuid
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from playwright.async_api import expect
 from styrmin_sdk import StyrminClient
 
-from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.configuration.conftest import DrawerDeployment
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 
 if TYPE_CHECKING:
@@ -33,46 +32,7 @@ pytestmark = [pytest.mark.shard_configuration]
 RECONCILE_TIMEOUT_SECONDS = 480.0
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-async def storage_edit_environment(
-    styrmin_resources: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-) -> AsyncGenerator[dict, None]:
-    driver, client = session_scenario_driver
-    cluster_id = styrmin_resources["cluster_id"]
-    env = await driver.create_environment(
-        name=f"drawer-storage-{uuid.uuid4().hex[:8]}",
-        cluster_id=cluster_id,
-        config={},
-    )
-    yield {"environment_id": str(env.id), "client": client}
-
-
-@pytest.fixture(scope="module")
-async def storage_edit_deployment(
-    storage_edit_environment: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-    simple_app_image: str,  # noqa: ARG001 — builds the image
-) -> dict:
-    driver, _ = session_scenario_driver
-    deployment = await driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=storage_edit_environment["environment_id"],
-        name="drawer-storage",
-    )
-    deployment = await driver.wait_for_deployment_running(
-        deployment_id=deployment.id, timeout=RECONCILE_TIMEOUT_SECONDS
-    )
-    return {
-        "deployment_id": str(deployment.id),
-        "namespace": f"styrmin-{deployment.id}",
-    }
+DRAWER_DEPLOYMENT = DrawerDeployment(name="drawer-storage")
 
 
 # ---------------------------------------------------------------------------
@@ -126,14 +86,13 @@ async def _wait_for_persisted_db_size(
     ),
 )
 async def test_drawer_storage_runtime_edit(
-    storage_edit_environment: dict,
-    storage_edit_deployment: dict,
+    drawer_deployment: dict,
     session_ui_page: "Page",
 ) -> None:
     page = session_ui_page
-    client: StyrminClient = storage_edit_environment["client"]
-    environment_id = storage_edit_environment["environment_id"]
-    deployment_id = storage_edit_deployment["deployment_id"]
+    client: StyrminClient = drawer_deployment["client"]
+    environment_id = drawer_deployment["environment_id"]
+    deployment_id = drawer_deployment["deployment_id"]
 
     # ``dbSize`` is an enum (small / medium / large / xlarge) backed by a
     # shadcn Select trigger — not a free-text input. We pick ``large`` as

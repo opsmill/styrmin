@@ -21,14 +21,14 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from playwright.async_api import expect
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.models import EnvVarInput, UpdateDeploymentInput
 
-from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.configuration.conftest import DrawerDeployment
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 
 if TYPE_CHECKING:
@@ -39,46 +39,7 @@ pytestmark = [pytest.mark.shard_configuration]
 RECONCILE_TIMEOUT_SECONDS = 480.0
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-async def multi_section_environment(
-    styrmin_resources: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-) -> AsyncGenerator[dict, None]:
-    driver, client = session_scenario_driver
-    cluster_id = styrmin_resources["cluster_id"]
-    env = await driver.create_environment(
-        name=f"drawer-multi-{uuid.uuid4().hex[:8]}",
-        cluster_id=cluster_id,
-        config={},
-    )
-    yield {"environment_id": str(env.id), "client": client}
-
-
-@pytest.fixture(scope="module")
-async def multi_section_deployment(
-    multi_section_environment: dict,
-    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
-    simple_app_image: str,  # noqa: ARG001 — builds the image
-) -> dict:
-    driver, _ = session_scenario_driver
-    deployment = await driver.create_deployment(
-        driver="simple-app",
-        version="0.1.0",
-        environment_id=multi_section_environment["environment_id"],
-        name="drawer-multi",
-    )
-    deployment = await driver.wait_for_deployment_running(
-        deployment_id=deployment.id, timeout=RECONCILE_TIMEOUT_SECONDS
-    )
-    return {
-        "deployment_id": str(deployment.id),
-        "namespace": f"styrmin-{deployment.id}",
-    }
+DRAWER_DEPLOYMENT = DrawerDeployment(name="drawer-multi")
 
 
 # ---------------------------------------------------------------------------
@@ -150,14 +111,13 @@ def _has_env_var(cfg: dict, name: str, value: str) -> bool:
     ),
 )
 async def test_drawer_multi_section_edit(
-    multi_section_environment: dict,
-    multi_section_deployment: dict,
+    drawer_deployment: dict,
     session_ui_page: "Page",
 ) -> None:
     page = session_ui_page
-    client: StyrminClient = multi_section_environment["client"]
-    environment_id = multi_section_environment["environment_id"]
-    deployment_id = multi_section_deployment["deployment_id"]
+    client: StyrminClient = drawer_deployment["client"]
+    environment_id = drawer_deployment["environment_id"]
+    deployment_id = drawer_deployment["deployment_id"]
 
     new_cpu = "175m"
     new_env_name = "MULTI_SECTION_FLAG"
@@ -246,14 +206,13 @@ async def test_drawer_multi_section_edit(
     ),
 )
 async def test_drawer_concurrent_edit_surfaces_conflict_panel(
-    multi_section_environment: dict,
-    multi_section_deployment: dict,
+    drawer_deployment: dict,
     session_ui_page: "Page",
 ) -> None:
     page = session_ui_page
-    client: StyrminClient = multi_section_environment["client"]
-    environment_id = multi_section_environment["environment_id"]
-    deployment_id = multi_section_deployment["deployment_id"]
+    client: StyrminClient = drawer_deployment["client"]
+    environment_id = drawer_deployment["environment_id"]
+    deployment_id = drawer_deployment["deployment_id"]
 
     # Per-test unique value so re-runs against a session-scoped resource
     # graph don't collide with prior runs.
