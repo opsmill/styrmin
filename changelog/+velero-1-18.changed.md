@@ -1,1 +1,0 @@
-Changed the `velero` subchart from 8.3.0 to 12.1.0 (Velero 1.15.2 to 1.18.1) and `velero-plugin-for-aws` from v1.11.1 to v1.14.2. On `helm upgrade` the chart's CRD job applies the new Velero CRDs and the Velero server and node-agent pods restart once.

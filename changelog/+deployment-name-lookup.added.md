@@ -1,1 +1,0 @@
-Added a `deployment(name, environmentId)` GraphQL query that resolves a non-internal, non-soft-deleted deployment by its natural identity, exposed in the SDK as `client.deployments.get_by_name(name, environment_id=...)`. The existing `deployment(deploymentId)` lookup is unchanged.
