@@ -33,6 +33,12 @@ from styrmin_backend.agent.service.kubernetes.primitives import (
 from styrmin_backend.agent.tasks.utils import API_TOKEN_ENV
 from styrmin_backend.context.models.contexts import GlobalContext
 
+# Seconds a finished ``execute_commands`` Job stays in the deployment namespace
+# before the Kubernetes TTL-after-finished controller deletes it together with
+# its pod. Long enough to read the logs of a failed command, short enough that
+# Jobs do not pile up across hooks and upgrades (#374).
+JOB_TTL_SECONDS_AFTER_FINISHED = 3600
+
 _GRAPHQL_DIR = Path(__file__).resolve().parent
 
 
@@ -220,6 +226,12 @@ async def execute_commands(
     """
     Executes a list of commands as kubernetes job with the given context.
 
+    Every call creates a new Job named ``<release_reference>-job-<suffix>`` in the
+    deployment namespace and waits for it to finish, so an action can call this
+    primitive as many times as it needs -- across hooks and across upgrades of the
+    same deployment. Finished Jobs are garbage-collected by Kubernetes after
+    ``JOB_TTL_SECONDS_AFTER_FINISHED`` seconds.
+
     Args:
         commands (list[str]): A list of commands to execute.
         image (str): The container image to use for the job.
@@ -267,16 +279,20 @@ async def execute_commands(
         "apiVersion": "batch/v1",
         "kind": "Job",
         "metadata": {
-            "name": f"{context.instance.release_reference}-job",
+            # ``generateName`` lets the API server append a unique suffix, so a
+            # Job left over from a previous call (or a previous upgrade of the
+            # same deployment) can never collide with this one (#374).
+            "generateName": f"{context.instance.release_reference}-job-",
             "namespace": context.instance.namespace,
         },
         "spec": {
+            "ttlSecondsAfterFinished": JOB_TTL_SECONDS_AFTER_FINISHED,
             "template": {
                 "spec": {
                     "containers": [container_spec],
                     "restartPolicy": "Never",
                 }
-            }
+            },
         },
     }
 

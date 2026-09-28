@@ -385,7 +385,9 @@ await start_components(components: list[str], context: GlobalContext) -> None
 
 #### `execute_commands`
 
-Executes shell commands as a Kubernetes job.
+Executes shell commands as a Kubernetes Job in the deployment namespace and waits for it to finish.
+
+Every call creates a new Job named `<release_reference>-job-<suffix>`, so an action can call the primitive as many times as it needs, across hooks and across upgrades of the same deployment. Finished Jobs are deleted by Kubernetes one hour after they complete (`ttlSecondsAfterFinished`), which leaves time to read the logs of a failed command without letting Jobs pile up.
 
 ```python
 await execute_commands(

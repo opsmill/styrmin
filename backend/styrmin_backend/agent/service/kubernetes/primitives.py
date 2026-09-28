@@ -14,7 +14,7 @@ from kubernetes_asyncio.client import (
 from kubernetes_asyncio.client.api_client import ApiClient, ApiException
 
 from .dependency import get_api_client
-from .exceptions import CustomResourceNotFound, JobFailedError
+from .exceptions import CustomResourceNotFound, JobAlreadyExistsError, JobFailedError
 
 
 def _prune_none(value: Any) -> Any:
@@ -536,21 +536,34 @@ async def run_job(
     body: Any,
     client: ApiClient = Depends(get_api_client),
 ) -> None:
+    """Create the Job described by ``body`` and wait until it finishes.
+
+    ``body["metadata"]`` may carry either a fixed ``name`` or a ``generateName``
+    prefix. The name is read back from the API server's create response, so
+    callers can let Kubernetes make every Job unique instead of reusing one
+    deterministic name that collides with a finished Job (#374).
+
+    Raises:
+        JobAlreadyExistsError: A Job with the requested name already exists.
+        JobFailedError: The Job reached its failure state.
+    """
     batch_api = kubeclient.BatchV1Api(client)
-    # core_api = kubeclient.CoreV1Api(client)
-    job_name = body["metadata"]["name"]
+    metadata = body["metadata"]
+    requested_name = metadata.get("name") or metadata.get("generateName")
 
     try:
         # Create the job
-        await batch_api.create_namespaced_job(
+        created: V1Job = await batch_api.create_namespaced_job(
             body=body, namespace=namespace, pretty="pretty"
         )
     except ApiException as exc:
         if exc.status == status.HTTP_409_CONFLICT:
-            raise CustomResourceNotFound(
-                f"Job {job_name} already exists in namespace {namespace}"
-            )
+            raise JobAlreadyExistsError(
+                f"Job {requested_name} already exists in namespace {namespace}"
+            ) from exc
         raise
+
+    job_name = created.metadata.name
 
     # Wait for the job to complete
     while True:
@@ -562,5 +575,5 @@ async def run_job(
             break
         if job.status.failed:
             # Job failed
-            raise RuntimeError(f"Job {job_name} failed in namespace {namespace}")
+            raise JobFailedError(f"Job {job_name} failed in namespace {namespace}")
         await asyncio.sleep(5)  # Poll every 5 seconds
