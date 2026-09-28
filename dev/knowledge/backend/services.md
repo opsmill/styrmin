@@ -147,7 +147,7 @@ Manages Kubernetes cluster definitions. Only one cluster may exist at a time.
 | `resolve_cluster(uow, cluster_id?, cluster_name?)` | Resolve cluster by ID or name (exactly one required) |
 | `get_cluster(cluster_id, uow)` | Retrieve cluster by ID |
 | `get_clusters(uow)` | List all clusters |
-| `delete_cluster(cluster_id, uow)` | Delete a cluster |
+| `delete_cluster(cluster_id, uow)` | Delete a cluster (raises `ClusterInUseError` while it still has environments) |
 
 ### Environments Service (`environments.py`)
 

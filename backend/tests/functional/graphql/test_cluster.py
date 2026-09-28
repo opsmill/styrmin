@@ -56,6 +56,55 @@ async def test_delete_cluster_removes_row(
 
 
 @pytest.mark.asyncio
+async def test_delete_cluster_with_environments_is_refused_as_in_use(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """A cluster that still has environments is refused with ``IN_USE`` (#366).
+
+    Deleting it used to make SQLAlchemy null out ``environment.cluster_id``,
+    a ``NOT NULL`` column, and the resulting ``IntegrityError`` surfaced as
+    ``INTERNAL_ERROR``.
+    """
+    cluster = Cluster(name="busy-cluster", config=VALID_CLUSTER_CONFIG)
+    session.add(cluster)
+    await session.commit()
+    cluster_id = cluster.id
+    session.add_all(
+        [
+            Environment(name="env-b", cluster_id=cluster_id),
+            Environment(name="env-a", cluster_id=cluster_id),
+        ]
+    )
+    await session.commit()
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("delete_cluster"),
+            "variables": {"clusterId": str(cluster_id)},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    error = payload["errors"][0]
+    assert error["extensions"]["code"] == "IN_USE", payload
+    assert error["extensions"]["environment_names"] == ["env-a", "env-b"], payload
+    assert "env-a, env-b" in error["message"], payload
+
+    # The refusal leaves the cluster and its environments untouched.
+    session.expire_all()
+    assert await session.get(Cluster, cluster_id) is not None
+    environments = (
+        await session.exec(
+            select(Environment).where(Environment.cluster_id == cluster_id)
+        )
+    ).all()
+    assert sorted(env.name for env in environments) == ["env-a", "env-b"]
+
+
+@pytest.mark.asyncio
 async def test_clusters_projects_seeded_rows(
     client: AsyncClient, session: AsyncSession
 ) -> None:

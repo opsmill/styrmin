@@ -25,6 +25,8 @@ What it covers:
   in the same environment (regression: tombstones' ``DeployedService``
   rows used to hold the name, failing the redeploy with
   ``ServiceNameConflictError``).
+* Deleting the cluster is refused with a typed ``IN_USE`` error while it
+  still has environments (regression #366: surfaced as ``INTERNAL_ERROR``).
 
 Out of scope for this test:
 
@@ -48,7 +50,7 @@ from kubernetes_asyncio import client as kubeclient
 from kubernetes_asyncio import config as k8s_config
 from kubernetes_asyncio.client.api_client import ApiException
 from styrmin_sdk import StyrminClient
-from styrmin_sdk.exceptions import ResourceNotFoundError
+from styrmin_sdk.exceptions import OperationFailedError, ResourceNotFoundError
 
 from tests.e2e.drivers import ScenarioDriver
 
@@ -129,7 +131,7 @@ async def test_delete_deployment_api(
     simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ) -> None:
-    """End-to-end deletion: deploy → backup → delete → tombstone → redeploy."""
+    """End-to-end deletion: deploy → backup → delete → tombstone → redeploy → cluster refusal."""
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
@@ -250,3 +252,14 @@ async def test_delete_deployment_api(
         deployment_id=redeployed.id, timeout=300.0
     )
     assert redeployed.id != deployment_id, "Redeploy must create a distinct deployment"
+
+    # 11. Deleting the cluster is refused with a typed IN_USE error, not
+    # INTERNAL_ERROR, while it still has environments (#366). A refusal
+    # changes nothing, so the shared session environment and cluster stay
+    # intact for the rest of the shard.
+    with pytest.raises(OperationFailedError) as cluster_refusal:
+        await client.clusters.delete(cluster_id=styrmin_resources["cluster_id"])
+    assert cluster_refusal.value.typename == "IN_USE", (
+        f"deleteCluster must be refused as IN_USE; got "
+        f"{cluster_refusal.value.typename!r}: {cluster_refusal.value}"
+    )

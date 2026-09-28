@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pytest
 
-from styrmin_backend.db.models import Cluster
+from styrmin_backend.db.models import Cluster, Environment
 from styrmin_backend.services.clusters import (
     create_cluster,
     delete_cluster,
@@ -12,6 +12,7 @@ from styrmin_backend.services.clusters import (
 )
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
+    ClusterInUseError,
     ClusterLimitReachedError,
     ClusterNotFoundError,
     InvalidContextError,
@@ -126,6 +127,28 @@ async def test_delete_cluster_that_does_not_exist(uow: FakeUnitOfWork):
     with pytest.raises(ClusterNotFoundError):
         await delete_cluster(cluster_id=uuid4(), uow=uow)
     assert not uow.committed
+
+
+async def test_delete_cluster_with_environments_is_refused(
+    uow: FakeUnitOfWork,
+    fake_cluster: Cluster,
+    fake_cluster_repository: FakeClusterRepository,
+):
+    fake_cluster.environments = [
+        Environment(name="env-b", cluster_id=fake_cluster.id),
+        Environment(name="env-a", cluster_id=fake_cluster.id),
+    ]
+
+    with pytest.raises(ClusterInUseError) as exc_info:
+        await delete_cluster(cluster_id=fake_cluster.id, uow=uow)
+
+    assert exc_info.value.error_metadata == {"environment_names": ["env-a", "env-b"]}
+    assert str(exc_info.value) == (
+        "Cluster 'test_cluster' still has environments: env-a, env-b. "
+        "Delete them before deleting the cluster."
+    )
+    assert not uow.committed
+    assert fake_cluster_repository.models == [fake_cluster]
 
 
 async def test_create_cluster_raises_error_when_cluster_exists(

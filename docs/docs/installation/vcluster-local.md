@@ -391,9 +391,11 @@ to rebuild the image. The vCluster reads Docker's image cache directly,
 so a successful local build is sufficient — no registry push needed.
 
 **Bootstrap step says "Cluster already exists".** A previous bootstrap
-run got that far. Either delete the existing record (via the UI or
-`styrminctl clusters delete`) or, easier, run `uv run invoke reset` to
-start over from a clean vCluster.
+run got that far. The easiest fix is `uv run invoke reset`, which starts
+over from a clean vCluster. `styrminctl clusters delete` removes the
+existing record only while the cluster has no environments: once the
+bootstrap has created one, the delete is refused with an error that
+lists them.
 
 **Login fails with "invalid credentials".** Confirm the
 `styrmin.adminPassword` in `dev/local/demo-values.yaml` matches the one
