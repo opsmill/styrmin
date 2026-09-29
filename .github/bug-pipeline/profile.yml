@@ -29,5 +29,8 @@ profile:
     - cd frontend && pnpm run lint
   authoritative_checks:
     - Unit Tests
+    - Frontend Tests
+    - CLI Unit Tests
+    - Python SDK Unit Tests
   docs_pointers:
     - AGENTS.md
