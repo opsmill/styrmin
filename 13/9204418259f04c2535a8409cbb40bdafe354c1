@@ -1,0 +1,21 @@
+dev/guides/bug-pipeline.md
+  s_dba8b04fb2b2f4::t_ae796dce188b7d 98-103,110-111
+.github/bug-pipeline/profile.yml
+  s_dba8b04fb2b2f4::t_ae796dce188b7d 32-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "139204418259f04c2535a8409cbb40bdafe354c1",
+  "prompts": {},
+  "sessions": {
+    "s_dba8b04fb2b2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfd76eed-da7b-48c8-ae3d-6e8e0d777605",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Pol Michel <polmichel29@gmail.com>"
+    }
+  }
+}
