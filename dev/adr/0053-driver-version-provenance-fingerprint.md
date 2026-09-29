@@ -92,6 +92,12 @@ A `uq_application_driver_version_identity` unique index over the identity column
 backs the lookup. Registration of Prefect actions is keyed on the fingerprint's
 short prefix, so a historical deployment resolves its actions to the bytes it
 shipped with rather than to whatever currently occupies that version label.
+For git rows this holds end to end (#375): the action deployment's pull step
+pins `commit_sha` to `source_commit_sha`, and the short fingerprint is part of
+the Prefect deployment *name* — Prefect upserts on `(flow, name)`, so a shared
+name would let a reload overwrite the earlier version's deployment. Rows
+registered before #375 keep their branch-tip deployment: a repeated load is a
+no-op, so nothing re-registers them.
 
 ### 5. Cascade on children, deliberately not on deployments
 

@@ -18,6 +18,10 @@ git repo (helm location already rewritten to the in-cluster chart server),
 bumping ``spec.version`` "1" → "2" with the supported range unchanged, and
 pushing the commit as a new branch — a distinct provenance fingerprint per
 spec 013, hence a second ApplicationDriverVersion row on the same driver.
+
+Loading that second build must not disturb the first one's actions: each
+build keeps its own Prefect deployments, pinned to the commit it was loaded
+from (#375).
 """
 
 from __future__ import annotations
@@ -30,8 +34,10 @@ import pytest
 import yaml
 from dulwich import porcelain
 from kr8s.asyncio.objects import Service as AsyncService
+from prefect.client.orchestration import PrefectClient
+from prefect.client.schemas.filters import DeploymentFilter, DeploymentFilterTags
 from styrmin_sdk import StyrminClient
-from tests.e2e.conftest import _portforward
+from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 
 pytestmark = [
@@ -82,6 +88,31 @@ async def _publish_driver_v2(
     return branch
 
 
+async def _assert_actions_pinned(*, vcluster: dict, commits: list[str]) -> None:
+    """Each commit has its own action deployments, checking out that commit."""
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+    prefect_service = await AsyncService.get(
+        "prefect-server", namespace="styrmin", api=kr8s_api
+    )
+    async with _portforward(prefect_service, remote_port=4200) as port:
+        prefect_url = f"http://localhost:{port}/api"
+        await _wait_for_http(f"{prefect_url}/health", timeout=60.0)
+        async with PrefectClient(api=prefect_url) as prefect:
+            for commit in commits:
+                deployments = await prefect.read_deployments(
+                    deployment_filter=DeploymentFilter(
+                        tags=DeploymentFilterTags(all_=[f"fingerprint/{commit[:7]}"])
+                    )
+                )
+                assert deployments, f"no action deployment for commit {commit[:7]}"
+                for deployment in deployments:
+                    clone = deployment.pull_steps[0][
+                        "prefect.deployments.steps.git_clone"
+                    ]
+                    assert clone.get("commit_sha") == commit, deployment.name
+                    assert not clone.get("branch"), deployment.name
+
+
 @pytest.mark.ci
 async def test_driver_version_reselection(
     scenario_driver: ScenarioDriver,
@@ -103,6 +134,9 @@ async def test_driver_version_reselection(
     original_binding = str(deployment.application_driver_version_id)
     app_version = deployment.application_version
     assert app_version is not None
+    assert deployment.application_driver_version is not None
+    original_commit = deployment.application_driver_version.source_commit_sha
+    assert original_commit is not None
 
     # Publish driver version "2" with the same supported range and load it.
     branch = await _publish_driver_v2(vcluster=vcluster, tmp_path=tmp_path)
@@ -121,6 +155,15 @@ async def test_driver_version_reselection(
     deployment = await client.deployments.get(deployment_id)
     assert str(deployment.application_driver_version_id) == new_version.id
     assert deployment.application_version == app_version
+
+    # Loading the new build left the original's actions in place, and neither
+    # build's actions follow the branch tip.
+    assert deployment.application_driver_version is not None
+    new_commit = deployment.application_driver_version.source_commit_sha
+    assert new_commit is not None
+    await _assert_actions_pinned(
+        vcluster=vcluster, commits=[original_commit, new_commit]
+    )
 
     # 2) Explicit pin: move back onto the original build even though a newer
     # matching build exists.

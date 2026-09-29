@@ -167,7 +167,10 @@ async def load_application_driver_from_object(
                 token=driver_object.source.token,
             )
 
-            builder = ActionsWorkflowBuilder(source=driver_object.source)
+            builder = ActionsWorkflowBuilder(
+                source=driver_object.source,
+                commit_sha=driver_object.source_commit_sha,
+            )
             if driver_object.driver_spec.spec.actions:
                 for action in driver_object.driver_spec.spec.actions:
                     workflow = builder.build_user_action_workflow_definition(

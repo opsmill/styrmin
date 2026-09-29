@@ -97,10 +97,14 @@ class WorkflowDefinition(BaseModel, ABC):
     cron: str | None = None
     tags: list[str] = Field(default_factory=list)
     image: str | None = None
+    # Prefect upserts deployments on ``(flow, name)``: workflows that must
+    # coexist under one flow name (user actions, one per driver version) set
+    # a distinct deployment name; the rest reuse ``name``.
+    deployment_name: str | None = None
 
     @property
     def full_name(self) -> str:
-        return f"{self.name}/{self.name}"
+        return f"{self.name}/{self.deployment_name or self.name}"
 
     @property
     def entrypoint(self) -> str:
@@ -108,7 +112,7 @@ class WorkflowDefinition(BaseModel, ABC):
 
     async def to_deployment(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "name": self.name,
+            "name": self.deployment_name or self.name,
             "entrypoint": self.entrypoint,
             "tags": self.get_tags(),
         }
@@ -151,6 +155,21 @@ class GitSourceWorkflowDefinition(WorkflowDefinition):
     token: str
     namespace: str
     set_directory: str | None = None
+    # Commit to pull instead of the branch tip (ADR-053, #375).
+    commit_sha: str | None = None
+
+    @property
+    def clone_directory_name(self) -> str:
+        """Directory the pull step clones into.
+
+        Mirrors Prefect's ``<repo>-<branch>`` default. A pinned commit gets
+        its own ``<repo>-<sha>`` directory, so a reused worker directory can
+        never serve another commit's checkout.
+        """
+        repository_name = get_repository_name(self.repository)
+        if self.commit_sha:
+            return f"{repository_name}-{self.commit_sha[:7]}"
+        return f"{repository_name}-{self.branch.replace('/', '-')}"
 
     async def to_deployment(self) -> dict[str, Any]:
         data = await super().to_deployment()
@@ -158,9 +177,12 @@ class GitSourceWorkflowDefinition(WorkflowDefinition):
         credentials = await GitHubCredentials.load(
             name=f"{self.namespace}-github-token"
         )
+        # Prefect refuses ``branch`` alongside ``commit_sha``.
         storage = GitRepository(
             url=self.repository,
-            branch=self.branch,
+            branch=None if self.commit_sha else self.branch,
+            commit_sha=self.commit_sha,
+            name=self.clone_directory_name,
             credentials=credentials,
         )
         data["pull_steps"] = [storage.to_pull_step()]
@@ -168,8 +190,7 @@ class GitSourceWorkflowDefinition(WorkflowDefinition):
             data["pull_steps"].append(
                 set_directory_pull_step(
                     directory=self.set_directory,
-                    repository_name=get_repository_name(self.repository),
-                    branch=self.branch,
+                    clone_directory_name=self.clone_directory_name,
                 )
             )
 

@@ -7,6 +7,7 @@ from prefect.client.orchestration import PrefectClient, get_client
 from prefect.client.schemas.actions import WorkPoolCreate
 from prefect.client.schemas.filters import DeploymentFilter, DeploymentFilterTags
 from prefect.client.schemas.objects import StateType
+from prefect.client.schemas.sorting import DeploymentSort
 from prefect.events.actions import ChangeFlowRunState
 from prefect.events.schemas.automations import AutomationCore, EventTrigger, Posture
 from prefect.events.schemas.events import ResourceSpecification
@@ -80,6 +81,11 @@ class PrefectManager:
         lookups in :meth:`get_user_action_deployment_id` must pass the same
         fingerprint so older instances keep resolving to their original
         workflow.
+
+        The fingerprint also names the Prefect deployment
+        (``<workflow>@<fingerprint>``): Prefect upserts on ``(flow, name)``, so
+        a shared name would let a reload overwrite the earlier version's
+        deployment (#375).
         """
         # Add tags to the workflow
         workflow.tags.append(f"application/{application}")
@@ -88,6 +94,7 @@ class PrefectManager:
         workflow.tags.append(f"mode/{mode}")
         if fingerprint:
             workflow.tags.append(f"fingerprint/{fingerprint}")
+            workflow.deployment_name = f"{workflow.name}@{fingerprint}"
         async with get_client(sync_client=False) as client:
             await workflow.save(
                 client=client,
@@ -120,10 +127,13 @@ class PrefectManager:
         if fingerprint:
             tags.append(f"fingerprint/{fingerprint}")
         async with get_client() as client:
+            # Newest first: a pinned registration must outrank an older
+            # branch-tip deployment carrying the same tags.
             deployments = await client.read_deployments(
                 deployment_filter=DeploymentFilter(
                     tags=DeploymentFilterTags(all_=tags)
                 ),
+                sort=DeploymentSort.CREATED_DESC,
             )
             if not deployments:
                 return None
