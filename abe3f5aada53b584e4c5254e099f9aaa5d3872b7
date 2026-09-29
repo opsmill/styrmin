@@ -1,0 +1,58 @@
+backend/styrmin_backend/workflows/models.py
+  s_31274c806862b2::t_28038bb3566df4 180,183-185
+  s_31274c806862b2::t_9355ad17d5120d 100-102
+  s_31274c806862b2::t_fff4dbfd1b3ced 158-167
+  s_31274c806862b2::t_aa440a1d15ef7e 103
+  s_31274c806862b2::t_2c3eb515103672 168-170
+  s_31274c806862b2::t_807a203a46211b 107,115,171-172,193
+backend/tests/e2e/test_driver_version_reselection.py
+  s_31274c806862b2::t_5369b7e4559a69 91-115
+  s_31274c806862b2::t_6d22f30ef5a99e 137-139
+  s_31274c806862b2::t_902a473846e741 21-24,37-38,40
+  s_31274c806862b2::t_fa9f572b484558 159-167
+backend/tests/unit/workflows/test_git_source_commit_pinning.py
+  s_31274c806862b2::t_a80be3aa18dc5f 3-7
+  s_31274c806862b2::t_cbc49e629c046a 1-2,8-164
+changelog/375.fixed.md
+  s_31274c806862b2::t_326a267dd26c1a 1
+dev/adr/0053-driver-version-provenance-fingerprint.md
+  s_31274c806862b2::t_326a267dd26c1a 96-100
+  s_31274c806862b2::t_8f588227e5248e 95
+backend/styrmin_backend/workflows/manager.py
+  s_31274c806862b2::t_9f1991eda92459 130-131
+  s_31274c806862b2::t_60b138d4028a6f 85-88
+  s_31274c806862b2::t_b5a11ce9017f8a 84
+  s_31274c806862b2::t_4bf37194bb221d 10,97,136
+docs/docs/drivers/loading-drivers.md
+  s_31274c806862b2::t_326a267dd26c1a 128-132
+  s_31274c806862b2::t_9262ce471fb1a3 127,133
+dev/guides/driver-iteration.md
+  s_31274c806862b2::t_326a267dd26c1a 98-104
+  s_31274c806862b2::t_0e396ad66319f9 105
+backend/styrmin_backend/services/user.py
+  s_31274c806862b2::t_934a90b0145a0c 22
+  s_31274c806862b2::t_492dc89c524cb1 23
+  s_31274c806862b2::t_be7e7d430a5b40 20,36
+backend/styrmin_backend/services/applications.py
+  s_31274c806862b2::t_8ae13e1ede3ff6 170-173
+backend/styrmin_backend/workflows/utils.py
+  s_31274c806862b2::t_47fbf38509086d 62,67-69,77
+backend/tests/unit/workflows/test_user_action_registration.py
+  s_31274c806862b2::t_0eb67ea1be6abb 1-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "abe3f5aada53b584e4c5254e099f9aaa5d3872b7",
+  "prompts": {},
+  "sessions": {
+    "s_31274c806862b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "67ff7fcb-fa41-4759-a28f-43cad86afbe8",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Simon AURA--SCUSSEL <simon@opsmill.com>"
+    }
+  }
+}

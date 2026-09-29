@@ -1,0 +1,14 @@
+backend/tests/functional/graphql/test_user_group_id_validation.py
+  h_cd48b1f80f2aa5 1-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "12146f04c220422608bfd8232acf830f6cca2bab",
+  "prompts": {},
+  "humans": {
+    "h_cd48b1f80f2aa5": {
+      "author": "Simon AURA--SCUSSEL <simon@opsmill.com>"
+    }
+  }
+}

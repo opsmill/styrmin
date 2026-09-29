@@ -1,0 +1,25 @@
+.github/workflows/publish.yml
+  s_6804202d5a20d7::t_835f8f4e891ad2 38,59,82
+  s_6804202d5a20d7::t_2db9d42d4e30dc 53,72,95
+.github/workflows/ci.yml
+  s_6804202d5a20d7::t_4c40ca3f09c847 25,46,59
+  s_6804202d5a20d7::t_f84fa53b712895 39-41
+  s_6804202d5a20d7::t_b8573568ae9602 53-54
+  s_6804202d5a20d7::t_eacbdf4e39d10c 70-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "79395f9c99d215dd8185091e8204312f2f0bc417",
+  "prompts": {},
+  "sessions": {
+    "s_6804202d5a20d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dbfa3949-cc7c-49af-9280-e6547f215d8f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Benoit Kohler <bkohler@mbpbenoitkohler.tailc018d.ts.net>"
+    }
+  }
+}
