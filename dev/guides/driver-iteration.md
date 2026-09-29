@@ -97,8 +97,9 @@ The provider lives in
 
 The SHA is also what the driver's actions run: each action's Prefect
 deployment pins `commit_sha` to the row's `source_commit_sha`, and its name
-carries the short fingerprint (`User Action: <name>@<short>`) so a reload at
-a newer commit registers alongside the earlier version. A push to the branch
+carries the driver and the short fingerprint
+(`User Action: <name> (<driver>@<short>)`) so a reload at a newer commit, or
+another driver declaring the same action, registers alongside it. A push to the branch
 never changes what an existing deployment runs — load the new commit and
 upgrade the deployment to move it. Rows loaded before this shipped keep
 following the branch tip until a new commit is loaded.
