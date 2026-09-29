@@ -95,14 +95,20 @@ The interactive skills `.agents/skills/bug-{analyze,tdd,fix}` remain — they ar
 `.github/bug-pipeline/profile.yml` is composed from the central `compose.py base python-uv node-pnpm`, with these styrmin-specific values:
 
 - `base_branch: develop` — the branch pipeline PRs target.
-- `authoritative_checks: [Unit Tests]` — the backend pytest CI job (`unit-tests` in `ci.yml`, surfaced as the **Unit Tests** check) that proves fail→pass.
+- `authoritative_checks: [Unit Tests, Frontend Tests, CLI Unit Tests, Python SDK Unit Tests]` —
+  the four per-suite CI jobs that prove fail→pass. Each covers a disjoint tree, so the
+  authoritative check for a given bug is the one whose suite holds the replication test:
+  **Unit Tests** for `backend/tests`, **Frontend Tests** for vitest under `frontend/`,
+  **CLI Unit Tests** for `cli/tests`, **Python SDK Unit Tests** for `python_sdk/tests`.
+  The other three stay green throughout and carry no signal for that bug.
 - `setup` / `runners` / `format` / `lint` — styrmin's real invocations (`uv sync`, `uv run invoke format|lint`, and the `cd frontend && pnpm …` tasks) that the local test/fix agents run.
 
 ## Troubleshooting
 
 - **Command doesn't fire** — the comment's first token must be exactly the command (`/bug-tdd`, not `/bug-tddx` or `> /bug-tdd`), the actor must have write access, and the issue/PR must carry `state/ai-pipeline-ready`.
 - **Worker stops immediately / can't read the issue** — confirm the `GH_AW_GITHUB_APPROVAL_LABELS` variable is set (see Prerequisites).
-- **`Unit Tests` is red after `/bug-tdd`** — that is the expected signal on a test-only PR (the bug reproduces). It should go green after `/bug-fix`.
+- **The authoritative check is red after `/bug-tdd`** — that is the expected signal on a test-only PR (the bug reproduces). It should go green after `/bug-fix`.
+- **Every check stayed green after `/bug-tdd`** — the replication test doesn't reproduce the bug, or it landed in a suite no listed check runs. Don't read it as approval.
 - **Reviewer didn't run** — it fires on `check_suite: completed` for `ai-bug-pipeline-*` branches; confirm CI actually concluded on the PR.
 - **A `state/needs-human-*` label appeared** — the stage stopped and needs a human; read the accompanying comment for what blocked it.
 
