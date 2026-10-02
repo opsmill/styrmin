@@ -194,9 +194,9 @@ component that lost its container.
 - [X] T060 [P] Update `CONTEXT.md`: keep the drafted **Component container** entry, point **Component overrides** at post-render patches for env vars, and sweep "operator" → "user" for humans in touched entries.
 - [X] T061 [P] Add towncrier fragments: `changelog/385.removed.md` (the `component_env_vars` filter; deployments on unmigrated driver versions fail rendering until upgraded) and `changelog/385.changed.md` (env vars injected by post-render into the component container; chart env defaults preserved; HelmRelease spec replaced on update) via `uv run towncrier create -c "..." 385.<type>.md`; follow `dev/guidelines/changelog.md`.
 - [X] T062 Verify `dev/knowledge/architecture.md` and `docs/docs/concepts-and-architecture/` contain no env var injection statement made stale by this change; update any found.
-- [ ] T063 Run `uv run invoke format lint`, `uv run invoke validate-graphql`, `uv run invoke test`, `cd frontend && pnpm test && pnpm lint`, and `cd docs && pnpm build`; fix every failure.
-- [ ] T064 Run the full `backend/tests/e2e/test_deployment_env_vars.py` module (`sleep infinity | uv run pytest backend/tests/e2e/test_deployment_env_vars.py -v -s --pdb 2>&1 | tee /tmp/env-vars-module.log`) to PASS, plus any other E2E module that deploys a migrated driver and was touched; complete `specs/017-post-render-env-vars/e2e-evidence.md` with the five constitution fields per test.
-- [ ] T065 Walk quickstart.md §1–§7 and correct any step that drifted from the implementation.
+- [X] T063 Run `uv run invoke format lint`, `uv run invoke validate-graphql`, `uv run invoke test`, `cd frontend && pnpm test && pnpm lint`, and `cd docs && pnpm build`; fix every failure.
+- [X] T064 Run the full `backend/tests/e2e/test_deployment_env_vars.py` module (`sleep infinity | uv run pytest backend/tests/e2e/test_deployment_env_vars.py -v -s --pdb 2>&1 | tee /tmp/env-vars-module.log`) to PASS, plus any other E2E module that deploys a migrated driver and was touched; complete `specs/017-post-render-env-vars/e2e-evidence.md` with the five constitution fields per test.
+- [X] T065 Walk quickstart.md §1–§7 and correct any step that drifted from the implementation.
 
 ---
 
