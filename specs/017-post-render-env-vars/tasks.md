@@ -89,13 +89,13 @@ without a container are skipped silently (FR-004).
 
 ### Tests for User Story 2
 
-- [ ] T022 [P] [US2] Add failing cases to `backend/tests/unit/services/env_vars/test_patch_builder.py`: a context with env-scope `LOG_LEVEL=info`, deployment-scope `LOG_LEVEL=warn`, and component-scope `LOG_LEVEL=debug` on one of two contained components → that component's patch carries `debug`, the other's `warn`; a mixed driver (one component with a container, one without) given a deployment-scope var → patches for the first only, no error (US2 Sc.1–3, FR-004).
+- [X] T022 [P] [US2] Add failing cases to `backend/tests/unit/services/env_vars/test_patch_builder.py`: a context with env-scope `LOG_LEVEL=info`, deployment-scope `LOG_LEVEL=warn`, and component-scope `LOG_LEVEL=debug` on one of two contained components → that component's patch carries `debug`, the other's `warn`; a mixed driver (one component with a container, one without) given a deployment-scope var → patches for the first only, no error (US2 Sc.1–3, FR-004).
 
 ### Implementation for User Story 2
 
-- [ ] T023 [US2] Confirm T015 satisfies T022 without changes (resolution already merges env → deployment → component into `ComponentContext.env_vars`); fix the builder if a case fails.
-- [ ] T024 [US2] Update `test_us2_environment_level_env_var_propagates_to_all_deployments` and `test_us3_per_component_env_var_overrides_deployment_level` in `backend/tests/e2e/test_deployment_env_vars.py`: replace comments/docstrings that describe values-template (`extraEnv`) consumption with post-render injection; keep assertions, narrowing "every container" assertions to the component containers (`simple-app`, `postgresql`).
-- [ ] T025 [US2] Run `sleep infinity | uv run pytest backend/tests/e2e/test_deployment_env_vars.py -k "us2 or us3" -v -s --pdb 2>&1 | tee /tmp/us2.log` to PASS and append the evidence to `specs/017-post-render-env-vars/e2e-evidence.md`.
+- [X] T023 [US2] Confirm T015 satisfies T022 without changes (resolution already merges env → deployment → component into `ComponentContext.env_vars`); fix the builder if a case fails.
+- [X] T024 [US2] Update `test_us2_environment_level_env_var_propagates_to_all_deployments` and `test_us3_per_component_env_var_overrides_deployment_level` in `backend/tests/e2e/test_deployment_env_vars.py`: replace comments/docstrings that describe values-template (`extraEnv`) consumption with post-render injection; keep assertions, narrowing "every container" assertions to the component containers (`simple-app`, `postgresql`).
+- [X] T025 [US2] Run `sleep infinity | uv run pytest backend/tests/e2e/test_deployment_env_vars.py -k "us2 or us3" -v -s --pdb 2>&1 | tee /tmp/us2.log` to PASS and append the evidence to `specs/017-post-render-env-vars/e2e-evidence.md`.
 
 **Checkpoint**: US1 + US2 cover every env var scope.
 
