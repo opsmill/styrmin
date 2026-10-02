@@ -53,6 +53,13 @@ class Component:
     id: UUID
     name: str
     enabled: bool
+    container: str | None = strawberry.field(
+        default=None,
+        description=(
+            "The component container declared by the deployment's pinned driver "
+            "version, or null when it declares none. See `ComponentConfig.container`."
+        ),
+    )
 
     @classmethod
     def from_instance(cls, instance: ComponentEntity) -> Component:
@@ -60,6 +67,8 @@ class Component:
             id=instance.id,
             name=instance.name,
             enabled=instance.enabled,
+            # Rows copied before 017 have no ``container`` key.
+            container=instance.config.get("container"),
         )
 
 

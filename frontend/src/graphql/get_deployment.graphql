@@ -48,6 +48,7 @@ query GetDeployment($deploymentId: UUID!) {
       id
       name
       enabled
+      container
     }
     deployedServices {
       id

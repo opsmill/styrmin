@@ -18,22 +18,36 @@ The fixture uses the ``client`` (admin Bearer) so the boundary
 ``prefect_manager_mock`` fixture isn't needed because every row fails
 **before** the resolver dispatches anything to the workflow engine —
 this is the whole point of typed-error pre-validation (FR-008 / FR-009).
+
+The ``COMPONENT_CONTAINER_NOT_DECLARED`` matrix (017 / FR-003) below also
+drives accepted writes, so it arms the Prefect mock.
 """
 
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from styrmin_backend.db.models import Component, ComponentConfig
+from styrmin_backend.db.models import (
+    ApplicationDriver,
+    ApplicationDriverVersion,
+    Component,
+    ComponentConfig,
+    Deployment,
+    Task,
+)
 
 from ._queries import load_query
 from .seeds import (
     seed_application_driver_version,
     seed_deployment,
+    seed_environment,
 )
 
 
@@ -332,3 +346,502 @@ async def test_update_deployment_input_error_code(
                 f"row {row_id}: expected extensions.{key} = {value!r}; "
                 f"got {actual!r}. Full extensions: {extensions}"
             )
+
+
+# ---------------------------------------------------------------------------
+# COMPONENT_CONTAINER_NOT_DECLARED (017 / FR-003, research D-007)
+# ---------------------------------------------------------------------------
+#
+# ``api`` declares a component container, ``worker`` declares none. Only
+# additions and value changes on ``worker`` are rejected; removals and
+# unchanged re-submissions pass so stored values can be cleaned up.
+
+_STORED_WORKER_ENV = {"A": "1", "B": "2"}
+
+
+def _arm_prefect(prefect_manager_mock: Any) -> None:
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+
+
+def _component_config(name: str, container: str | None) -> dict[str, Any]:
+    return {
+        "identifier": {"label": {"app.kubernetes.io/name": f"{name}-app"}},
+        "container": container,
+    }
+
+
+async def _add_component_configs(
+    session: AsyncSession, adv_id: UUID, containers: dict[str, str | None]
+) -> None:
+    for name, container in containers.items():
+        session.add(
+            ComponentConfig(
+                name=name,
+                config=_component_config(name, container),
+                application_driver_version_id=adv_id,
+            )
+        )
+    await session.commit()
+
+
+async def _seed_container_deployment(
+    session: AsyncSession,
+    *,
+    containers: dict[str, str | None],
+    stored_worker_env: dict[str, str] | None,
+    adv: ApplicationDriverVersion | None = None,
+) -> UUID:
+    """Seed a deployment bound to a driver version declaring ``containers``."""
+    if adv is None:
+        adv = await seed_application_driver_version(session)
+        await _add_component_configs(session, adv.id, containers)
+    deployment = await seed_deployment(session, adv=adv)
+    for name, container in containers.items():
+        session.add(
+            Component(
+                name=name,
+                config=_component_config(name, container),
+                enabled=True,
+                deployment_id=deployment.id,
+            )
+        )
+    if stored_worker_env is not None:
+        deployment.config = {"components": {"worker": {"env_vars": stored_worker_env}}}
+        session.add(deployment)
+    await session.commit()
+    return deployment.id
+
+
+def _worker_input(env: dict[str, str] | None) -> dict[str, Any]:
+    row: dict[str, Any] = {"name": "worker"}
+    if env is not None:
+        row["envVars"] = [{"name": k, "value": v} for k, v in env.items()]
+    return {"components": [row]}
+
+
+async def _post_update(
+    client: AsyncClient, deployment_id: UUID, input_var: dict[str, Any]
+) -> dict[str, Any]:
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {"deploymentId": str(deployment_id), "input": input_var},
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def _task_count(session: AsyncSession, deployment_id: UUID) -> int:
+    rows = await session.exec(select(Task).where(Task.deployment_id == deployment_id))
+    return len(rows.all())
+
+
+async def _stored_config(session: AsyncSession, deployment_id: UUID) -> dict | None:
+    session.expire_all()
+    row = await session.get(Deployment, deployment_id)
+    assert row is not None
+    return row.config
+
+
+def _assert_container_not_declared(
+    payload: dict[str, Any], components_with_container: list[str]
+) -> None:
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "COMPONENT_CONTAINER_NOT_DECLARED", extensions
+    assert extensions.get("component_name") == "worker", extensions
+    assert extensions.get("components_with_container") == components_with_container
+    assert "'worker'" in payload["errors"][0]["message"]
+
+
+async def _assert_rejected_without_task(
+    session: AsyncSession,
+    prefect_manager_mock: Any,
+    deployment_id: UUID,
+    payload: dict[str, Any],
+    *,
+    components_with_container: list[str],
+    stored_before: dict | None,
+    tasks_before: int,
+) -> None:
+    _assert_container_not_declared(payload, components_with_container)
+    prefect_manager_mock.run_action.assert_not_awaited()
+    assert await _task_count(session, deployment_id) == tasks_before
+    assert await _stored_config(session, deployment_id) == stored_before
+
+
+_REJECTED_CASES = [
+    ("add_key", {**_STORED_WORKER_ENV, "C": "3"}),
+    ("change_value", {"A": "1", "B": "changed"}),
+]
+
+_ACCEPTED_CASES = [
+    ("remove_key", {"A": "1"}),
+    ("remove_all", None),
+    ("unchanged", dict(_STORED_WORKER_ENV)),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case_id", "submitted"), _REJECTED_CASES, ids=[c[0] for c in _REJECTED_CASES]
+)
+async def test_component_container_not_declared_rejects_add_or_change(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    case_id: str,  # noqa: ARG001 — parametrize id
+    submitted: dict[str, str],
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_container_deployment(
+        session,
+        containers={"api": "api-app", "worker": None},
+        stored_worker_env=_STORED_WORKER_ENV,
+    )
+    stored_before = await _stored_config(session, deployment_id)
+
+    payload = await _post_update(client, deployment_id, _worker_input(submitted))
+
+    await _assert_rejected_without_task(
+        session,
+        prefect_manager_mock,
+        deployment_id,
+        payload,
+        components_with_container=["api"],
+        stored_before=stored_before,
+        tasks_before=0,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case_id", "submitted"), _ACCEPTED_CASES, ids=[c[0] for c in _ACCEPTED_CASES]
+)
+async def test_component_container_not_declared_accepts_remove_or_unchanged(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    case_id: str,  # noqa: ARG001 — parametrize id
+    submitted: dict[str, str] | None,
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_container_deployment(
+        session,
+        containers={"api": "api-app", "worker": None},
+        stored_worker_env=_STORED_WORKER_ENV,
+    )
+
+    payload = await _post_update(client, deployment_id, _worker_input(submitted))
+
+    assert "errors" not in payload, payload
+    stored = await _stored_config(session, deployment_id)
+    assert stored is not None
+    assert stored["components"]["worker"].get("env_vars") == submitted
+
+
+@pytest.mark.asyncio
+async def test_component_container_not_declared_rejects_first_value(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """No stored block: any value on a containerless component is an addition."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_container_deployment(
+        session,
+        containers={"api": "api-app", "worker": None},
+        stored_worker_env=None,
+    )
+
+    payload = await _post_update(client, deployment_id, _worker_input({"A": "1"}))
+
+    await _assert_rejected_without_task(
+        session,
+        prefect_manager_mock,
+        deployment_id,
+        payload,
+        components_with_container=["api"],
+        stored_before=None,
+        tasks_before=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_component_container_not_declared_treats_missing_key_as_none(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """Component config rows stored before 017 carry no ``container`` key."""
+    _arm_prefect(prefect_manager_mock)
+    adv = await seed_application_driver_version(session)
+    session.add(
+        ComponentConfig(
+            name="worker",
+            config={"identifier": {"label": {"app.kubernetes.io/name": "worker-app"}}},
+            application_driver_version_id=adv.id,
+        )
+    )
+    await session.commit()
+    deployment_id = await _seed_container_deployment(
+        session, containers={"worker": None}, stored_worker_env=None, adv=adv
+    )
+
+    payload = await _post_update(client, deployment_id, _worker_input({"A": "1"}))
+
+    _assert_container_not_declared(payload, components_with_container=[])
+    prefect_manager_mock.run_action.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_component_container_not_declared_allows_broader_scopes(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """Deployment-scope env vars skip containerless components (US4 Sc.3)."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_container_deployment(
+        session,
+        containers={"api": "api-app", "worker": None},
+        stored_worker_env=None,
+    )
+
+    payload = await _post_update(
+        client, deployment_id, {"envVars": [{"name": "LOG_LEVEL", "value": "debug"}]}
+    )
+
+    assert "errors" not in payload, payload
+    stored = await _stored_config(session, deployment_id)
+    assert stored is not None
+    assert stored["env_vars"] == {"LOG_LEVEL": "debug"}
+
+
+@pytest.mark.asyncio
+async def test_component_container_declared_accepts_new_value(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_container_deployment(
+        session,
+        containers={"api": "api-app", "worker": "worker-app"},
+        stored_worker_env=None,
+    )
+
+    payload = await _post_update(client, deployment_id, _worker_input({"A": "1"}))
+
+    assert "errors" not in payload, payload
+    stored = await _stored_config(session, deployment_id)
+    assert stored is not None
+    assert stored["components"]["worker"]["env_vars"] == {"A": "1"}
+
+
+# -- Validated against the driver version the deployment is pinned to --------
+#
+# ``updateDeployment`` carries no driver version; the version switch is
+# ``updateDeploymentVersion``. After a switch, writes are validated against the
+# newly pinned version, not the one the stored values were written under.
+
+
+async def _seed_switch(
+    session: AsyncSession,
+    *,
+    before: dict[str, str | None],
+    after: dict[str, str | None],
+    stored_worker_env: dict[str, str] | None,
+) -> tuple[UUID, UUID]:
+    """Seed two versions of one driver; the deployment is bound to the first."""
+    old = await seed_application_driver_version(session, version="1.0.0")
+    driver = await session.get(ApplicationDriver, old.application_driver_id)
+    assert driver is not None
+    new = await seed_application_driver_version(session, driver=driver, version="2.0.0")
+    await _add_component_configs(session, old.id, before)
+    await _add_component_configs(session, new.id, after)
+    new_id = new.id
+    deployment_id = await _seed_container_deployment(
+        session, containers=before, stored_worker_env=stored_worker_env, adv=old
+    )
+    return deployment_id, new_id
+
+
+async def _switch_driver_version(
+    client: AsyncClient, deployment_id: UUID, driver_version_id: UUID
+) -> None:
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment_version"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "version": "1.0.0",
+                "driverVersionId": str(driver_version_id),
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert "errors" not in response.json(), response.json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case_id", "submitted"), _REJECTED_CASES, ids=[c[0] for c in _REJECTED_CASES]
+)
+async def test_component_container_lost_on_switch_rejects_add_or_change(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    case_id: str,  # noqa: ARG001 — parametrize id
+    submitted: dict[str, str],
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, new_id = await _seed_switch(
+        session,
+        before={"api": "api-app", "worker": "worker-app"},
+        after={"api": "api-app", "worker": None},
+        stored_worker_env=_STORED_WORKER_ENV,
+    )
+    await _switch_driver_version(client, deployment_id, new_id)
+    stored_before = await _stored_config(session, deployment_id)
+    tasks_before = await _task_count(session, deployment_id)
+    prefect_manager_mock.run_action.reset_mock()
+
+    payload = await _post_update(client, deployment_id, _worker_input(submitted))
+
+    await _assert_rejected_without_task(
+        session,
+        prefect_manager_mock,
+        deployment_id,
+        payload,
+        components_with_container=["api"],
+        stored_before=stored_before,
+        tasks_before=tasks_before,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case_id", "submitted"), _ACCEPTED_CASES, ids=[c[0] for c in _ACCEPTED_CASES]
+)
+async def test_component_container_lost_on_switch_accepts_remove_or_unchanged(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    case_id: str,  # noqa: ARG001 — parametrize id
+    submitted: dict[str, str] | None,
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, new_id = await _seed_switch(
+        session,
+        before={"api": "api-app", "worker": "worker-app"},
+        after={"api": "api-app", "worker": None},
+        stored_worker_env=_STORED_WORKER_ENV,
+    )
+    await _switch_driver_version(client, deployment_id, new_id)
+    # The switch itself keeps the stored values (FR-005).
+    stored = await _stored_config(session, deployment_id)
+    assert stored is not None
+    assert stored["components"]["worker"]["env_vars"] == _STORED_WORKER_ENV
+
+    payload = await _post_update(client, deployment_id, _worker_input(submitted))
+
+    assert "errors" not in payload, payload
+    stored = await _stored_config(session, deployment_id)
+    assert stored is not None
+    assert stored["components"]["worker"].get("env_vars") == submitted
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case_id", "submitted"),
+    _REJECTED_CASES + _ACCEPTED_CASES,
+    ids=[c[0] for c in _REJECTED_CASES + _ACCEPTED_CASES],
+)
+async def test_component_container_gained_on_switch_accepts_every_write(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    case_id: str,  # noqa: ARG001 — parametrize id
+    submitted: dict[str, str] | None,
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, new_id = await _seed_switch(
+        session,
+        before={"api": "api-app", "worker": None},
+        after={"api": "api-app", "worker": "worker-app"},
+        stored_worker_env=_STORED_WORKER_ENV,
+    )
+    # Before the switch the pinned version has no container for ``worker``.
+    pre_switch = await _post_update(
+        client, deployment_id, _worker_input({**_STORED_WORKER_ENV, "C": "3"})
+    )
+    _assert_container_not_declared(pre_switch, components_with_container=["api"])
+
+    await _switch_driver_version(client, deployment_id, new_id)
+    payload = await _post_update(client, deployment_id, _worker_input(submitted))
+
+    assert "errors" not in payload, payload
+    stored = await _stored_config(session, deployment_id)
+    assert stored is not None
+    assert stored["components"]["worker"].get("env_vars") == submitted
+
+
+# -- deploy (create) ------------------------------------------------------------
+
+
+async def _deploy_with_worker_env(
+    client: AsyncClient, session: AsyncSession, containers: dict[str, str | None]
+) -> tuple[dict[str, Any], str]:
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session, version="1.0.0")
+    await _add_component_configs(session, adv.id, containers)
+    driver = await session.get(ApplicationDriver, adv.application_driver_id)
+    assert driver is not None
+    name = f"cc-{uuid4().hex[:8]}"
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("deploy_with_config"),
+            "variables": {
+                "driver": driver.name,
+                "environmentId": str(environment.id),
+                "version": "1.0.0",
+                "name": name,
+                "config": _worker_input({"A": "1"}),
+            },
+        },
+    )
+    assert response.status_code == 200
+    return response.json(), name
+
+
+@pytest.mark.asyncio
+async def test_deploy_rejects_component_env_var_without_container(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+
+    payload, name = await _deploy_with_worker_env(
+        client, session, {"api": "api-app", "worker": None}
+    )
+
+    _assert_container_not_declared(payload, components_with_container=["api"])
+    prefect_manager_mock.run_action.assert_not_awaited()
+    created = await session.exec(select(Deployment).where(Deployment.name == name))
+    assert created.first() is None
+
+
+@pytest.mark.asyncio
+async def test_deploy_accepts_component_env_var_with_container(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+
+    payload, name = await _deploy_with_worker_env(
+        client, session, {"api": "api-app", "worker": "worker-app"}
+    )
+
+    assert "errors" not in payload, payload
+    session.expire_all()
+    created = (
+        await session.exec(select(Deployment).where(Deployment.name == name))
+    ).one()
+    assert created.config["components"]["worker"]["env_vars"] == {"A": "1"}

@@ -259,6 +259,45 @@ class UnknownComponentEnvVarError(ServiceError):
         }
 
 
+class ComponentContainerNotDeclaredError(ServiceError):
+    """A component-scope env var write targets a component with no component container.
+
+    Raised when the write adds a key or changes a value relative to the stored
+    block, checked against the driver version the deployment is pinned to after
+    the write. Removals and unchanged re-submissions are accepted (FR-003).
+    """
+
+    error_code = "COMPONENT_CONTAINER_NOT_DECLARED"
+    default_message = (
+        "Environment variables target a component that declares no component container"
+    )
+
+    def __init__(
+        self,
+        message: str = "",
+        component_name: str = "",
+        components_with_container: list[str] | None = None,
+    ) -> None:
+        self.component_name = component_name
+        self.components_with_container = sorted(components_with_container or [])
+        super().__init__(
+            message
+            or (
+                f"Environment variables target component {component_name!r}, "
+                "which declares no component container in the deployment's driver. "
+                "Components that accept env vars: "
+                f"{self.components_with_container}"
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {
+            "component_name": self.component_name,
+            "components_with_container": self.components_with_container,
+        }
+
+
 class DriverEnvVarDocComponentMismatchError(ServiceError):
     """A driver's ``spec.env_vars`` doc references a component the driver does not declare.
 

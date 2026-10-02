@@ -30,6 +30,7 @@ from styrmin_backend.services.container_overrides.validator import (
     validate_container_override,
 )
 from styrmin_backend.services.env_vars.exceptions import (
+    ComponentContainerNotDeclaredError,
     UnknownComponentEnvVarError,
 )
 from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
@@ -108,6 +109,62 @@ def _validate_component_env_var_targets(
             raise UnknownComponentEnvVarError(
                 component_name=name,
                 known_components=sorted(known),
+            )
+
+
+def _containers_by_component(
+    driver_version: ApplicationDriverVersion,
+) -> dict[str, str | None]:
+    """Map each declared component to its component container (``None`` if undeclared)."""
+    containers: dict[str, str | None] = {}
+    for component_config in driver_version.component_configs or []:
+        config = component_config.config
+        container = config.get("container") if isinstance(config, dict) else None
+        containers[component_config.name] = container
+    return containers
+
+
+def _validate_component_env_var_containers(
+    submitted_config: dict | None,
+    stored_config: dict | None,
+    containers_by_component: dict[str, str | None],
+) -> None:
+    """Reject added or changed component-scope env vars on containerless components.
+
+    ``containers_by_component`` comes from the driver version the deployment is
+    pinned to after the write. Removals and unchanged re-submissions pass so
+    values stored before a driver upgrade can still be cleaned up (FR-003).
+    Unknown components are left to :func:`_validate_component_env_var_targets`.
+    """
+    submitted_components = (submitted_config or {}).get("components")
+    if not isinstance(submitted_components, dict):
+        return
+    stored_components = (stored_config or {}).get("components")
+    if not isinstance(stored_components, dict):
+        stored_components = {}
+    for name, block in submitted_components.items():
+        if name not in containers_by_component or containers_by_component[name]:
+            continue
+        submitted_env = block.get("env_vars") if isinstance(block, dict) else None
+        if not isinstance(submitted_env, dict) or not submitted_env:
+            continue
+        stored_block = stored_components.get(name)
+        stored_env = (
+            stored_block.get("env_vars") if isinstance(stored_block, dict) else None
+        )
+        if not isinstance(stored_env, dict):
+            stored_env = {}
+        if any(
+            key not in stored_env or stored_env[key] != value
+            for key, value in submitted_env.items()
+        ):
+            raise ComponentContainerNotDeclaredError(
+                component_name=name,
+                components_with_container=[
+                    component
+                    for component, container in containers_by_component.items()
+                    if container
+                ],
             )
 
 
@@ -430,6 +487,12 @@ async def update_deployment(
                 validate_deployment_config(context=deployment_config)
             except InvalidDeploymentContextError as e:
                 raise InvalidContextError(str(e)) from e
+
+            # updateDeployment never switches driver versions, so the pinned
+            # version is the one the deployment keeps after this write (FR-003).
+            _validate_component_env_var_containers(
+                deployment_config, deployment.config, _containers_by_component(adv)
+            )
 
         if deployment_name is not None:
             try:
@@ -1255,6 +1318,13 @@ async def deploy_application(
             validate_deployment_config(context=deployment_config)
         except InvalidDeploymentContextError as e:
             raise InvalidContextError(str(e)) from e
+
+        # A new deployment has no stored values: every block is an addition.
+        _validate_component_env_var_containers(
+            deployment_config,
+            None,
+            _containers_by_component(application_driver_version),
+        )
 
         # Get the environment
         environment = await uow.environments.get(environment_id)
