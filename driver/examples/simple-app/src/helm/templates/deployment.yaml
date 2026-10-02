@@ -72,15 +72,15 @@ spec:
                   key: db-password
             - name: DATABASE_URL
               value: {{ include "simple-app.databaseUrl" . | quote }}
-            # DO NOT REMOVE — pinned by
-            # backend/tests/e2e/test_deployment_env_vars.py::
-            #   test_us1_deployment_level_env_var
-            # to assert chart-default env preservation per
-            # 010-driver-env-var-consumption / FR-014a. The marker proves the
-            # platform does NOT clobber chart-rendered env entries when
-            # operator-supplied env vars are merged in via `extraEnv`.
+            # DO NOT REMOVE — pinned by test_deployment_env_vars.py::
+            # test_component_env_var_merges_into_chart_env (literal and
+            # valueFrom chart defaults survive / are replaced by post-render).
             - name: STYRMIN_CHART_DEFAULT
               value: {{ .Values.chartDefaultMarker | default "marker" | quote }}
+            - name: STYRMIN_CHART_DEFAULT_FROM
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

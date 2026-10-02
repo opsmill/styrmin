@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: simple-app
 spec:
-  version: "1"
+  version: "2"
   supported_versions: ">=0.1,<1.0"
   info:
     description: Simple 3-tier FastAPI application with PostgreSQL
@@ -17,11 +17,13 @@ spec:
 
   components:
     server:
+      container: simple-app
       identifier:
         label:
           app.kubernetes.io/name: simple-app
 
     database:
+      container: postgresql
       identifier:
         label:
           app.kubernetes.io/name: postgresql
@@ -34,7 +36,7 @@ spec:
     - name: LOG_LEVEL
       description: >-
         Application log verbosity. Doc-only — actual value comes from
-        operator-set deployment / environment env vars.
+        user-set deployment / environment env vars.
       level: deployment
     - name: DB_POOL_SIZE
       description: >-
