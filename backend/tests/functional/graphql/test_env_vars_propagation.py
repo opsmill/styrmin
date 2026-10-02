@@ -16,11 +16,17 @@ test will land alongside the GraphQL mutation surface (US3 / US4 follow-up).
 
 from __future__ import annotations
 
+from typing import Any
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
+
 import pytest
 from httpx import AsyncClient
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import (
+    ApplicationDriver,
     ApplicationDriverVersion,
     Component,
     ComponentConfig,
@@ -771,3 +777,113 @@ async def test_application_driver_version_env_vars_empty_when_unset(
     matching = [v for v in versions if v["id"] == str(adv.id)]
     assert len(matching) == 1
     assert matching[0]["envVars"] == []
+
+
+# ---------------------------------------------------------------------------
+# 017 US4 — Deployment.components[].container propagation (T045)
+# ---------------------------------------------------------------------------
+
+
+def _arm_prefect(prefect_manager_mock: Any) -> None:
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+
+
+async def _read_component_containers(
+    client: AsyncClient, deployment_id: UUID
+) -> dict[str, str | None]:
+    data = await gql(
+        client,
+        "get_deployment_component_containers",
+        {"deploymentId": str(deployment_id)},
+    )
+    return {c["name"]: c["container"] for c in data["deployment"]["components"]}
+
+
+async def _stored_component_configs(
+    session: AsyncSession, deployment_id: UUID
+) -> dict[str, dict]:
+    session.expire_all()
+    rows = await session.exec(
+        select(Component).where(Component.deployment_id == deployment_id)
+    )
+    return {c.name: c.config for c in rows.all()}
+
+
+@pytest.mark.asyncio
+async def test_component_container_propagation_follows_pinned_driver_version(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """``deploy`` copies the driver version's container onto the deployment's
+    components; switching to a version without it reads back ``null``."""
+    _arm_prefect(prefect_manager_mock)
+    environment = await seed_environment(session)
+    old = await seed_application_driver_version(session, version="1.0.0")
+    driver = await session.get(ApplicationDriver, old.application_driver_id)
+    assert driver is not None
+    driver_name = driver.name
+    new = await seed_application_driver_version(session, driver=driver, version="2.0.0")
+    old_id, new_id = old.id, new.id
+    label = {"identifier": {"label": {"app.kubernetes.io/name": "server-app"}}}
+    session.add(
+        ComponentConfig(
+            name="server",
+            config={**label, "container": "simple-app"},
+            application_driver_version_id=old_id,
+        )
+    )
+    session.add(
+        ComponentConfig(
+            name="server",
+            config={**label, "container": None},
+            application_driver_version_id=new_id,
+        )
+    )
+    await session.commit()
+    name = f"cc-propagation-{uuid4().hex[:8]}"
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("deploy_with_driver_version"),
+            "variables": {
+                "driver": driver_name,
+                "environmentId": str(environment.id),
+                "name": name,
+                "version": "1.0.0",
+                "driverVersionId": str(old_id),
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" not in payload, payload
+    session.expire_all()
+    deployment_id = (
+        await session.exec(select(Deployment.id).where(Deployment.name == name))
+    ).one()
+
+    stored = await _stored_component_configs(session, deployment_id)
+    assert stored["server"]["container"] == "simple-app"
+    assert await _read_component_containers(client, deployment_id) == {
+        "server": "simple-app"
+    }
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment_version"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "version": "1.0.0",
+                "driverVersionId": str(new_id),
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert "errors" not in response.json(), response.json()
+
+    stored = await _stored_component_configs(session, deployment_id)
+    assert stored["server"]["container"] is None
+    assert await _read_component_containers(client, deployment_id) == {"server": None}

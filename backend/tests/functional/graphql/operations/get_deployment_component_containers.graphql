@@ -1,0 +1,9 @@
+query GetDeploymentComponentContainers($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        components {
+            name
+            container
+        }
+    }
+}

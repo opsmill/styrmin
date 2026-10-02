@@ -78,7 +78,9 @@ class ComponentConfigInput:
         description=(
             "The component name as declared by the deployment's currently "
             "pinned application-driver version. Must match a known "
-            "component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``."
+            "component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. "
+            "Env vars on a component that declares no component container "
+            "raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``)."
         )
     )
     env_vars: list[EnvVarInput] | None = strawberry.field(
@@ -87,7 +89,10 @@ class ComponentConfigInput:
             "Environment-variable overrides scoped to this component. "
             "Submitted as a list of ``{name, value}`` rows; duplicates "
             "within the list raise ``DUPLICATE_ENV_VAR_NAME`` with the "
-            "component scope in the payload."
+            "component scope in the payload. Adding or changing a value on "
+            "a component that declares no component container raises "
+            "``COMPONENT_CONTAINER_NOT_DECLARED``; removing values or "
+            "re-submitting the stored ones unchanged is accepted."
         ),
     )
     command: list[str] | None = strawberry.field(

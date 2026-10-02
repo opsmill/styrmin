@@ -49,7 +49,8 @@ async def _seed_deployment_with_components(
     """Seed a deployment whose driver declares ``component_names`` and whose
     Component rows mirror those names. Mirrors the helper in
     ``test_env_vars_propagation.py`` so the components-row propagation
-    test can target a driver-known component name.
+    test can target a driver-known component name. Each component declares
+    a component container so component-scope env vars are accepted (017).
     """
     adv = await seed_application_driver_version(session)
     for name in component_names:
@@ -59,6 +60,7 @@ async def _seed_deployment_with_components(
                 "identifier": {
                     "label": {"app.kubernetes.io/name": f"{name}-app"},
                 },
+                "container": f"{name}-app",
             },
             application_driver_version_id=adv.id,
         )
@@ -72,6 +74,7 @@ async def _seed_deployment_with_components(
                 "identifier": {
                     "label": {"app.kubernetes.io/name": f"{name}-app"},
                 },
+                "container": f"{name}-app",
             },
             enabled=True,
             deployment_id=deployment.id,
