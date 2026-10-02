@@ -71,10 +71,10 @@ container → `true`; (b) has none → `false`, values returned; (c) does not de
 
 | Code | Raised by | `extensions` metadata |
 |---|---|---|
-| `COMPONENT_CONTAINER_NOT_DECLARED` | `updateDeployment`, `deploy` (any write carrying a new or changed component-scope env var block for a component without a container) | `componentName`, `componentsWithContainer` |
+| `COMPONENT_CONTAINER_NOT_DECLARED` | `updateDeployment`, `deploy` (a write adding or changing a component-scope env var for a component without a container in the target driver version) | `componentName`, `componentsWithContainer` |
 
-Mutation-error test: submit the write, assert the code and metadata, and assert no Prefect task
-was submitted.
+Mutation-error tests: add / change → code + metadata + no Prefect task submitted; remove /
+unchanged → accepted; repeated on a write that also switches driver version.
 
 `RETIRED_TEMPLATE_FILTER` is a render-time error recorded on the instance, not a GraphQL
 mutation error (see [errors.md](errors.md)).

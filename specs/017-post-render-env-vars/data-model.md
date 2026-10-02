@@ -82,9 +82,10 @@ means absence of its entry, so clearing converges without markers (FR-010).
 | `RetiredTemplateFilterError` | `RETIRED_TEMPLATE_FILTER` | values-template render, when `component_env_vars` is called (FR-007) | `filter`, `migration_guide` |
 | Container-name validation failure | driver-load validation error (existing path) | driver registration (FR-001) | offending component + value |
 
-`ComponentContainerNotDeclaredError` fires only when the submitted component block differs from
-the stored one (research D-007). Unknown-component blocks keep raising
-`UNKNOWN_COMPONENT_ENV_VAR` first.
+`ComponentContainerNotDeclaredError` fires only when the submitted component block adds a key or
+changes a value relative to the stored one, judged against the driver version the deployment is
+pinned to after the write (research D-007). Removals and unchanged re-submissions pass.
+Unknown-component blocks keep raising `UNKNOWN_COMPONENT_ENV_VAR` first.
 
 ## 6. HelmRelease apply (operator)
 

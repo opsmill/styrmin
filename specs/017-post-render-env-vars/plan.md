@@ -117,10 +117,12 @@ backend/tests/
 
 driver/examples/*/driver.styrmin.yml                  # declare container on every component (FR-008)
 driver/examples/*/values.j2.yml                       # drop component_env_vars wiring
+driver/examples/simple-app/src/helm/templates/deployment.yaml  # + STYRMIN_CHART_DEFAULT_FROM valueFrom marker
 
 frontend/src/
 ├── graphql/get_deployment.graphql                    # components { container }
-└── components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx (+ test)  # FR-006
+├── components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx (+ test)  # FR-006
+└── pages/drivers/driver-detail/tabs/ComponentsTab.tsx (+ test)  # show component container
 
 python_sdk/src/styrmin_sdk/graphql/*.graphql          # isApplicable, componentConfigs.container
 schema.graphql, generated SDK + frontend types        # regenerated
@@ -142,36 +144,60 @@ siblings in `blocks/patches.py`.
 
 1. **Patch builder** (D-009): pure function over `GlobalContext`; for each component with a
    container and non-empty `env_vars.config`, emit `ContainerEnvPatch` for `Deployment` and
-   `StatefulSet` targeted by the identifier label. Eagerly render; typed error on failure.
+   `StatefulSet` targeted by the identifier label. Eagerly render; typed error on failure. Log one
+   info line per component with patches (`component`, `container`, env var count — never values).
+   Unit tests round-trip scalar edge values (`"true"`, `"null"`, `"0123"`, `""`, multi-line,
+   `$(VAR)`) through `yaml.safe_load` of the rendered patch and get strings back (critique E5, E8).
 2. **Builder ordering** (D-002): `build()` appends env patches after scheduling patches. A unit
-   test pins the position.
-3. **Filter retirement** (D-008): `component_env_vars` stays registered as a raising stub.
-   `instance.config.env_vars` and `components[<name>].env_vars` stay in the rendering context.
+   test pins the position. Tests assert outcomes (entries present, values replaced, resources on
+   the chart's original first container), not kyaml's full ordering (critique E9).
+3. **Filter retirement** (D-008): `component_env_vars` stays registered as a raising stub whose
+   message tells deployment users to upgrade the deployment and driver authors to migrate
+   (critique P3). `instance.config.env_vars` and `components[<name>].env_vars` stay in the
+   rendering context. Tests that pin the old filter contract
+   (`test_render_value_template_env_vars.py`) are rewritten to the new contract, not deleted
+   (critique E6).
 4. **Write validation** (D-007): `_validate_component_env_var_containers(submitted, stored,
-   containers_by_component)` runs after `_validate_component_env_var_targets` in
-   `update_deployment` and `deploy`; compares the submitted block to the stored one.
+   containers_by_component)` runs in `update_deployment` once the target driver version is
+   resolved (before any task is submitted) and in `deploy` against the selected version. It
+   rejects additions and value changes for containerless components; removals and unchanged
+   re-submissions pass. Test matrix: add / change / remove / unchanged × stable / switching
+   driver version (critique E1, E2, X1).
 5. **Read flags** (D-005, D-006): `ComponentEnvVars.isApplicable` computed in the resolver from
    driver-version component configs; `Component.container` and `ComponentConfig.container` read
    `config["container"]`.
 6. **HelmRelease apply** (D-003): `upsert_custom_resource(..., replace_spec_on_update=True)` sends
    a single JSON Patch (`add /spec` pruned + per-key metadata `add` ops) on 409; other callers
-   unchanged.
-7. **Drivers** (D-010): add `container` to all 30 components, verified by rendering each driver;
-   strip env wiring from every `values.j2.yml`; move infrahub's
-   `PREFECT_SERVER_ANALYTICS_ENABLED` to `global.prefect.env`; bump each driver's
-   `spec.version`.
+   unchanged. Unit tests pin that kopf annotations and Flux's finalizer survive an update and
+   that the builder always sets both metadata maps the per-key ops rely on (critique E3).
+7. **Drivers** (D-010): add `container` to all 30 components, verified by rendering each driver
+   with `helm template` — the command and matched container per component are recorded in the
+   implementation notes (critique E4); strip env wiring from every `values.j2.yml`; move
+   infrahub's `PREFECT_SERVER_ANALYTICS_ENABLED` to `global.prefect.env`; bump each driver's
+   `spec.version`. The simple-app chart gains a harmless `STYRMIN_CHART_DEFAULT_FROM` entry
+   (`valueFrom.fieldRef: metadata.name`) so the US1 E2E covers `valueFrom` replacement
+   (critique P5).
 8. **Frontend** (FR-006): editor disabled with an explanation when `component.container` is
-   null; stored blocks shown read-only with a remove control (orphan-row precedent).
+   null; stored blocks shown read-only with a remove control (orphan-row precedent). The driver
+   detail `ComponentsTab` shows each component's container (critique P4).
+9. **Docs** (§VII): the migration guide (`docs/docs/drivers/migrating-env-vars.md`) covers, in
+   order, loading migrated drivers, upgrading every deployment before editing environment env
+   vars (fan-out would otherwise fail every old-version deployment), declaring containers,
+   removing the filter, ordering (D-002), and that user env vars no longer reach chart Jobs or
+   init containers (critique P2, P3). The ADR records the narrowed ADR-045 §2 reversal, platform
+   rollback stopping injection (critique E7), and the deferred UI hint for silently skipped
+   components (critique P1).
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| Wrong container name in an in-repo driver breaks releases once env vars are set | Render-verify every name (D-010); US1/US2 E2Es exercise simple-app; document failure mode. |
+| Wrong container name in an in-repo driver breaks releases once env vars are set | Render-verify every name and record it (D-010, Design Note 7); US1/US2 E2Es exercise simple-app; failure mode documented. |
 | `spec` replace removes something a non-Styrmin actor wrote into the HelmRelease spec | Nothing else writes `spec` today (D-003); metadata keeps merge semantics; ADR records the narrowed contract. |
 | Container reorder surprises `kubectl logs` / `get_component_env` | Documented (D-002); `get_component_env` gets the component container at index 0 when env vars are set. Name-based selection is a follow-up. |
-| Deployments pinned to unmigrated driver versions fail on next render | Intended (FR-007); typed error names the migration guide; changelog `removed` fragment flags it. |
-| Kustomize/Flux version drift changes merge ordering | Contract pinned by unit tests on our output and by E2E assertions on live pods, not on order beyond what tests check. |
+| Deployments pinned to unmigrated driver versions fail on next render, including an environment env var fan-out | Intended (FR-007); the typed error states the remediation; migration guide orders the steps; changelog `removed` fragment flags it. |
+| Kustomize/Flux version drift changes merge ordering | Outcome-based unit and E2E assertions (Design Note 2). |
+| Platform rollback after migrated drivers are loaded stops env injection | Recorded in ADR consequences and release notes. |
 
 ## Complexity Tracking
 
