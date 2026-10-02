@@ -282,3 +282,45 @@ last), and the test is unchanged. The re-run below passed every scenario.
 `test_infrahub_backup_restore.py` (infrahub), and the other simple-app modules are untouched by
 this feature and were not run here; CI's shards cover them. No E2E module deploys slurpit or
 infrahub-mcp.
+
+## Per-key HelmRelease apply (post-review change)
+
+The HelmRelease apply moved from a whole-`spec` replace to per-key replace (ADR-055 §6). Images
+were built from the working tree with `STYRMIN_IMAGE_VER=local-fac017-perkey`. Each session was
+launched as `sleep infinity | uv run pytest <module> -k "<selector>" -v -s --pdb` from a runner
+script, and the runner killed the process group after the summary line.
+
+| Test id | Passed at (session end) | vCluster | Kubeconfig | Pass line |
+|---|---|---|---|---|
+| `backend/tests/e2e/test_deployment_env_vars.py::test_component_env_var_merges_into_chart_env[api-chromium]` | 2026-10-02T23:23:30Z | `pytest-5d90518f-dea6-4faa-811c-6ce354860503` | `/tmp/pytest-of-root/pytest-333/vcluster0/kubeconfig` | `PASSED` |
+| `...test_deployment_env_vars.py::test_us1_deployment_level_env_var[api-chromium]` | same | same | same | `PASSED` |
+| `...test_deployment_env_vars.py::test_us2_environment_level_env_var_propagates_to_all_deployments[api-chromium]` | same | same | same | `PASSED` |
+| `...test_deployment_env_vars.py::test_us3_per_component_env_var_overrides_deployment_level[api-chromium]` | same | same | same | `PASSED` |
+| `...test_deployment_env_vars.py::test_us4_driver_env_var_docs_surfaced_via_graphql[api-chromium]` | same | same | same | `PASSED` |
+| `backend/tests/e2e/test_deployment_env_vars.py::test_component_env_var_merges_into_chart_env[ui-chromium]` | 2026-10-02T23:26:45Z | `pytest-e1ddb8b8-3b5c-4a59-a751-191f767615e4` | `/tmp/pytest-of-root/pytest-334/vcluster0/kubeconfig` | `PASSED` |
+| `backend/tests/e2e/test_deployment_container_overrides.py::test_us1_*`, `test_us2_command_independent_of_args`, `test_us3_clear_override_falls_back_to_chart_default`, `test_us6_driver_declares_overridable_component` `[api-chromium]` | 2026-10-02T23:42:39Z | `pytest-19deba43-349b-4fc2-9b4e-388fa2040c59` | `/tmp/pytest-of-root/pytest-336/vcluster0/kubeconfig` | `PASSED` each |
+
+Session summaries:
+
+- env-vars api: `====== 5 passed, 1 skipped, 6 deselected, 1 warning in 254.16s (0:04:14) =======`
+  (us5 is skipped by its own marker).
+- env-vars ui: `====== 1 passed, 5 skipped, 6 deselected, 1 warning in 185.93s (0:03:05) =======`
+  (the others are `api_only`).
+- container-overrides api, us4 excluded:
+  `============ 4 passed, 6 deselected, 1 warning in 169.39s (0:02:49) ============`
+
+`test_deployment_container_overrides.py::test_us4_invalid_overrides_rejected[api-chromium]`
+failed in a first container-overrides session (`pytest-f8553fa8-c26e-4e69-8407-9f77644c62e7`,
+`pytest-335`). It is the same race seen in the final-gates run, now confirmed on the live
+cluster while pdb was paused:
+
+- The test sends `command: ["sh","-c",""]` and then immediately clears the override. Two
+  `apply_state` flows were scheduled 67 ms apart (23:29:16.855Z and 23:29:16.922Z) and both
+  started at 23:29:21.36Z.
+- The final StyrminDeployment CR carried `spec.instanceId: 444d6e14-…`, the instance of the
+  flow with the broken command, so the earlier mutation's write landed last.
+- The deployment never reached `running` (the pod crash-loops on `sh -c ""`).
+
+Flows for one deployment are not serialized, and the last CR write wins under merge-patch and
+under per-key replace alike. The HelmRelease only mirrors the CR, so the apply-mode change
+cannot cause or fix this failure. This is a pre-existing race and should get its own issue.

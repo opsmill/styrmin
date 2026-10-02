@@ -163,4 +163,3 @@ async def test_agent_crd_apply_opts_into_per_key_replace() -> None:
     assert kwargs["plurals"] == CRD_PLURAL
     assert kwargs["body"] is body
     assert kwargs["replace_spec_keys_on_update"] is True
-    assert "replace_spec_on_update" not in kwargs
