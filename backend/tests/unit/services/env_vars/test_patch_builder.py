@@ -1,8 +1,9 @@
-"""Unit tests for ``build_env_var_patches`` (017-post-render-env-vars, T007).
+"""Unit tests for ``build_env_var_patches`` (017-post-render-env-vars, T007, T022).
 
 Pins research D-009: one ``ContainerEnvPatch`` per workload kind for each
 component that declares a component container and has resolved env vars, and
-the skips that keep containerless or empty components untouched.
+the skips that keep containerless or empty components untouched. The scope
+cases resolve env vars through the context service before building (FR-004).
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from styrmin_backend.context.models.contexts import (
     InstanceContext,
 )
 from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
+from styrmin_backend.services.context import _populate_component_env_vars
 from styrmin_backend.services.env_vars.exceptions import EnvVarPatchRenderingError
 from styrmin_backend.services.env_vars.patch_builder import build_env_var_patches
 
@@ -171,6 +173,52 @@ class TestEmittedPatches:
             "app.kubernetes.io/name=worker",
             "app.kubernetes.io/name=worker",
         ]
+
+
+def _env_by_selector(context: GlobalContext) -> dict[str | None, dict[str, str]]:
+    return {
+        tp.target.label_selector: tp.patch.env
+        for tp in build_env_var_patches(context)
+        if isinstance(tp.patch, ContainerEnvPatch)
+    }
+
+
+class TestResolvedScopes:
+    """US2: resolution merges env -> deployment -> component before the build."""
+
+    def test_deepest_scope_wins_per_component(self) -> None:
+        context = _context(_component("server"), _component("database"))
+
+        _populate_component_env_vars(
+            context=context,
+            environment_config={"env_vars": {"LOG_LEVEL": "info", "REGION": "eu"}},
+            deployment_config={
+                "env_vars": {"LOG_LEVEL": "warn"},
+                "components": {"server": {"env_vars": {"LOG_LEVEL": "debug"}}},
+            },
+        )
+
+        assert _env_by_selector(context) == {
+            "app.kubernetes.io/name=server": {"LOG_LEVEL": "debug", "REGION": "eu"},
+            "app.kubernetes.io/name=database": {"LOG_LEVEL": "warn", "REGION": "eu"},
+        }
+
+    def test_deployment_scope_skips_component_without_container(self) -> None:
+        context = _context(_component("server"), _component("database", container=None))
+
+        _populate_component_env_vars(
+            context=context,
+            environment_config=None,
+            deployment_config={"env_vars": {"LOG_LEVEL": "debug"}},
+        )
+
+        assert context.components is not None
+        database = context.components.root["database"]
+        assert database.env_vars is not None
+        assert database.env_vars.config == {"LOG_LEVEL": "debug"}
+        assert _env_by_selector(context) == {
+            "app.kubernetes.io/name=server": {"LOG_LEVEL": "debug"},
+        }
 
 
 class TestSkips:

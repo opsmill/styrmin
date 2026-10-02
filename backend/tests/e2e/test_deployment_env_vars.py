@@ -44,13 +44,16 @@ pytestmark = [
 RECONCILE_TIMEOUT_SECONDS = 480.0
 
 
-def _container_envs(dep: Any) -> list[dict[str, str]]:
-    """Return the flattened list of ``env`` entries across every container in
-    the rendered pod template, normalised to plain ``{name, value}`` dicts.
+def _container_envs(dep: Any, container: str | None = None) -> list[dict[str, str]]:
+    """Return the ``env`` entries of the rendered pod template, normalised to
+    plain ``{name, value}`` dicts — from ``container`` only when given, else
+    flattened across every container.
     """
     envs: list[dict[str, str]] = []
-    for container in dep.spec.template.spec.containers or []:
-        for entry in container.env or []:
+    for spec in dep.spec.template.spec.containers or []:
+        if container is not None and spec.name != container:
+            continue
+        for entry in spec.env or []:
             envs.append(
                 {
                     "name": entry.name,
@@ -380,12 +383,15 @@ async def env_vars_second_deployment(
     }
 
 
+_STAGING_OTEL = {"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "https://otel.staging"}
+_LOCAL_OTEL = {"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "https://otel.local"}
+
+
 @pytest.mark.api_only(
     reason=(
         # 011/US4 audit (FR-015): the second half of this scenario calls
         # ``scenario_driver.update_deployment`` with an env_vars override
-        # which the UI driver rejects (scheduling-only); no deployment-
-        # detail env-vars editor exists yet.
+        # which the UI driver rejects (scheduling-only).
         "Drives scenario_driver.update_deployment with env_vars in the "
         "deployment-level override step; the UI driver only accepts "
         "the 'scheduling' sub-tree today."
@@ -402,8 +408,9 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
     _env_vars_driver_bound: None,
 ) -> None:
     """Quickstart Step 2: set ``OTEL_EXPORTER_OTLP_ENDPOINT`` at the
-    environment scope and assert every deployment in that environment
-    receives the entry on its containers (FR-001 / FR-020).
+    environment scope and assert the post-render patch injects it into the
+    ``simple-app`` component container of every deployment in that
+    environment (FR-001 / FR-020).
 
     Then set a deployment-level override on one deployment and assert the
     divergence (FR-002 deepest-wins, per-key).
@@ -460,12 +467,7 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
             vcluster,
             namespace=deployment_a_namespace,
             label_selector="app.kubernetes.io/name=simple-app",
-            predicate=lambda d: any(
-                entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
-                and entry.value == "https://otel.staging"
-                for container in d.spec.template.spec.containers or []
-                for entry in container.env or []
-            ),
+            predicate=lambda d: _STAGING_OTEL in _container_envs(d, "simple-app"),
             description=(
                 "OTEL_EXPORTER_OTLP_ENDPOINT to land on deployment A from the "
                 "environment scope"
@@ -475,12 +477,7 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
             vcluster,
             namespace=deployment_b_namespace,
             label_selector="app.kubernetes.io/name=simple-app",
-            predicate=lambda d: any(
-                entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
-                and entry.value == "https://otel.staging"
-                for container in d.spec.template.spec.containers or []
-                for entry in container.env or []
-            ),
+            predicate=lambda d: _STAGING_OTEL in _container_envs(d, "simple-app"),
             description=(
                 "OTEL_EXPORTER_OTLP_ENDPOINT to land on peer deployment B "
                 "without any per-deployment env vars set"
@@ -488,16 +485,8 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
         ),
     )
 
-    envs_a = _container_envs(dep_a)
-    envs_b = _container_envs(dep_b)
-    assert {
-        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "value": "https://otel.staging",
-    } in envs_a
-    assert {
-        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "value": "https://otel.staging",
-    } in envs_b
+    assert _STAGING_OTEL in _container_envs(dep_a, "simple-app")
+    assert _STAGING_OTEL in _container_envs(dep_b, "simple-app")
 
     # 2) Override on deployment A only. Deployment B keeps the env value.
     await scenario_driver.update_deployment(
@@ -512,49 +501,29 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
         vcluster,
         namespace=deployment_a_namespace,
         label_selector="app.kubernetes.io/name=simple-app",
-        predicate=lambda d: any(
-            entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
-            and entry.value == "https://otel.local"
-            for container in d.spec.template.spec.containers or []
-            for entry in container.env or []
-        ),
+        predicate=lambda d: _LOCAL_OTEL in _container_envs(d, "simple-app"),
         description=(
             "deployment-level override to win on deployment A "
             "(FR-002 per-key deepest-wins)"
         ),
     )
-    envs_a_after = _container_envs(dep_a_overridden)
-    assert {
-        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "value": "https://otel.local",
-    } in envs_a_after
-    # The environment-scope value must NOT linger on deployment A's pods.
-    assert {
-        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "value": "https://otel.staging",
-    } not in envs_a_after
+    envs_a_after = _container_envs(dep_a_overridden, "simple-app")
+    assert _LOCAL_OTEL in envs_a_after
+    # The environment-scope value must NOT linger on deployment A's container.
+    assert _STAGING_OTEL not in envs_a_after
 
     # Re-read deployment B and confirm it still carries the env-scope value.
     dep_b_after = await _wait_for_pod_template(
         vcluster,
         namespace=deployment_b_namespace,
         label_selector="app.kubernetes.io/name=simple-app",
-        predicate=lambda d: any(
-            entry.name == "OTEL_EXPORTER_OTLP_ENDPOINT"
-            and entry.value == "https://otel.staging"
-            for container in d.spec.template.spec.containers or []
-            for entry in container.env or []
-        ),
+        predicate=lambda d: _STAGING_OTEL in _container_envs(d, "simple-app"),
         description=(
             "deployment B still serves the environment-scope value after "
             "deployment A's per-key override"
         ),
     )
-    envs_b_after = _container_envs(dep_b_after)
-    assert {
-        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "value": "https://otel.staging",
-    } in envs_b_after
+    assert _STAGING_OTEL in _container_envs(dep_b_after, "simple-app")
 
 
 # ---------------------------------------------------------------------------
@@ -567,12 +536,10 @@ async def test_us2_environment_level_env_var_propagates_to_all_deployments(
         # 011/US4 audit (FR-015): drives
         # scenario_driver.update_deployment with both env_vars and
         # per-component env_vars; the UI driver only accepts the
-        # 'scheduling' sub-tree, and per-component env_var editing has
-        # no UI surface today.
+        # 'scheduling' sub-tree.
         "Drives scenario_driver.update_deployment with env_vars and "
         "per-component env_vars; the UI driver only accepts the "
-        "'scheduling' sub-tree today, and there is no per-component "
-        "env-vars editor in the frontend."
+        "'scheduling' sub-tree today."
     )
 )
 @pytest.mark.ci
@@ -584,17 +551,16 @@ async def test_us3_per_component_env_var_overrides_deployment_level(
     _env_vars_driver_bound: None,
 ) -> None:
     """Quickstart Step 3: deployment-level + per-component env vars on a
-    multi-component driver. The ``server`` component inherits the
-    deployment-level ``LOG_LEVEL=info``; the ``database`` component
-    overrides ``LOG_LEVEL=debug`` and adds ``DB_POOL_SIZE=5`` only to its
-    own pods. Asserts FR-002 (deepest-wins) and that peer components are
-    unaffected by another component's block.
+    multi-component driver, injected by post-render into each component
+    container. The ``server`` container (``simple-app``) inherits the
+    deployment-level ``LOG_LEVEL=info``; the ``database`` container
+    (``postgresql``) overrides ``LOG_LEVEL=debug`` and adds
+    ``DB_POOL_SIZE=5``. Asserts FR-002 (deepest-wins) and that peer
+    components are unaffected by another component's block.
     """
     deployment_id = env_vars_deployment["deployment_id"]
     namespace = env_vars_deployment["namespace"]
 
-    # Reset the environment-scope OTEL endpoint so it doesn't pollute the
-    # baseline assertions (US2's earlier test left it set).
     await scenario_driver.update_deployment(
         deployment_id=deployment_id,
         config={
@@ -610,45 +576,41 @@ async def test_us3_per_component_env_var_overrides_deployment_level(
         deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
     )
 
-    # ``server`` pods carry LOG_LEVEL=info inherited from the deployment
-    # scope and must NOT carry DB_POOL_SIZE.
+    # The ``simple-app`` container carries LOG_LEVEL=info inherited from the
+    # deployment scope and must NOT carry DB_POOL_SIZE.
     server_dep = await _wait_for_pod_template(
         vcluster,
         namespace=namespace,
         label_selector="app.kubernetes.io/name=simple-app",
-        predicate=lambda d: any(
-            entry.name == "LOG_LEVEL" and entry.value == "info"
-            for container in d.spec.template.spec.containers or []
-            for entry in container.env or []
+        predicate=lambda d: (
+            {"name": "LOG_LEVEL", "value": "info"} in _container_envs(d, "simple-app")
         ),
-        description="LOG_LEVEL=info to land on server pods (deployment scope)",
+        description="LOG_LEVEL=info to land on the simple-app container",
     )
-    server_envs = _container_envs(server_dep)
+    server_envs = _container_envs(server_dep, "simple-app")
     server_names = {entry["name"] for entry in server_envs}
     assert {"name": "LOG_LEVEL", "value": "info"} in server_envs
     assert "DB_POOL_SIZE" not in server_names, (
-        "server pods must not receive component-scoped env vars meant for database"
+        "the server container must not receive env vars scoped to database"
     )
 
-    # ``database`` pods override LOG_LEVEL and gain DB_POOL_SIZE.
+    # The ``postgresql`` container overrides LOG_LEVEL and gains DB_POOL_SIZE.
     database_dep = await _wait_for_pod_template(
         vcluster,
         namespace=namespace,
         label_selector="app.kubernetes.io/name=postgresql",
-        predicate=lambda d: any(
-            entry.name == "LOG_LEVEL" and entry.value == "debug"
-            for container in d.spec.template.spec.containers or []
-            for entry in container.env or []
+        predicate=lambda d: (
+            {"name": "LOG_LEVEL", "value": "debug"} in _container_envs(d, "postgresql")
         ),
         description=(
-            "LOG_LEVEL=debug to land on database pods via component scope "
-            "(FR-002 deepest-wins)"
+            "LOG_LEVEL=debug to land on the postgresql container via component "
+            "scope (FR-002 deepest-wins)"
         ),
     )
-    database_envs = _container_envs(database_dep)
+    database_envs = _container_envs(database_dep, "postgresql")
     assert {"name": "LOG_LEVEL", "value": "debug"} in database_envs
     assert {"name": "DB_POOL_SIZE", "value": "5"} in database_envs
-    # The deployment-scope LOG_LEVEL=info must NOT linger on database pods.
+    # The deployment-scope LOG_LEVEL=info must NOT linger on the database container.
     assert {"name": "LOG_LEVEL", "value": "info"} not in database_envs
 
 

@@ -76,3 +76,46 @@ fix.
 
 `test_us1_deployment_level_env_var[ui-chromium]` is skipped by its `api_only` marker (the UI
 driver's `update_deployment` accepts only the `scheduling` sub-tree).
+
+## US2 (T025)
+
+Both scenarios carry `api_only` (the UI driver's `update_deployment` accepts only the `scheduling`
+sub-tree), so only `[api-chromium]` applies. Images were built from the working tree with
+`STYRMIN_IMAGE_VER=local-fac017-us2`. The fixture finalizer deleted the vCluster after the run.
+
+### `test_us2_environment_level_env_var_propagates_to_all_deployments[api-chromium]`
+
+- **Node ID**:
+  `backend/tests/e2e/test_deployment_env_vars.py::test_us2_environment_level_env_var_propagates_to_all_deployments[api-chromium]`
+- **Command**:
+
+  ```bash
+  sleep infinity | STYRMIN_IMAGE_VER=local-fac017-us2 uv run pytest \
+    backend/tests/e2e/test_deployment_env_vars.py \
+    -k "(us2 or us3) and api-chromium" -v -s --pdb 2>&1 | tee us2-api.log
+  ```
+
+- **Timestamp**: 2026-10-02T18:04:38Z (session end)
+- **vCluster**: `pytest-00174285-1643-4ec4-893a-b1ad5e3c0475`, kubeconfig
+  `/tmp/pytest-of-root/pytest-301/vcluster0/kubeconfig`
+- **Result** (`-s` output separates the node ID from its outcome):
+
+  ```text
+  backend/tests/e2e/test_deployment_env_vars.py::test_us2_environment_level_env_var_propagates_to_all_deployments[api-chromium]
+  PASSED
+  =========== 2 passed, 10 deselected, 1 warning in 204.95s (0:03:24) ============
+  ```
+
+### `test_us3_per_component_env_var_overrides_deployment_level[api-chromium]`
+
+- **Node ID**:
+  `backend/tests/e2e/test_deployment_env_vars.py::test_us3_per_component_env_var_overrides_deployment_level[api-chromium]`
+- **Command**: same session as above.
+- **Timestamp**: 2026-10-02T18:04:38Z (session end)
+- **vCluster**: `pytest-00174285-1643-4ec4-893a-b1ad5e3c0475`, kubeconfig
+  `/tmp/pytest-of-root/pytest-301/vcluster0/kubeconfig`
+- **Result**:
+
+  ```text
+  backend/tests/e2e/test_deployment_env_vars.py::test_us3_per_component_env_var_overrides_deployment_level[api-chromium] PASSED
+  ```
