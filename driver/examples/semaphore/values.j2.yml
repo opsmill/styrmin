@@ -13,9 +13,6 @@ general:
   additionalPythonPackages:
     - infrahub-sdk
 
-# Operator-supplied env vars for the `server` component.
-extraEnv: {{ components | component_env_vars("server") | tojson }}
-
 database:
   type: postgres
   host: styrmin-postgresql
@@ -72,5 +69,3 @@ postgresql:
     extraVolumeMounts:
       - name: backup
         mountPath: /backup
-    # Operator-supplied env vars for the `database` component.
-    extraEnvVars: {{ components | component_env_vars("database") | tojson }}

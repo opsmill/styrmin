@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: infrahub-mcp
 spec:
-  version: "1"
+  version: "2"
   supported_versions: ">=1.1,<2.0"
   info:
     description: >-
@@ -41,6 +41,7 @@ spec:
 
   components:
     server:
+      container: infrahub-mcp
       identifier:
         label:
           app.kubernetes.io/name: infrahub-mcp

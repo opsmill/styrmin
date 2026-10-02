@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: db-test
 spec:
-  version: "1"
+  version: "2"
   supported_versions: ">=0.1,<1.0"
   info:
     description: Test application with MariaDB and MongoDB for backup testing
@@ -17,11 +17,13 @@ spec:
 
   components:
     server:
+      container: db-test
       identifier:
         label:
           app.kubernetes.io/name: db-test
 
     mariadb:
+      container: mariadb
       identifier:
         label:
           app.kubernetes.io/name: mariadb
@@ -30,6 +32,7 @@ spec:
         kind: mariadb
 
     mongodb:
+      container: mongodb
       identifier:
         label:
           app.kubernetes.io/component: mongodb

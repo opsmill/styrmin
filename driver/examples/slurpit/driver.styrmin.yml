@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: slurpit
 spec:
-  version: "1"
+  version: "2"
   supported_versions: ">=1.3,<1.4"
   info:
     description: Network discovery and inventory management platform
@@ -52,26 +52,31 @@ spec:
 
   components:
     portal:
+      container: slurpit-portal
       identifier:
         label:
           app.kubernetes.io/component: portal
 
     warehouse:
+      container: styrmin-slurpit-warehouse
       identifier:
         label:
           app.kubernetes.io/component: warehouse
 
     scanner:
+      container: slurpit-scanner
       identifier:
         label:
           app.kubernetes.io/component: scanner
 
     scraper:
+      container: slurpit-scraper
       identifier:
         label:
           app.kubernetes.io/component: scraper
 
     mariadb:
+      container: slurpit-mariadb
       identifier:
         label:
           app.kubernetes.io/component: mariadb
@@ -80,6 +85,7 @@ spec:
         kind: mariadb
 
     mongodb:
+      container: styrmin-slurpit-mongodb
       identifier:
         label:
           app.kubernetes.io/component: mongodb

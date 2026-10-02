@@ -4,10 +4,6 @@ image:
   repository: db-test
   tag: "{{ app.version }}"
 
-# Operator-supplied env vars for the `server` component
-# (`components.server.env_vars.config`, env→dep→comp deepest-wins).
-extraEnv: {{ components | component_env_vars("server") | tojson }}
-
 mariadb:
   fullnameOverride: styrmin-db-test-mariadb
   auth:
@@ -35,15 +31,10 @@ mariadb:
     extraVolumeMounts:
       - name: backup
         mountPath: /backup
-    # Hardcoded MARIADB_PASSWORD plus operator-supplied env vars for the
-    # `mariadb` component.
+    # Hard-coded credentials.
     extraEnvVars:
       - name: MARIADB_PASSWORD
         value: test-password
-{%- for entry in components | component_env_vars("mariadb") %}
-      - name: {{ entry.name | tojson }}
-        value: {{ entry.value | tojson }}
-{%- endfor %}
 
 mongodb:
   fullnameOverride: styrmin-db-test-mongodb
@@ -71,14 +62,9 @@ mongodb:
   extraVolumeMounts:
     - name: backup
       mountPath: /backup
-  # Hardcoded mongo root creds plus operator-supplied env vars for the
-  # `mongodb` component.
+  # Hard-coded mongo root credentials.
   extraEnvVars:
     - name: MONGO_INITDB_ROOT_USERNAME
       value: testuser
     - name: MONGO_INITDB_ROOT_PASSWORD
       value: test-mongo-password
-{%- for entry in components | component_env_vars("mongodb") %}
-    - name: {{ entry.name | tojson }}
-      value: {{ entry.value | tojson }}
-{%- endfor %}
