@@ -725,6 +725,57 @@ class RuntimeClassPatch(Patch):
 
 
 @dataclass
+class ContainerEnvPatch(Patch):
+    """Strategic-merge YAML patch merging env entries into one named container.
+
+    Containers merge by ``name`` and env entries by env ``name``, so chart
+    entries the patch does not name survive. Every entry carries
+    ``valueFrom: null`` so a same-name chart ``valueFrom`` is replaced by the
+    literal ``value`` (017-post-render-env-vars research D-001).
+
+    Example:
+        >>> patch = ContainerEnvPatch(container="app", env={"LOG_LEVEL": "debug"})
+        >>> print(patch.render_value())
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: any
+        spec:
+          template:
+            spec:
+              containers:
+              - name: app
+                env:
+                - name: LOG_LEVEL
+                  value: debug
+                  valueFrom: null
+        <BLANKLINE>
+    """
+
+    container: str
+    env: dict[str, str]
+    kind: str = "Deployment"
+    api_version: str = "apps/v1"
+    name: str = "any"
+    _path: str = field(init=False, default="/spec/template/spec/containers")
+    _operation: str = field(init=False, default="add")
+
+    def render_value(self) -> str:
+        entries = [
+            {"name": key, "value": value, "valueFrom": None}
+            for key, value in self.env.items()
+        ]
+        leaf = {"containers": [{"name": self.container, "env": entries}]}
+        doc: dict[str, Any] = {
+            "apiVersion": self.api_version,
+            "kind": self.kind,
+            "metadata": {"name": self.name},
+            **_nested_dict(_POD_TEMPLATE_SPEC_PATH, leaf),
+        }
+        return yaml.dump(doc, default_flow_style=False, sort_keys=False)
+
+
+@dataclass
 class GenericPatch(Patch):
     """
     Represents a generic patch with a specific value.
