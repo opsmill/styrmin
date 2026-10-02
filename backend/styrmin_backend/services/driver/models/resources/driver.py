@@ -26,6 +26,7 @@ Example:
                 version: 2.3.*
         components:
             server:
+                container: infrahub-server  # optional; receives the component's env vars
                 count: 2
                 resources:
                     cpu: 4
@@ -63,6 +64,7 @@ Example:
     ```
 """
 
+import re
 from typing import Literal, Self
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -132,10 +134,30 @@ class Identifier(BaseModel):
     label: LabelIdentifier
 
 
+# Kubernetes container name: a DNS-1123 label.
+_CONTAINER_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+_CONTAINER_NAME_MAX_LENGTH = 63
+
+
 class ArbitrarySectionModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     identifier: Identifier
+    container: str | None = None
+
+    @field_validator("container", mode="after")
+    @classmethod
+    def validate_container(cls, value: str | None) -> str | None:
+        if value is not None and (
+            len(value) > _CONTAINER_NAME_MAX_LENGTH
+            or not _CONTAINER_NAME_RE.fullmatch(value)
+        ):
+            raise ValueError(
+                f"{value!r} is not a valid Kubernetes container name: use 1-63 "
+                "lowercase alphanumerics or '-', starting and ending with an "
+                "alphanumeric"
+            )
+        return value
 
 
 class Components(RootModel):

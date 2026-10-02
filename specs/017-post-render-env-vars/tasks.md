@@ -36,10 +36,10 @@ independently. Paths are repository-relative.
 
 **Purpose**: The component container field, available end to end. Blocks every story.
 
-- [ ] T002 [P] Write failing unit tests in `backend/tests/unit/services/driver/test_component_container.py`: a driver spec with `components.server.container: simple-app` loads and exposes the value; omitting `container` loads with `None`; `Simple_App`, `-bad`, `""`, and a 64-char name each fail registration with a validation error naming the component (FR-001).
-- [ ] T003 [P] Write a failing unit test in `backend/tests/unit/context/test_component_context_container.py`: a `ContextInput` whose component config carries `container` yields `ComponentContext.config.container`; a stored instance context without the key still validates with `container is None`.
-- [ ] T004 Add `container: str | None = None` with DNS-1123 label validation (`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, ≤ 63 chars) to `ArbitrarySectionModel` in `backend/styrmin_backend/services/driver/models/resources/driver.py`; add the `container` example to the module docstring. Make T002 pass.
-- [ ] T005 Add the same typed `container: str | None = None` field to `ArbitrarySectionModel` in `backend/styrmin_backend/context/models/components.py` (no validation beyond type; load-time validation is T004's). Make T003 pass.
+- [X] T002 [P] Write failing unit tests in `backend/tests/unit/services/driver/test_component_container.py`: a driver spec with `components.server.container: simple-app` loads and exposes the value; omitting `container` loads with `None`; `Simple_App`, `-bad`, `""`, and a 64-char name each fail registration with a validation error naming the component (FR-001).
+- [X] T003 [P] Write a failing unit test in `backend/tests/unit/context/test_component_context_container.py`: a `ContextInput` whose component config carries `container` yields `ComponentContext.config.container`; a stored instance context without the key still validates with `container is None`.
+- [X] T004 Add `container: str | None = None` with DNS-1123 label validation (`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, ≤ 63 chars) to `ArbitrarySectionModel` in `backend/styrmin_backend/services/driver/models/resources/driver.py`; add the `container` example to the module docstring. Make T002 pass.
+- [X] T005 Add the same typed `container: str | None = None` field to `ArbitrarySectionModel` in `backend/styrmin_backend/context/models/components.py` (no validation beyond type; load-time validation is T004's). Make T003 pass.
 
 **Checkpoint**: `components.<name>.container` loads, validates, and reaches `ComponentContext`.
 
