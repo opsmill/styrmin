@@ -141,6 +141,31 @@ class ScenarioDriver(Protocol):
         observe the reconciliation completing.
         """
 
+    async def set_component_env_vars(
+        self, *, deployment_id: str, component: str, env_vars: dict[str, str]
+    ) -> None:
+        """Replace one component's component-scope env vars on a deployment.
+
+        ``env_vars`` is the complete desired set for ``component``; an empty
+        dict clears it. Every other stored config field, including the other
+        components' blocks and this component's ``command``/``args``, is
+        preserved.
+
+        API driver: reads the stored ``Deployment.config``, swaps
+        ``components[<component>].env_vars``, and resubmits the whole config
+        through ``update_deployment`` (``updateDeployment`` is
+        full-replacement). A block left empty is dropped.
+
+        UI driver: opens the Settings tab's edit drawer, expands
+        ``component-override-trigger-<component>``, edits the env var rows in
+        place to match ``env_vars`` (adding, renaming and removing rows),
+        then applies through the diff dialog. A block left with no env vars,
+        command or args is removed.
+
+        Both block until the server has accepted the mutation; callers still
+        need ``wait_for_deployment_running`` to observe the reconcile.
+        """
+
     async def get_deployment_timeline(
         self, *, deployment_id: str
     ) -> list[TimelineEntry]: ...

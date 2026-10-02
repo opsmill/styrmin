@@ -304,6 +304,20 @@ class UiScenarioDriver:
             await self._deployment_detail.fill_scheduling_config(scheduling)
             await self._deployment_detail.save_scheduling_config()
 
+    async def set_component_env_vars(
+        self, *, deployment_id: str, component: str, env_vars: dict[str, str]
+    ) -> None:
+        environment_id = self._require_environment_context(deployment_id=deployment_id)
+        async with _ui_errors(
+            f"setting env vars on component {component!r} of deployment {deployment_id}"
+        ):
+            await self._deployment_detail.goto(
+                environment_id=environment_id, deployment_id=deployment_id
+            )
+            await self._deployment_detail.set_component_env_vars(
+                component=component, env_vars=env_vars
+            )
+
     async def update_environment_via_form(
         self,
         *,
