@@ -14,8 +14,9 @@ container by env `name`. Chart entries survive and same-name entries (including 
 replaced. Writes that target a component without a container are rejected up front, upgrades that
 drop a container keep and flag stored values, the `component_env_vars` filter fails rendering
 with a pointer to a migration guide, and every in-repo driver is migrated. The HelmRelease update
-switches from merge-patch to a wholesale `spec` replace, so values-template env entries written
-before migration do not linger (research D-003).
+switches from merge-patch to replacing each top-level spec key Styrmin writes, so values-template
+env entries written before migration do not linger while keys Styrmin never writes
+(`spec.suspend`) survive (research D-003 and its revision).
 
 ## Technical Context
 
@@ -166,9 +167,10 @@ siblings in `blocks/patches.py`.
 5. **Read flags** (D-005, D-006): `ComponentEnvVars.isApplicable` computed in the resolver from
    driver-version component configs; `Component.container` and `ComponentConfig.container` read
    `config["container"]`.
-6. **HelmRelease apply** (D-003): `upsert_custom_resource(..., replace_spec_on_update=True)` sends
-   a single JSON Patch (`add /spec` pruned + per-key metadata `add` ops) on 409; other callers
-   unchanged. Unit tests pin that kopf annotations and Flux's finalizer survive an update and
+6. **HelmRelease apply** (D-003): `upsert_custom_resource(..., replace_spec_keys_on_update=True)`
+   sends a single JSON Patch (one `add /spec/<key>` per spec key the body sets, pruned, + per-key
+   metadata `add` ops) on 409; the agent's StyrminDeployment CR applies use the same mode; other
+   callers unchanged. Unit tests pin that kopf annotations and Flux's finalizer survive an update and
    that the builder always sets both metadata maps the per-key ops rely on (critique E3).
 7. **Drivers** (D-010): add `container` to all 30 components, verified by rendering each driver
    with `helm template` — the command and matched container per component are recorded in the

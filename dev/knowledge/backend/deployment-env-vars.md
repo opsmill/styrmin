@@ -222,10 +222,11 @@ deployment; the typed code and metadata do not survive the CR → operator hop,
 the message and the migration guide URL do.
 
 Two apply-path changes make clearing work on deployments created before
-017: the operator's HelmRelease update replaces `spec` (JSON Patch
-`add /spec`, `None` pruned, per-key metadata ops), and the agent's
-StyrminDeployment CR applies replace each top-level spec key they write
-(`spec.context` wholesale; `spec.deletionRequested` untouched). Without them,
+017: both the operator's HelmRelease update and the agent's StyrminDeployment
+CR applies replace each top-level spec key they write (JSON Patch
+`add /spec/<key>`, `None` pruned, per-key metadata ops). `spec.values` and
+`spec.context` are replaced wholesale; keys Styrmin never writes
+(`spec.suspend`, `spec.deletionRequested`) are untouched. Without them,
 merge-patch kept stale values-template env entries and cleared context keys.
 
 History: 008 injected by a JSON-patch `replace` on `containers/0/env`, which
@@ -264,7 +265,7 @@ foot setting them in the past.
 | Patch placement + rendering-context exposure | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` (`ApplicationHelmReleaseBuilder.build`, `render_value_template`, retired `component_env_vars` stub) |
 | Write guard | `backend/styrmin_backend/services/deployment.py::_validate_component_env_var_containers`; error in `services/env_vars/exceptions.py` |
 | Retired-filter error | `backend/styrmin_backend/services/exceptions.py::RetiredTemplateFilterError` |
-| HelmRelease / CR apply | `backend/styrmin_backend/agent/service/kubernetes/primitives.py::upsert_custom_resource` (`replace_spec_on_update`, `replace_spec_keys_on_update`); callers in `operator/pipeline.py` and `agent/tasks/orchestration.py` |
+| HelmRelease / CR apply | `backend/styrmin_backend/agent/service/kubernetes/primitives.py::upsert_custom_resource` (`replace_spec_keys_on_update`); callers in `operator/pipeline.py` and `agent/tasks/orchestration.py` |
 | Driver-side docs | `backend/styrmin_backend/services/driver/models/resources/env_vars.py` |
 | Reference driver | `driver/examples/simple-app/driver.styrmin.yml` and `driver/examples/simple-app/src/helm/templates/deployment.yaml` |
 | GraphQL types | `backend/styrmin_backend/api/definitions/deployment/model.py`, `.../environment/model.py`, `.../application_driver/model.py`, `.../deployment_timeline/model.py` |

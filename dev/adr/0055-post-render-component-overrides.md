@@ -8,7 +8,8 @@ non-feature it records ("no platform-side post-render env var injection"). ADR-0
 and §5 no longer describe how env vars reach pods; ADR-013 §3 (merged dicts) and the
 resolver are unchanged.
 **Narrows**: [ADR-045](0045-container-override-no-layering-and-omit-marker.md) §2 and §5 —
-the HelmRelease `spec` is replaced on update instead of merge-patched (see §6).
+the operator replaces each HelmRelease spec key Styrmin writes on update instead of
+merge-patching it (see §6).
 **Related**: [ADR-035](0035-post-render-injection-toggles-and-kind-list.md) (the post-render
 patch pipeline this extends), [ADR-004](0004-embed-context-in-deployment-crd.md) (the
 StyrminDeployment CR carries the context), [ADR-012](0012-environment-config-fanout.md)
@@ -121,36 +122,43 @@ never injected. `isOrphaned` keeps its meaning (the driver no longer declares th
 The deployment edit drawer offers no env var editor for a containerless component; stored
 values there are read-only and removable.
 
-### 6. The operator replaces the HelmRelease `spec` on update
+### 6. Styrmin replaces each spec key it writes on update
 
 The operator applied the HelmRelease with JSON merge-patch (RFC 7386), which leaves keys the
 new body omits in place. A deployment created before migration carries values-template env
 entries in its live `spec.values`: list slots (`extraEnv`, `extraEnvVars`) survive when the
 migrated template stops writing them, and map slots keep stale user keys next to the
-hard-coded wiring. The chart would keep rendering the old value, and clearing an env var
-through Styrmin would never reach the pod.
+hard-coded wiring. A merge-patch can delete a map key only through an explicit `null`, and
+the template cannot know which keys an earlier render wrote, so no marker clears a map slot.
+The chart would keep rendering the old value, and clearing an env var through Styrmin would
+never reach the pod.
 
-The HelmRelease apply in `operator/pipeline.py` now passes `replace_spec_on_update=True` to
-`upsert_custom_resource`. On a 409 it sends one JSON Patch (`application/json-patch+json`):
-`add /spec` with `None` values pruned, plus one `add` per `metadata.labels` and
-`metadata.annotations` key the body sets (RFC 6901 escaping). Flux's finalizer and kopf's
-annotations are not touched. The create path is unchanged (`prune_none_on_create`). Every
-other custom resource keeps merge-patch.
+Both the HelmRelease apply (`operator/pipeline.py`) and the agent's StyrminDeployment CR
+create, update, and upgrade applies (`agent/tasks/orchestration.py`) pass
+`replace_spec_keys_on_update=True` to `upsert_custom_resource`. On a 409 it sends one JSON
+Patch (`application/json-patch+json`): one `add` per top-level `spec` key the body sets
+(`None` pruned), plus one `add` per `metadata.labels` and `metadata.annotations` key the body
+sets (RFC 6901 escaping). The rule is: **Styrmin owns each top-level spec key it writes;
+everything else merges.**
 
-The same residue existed one hop earlier (research D-003 addendum). The operator builds the
-HelmRelease from the StyrminDeployment CR's `spec.context`, which the agent also wrote with
-merge-patch; the context is dumped with `exclude_none=True`, so a cleared env var stayed in
-the CR. The agent's create, update, and upgrade CR applies now pass
-`replace_spec_keys_on_update=True`: one JSON Patch with an `add` per top-level spec key the
-body sets, so `spec.context` is replaced wholesale. `spec.deletionRequested` is server-owned
-and absent from the agent's body, so it is left alone; a whole-`spec` replace would reset it
-to its `false` default, which the CRD's CEL rule rejects after a delete request.
+- Keys Styrmin writes are replaced, so nested keys it stopped writing disappear:
+  `spec.values` on the HelmRelease, `spec.context` on the CR (dumped with
+  `exclude_none=True`, so a cleared env var used to stay there; research D-003 addendum).
+  Styrmin writes `postRenderers` on every render (the label patches are unconditional), so
+  the list never goes stale.
+- Spec keys Styrmin never writes survive, as with merge-patch: `spec.suspend` set by
+  `flux suspend hr`, and the server-owned `spec.deletionRequested` on the CR (a whole-`spec`
+  replace would reset it to `false`, which the CRD's CEL rule rejects after a delete
+  request).
+- Flux's finalizer and kopf's annotations are not touched. The create path is unchanged
+  (`prune_none_on_create`). Every other custom resource keeps merge-patch.
 
 Effect on ADR-045: §2 rejected a full replace because it "reshaped the apply path for every
-resource"; this one is scoped to two callers. Under replace, an omitted values key no longer
-lingers, so the always-present `[]` key from §2 is no longer needed for clearing (it stays
-harmless and documented). The `null` marker from §5 is pruned on create and on update, so it
-reads as absent on both paths and the chart default applies, the same outcome as before.
+resource"; this one is scoped to two callers and to the spec keys they write. Under
+per-key replace, an omitted values key no longer lingers, so the always-present `[]` key from
+§2 is no longer needed for clearing (it stays harmless and documented). The `null` marker
+from §5 is pruned on create and on update, so it reads as absent on both paths and the chart
+default applies, the same outcome as before.
 
 ## Consequences
 
@@ -216,8 +224,13 @@ reads as absent on both paths and the chart default applies, the same outcome as
   template boilerplate this change removes.
 - **Diff the live HelmRelease and emit `null` for vanished keys.** Rejected: same outcome as
   replace, with a GET and a recursive diff on every reconcile.
-- **Server-side apply.** Rejected: needs a field-manager migration of every existing
-  HelmRelease.
+- **Server-side apply.** Rejected for now: the native ownership model, but every existing
+  HelmRelease and CR needs a one-time `managedFields` migration before stale keys are
+  removed. A candidate for its own ADR.
+- **Replace the whole HelmRelease `spec`** (`add /spec`, the first implementation).
+  Rejected: drops spec keys Styrmin never writes, so the next update undoes `flux suspend hr`.
 - **Replace the whole StyrminDeployment CR `spec`.** Rejected: resets the server-owned
   `spec.deletionRequested`, which the CEL rule forbids after a delete request; per-key replace
   of the keys the agent writes avoids it.
+- **Keep merge-patch and drop FR-011.** Rejected: user env vars set in a map slot before
+  migration could never be cleared through Styrmin.

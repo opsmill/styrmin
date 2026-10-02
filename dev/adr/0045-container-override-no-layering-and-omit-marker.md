@@ -11,8 +11,8 @@
 **Source**: specs/archive/014-component-container-overrides/ (spec, plan, research)
 
 > **Superseded in part by [ADR-055](0055-post-render-component-overrides.md)** (2026-10-02,
-> 017-post-render-env-vars). The operator now replaces the HelmRelease `spec` on update (JSON
-> Patch `add /spec`, `None` pruned) instead of merge-patching it. §2's merge-patch rationale for
+> 017-post-render-env-vars). The operator now replaces each HelmRelease spec key Styrmin
+> writes on update (JSON Patch `add /spec/<key>`, `None` pruned) instead of merge-patching it. §2's merge-patch rationale for
 > the always-present key no longer applies (an omitted key no longer lingers; the `[]` marker
 > stays harmless), and §5's `null` marker is pruned on both create and update. The
 > `component_env_vars` filter §2 cites as precedent was retired by ADR-055. `command`/`args`
@@ -176,8 +176,9 @@ changes no behaviour for any other custom resource and leaves the merge-patch
 path untouched. Full replace / server-side apply was rejected because it
 reshaped the apply path for **every** resource — this does not.
 
-> **Note (ADR-055):** the operator's HelmRelease apply now replaces `spec` on update (one
-> JSON Patch, `None` pruned), scoped to that caller and the StyrminDeployment CR apply. The
+> **Note (ADR-055):** the operator's HelmRelease apply now replaces each spec key Styrmin writes
+> on update (one JSON Patch, `None` pruned), scoped to that caller and the StyrminDeployment CR
+> apply. The
 > `null` marker is therefore pruned on the update path too and reads as absent on both paths;
 > the clearing outcome above is unchanged.
 

@@ -213,7 +213,7 @@ The kopf-based controller running inside the **agent** that watches **StyrminDep
 _Avoid_: "kopf" (that is the library), "kubernetes operator" (redundant), "the controller" (overloaded with K8s controllers).
 
 **HelmRelease**:
-The FluxCD v2 CRD declaring desired Helm chart state. Created and updated by the **operator** based on the resolved **GlobalContext**; Styrmin owns its `spec` and replaces it wholesale on every update ([ADR-055](dev/adr/0055-post-render-component-overrides.md)).
+The FluxCD v2 CRD declaring desired Helm chart state. Created and updated by the **operator** based on the resolved **GlobalContext**; on update Styrmin replaces each top-level spec key it writes (so stale `spec.values` keys disappear) and leaves keys it never writes, such as `spec.suspend` ([ADR-055](dev/adr/0055-post-render-component-overrides.md)).
 _Avoid_: "release" alone (ambiguous), "Helm install".
 
 **HelmChart / HelmRepository**:

@@ -217,11 +217,11 @@ async def execute_phase_helmrelease(
             group="helm.toolkit.fluxcd.io",
             version="v2",
             namespace=namespace,
-            # Styrmin owns the HelmRelease spec: replace it on update so stale
-            # values-template keys do not linger, and prune ``None`` on both
-            # paths so a driver's ``null`` marker reads as absent (ADR-055).
+            # Replace each spec key Styrmin writes so stale values-template keys
+            # do not linger, keep keys it doesn't (``spec.suspend``), and prune
+            # ``None`` on both paths so a ``null`` marker reads as absent (ADR-055).
             prune_none_on_create=True,
-            replace_spec_on_update=True,
+            replace_spec_keys_on_update=True,
         )
         logger.info(
             "Created HelmRelease %s in %s",

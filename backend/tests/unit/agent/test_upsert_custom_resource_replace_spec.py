@@ -1,10 +1,11 @@
-"""Unit tests for ``upsert_custom_resource(replace_spec_on_update=True)``
-(017-post-render-env-vars, T009, FR-011, research D-003, critique E3).
+"""Unit tests for ``upsert_custom_resource(replace_spec_keys_on_update=True)``
+on the HelmRelease apply (017-post-render-env-vars, T009, FR-011, research
+D-003, critique E3).
 
-On a 409 the HelmRelease apply sends one JSON Patch that replaces ``spec``
-wholesale (``None`` pruned) and adds each owned ``metadata.labels`` /
+On a 409 the apply sends one JSON Patch that replaces each spec key the body
+sets (``None`` pruned) and adds each owned ``metadata.labels`` /
 ``metadata.annotations`` key individually, so stale ``spec.values`` entries
-disappear while kopf annotations and Flux's finalizer survive.
+disappear while ``spec.suspend``, kopf annotations and Flux's finalizer survive.
 """
 
 from __future__ import annotations
@@ -81,20 +82,18 @@ def _apply_add_ops(live: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str,
 async def test_conflict_sends_single_json_patch() -> None:
     api = _mock_api()
 
-    await _run(api, _BODY, prune_none_on_create=True, replace_spec_on_update=True)
+    await _run(api, _BODY, prune_none_on_create=True, replace_spec_keys_on_update=True)
 
     api.patch_namespaced_custom_object.assert_awaited_once()
     kwargs = api.patch_namespaced_custom_object.call_args.kwargs
     assert kwargs["_content_type"] == "application/json-patch+json"
     assert kwargs["name"] == "rel"
     assert kwargs["body"] == [
+        {"op": "add", "path": "/spec/interval", "value": "1h"},
         {
             "op": "add",
-            "path": "/spec",
-            "value": {
-                "interval": "1h",
-                "values": {"infrahubServer": {"infrahubServer": {"env": {"A": "1"}}}},
-            },
+            "path": "/spec/values",
+            "value": {"infrahubServer": {"infrahubServer": {"env": {"A": "1"}}}},
         },
         {
             "op": "add",
@@ -114,12 +113,13 @@ async def test_conflict_sends_single_json_patch() -> None:
 async def test_ops_only_touch_spec_and_keys_the_body_sets() -> None:
     api = _mock_api()
 
-    await _run(api, _BODY, replace_spec_on_update=True)
+    await _run(api, _BODY, replace_spec_keys_on_update=True)
 
     paths = [
         op["path"] for op in api.patch_namespaced_custom_object.call_args.kwargs["body"]
     ]
     assert not any(p.startswith("/metadata/finalizers") for p in paths)
+    assert "/spec" not in paths
     assert "/metadata/labels" not in paths
     assert "/metadata/annotations" not in paths
     assert not any(p.startswith("/status") for p in paths)
@@ -139,13 +139,14 @@ async def test_applied_patch_drops_stale_spec_and_keeps_foreign_metadata() -> No
         },
         "spec": {
             "interval": "1h",
+            "suspend": True,
             "values": {"extraEnv": [{"name": "STALE_VALUES_ENV", "value": "x"}]},
         },
         "status": {"observedGeneration": 3},
     }
     api = _mock_api()
 
-    await _run(api, _BODY, replace_spec_on_update=True)
+    await _run(api, _BODY, replace_spec_keys_on_update=True)
     result = _apply_add_ops(
         live, api.patch_namespaced_custom_object.call_args.kwargs["body"]
     )
@@ -154,6 +155,8 @@ async def test_applied_patch_drops_stale_spec_and_keeps_foreign_metadata() -> No
     assert result["spec"]["values"]["infrahubServer"]["infrahubServer"] == {
         "env": {"A": "1"}
     }
+    # ``flux suspend`` sets a key Styrmin never writes; an update must keep it.
+    assert result["spec"]["suspend"] is True
     assert result["metadata"]["finalizers"] == ["finalizers.fluxcd.io"]
     assert result["metadata"]["labels"] == {
         "plain": "x",
@@ -169,26 +172,29 @@ async def test_applied_patch_drops_stale_spec_and_keeps_foreign_metadata() -> No
 
 @pytest.mark.asyncio
 async def test_tilde_and_slash_are_escaped_per_rfc_6901() -> None:
-    body = {"metadata": {"name": "rel", "labels": {"a~b/c": "v"}}, "spec": {}}
+    body = {
+        "metadata": {"name": "rel", "labels": {"a~b/c": "v"}},
+        "spec": {"x/y": 1},
+    }
     api = _mock_api()
 
-    await _run(api, body, replace_spec_on_update=True)
+    await _run(api, body, replace_spec_keys_on_update=True)
 
     paths = [
         op["path"] for op in api.patch_namespaced_custom_object.call_args.kwargs["body"]
     ]
-    assert paths == ["/spec", "/metadata/labels/a~0b~1c"]
+    assert paths == ["/spec/x~1y", "/metadata/labels/a~0b~1c"]
 
 
 @pytest.mark.asyncio
-async def test_body_without_metadata_maps_only_replaces_spec() -> None:
+async def test_body_without_metadata_maps_only_replaces_spec_keys() -> None:
     body = {"metadata": {"name": "rel"}, "spec": {"interval": "1h"}}
     api = _mock_api()
 
-    await _run(api, body, replace_spec_on_update=True)
+    await _run(api, body, replace_spec_keys_on_update=True)
 
     assert api.patch_namespaced_custom_object.call_args.kwargs["body"] == [
-        {"op": "add", "path": "/spec", "value": {"interval": "1h"}}
+        {"op": "add", "path": "/spec/interval", "value": "1h"}
     ]
 
 
@@ -197,7 +203,7 @@ async def test_caller_body_is_not_mutated() -> None:
     body = copy.deepcopy(_BODY)
     api = _mock_api()
 
-    await _run(api, body, prune_none_on_create=True, replace_spec_on_update=True)
+    await _run(api, body, prune_none_on_create=True, replace_spec_keys_on_update=True)
 
     assert body == _BODY
 
@@ -206,7 +212,7 @@ async def test_caller_body_is_not_mutated() -> None:
 async def test_create_path_still_prunes_and_skips_patch() -> None:
     api = _mock_api(conflict=False)
 
-    await _run(api, _BODY, prune_none_on_create=True, replace_spec_on_update=True)
+    await _run(api, _BODY, prune_none_on_create=True, replace_spec_keys_on_update=True)
 
     sent = api.create_namespaced_custom_object.call_args.kwargs["body"]
     assert "args" not in sent["spec"]["values"]["infrahubServer"]["infrahubServer"]
@@ -219,7 +225,7 @@ async def test_non_conflict_error_is_raised() -> None:
     api.create_namespaced_custom_object.side_effect = ApiException(status=500)
 
     with pytest.raises(ApiException):
-        await _run(api, _BODY, replace_spec_on_update=True)
+        await _run(api, _BODY, replace_spec_keys_on_update=True)
     api.patch_namespaced_custom_object.assert_not_awaited()
 
 
@@ -235,7 +241,7 @@ async def test_flag_off_keeps_merge_patch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_operator_helmrelease_apply_opts_into_replace_spec() -> None:
+async def test_operator_helmrelease_apply_opts_into_per_key_replace() -> None:
     from uuid import uuid4
 
     from styrmin_backend.agent.service.kubernetes.resources.builders.application import (
@@ -295,7 +301,7 @@ async def test_operator_helmrelease_apply_opts_into_replace_spec() -> None:
 
     assert result.success, result.errors
     calls = {c.kwargs["plurals"]: c.kwargs for c in upsert.await_args_list}
-    assert calls["helmreleases"]["replace_spec_on_update"] is True
+    assert calls["helmreleases"]["replace_spec_keys_on_update"] is True
     assert calls["helmreleases"]["prune_none_on_create"] is True
-    assert "replace_spec_on_update" not in calls["helmrepositories"]
-    assert "replace_spec_on_update" not in calls["helmcharts"]
+    assert "replace_spec_keys_on_update" not in calls["helmrepositories"]
+    assert "replace_spec_keys_on_update" not in calls["helmcharts"]

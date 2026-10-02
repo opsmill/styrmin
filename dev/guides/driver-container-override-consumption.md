@@ -66,7 +66,8 @@ args:
 - **Always emit the key** and `tojson` the list — do NOT wrap the emission in
   an `if`/omit guard. This was required while the operator merge-patched the
   HelmRelease (an omitted key was left unchanged, so a cleared override
-  persisted). Since 017 the operator replaces the HelmRelease `spec` on update
+  persisted). Since 017 the operator replaces each HelmRelease spec key it writes
+  on update, including `spec.values`
   ([ADR-055](../adr/0055-post-render-component-overrides.md) §6), so an omitted
   key no longer lingers, but the always-present key stays the documented
   pattern and keeps the rendered values explicit.
@@ -109,8 +110,8 @@ clearing reverts to the default (see
 - on the **create POST**, `prune_none_on_create` strips them, so a first
   reconcile never persists a literal null that the unguarded chart would render
   and blank;
-- on an **update**, the `spec` replace (JSON Patch `add /spec`) prunes them the
-  same way.
+- on an **update**, the per-key spec replace (JSON Patch `add /spec/<key>`)
+  prunes them the same way.
 
 The alternative is a **default fallback** — always emit the key, falling back to
 the chart's documented default instead of `[]`:

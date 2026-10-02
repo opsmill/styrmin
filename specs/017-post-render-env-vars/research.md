@@ -81,7 +81,7 @@ remaining elements. This applies at two levels:
 
 ---
 
-## D-003 — Stale values-template env on migrated deployments → replace HelmRelease `spec` on update
+## D-003 — Stale values-template env on migrated deployments → replace each HelmRelease spec key on update
 
 **Finding**: The operator applies the HelmRelease via `upsert_custom_resource`, which on update
 sends `application/merge-patch+json` (RFC 7386, ADR-045). Merge-patch merges maps recursively and
@@ -147,6 +147,15 @@ with an `add` op per top-level spec key the body sets. `spec.context` is replace
 while the server-owned `spec.deletionRequested` (CEL-guarded, never in the agent's body) is left
 alone; a full `spec` replace would reset it to its `false` default and be rejected after a delete
 request.
+
+**Revision (post-review, 2026-10-02)**: the HelmRelease apply now uses the same per-key mode
+(`replace_spec_keys_on_update=True`) and the wholesale `add /spec` mode is removed. "Nothing else
+writes the spec" held for Styrmin code but not for people: `flux suspend hr` sets `spec.suspend`,
+and a whole-`spec` replace undid it on the next update. Per-key replace still drops stale nested
+keys under `spec.values` (the FR-011 fix) and keeps spec keys Styrmin never writes, as merge-patch
+did. `spec.postRenderers` is written on every render (the label patches are unconditional), so it
+cannot go stale. Rule for both callers: Styrmin owns each top-level spec key it writes; everything
+else merges (ADR-055 §6).
 
 ---
 

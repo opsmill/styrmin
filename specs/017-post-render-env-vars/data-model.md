@@ -92,8 +92,8 @@ Unknown-component blocks keep raising `UNKNOWN_COMPONENT_ENV_VAR` first.
 | Path | Before | After (FR-011) |
 |---|---|---|
 | Create (`POST`) | body with `None` pruned | unchanged |
-| Update, `spec` | JSON merge-patch (maps merge, omitted keys survive) | JSON Patch `add /spec` with `None` pruned — wholesale replace |
+| Update, `spec` | JSON merge-patch (maps merge, omitted keys survive) | JSON Patch `add /spec/<key>` per spec key the body sets, `None` pruned — those keys are replaced, keys Styrmin never writes (`spec.suspend`) survive |
 | Update, `metadata.labels` / `metadata.annotations` | merge-patch | per-key `add` ops (merge semantics preserved; Flux finalizer untouched) |
 
-Opt-in flag on `upsert_custom_resource`, set only by the HelmRelease apply in
-`operator/pipeline.py` (research D-003).
+Opt-in flag `replace_spec_keys_on_update` on `upsert_custom_resource`, set by the HelmRelease
+apply in `operator/pipeline.py` and the agent's StyrminDeployment CR applies (research D-003).

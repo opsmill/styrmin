@@ -119,3 +119,25 @@ The review was done by hand in the main context, without the `speckit-review-run
 2. Open the PR, with US1 and US3 landing together as planned (the PR template asks for high-risk callouts on operator/agent changes).
 3. File follow-ups: the `styrminctl apply` ordering gap, the `test_deployment_container_overrides` CR write race, UI-driver support for deployment-scope env vars, and `get_component_env` name-based container selection (ADR-055).
 4. Optionally run `speckit-reconcile-run` to fix the spec drift (component count, D-002 path, T044 casing).
+
+## 7. Addendum: per-key HelmRelease apply (post-report)
+
+Follow-up decision after review (option A). The HelmRelease apply in `a3ff101` replaced the whole
+`spec` (`add /spec`), which also undid spec keys Styrmin never writes, such as `spec.suspend`
+from `flux suspend hr`. It now uses the same per-key mode as the StyrminDeployment CR apply from
+`2242972`: one `add /spec/<key>` per top-level spec key Styrmin writes. The wholesale mode and
+the `replace_spec_on_update` flag are removed. Rule for both resources: Styrmin owns each
+top-level spec key it writes; everything else merges (ADR-055 §6, research D-003 revision).
+
+Pure merge-patch was ruled out because a merge-patch deletes a map key only through an explicit
+`null`, so stale user env keys in map-shaped values slots (infrahub, neo4j, slurpit) could never
+be cleared. Merge-patch with computed deletions, server-side apply, and dropping FR-011 are
+recorded as alternatives in ADR-055.
+
+Evidence for this change is in `e2e-evidence.md` (per-key section). The env-vars module passed
+on api (5 passed) and ui (1 passed). container-overrides passed us1, us2, us3 and us6.
+
+container-overrides `test_us4_invalid_overrides_rejected` failed again. The live cluster
+confirmed the cause: two concurrent `apply_state` flows for one deployment, with the earlier
+mutation's CR write landing last. This is independent of the apply mode, so it is a
+pre-existing race for its own issue.
