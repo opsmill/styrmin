@@ -1,9 +1,17 @@
 # ADR-013: Driver-Side Env Var Consumption via Values Template
 
-**Status**: Accepted
+**Status**: Accepted — superseded in part by [ADR-055](0055-post-render-component-overrides.md)
 **Date**: 2026-05-08
-**Source**: specs/010-driver-env-var-consumption/ (spec, plan, research)
+**Source**: specs/archive/010-driver-env-var-consumption/ (spec, plan, research)
 **Supersedes**: the post-render env-vars injection design from 008-deployment-env-vars (`EnvVarsPatch` / `envVarCollisions` surfaces and the chart-vs-operator conflict policy); [ADR-012](0012-environment-config-fanout.md)'s environment-config fanout is unaffected.
+
+> **Superseded in part by [ADR-055](0055-post-render-component-overrides.md)** (2026-10-02,
+> 017-post-render-env-vars). §1 and the FR-026 non-feature no longer hold: drivers declare a
+> component container (`components.<name>.container`) and Styrmin merges env vars into it by a
+> strategic-merge post-render patch, keyed by env `name`, so chart env entries survive. The
+> `component_env_vars` filter that §2 and §5 rely on now fails rendering. §3 (merged dicts,
+> exposed read-only in the rendering context) and the resolver still apply. The text below is
+> kept as the record of the 010 decision.
 
 ## Context
 
