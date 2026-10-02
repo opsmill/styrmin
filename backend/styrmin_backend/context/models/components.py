@@ -39,6 +39,8 @@ class ArbitrarySectionModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     identifier: Identifier
+    # Validated at driver load; ``None`` on contexts stored before the field.
+    container: str | None = None
 
     def __getitem__(self, item: Any) -> Any:
         assert self.__pydantic_extra__ is not None
