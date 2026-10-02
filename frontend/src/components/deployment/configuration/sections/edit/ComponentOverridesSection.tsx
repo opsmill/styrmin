@@ -182,6 +182,9 @@ function ensureComponentBlock(
  *    coming in future iterations" line so the section has visible room to
  *    grow without a structural rewrite.
  *
+ * Components without a component container get no env var editor: stored
+ * values render read-only and removable (FR-006).
+ *
  * Field-array semantics: every read or write into the override list keys
  * on the component `name`. The array index is an implementation detail of
  * TanStack Form's `mode="array"`; it never appears in the diff path (which
@@ -296,6 +299,7 @@ export function ComponentOverridesSection({
                       <ComponentOverrideBody
                         form={form}
                         componentName={componentName}
+                        hasContainer={Boolean(component.container)}
                         field={field}
                         rows={rows}
                         initialBlock={initialByName.get(componentName)}
@@ -307,7 +311,7 @@ export function ComponentOverridesSection({
               })}
               {/* Orphaned override blocks: entries in form state that point
                   at component names no longer declared by the driver. We
-                  still render them with a remove affordance so the operator
+                  still render them with a remove affordance so the user
                   can clean them up. */}
               {rows
                 .map((row, index) => ({ row, index }))
@@ -348,6 +352,8 @@ export function ComponentOverridesSection({
 interface ComponentOverrideBodyProps {
   form: ReactFormLike;
   componentName: string;
+  /** False when the driver declares no component container for this component. */
+  hasContainer: boolean;
   field: ComponentOverridesField;
   rows: ComponentConfigInput[];
   initialBlock: ComponentConfigInput | undefined;
@@ -357,6 +363,7 @@ interface ComponentOverrideBodyProps {
 function ComponentOverrideBody({
   form,
   componentName,
+  hasContainer,
   field,
   rows,
   initialBlock,
@@ -405,6 +412,15 @@ function ComponentOverrideBody({
         <form.Field name={`${blockPath}.envVars`} mode="array">
           {(envField: any) => {
             const envRows: EnvVarInput[] = envField.state.value ?? [];
+            if (!hasContainer) {
+              return (
+                <ContainerlessEnvVars
+                  componentName={componentName}
+                  envRows={envRows}
+                  onRemove={(index) => envField.removeValue(index)}
+                />
+              );
+            }
             return (
               <div className="mt-2 space-y-2">
                 {envRows.length === 0 && (
@@ -672,6 +688,57 @@ function ComponentOverrideBody({
           Remove override
         </Button>
       </div>
+    </div>
+  );
+}
+
+interface ContainerlessEnvVarsProps {
+  componentName: string;
+  envRows: EnvVarInput[];
+  onRemove: (index: number) => void;
+}
+
+/**
+ * Env var area for a component without a component container. The backend
+ * rejects new or changed values there, so stored rows are read-only and can
+ * only be removed (same treatment as orphaned override blocks).
+ */
+function ContainerlessEnvVars({
+  componentName,
+  envRows,
+  onRemove,
+}: ContainerlessEnvVarsProps) {
+  return (
+    <div className="mt-2 space-y-2">
+      <p
+        className="text-xs italic text-muted-foreground"
+        data-testid={`comp-env-no-container-${componentName}`}
+      >
+        The driver declares no container for this component, so env vars
+        can&apos;t be applied to it.
+        {envRows.length > 0 && " Stored values can only be removed."}
+      </p>
+      {envRows.map((row, index) => (
+        <div
+          key={`comp-${componentName}-env-readonly-${index}`}
+          className="flex items-center justify-between gap-2 rounded-md border border-dashed border-amber-400 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
+          data-testid="component-env-var-readonly-row"
+        >
+          <span className="break-all font-mono text-xs text-amber-900 dark:text-amber-200">
+            {row.name}={row.value}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={`Remove env var ${row.name} on ${componentName}`}
+            onClick={() => onRemove(index)}
+            data-testid={`comp-env-remove-${componentName}-${index}`}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
     </div>
   );
 }
