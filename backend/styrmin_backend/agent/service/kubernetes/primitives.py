@@ -21,7 +21,7 @@ def _prune_none(value: Any) -> Any:
     """Recursively drop dict keys whose value is ``None`` (lists are recursed
     but their elements are kept).
 
-    Used on the **create** path of :func:`upsert_custom_resource` only. The two
+    Used on the **create** path of :func:`upsert_custom_resource`. The two
     apply paths treat a ``null`` differently:
 
     - **create** (``POST``) stores the body verbatim, so a ``key: null`` lands
@@ -39,12 +39,46 @@ def _prune_none(value: Any) -> Any:
     on create makes a rendered ``null`` behave as "absent" (chart default
     applies), while the merge-patch path keeps the ``null`` so clearing still
     deletes the key. See ADR-045 §5.
+
+    The ``replace_spec_on_update`` update path also prunes, since replacing
+    ``spec`` removes omitted keys without needing a ``null``.
     """
     if isinstance(value, dict):
         return {k: _prune_none(v) for k, v in value.items() if v is not None}
     if isinstance(value, list):
         return [_prune_none(v) for v in value]
     return value
+
+
+def _json_pointer_token(key: str) -> str:
+    """Escape *key* as one RFC 6901 reference token (``~`` first, then ``/``)."""
+    return key.replace("~", "~0").replace("/", "~1")
+
+
+def _replace_spec_json_patch(body: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build the JSON Patch that replaces ``spec`` and adds owned metadata keys.
+
+    ``spec`` is replaced wholesale with ``None`` pruned, so keys the new body
+    omits are removed. ``metadata.labels`` / ``metadata.annotations`` keys are
+    added one by one, leaving keys other actors wrote (kopf annotations, Flux's
+    finalizer) untouched. Per-key ``add`` needs the live map to exist; the
+    HelmRelease builder always sets both. See 017-post-render-env-vars D-003.
+    """
+    pruned = _prune_none(body)
+    ops: list[dict[str, Any]] = [
+        {"op": "add", "path": "/spec", "value": pruned.get("spec", {})}
+    ]
+    metadata = pruned.get("metadata", {})
+    for map_key in ("labels", "annotations"):
+        for key, value in metadata.get(map_key, {}).items():
+            ops.append(
+                {
+                    "op": "add",
+                    "path": f"/metadata/{map_key}/{_json_pointer_token(key)}",
+                    "value": value,
+                }
+            )
+    return ops
 
 
 @inject
@@ -113,6 +147,7 @@ async def upsert_custom_resource(
     namespace: str,
     update: bool = True,
     prune_none_on_create: bool = False,
+    replace_spec_on_update: bool = False,
     client: ApiClient = Depends(get_api_client),
 ) -> None:
     # Declare the kubernetes client object
@@ -120,8 +155,9 @@ async def upsert_custom_resource(
 
     # On create, a ``null`` would be stored verbatim; on the merge-patch update
     # below it deletes the key. Drivers emit ``null`` to clear an override, so
-    # callers that carry such values (the HelmRelease apply) prune ``None`` from
-    # the *create* body only — the update path keeps it. See ADR-045 §5.
+    # callers that carry such values prune ``None`` from the *create* body. The
+    # HelmRelease apply also sets ``replace_spec_on_update``, whose JSON Patch
+    # prunes ``None`` too, so a null marker reads as absent on both paths.
     create_body = _prune_none(body) if prune_none_on_create else body
 
     try:
@@ -134,7 +170,19 @@ async def upsert_custom_resource(
         )
     except ApiException as exc:
         if update:
-            if exc.status == status.HTTP_409_CONFLICT:
+            if exc.status == status.HTTP_409_CONFLICT and replace_spec_on_update:
+                # Replace ``spec`` rather than merge it, so keys the new body
+                # omits do not linger (FR-011, research D-003).
+                await custom_obj_api.patch_namespaced_custom_object(
+                    group=group,
+                    version=version,
+                    namespace=namespace,
+                    plural=plurals,
+                    body=_replace_spec_json_patch(body),
+                    name=body["metadata"]["name"],
+                    _content_type="application/json-patch+json",  # type: ignore[call-arg]
+                )
+            elif exc.status == status.HTTP_409_CONFLICT:
                 await custom_obj_api.patch_namespaced_custom_object(
                     group=group,
                     version=version,
