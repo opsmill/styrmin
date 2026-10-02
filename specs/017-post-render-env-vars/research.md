@@ -183,7 +183,9 @@ the driver declares no component container for it. `isOrphaned` keeps its curren
 **Decision**: Add `container: String` to:
 
 - `ComponentConfig` (driver version, `ApplicationDriverVersion.componentConfigs`) — the brief's
-  "driver-version read path"; shown in the driver detail view and SDK `load_version` results.
+  "driver-version read path"; shown in the driver detail Components tab
+  (`frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx`) and in SDK `load_version`
+  results.
 - `Component` (deployment, `Deployment.components`) — what the deployment configuration editor
   already iterates, so FR-006 needs no extra query.
 
@@ -200,17 +202,29 @@ propagation test (Constitution §V).
 `services/deployment.py` that runs next to `_validate_component_env_var_targets` on every write
 path that already calls it (`update_deployment`, `deploy`), before any task is submitted.
 
-**Rule**: reject a component-scope env var block for a component without a component container
-**when the submitted block differs from the stored one**. Re-submitting the stored, unchanged
-block passes.
+**Rule**: for a component without a component container **in the target driver version**, reject
+the submitted component-scope block when it **adds a key or changes a value** relative to the
+stored block. Unchanged re-submissions and removals (submitted ⊆ stored, compared as dicts) pass.
+
+| Submitted vs stored (containerless component) | Result |
+|---|---|
+| identical | accepted |
+| subset (keys removed) | accepted |
+| new key | `COMPONENT_CONTAINER_NOT_DECLARED` |
+| changed value | `COMPONENT_CONTAINER_NOT_DECLARED` |
+
+**Target version**: the driver version the deployment will be pinned to after the mutation
+(resolved in `update_deployment` before any task is submitted; on `deploy`, the selected
+version). This deliberately differs from `_validate_component_env_var_targets`, which checks the
+pre-switch version: validating the pre-switch version would let a version-switching write store
+values on a component that loses its container (inert, violating SC-005) and wrongly reject
+values on a component that gains one. The existing unknown-component check is left unchanged.
 
 **Rationale**: after a driver upgrade drops a component container (FR-005), stored values must
 stay. The frontend submits the full `components` list, and `styrminctl apply` submits full
 manifests; rejecting an unchanged re-submission would block every unrelated edit on that
-deployment. New or changed values are still rejected 100% of the time (SC-005).
-
-The validator runs against the same driver version `_validate_component_env_var_targets` uses
-today (the deployment's current version), for consistency.
+deployment, and rejecting removals would break the FR-006 remove control. Added or changed
+values are still rejected 100% of the time (SC-005). (Critique E1, E2.)
 
 ---
 
@@ -289,8 +303,10 @@ upgraded.
 
 - **US1** — new test in `backend/tests/e2e/test_deployment_env_vars.py` reusing the module's
   `env_vars_deployment` (simple-app): set component-scope `LOG_LEVEL=debug` on `server`, assert it
-  plus `STYRMIN_CHART_DEFAULT=marker`; override `STYRMIN_CHART_DEFAULT`; clear both and assert the
-  chart's `marker` is back. **Dual-entrypoint**: drives a new `ScenarioDriver.set_component_env_vars`
+  plus `STYRMIN_CHART_DEFAULT=marker`; override `STYRMIN_CHART_DEFAULT` and
+  `STYRMIN_CHART_DEFAULT_FROM` (a new harmless chart-default entry with
+  `valueFrom.fieldRef: metadata.name`, added to the simple-app chart so US1 Sc.2 is E2E-covered —
+  critique P5); clear all three and assert both chart defaults are back. **Dual-entrypoint**: drives a new `ScenarioDriver.set_component_env_vars`
   method (SDK on `[api-chromium]`, deployment Configuration editor on `[ui-chromium]`). Also seeds
   a stray `extraEnv` entry into the live HelmRelease `spec.values` via kr8s, triggers a reconcile,
   and asserts it is gone (D-003).

@@ -4,10 +4,12 @@
 
 - **Class**: `ComponentContainerNotDeclaredError(ServiceError)` in
   `backend/styrmin_backend/services/env_vars/exceptions.py`.
-- **When**: a write submits a component-scope env var block for a component whose driver version
-  declares no component container, and the block differs from the stored one.
-- **Not raised**: for unchanged re-submissions; for deployment- or environment-scope env vars;
-  for unknown components (those keep `UNKNOWN_COMPONENT_ENV_VAR`, checked first).
+- **When**: a write submits a component-scope env var block that adds a key or changes a value,
+  relative to the stored block, for a component that declares no component container in the
+  driver version the deployment will be pinned to after the write.
+- **Not raised**: for unchanged re-submissions or removals (submitted ⊆ stored); for deployment-
+  or environment-scope env vars; for unknown components (those keep `UNKNOWN_COMPONENT_ENV_VAR`,
+  checked first against the current version).
 - **Default message**: `Environment variables target component {name!r}, which declares no
   component container in the deployment's driver. Components that accept env vars:
   {components_with_container}`.
@@ -22,9 +24,10 @@
   records the message on the instance (existing `except Exception` path), so the deployment
   reports the failure with the message below.
 - **Default message**: `The 'component_env_vars' template filter was removed: Styrmin now injects
-  env vars into each component's declared component container. Remove the filter from
-  values.j2.yml and declare components.<name>.container in driver.styrmin.yml. Migration guide:
-  https://styrmin.pages.dev/docs/drivers/migrating-env-vars`.
+  env vars into each component's declared component container. Deployment users: upgrade this
+  deployment to a driver version that declares component containers. Driver authors: remove the
+  filter from values.j2.yml and declare components.<name>.container in driver.styrmin.yml.
+  Migration guide: https://styrmin.pages.dev/docs/drivers/migrating-env-vars`.
 - **Metadata**: `filter: "component_env_vars"`, `migration_guide: <url>`.
 
 ## Env var patch serialisation failure

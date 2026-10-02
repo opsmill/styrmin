@@ -57,8 +57,10 @@ Expected for `[api-chromium]` and `[ui-chromium]`:
 
 1. `LOG_LEVEL=debug` on `server` → the `simple-app` container has `LOG_LEVEL=debug` and
    `STYRMIN_CHART_DEFAULT=marker`.
-2. `STYRMIN_CHART_DEFAULT=override` → the container shows `override`.
-3. Clear both → `LOG_LEVEL` absent, `STYRMIN_CHART_DEFAULT=marker` back.
+2. `STYRMIN_CHART_DEFAULT=override` and `STYRMIN_CHART_DEFAULT_FROM=literal` → the container
+   shows both literals; `STYRMIN_CHART_DEFAULT_FROM` no longer has a `valueFrom`.
+3. Clear all three → `LOG_LEVEL` absent, `STYRMIN_CHART_DEFAULT=marker` and the
+   `STYRMIN_CHART_DEFAULT_FROM` `fieldRef` back.
 4. A stray `extraEnv` entry seeded into the live HelmRelease `spec.values` is gone after the
    next reconcile (FR-011).
 
