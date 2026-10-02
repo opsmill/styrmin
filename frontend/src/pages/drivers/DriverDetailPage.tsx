@@ -189,7 +189,10 @@ export default function DriverDetailPage() {
             <ParametersTab version={selected} />
           </TabPanel>
           <TabPanel active={activeTab === "components"}>
-            <ComponentsTab components={selected.components} />
+            <ComponentsTab
+              components={selected.components}
+              componentConfigs={selected.componentConfigs}
+            />
           </TabPanel>
         </div>
       </div>

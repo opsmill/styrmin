@@ -19,6 +19,11 @@ not just the resolver), and assert the GraphQL query projects the
 fingerprint verbatim. Mirrors the round-trip recipe used by
 ``test_application_driver_created_on_propagation``.
 
+017-post-render-env-vars (T029) adds ``componentConfigs { container }``: the
+component container a driver declares (``components.<name>.container``),
+loaded through ``loadLocalApplicationDriverVersion`` and read back from both
+the DB row and the ``applicationDriver`` query.
+
 Test location note: the task list specifies
 ``backend/tests/unit/api/schema/test_application_driver_version_propagation.py``
 but the project's documented propagation-test harness (fixtures, seeds,
@@ -28,11 +33,17 @@ operation loader) lives in ``backend/tests/functional/graphql/`` per
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+from uuid import UUID
+
 import pytest
+import yaml
 from httpx import AsyncClient
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from styrmin_backend.db.models import ApplicationDriverVersion
+from styrmin_backend.db.models import ApplicationDriverVersion, ComponentConfig
 
 from .conftest import gql
 from .seeds import seed_application_driver_version
@@ -118,3 +129,107 @@ async def test_source_commit_sha_propagates_from_db_to_graphql(
     assert version_payload["sourceType"] == "git"
     assert version_payload["sourceCommitSha"] == KNOWN_COMMIT_SHA
     assert version_payload["contentHash"] is None
+
+
+def _write_container_driver(path: Path) -> None:
+    """Write a local driver whose ``server`` declares a container and whose
+    ``database`` omits it."""
+    spec: dict[str, Any] = {
+        "apiVersion": "styrmin.io/v1",
+        "kind": "ApplicationDriver",
+        "metadata": {"name": "container-propagation"},
+        "spec": {
+            "version": "0.1.0",
+            "supported_versions": ">=0.1,<1.0",
+            "info": {"description": "Component container propagation fixture"},
+            "helm": {
+                "main": {
+                    "location": "oci://registry.example.com/charts/simple-app",
+                    "version": "0.1.0",
+                }
+            },
+            "components": {
+                "server": {
+                    "identifier": {"label": {"app.kubernetes.io/name": "simple-app"}},
+                    "container": "simple-app",
+                },
+                "database": {
+                    "identifier": {"label": {"app.kubernetes.io/name": "postgresql"}},
+                },
+            },
+        },
+    }
+    (path / "driver.styrmin.yml").write_text(yaml.safe_dump(spec))
+    (path / "values.j2.yml").write_text("{}\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_component_container_propagates_from_driver_load_to_graphql(
+    client: AsyncClient, session: AsyncSession, tmp_path: Path
+) -> None:
+    """A loaded driver's declared component container reaches the
+    ``ComponentConfig`` row and projects through ``componentConfigs``; an
+    undeclared one projects as null."""
+    _write_container_driver(tmp_path)
+
+    loaded = await gql(
+        client, "load_local_driver_component_containers", {"path": str(tmp_path)}
+    )
+    version = loaded["loadLocalApplicationDriverVersion"]
+    assert {c["name"]: c["container"] for c in version["componentConfigs"]} == {
+        "server": "simple-app",
+        "database": None,
+    }
+
+    rows = (
+        await session.exec(
+            select(ComponentConfig).where(
+                ComponentConfig.application_driver_version_id == UUID(version["id"])
+            )
+        )
+    ).all()
+    assert {row.name: row.config.get("container") for row in rows} == {
+        "server": "simple-app",
+        "database": None,
+    }
+
+    data = await gql(
+        client,
+        "get_driver_component_containers",
+        {"applicationDriverId": version["applicationDriverId"]},
+    )
+    [read_back] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == version["id"]
+    ]
+    assert {c["name"]: c["container"] for c in read_back["componentConfigs"]} == {
+        "server": "simple-app",
+        "database": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_component_container_is_null_for_rows_without_the_key(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Rows stored before the field existed have no ``container`` key; the
+    resolver reads them as null rather than failing."""
+    adv = await seed_application_driver_version(session)
+    session.add(
+        ComponentConfig(
+            name="legacy",
+            config={"identifier": {"label": {"app.kubernetes.io/name": "legacy"}}},
+            application_driver_version_id=adv.id,
+        )
+    )
+    await session.commit()
+
+    data = await gql(
+        client,
+        "get_driver_component_containers",
+        {"applicationDriverId": str(adv.application_driver_id)},
+    )
+    [version] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == str(adv.id)
+    ]
+    assert version["componentConfigs"] == [{"name": "legacy", "container": None}]

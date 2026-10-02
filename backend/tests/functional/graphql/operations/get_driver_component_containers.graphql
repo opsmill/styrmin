@@ -1,0 +1,12 @@
+query GetDriverComponentContainers($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        id
+        versions {
+            id
+            componentConfigs {
+                name
+                container
+            }
+        }
+    }
+}

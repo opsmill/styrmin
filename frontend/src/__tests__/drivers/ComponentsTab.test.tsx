@@ -4,12 +4,23 @@ import { render, screen } from "@testing-library/react";
 import { ComponentsTab } from "@/pages/drivers/driver-detail/tabs/ComponentsTab";
 import type { DriverVersionDetail } from "@/pages/drivers/driver-detail/types";
 
-function renderComponents(components: unknown) {
+function renderComponents(
+  components: unknown,
+  componentConfigs: DriverVersionDetail["componentConfigs"] = [],
+) {
   return render(
     <ComponentsTab
       components={components as DriverVersionDetail["components"]}
+      componentConfigs={componentConfigs}
     />,
   );
+}
+
+function componentConfig(
+  name: string,
+  container: string | null,
+): DriverVersionDetail["componentConfigs"][number] {
+  return { id: `${name}-id`, name, config: {}, container };
 }
 
 describe("ComponentsTab", () => {
@@ -63,5 +74,36 @@ describe("ComponentsTab", () => {
     expect(screen.getByText("chartVersion")).toBeInTheDocument();
     expect(screen.getByText("service")).toBeInTheDocument();
     expect(screen.getAllByText("—")).toHaveLength(2);
+  });
+
+  it("shows each component's declared container", () => {
+    renderComponents(
+      {
+        server: { identifier: { label: { service: "web" } } },
+        worker: { identifier: { label: { service: "worker" } } },
+      },
+      [
+        componentConfig("server", "simple-app"),
+        componentConfig("worker", "celery"),
+      ],
+    );
+    const [server, worker] = screen.getAllByTestId(
+      "driver-component-container",
+    );
+    expect(server).toHaveTextContent("simple-app");
+    expect(worker).toHaveTextContent("celery");
+  });
+
+  it("shows an explicit none-declared state for a component without a container", () => {
+    renderComponents(
+      {
+        server: { identifier: { label: { service: "web" } }, container: null },
+      },
+      [componentConfig("server", null)],
+    );
+    const container = screen.getByTestId("driver-component-container");
+    expect(container).toHaveTextContent("None declared");
+    // the container is shown once, not repeated as a raw "container: —" field
+    expect(screen.queryByText("—")).toBeNull();
   });
 });

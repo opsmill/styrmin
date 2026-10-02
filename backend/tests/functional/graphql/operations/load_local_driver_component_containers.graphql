@@ -1,0 +1,10 @@
+mutation LoadLocalDriverComponentContainers($path: String!) {
+    loadLocalApplicationDriverVersion(path: $path) {
+        id
+        applicationDriverId
+        componentConfigs {
+            name
+            container
+        }
+    }
+}

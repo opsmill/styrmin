@@ -49,6 +49,7 @@ class LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionCompon
     id: UUID
     name: str
     config: Optional[Any]
+    container: Optional[str]
 
 
 class LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionActions(
