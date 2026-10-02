@@ -104,7 +104,9 @@ A deployment has component-scope env vars on a component. A driver upgrade remov
 - **One identifier label matching several workloads**: only `Deployment` and `StatefulSet` workloads are patched, so chart `Job`s and `CronJob`s sharing the label are untouched.
 - **Chart `valueFrom` entry with the same name as a user env var**: replaced by the user's literal value (US1 Sc.2).
 - **Same key provided through the chart's `envFrom`**: the user value wins by Kubernetes `env`-over-`envFrom` precedence.
-- **Ordering**: user entries that don't replace a chart entry are appended after the chart's entries, so a chart env entry that references a user var via `$(USER_VAR)` will not expand. Documented for driver authors.
+- **Ordering**: user-set entries (new and replacing) are placed before the chart's remaining entries, and the component container becomes the first container of the pod. A chart env entry referencing a user var via `$(USER_VAR)` expands; a user value referencing a chart var via `$(CHART_VAR)` does not. Documented for driver authors (research D-002).
+- **Deployment created before this change**: its stored chart values still carry env entries written by the old values template. On its first reconcile on a migrated driver version those entries are removed, so later clearing an env var restores the chart default (FR-011).
+- **Re-submitting unchanged stored env vars** for a component without a component container (e.g. a full-config edit of another field after US5's driver upgrade): accepted, values kept; only new or changed values are rejected (FR-003).
 - **Driver upgrade drops a component container**: stored values kept, flagged, skipped (US5).
 - **Driver upgrade drops the component entirely**: unchanged existing orphaned-component behaviour.
 - **Clearing**: the post-render patches are regenerated on every reconcile from the resolved env vars, so removing an env var removes it from the container; no empty-list or `null` marker is needed.
@@ -117,14 +119,15 @@ A deployment has component-scope env vars on a component. A driver upgrade remov
 
 - **FR-001**: Driver authors MUST be able to declare one component container name per component (`components.<name>.container`) in the driver specification file. The declaration is optional per component; a malformed value MUST reject driver registration. *Verify: driver-load unit test.*
 - **FR-002**: System MUST merge each component's resolved env vars into its component container by env var `name`, on `Deployment` and `StatefulSet` workloads only. Chart-rendered entries survive; a same-name entry is replaced, including a `valueFrom` entry. *Verify: rendered-patch unit test, US1 E2E.*
-- **FR-003**: System MUST reject a component-scope env var write on a component with no component container, with a typed `ServiceError`, before any reconcile is submitted. *Verify: mutation error test asserting no task submitted.*
+- **FR-003**: System MUST reject a component-scope env var write on a component with no component container, with a typed `ServiceError`, before any reconcile is submitted. Re-submitting the stored, unchanged values for that component is not a write and MUST be accepted. *Verify: mutation error test asserting no task submitted; unchanged re-submission test.*
 - **FR-004**: System MUST apply deployment- and environment-scope env vars only to components with a component container, skipping the rest without error. *Verify: render unit test on a mixed driver.*
 - **FR-005**: System MUST keep stored component env vars that became non-applicable after a driver upgrade (component container removed), flag them as not applied on read, and omit them from rendered patches. *Verify: propagation test, render unit test.*
-- **FR-006**: Users MUST NOT be able to edit component-scope env vars in the frontend for a component without a component container. *Verify: frontend component test.*
+- **FR-006**: Users MUST NOT be able to edit component-scope env vars in the frontend for a component without a component container. Stored values on such a component (FR-005) are shown read-only and can be removed. *Verify: frontend component test.*
 - **FR-007**: System MUST fail rendering with a typed error naming the migration guide when a `values.j2.yml` uses `component_env_vars`. *Verify: render unit test.*
 - **FR-008**: All in-repo example drivers MUST declare a component container on each component that receives env vars today, and MUST stop wiring env vars in `values.j2.yml`. *Verify: driver-load tests, migrated-driver E2Es.*
 - **FR-009**: System MUST keep `instance.config.env_vars` and `components[<name>].env_vars.config` in the rendering context as read-only data, so a driver can still read resolved env vars for non-injection purposes (e.g. ConfigMap content, chart conditionals). *Verify: render unit test.*
 - **FR-010**: System MUST regenerate the env var post-render patches on every reconcile from the currently resolved env vars, so setting, changing, or clearing an env var converges the running container. *Verify: US1 Sc.3 E2E (clear restores chart default).*
+- **FR-011**: On every reconcile, the chart values the platform applies MUST fully replace the previously applied ones, so env entries written by a pre-migration values template do not linger after the deployment moves to a migrated driver version. *Verify: unit test on the release apply; US1 E2E step that seeds a stale values entry and asserts its removal.*
 
 ### Key Entities *(include if feature involves data)*
 
@@ -145,7 +148,7 @@ A deployment has component-scope env vars on a component. A driver upgrade remov
 
 ## Assumptions
 
-- Flux's Kustomize post-renderer applies strategic merge keyed by container `name` on `Deployment` / `StatefulSet`, including `valueFrom` removal when a user value replaces a chart `valueFrom` entry — to be verified early in planning.
+- Flux's Kustomize post-renderer applies strategic merge keyed by container `name` on `Deployment` / `StatefulSet`, including `valueFrom` removal when a user value replaces a chart `valueFrom` entry — verified in planning with kustomize v5.7.1 (research D-001, D-002).
 - Each in-repo driver component that receives env vars today has one stable application container name in its chart.
 - Third-party drivers are few enough (pre-1.0) that a loud FR-007 rendering failure plus a migration guide is an acceptable migration path, with no deprecation window.
 - The existing `container_overrides[].container` field stays informational; `command` / `args` overrides keep their values-template route in v1.
