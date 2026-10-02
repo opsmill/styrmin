@@ -220,6 +220,27 @@ class TestResolvedScopes:
             "app.kubernetes.io/name=server": {"LOG_LEVEL": "debug"},
         }
 
+    def test_stored_values_on_component_that_lost_its_container_emit_none(
+        self,
+    ) -> None:
+        # FR-005: a driver upgrade dropped the container; stored values stay resolved.
+        context = _context(_component("server", container=None))
+
+        _populate_component_env_vars(
+            context=context,
+            environment_config=None,
+            deployment_config={
+                "components": {"server": {"env_vars": {"LOG_LEVEL": "debug"}}}
+            },
+        )
+
+        assert context.components is not None
+        server = context.components.root["server"]
+        assert server.env_vars is not None
+        assert server.env_vars.config == {"LOG_LEVEL": "debug"}
+        assert server.env_vars.is_orphaned is False
+        assert build_env_var_patches(context) == []
+
 
 class TestSkips:
     def test_component_without_container_gets_none(self) -> None:

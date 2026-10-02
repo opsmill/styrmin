@@ -887,3 +887,142 @@ async def test_component_container_propagation_follows_pinned_driver_version(
     stored = await _stored_component_configs(session, deployment_id)
     assert stored["server"]["container"] is None
     assert await _read_component_containers(client, deployment_id) == {"server": None}
+
+
+# ---------------------------------------------------------------------------
+# 017 US5 — ComponentEnvVars.isApplicable propagation (T052)
+# ---------------------------------------------------------------------------
+
+
+async def _read_component_env_vars(
+    client: AsyncClient, deployment_id: UUID
+) -> dict[str, dict[str, Any]]:
+    data = await gql(
+        client,
+        "get_deployment_component_env_vars",
+        {"deploymentId": str(deployment_id)},
+    )
+    return {row["component"]: row for row in data["deployment"]["componentEnvVars"]}
+
+
+async def _switch_driver_version(
+    client: AsyncClient, deployment_id: UUID, driver_version_id: UUID
+) -> None:
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment_version"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "version": "1.0.0",
+                "driverVersionId": str(driver_version_id),
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert "errors" not in response.json(), response.json()
+
+
+@pytest.mark.asyncio
+async def test_component_env_vars_is_applicable_follows_pinned_driver_version(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """Stored component env vars stay readable across upgrades that drop the
+    component container (``isApplicable: false``) or the component itself
+    (``isOrphaned: true``, ``isApplicable: false``) — FR-005."""
+    _arm_prefect(prefect_manager_mock)
+    environment = await seed_environment(session)
+    with_container = await seed_application_driver_version(session, version="1.0.0")
+    driver = await session.get(ApplicationDriver, with_container.application_driver_id)
+    assert driver is not None
+    driver_name = driver.name
+    without_container = await seed_application_driver_version(
+        session, driver=driver, version="2.0.0"
+    )
+    without_component = await seed_application_driver_version(
+        session, driver=driver, version="3.0.0"
+    )
+    v1_id, v2_id, v3_id = with_container.id, without_container.id, without_component.id
+    for adv_id, name, container in (
+        (v1_id, "server", "simple-app"),
+        (v2_id, "server", None),
+        (v3_id, "api", "api"),
+    ):
+        session.add(
+            ComponentConfig(
+                name=name,
+                config={
+                    "identifier": {"label": {"app.kubernetes.io/name": f"{name}-app"}},
+                    "container": container,
+                },
+                application_driver_version_id=adv_id,
+            )
+        )
+    await session.commit()
+    name = f"applicable-propagation-{uuid4().hex[:8]}"
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("deploy_with_driver_version"),
+            "variables": {
+                "driver": driver_name,
+                "environmentId": str(environment.id),
+                "name": name,
+                "version": "1.0.0",
+                "driverVersionId": str(v1_id),
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert "errors" not in response.json(), response.json()
+    session.expire_all()
+    deployment_id = (
+        await session.exec(select(Deployment.id).where(Deployment.name == name))
+    ).one()
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {
+                    "components": [
+                        {
+                            "name": "server",
+                            "envVars": [{"name": "LOG_LEVEL", "value": "debug"}],
+                        }
+                    ]
+                },
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert "errors" not in response.json(), response.json()
+    expected_env = [{"name": "LOG_LEVEL", "value": "debug"}]
+
+    # (a) Container declared: applicable.
+    rows = await _read_component_env_vars(client, deployment_id)
+    assert rows["server"]["isOrphaned"] is False
+    assert rows["server"]["isApplicable"] is True
+    assert rows["server"]["envVars"] == expected_env
+
+    # (b) Upgrade drops the container, no config in the call: kept, not applicable.
+    await _switch_driver_version(client, deployment_id, v2_id)
+    session.expire_all()
+    stored = await session.get(Deployment, deployment_id)
+    assert stored is not None
+    assert stored.config["components"]["server"]["env_vars"] == {"LOG_LEVEL": "debug"}
+    rows = await _read_component_env_vars(client, deployment_id)
+    assert rows["server"]["isOrphaned"] is False
+    assert rows["server"]["isApplicable"] is False
+    assert rows["server"]["envVars"] == expected_env
+
+    # (c) Upgrade drops the component: orphaned, not applicable.
+    await _switch_driver_version(client, deployment_id, v3_id)
+    rows = await _read_component_env_vars(client, deployment_id)
+    assert set(rows) == {"server"}, rows
+    assert rows["server"]["isOrphaned"] is True
+    assert rows["server"]["isApplicable"] is False
+    assert rows["server"]["envVars"] == expected_env

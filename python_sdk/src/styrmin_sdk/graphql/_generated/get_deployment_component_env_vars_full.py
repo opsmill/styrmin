@@ -23,6 +23,7 @@ class GetDeploymentComponentEnvVarsFullDeployment(BaseModel):
 class GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVars(BaseModel):
     component: str
     is_orphaned: bool = Field(alias="isOrphaned")
+    is_applicable: bool = Field(alias="isApplicable")
     env_vars: list[
         "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVarsEnvVars"
     ] = Field(alias="envVars")

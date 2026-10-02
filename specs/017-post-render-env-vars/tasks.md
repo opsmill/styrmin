@@ -173,12 +173,12 @@ component that lost its container.
 
 ### Tests for User Story 5
 
-- [ ] T052 [P] [US5] Write failing propagation tests in `backend/tests/functional/graphql/test_env_vars_propagation.py`: (a) container declared → `componentEnvVars { component isOrphaned isApplicable envVars }` returns `isApplicable: true`; (b) upgrade the deployment to a driver version without that component's container (no config in the call) → upgrade succeeds, values returned, `isOrphaned: false`, `isApplicable: false`; (c) component dropped → `isOrphaned: true`, `isApplicable: false`. Add a builder assertion in `backend/tests/unit/services/env_vars/test_patch_builder.py` that case (b)'s context emits no env patch (FR-005).
+- [X] T052 [P] [US5] Write failing propagation tests in `backend/tests/functional/graphql/test_env_vars_propagation.py`: (a) container declared → `componentEnvVars { component isOrphaned isApplicable envVars }` returns `isApplicable: true`; (b) upgrade the deployment to a driver version without that component's container (no config in the call) → upgrade succeeds, values returned, `isOrphaned: false`, `isApplicable: false`; (c) component dropped → `isOrphaned: true`, `isApplicable: false`. Add a builder assertion in `backend/tests/unit/services/env_vars/test_patch_builder.py` that case (b)'s context emits no env patch (FR-005).
 
 ### Implementation for User Story 5
 
-- [ ] T053 [US5] Add `is_applicable: bool` to `ComponentEnvVars` in `backend/styrmin_backend/api/definitions/deployment/model.py` and compute it in the `component_env_vars` resolver as `not is_orphaned and container is not None`, reading containers from the deployment's pinned driver-version component configs (research D-005); update the type description per contracts/graphql-deltas.md ("operator" → "user"). Make T052 pass.
-- [ ] T054 [US5] Regenerate the schema and types (`uv run styrmin export graphql-schema schema.graphql`; add `isApplicable` to `python_sdk/src/styrmin_sdk/graphql/get_deployment_component_env_vars_full.graphql`; `uv run invoke validate-graphql`; `uv run invoke generate`).
+- [X] T053 [US5] Add `is_applicable: bool` to `ComponentEnvVars` in `backend/styrmin_backend/api/definitions/deployment/model.py` and compute it in the `component_env_vars` resolver as `not is_orphaned and container is not None`, reading containers from the deployment's pinned driver-version component configs (research D-005); update the type description per contracts/graphql-deltas.md ("operator" → "user"). Make T052 pass.
+- [X] T054 [US5] Regenerate the schema and types (`uv run styrmin export graphql-schema schema.graphql`; add `isApplicable` to `python_sdk/src/styrmin_sdk/graphql/get_deployment_component_env_vars_full.graphql`; `uv run invoke validate-graphql`; `uv run invoke generate`).
 
 **Checkpoint**: all five stories functional.
 

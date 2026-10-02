@@ -216,14 +216,16 @@ export type ComponentContainerOverrides = {
   isOrphaned: Scalars['Boolean']['output'];
 };
 
-/** A bundle of environment variables targeting one component of a deployment, plus an ``isOrphaned`` flag indicating whether the deployment's current driver still declares the targeted component. Orphaned blocks remain visible in the API but are NOT injected into rendered pods. */
+/** A bundle of environment variables targeting one component of a deployment. Applicable env vars are injected by a post-render patch into the component container the driver declares. ``isOrphaned`` flags blocks whose component the deployment's current driver no longer declares; ``isApplicable`` flags whether the env vars can reach any container. Non-applicable blocks remain visible in the API but are NOT injected into rendered pods. */
 export type ComponentEnvVars = {
   __typename?: 'ComponentEnvVars';
   /** Name of the targeted component. */
   component: Scalars['String']['output'];
   /** The effective env vars set on this component (env+dep+component merged). */
   envVars: Array<EnvVar>;
-  /** True when the deployment's current driver no longer declares this component (the upgrade renamed or removed it). Orphaned blocks are visible in the API but are NOT injected into rendered pods, so the operator can audit and clean them up. */
+  /** False when these env vars cannot reach any container: the component is orphaned (`isOrphaned`) or the driver declares no component container for it. Stored values are kept but not injected. */
+  isApplicable: Scalars['Boolean']['output'];
+  /** True when the deployment's current driver no longer declares this component (the upgrade renamed or removed it). Orphaned blocks are visible in the API but are NOT injected into rendered pods, so the user can audit and clean them up. */
   isOrphaned: Scalars['Boolean']['output'];
 };
 
@@ -309,7 +311,7 @@ export type Deployment = {
   applicationVersion: Scalars['String']['output'];
   /** Per-component container ``command``/``args`` overrides, including orphaned blocks (``isOrphaned=true``). Component-scope only — there is NO environment/deployment layering. Live components with neither slot set are omitted to keep the surface tidy. Orphaned blocks (component renamed or removed by a driver upgrade — FR-005) are always surfaced here but skipped by the renderer so no value reaches a rendered pod. Cleared slots are returned as ``null``. */
   componentContainerOverrides: Array<ComponentContainerOverrides>;
-  /** Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Orphaned blocks (component renamed or removed by a driver upgrade — FR-029..FR-033) are visible here but skipped by the post-render injector so no env entries reach rendered pods. */
+  /** Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Non-applicable blocks (``isApplicable=false``: component renamed or removed by a driver upgrade, or no component container declared) are visible here but skipped by the post-render injector so no env entries reach rendered pods. */
   componentEnvVars: Array<ComponentEnvVars>;
   components: Array<Component>;
   config: Scalars['JSON']['output'];
