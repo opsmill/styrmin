@@ -190,8 +190,12 @@ _Avoid_: inventing additional context types without an ADR.
 The mechanism by which a **deployment**'s **component** config overrides the **driver version**'s default `ComponentConfig`. First-class to the deployment-config feature.
 _Avoid_: "component patch", "component customisation".
 
+**Component container**:
+The single container in a **component**'s pod template that the **application driver** declares (`components.<name>.container` in the **driver specification file**) as the target of per-component post-render overrides — env vars today, images next ([#20](https://github.com/opsmill/styrmin/issues/20)). A wrong name fails the Helm release rather than silently no-op'ing.
+_Avoid_: "main container", "app container", "primary container", "target container".
+
 **Container override**:
-The per-**component** `command` (container entrypoint) and/or `args` slot an operator may set on a single **deployment**, scoped to that component only — no environment/deployment-wide scope, no layering (014-component-container-overrides). Two independent, optional, nullable lists; absence falls through to the chart/image default. Stored on `DeploymentConfig.components[<name>]`, consumed by the **driver version** through the `component_command` / `component_args` template filters.
+The per-**component** `command` (container entrypoint) and/or `args` slot a user may set on a single **deployment**, scoped to that component only — no environment/deployment-wide scope, no layering (014-component-container-overrides). Two independent, optional, nullable lists; absence falls through to the chart/image default. Stored on `DeploymentConfig.components[<name>]`, consumed by the **driver version** through the `component_command` / `component_args` template filters.
 _Avoid_: "command override" / "args override" alone (they are the two slots **of** a container override), "entrypoint patch", "container customisation". Distinct from **component overrides** (the broader config-override mechanism) and from env vars (which **do** layer across scopes).
 
 ### Recorded intent and kubernetes
