@@ -470,6 +470,34 @@ class ApiScenarioDriver:
         except StyrminError as exc:
             raise _normalise(exc) from exc
 
+    async def set_component_env_vars(
+        self, *, deployment_id: str, component: str, env_vars: dict[str, str]
+    ) -> None:
+        # ``updateDeployment`` is full-replacement: resubmit the stored config
+        # with only this component's env vars swapped.
+        try:
+            deployment = await self._client.deployments.get(deployment_id)
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+
+        config: dict[str, Any] = dict(deployment.config or {})
+        components = {
+            name: dict(block)
+            for name, block in (config.get("components") or {}).items()
+        }
+        block = {
+            key: value
+            for key, value in components.pop(component, {}).items()
+            if key != "env_vars" and value is not None
+        }
+        if env_vars:
+            block["env_vars"] = dict(env_vars)
+        if block:
+            components[component] = block
+        config["components"] = components
+
+        await self.update_deployment(deployment_id=deployment_id, config=config)
+
     async def update_environment_via_form(
         self,
         *,

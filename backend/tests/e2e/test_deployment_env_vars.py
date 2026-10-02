@@ -6,32 +6,31 @@ rendered pod spec on the vcluster. Asserts by reading the resulting
 workload (``apps/v1.Deployment`` / ``StatefulSet`` / ``DaemonSet``) back
 from the vcluster API server and inspecting the container ``env`` block.
 
-US1 scenario corresponds to Quickstart Step 1: deploy ``simple-app``, set
-``LOG_LEVEL=debug`` on the deployment, observe the env entry on every
-container's ``env:`` list.
+Env vars reach the component container by post-render patch
+(017-post-render-env-vars): chart env entries survive, same-name entries are
+replaced. ``test_component_env_var_merges_into_chart_env`` is the
+dual-entrypoint US1 scenario, driven through
+``scenario_driver.set_component_env_vars`` (SDK or the Settings edit drawer).
 
-Marker landscape (audited under 011/US4): every scenario in this file
-keeps its ``api_only`` marker. Although ``scenario_driver.update_deployment``
-is a dual-entrypoint method, the UI driver's implementation only accepts
-the ``scheduling`` sub-tree (see ``UiScenarioDriver.update_deployment``);
-the deployment-detail page exposes no env-vars editor today, so a
-``[ui-chromium]`` variant of these scenarios would raise
-``ScenarioActionError`` immediately. The driver-docs scenario is a pure
-GraphQL read with no UI surface either. Each retained marker carries an
-inline FR-015 rationale; the markers will retire as the deployment-level
-env-vars UI lands in a future iteration. The 011/US4 audit's marker-count
-reduction therefore comes entirely from the environment-update tests
-where ``scenario_driver.update_environment_via_form`` is now wired
-up.
+Marker landscape (audited under 011/US4): the other scenarios keep their
+``api_only`` marker. ``scenario_driver.update_deployment`` is dual-entrypoint,
+but the UI driver's implementation only accepts the ``scheduling`` sub-tree
+(see ``UiScenarioDriver.update_deployment``), so a ``[ui-chromium]`` variant
+would raise ``ScenarioActionError`` immediately. The driver-docs scenario is
+a pure GraphQL read with no UI surface either. Each retained marker carries
+an inline FR-015 rationale.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Callable
 
+import kr8s.asyncio
 import pytest
+from kr8s.asyncio.objects import APIObject
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
 
@@ -59,6 +58,55 @@ def _container_envs(dep: Any) -> list[dict[str, str]]:
                 }
             )
     return envs
+
+
+def _simple_app_env(workload: Any) -> dict[str, Any]:
+    """Env entries of the ``simple-app`` container (the server component
+    container), keyed by name."""
+    for container in workload.spec.template.spec.containers or []:
+        if container.name == "simple-app":
+            return {entry.name: entry for entry in container.env or []}
+    return {}
+
+
+def _literal(env: dict[str, Any], name: str) -> str | None:
+    """Literal ``value`` of ``name``, or ``None`` if absent or ``valueFrom``."""
+    entry = env.get(name)
+    if entry is None or entry.value_from is not None:
+        return None
+    return entry.value
+
+
+def _field_ref_path(env: dict[str, Any], name: str) -> str | None:
+    entry = env.get(name)
+    if entry is None or entry.value_from is None or entry.value_from.field_ref is None:
+        return None
+    return entry.value_from.field_ref.field_path
+
+
+def _chart_defaults_intact(env: dict[str, Any]) -> bool:
+    return (
+        _literal(env, "STYRMIN_CHART_DEFAULT") == "marker"
+        and _field_ref_path(env, "STYRMIN_CHART_DEFAULT_FROM") == "metadata.name"
+    )
+
+
+class _HelmRelease(APIObject):
+    kind = "HelmRelease"
+    version = "helm.toolkit.fluxcd.io/v2"
+    endpoint = "helmreleases"
+    plural = "helmreleases"
+    singular = "helmrelease"
+    namespaced = True
+
+
+async def _deployment_helm_release(*, kubeconfig_path: str, namespace: str) -> Any:
+    api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+    releases = [hr async for hr in _HelmRelease.list(namespace=namespace, api=api)]
+    assert len(releases) == 1, (
+        f"expected one HelmRelease in {namespace}, got {[hr.name for hr in releases]}"
+    )
+    return releases[0]
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +170,118 @@ def _env_vars_driver_bound(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.ci
+async def test_component_env_var_merges_into_chart_env(
+    env_vars_environment: dict,
+    env_vars_deployment: dict,
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    _env_vars_driver_bound: None,
+) -> None:
+    """US1 (017-post-render-env-vars): component-scope env vars merge into the
+    chart's rendered env of the ``simple-app`` container by post-render.
+
+    1. ``LOG_LEVEL=debug`` lands; both chart defaults survive.
+    2. Same-name entries replace the chart's literal and ``valueFrom`` ones.
+    3. A stray values-template ``extraEnv`` entry (a pre-migration render)
+       and the user entries are gone after clearing, chart defaults back
+       (FR-011).
+
+    Runs first in the module: later tests set a deployment-scope
+    ``LOG_LEVEL`` that would mask step 3.
+    """
+    deployment_id = env_vars_deployment["deployment_id"]
+    namespace = env_vars_deployment["namespace"]
+    client: StyrminClient = env_vars_environment["client"]
+    stored = await client.deployments.get(deployment_id)
+    assert not (stored.config or {}).get("env_vars"), (
+        f"precondition: no deployment-scope env vars, got {stored.config!r}"
+    )
+
+    async def _set_server_env(env_vars: dict[str, str]) -> None:
+        await scenario_driver.set_component_env_vars(
+            deployment_id=deployment_id, component="server", env_vars=env_vars
+        )
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+        )
+
+    async def _wait_for_server_env(
+        predicate: Callable[[dict[str, Any]], bool], description: str
+    ) -> dict[str, Any]:
+        dep = await _wait_for_pod_template(
+            vcluster,
+            namespace=namespace,
+            label_selector="app.kubernetes.io/name=simple-app",
+            predicate=lambda d: predicate(_simple_app_env(d)),
+            description=description,
+        )
+        return _simple_app_env(dep)
+
+    # 1) A new name is added; chart literal and valueFrom defaults survive.
+    await _set_server_env({"LOG_LEVEL": "debug"})
+    env = await _wait_for_server_env(
+        lambda e: _literal(e, "LOG_LEVEL") == "debug" and _chart_defaults_intact(e),
+        "LOG_LEVEL=debug next to both chart defaults on the simple-app container",
+    )
+    assert _literal(env, "LOG_LEVEL") == "debug"
+    assert _chart_defaults_intact(env), env
+
+    # 2) Same-name entries replace the chart's, including its valueFrom.
+    await _set_server_env(
+        {
+            "LOG_LEVEL": "debug",
+            "STYRMIN_CHART_DEFAULT": "override",
+            "STYRMIN_CHART_DEFAULT_FROM": "literal",
+        }
+    )
+    env = await _wait_for_server_env(
+        lambda e: (
+            _literal(e, "STYRMIN_CHART_DEFAULT") == "override"
+            and _literal(e, "STYRMIN_CHART_DEFAULT_FROM") == "literal"
+        ),
+        "both chart defaults replaced by user literals",
+    )
+    assert env["STYRMIN_CHART_DEFAULT_FROM"].value_from is None
+    assert _literal(env, "LOG_LEVEL") == "debug"
+
+    # 3) Simulate a deployment rendered before the migration: a values-template
+    # env entry in the live HelmRelease spec.values.
+    helm_release = await _deployment_helm_release(
+        kubeconfig_path=env_vars_deployment["kubeconfig_path"], namespace=namespace
+    )
+    await helm_release.patch(
+        {
+            "spec": {
+                "values": {"extraEnv": [{"name": "STALE_VALUES_ENV", "value": "x"}]}
+            }
+        },
+        type="merge",
+    )
+    await _wait_for_server_env(
+        lambda e: _literal(e, "STALE_VALUES_ENV") == "x",
+        "seeded STALE_VALUES_ENV to render from the HelmRelease values",
+    )
+
+    await _set_server_env({})
+    env = await _wait_for_server_env(
+        lambda e: (
+            "LOG_LEVEL" not in e
+            and "STALE_VALUES_ENV" not in e
+            and _chart_defaults_intact(e)
+        ),
+        "user and stale entries gone, chart defaults restored",
+    )
+    assert "LOG_LEVEL" not in env
+    assert "STALE_VALUES_ENV" not in env
+    assert _chart_defaults_intact(env), env
+
+    await helm_release.refresh()
+    values_blob = json.dumps(helm_release.raw["spec"].get("values", {}))
+    assert "STALE_VALUES_ENV" not in values_blob, values_blob
+    assert "LOG_LEVEL" not in values_blob, values_blob
+
+
 @pytest.mark.api_only(
     reason=(
         # 011/US4 audit (FR-015): the UI driver's update_deployment only
@@ -143,8 +303,9 @@ async def test_us1_deployment_level_env_var(
     scenario_driver: ScenarioDriver,
     _env_vars_driver_bound: None,
 ) -> None:
-    """Quickstart Step 1: set ``LOG_LEVEL=debug`` at deployment scope and
-    assert the entry reaches every container's ``env:`` block.
+    """Set ``LOG_LEVEL=debug`` at deployment scope and assert the post-render
+    patch injects it into the server component container (``simple-app``)
+    while the chart's own env entries survive.
     """
     deployment_id = env_vars_deployment["deployment_id"]
     namespace = env_vars_deployment["namespace"]
@@ -161,31 +322,20 @@ async def test_us1_deployment_level_env_var(
         vcluster,
         namespace=namespace,
         label_selector="app.kubernetes.io/name=simple-app",
-        predicate=lambda d: any(
-            entry.name == "LOG_LEVEL" and entry.value == "debug"
-            for container in d.spec.template.spec.containers or []
-            for entry in container.env or []
-        ),
-        description="LOG_LEVEL=debug to land on every container",
+        predicate=lambda d: _literal(_simple_app_env(d), "LOG_LEVEL") == "debug",
+        description="LOG_LEVEL=debug to land on the simple-app container",
     )
 
-    envs = _container_envs(dep)
-    assert {"name": "LOG_LEVEL", "value": "debug"} in envs
+    env = _simple_app_env(dep)
+    assert _literal(env, "LOG_LEVEL") == "debug"
 
-    # FR-014a (010-driver-env-var-consumption): chart-default env entries
-    # MUST be preserved alongside operator-set ones. The
-    # ``STYRMIN_CHART_DEFAULT`` marker is sourced from the simple-app
-    # chart's ``values.yaml`` and rendered by the chart's own
-    # ``deployment.yaml`` template (see
-    # ``driver/examples/simple-app/src/helm/``). DO NOT remove the marker
-    # from the chart without updating this assertion; the marker is the
-    # load-bearing assertion vs 008's broken behaviour where chart-default
-    # entries were clobbered by the post-render injection layer.
-    chart_default_names = {entry["name"] for entry in envs}
-    assert "STYRMIN_CHART_DEFAULT" in chart_default_names, (
-        "chart-default env entry was clobbered by env-vars consumption — "
-        "the platform must NOT modify chart-rendered env entries (FR-014a / "
-        f"SC-002). Observed env entries on the simple-app container: {envs}"
+    # FR-014a: the post-render patch merges by env name, so the chart's own
+    # entries (the ``STYRMIN_CHART_DEFAULT`` marker from the simple-app chart)
+    # survive next to user-set ones.
+    assert "STYRMIN_CHART_DEFAULT" in env, (
+        "chart-default env entry was clobbered by env var injection — the "
+        "post-render patch must merge by name (FR-014a). Observed env entries "
+        f"on the simple-app container: {sorted(env)}"
     )
 
 

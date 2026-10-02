@@ -308,6 +308,106 @@ class DeploymentDetailPage:
                     "input[placeholder='values (comma-separated)']"
                 ).fill(",".join(str(v) for v in values))
 
+    # ------------------------------------------------------------------
+    # Settings drawer — component env vars (017)
+    # ------------------------------------------------------------------
+
+    async def set_component_env_vars(
+        self, *, component: str, env_vars: dict[str, str]
+    ) -> None:
+        """Make ``component``'s env var rows in the Settings edit drawer equal
+        ``env_vars``, then apply through the diff dialog.
+
+        Rows are edited in place by index and extras removed from the end; a
+        block left with no env vars, command or args is removed. Closes the
+        drawer without submitting when the rows already match.
+        """
+        page = self._page
+        await page.get_by_role("button", name="Settings", exact=True).click()
+        await page.locator("[data-testid=settings-update-button]").click()
+        drawer = page.locator("[role=dialog][aria-labelledby=config-edit-drawer-title]")
+        await expect(drawer).to_be_visible()
+        await page.locator("[data-testid=section-nav-componentOverrides]").click()
+
+        trigger = page.locator(f"[data-testid=component-override-trigger-{component}]")
+        if await trigger.get_attribute("aria-expanded") != "true":
+            await trigger.click()
+        block = page.locator(
+            f"[data-testid=component-override-block][data-component='{component}']"
+        )
+        add_block = block.locator(f"[data-testid=component-override-add-{component}]")
+        add_row = block.locator(f"[data-testid=comp-env-add-{component}]")
+        await expect(add_block.or_(add_row)).to_be_visible()
+
+        rows = block.locator("[data-testid=component-env-var-row]")
+        current: list[tuple[str, str]] = []
+        for index in range(await rows.count()):
+            name_input = block.locator(
+                f"[data-testid=comp-env-name-{component}-{index}]"
+            )
+            value_input = block.locator(
+                f"[data-testid=comp-env-value-{component}-{index}]"
+            )
+            current.append(
+                (await name_input.input_value(), await value_input.input_value())
+            )
+        desired = list(env_vars.items())
+        if current == desired:
+            await page.locator("[data-testid=drawer-close-button]").click()
+            await expect(drawer).to_be_hidden()
+            return
+
+        if await add_block.is_visible():
+            await add_block.click()
+        for index, (name, value) in enumerate(desired):
+            if index >= len(current):
+                await add_row.click()
+            await block.locator(
+                f"[data-testid=comp-env-name-{component}-{index}]"
+            ).fill(name)
+            value_input = block.locator(
+                f"[data-testid=comp-env-value-{component}-{index}]"
+            )
+            await value_input.fill(value)
+            await value_input.press("Tab")
+        for index in range(len(current) - 1, len(desired) - 1, -1):
+            await block.locator(
+                f"[data-testid=comp-env-remove-{component}-{index}]"
+            ).click()
+
+        if not desired:
+            other_rows = block.locator(
+                f"[data-testid^='comp-command-{component}-'], "
+                f"[data-testid^='comp-args-{component}-']"
+            )
+            if await other_rows.count() == 0:
+                await block.locator(
+                    f"[data-testid=component-override-remove-{component}]"
+                ).click()
+
+        review = page.locator("[data-testid=drawer-review-apply-button]")
+        await expect(review).to_be_enabled()
+        await review.click()
+        diff_dialog = page.locator("[data-testid=config-diff-dialog]")
+        await expect(diff_dialog).to_be_visible()
+        await page.locator("[data-testid=diff-dialog-apply-button]").click()
+        try:
+            await expect(diff_dialog).to_be_hidden(timeout=60_000)
+        except AssertionError as exc:
+            problem = page.locator(
+                "[data-testid=diff-dialog-error], "
+                "[data-testid=diff-dialog-conflict-panel]"
+            )
+            message = (
+                await problem.first.inner_text()
+                if await problem.count() > 0
+                else "(no error rendered)"
+            )
+            raise ScenarioActionError(
+                f"component env var apply did not close the diff dialog: {message}"
+            ) from exc
+        await expect(drawer).to_be_hidden()
+
     async def _select_value(
         self, container: Locator, label_text: str, option: str
     ) -> None:

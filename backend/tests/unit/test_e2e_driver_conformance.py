@@ -314,6 +314,18 @@ def test_api_driver_constituent_outcome_matches_frontend_vocabulary(
     assert _constituent_outcome(constituent) == expected
 
 
+def test_set_component_env_vars_is_declared_keyword_only() -> None:
+    """Pins the component env var setter (017) the US1 E2E drives on both
+    entrypoints; the generic checks above then hold both drivers to it."""
+    assert "set_component_env_vars" in _protocol_methods()
+    assert _is_async(ScenarioDriver, "set_component_env_vars")
+    params = list(
+        inspect.signature(ScenarioDriver.set_component_env_vars).parameters.values()
+    )[1:]
+    assert [p.name for p in params] == ["deployment_id", "component", "env_vars"]
+    assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params)
+
+
 def test_protocol_method_signatures_match() -> None:
     """Each driver's method parameter names, defaults, and return type must match.
 
