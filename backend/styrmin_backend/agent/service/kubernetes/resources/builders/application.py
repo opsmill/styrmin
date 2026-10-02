@@ -1,3 +1,5 @@
+from typing import NoReturn
+
 import jinja2
 from prefect import task
 from yaml import YAMLError, safe_load
@@ -21,6 +23,7 @@ from styrmin_backend.services.driver.models.resources.backup import (
 )
 from styrmin_backend.services.env_vars.patch_builder import build_env_var_patches
 from styrmin_backend.services.exceptions import (
+    RetiredTemplateFilterError,
     SchedulingPatchRenderingError,
 )
 from styrmin_backend.services.scheduling.patch_builder import (
@@ -68,29 +71,12 @@ def split_string(value: str, separator: str | None = None) -> list[str]:
     return value.split(separator)
 
 
-def component_env_vars(components: object, name: str) -> list[dict[str, str]]:
-    """Return per-component env vars as a list of ``{name, value}`` entries.
+def component_env_vars(*args: object, **kwargs: object) -> NoReturn:  # noqa: ARG001
+    """Retired filter: Styrmin injects env vars by post-render patch (017 FR-007).
 
-    The single canonical accessor for driver value templates: yields the
-    Kubernetes-native env list shape (which supports `value`, `valueFrom`,
-    secret refs, etc.) and returns an empty list whenever the component is
-    absent from the rendering context, has no ``env_vars`` block, or the
-    merged config dict is empty. Templates can drop every defensive guard:
-
-        extraEnv: {{ components | component_env_vars("server") | tojson }}
+    Stays registered so a driver still calling it gets the typed error.
     """
-    if not isinstance(components, dict):
-        return []
-    component = components.get(name)
-    if not isinstance(component, dict):
-        return []
-    env_vars = component.get("env_vars")
-    if not isinstance(env_vars, dict):
-        return []
-    config = env_vars.get("config")
-    if not isinstance(config, dict):
-        return []
-    return [{"name": str(k), "value": str(v)} for k, v in config.items()]
+    raise RetiredTemplateFilterError
 
 
 def _resolved_container_override(components: object, name: str) -> dict | None:
@@ -115,7 +101,7 @@ def component_command(components: object, name: str) -> list[str]:
     """Resolved ``command`` override for component ``name``, or ``[]`` when unset.
 
     Empty-list marker contract (ADR-045): returns the resolved non-empty list
-    when the operator has set a ``command`` override, or **``[]``** when unset
+    when the user has set a ``command`` override, or **``[]``** when unset
     (component absent, no override block, or the ``command`` slot unset). The
     driver template emits it unconditionally
     (``command: {{ components | component_command("server") | tojson }}``); the
@@ -128,8 +114,7 @@ def component_command(components: object, name: str) -> list[str]:
     (RFC 7386): an omitted key leaves a previously-set override in place, so
     clearing would never reach the pod. Emitting ``[]`` overwrites the prior
     value under merge-patch, and the chart's ``with`` guard makes ``[]`` safe
-    (it never blanks the entrypoint). Mirrors the env-vars
-    ``component_env_vars`` always-present-list convention.
+    (it never blanks the entrypoint).
     """
     override = _resolved_container_override(components, name)
     if override is None:
