@@ -2,17 +2,18 @@
 
 This guide is for **driver authors** wiring a component's container
 `command` / `args` to be overridable per deployment
-(014-component-container-overrides). It documents how an operator-set override
+(014-component-container-overrides). It documents how a user-set override
 reaches your `values.j2.yml`, how to render it, and what the platform
 deliberately does **not** do for you.
 
-The override is a close sibling of the env-vars consumption surface
-([`driver-env-var-consumption.md`](driver-env-var-consumption.md)). The one
-behavioural divergence recorded in
-[ADR-045](../adr/0045-container-override-no-layering-and-omit-marker.md) is
-**no layering** (component-scope only). Like env vars, the filters return an
-**always-present list** (`[]` when unset) and the chart guards consumption with
-a `{{- with }}` block.
+Unlike env vars, `command`/`args` still flow through the values template. Env
+vars moved to post-render injection into the declared component container in
+017 ([ADR-055](../adr/0055-post-render-component-overrides.md),
+[`driver-env-var-consumption.md`](driver-env-var-consumption.md)); moving
+`command`/`args` onto the same mechanism is a follow-up. The override filters
+return an **always-present list** (`[]` when unset), the chart guards
+consumption with a `{{- with }}` block, and there is **no layering**
+(component-scope only, [ADR-045](../adr/0045-container-override-no-layering-and-omit-marker.md)).
 
 ## What reaches your template
 
@@ -21,8 +22,8 @@ Your driver's `values.j2.yml` is rendered with a `GlobalContext` dumped via
 
 | Path | Shape | What it carries |
 |---|---|---|
-| `components[<name>].container_override.command` | `list[str] \| None` | The operator's entrypoint override for that component, or absent when unset. |
-| `components[<name>].container_override.args` | `list[str] \| None` | The operator's args override, or absent when unset. |
+| `components[<name>].container_override.command` | `list[str] \| None` | The user's entrypoint override for that component, or absent when unset. |
+| `components[<name>].container_override.args` | `list[str] \| None` | The user's args override, or absent when unset. |
 
 Unlike env vars there is **no environment- or deployment-wide scope** — a
 `command`/`args` override is set only on a single component of a single
@@ -38,7 +39,7 @@ command: {{ components | component_command("server") | tojson }}
 args: {{ components | component_args("server") | tojson }}
 ```
 
-Each filter returns the resolved non-empty list when the operator has set an
+Each filter returns the resolved non-empty list when the user has set an
 override, or **`[]`** when it is unset (component absent from the context, no
 override block, or that slot unset).
 
@@ -60,15 +61,15 @@ args:
 
 | Filter | Returns when unset | Returns when set |
 |---|---|---|
-| `component_env_vars` | `[]` (chart appends harmlessly) | `[{name, value}, ...]` |
 | `component_command` / `component_args` | **`[]`** | `["...", ...]` |
 
 - **Always emit the key** and `tojson` the list — do NOT wrap the emission in
-  an `if`/omit guard. The key must be **present** in the rendered values so
-  that *clearing* an override propagates: the operator applies HelmRelease
-  `spec.values` via JSON merge-patch (RFC 7386), where an **omitted** key is
-  left unchanged, so a cleared override would otherwise silently persist on the
-  running pod.
+  an `if`/omit guard. This was required while the operator merge-patched the
+  HelmRelease (an omitted key was left unchanged, so a cleared override
+  persisted). Since 017 the operator replaces the HelmRelease `spec` on update
+  ([ADR-055](../adr/0055-post-render-component-overrides.md) §6), so an omitted
+  key no longer lingers, but the always-present key stays the documented
+  pattern and keeps the rendered values explicit.
 - The **chart** owns the safety guard: `{{- with .Values.command }}` skips an
   empty list, so `[]` never blanks the container entrypoint — the image
   `ENTRYPOINT`/`CMD` (or chart default) applies. Always consume these values
@@ -99,14 +100,17 @@ args: null
 {%- endif %}
 ```
 
-This works because the two HelmRelease apply paths treat the `null` exactly as
-clearing needs (see [ADR-045](../adr/0045-container-override-no-layering-and-omit-marker.md) §5):
+This works because the operator strips `null`s before it applies the
+HelmRelease, so the key is absent and the chart's own default flows through —
+clearing reverts to the default (see
+[ADR-045](../adr/0045-container-override-no-layering-and-omit-marker.md) §5 and
+[ADR-055](../adr/0055-post-render-component-overrides.md) §6):
 
-- on a **merge-patch update**, `null` *deletes* the key (RFC 7386) so the
-  chart's own default flows through — clearing reverts to the default;
-- on the **create POST**, the operator strips `null`s first
-  (`prune_none_on_create`), so a first reconcile treats it as absent rather than
-  persisting a literal null that the unguarded chart would render and blank.
+- on the **create POST**, `prune_none_on_create` strips them, so a first
+  reconcile never persists a literal null that the unguarded chart would render
+  and blank;
+- on an **update**, the `spec` replace (JSON Patch `add /spec`) prunes them the
+  same way.
 
 The alternative is a **default fallback** — always emit the key, falling back to
 the chart's documented default instead of `[]`:
@@ -119,7 +123,7 @@ Both clear correctly; pick based on the remaining trade-off:
 
 | Approach | Pros | Cons |
 |---|---|---|
-| **`null` marker** (Infrahub) | No duplicated default; clearing reverts to the chart default | Relies on the operator's create-path `null` prune (ADR-045 §5) |
+| **`null` marker** (Infrahub) | No duplicated default; clearing reverts to the chart default | Relies on the operator's `null` prune on create and update (ADR-045 §5, ADR-055 §6) |
 | **Default fallback** | Self-contained in the template | Duplicates the chart's default, which can drift on a chart-version bump (pin the chart and keep it in sync) |
 
 Either way, **only the fields the chart actually exposes are overridable.** The
@@ -149,21 +153,24 @@ spec:
 This block is **doc-only**: it surfaces through
 `ApplicationDriverVersion.containerOverrides` for discovery, but the platform
 **does not require** a declared component to actually wire the filters, and it
-does not validate operator values against it. A driver that **declares but does
+does not validate user values against it. A driver that **declares but does
 not wire** the filters stores the override and silently never applies it
-(US6 Sc.3 — identical to the env-vars no-enforcement policy in ADR-013 §5).
+(US6 Sc.3 — the no-enforcement policy ADR-013 §5 used to apply to env vars).
 Conversely, wiring the filters without the doc block also works — the doc block
-is purely for operator discoverability.
+is purely for user discoverability. Its `container` field is informational and
+separate from `components.<name>.container`, the component container env vars
+are injected into; the two are not cross-validated.
 
 ## What the platform does NOT do
 
 - It never injects `command`/`args` into a container your template did not
-  wire (no post-render injection — same boundary as ADR-013).
+  wire (no post-render injection for these two slots yet; env vars moved to
+  post-render in ADR-055).
 - It does not template or expand override values — they pass through verbatim
   (FR-014).
 - It does not layer the value across scopes — there is exactly one source (the
   component block).
 
-Operators set/clear overrides through the standard `updateDeployment` mutation
+Users set/clear overrides through the standard `updateDeployment` mutation
 (and at create time via the `deploy` mutation's `config` JSON); the malformed
 or mis-targeted ones are rejected at the write boundary before any reconcile.

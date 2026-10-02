@@ -13,7 +13,7 @@ across the page.
 Everything here is client-side. There is no GraphQL schema change, no new query,
 and no backend involvement beyond the existing `updateDeployment` mutation — which
 has **full-replacement** semantics, so the UI is responsible for showing the
-operator what a submit will change before it fires.
+user what a submit will change before it fires.
 
 Design rationale and rejected alternatives:
 [ADR-052](../../adr/0052-client-side-config-diff-impact-and-conflict-detection.md).
@@ -167,7 +167,7 @@ mutating. `ConfigDiffDialog`:
 4. **Changed** → render `ConflictPanel`; the mutation does not proceed.
 
 Reload hands the refreshed deployment back to `ConfigEditDrawer`, which **swaps its
-baseline to the new persisted state while keeping the operator's pending edits**.
+baseline to the new persisted state while keeping the user's pending edits**.
 The draft is never discarded — only what it is measured against moves. There is no
 "overwrite anyway" affordance.
 
@@ -183,7 +183,7 @@ Two caveats:
   unset array `defaultValues` into `[]` on first render, which would diverge from
   an `undefined` baseline and make the reload-merge treat an untouched field as
   edited. The helper tolerates exactly that `undefined ↔ []` case and is **not** a
-  general equality helper — an operator clearing a list to `[]` is a real edit.
+  general equality helper — a user clearing a list to `[]` is a real edit.
 
 ### Env-var values are plaintext
 
@@ -194,6 +194,34 @@ Masking behind a Reveal toggle was rejected: it would imply the UI is the trust
 boundary when the GraphQL response carries the plaintext anyway. `EnvVar.value` is
 documented as not being for secret material; a real secrets facility is a separate
 workstream.
+
+### Component env vars follow the component container
+
+<!-- Extracted from specs/017-post-render-env-vars on 2026-10-02 -->
+
+Styrmin injects env vars into each component's declared **component container**
+([ADR-055](../../adr/0055-post-render-component-overrides.md)), and the backend
+rejects added or changed component-scope env vars on a component without one
+(`COMPONENT_CONTAINER_NOT_DECLARED`). The Components section of the drawer
+(`ComponentOverridesSection.tsx`) mirrors that rule from `component.container`,
+which `get_deployment.graphql` selects on `Deployment.components`:
+
+- **Container declared**: the env var editor is unchanged.
+- **No container**: no add or edit control is rendered. An explanation
+  (`comp-env-no-container-<component>`) says the driver declares no container, so
+  env vars can't be applied. Stored values, typically left by a driver upgrade
+  that dropped the container, render read-only (`component-env-var-readonly-row`)
+  with a remove button, the same treatment as orphaned override blocks. Removing
+  them submits a subset of the stored block, which the backend accepts.
+
+The driver detail **Components** tab (`ComponentsTab.tsx`) shows each component's
+container from `componentConfigs[].container`, or an explicit **None declared**
+state with a tooltip, so driver authors can confirm what they declared.
+
+Deployment- and environment-scope editors carry no such hint: those scopes skip
+containerless components silently. Surfacing that in the UI is a deferred
+follow-up (ADR-055 consequences); the API exposes it as
+`ComponentEnvVars.isApplicable`.
 
 ### Testing
 

@@ -364,6 +364,13 @@ spec:
 
 `spec.parameters` stays a `{name: value}` map.
 
+Adding or changing per-component `env_vars` on a component whose driver
+version declares no component container fails with
+`COMPONENT_CONTAINER_NOT_DECLARED`. `apply` writes `spec.config` before it
+moves the deployment to a new driver version, so the check runs against the
+current version. See
+[Migrating env var wiring](../drivers/migrating-env-vars.md).
+
 ### Related
 
 - [Installation → Quickstart](../installation/quickstart.md) — the

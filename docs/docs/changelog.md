@@ -8,6 +8,39 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Env vars keep the chart's env defaults
+
+Styrmin now merges the env vars users set on a deployment into each
+component's declared **component container** after the Helm chart
+renders, instead of having the driver write them into the chart's
+values. Chart env defaults are no longer dropped.
+
+#### What's new
+
+- Drivers declare `components.<name>.container` in
+  `driver.styrmin.yml`. User env vars reach that container by name: the
+  chart's own env entries are kept, and a user value replaces a chart
+  entry of the same name.
+- Adding or changing a component env var on a component without a
+  component container is rejected with `COMPONENT_CONTAINER_NOT_DECLARED`.
+  The deployment's Configuration editor hides the env var editor for such
+  components, and the driver's **Components** tab shows each component's
+  container.
+- Every example driver declares its component containers. The `infrahub`
+  task manager keeps the Prefect chart's `PROMETHEUS_MULTIPROC_DIR` and
+  `PREFECT_UI_SERVE_BASE` defaults.
+
+#### Migration
+
+- The `component_env_vars` template filter is removed. A deployment
+  pinned to a driver version that still calls it fails on its next
+  change. Load the migrated drivers and upgrade each deployment before
+  editing environment env vars; driver authors declare containers and
+  remove the filter. See
+  [Migrating env var wiring](./drivers/migrating-env-vars.md).
+- User env vars now reach only the component container, not chart Jobs,
+  init containers, or other containers in the pod.
+
 ### Clone an environment, with its data, in one action
 
 Environment backups could put an environment **back**. An **environment

@@ -60,11 +60,11 @@ styrmin_backend/services/
 │
 ├── scheduling/                    # Pod scheduling helpers
 │
-├── env_vars/                      # Free-form deployment env vars (post-render injection)
+├── env_vars/                      # Free-form deployment env vars (post-render injection, ADR-055)
 │   ├── validator.py               # name regex + size caps + risky-name warning
 │   ├── resolver.py                # env→dep→comp deepest-wins merge
-│   ├── patch_builder.py           # JSON-patch builder for container[0].env
-│   └── exceptions.py              # InvalidEnvVarNameError, EnvVarSizeLimitExceededError, etc.
+│   ├── patch_builder.py           # strategic-merge env patches into each component container
+│   └── exceptions.py              # InvalidEnvVarNameError, ComponentContainerNotDeclaredError, etc.
 │
 └── utilities/                     # Infrastructure utilities (ingress, etc.)
     └── utilities.py               # Utility management
@@ -490,7 +490,9 @@ ServiceError (base)
 ├── InvalidEnvVarNameError                  # services/env_vars/exceptions.py
 ├── DuplicateEnvVarNameError
 ├── EnvVarSizeLimitExceededError
-└── UnknownComponentEnvVarError
+├── UnknownComponentEnvVarError
+├── ComponentContainerNotDeclaredError      # services/env_vars/exceptions.py
+└── RetiredTemplateFilterError              # services/exceptions.py
 ```
 
 <!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->

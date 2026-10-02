@@ -71,7 +71,7 @@ container → `true`; (b) has none → `false`, values returned; (c) does not de
 
 | Code | Raised by | `extensions` metadata |
 |---|---|---|
-| `COMPONENT_CONTAINER_NOT_DECLARED` | `updateDeployment`, `deploy` (a write adding or changing a component-scope env var for a component without a container in the target driver version) | `componentName`, `componentsWithContainer` |
+| `COMPONENT_CONTAINER_NOT_DECLARED` | `updateDeployment`, `deploy` (a write adding or changing a component-scope env var for a component without a container in the target driver version) | `component_name`, `components_with_container` (snake_case, as `UNKNOWN_COMPONENT_ENV_VAR`) |
 
 Mutation-error tests: add / change → code + metadata + no Prefect task submitted; remove /
 unchanged → accepted; repeated on a write that also switches driver version.

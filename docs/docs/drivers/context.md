@@ -135,11 +135,30 @@ components:        # ComponentsContext, keyed by component name
 
 Per-component configuration. A driver declares its components in
 `driver.styrmin.yml`; this is where the resolved per-component values
-end up at runtime. Often paired with the `component_env_vars` Jinja
-filter — for example
-`{{ components | component_env_vars("server") | tojson }}`.
+end up at runtime: the component's definition under
+`components.<name>.config` (including its declared `container`) and its
+resolved env vars under `components.<name>.env_vars.config`.
 
 May be `None` if the driver has no per-component configuration.
+
+#### Env vars are read-only data
+
+Styrmin injects the env vars users set into each component's declared
+component container after the chart renders; templates do not wire
+them (see
+[Creating a Driver](./creating-a-driver.md#the-component-container)).
+The resolved values stay readable for other uses, such as building a
+ConfigMap or switching a chart feature on:
+
+- `instance.config.env_vars` — environment and deployment scopes merged,
+  deepest wins.
+- `components.<name>.env_vars.config` — environment, deployment, and
+  component scopes merged, deepest wins.
+
+Both are absent when nothing is set, so guard with
+`(instance.config.env_vars or {})`. Don't write them into a chart env
+key: Styrmin already injects them, and Helm's list replacement would
+drop the chart's own env defaults.
 
 #### `parameters`
 
@@ -192,8 +211,6 @@ ingress:
   hosts:
     - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ cluster.config.fqdn_suffix }}"
 
-extraEnv: {{ components | component_env_vars("server") | tojson }}
-
 storage:
   storageClassName: "{{ instance.config.standard_storage.storage_class }}"
 ```
@@ -205,11 +222,13 @@ Notice the typical patterns:
   default-correct place to read from.
 - **`{{ cluster.config.X }}`** only when you specifically need the
   cluster-wide value (e.g. the FQDN suffix).
-- **`components | component_env_vars("<name>")`** as a Jinja filter to
-  produce the per-component env-var list.
+- **No env var wiring.** User env vars reach each component's
+  declared container without template code; the `component_env_vars`
+  filter is removed (see
+  [Migrating env var wiring](./migrating-env-vars.md)).
 - **`components | component_command("<name>")`** /
-  **`components | component_args("<name>")`** as Jinja filters to read an
-  operator's per-component container `command`/`args` override. Each returns
+  **`components | component_args("<name>")`** as Jinja filters to read a
+  user's per-component container `command`/`args` override. Each returns
   the list or **`[]`** when unset; emit the keys unconditionally and guard
   consumption in your chart with `{{- with .Values.command }}` so an empty list
   falls through to the image/chart default. See

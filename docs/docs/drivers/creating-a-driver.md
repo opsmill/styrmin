@@ -132,10 +132,12 @@ This is the core of the driver. For each candidate component from Step
 spec:
   components:
     server:
+      container: my-app
       identifier:
         label:
           app.kubernetes.io/name: my-app
     database:
+      container: postgresql
       identifier:
         label:
           app.kubernetes.io/name: postgresql
@@ -176,6 +178,35 @@ combination Styrmin can match on. Two paths to make that happen:
 **Pick the simplest match that uniquely identifies the pods.** A
 single, stable label is better than two; matching on values the chart
 already sets is better than fighting it.
+
+#### The component container
+
+The optional **`container`** field names the **component container**:
+the one container in the component's pod that receives the env vars
+users set on a deployment. Styrmin merges those env vars into it after
+the chart renders, by env var name, so every env entry the chart ships
+survives and a user value with the same name replaces the chart's. Your
+`values.j2.yml` does not mention env vars at all.
+
+- Use the application container's name from the rendered chart (from
+  Step 1's `helm install --dry-run`), not a sidecar's.
+- The name must exist in every `Deployment` and `StatefulSet` that the
+  component's first identifier label selects. Styrmin matches that label
+  against the workload's own `metadata.labels`, so the chart must label
+  the workload, not only its pods (`podLabels` alone is not enough; many
+  charts also expose a `labels` or `commonLabels` value).
+- A wrong name fails the Helm release the first time a user sets an env
+  var on that component (`spec.template.spec.containers[0].image:
+  Required value`).
+- Without `container`, the component accepts no component-scope env
+  vars, and deployment- or environment-scope env vars skip it.
+
+User env vars reach only this container: not other containers in the
+pod, not init containers, and not chart `Job`s or `CronJob`s. In the
+container's env list, user entries come before the chart's, and the
+component container moves to the first position in the pod. See
+[Migrating env var wiring](./migrating-env-vars.md) if your driver used
+the removed `component_env_vars` filter.
 
 ### Step 4: Configure backups
 
@@ -224,8 +255,6 @@ image:
   repository: my-app
   tag: "{{ app.version }}"
 
-extraEnv: {{ components | component_env_vars("server") | tojson }}
-
 ingress:
   enabled: true
   className: "{{ instance.config.ingress_class }}"
@@ -238,8 +267,6 @@ ingress:
 postgresql:
   enabled: true
   fullnameOverride: styrmin-postgresql
-  primary:
-    extraEnvVars: {{ components | component_env_vars("database") | tojson }}
 ```
 
 Patterns to know:
@@ -250,13 +277,14 @@ Patterns to know:
   layers.
 - **`{{ services['<name>'].primary_fqdn }}`** to get the auto-generated
   hostname for a service you declared (see next step).
-- **`{{ components | component_env_vars("<name>") | tojson }}`** to
-  inject the per-component env vars (declared via `env_vars` —
-  optional).
+- **No env var wiring.** User env vars reach the component container
+  declared in Step 3 without any template code. Do not write them into
+  the chart's `env` or `extraEnv` keys: Helm replaces lists, so that
+  drops the chart's own env defaults.
 
 #### Container `command` / `args` overrides (optional)
 
-To let an operator override a component's container entrypoint or args for one
+To let a user override a component's container entrypoint or args for one
 deployment — without forking your driver — emit the `component_command` /
 `component_args` filters **unconditionally** in `values.j2.yml`:
 
@@ -265,12 +293,10 @@ command: {{ components | component_command("server") | tojson }}
 args: {{ components | component_args("server") | tojson }}
 ```
 
-Each filter returns the operator's list when set, or **`[]`** when unset. Emit
-the keys unconditionally (do **not** wrap them in an `if`): the key must be
-present so that *clearing* an override propagates (the platform applies the
-HelmRelease values via JSON merge-patch, where an omitted key would leave a
-prior override in place). In your **chart**, guard consumption with a `with`
-block so an empty list falls through to the image/chart default:
+Each filter returns the user's list when set, or **`[]`** when unset. Emit
+the keys unconditionally (do **not** wrap them in an `if`) and let the chart
+decide. In your **chart**, guard consumption with a `with` block so an empty
+list falls through to the image/chart default:
 
 ```yaml
 {{- with .Values.command }}
@@ -304,9 +330,9 @@ args: null
 {%- endif %}
 ```
 
-On a merge-patch update the `null` deletes the key so the chart's own default
-applies (clearing reverts to the default); on the initial create the operator
-strips the `null` so the key is simply absent. See `driver/examples/infrahub`
+Styrmin strips the `null` before it applies the HelmRelease, on both the
+initial create and every update, so the key is simply absent and the chart's
+own default applies (clearing reverts to the default). See `driver/examples/infrahub`
 for the worked example and the
 [container-override consumption guide](https://github.com/opsmill/styrmin/blob/develop/dev/guides/driver-container-override-consumption.md)
 for this and the default-fallback alternative.
@@ -481,6 +507,9 @@ Before you call the driver done:
       made a conscious decision not to expose one).
 - [ ] Each component's `identifier.label` matches the pods you expect
       it to — verify with `kubectl get pods -l <label>=<value>`.
+- [ ] Each component that should receive env vars declares a
+      `container` that exists in every workload its label selects, and
+      `values.j2.yml` does not wire env vars.
 - [ ] Every stateful component has a `backup` block with the right
       strategy.
 - [ ] Every externally reachable service is declared under

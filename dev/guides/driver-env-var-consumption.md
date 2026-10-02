@@ -1,204 +1,220 @@
 # Driver Env Var Consumption Guide
 
-This guide is for **driver authors** writing or maintaining a `values.j2.yml`
-template. It documents how operator-set environment variables reach the
-template, how to render them through your chart, and what the platform
-deliberately does **not** do for you.
+This guide is for **driver authors**. It covers what a driver must declare so user-set
+environment variables reach its pods, what Styrmin then does on its own, and the failure
+modes to check for.
 
-For the operator-facing reference (where env vars get set, validated, and
-queried), see [`dev/knowledge/backend/deployment-env-vars.md`](../knowledge/backend/deployment-env-vars.md).
-The canonical contract for this consumption surface lives in
-[`specs/010-driver-env-var-consumption/spec.md`](../../specs/010-driver-env-var-consumption/spec.md).
+The short version: declare one **component container** per component in
+`driver.styrmin.yml`, and do not mention env vars in `values.j2.yml`. Styrmin merges each
+component's resolved env vars into that container after the chart renders, by env var
+`name`, so the chart's own env entries survive.
 
-## What env vars reach your template
+For the user-facing reference (where env vars are set, validated, and queried), see
+[`dev/knowledge/backend/deployment-env-vars.md`](../knowledge/backend/deployment-env-vars.md).
+The decision record is [ADR-055](../adr/0055-post-render-component-overrides.md). Drivers
+written for the retired values-template route should follow the
+[migration guide](../../docs/docs/drivers/migrating-env-vars.md).
 
-Your driver's `values.j2.yml` is rendered with a `GlobalContext` that the
-platform dumps via `model_dump(exclude_none=True)`. Two fields carry resolved
-env vars:
+## Declare the component container
+
+Add `container` to each component that should receive env vars:
+
+```yaml
+# driver.styrmin.yml
+spec:
+  components:
+    server:
+      container: simple-app        # the container that receives env vars
+      identifier:
+        label:
+          app.kubernetes.io/name: simple-app
+    database:
+      container: postgresql
+      identifier:
+        label:
+          app.kubernetes.io/name: postgresql
+```
+
+- The value must be a Kubernetes container name (lowercase alphanumerics and `-`, starting
+  and ending with an alphanumeric, at most 63 characters). A malformed value fails driver
+  registration.
+- It is optional. A component without it accepts no component-scope env vars (writes are
+  rejected with `COMPONENT_CONTAINER_NOT_DECLARED`) and is skipped silently for deployment-
+  and environment-scope env vars.
+- One name per component. Pick the application container, not a sidecar.
+
+Find the name by rendering the chart with your driver's values and reading the pod template
+of every `Deployment` and `StatefulSet` the component's identifier label selects:
+
+```bash
+helm template styrmin-my-app <chart> -f rendered-values.yaml \
+  | yq 'select(.kind == "Deployment" or .kind == "StatefulSet")
+        | [.metadata.name, .metadata.labels, .spec.template.spec.containers[].name]'
+```
+
+The patch targets workloads by the component's **first** identifier label, matched against
+the workload's own `metadata.labels` (a Kustomize `target.labelSelector` matches the
+resource, not its pods). Most charts put the same labels on both; check that yours does.
+[`specs/017-post-render-env-vars/driver-containers.md`](../../specs/017-post-render-env-vars/driver-containers.md)
+records the command and result for every in-repo driver.
+
+## No template wiring
+
+`values.j2.yml` does not inject env vars. Do not write the chart's `env`, `extraEnv`, or
+`extraEnvVars` keys with user values: Helm replaces lists wholesale, which is what dropped
+chart defaults under the retired route.
+
+The `component_env_vars` filter is retired. Calling it fails rendering with
+`RETIRED_TEMPLATE_FILTER`; the deployment reports
+`Failed to create HelmRelease: The 'component_env_vars' template filter was removed: …`.
+
+Keep hard-coded chart wiring in the template where the chart reads a map or a dedicated key.
+Where the chart's env is a list that also carries chart defaults, put your hard-coded entry
+in a slot that does not replace those defaults instead of copying the defaults into the
+template. The infrahub drivers set `PREFECT_SERVER_ANALYTICS_ENABLED` under
+`global.prefect.env` (which the prefect-server subchart merges under `server.env`) rather than
+overriding `prefect-server.server.env`.
+
+### Read-only context fields
+
+The resolved env vars stay in the rendering context for non-injection uses, such as building
+a ConfigMap or switching a chart feature on a value:
 
 | Field | Shape | What it carries |
 |---|---|---|
-| `instance.config.env_vars` | `dict[str, str]` | The **deployment-effective** merged env vars (environment scope merged into deployment scope, deepest-wins). |
-| `components[<name>].env_vars.config` | `dict[str, str]` | The **per-component** merged env vars (environment → deployment → component, deepest-wins). |
+| `instance.config.env_vars` | `dict[str, str]` | Deployment-effective env vars (environment → deployment, deepest-wins). |
+| `components[<name>].env_vars.config` | `dict[str, str]` | Per-component env vars (environment → deployment → component, deepest-wins). |
 
-Both keys may be **absent** from the rendered context dict when no env vars
-are set anywhere — `exclude_none=True` drops them. The canonical accessor
-is the **`component_env_vars` Jinja filter**, which encapsulates every
-defensive guard and returns the Kubernetes-native `[{name, value}, ...]`
-list shape ready to drop straight into a chart-side `extraEnv` /
-`extraEnvVars` value:
+Both keys are absent when nothing is set (the context is dumped with `exclude_none=True`), so
+guard with `or {}`. Writing these values into a chart env key brings the list-replacement
+problem back; Styrmin already injects them.
 
-```jinja
-extraEnv: {{ components | component_env_vars("server") | tojson }}
-```
+## What Styrmin does
 
-The filter returns an empty list whenever the component is missing from
-the context, has no `env_vars` block, or its merged config dict is empty —
-so templates never need `is defined` / `or {}` guards. For mixed renders
-(chart-default entries plus operator-supplied entries), iterate the filter
-output and emit each entry alongside the hardcoded ones:
-
-```jinja
-extraEnvVars:
-  - name: HARDCODED
-    value: "yes"
-{%- for entry in components | component_env_vars("server") %}
-  - name: {{ entry.name | tojson }}
-    value: {{ entry.value | tojson }}
-{%- endfor %}
-```
-
-The deployment-effective `instance.config.env_vars` dict remains available
-for templates that intentionally want a coarser scope; use the same
-defensive `or {}` accessor (`(instance.config.env_vars or {}).items()`).
-Per-component is preferred for new templates: it carries the full
-env→dep→comp merge, so deployment-level env vars still flow through.
-
-The platform resolves the merge order; you do not implement it. Operators
-control which scope wins through the standard `updateEnvironment` /
-`updateDeployment` mutations. Your template just consumes the merged result.
-
-## How to render them
-
-All three examples below use Jinja's `tojson` filter on names and values.
-**Use it.** Operator-supplied values may contain newlines, quotes, leading
-dashes, or other YAML-significant characters; without escaping, an unlucky
-value will silently produce broken `values.yaml`. The platform does NOT
-escape values for you — it is your template's responsibility.
-
-### Single-component driver (the simple-app pattern)
-
-The canonical shape: expose operator-set env vars through a chart-side
-`extraEnv` value. Naming the value `extraEnv` (not `env`) makes it
-**structurally additive** — chart-default env entries stay intact, operator
-entries concatenate.
-
-```jinja
-# values.j2.yml
-image:
-  repository: my-app
-  tag: "{{ app.version }}"
-
-extraEnv: {{ components | component_env_vars("server") | tojson }}
-```
-
-Corresponding chart-side hook in `templates/deployment.yaml`:
+For each component with a component container and at least one resolved env var, the
+HelmRelease gains two strategic-merge Kustomize patches (one targeting `Deployment`, one
+`StatefulSet`), appended after every other post-render patch. For a component `server` with
+container `simple-app` and `LOG_LEVEL=debug`, the patch body is:
 
 ```yaml
-env:
-  - name: APP_DEFAULT_VAR
-    value: "default-value"
-  {{- with .Values.extraEnv }}
-  {{- toYaml . | nindent 4 }}
-  {{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: any
+spec:
+  template:
+    spec:
+      containers:
+      - name: simple-app
+        env:
+        - name: LOG_LEVEL
+          value: debug
+          valueFrom: null
 ```
 
-The chart's defaults render first, the operator entries append after. If two
-entries collide on `name`, Kubernetes uses **whichever appears last** in the
-list — pick your ordering accordingly.
+The result on the rendered workload:
 
-### Multi-component driver (per-component scoping)
+- chart env entries the user did not name are kept;
+- a user entry with the same name as a chart entry replaces it, including a chart
+  `valueFrom` entry;
+- entries the user clears disappear on the next reconcile; the chart's value comes back;
+- values are passed as strings, unescaped and uncoerced (`"true"`, `"0123"`, multi-line,
+  `$(VAR)` all arrive as written);
+- the user value wins over the same key from the chart's `envFrom` (Kubernetes `env` over
+  `envFrom` precedence).
 
-When your driver declares multiple components, call the filter once per
-component. Each component receives its own env→dep→comp-merged dict; peer
-components are not affected.
+Precedence between scopes is resolved before the patch is built: per-key deepest-wins,
+environment → deployment → component. Disabled components still get the patch; their replica
+count is managed separately.
 
-```jinja
-# values.j2.yml — multi-component driver with `api` and `worker`
-api:
-  extraEnv: {{ components | component_env_vars("api") | tojson }}
+### Ordering and `$(VAR)` references
 
-worker:
-  extraEnv: {{ components | component_env_vars("worker") | tojson }}
-```
+The merge puts every user entry, new or replacing, **before** the chart's remaining entries,
+and moves the component container to `containers[0]` of the pod. Kubernetes expands a
+`$(VAR)` reference only to entries listed earlier, so:
 
-An operator setting `componentEnvVars: [{ component: "worker", envVars: { WORKER_QUEUE: "orders" } }]`
-sees `WORKER_QUEUE=orders` only on the worker pods; the `api` pods are
-unaffected.
+- a chart entry that references a user var (`$(USER_VAR)`) expands;
+- a user value that references a chart var (`$(CHART_VAR)`) does not;
+- user entries are ordered environment keys first, then keys new at deployment scope, then
+  keys new at component scope; a key overridden by a deeper scope keeps its earlier position.
+  A user-to-user reference expands only when the referenced key comes first.
 
-### Combining chart-default env entries with operator-set ones
+This is the current behaviour of the kyaml strategic-merge engine in Flux's post-renderer,
+not a documented Kubernetes contract. Do not build on the exact order.
 
-Two ordering choices, both legitimate. Pick the one that matches your app's
-operational story.
+A multi-container component reorders its containers once, when its first env var is set.
+`kubectl logs` without `-c` picks the first container (unless the pod sets the
+`kubectl.kubernetes.io/default-container` annotation), which is now the component container.
 
-**Chart-defaults first, operator entries override on collision** (typical):
+### Scope: Deployment and StatefulSet, one container
 
-```yaml
-# templates/deployment.yaml
-env:
-  - name: LOG_LEVEL
-    value: "warn"
-  - name: APP_REGION
-    value: "us-east-1"
-  {{- with .Values.extraEnv }}
-  {{- toYaml . | nindent 4 }}
-  {{- end }}
-```
+Only the component container of `Deployment` and `StatefulSet` workloads receives user env
+vars. These do not:
 
-If the operator sets `LOG_LEVEL=debug`, the appended entry comes after — and
-because Kubernetes uses the **last** entry on duplicate `name`, `debug` wins.
+- other containers in the same pod (sidecars);
+- init containers;
+- `Job`, `CronJob`, and `DaemonSet` workloads, including chart migration and hook Jobs that
+  share the component's label.
 
-**Operator entries first, chart-defaults override on collision** (rare; for
-guard-rail scenarios where the chart enforces a value):
+If your application needs a user value in a Job, read it from the context and template it
+explicitly. Action Jobs started with `execute_commands(env_from_component=...)` copy the
+env of the component pod template's first container, which is the component container
+whenever env vars are set.
 
-```yaml
-# templates/deployment.yaml
-env:
-  {{- with .Values.extraEnv }}
-  {{- toYaml . | nindent 4 }}
-  {{- end }}
-  - name: APP_REGION
-    value: "us-east-1"
-```
+## Failure modes to check
 
-Same operator setting `LOG_LEVEL=debug` reaches the pod (no collision with
-`APP_REGION`). But if the operator tries to set `APP_REGION=eu-west-2`, the
-chart's default appears last and wins — the operator override is silently
-discarded.
+- **Wrong container name.** The strategic merge adds a new, image-less container with that
+  name, and the API server rejects the workload. The Helm release fails with
+  `spec.template.spec.containers[0].image: Required value`. Nothing fails until a user first
+  sets an env var on that component, so verify the name when you write the driver.
+- **Identifier label not on the workload.** If the first identifier label matches only pods,
+  or only a kind other than `Deployment`/`StatefulSet`, the patch matches nothing and the env
+  vars silently never arrive.
+- **One label, several workloads.** Every matched `Deployment` and `StatefulSet` gets the
+  patch, so each must contain the named container.
+- **Container dropped in a driver upgrade.** Stored component-scope env vars are kept and
+  read back with `isApplicable: false`; they are not injected until a version declares the
+  container again.
 
-The platform imposes **no** precedence policy on chart-vs-operator
-collisions. You choose.
+## Verifying a driver
 
-## What the platform doesn't do
+1. Load the driver and deploy it.
+2. Set a component-scope env var whose name matches a chart default, for example through the
+   deployment's Configuration tab.
+3. Read the live pod template and confirm the container carries the user value and every
+   other chart entry:
 
-These are **not** bugs — they are deliberate non-features:
+   ```bash
+   kubectl get deploy -n <namespace> -l <identifier-label> \
+     -o jsonpath='{.items[0].spec.template.spec.containers[0].env}'
+   ```
 
-- **No enforcement that operator-set env vars are consumed.** A driver
-  template that ignores `instance.config.env_vars` silently opts out. The
-  values are stored, queryable, and editable, but never reach a pod.
-- **No validation that `spec.env_vars` matches what the template
-  consumes.** The driver-side declaration is informational only — it
-  documents what your app respects, not what your template actually wires
-  up.
-- **No automatic chart-default merging.** The platform never inspects your
-  chart's defaults. Concatenation, deduplication, and precedence on
-  collisions are entirely your template's call.
-- **No type coercion on values.** Operators submit strings; your chart
-  receives strings. If your app needs a number or a boolean, your chart or
-  app handles that conversion.
-- **No migration for drivers from before 010.** Drivers that previously
-  relied on the platform's post-render injection (008's `EnvVarsPatch`,
-  removed in 010) silently opt out until their author updates the template.
-  Until then, operator-set env vars are stored, queryable, and editable —
-  but don't reach pods. This is a feature: each driver decides whether to
-  expose the surface.
+4. Clear the env var and confirm the chart default is back.
 
 ## Extending the renderer
 
-The Jinja environment used to render every driver `values.j2.yml` is built
-in `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py:get_jinja_environment`.
-Custom filters (`to_fqdn_label`, `split`, `component_env_vars`) are
-registered there. To add a new filter for driver authors, add the function
-nearby and register it in `get_jinja_environment` — the
-`SilentUndefined` policy applied at the same site means filters can
-safely traverse undefined chains without raising. Add a unit test
-alongside `backend/tests/unit/agent/test_render_value_template_env_vars.py`
-that drives the filter through `ApplicationHelmReleaseBuilder.render_value_template`
-to lock in the contract.
+The Jinja environment for `values.j2.yml` is built in
+`backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py:get_jinja_environment`.
+Custom filters (`to_fqdn_label`, `split`, `component_command`, `component_args`, and the
+retired `component_env_vars` stub) are registered there. Add a unit test that drives a new
+filter through `ApplicationHelmReleaseBuilder.render_value_template`
+(see `backend/tests/unit/agent/test_render_value_template_env_vars.py`).
+
+The env var patches are built by `build_env_var_patches()` in
+`backend/styrmin_backend/services/env_vars/patch_builder.py` and rendered by
+`ContainerEnvPatch` in
+`backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py`.
 
 ## Related
 
-- Operator-facing reference: [`dev/knowledge/backend/deployment-env-vars.md`](../knowledge/backend/deployment-env-vars.md).
-- Canonical contract: [`specs/010-driver-env-var-consumption/spec.md`](../../specs/010-driver-env-var-consumption/spec.md).
-- Architecture record: [`dev/adr/0013-driver-env-var-consumption.md`](../adr/0013-driver-env-var-consumption.md).
-- Reference driver: `driver/examples/simple-app/values.j2.yml` and `driver/examples/simple-app/src/helm/templates/deployment.yaml`.
+- [ADR-055](../adr/0055-post-render-component-overrides.md) — the decision, ordering facts, and
+  consequences.
+- [ADR-013](../adr/0013-driver-env-var-consumption.md) — the retired values-template route
+  (superseded in part).
+- [`dev/knowledge/backend/deployment-env-vars.md`](../knowledge/backend/deployment-env-vars.md) —
+  scopes, validation, read surface.
+- [`docs/docs/drivers/migrating-env-vars.md`](../../docs/docs/drivers/migrating-env-vars.md) —
+  user and driver-author migration steps.
+- Reference driver: `driver/examples/simple-app/driver.styrmin.yml` and
+  `driver/examples/simple-app/src/helm/templates/deployment.yaml` (the `STYRMIN_CHART_DEFAULT`
+  and `STYRMIN_CHART_DEFAULT_FROM` entries are the chart defaults the E2E asserts survive).
