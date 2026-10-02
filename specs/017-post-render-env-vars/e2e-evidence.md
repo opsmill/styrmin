@@ -119,3 +119,35 @@ sub-tree), so only `[api-chromium]` applies. Images were built from the working 
   ```text
   backend/tests/e2e/test_deployment_env_vars.py::test_us3_per_component_env_var_overrides_deployment_level[api-chromium] PASSED
   ```
+
+## SC-003 (T043)
+
+The scenario carries `api_only` (it asserts through kr8s and the Prefect HTTP endpoints), so only
+`[api-chromium]` applies; it is the module's only node. It reads the `styrmin-task-manager`
+Deployment's Ready pods and asserts their `prefect-server` container keeps the chart default
+`PREFECT_UI_SERVE_BASE=/` and carries `PREFECT_SERVER_ANALYTICS_ENABLED=True` (the driver's
+`enable_analytics` default). Images were built from the working tree with
+`STYRMIN_IMAGE_VER=local-fac017-sc003`. The fixture finalizer deleted the vCluster after the run.
+
+### `test_infrahub_task_manager_service_exposes_prefect_ui[api-chromium]`
+
+- **Node ID**:
+  `backend/tests/e2e/test_infrahub_services.py::test_infrahub_task_manager_service_exposes_prefect_ui[api-chromium]`
+- **Command**:
+
+  ```bash
+  sleep infinity | STYRMIN_IMAGE_VER=local-fac017-sc003 uv run pytest \
+    backend/tests/e2e/test_infrahub_services.py -k api-chromium -v -s --pdb 2>&1 \
+    | tee sc003-api.log
+  ```
+
+- **Timestamp**: 2026-10-02T18:37:59Z (session end)
+- **vCluster**: `pytest-8fa6471b-06dc-45d5-9e67-4cf799778fb9`, kubeconfig
+  `/tmp/pytest-of-root/pytest-314/vcluster0/kubeconfig`
+- **Result** (`-s` output separates the node ID from its outcome):
+
+  ```text
+  backend/tests/e2e/test_infrahub_services.py::test_infrahub_task_manager_service_exposes_prefect_ui[api-chromium]
+  PASSED
+  ============ 1 passed, 1 deselected, 1 warning in 174.30s (0:02:54) ============
+  ```

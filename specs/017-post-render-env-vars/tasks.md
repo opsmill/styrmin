@@ -116,7 +116,7 @@ SC-002, SC-003).
 - [X] T028 [P] [US3] Write a failing unit test in `backend/tests/unit/agent/test_infrahub_values_prefect_env.py` that renders `driver/examples/infrahub/values.j2.yml` and `driver/examples/infrahub-enterprise/values.j2.yml` with a representative context and asserts no `prefect-server.server.env` key is emitted and `PREFECT_SERVER_ANALYTICS_ENABLED` is set under `global.prefect.env` (SC-003, research D-010).
 - [X] T029 [P] [US3] Write a failing propagation test in `backend/tests/functional/graphql/test_application_driver_version_propagation.py`: load a driver whose components declare/omit `container`; `applicationDriverVersion { componentConfigs { name container } }` returns the declared value and `null` (contracts/graphql-deltas.md).
 - [X] T030 [P] [US3] Write a failing frontend test in `frontend/src/__tests__/drivers/ComponentsTab.test.tsx`: each component row shows its container, and a component without one shows an explicit "none declared" state (critique P4).
-- [ ] T031 [US3] Extend `test_infrahub_task_manager_service_exposes_prefect_ui` in `backend/tests/e2e/test_infrahub_services.py` (read-only, on `deployed_infrahub_enterprise_app`): the `prefect-server` Deployment's pods are Ready and its `prefect-server` container env contains `PREFECT_UI_SERVE_BASE=/` and `PREFECT_SERVER_ANALYTICS_ENABLED` (SC-003; research D-011).
+- [X] T031 [US3] Extend `test_infrahub_task_manager_service_exposes_prefect_ui` in `backend/tests/e2e/test_infrahub_services.py` (read-only, on `deployed_infrahub_enterprise_app`): the `prefect-server` Deployment's pods are Ready and its `prefect-server` container env contains `PREFECT_UI_SERVE_BASE=/` and `PREFECT_SERVER_ANALYTICS_ENABLED` (SC-003; research D-011).
 
 ### Implementation for User Story 3
 
@@ -131,7 +131,7 @@ SC-002, SC-003).
 - [X] T040 [US3] Add a `container: str | None` field to the `ComponentConfig` Strawberry type in `backend/styrmin_backend/api/definitions/application_driver/model.py` resolving `config["container"]`, with the description from contracts/graphql-deltas.md. Make T029 pass.
 - [X] T041 [US3] Regenerate: `uv run styrmin export graphql-schema schema.graphql`; add `container` under `componentConfigs` in `python_sdk/src/styrmin_sdk/graphql/load_version.graphql` and `load_local_version.graphql` and in `frontend/src/graphql/get_driver.graphql`; run `uv run invoke validate-graphql` and `uv run invoke generate`.
 - [X] T042 [US3] Show the component container in `frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx`. Make T030 pass.
-- [ ] T043 [US3] Run T031 with `sleep infinity | uv run pytest backend/tests/e2e/test_infrahub_services.py -v -s --pdb 2>&1 | tee /tmp/sc003.log` to PASS and append the evidence to `specs/017-post-render-env-vars/e2e-evidence.md`.
+- [X] T043 [US3] Run T031 with `sleep infinity | uv run pytest backend/tests/e2e/test_infrahub_services.py -v -s --pdb 2>&1 | tee /tmp/sc003.log` to PASS and append the evidence to `specs/017-post-render-env-vars/e2e-evidence.md`.
 
 **Checkpoint**: every in-repo driver injects env vars by post-render; unmigrated drivers fail
 loudly with a pointer to the guide.
