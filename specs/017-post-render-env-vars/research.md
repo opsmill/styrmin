@@ -137,6 +137,17 @@ atomic.
 first reconcile on a migrated driver version). It is the engineering condition for SC-004 on
 pre-existing deployments, not new user-facing scope.
 
+**Addendum (found by the US1 E2E, T021)**: the operator builds the HelmRelease from the
+StyrminDeployment CR's `spec.context`, and the agent wrote that CR with merge-patch as well. The
+context is dumped with `exclude_none=True`, so a cleared env var (or any key dropped from a dict)
+stayed in the CR and kept reaching the post-render patches. The agent's three CR applies
+(`create_instance_crd`, `update_instance_crd`, `upgrade_instance_crd`) now go through
+`_apply_styrmin_deployment_crd`, which passes `replace_spec_keys_on_update=True`: one JSON Patch
+with an `add` op per top-level spec key the body sets. `spec.context` is replaced wholesale,
+while the server-owned `spec.deletionRequested` (CEL-guarded, never in the agent's body) is left
+alone; a full `spec` replace would reset it to its `false` default and be rejected after a delete
+request.
+
 ---
 
 ## D-004 — Driver specification: optional `components.<name>.container`

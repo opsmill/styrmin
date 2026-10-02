@@ -65,6 +65,20 @@ def _build_namespace_labels(
     }
 
 
+async def _apply_styrmin_deployment_crd(*, body: dict, namespace: str) -> None:
+    """Create or update the StyrminDeployment CR, replacing each spec key it
+    writes so keys dropped from the context do not linger (017 FR-011); the
+    server-owned ``spec.deletionRequested`` is left alone."""
+    await upsert_custom_resource(
+        plurals=CRD_PLURAL,
+        body=body,
+        group=CRD_GROUP,
+        version=CRD_VERSION,
+        namespace=namespace,
+        replace_spec_keys_on_update=True,
+    )
+
+
 async def _set_deployment_in_progress(namespace: str, release_reference: str) -> None:
     """Set the deployment-in-progress annotation on the HelmRelease.
 
@@ -645,13 +659,7 @@ async def create_instance_crd(
     namespace_labels = _build_namespace_labels(context)
     await apply_kubernetes_namespace(namespace=namespace, labels=namespace_labels)
 
-    await upsert_custom_resource(
-        plurals=CRD_PLURAL,
-        body=crd_body,
-        group=CRD_GROUP,
-        version=CRD_VERSION,
-        namespace=namespace,
-    )
+    await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
 
     logger.info(
         "StyrminDeployment CRD created: %s/%s",
@@ -696,17 +704,7 @@ async def update_instance_crd(
         namespace=namespace,
     )
 
-    from styrmin_backend.agent.service.kubernetes.primitives import (
-        upsert_custom_resource,
-    )
-
-    await upsert_custom_resource(
-        plurals=CRD_PLURAL,
-        body=crd_body,
-        group=CRD_GROUP,
-        version=CRD_VERSION,
-        namespace=namespace,
-    )
+    await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
 
     # Apply cross-namespace ExternalName service aliases for service discovery
     aliases = compute_service_aliases(context)
@@ -749,13 +747,7 @@ async def upgrade_instance_crd(
         release_reference=release_reference,
         namespace=namespace,
     )
-    await upsert_custom_resource(
-        plurals=CRD_PLURAL,
-        body=crd_body,
-        group=CRD_GROUP,
-        version=CRD_VERSION,
-        namespace=namespace,
-    )
+    await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
 
     # Reset status.displayState + phase atomically with the spec change.
     # Without this there is a window where the CRD carries the new

@@ -40,8 +40,8 @@ def _prune_none(value: Any) -> Any:
     applies), while the merge-patch path keeps the ``null`` so clearing still
     deletes the key. See ADR-045 §5.
 
-    The ``replace_spec_on_update`` update path also prunes, since replacing
-    ``spec`` removes omitted keys without needing a ``null``.
+    The ``replace_spec_on_update`` / ``replace_spec_keys_on_update`` update
+    paths also prune, since replacing removes omitted keys without a ``null``.
     """
     if isinstance(value, dict):
         return {k: _prune_none(v) for k, v in value.items() if v is not None}
@@ -55,19 +55,29 @@ def _json_pointer_token(key: str) -> str:
     return key.replace("~", "~0").replace("/", "~1")
 
 
-def _replace_spec_json_patch(body: dict[str, Any]) -> list[dict[str, Any]]:
+def _replace_spec_json_patch(
+    body: dict[str, Any], *, per_key: bool = False
+) -> list[dict[str, Any]]:
     """Build the JSON Patch that replaces ``spec`` and adds owned metadata keys.
 
     ``spec`` is replaced wholesale with ``None`` pruned, so keys the new body
-    omits are removed. ``metadata.labels`` / ``metadata.annotations`` keys are
-    added one by one, leaving keys other actors wrote (kopf annotations, Flux's
-    finalizer) untouched. Per-key ``add`` needs the live map to exist; the
-    HelmRelease builder always sets both. See 017-post-render-env-vars D-003.
+    omits are removed. With ``per_key``, each top-level ``spec`` key the body
+    sets is replaced instead, leaving keys other writers own in place.
+    ``metadata.labels`` / ``metadata.annotations`` keys are added one by one,
+    leaving keys other actors wrote (kopf annotations, Flux's finalizer)
+    untouched. Per-key ``add`` needs the live map to exist; the HelmRelease
+    builder always sets both. See 017-post-render-env-vars D-003.
     """
     pruned = _prune_none(body)
-    ops: list[dict[str, Any]] = [
-        {"op": "add", "path": "/spec", "value": pruned.get("spec", {})}
-    ]
+    spec = pruned.get("spec", {})
+    ops: list[dict[str, Any]] = (
+        [
+            {"op": "add", "path": f"/spec/{_json_pointer_token(key)}", "value": value}
+            for key, value in spec.items()
+        ]
+        if per_key
+        else [{"op": "add", "path": "/spec", "value": spec}]
+    )
     metadata = pruned.get("metadata", {})
     for map_key in ("labels", "annotations"):
         for key, value in metadata.get(map_key, {}).items():
@@ -148,6 +158,7 @@ async def upsert_custom_resource(
     update: bool = True,
     prune_none_on_create: bool = False,
     replace_spec_on_update: bool = False,
+    replace_spec_keys_on_update: bool = False,
     client: ApiClient = Depends(get_api_client),
 ) -> None:
     # Declare the kubernetes client object
@@ -170,15 +181,19 @@ async def upsert_custom_resource(
         )
     except ApiException as exc:
         if update:
-            if exc.status == status.HTTP_409_CONFLICT and replace_spec_on_update:
-                # Replace ``spec`` rather than merge it, so keys the new body
-                # omits do not linger (FR-011, research D-003).
+            if exc.status == status.HTTP_409_CONFLICT and (
+                replace_spec_on_update or replace_spec_keys_on_update
+            ):
+                # Replace ``spec`` (or each spec key the body sets) rather than
+                # merge it, so keys the new body omits do not linger (FR-011).
                 await custom_obj_api.patch_namespaced_custom_object(
                     group=group,
                     version=version,
                     namespace=namespace,
                     plural=plurals,
-                    body=_replace_spec_json_patch(body),
+                    body=_replace_spec_json_patch(
+                        body, per_key=replace_spec_keys_on_update
+                    ),
                     name=body["metadata"]["name"],
                     _content_type="application/json-patch+json",  # type: ignore[call-arg]
                 )
