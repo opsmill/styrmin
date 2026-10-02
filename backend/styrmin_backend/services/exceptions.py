@@ -747,3 +747,36 @@ class SchedulingPatchRenderingError(PostRenderPatchRenderingError):
     """Failed to serialise a scheduling post-renderer patch into YAML."""
 
     default_message = "Failed to serialise scheduling post-renderer patch"
+
+
+ENV_VARS_MIGRATION_GUIDE_URL = (
+    "https://styrmin.pages.dev/docs/drivers/migrating-env-vars"
+)
+
+
+class RetiredTemplateFilterError(ServiceError):
+    """A driver values template called a template filter Styrmin removed."""
+
+    error_code = "RETIRED_TEMPLATE_FILTER"
+    default_message = (
+        "The 'component_env_vars' template filter was removed: Styrmin now injects "
+        "env vars into each component's declared component container. Deployment "
+        "users: upgrade this deployment to a driver version that declares component "
+        "containers. Driver authors: remove the filter from values.j2.yml and declare "
+        "components.<name>.container in driver.styrmin.yml. Migration guide: "
+        f"{ENV_VARS_MIGRATION_GUIDE_URL}"
+    )
+
+    def __init__(
+        self,
+        message: str = "",
+        filter_name: str = "component_env_vars",
+        migration_guide: str = ENV_VARS_MIGRATION_GUIDE_URL,
+    ) -> None:
+        self.filter_name = filter_name
+        self.migration_guide = migration_guide
+        super().__init__(message)
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"filter": self.filter_name, "migration_guide": self.migration_guide}

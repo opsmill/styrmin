@@ -1,32 +1,24 @@
-"""Unit tests for env-vars exposure through ``ApplicationBuilder.render_value_template``.
+"""Unit tests for the env var rendering contract of
+``ApplicationHelmReleaseBuilder.render_value_template``
+(017-post-render-env-vars, T026, FR-007, FR-009, research D-008).
 
-Phase 2 / T004 — verifies FR-001 + FR-002 of 010-driver-env-var-consumption:
-the platform exposes the deployment-effective env-vars dict to driver templates
-as ``instance.config.env_vars`` and per-component env-vars as
-``components[<name>].env_vars.config``. Both fields ride through
-``render_value_template`` via ``GlobalContext.model_dump(exclude_none=True)``
-into the Jinja rendering dict.
-
-These tests are the safety net for Phase 4's deletion of the broken
-post-render injection layer: deleting that layer is only safe when the
-template-context exposure path is verified to work. If any of these tests
-fail against the pre-deletion codebase, do NOT proceed to Phase 4.
-
-Test cases:
-1. Both scopes set: deployment + per-component env vars render correctly.
-2. Deployment-only set: per-component lists render empty (defensive ``or {}``).
-3. Per-component-only set: deployment list renders empty.
-4. Nothing set anywhere: both lists empty, no Jinja UndefinedError.
+FR-007: Styrmin injects env vars by post-render patch, so the retired
+``component_env_vars`` filter fails rendering with a typed error naming the
+migration guide. FR-009: ``instance.config.env_vars`` and
+``components[<name>].env_vars.config`` stay readable in the rendering context.
 """
 
 from __future__ import annotations
 
 from textwrap import dedent
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
+
+import pytest
 
 from styrmin_backend.agent.service.kubernetes.resources.builders.application import (
     ApplicationHelmReleaseBuilder,
-    component_env_vars,
+    get_jinja_environment,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.models.components import (
@@ -55,6 +47,21 @@ from styrmin_backend.context.models.helm import (
     ChartInfo,
     HelmInfo,
     RepositoryInfo,
+)
+from styrmin_backend.operator.pipeline import execute_phase_helmrelease
+from styrmin_backend.services.exceptions import RetiredTemplateFilterError
+
+MIGRATION_GUIDE = "https://styrmin.pages.dev/docs/drivers/migrating-env-vars"
+RETIRED_FILTER_MESSAGE = (
+    "The 'component_env_vars' template filter was removed: Styrmin now injects "
+    "env vars into each component's declared component container. Deployment "
+    "users: upgrade this deployment to a driver version that declares component "
+    "containers. Driver authors: remove the filter from values.j2.yml and declare "
+    "components.<name>.container in driver.styrmin.yml. Migration guide: "
+    f"{MIGRATION_GUIDE}"
+)
+RETIRED_FILTER_TEMPLATE = (
+    'extraEnv: {{ components | component_env_vars("server") | tojson }}\n'
 )
 
 
@@ -90,6 +97,7 @@ def _make_global_context(
     *,
     instance_env_vars: dict[str, str] | None,
     components: ComponentsContext,
+    values_template: str = "",
 ) -> GlobalContext:
     """Build a synthetic ``GlobalContext`` with env vars set at the deployment
     (instance.config) scope and arbitrary per-component scope. Mirrors the
@@ -115,7 +123,7 @@ def _make_global_context(
                     id=uuid4(),
                     name="test-chart",
                     version="1.0.0",
-                    values_template="",
+                    values_template=values_template,
                 ),
                 repository=RepositoryInfo(
                     id=uuid4(),
@@ -128,9 +136,8 @@ def _make_global_context(
     )
 
 
-# Probe template — exercises both consumption surfaces with the defensive
-# ``or {}`` accessor pattern documented in FR-003 and demonstrated by the
-# simple-app driver example in research §3.
+# Probe template — reads both env var paths with the defensive ``or {}``
+# accessor pattern.
 PROBE_TEMPLATE = dedent(
     """
     deployment_env_vars:
@@ -158,13 +165,96 @@ def _render(context: GlobalContext) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# T004 — FR-001 / FR-002 verification cases
+# FR-007 — the retired ``component_env_vars`` filter fails loudly
+# ---------------------------------------------------------------------------
+
+
+def _assert_retired_filter_error(error: RetiredTemplateFilterError) -> None:
+    assert error.error_code == "RETIRED_TEMPLATE_FILTER"
+    assert error.error_metadata == {
+        "filter": "component_env_vars",
+        "migration_guide": MIGRATION_GUIDE,
+    }
+    assert str(error) == RETIRED_FILTER_MESSAGE
+
+
+class TestRetiredComponentEnvVarsFilter:
+    """A ``values.j2.yml`` calling ``component_env_vars`` aborts rendering."""
+
+    @pytest.mark.parametrize(
+        "server_env_vars",
+        [{"LOG_LEVEL": "debug"}, {}, None],
+        ids=["env-vars-set", "env-vars-empty", "no-env-vars-block"],
+    )
+    def test_template_calling_filter_raises_typed_error(
+        self, server_env_vars: dict[str, str] | None
+    ) -> None:
+        """Raises whatever the context holds, so an unmigrated driver fails
+        before any user sets env vars rather than silently dropping them later.
+        """
+        context = _make_global_context(
+            instance_env_vars=None,
+            components=ComponentsContext(
+                root={"server": _component("server", "server-app", server_env_vars)}
+            ),
+        )
+
+        with pytest.raises(RetiredTemplateFilterError) as exc_info:
+            ApplicationHelmReleaseBuilder.render_value_template(
+                values_template=RETIRED_FILTER_TEMPLATE, context=context
+            )
+
+        _assert_retired_filter_error(exc_info.value)
+
+    def test_filter_stays_registered(self) -> None:
+        """Unregistering would give Jinja's generic "no filter named" error at
+        compile time instead of the typed error pointing at the migration guide.
+        """
+        environment = get_jinja_environment()
+
+        assert "component_env_vars" in environment.filters
+        environment.from_string(RETIRED_FILTER_TEMPLATE)
+
+    async def test_operator_records_message_without_applying_helm_release(
+        self,
+    ) -> None:
+        """The operator pipeline keeps the message (code and metadata are not
+        carried by ``PhaseResult``) and never applies the HelmRelease.
+        """
+        context = _make_global_context(
+            instance_env_vars=None,
+            components=ComponentsContext(
+                root={"server": _component("server", "server-app", None)}
+            ),
+            values_template=RETIRED_FILTER_TEMPLATE,
+        )
+        upsert = AsyncMock()
+
+        with patch(
+            "styrmin_backend.agent.service.kubernetes.primitives.upsert_custom_resource",
+            upsert,
+        ):
+            result = await execute_phase_helmrelease(
+                crd_spec={"context": context.model_dump(mode="json")},
+                namespace=context.instance.namespace,
+            )
+
+        assert result.success is False
+        assert result.errors == [
+            f"Failed to create HelmRelease: {RETIRED_FILTER_MESSAGE}"
+        ]
+        applied = [call.kwargs["plurals"] for call in upsert.await_args_list]
+        assert "helmreleases" not in applied
+
+
+# ---------------------------------------------------------------------------
+# FR-009 — env vars stay readable in the rendering context
 # ---------------------------------------------------------------------------
 
 
 class TestRenderValueTemplateEnvVarsExposure:
-    """Verify env vars set on the resolved ``GlobalContext`` reach driver
-    templates through ``ApplicationHelmReleaseBuilder.render_value_template``.
+    """Env vars on the resolved ``GlobalContext`` stay readable by driver
+    templates as data (e.g. ConfigMap content), not for injection.
     """
 
     def test_both_scopes_set_render_into_template(self) -> None:
@@ -248,10 +338,8 @@ class TestRenderValueTemplateEnvVarsExposure:
         ]
 
     def test_nothing_set_anywhere_renders_without_raising(self) -> None:
-        """Edge case from spec.md — no env vars set at any scope. Rendering
-        the probe template MUST NOT raise on undefined keys; both lists
-        render empty. This is the load-bearing "templates won't blow up
-        when operators haven't set anything" guarantee from FR-003.
+        """No env vars set at any scope: rendering the probe template does
+        not raise on undefined keys and both lists render empty.
         """
         components = ComponentsContext(
             root={"worker": _component("worker", "worker-app", None)}
@@ -266,52 +354,8 @@ class TestRenderValueTemplateEnvVarsExposure:
         assert result["deployment_env_vars"] in (None, [])
         assert result["worker_env_vars"] in (None, [])
 
-    def test_component_env_vars_filter_returns_list_form(self) -> None:
-        """The ``component_env_vars`` Jinja filter is the single canonical
-        accessor used by every example driver. Verifies it returns the
-        Kubernetes-native ``[{name, value}, ...]`` list form, the empty list
-        when the component is absent / has no env_vars / has an empty config,
-        and is reachable through the rendered template.
-        """
-        components = ComponentsContext(
-            root={
-                "server": _component("server", "server-app", {"LOG_LEVEL": "debug"}),
-                "worker_no_env": _component("worker_no_env", "worker-app", None),
-                "worker_empty": _component("worker_empty", "worker-app", {}),
-            }
-        )
-        context = _make_global_context(
-            instance_env_vars=None,
-            components=components,
-        )
-        dumped = context.model_dump(exclude_none=True)
-
-        assert component_env_vars(dumped["components"], "server") == [
-            {"name": "LOG_LEVEL", "value": "debug"},
-        ]
-        assert component_env_vars(dumped["components"], "worker_no_env") == []
-        assert component_env_vars(dumped["components"], "worker_empty") == []
-        assert component_env_vars(dumped["components"], "missing") == []
-        # Garbage inputs collapse to an empty list — no template should ever
-        # raise because of a malformed context.
-        assert component_env_vars(None, "server") == []
-        assert component_env_vars("not-a-dict", "server") == []
-
-        rendered = ApplicationHelmReleaseBuilder.render_value_template(
-            values_template=(
-                'extraEnv: {{ components | component_env_vars("server") | tojson }}\n'
-                'workerEnv: {{ components | component_env_vars("worker_no_env") | tojson }}\n'
-                'missingEnv: {{ components | component_env_vars("missing") | tojson }}\n'
-            ),
-            context=context,
-        )
-        assert rendered["extraEnv"] == [{"name": "LOG_LEVEL", "value": "debug"}]
-        assert rendered["workerEnv"] == []
-        assert rendered["missingEnv"] == []
-
     def test_dump_shape_carries_env_vars_through(self) -> None:
-        """Regression-pin on FR-003 / the ``model_dump(exclude_none=True)``
-        contract. When env vars are set, the dumped dict exposes
+        """Regression-pin on the ``model_dump(exclude_none=True)`` contract. When env vars are set, the dumped dict exposes
         ``instance.config.env_vars`` and
         ``components.worker.env_vars.config`` exactly — keys that the
         rendering probe (and real driver templates) read by name.
