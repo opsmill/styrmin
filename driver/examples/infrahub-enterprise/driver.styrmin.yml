@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: infrahub-enterprise
 spec:
-  version: "1"
+  version: "2"
   supported_versions: ">=1.5,<2.0"
   info:
     icon: xxxx
@@ -74,6 +74,7 @@ spec:
 
   components:
     server:
+      container: infrahub-server
       cpu: 4
       identifier:
         label:
@@ -87,11 +88,13 @@ spec:
         volume: infrahub-server-storage-data
 
     task-worker:
+      container: infrahub-task-worker
       identifier:
         label:
           service: infrahub-task-worker
 
     database:
+      container: neo4j
       identifier:
         label:
           infrahub/service: database
@@ -100,21 +103,25 @@ spec:
         kind: neo4j
 
     cache:
+      container: redis
       identifier:
         label:
           infrahub/service: cache
 
     message-queue:
+      container: rabbitmq
       identifier:
         label:
           infrahub/service: message-queue
 
     task-manager:
+      container: prefect-server
       identifier:
         label:
           app.kubernetes.io/name: prefect-server
 
     task-manager-db:
+      container: postgresql
       identifier:
         label:
           infrahub/service: task-manager-db
