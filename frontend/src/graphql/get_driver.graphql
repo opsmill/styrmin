@@ -26,6 +26,7 @@ query GetDriver($applicationDriverId: UUID!) {
         id
         name
         config
+        container
       }
       helmChart {
         id

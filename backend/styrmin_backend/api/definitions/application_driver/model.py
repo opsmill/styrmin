@@ -95,6 +95,21 @@ class ComponentConfig:
     name: str
     config: JSON | None = None
 
+    @strawberry.field(
+        description=(
+            "The component container the driver declares for this component "
+            "(`components.<name>.container` in the driver specification file): the "
+            "container that receives per-component post-render overrides such as "
+            "env vars. Null when the driver declares none — component-scope env "
+            "vars are then rejected and broader scopes skip this component."
+        )
+    )
+    def container(self) -> str | None:
+        # Rows stored before the field existed have no ``container`` key.
+        if not isinstance(self.config, dict):
+            return None
+        return self.config.get("container")
+
     @classmethod
     def from_instance(cls, instance: DomainComponentConfig) -> ComponentConfig:
         return cls(

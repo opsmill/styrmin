@@ -2101,6 +2101,7 @@ class Client(AsyncBaseClient):
                   id
                   name
                   config
+                  container
                 }
                 actions {
                   name
@@ -2150,6 +2151,7 @@ class Client(AsyncBaseClient):
                   id
                   name
                   config
+                  container
                 }
                 actions {
                   name

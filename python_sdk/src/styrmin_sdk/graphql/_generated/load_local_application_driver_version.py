@@ -40,6 +40,7 @@ class LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersionComponen
     id: UUID
     name: str
     config: Optional[Any]
+    container: Optional[str]
 
 
 class LoadLocalApplicationDriverVersionLoadLocalApplicationDriverVersionActions(

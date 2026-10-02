@@ -4,6 +4,7 @@ import { isPlainObject } from "../json-guards";
 
 interface ComponentsTabProps {
   components: DriverVersionDetail["components"];
+  componentConfigs: DriverVersionDetail["componentConfigs"];
 }
 
 /**
@@ -17,13 +18,18 @@ interface ComponentsTabProps {
  *
  * For each well-shaped `[componentName, componentDecl]` entry we render:
  *   - the component name (mono, matches version-number visual style),
+ *   - the declared component container (from `componentConfigs`), or an
+ *     explicit "None declared" state,
  *   - `identifier.label` (when a plain object) as a key/value list,
  *   - any other declared scalar properties as additional key/value rows,
  *   - any other declared shallow-dict properties expanded one level deep.
  *
  * Critically: NO `<pre>` and NO `JSON.stringify` of component data anywhere.
  */
-export function ComponentsTab({ components }: ComponentsTabProps) {
+export function ComponentsTab({
+  components,
+  componentConfigs,
+}: ComponentsTabProps) {
   if (!isPlainObject(components) || Object.keys(components).length === 0) {
     return (
       <p
@@ -51,13 +57,22 @@ export function ComponentsTab({ components }: ComponentsTabProps) {
     );
   }
 
+  const containers = new Map(
+    componentConfigs.map((cc) => [cc.name, cc.container ?? null]),
+  );
+
   return (
     <div
       className="grid gap-3 sm:grid-cols-2"
       data-testid="driver-components-list"
     >
       {entries.map(([name, decl]) => (
-        <ComponentRow key={name} name={name} decl={decl} />
+        <ComponentRow
+          key={name}
+          name={name}
+          decl={decl}
+          container={containers.get(name) ?? null}
+        />
       ))}
     </div>
   );
@@ -66,9 +81,10 @@ export function ComponentsTab({ components }: ComponentsTabProps) {
 interface ComponentRowProps {
   name: string;
   decl: Record<string, unknown>;
+  container: string | null;
 }
 
-function ComponentRow({ name, decl }: ComponentRowProps) {
+function ComponentRow({ name, decl, container }: ComponentRowProps) {
   const fields = flattenDecl(decl);
   return (
     <div
@@ -83,6 +99,24 @@ function ComponentRow({ name, decl }: ComponentRowProps) {
         <span className="font-mono text-[13px] font-medium text-foreground">
           {name}
         </span>
+      </div>
+      <div
+        className="mt-2 flex items-baseline gap-2 text-xs"
+        data-testid="driver-component-container"
+      >
+        <span className="text-muted-foreground">Container</span>
+        {container ? (
+          <span className="truncate font-mono text-[13px]" title={container}>
+            {container}
+          </span>
+        ) : (
+          <span
+            className="italic text-muted-foreground"
+            title="The driver declares no container for this component, so env vars are not applied to it"
+          >
+            None declared
+          </span>
+        )}
       </div>
       {fields.length > 0 ? (
         <dl className="mt-3 grid grid-cols-[165px_1fr] gap-x-4 gap-y-1.5 border-t border-border/60 pt-3">
@@ -125,7 +159,8 @@ function flattenDecl(decl: Record<string, unknown>): Array<[string, string]> {
     }
   }
   for (const [key, value] of Object.entries(decl)) {
-    if (key === "identifier") continue;
+    // `container` has its own row, sourced from `componentConfigs`.
+    if (key === "identifier" || key === "container") continue;
     if (isScalar(value)) {
       pairs.push([key, String(value)]);
     } else if (value === null) {
