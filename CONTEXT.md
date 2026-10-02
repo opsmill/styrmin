@@ -187,16 +187,16 @@ The fixed set of sub-contexts that compose **GlobalContext**. Each level can ove
 _Avoid_: inventing additional context types without an ADR.
 
 **Component overrides**:
-The mechanism by which a **deployment**'s **component** config overrides the **driver version**'s default `ComponentConfig`. First-class to the deployment-config feature.
+The mechanism by which a **deployment**'s **component** config (`DeploymentConfig.components[<name>]`) overrides the **driver version**'s default `ComponentConfig`. First-class to the deployment-config feature. Component-scope env vars reach pods by a post-render patch into the **component container**, not through the values template ([ADR-055](dev/adr/0055-post-render-component-overrides.md)); **container overrides** still flow through the values template.
 _Avoid_: "component patch", "component customisation".
 
 **Component container**:
-The single container in a **component**'s pod template that the **application driver** declares (`components.<name>.container` in the **driver specification file**) as the target of per-component post-render overrides — env vars today, images next ([#20](https://github.com/opsmill/styrmin/issues/20)). A wrong name fails the Helm release rather than silently no-op'ing.
+The single container in a **component**'s pod template that the **application driver** declares (`components.<name>.container` in the **driver specification file**) as the target of per-component post-render overrides — env vars today, images next ([#20](https://github.com/opsmill/styrmin/issues/20)). Optional: a component without one accepts no component-scope env vars (`COMPONENT_CONTAINER_NOT_DECLARED`) and is skipped by deployment- and environment-scope ones. Only `Deployment` and `StatefulSet` workloads are patched. A wrong name fails the Helm release rather than silently no-op'ing. See [ADR-055](dev/adr/0055-post-render-component-overrides.md).
 _Avoid_: "main container", "app container", "primary container", "target container".
 
 **Container override**:
-The per-**component** `command` (container entrypoint) and/or `args` slot a user may set on a single **deployment**, scoped to that component only — no environment/deployment-wide scope, no layering (014-component-container-overrides). Two independent, optional, nullable lists; absence falls through to the chart/image default. Stored on `DeploymentConfig.components[<name>]`, consumed by the **driver version** through the `component_command` / `component_args` template filters.
-_Avoid_: "command override" / "args override" alone (they are the two slots **of** a container override), "entrypoint patch", "container customisation". Distinct from **component overrides** (the broader config-override mechanism) and from env vars (which **do** layer across scopes).
+The per-**component** `command` (container entrypoint) and/or `args` slot a user may set on a single **deployment**, scoped to that component only — no environment/deployment-wide scope, no layering (014-component-container-overrides). Two independent, optional, nullable lists; absence falls through to the chart/image default. Stored on `DeploymentConfig.components[<name>]`, consumed by the **driver version** through the `component_command` / `component_args` template filters. The `container` named in the driver's `spec.container_overrides` is informational and distinct from the **component container**.
+_Avoid_: "command override" / "args override" alone (they are the two slots **of** a container override), "entrypoint patch", "container customisation". Distinct from **component overrides** (the broader config-override mechanism) and from env vars (which **do** layer across scopes and are injected by post-render).
 
 ### Recorded intent and kubernetes
 
@@ -213,7 +213,7 @@ The kopf-based controller running inside the **agent** that watches **StyrminDep
 _Avoid_: "kopf" (that is the library), "kubernetes operator" (redundant), "the controller" (overloaded with K8s controllers).
 
 **HelmRelease**:
-The FluxCD v2 CRD declaring desired Helm chart state. Created and updated by the **operator** based on the resolved **GlobalContext**.
+The FluxCD v2 CRD declaring desired Helm chart state. Created and updated by the **operator** based on the resolved **GlobalContext**; Styrmin owns its `spec` and replaces it wholesale on every update ([ADR-055](dev/adr/0055-post-render-component-overrides.md)).
 _Avoid_: "release" alone (ambiguous), "Helm install".
 
 **HelmChart / HelmRepository**:

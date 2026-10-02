@@ -1,15 +1,18 @@
 # Deployment Env Vars
 
-A free-form `dict[str, str]` of environment variables that operators can set
+A free-form `dict[str, str]` of environment variables that users can set
 on a deployment without a driver change. The platform resolves the merged
-dict at the API boundary and exposes it to the driver's `values.j2.yml`
-rendering context; the driver consumes it through its Helm chart.
+dict and merges it, after the chart renders, into the **component
+container** each driver component declares, by env var `name`.
 
-This page is the operator/contributor reference. The decisions behind the
-shape (free-form `dict[str, str]`, three-scope deepest-wins precedence,
-driver-side consumption) live in [ADR-013](../../adr/0013-driver-env-var-consumption.md).
-The full contracts are in [`specs/008-deployment-env-vars/`](../../../specs/008-deployment-env-vars/)
-and [`specs/010-driver-env-var-consumption/`](../../../specs/010-driver-env-var-consumption/).
+This page is the user/contributor reference. The decisions behind the shape
+(free-form `dict[str, str]`, three-scope deepest-wins precedence) live in
+[ADR-013](../../adr/0013-driver-env-var-consumption.md); post-render
+injection into the component container lives in
+[ADR-055](../../adr/0055-post-render-component-overrides.md). The full
+contracts are in [`specs/archive/008-deployment-env-vars/`](../../../specs/archive/008-deployment-env-vars/),
+[`specs/archive/010-driver-env-var-consumption/`](../../../specs/archive/010-driver-env-var-consumption/),
+and [`specs/017-post-render-env-vars/`](../../../specs/017-post-render-env-vars/).
 
 ## When to reach for env vars
 
@@ -94,7 +97,29 @@ mutation {
 
 Reads are typed: `Environment.envVars`, `Deployment.envVars`,
 `Deployment.componentEnvVars`. The full GraphQL surface is enumerated in
-[`specs/008-deployment-env-vars/contracts/graphql.md`](../../../specs/008-deployment-env-vars/contracts/graphql.md).
+[`specs/archive/008-deployment-env-vars/contracts/graphql.md`](../../../specs/archive/008-deployment-env-vars/contracts/graphql.md);
+017 adds `Component.container`, `ComponentConfig.container`, and
+`ComponentEnvVars.isApplicable` ([`contracts/graphql-deltas.md`](../../../specs/017-post-render-env-vars/contracts/graphql-deltas.md)).
+
+### Component-scope writes need a component container
+
+`updateDeployment` and `deploy` raise `COMPONENT_CONTAINER_NOT_DECLARED`
+(`ComponentContainerNotDeclaredError`, metadata `component_name` and
+`components_with_container`) when a component-scope block **adds a key or
+changes a value** on a component that declares no component container in
+the deployment's pinned driver version. Removals and unchanged
+re-submissions pass, so the frontend's full-config submits and the removal
+of stranded values keep working. The check runs after
+`UNKNOWN_COMPONENT_ENV_VAR` and before any task is submitted. Component rows
+stored before 017 have no `container` key and count as containerless.
+Deployment- and environment-scope env vars are never rejected for this; they
+skip containerless components at render time.
+
+`updateDeployment` never switches driver versions, so the pinned version is
+the target. `styrminctl apply` calls `updateDeployment` before
+`updateDeploymentVersion` (ADR-048), so a manifest that switches version and
+adds component env vars in one go is validated against the pre-switch
+version — a known gap recorded in ADR-055.
 
 ## Driver-side documentation
 
@@ -139,42 +164,77 @@ Names must match `^[A-Za-z_][A-Za-z0-9_]*$`. Empty values (`""`) are
 accepted. Duplicate names within a single scope are rejected before the dict
 is built.
 
-## Upgrade orphans
+## Upgrade orphans and non-applicable blocks
 
 If a driver upgrade renames or removes a component carrying per-component env
 vars, the upgrade succeeds. The orphaned block becomes visible via
 `ComponentEnvVars.isOrphaned = true` and is **not** injected into any pod.
-Operators audit and remove orphans through the same `updateDeployment`
+Users audit and remove orphans through the same `updateDeployment`
 mutation. Rolling the driver back to a version that re-introduces the
 component name turns the block live again.
 
-## Driver-side consumption (010+)
+A driver upgrade that keeps the component but drops its component container
+is handled the same way: the stored block is kept and read back with
+`isOrphaned: false`, `isApplicable: false`. `isApplicable` is computed in the
+`componentEnvVars` resolver as `not isOrphaned and container != null`, reading
+the container from the deployment's `Component` rows (which mirror the pinned
+driver version). It is not persisted and not part of the instance context.
 
-Env vars reach pods through the **driver's values template**, not through a
-platform-side patch. The platform resolves the merged dict (env→dep→comp
-deepest-wins) at the API boundary and exposes it to `values.j2.yml` as:
+| State | `isOrphaned` | `isApplicable` | Injected |
+|-------|--------------|----------------|----------|
+| Component declared, with container | false | true | yes (when non-empty) |
+| Component declared, no container | false | false | no |
+| Component no longer declared | true | false | no |
+
+## Injection by post-render (017+)
+
+Env vars reach pods through a **post-render Kustomize patch**, not through
+the driver's values template. Each driver component may declare a component
+container (`components.<name>.container`, a DNS-1123 label validated at
+driver registration). For every component with a container and non-empty,
+non-orphaned resolved env vars, `build_env_var_patches()` emits one
+strategic-merge `ContainerEnvPatch` per kind (`Deployment`, `StatefulSet`),
+targeted by the component's first identifier label. The HelmRelease builder
+appends them after every other post-render patch.
+
+Each patch names the container and lists `{name, value, valueFrom: null}`
+per env var in resolution order. The merge keeps chart entries the patch does
+not name, replaces same-name entries (including `valueFrom`), and leaves other
+containers, init containers, and `Job`/`CronJob`/`DaemonSet` workloads alone.
+User entries land before the chart's remaining entries and the component
+container moves to `containers[0]` (research D-002; observed kyaml behaviour,
+not a contract). Patches are rebuilt on every render, so clearing an env var
+needs no marker. One info log per component with patches records `component`,
+`container`, and the env var count, never values.
+
+The resolved dicts stay in the rendering context as **read-only data**:
 
 - `instance.config.env_vars` — the deployment-effective merged dict
   (`dict[str, str]`), env→dep merged.
 - `components[<name>].env_vars.config` — the per-component merged dict
   (`dict[str, str]`), env→dep→comp merged.
 
-The driver consumes the values however its Helm chart expects — typically as
-additional `env:` entries on a container, but drivers control the shape
-(ConfigMap content, chart conditionals, feature gates, etc.). Drivers that
-don't consume the surface silently opt out: operator-set env vars are stored,
-queryable, and editable, but never reach pods.
+The `component_env_vars` template filter is retired: it raises
+`RetiredTemplateFilterError` (`RETIRED_TEMPLATE_FILTER`, metadata `filter`
+and `migration_guide`), which aborts rendering before a HelmRelease is
+built. The operator records `Failed to create HelmRelease: <message>` on the
+deployment; the typed code and metadata do not survive the CR → operator hop,
+the message and the migration guide URL do.
 
-The previous **post-render injection** mechanism (008's `EnvVarsPatch`,
-`PostRenderInjection.env_vars`, `EnvVarCollision`) was removed in 010 because
-it clobbered chart-default env entries. See [ADR-013](../../adr/0013-driver-env-var-consumption.md)
-for the durable record of the pivot, and the
-[driver-author guide](../../guides/driver-env-var-consumption.md) for the
-template-side consumption pattern (single-component, multi-component, and
-chart-default-combination examples).
+Two apply-path changes make clearing work on deployments created before
+017: the operator's HelmRelease update replaces `spec` (JSON Patch
+`add /spec`, `None` pruned, per-key metadata ops), and the agent's
+StyrminDeployment CR applies replace each top-level spec key they write
+(`spec.context` wholesale; `spec.deletionRequested` untouched). Without them,
+merge-patch kept stale values-template env entries and cleared context keys.
 
-The consumption contract belongs to the **driver author**; the platform's
-role is limited to exposing the resolved dict via the rendering context.
+History: 008 injected by a JSON-patch `replace` on `containers/0/env`, which
+clobbered chart defaults; 010 moved injection into driver templates
+([ADR-013](../../adr/0013-driver-env-var-consumption.md)), where Helm's list
+replacement dropped chart defaults instead; 017 merges by name into the
+declared container ([ADR-055](../../adr/0055-post-render-component-overrides.md)).
+The [driver-author guide](../../guides/driver-env-var-consumption.md) covers
+declaring the container and the failure modes.
 
 ## ⚠️ No secrets
 
@@ -188,7 +248,7 @@ boundary; type-aware UI surfaces should propagate it.
 
 Names matching the `PATH | LD_* | PYTHONPATH | RUBYLIB | NODE_PATH |
 JAVA_TOOL_OPTIONS` family emit a structured `logger.warning` at the validator;
-they are accepted but flagged because operators have shot themselves in the
+they are accepted but flagged because users have shot themselves in the
 foot setting them in the past.
 
 ## Implementation pointers
@@ -198,19 +258,30 @@ foot setting them in the past.
 | Pydantic config models | `backend/styrmin_backend/context/models/config.py` (`EnvironmentConfig.env_vars`, `DeploymentConfig.env_vars`) |
 | Validator | `backend/styrmin_backend/services/env_vars/validator.py` |
 | Resolver (merge + orphan detection) | `backend/styrmin_backend/services/env_vars/resolver.py` |
-| Rendering-context exposure | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py::ApplicationBuilder.render_value_template` |
+| Component container field + validation | `backend/styrmin_backend/services/driver/models/resources/driver.py::ArbitrarySectionModel`, `backend/styrmin_backend/context/models/components.py::ArbitrarySectionModel` |
+| Patch builder | `backend/styrmin_backend/services/env_vars/patch_builder.py::build_env_var_patches` |
+| Patch block | `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py::ContainerEnvPatch` |
+| Patch placement + rendering-context exposure | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` (`ApplicationHelmReleaseBuilder.build`, `render_value_template`, retired `component_env_vars` stub) |
+| Write guard | `backend/styrmin_backend/services/deployment.py::_validate_component_env_var_containers`; error in `services/env_vars/exceptions.py` |
+| Retired-filter error | `backend/styrmin_backend/services/exceptions.py::RetiredTemplateFilterError` |
+| HelmRelease / CR apply | `backend/styrmin_backend/agent/service/kubernetes/primitives.py::upsert_custom_resource` (`replace_spec_on_update`, `replace_spec_keys_on_update`); callers in `operator/pipeline.py` and `agent/tasks/orchestration.py` |
 | Driver-side docs | `backend/styrmin_backend/services/driver/models/resources/env_vars.py` |
-| Reference driver consuming env vars | `driver/examples/simple-app/values.j2.yml` and `driver/examples/simple-app/src/helm/templates/deployment.yaml` |
+| Reference driver | `driver/examples/simple-app/driver.styrmin.yml` and `driver/examples/simple-app/src/helm/templates/deployment.yaml` |
 | GraphQL types | `backend/styrmin_backend/api/definitions/deployment/model.py`, `.../environment/model.py`, `.../application_driver/model.py`, `.../deployment_timeline/model.py` |
-| E2E coverage | `backend/tests/e2e/test_deployment_env_vars.py` |
-| Propagation tests | `backend/tests/functional/graphql/test_env_vars_propagation.py` |
+| Frontend gating | `frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx`, `frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx` |
+| Unit tests | `backend/tests/unit/agent/test_container_env_patch.py`, `.../test_application_builder_env_vars.py`, `.../test_upsert_custom_resource_replace_spec.py`, `backend/tests/unit/services/env_vars/test_patch_builder.py` |
+| E2E coverage | `backend/tests/e2e/test_deployment_env_vars.py`, `backend/tests/e2e/test_infrahub_services.py` (chart env defaults kept) |
+| Propagation + mutation-error tests | `backend/tests/functional/graphql/test_env_vars_propagation.py`, `.../test_update_deployment_input_errors.py`, `.../test_application_driver_version_propagation.py` |
 
 ## Related
 
-- [ADR-013: Driver-Side Env Var Consumption](../../adr/0013-driver-env-var-consumption.md) — durable record of the design (free-form `dict[str, str]`, three-scope deepest-wins, driver-side template consumption — no platform post-render injection).
-- [Driver-author guide](../../guides/driver-env-var-consumption.md) — template-side consumption patterns (single-component, multi-component, chart-default combinations) for driver authors.
+- [ADR-055: Post-Render Component Overrides](../../adr/0055-post-render-component-overrides.md) — component container, strategic-merge injection, ordering, HelmRelease `spec` replace.
+- [ADR-013: Driver-Side Env Var Consumption](../../adr/0013-driver-env-var-consumption.md) — free-form `dict[str, str]`, three-scope deepest-wins; its values-template injection route is superseded by ADR-055.
+- [Driver-author guide](../../guides/driver-env-var-consumption.md) — declaring the component container, ordering rules, failure modes.
+- [Migration guide](../../../docs/docs/drivers/migrating-env-vars.md) — user and driver-author steps off `component_env_vars`.
 - [ADR-004: Embed GlobalContext in StyrminDeployment CRD](../../adr/0004-embed-context-in-deployment-crd.md) — the carrier mechanism that flows resolved env vars to the operator/agent.
 - [`services.md`](services.md) — surrounding service-layer architecture.
 - [`api.md`](api.md) — surrounding GraphQL API surface.
-- [`specs/008-deployment-env-vars/`](../../../specs/008-deployment-env-vars/) — full operator-facing feature spec, plan, contracts, and quickstart.
-- [`specs/010-driver-env-var-consumption/`](../../../specs/010-driver-env-var-consumption/) — full driver-side consumption feature spec, plan, and research.
+- [`specs/archive/008-deployment-env-vars/`](../../../specs/archive/008-deployment-env-vars/) — full user-facing feature spec, plan, contracts, and quickstart.
+- [`specs/archive/010-driver-env-var-consumption/`](../../../specs/archive/010-driver-env-var-consumption/) — the 010 driver-side consumption spec, plan, and research.
+- [`specs/017-post-render-env-vars/`](../../../specs/017-post-render-env-vars/) — post-render injection spec, research, and contracts.

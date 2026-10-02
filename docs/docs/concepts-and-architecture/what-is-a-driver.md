@@ -26,7 +26,8 @@ A driver bundles up the following:
 - **Component definitions.** Logical sub-parts of the application
   (e.g. `server`, `task-worker`), identified by a Kubernetes label
   selector. Components are what Styrmin starts, stops, scales, and reports
-  status on as a unit.
+  status on as a unit. Each can name a **component container**, the
+  container that receives the env vars users set on a deployment.
 - **User-facing parameters.** Typed inputs (string, integer, boolean,
   enum) the user fills in when creating a deployment. Parameters are
   surfaced in the UI and SDK, and flow into the Helm values via Jinja2.

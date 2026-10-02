@@ -42,6 +42,7 @@ const sidebars: SidebarsConfig = {
         'drivers/loading-drivers',
         'drivers/context',
         'drivers/creating-a-driver',
+        'drivers/migrating-env-vars',
       ],
     },
     {

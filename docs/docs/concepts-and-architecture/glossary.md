@@ -60,6 +60,12 @@ Deployment on it. One **agent** runs per Cluster.
 Kubernetes label selector. Lifecycle controls (start/stop, restart,
 scale) act on the Component as a unit.
 
+**Component container** — The one container in a Component's pod
+that the Application Driver names (`components.<name>.container`) to
+receive the env vars users set on a Deployment. Styrmin merges them
+into it by name after the Helm chart renders, so the chart's own env
+entries survive. See [Migrating env var wiring](../drivers/migrating-env-vars.md).
+
 **Component overrides** — The mechanism by which a Deployment
 overrides the Application Driver Version's default Component config.
 First-class to the deployment-config feature.
