@@ -713,15 +713,15 @@ class UserHasReferencesError(ServiceError):
     default_message = "User has foreign-key references and cannot be deleted"
 
 
-class SchedulingPatchRenderingError(ServiceError):
-    """Failed to serialise a scheduling post-renderer patch into YAML.
+class PostRenderPatchRenderingError(ServiceError):
+    """Failed to serialise a post-renderer patch into YAML.
 
     Surfaces the failing resource identity (kind + label selector) so the
-    deployment status view can point the operator at the offending rule.
+    deployment status view can point the user at the offending patch.
     """
 
     error_code = "OPERATION_FAILED"
-    default_message = "Failed to serialise scheduling post-renderer patch"
+    default_message = "Failed to serialise post-renderer patch"
 
     def __init__(
         self,
@@ -741,3 +741,9 @@ class SchedulingPatchRenderingError(ServiceError):
         if self.label_selector is not None:
             meta["label_selector"] = self.label_selector
         return meta
+
+
+class SchedulingPatchRenderingError(PostRenderPatchRenderingError):
+    """Failed to serialise a scheduling post-renderer patch into YAML."""
+
+    default_message = "Failed to serialise scheduling post-renderer patch"
