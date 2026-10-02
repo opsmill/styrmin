@@ -10,14 +10,8 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# Container entrypoint/args for the simple-app server container
-# (014-component-container-overrides). Both empty by default: the chart's
-# deployment template guards each with ``{{- with .Values.command/args }}``, so
-# an empty list is skipped and the image ENTRYPOINT (`uvicorn simple_app.main:app`)
-# + CMD (`--host 0.0.0.0 --port 8000`) provide the runtime default. The driver's
-# values.j2.yml always sets these from the operator's per-component override
-# (or ``[]`` when unset), so clearing an override propagates through the
-# operator's JSON merge-patch HelmRelease apply.
+# Server container command/args; the deployment template skips an empty list, so the
+# image ENTRYPOINT/CMD apply. The driver's values.j2.yml always sets both (`[]` when unset).
 command: []
 args: []
 
