@@ -97,10 +97,12 @@ class EnvVar:
 @strawberry.type(
     description=(
         "A bundle of environment variables targeting one component of a "
-        "deployment, plus an ``isOrphaned`` flag indicating whether the "
-        "deployment's current driver still declares the targeted component. "
-        "Orphaned blocks remain visible in the API but are NOT injected "
-        "into rendered pods."
+        "deployment. Applicable env vars are injected by a post-render patch "
+        "into the component container the driver declares. ``isOrphaned`` "
+        "flags blocks whose component the deployment's current driver no "
+        "longer declares; ``isApplicable`` flags whether the env vars can "
+        "reach any container. Non-applicable blocks remain visible in the "
+        "API but are NOT injected into rendered pods."
     )
 )
 class ComponentEnvVars:
@@ -113,7 +115,15 @@ class ComponentEnvVars:
             "True when the deployment's current driver no longer declares "
             "this component (the upgrade renamed or removed it). Orphaned "
             "blocks are visible in the API but are NOT injected into "
-            "rendered pods, so the operator can audit and clean them up."
+            "rendered pods, so the user can audit and clean them up."
+        )
+    )
+    is_applicable: bool = strawberry.field(
+        description=(
+            "False when these env vars cannot reach any container: the "
+            "component is orphaned (`isOrphaned`) or the driver declares no "
+            "component container for it. Stored values are kept but not "
+            "injected."
         )
     )
 
@@ -455,8 +465,9 @@ class Deployment:
             "Per-component effective env vars, including orphaned blocks "
             "(``isOrphaned=true``). Component-level entries override "
             "deployment- and environment-level entries on a per-key basis "
-            "(FR-002 deepest-wins). Orphaned blocks (component renamed or "
-            "removed by a driver upgrade — FR-029..FR-033) are visible here "
+            "(FR-002 deepest-wins). Non-applicable blocks "
+            "(``isApplicable=false``: component renamed or removed by a driver "
+            "upgrade, or no component container declared) are visible here "
             "but skipped by the post-render injector so no env entries reach "
             "rendered pods."
         )
@@ -472,7 +483,9 @@ class Deployment:
         ``deployment`` layer). Live components for which the merged dict is
         empty are omitted to keep the surface tidy. Orphaned blocks
         (US5 / FR-029..FR-033) are always surfaced regardless of dict size —
-        their whole purpose is operator visibility after a driver upgrade.
+        their whole purpose is user visibility after a driver upgrade.
+        ``isApplicable`` reads the component container from the deployment's
+        components, which mirror its pinned driver version.
         """
         from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
 
@@ -489,7 +502,10 @@ class Deployment:
             environment = await uow.environments.get(deployment.environment_id)
             env_config_raw = environment.config if environment is not None else None
             dep_config_raw = deployment.config
-            driver_components = [c.name for c in (deployment.components or [])]
+            containers = {
+                c.name: c.config.get("container") for c in (deployment.components or [])
+            }
+            driver_components = list(containers)
 
         env_cfg = (
             EnvironmentConfig.model_validate(env_config_raw) if env_config_raw else None
@@ -526,6 +542,10 @@ class Deployment:
                         for k, v in entry.resolved.config.items()
                     ],
                     is_orphaned=entry.resolved.is_orphaned,
+                    is_applicable=(
+                        not entry.resolved.is_orphaned
+                        and containers.get(entry.component_name) is not None
+                    ),
                 )
             )
         return results

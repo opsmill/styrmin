@@ -4,6 +4,7 @@ query GetDeploymentComponentEnvVars($deploymentId: UUID!) {
         componentEnvVars {
             component
             isOrphaned
+            isApplicable
             envVars {
                 name
                 value

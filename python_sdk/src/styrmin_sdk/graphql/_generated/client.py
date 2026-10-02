@@ -1067,6 +1067,7 @@ class Client(AsyncBaseClient):
                 componentEnvVars {
                   component
                   isOrphaned
+                  isApplicable
                   envVars {
                     name
                     value
