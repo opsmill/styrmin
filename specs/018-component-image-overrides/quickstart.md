@@ -11,7 +11,7 @@
 Render the patches the builder emits against a fixture workload and run them through Kustomize:
 
 ```bash
-uv run pytest backend/tests/unit/services/component_container -v
+uv run pytest backend/tests/unit/services/component_container backend/tests/integration/test_component_container_kustomize.py -v
 ```
 
 Expected: the existing-container cases set the image (and env) on the component container only;
