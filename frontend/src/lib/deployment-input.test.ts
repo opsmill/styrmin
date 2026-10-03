@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { deploymentConfigToInput } from "./deployment-input";
+import {
+  componentsFormToInput,
+  deploymentConfigToInput,
+} from "./deployment-input";
 
 describe("deploymentConfigToInput", () => {
   it("converts an empty config into an input with every field undefined", () => {
@@ -130,6 +133,27 @@ describe("deploymentConfigToInput", () => {
         { name: "api", envVars: [], command: undefined, args: undefined },
       ]),
     );
+  });
+
+  it("carries a per-component image from the config block into the input", () => {
+    // 018-component-image-overrides: the stored reference (tokens included)
+    // surfaces on `ComponentConfigInput.image` so the drawer pre-fills it.
+    const input = deploymentConfigToInput({
+      components: {
+        server: { image: "registry.example/acme/app:{{ app.version }}" },
+        worker: { env_vars: {}, image: null },
+      },
+    });
+    expect(input.components).toEqual([
+      {
+        name: "server",
+        envVars: undefined,
+        command: undefined,
+        args: undefined,
+        image: "registry.example/acme/app:{{ app.version }}",
+      },
+      { name: "worker", envVars: [], command: undefined, args: undefined },
+    ]);
   });
 
   it("preserves every other field unchanged from a fully-populated config", () => {
@@ -376,5 +400,66 @@ describe("deploymentConfigToInput", () => {
     });
     expect(input.externalUrlScheme).toBe("HTTPS");
     expect(input.externalDnsEndpointsType).toBe("NODE_EXTERNAL_IP");
+  });
+});
+
+describe("componentsFormToInput", () => {
+  it("passes undefined and null through", () => {
+    expect(componentsFormToInput(undefined)).toBeUndefined();
+    expect(componentsFormToInput(null)).toBeNull();
+  });
+
+  it("maps an empty image field to image: null (clear)", () => {
+    expect(
+      componentsFormToInput([{ name: "server", envVars: [], image: "" }]),
+    ).toEqual([{ name: "server", envVars: [], image: null }]);
+  });
+
+  it("keeps a set image and leaves an untouched one absent", () => {
+    const out = componentsFormToInput([
+      { name: "server", envVars: [], image: "app:1" },
+      { name: "worker", envVars: [] },
+    ]);
+    expect(out).toEqual([
+      { name: "server", envVars: [], image: "app:1" },
+      { name: "worker", envVars: [] },
+    ]);
+    expect(out?.[1]).not.toHaveProperty("image");
+  });
+
+  it("omits empty command/args lists but keeps an empty envVars list", () => {
+    // FR-007 (014): omit = clear for command/args, the backend rejects [];
+    // `envVars: []` is a legitimate clear and passes through.
+    expect(
+      componentsFormToInput([
+        { name: "server", envVars: [], command: [], args: [] },
+        { name: "worker", command: ["/bin/sh"], args: ["-c"] },
+      ]),
+    ).toEqual([
+      { name: "server", envVars: [] },
+      { name: "worker", command: ["/bin/sh"], args: ["-c"] },
+    ]);
+  });
+
+  it("round-trips image read -> form -> ComponentConfigInput", () => {
+    const form = deploymentConfigToInput({
+      components: {
+        server: {
+          env_vars: { LOG_LEVEL: "debug" },
+          image: "registry.example/acme/app-patched:{{ app.version }}",
+        },
+      },
+    }).components;
+    expect(componentsFormToInput(form)).toEqual([
+      {
+        name: "server",
+        envVars: [{ name: "LOG_LEVEL", value: "debug" }],
+        image: "registry.example/acme/app-patched:{{ app.version }}",
+      },
+    ]);
+
+    // Clearing the field in the drawer submits an explicit null.
+    const cleared = form!.map((block) => ({ ...block, image: "" }));
+    expect(componentsFormToInput(cleared)?.[0].image).toBeNull();
   });
 });

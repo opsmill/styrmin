@@ -145,6 +145,45 @@ describe("config-diff: diff()", () => {
     expect(result.sectionsChanged).toEqual(["componentOverrides"]);
   });
 
+  it.each([
+    ["add", undefined, "app:{{ app.version }}", "", "app:{{ app.version }}"],
+    ["change", "app:1", "app:2", "app:1", "app:2"],
+    ["remove", "app:1", null, "app:1", ""],
+    ["remove", "app:1", "", "app:1", ""],
+  ] as const)(
+    "emits an image %s entry for %j -> %j on an existing block (018)",
+    (kind, beforeImage, afterImage, beforeText, afterText) => {
+      const before: UpdateDeploymentInput = {
+        components: [{ name: "server", envVars: [], image: beforeImage }],
+      };
+      const after: UpdateDeploymentInput = {
+        components: [{ name: "server", envVars: [], image: afterImage }],
+      };
+      const result = diff(before, after, emptySchema);
+      expect(result.entries).toEqual([
+        {
+          section: "componentOverrides",
+          path: "components[server].image",
+          label: 'Component "server" image',
+          before: beforeText,
+          after: afterText,
+          kind,
+        },
+      ]);
+      expect(result.hasChanges).toBe(true);
+    },
+  );
+
+  it("treats an empty image field like an unset one", () => {
+    const before: UpdateDeploymentInput = {
+      components: [{ name: "server", envVars: [] }],
+    };
+    const after: UpdateDeploymentInput = {
+      components: [{ name: "server", envVars: [], image: "" }],
+    };
+    expect(diff(before, after, emptySchema).hasChanges).toBe(false);
+  });
+
   it("treats toleration reorders as no-op, but a key-change as add+remove", () => {
     const before: UpdateDeploymentInput = {
       scheduling: {

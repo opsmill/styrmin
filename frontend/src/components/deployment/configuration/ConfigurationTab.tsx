@@ -136,6 +136,7 @@ export function ConfigurationTab({ deployment }: Props) {
         environmentConfig={deployment.environment.config}
         clusterConfig={deployment.environment.cluster.config}
         components={deployment.components}
+        imageOverrides={deployment.componentImageOverrides}
       />
       <NetworkingSummary
         deploymentConfig={deployment.config}

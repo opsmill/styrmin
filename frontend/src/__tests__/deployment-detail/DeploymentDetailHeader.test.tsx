@@ -131,6 +131,7 @@ function makeDeployment(
     },
     applicationInstance: null,
     components: [],
+    componentImageOverrides: [],
     deployedServices: [],
   } as DeploymentShape;
 
