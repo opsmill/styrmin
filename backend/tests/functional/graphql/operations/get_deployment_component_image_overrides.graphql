@@ -1,0 +1,13 @@
+query GetDeploymentComponentImageOverrides($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        applicationVersion
+        componentImageOverrides {
+            component
+            reference
+            resolvedReference
+            isOrphaned
+            isApplicable
+        }
+    }
+}

@@ -49,7 +49,7 @@ class AffinityTermInput(BaseModel):
 
 
 class ComponentConfigInput(BaseModel):
-    """Per-component override block for a deployment. Carries env-var overrides today; future per-component knobs (e.g. replicas) slot into this same input without a schema renumber."""
+    """Per-component override block for a deployment: env vars, the container ``command``/``args``, and the component container's ``image``. Future per-component knobs (e.g. replicas) slot into this same input without a schema renumber."""
 
     name: str
     "The component name as declared by the deployment's currently pinned application-driver version. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Env vars on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``)."
@@ -59,6 +59,8 @@ class ComponentConfigInput(BaseModel):
     "Container entrypoint override for this component, scoped to this deployment. A non-empty list of strings; an empty list raises ``INVALID_CONTAINER_COMMAND``. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart/image default flows through) — clearing is never an empty list. Passed through verbatim — no templating."
     args: Optional[list[str]] = None
     "Container args override for this component. Same shape and rules as ``command``, raising ``INVALID_CONTAINER_ARGS``."
+    image: Optional[str] = None
+    "Image reference for this component's component container, scoped to this deployment. A full reference with an explicit tag or digest; every ``{{ app.version }}`` token is replaced with the deployment's application version at render time, and a literal tag pins the image. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart image applies). Raises ``UNKNOWN_COMPONENT_IMAGE_OVERRIDE``, ``INVALID_IMAGE_REFERENCE``, or ``COMPONENT_CONTAINER_NOT_DECLARED`` (adding or changing it on a component without a component container; removing it is always accepted)."
 
 
 class CrdConditionInput(BaseModel):

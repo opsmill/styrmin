@@ -31,6 +31,9 @@ class GetDeploymentDeployment(BaseModel):
         Field(alias="applicationInstance")
     )
     components: list["GetDeploymentDeploymentComponents"]
+    component_image_overrides: list[
+        "GetDeploymentDeploymentComponentImageOverrides"
+    ] = Field(alias="componentImageOverrides")
     deployed_services: list["GetDeploymentDeploymentDeployedServices"] = Field(
         alias="deployedServices"
     )
@@ -57,6 +60,14 @@ class GetDeploymentDeploymentComponents(BaseModel):
     id: UUID
     name: str
     enabled: bool
+
+
+class GetDeploymentDeploymentComponentImageOverrides(BaseModel):
+    component: str
+    reference: str
+    resolved_reference: str = Field(alias="resolvedReference")
+    is_orphaned: bool = Field(alias="isOrphaned")
+    is_applicable: bool = Field(alias="isApplicable")
 
 
 class GetDeploymentDeploymentDeployedServices(BaseModel):

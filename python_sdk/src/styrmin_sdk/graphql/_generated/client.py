@@ -41,6 +41,9 @@ from .get_deployment_component_container_overrides_full import (
     GetDeploymentComponentContainerOverridesFull,
 )
 from .get_deployment_component_env_vars_full import GetDeploymentComponentEnvVarsFull
+from .get_deployment_component_image_overrides_full import (
+    GetDeploymentComponentImageOverridesFull,
+)
 from .get_deployment_pod_statuses import GetDeploymentPodStatuses
 from .get_deployment_resolved_scheduling import GetDeploymentResolvedScheduling
 from .get_deployment_services import GetDeploymentServices
@@ -951,6 +954,13 @@ class Client(AsyncBaseClient):
                   name
                   enabled
                 }
+                componentImageOverrides {
+                  component
+                  reference
+                  resolvedReference
+                  isOrphaned
+                  isApplicable
+                }
                 deployedServices {
                   id
                   driverServiceName
@@ -1085,6 +1095,34 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeploymentComponentEnvVarsFull.model_validate(data)
+
+    async def get_deployment_component_image_overrides_full(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentComponentImageOverridesFull:
+        query = gql("""
+            query GetDeploymentComponentImageOverridesFull($deploymentId: UUID!) {
+              deployment(deploymentId: $deploymentId) {
+                id
+                applicationVersion
+                componentImageOverrides {
+                  component
+                  reference
+                  resolvedReference
+                  isOrphaned
+                  isApplicable
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentComponentImageOverridesFull",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentComponentImageOverridesFull.model_validate(data)
 
     async def get_deployment_pod_statuses(
         self, deployment_id: UUID, **kwargs: Any

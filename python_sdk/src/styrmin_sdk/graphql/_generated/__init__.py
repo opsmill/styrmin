@@ -93,6 +93,7 @@ from .get_deployment import (
     GetDeploymentDeployment,
     GetDeploymentDeploymentApplicationDriverVersion,
     GetDeploymentDeploymentApplicationInstance,
+    GetDeploymentDeploymentComponentImageOverrides,
     GetDeploymentDeploymentComponents,
     GetDeploymentDeploymentCreatedBy,
     GetDeploymentDeploymentDeployedServices,
@@ -116,6 +117,11 @@ from .get_deployment_component_env_vars_full import (
     GetDeploymentComponentEnvVarsFullDeployment,
     GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVars,
     GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVarsEnvVars,
+)
+from .get_deployment_component_image_overrides_full import (
+    GetDeploymentComponentImageOverridesFull,
+    GetDeploymentComponentImageOverridesFullDeployment,
+    GetDeploymentComponentImageOverridesFullDeploymentComponentImageOverrides,
 )
 from .get_deployment_pod_statuses import (
     GetDeploymentPodStatuses,
@@ -430,9 +436,13 @@ __all__ = [
     "GetDeploymentComponentEnvVarsFullDeployment",
     "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVars",
     "GetDeploymentComponentEnvVarsFullDeploymentComponentEnvVarsEnvVars",
+    "GetDeploymentComponentImageOverridesFull",
+    "GetDeploymentComponentImageOverridesFullDeployment",
+    "GetDeploymentComponentImageOverridesFullDeploymentComponentImageOverrides",
     "GetDeploymentDeployment",
     "GetDeploymentDeploymentApplicationDriverVersion",
     "GetDeploymentDeploymentApplicationInstance",
+    "GetDeploymentDeploymentComponentImageOverrides",
     "GetDeploymentDeploymentComponents",
     "GetDeploymentDeploymentCreatedBy",
     "GetDeploymentDeploymentDeployedServices",
