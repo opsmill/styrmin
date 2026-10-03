@@ -562,6 +562,15 @@ function diffComponents(
         b.envVars ?? null,
         a.envVars ?? null,
       );
+      // Image override (018); the drawer's empty field means "no override".
+      diffScalar(
+        entries,
+        "componentOverrides",
+        `components[${name}].image`,
+        `Component "${name}" image`,
+        b.image || null,
+        a.image || null,
+      );
     } else if (!b && a) {
       entries.push({
         section: "componentOverrides",

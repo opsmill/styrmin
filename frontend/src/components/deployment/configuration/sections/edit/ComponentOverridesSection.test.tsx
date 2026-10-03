@@ -8,6 +8,8 @@ import type {
   UpdateDeploymentInput,
 } from "@/generated/graphql";
 
+import { componentsFormToInput } from "@/lib/deployment-input";
+
 import { DrawerDiffProvider } from "../../DrawerDiffContext";
 import {
   ComponentOverridesSection,
@@ -63,6 +65,32 @@ describe("componentOverridesSchema", () => {
       },
     ]);
     expect(result.success).toBe(false);
+  });
+});
+
+describe("componentOverridesSchema: image", () => {
+  it.each([
+    "registry.example/acme/app:1.0.0",
+    "registry.example/acme/app:{{ app.version }}",
+    "",
+  ])("accepts %j", (image) => {
+    const result = componentOverridesSchema.safeParse([
+      { name: "server", envVars: [], image },
+    ]);
+    expect(result.success).toBe(true);
+  });
+
+  it.each([
+    ["registry.example/acme/app", /no tag or digest/i],
+    ["App:1", /not a valid image reference/i],
+    ["app:{{ app.name }}", /only \{\{ app\.version \}\} is substituted/],
+  ])("rejects %j", (image, message) => {
+    const result = componentOverridesSchema.safeParse([
+      { name: "server", envVars: [], image },
+    ]);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].path).toEqual([0, "image"]);
+    expect(result.error?.issues[0].message).toMatch(message);
   });
 });
 
@@ -210,5 +238,92 @@ describe("ComponentOverridesSection: components with a component container", () 
         },
       ]),
     );
+  });
+});
+
+describe("ComponentOverridesSection: image override", () => {
+  const IMAGE = "registry.example/acme/simple-app-patched:{{ app.version }}";
+
+  it("offers an Image input with the token hint on a component with a container", async () => {
+    renderSection({ components: [{ name: "server", envVars: [] }] });
+
+    await openComponent("server");
+
+    const input = screen.getByLabelText("Image for server");
+    expect(input).toBe(screen.getByTestId("comp-image-server"));
+    expect(input).toHaveValue("");
+    expect(screen.getByTestId("comp-image-hint-server")).toHaveTextContent(
+      "Use {{ app.version }} to follow the application version; a literal tag pins the image.",
+    );
+    expect(input).toHaveAccessibleDescription(/a literal tag pins the image/);
+  });
+
+  it("offers no Image input on a component without a container", async () => {
+    renderSection({ components: [{ name: "migrate", envVars: [] }] });
+
+    await openComponent("migrate");
+
+    expect(screen.queryByTestId("comp-image-migrate")).toBeNull();
+    expect(screen.queryByLabelText("Image for migrate")).toBeNull();
+  });
+
+  it("accepts a valid reference and maps it into the submitted component block", async () => {
+    const { components } = renderSection({
+      components: [
+        { name: "server", envVars: [{ name: "LOG_LEVEL", value: "debug" }] },
+      ],
+    });
+
+    await openComponent("server");
+    fireEvent.change(screen.getByTestId("comp-image-server"), {
+      target: { value: IMAGE },
+    });
+
+    await waitFor(() =>
+      expect(components()).toEqual([
+        {
+          name: "server",
+          envVars: [{ name: "LOG_LEVEL", value: "debug" }],
+          image: IMAGE,
+        },
+      ]),
+    );
+    expect(screen.queryByTestId("comp-image-error-server")).toBeNull();
+    expect(componentsFormToInput(components())).toEqual([
+      {
+        name: "server",
+        envVars: [{ name: "LOG_LEVEL", value: "debug" }],
+        image: IMAGE,
+      },
+    ]);
+    expect(
+      screen.getByTestId("component-override-trigger-server"),
+    ).toHaveTextContent("1 env var · image");
+  });
+
+  it("shows an inline error for an invalid reference", async () => {
+    renderSection({ components: [{ name: "server", envVars: [] }] });
+
+    await openComponent("server");
+    fireEvent.change(screen.getByTestId("comp-image-server"), {
+      target: { value: "registry.example/acme/app" },
+    });
+
+    expect(
+      await screen.findByTestId("comp-image-error-server"),
+    ).toHaveTextContent(/no tag or digest/i);
+  });
+
+  it("pre-fills a stored image", async () => {
+    renderSection({
+      components: [{ name: "server", envVars: [], image: IMAGE }],
+    });
+
+    await openComponent("server");
+
+    expect(screen.getByTestId("comp-image-server")).toHaveValue(IMAGE);
+    expect(
+      screen.getByTestId("component-override-trigger-server"),
+    ).toHaveTextContent("image");
   });
 });

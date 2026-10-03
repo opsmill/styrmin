@@ -128,6 +128,7 @@ function makeDeployment(): DeploymentShape {
     },
     applicationInstance: { id: "inst-1" },
     components: [],
+    componentImageOverrides: [],
     deployedServices: [],
   } as unknown as DeploymentShape;
 }

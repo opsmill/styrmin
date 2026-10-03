@@ -31,14 +31,16 @@ type ReadEnvVars = Record<string, string>;
 
 /**
  * Read-side per-component override block: `{ env_vars: {...}, command: [...],
- * args: [...] }`. `command`/`args` are the container-override slots
- * (014-component-container-overrides); each is a `list[str] | null` in the
- * persisted `ComponentConfigBlock`.
+ * args: [...], image: "..." }`. `command`/`args` are the container-override
+ * slots (014-component-container-overrides); each is a `list[str] | null` in
+ * the persisted `ComponentConfigBlock`. `image` is the stored image override
+ * (018-component-image-overrides), `{{ app.version }}` tokens included.
  */
 type ReadComponentBlock = {
   env_vars?: ReadEnvVars | null;
   command?: string[] | null;
   args?: string[] | null;
+  image?: string | null;
 };
 
 function envVarsDictToList(
@@ -60,7 +62,33 @@ function componentsDictToList(
     // (omit = clear, never `[]`).
     command: block?.command ?? undefined,
     args: block?.args ?? undefined,
+    // Image override (018); the drawer edits it as a string.
+    image: block?.image ?? undefined,
   }));
+}
+
+/**
+ * Map the drawer's component blocks onto `ComponentConfigInput` for submit.
+ * Under full replacement both encode "clear": an empty `command`/`args` list
+ * is omitted (the backend rejects `[]`), and an empty `image` field becomes
+ * `image: null`. `envVars: []` is a legitimate clear and passes through.
+ */
+export function componentsFormToInput(
+  blocks: readonly ComponentConfigInput[] | null | undefined,
+): ComponentConfigInput[] | null | undefined {
+  if (blocks == null) return blocks;
+  return blocks.map((block) => {
+    if (block == null || typeof block !== "object") return block;
+    const next: ComponentConfigInput = { ...block };
+    if (Array.isArray(next.command) && next.command.length === 0) {
+      delete next.command;
+    }
+    if (Array.isArray(next.args) && next.args.length === 0) {
+      delete next.args;
+    }
+    if (next.image === "") next.image = null;
+    return next;
+  });
 }
 
 /**

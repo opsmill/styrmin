@@ -110,6 +110,7 @@ function buildDeployment(overrides: Partial<Deployment> = {}): Deployment {
     },
     applicationInstance: null,
     components: [],
+    componentImageOverrides: [],
     deployedServices: [],
     ...overrides,
   } as Deployment;

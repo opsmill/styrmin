@@ -24,6 +24,10 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import type { SectionId } from "@/lib/configuration-types";
+import {
+  imageReferenceMessage,
+  validateImageReference,
+} from "@/lib/image-reference";
 import { cn } from "@/lib/utils";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
@@ -36,15 +40,21 @@ type DeploymentComponent = NonNullable<
 // POSIX env-var name regex — mirrors `EnvVarsSection`.
 const POSIX_ENV_VAR = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** Inline error for an image override; empty means "no override" and is valid. */
+function imageFieldError(value: unknown): string | undefined {
+  if (typeof value !== "string" || value === "") return undefined;
+  const error = validateImageReference(value);
+  return error ? imageReferenceMessage(error.reason) : undefined;
+}
+
 /**
  * Zod schema for the per-component override list (`UpdateDeploymentInput.components`).
  *
- * The backend `ComponentConfigInput` accepts a name, an env-var list, and the
- * container-override slots `command` / `args` (014-component-container-overrides).
- * Future per-component knobs (CPU/memory, replicas, image overrides) are
- * intentionally rendered as muted "coming soon" placeholders in the UI so the
- * section has visible room to grow without restructuring; they are **not** part
- * of this validation schema until the GraphQL surface widens.
+ * The backend `ComponentConfigInput` accepts a name, an env-var list, the
+ * container-override slots `command` / `args` (014-component-container-overrides),
+ * and an `image` override (018-component-image-overrides). Future per-component
+ * knobs (CPU/memory, replicas) are rendered as a muted "coming soon" placeholder
+ * and are **not** part of this validation schema until the GraphQL surface widens.
  *
  * Rules:
  *  - `name` non-empty (driver-declared component name; backend re-validates).
@@ -55,8 +65,10 @@ const POSIX_ENV_VAR = /^[A-Za-z_][A-Za-z0-9_]*$/;
  *  - `command` / `args` are optional `string[]`. Deliberately **no** `.min(1)`:
  *    removing every row means "clear the override", which the submit boundary
  *    encodes by omitting the field entirely (omit = clear, never `[]` — see
- *    FR-007 / `ConfigDiffDialog.handleApply`). An empty array passing the
+ *    FR-007 / `componentsFormToInput`). An empty array passing the
  *    schema is fine because it never reaches the wire.
+ *  - `image` is an optional image reference checked with the shared grammar
+ *    (`lib/image-reference.ts`); empty is valid and submits `image: null`.
  */
 export const componentOverridesSchema = z
   .array(
@@ -64,6 +76,13 @@ export const componentOverridesSchema = z
       name: z.string().min(1, "Component name is required"),
       command: z.array(z.string()).optional(),
       args: z.array(z.string()).optional(),
+      image: z
+        .string()
+        .superRefine((value: string, ctx: any) => {
+          const message = imageFieldError(value);
+          if (message) ctx.addIssue({ code: "custom", message });
+        })
+        .optional(),
       envVars: z
         .array(
           z.object({
@@ -117,14 +136,15 @@ function emptyEnvVar(): EnvVarInput {
 
 /**
  * Right-aligned one-line summary for a component-override trigger. Renders a
- * token per non-empty scope (env vars / command / args) so a component with
- * only a command/args override (no env vars) still reads sensibly. Falls back
+ * token per non-empty scope (env vars / command / args / image) so a component
+ * with only a command/args or image override still reads sensibly. Falls back
  * to "override (empty)" when the block exists but carries no scope yet.
  */
 function summariseOverrideRow(
   envVarCount: number,
   commandCount: number,
   argsCount: number,
+  hasImage: boolean,
 ): string {
   const parts: string[] = [];
   if (envVarCount > 0) {
@@ -135,6 +155,9 @@ function summariseOverrideRow(
   }
   if (argsCount > 0) {
     parts.push(`args: ${argsCount}`);
+  }
+  if (hasImage) {
+    parts.push("image");
   }
   return parts.length > 0 ? parts.join(" · ") : "override (empty)";
 }
@@ -176,14 +199,15 @@ function ensureComponentBlock(
  * Component Overrides section of the edit drawer (FR-013).
  *
  * One Base UI Collapsible per driver-declared component. Inside the body:
- *  - Per-component env-var field array (the only over­ride scope wired
- *    end-to-end today; lines up with `ComponentConfigInput.envVars`).
+ *  - Per-component env-var field array (`ComponentConfigInput.envVars`).
+ *  - An "Image" input (`ComponentConfigInput.image`, 018) and the
+ *    command/args editors (014).
  *  - A muted "future per-component fields (CPU / memory / replicas)
  *    coming in future iterations" line so the section has visible room to
  *    grow without a structural rewrite.
  *
- * Components without a component container get no env var editor: stored
- * values render read-only and removable (FR-006).
+ * Components without a component container get no env var editor and no
+ * Image input: stored env vars render read-only and removable (FR-006).
  *
  * Field-array semantics: every read or write into the override list keys
  * on the component `name`. The array index is an implementation detail of
@@ -259,6 +283,7 @@ export function ComponentOverridesSection({
                   envVarCount,
                   commandCount,
                   argsCount,
+                  Boolean(overrideRow?.image),
                 );
 
                 return (
@@ -402,6 +427,7 @@ function ComponentOverrideBody({
   const envCommand = environmentBlock?.command ?? [];
   const initialArgs = initialBlock?.args ?? [];
   const envArgs = environmentBlock?.args ?? [];
+  const initialImage = initialBlock?.image ?? undefined;
 
   return (
     <div className="space-y-4">
@@ -534,6 +560,84 @@ function ComponentOverrideBody({
           }}
         </form.Field>
       </div>
+
+      {hasContainer && (
+        <form.Field
+          name={`${blockPath}.image`}
+          validators={{
+            onChange: ({ value }: { value: unknown }) => imageFieldError(value),
+          }}
+        >
+          {(f: any) => {
+            const inputId = `comp-${componentName}-image`;
+            const hintId = `${inputId}-hint`;
+            const errorId = `${inputId}-error`;
+            const error =
+              f.state.meta.errors.length > 0
+                ? String(f.state.meta.errors[0])
+                : null;
+            return (
+              <ChangedFieldFrame
+                name={`${blockPath}.image`}
+                form={form}
+                initial={initialImage}
+                environment={environmentBlock?.image ?? undefined}
+              >
+                <div
+                  className="space-y-1"
+                  data-testid={`component-image-editor-${componentName}`}
+                >
+                  <Label
+                    htmlFor={inputId}
+                    className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  >
+                    Image
+                  </Label>
+                  <Input
+                    id={inputId}
+                    data-testid={`comp-image-${componentName}`}
+                    aria-label={`Image for ${componentName}`}
+                    aria-describedby={error ? `${errorId} ${hintId}` : hintId}
+                    aria-invalid={error ? true : undefined}
+                    value={f.state.value ?? ""}
+                    onChange={(e: any) =>
+                      // Nothing stored: clearing returns to undefined, so typing
+                      // then clearing is not a change. Otherwise "" submits null.
+                      f.handleChange(
+                        e.target.value === "" && initialImage === undefined
+                          ? undefined
+                          : e.target.value,
+                      )
+                    }
+                    onBlur={f.handleBlur}
+                    placeholder="registry.example/acme/app:{{ app.version }}"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  {error && (
+                    <p
+                      id={errorId}
+                      data-testid={`comp-image-error-${componentName}`}
+                      className="text-xs text-destructive"
+                    >
+                      {error}
+                    </p>
+                  )}
+                  <p
+                    id={hintId}
+                    data-testid={`comp-image-hint-${componentName}`}
+                    className="text-xs text-muted-foreground"
+                  >
+                    Use <code className="font-mono">{"{{ app.version }}"}</code>{" "}
+                    to follow the application version; a literal tag pins the
+                    image.
+                  </p>
+                </div>
+              </ChangedFieldFrame>
+            );
+          }}
+        </form.Field>
+      )}
 
       <div data-testid={`component-command-editor-${componentName}`}>
         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -746,8 +850,7 @@ function ContainerlessEnvVars({
 /**
  * Visual "room to grow" affordance (FR-013 / SC-007). Documents the
  * per-component fields that the section is structurally ready to host
- * once the GraphQL `ComponentConfigInput` surface widens — today only
- * env vars round-trip end-to-end.
+ * once the GraphQL `ComponentConfigInput` surface widens.
  */
 function FutureExtensionPlaceholder() {
   return (
@@ -755,8 +858,8 @@ function FutureExtensionPlaceholder() {
       className="rounded-md border border-dashed border-border bg-muted/40 px-3 py-2 text-[11px] italic text-muted-foreground"
       data-testid="component-override-future-placeholder"
     >
-      More per-component fields (CPU / memory requests &amp; limits, replicas,
-      image overrides) are coming in future iterations.
+      More per-component fields (CPU / memory requests &amp; limits, replicas)
+      are coming in future iterations.
     </p>
   );
 }

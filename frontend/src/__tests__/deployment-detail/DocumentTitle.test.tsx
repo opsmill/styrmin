@@ -120,6 +120,7 @@ function makeDeployment(): DeploymentShape {
     },
     applicationInstance: null,
     components: [],
+    componentImageOverrides: [],
     deployedServices: [],
   } as DeploymentShape;
 }
