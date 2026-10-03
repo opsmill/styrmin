@@ -137,9 +137,10 @@ Both the HelmRelease apply (`operator/pipeline.py`) and the agent's StyrminDeplo
 create, update, and upgrade applies (`agent/tasks/orchestration.py`) pass
 `replace_spec_keys_on_update=True` to `upsert_custom_resource`. On a 409 it sends one JSON
 Patch (`application/json-patch+json`): one `add` per top-level `spec` key the body sets
-(`None` pruned), plus one `add` per `metadata.labels` and `metadata.annotations` key the body
-sets (RFC 6901 escaping). The rule is: **Styrmin owns each top-level spec key it writes;
-everything else merges.**
+(nested `None` pruned; a top-level `None` becomes `add {}` then `remove`, deleting the key
+whether or not it exists), plus one `add` per `metadata.labels` and `metadata.annotations` key
+the body sets (RFC 6901 escaping). The rule is: **Styrmin owns each top-level spec key it
+writes; everything else merges.**
 
 - Keys Styrmin writes are replaced, so nested keys it stopped writing disappear:
   `spec.values` on the HelmRelease, `spec.context` on the CR (dumped with

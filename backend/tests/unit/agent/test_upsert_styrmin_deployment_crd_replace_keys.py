@@ -125,6 +125,8 @@ async def test_conflict_replaces_each_spec_key_the_body_sets() -> None:
 
     assert ops == [
         {"op": "add", "path": "/spec/deploymentId", "value": "d"},
+        {"op": "add", "path": "/spec/instanceId", "value": {}},
+        {"op": "remove", "path": "/spec/instanceId"},
         {"op": "add", "path": "/spec/context", "value": {"a": 1}},
         {
             "op": "add",

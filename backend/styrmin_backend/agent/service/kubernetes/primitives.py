@@ -40,8 +40,8 @@ def _prune_none(value: Any) -> Any:
     applies), while the merge-patch path keeps the ``null`` so clearing still
     deletes the key. See ADR-045 §5.
 
-    The ``replace_spec_keys_on_update`` path also prunes, since replacing a
-    spec key removes its omitted nested keys without a ``null``.
+    The ``replace_spec_keys_on_update`` path also prunes nested ``None``, since
+    replacing a spec key removes its omitted nested keys without a ``null``.
     """
     if isinstance(value, dict):
         return {k: _prune_none(v) for k, v in value.items() if v is not None}
@@ -58,19 +58,24 @@ def _json_pointer_token(key: str) -> str:
 def _replace_spec_keys_json_patch(body: dict[str, Any]) -> list[dict[str, Any]]:
     """Build the JSON Patch that replaces each spec key the body sets.
 
-    Each top-level ``spec`` key the body sets is replaced (``None`` pruned), so
-    nested keys the new body omits are removed; spec keys the body does not set
+    Each top-level ``spec`` key the body sets is replaced (nested ``None``
+    pruned), so nested keys the new body omits are removed. A top-level key set
+    to ``None`` is removed by ``add {}`` then ``remove``, which succeeds whether
+    or not the key exists live. Spec keys the body does not set
     (``spec.suspend``, ``spec.deletionRequested``) are left alone, as with
     merge-patch. ``metadata.labels`` / ``metadata.annotations`` keys are added
     one by one, leaving keys other actors wrote (kopf annotations, Flux's
     finalizer) untouched. Per-key ``add`` needs the live maps to exist.
     """
-    pruned = _prune_none(body)
-    ops: list[dict[str, Any]] = [
-        {"op": "add", "path": f"/spec/{_json_pointer_token(key)}", "value": value}
-        for key, value in pruned.get("spec", {}).items()
-    ]
-    metadata = pruned.get("metadata", {})
+    ops: list[dict[str, Any]] = []
+    for key, value in (body.get("spec") or {}).items():
+        path = f"/spec/{_json_pointer_token(key)}"
+        if value is None:
+            ops.append({"op": "add", "path": path, "value": {}})
+            ops.append({"op": "remove", "path": path})
+        else:
+            ops.append({"op": "add", "path": path, "value": _prune_none(value)})
+    metadata = _prune_none(body.get("metadata") or {})
     for map_key in ("labels", "annotations"):
         for key, value in metadata.get(map_key, {}).items():
             ops.append(
@@ -159,7 +164,8 @@ async def upsert_custom_resource(
     # below it deletes the key. Drivers emit ``null`` to clear an override, so
     # callers that carry such values prune ``None`` from the *create* body. The
     # HelmRelease apply also sets ``replace_spec_keys_on_update``, whose JSON
-    # Patch prunes ``None`` too, so a null marker reads as absent on both paths.
+    # Patch prunes nested ``None`` and removes a top-level spec key set to
+    # ``None``, so a null marker reads as absent on both paths.
     create_body = _prune_none(body) if prune_none_on_create else body
 
     try:
