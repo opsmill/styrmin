@@ -86,6 +86,7 @@ from styrmin_sdk.models.deployment_manifest import (
     resolve_overrides,
 )
 from styrmin_sdk.models.driver import ApplicationDriver, ApplicationDriverVersionSummary
+from styrmin_sdk.models.image_reference import has_app_version_token, pinned_image_components
 
 __all__ = [
     "Action",
@@ -132,5 +133,7 @@ __all__ = [
     "Task",
     "UpdateDeploymentInput",
     "UpdateEnvironmentInput",
+    "has_app_version_token",
+    "pinned_image_components",
     "resolve_overrides",
 ]

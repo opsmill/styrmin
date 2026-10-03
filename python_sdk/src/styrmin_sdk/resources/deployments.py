@@ -74,6 +74,7 @@ from styrmin_sdk.models.deployment_manifest import (
     ResolvedManifest,
     resolve_overrides,
 )
+from styrmin_sdk.models.image_reference import pinned_image_components
 from styrmin_sdk.resources._base import BaseResource, JsonValue
 
 
@@ -201,6 +202,24 @@ def _build_update_input(manifest: ResolvedManifest) -> UpdateDeploymentInput:
         raise ManifestValidationError(
             f"manifest {manifest.source_path}: spec.config does not match UpdateDeploymentInput: {exc}",
         ) from exc
+
+
+def _effective_image_overrides(update_input: UpdateDeploymentInput, stored_config: object) -> dict[str, str | None]:
+    """Image override per component once ``update_input`` lands (research D-011).
+
+    Manifest ``components`` replace the stored blocks; when the manifest omits them, the
+    stored ``config.components`` (a dict keyed by component name) stay in effect.
+    """
+    if update_input.components is not None:
+        return {block.name: block.image for block in update_input.components}
+    stored = stored_config.get("components") if isinstance(stored_config, dict) else None
+    if not isinstance(stored, dict):
+        return {}
+    return {
+        name: block.get("image") if isinstance(block, dict) else None
+        for name, block in stored.items()
+        if isinstance(name, str)
+    }
 
 
 def _build_config_input(manifest: ResolvedManifest) -> DeploymentConfigInput | None:
@@ -617,7 +636,9 @@ class DeploymentResource(BaseResource):
         current instance. When BOTH calls return ``None`` the apply is a true
         no-op and returns ``action="unchanged"``; otherwise it is ``"updated"``
         with ``task_id`` set to the last non-null task (the version task when a
-        version change happened, else the config task).
+        version change happened, else the config task). An ``updated`` outcome that
+        changes the application version also carries ``target_version`` and the
+        token-free ``pinned_image_components`` (FR-008); ``apply`` never prompts.
         """
         existing_driver_name = existing.application_driver_version.application_driver.name
         if existing_driver_name != manifest.driver:
@@ -626,7 +647,8 @@ class DeploymentResource(BaseResource):
                 "driver changes require delete-and-recreate"
             )
 
-        update_task = await self.update(existing.id, input=_build_update_input(manifest))
+        update_input = _build_update_input(manifest)
+        update_task = await self.update(existing.id, input=update_input)
 
         try:
             version_task = await self.update_version(existing.id, manifest.version)
@@ -654,11 +676,18 @@ class DeploymentResource(BaseResource):
         # At least one mutation dispatched a task. The version task is the last
         # non-null task (it runs after the config update), so prefer it.
         last_task = version_task if version_task is not None else update_task
+        version_changed = manifest.version != existing.application_version
         return ApplyOutcome(
             name=manifest.name,
             action="updated",
             deployment_id=existing.id,
             task_id=last_task.id if last_task is not None else None,
+            target_version=manifest.version if version_changed else None,
+            pinned_image_components=(
+                pinned_image_components(_effective_image_overrides(update_input, existing.config))
+                if version_changed
+                else []
+            ),
         )
 
     async def _wait_for_terminal(self, outcome: ApplyOutcome) -> ApplyOutcome:
