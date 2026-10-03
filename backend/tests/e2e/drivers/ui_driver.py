@@ -308,6 +308,7 @@ class UiScenarioDriver:
         self, *, deployment_id: str, component: str, env_vars: dict[str, str]
     ) -> None:
         environment_id = self._require_environment_context(deployment_id=deployment_id)
+        self._deployment_id = deployment_id
         async with _ui_errors(
             f"setting env vars on component {component!r} of deployment {deployment_id}"
         ):

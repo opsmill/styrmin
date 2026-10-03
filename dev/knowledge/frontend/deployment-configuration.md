@@ -10,10 +10,12 @@ tab** of read-only summary cards on the deployment detail page, and a right-side
 scheduling-only modal, a raw JSON dump, and per-field edit affordances scattered
 across the page.
 
-Everything here is client-side. There is no GraphQL schema change, no new query,
-and no backend involvement beyond the existing `updateDeployment` mutation — which
-has **full-replacement** semantics, so the UI is responsible for showing the
-user what a submit will change before it fires.
+The surface as introduced by 011 is client-side. There is no GraphQL schema change,
+no new query, and no backend involvement beyond the existing `updateDeployment`
+mutation — which has **full-replacement** semantics, so the UI is responsible for
+showing the user what a submit will change before it fires. Component env vars are
+the exception: they follow the backend's component container rule (see
+[Component env vars follow the component container](#component-env-vars-follow-the-component-container)).
 
 Design rationale and rejected alternatives:
 [ADR-052](../../adr/0052-client-side-config-diff-impact-and-conflict-detection.md).

@@ -35,7 +35,7 @@ values. Chart env defaults are no longer dropped.
 - The `component_env_vars` template filter is removed. A deployment
   pinned to a driver version that still calls it fails on its next
   change. Load the migrated drivers and upgrade each deployment before
-  editing environment env vars; driver authors declare containers and
+  editing env vars on an environment; driver authors declare containers and
   remove the filter. See
   [Migrating env var wiring](./drivers/migrating-env-vars.md).
 - User env vars now reach only the component container, not chart Jobs,

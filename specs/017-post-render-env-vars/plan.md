@@ -45,7 +45,7 @@ rendering is O(env vars).
 must come after every existing post-render patch (research D-002); Helm charts ship
 `resources.requests` only (unchanged).
 
-**Scale/Scope**: 7 in-repo drivers, 30 components; ~6 backend modules, 2 GraphQL types + 1 field,
+**Scale/Scope**: 7 in-repo drivers, 28 components; ~6 backend modules, 2 GraphQL types + 1 field,
 1 frontend section, 1 E2E module extended, 1 E2E test extended.
 
 ## Constitution Check
@@ -172,7 +172,7 @@ siblings in `blocks/patches.py`.
    metadata `add` ops) on 409; the agent's StyrminDeployment CR applies use the same mode; other
    callers unchanged. Unit tests pin that kopf annotations and Flux's finalizer survive an update and
    that the builder always sets both metadata maps the per-key ops rely on (critique E3).
-7. **Drivers** (D-010): add `container` to all 30 components, verified by rendering each driver
+7. **Drivers** (D-010): add `container` to all 28 components, verified by rendering each driver
    with `helm template` — the command and matched container per component are recorded in the
    implementation notes (critique E4); strip env wiring from every `values.j2.yml`; move
    infrahub's `PREFECT_SERVER_ANALYTICS_ENABLED` to `global.prefect.env`; bump each driver's

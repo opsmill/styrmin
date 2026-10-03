@@ -109,7 +109,7 @@ Mark deprecated docs clearly. Don't delete—update with pointers to replacement
 - [0053-driver-version-provenance-fingerprint.md](adr/0053-driver-version-provenance-fingerprint.md) - Driver-version identity widens to include a provenance fingerprint (`content_hash` for local, `source_commit_sha` for git); no load ever deletes a row; labels always render `<version>@<short7>`
 - [0054-backend-authoritative-noop-detection.md](adr/0054-backend-authoritative-noop-detection.md) - No-op detection runs in the service layer before any write and is signalled by returning `null` from the already-nullable `Task` field; reverts the SDK-side stopgap
 - [0055-environment-backup-parent-records.md](adr/0055-environment-backup-parent-records.md) - Environment backup/restore as parent records grouping constituents via nullable child FKs, with status derived on every read and never stored; the justified deviation from ADR-012's umbrella rejection, plus the restore ordering that excludes restored deployments from the config fan-out
-- [0057-post-render-component-overrides.md](adr/0057-post-render-component-overrides.md) - Drivers declare a component container per component; env vars merge into it by a strategic-merge post-render patch (chart entries survive), `component_env_vars` retired, HelmRelease `spec` replaced on update
+- [0057-post-render-component-overrides.md](adr/0057-post-render-component-overrides.md) - Drivers declare a component container per component; env vars merge into it by a strategic-merge post-render patch (chart entries survive), `component_env_vars` retired, Styrmin-managed HelmRelease `spec` keys replaced on update
 
 ## Current Knowledge
 

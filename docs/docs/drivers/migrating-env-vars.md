@@ -38,7 +38,8 @@ entry replaces it, including a chart entry that uses `valueFrom`.
 Do these steps in order.
 
 1. **Load driver versions that declare component containers.** The example drivers that ship
-   in the Styrmin image are already migrated; reload them after upgrading Styrmin:
+   in the Styrmin image at `/styrmin/drivers/<name>` are already migrated. After upgrading
+   Styrmin, reload each one you use, for example:
 
    ```shell
    uv run styrminctl drivers load-local-version /styrmin/drivers/infrahub

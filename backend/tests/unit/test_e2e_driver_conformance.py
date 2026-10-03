@@ -316,7 +316,8 @@ def test_api_driver_constituent_outcome_matches_frontend_vocabulary(
 
 def test_set_component_env_vars_is_declared_keyword_only() -> None:
     """Pins the component env var setter (017) the US1 E2E drives on both
-    entrypoints; the generic checks above then hold both drivers to it."""
+    entrypoints, keyword-only on the protocol and on each driver; the generic
+    signature check compares names, defaults, and returns, not parameter kind."""
     assert "set_component_env_vars" in _protocol_methods()
     assert _is_async(ScenarioDriver, "set_component_env_vars")
     params = list(
@@ -324,6 +325,14 @@ def test_set_component_env_vars_is_declared_keyword_only() -> None:
     )[1:]
     assert [p.name for p in params] == ["deployment_id", "component", "env_vars"]
     assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params)
+    for driver_cls in (ApiScenarioDriver, UiScenarioDriver):
+        impl_params = list(
+            inspect.signature(driver_cls.set_component_env_vars).parameters.values()
+        )[1:]
+        assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in impl_params), (
+            f"{driver_cls.__name__}.set_component_env_vars: parameters must be "
+            "keyword-only"
+        )
 
 
 def test_protocol_method_signatures_match() -> None:
