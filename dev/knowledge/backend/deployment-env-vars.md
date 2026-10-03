@@ -12,7 +12,7 @@ injection into the component container lives in
 [ADR-057](../../adr/0057-post-render-component-overrides.md). The full
 contracts are in [`specs/archive/008-deployment-env-vars/`](../../../specs/archive/008-deployment-env-vars/),
 [`specs/archive/010-driver-env-var-consumption/`](../../../specs/archive/010-driver-env-var-consumption/),
-and [`specs/017-post-render-env-vars/`](../../../specs/017-post-render-env-vars/).
+and [`specs/archive/017-post-render-env-vars/`](../../../specs/archive/017-post-render-env-vars/).
 
 ## When to reach for env vars
 
@@ -99,7 +99,7 @@ Reads are typed: `Environment.envVars`, `Deployment.envVars`,
 `Deployment.componentEnvVars`. The full GraphQL surface is enumerated in
 [`specs/archive/008-deployment-env-vars/contracts/graphql.md`](../../../specs/archive/008-deployment-env-vars/contracts/graphql.md);
 017 adds `Component.container`, `ComponentConfig.container`, and
-`ComponentEnvVars.isApplicable` ([`contracts/graphql-deltas.md`](../../../specs/017-post-render-env-vars/contracts/graphql-deltas.md)).
+`ComponentEnvVars.isApplicable` ([`contracts/graphql-deltas.md`](../../../specs/archive/017-post-render-env-vars/contracts/graphql-deltas.md)).
 
 ### Component-scope writes need a component container
 
@@ -286,4 +286,4 @@ foot setting them in the past.
 - [`api.md`](api.md) — surrounding GraphQL API surface.
 - [`specs/archive/008-deployment-env-vars/`](../../../specs/archive/008-deployment-env-vars/) — full user-facing feature spec, plan, contracts, and quickstart.
 - [`specs/archive/010-driver-env-var-consumption/`](../../../specs/archive/010-driver-env-var-consumption/) — the 010 driver-side consumption spec, plan, and research.
-- [`specs/017-post-render-env-vars/`](../../../specs/017-post-render-env-vars/) — post-render injection spec, research, and contracts.
+- [`specs/archive/017-post-render-env-vars/`](../../../specs/archive/017-post-render-env-vars/) — post-render injection spec, research, and contracts.

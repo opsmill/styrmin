@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-02
-**Source**: specs/017-post-render-env-vars/ (spec, plan, research D-001 – D-011, critique)
+**Source**: specs/archive/017-post-render-env-vars/ (spec, plan, research D-001 – D-011, critique)
 **Supersedes**: [ADR-013](0013-driver-env-var-consumption.md) §1 and the FR-026
 non-feature it records ("no platform-side post-render env var injection"). ADR-013 §2
 and §5 no longer describe how env vars reach pods; ADR-013 §3 (merged dicts) and the

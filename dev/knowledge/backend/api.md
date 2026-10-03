@@ -364,6 +364,26 @@ type Deployment {
 
 `Environment` gains a parallel `envVars: [EnvVar!]!`. Operator-set env vars travel through the typed `input: UpdateDeploymentInput!` argument on `updateDeployment()` (`envVars: [EnvVarInput!]` per scope) and through the typed `input: UpdateEnvironmentInput!` on `updateEnvironment()`. The legacy `config: JSON` write path persists on `deploy()` (Pydantic-validated against `DeploymentConfig`) until the analogous deploy-side migration ships. See "Environment-config update + fanout" below for the environment-scope contract; see [`specs/011-typed-deployment-input/spec.md`](../../../specs/011-typed-deployment-input/spec.md) for the deployment-scope contract. Driver-side documentation (`ApplicationDriverVersion.envVars`), orphan tracking on per-component blocks (`ComponentEnvVars.isOrphaned = true`), and chart-vs-user collision warnings (`DeploymentTimelineEntry.envVarCollisions`) are scoped for follow-up user stories (US4/US5/US7) and will be added as those ship.
 
+#### Component container read fields
+
+<!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
+
+Env vars reach pods by post-render injection into each component's declared **component container** ([ADR-057](../../adr/0057-post-render-component-overrides.md)). Three additive fields expose it:
+
+```graphql
+type Component {                 # Deployment.components
+  container: String              # from the deployment's Component.config["container"]
+}
+type ComponentConfig {           # ApplicationDriverVersion.componentConfigs
+  container: String              # from ComponentConfig.config["container"]
+}
+type ComponentEnvVars {          # Deployment.componentEnvVars
+  isApplicable: Boolean!         # not isOrphaned and the component declares a container
+}
+```
+
+`container` is `null` when the driver declares no component container. `Component.container` follows the deployment's pinned driver version, because component rows are recreated on a driver-version switch. `isApplicable` is computed in the resolver from that driver version's component configs; it is not stored and not part of the instance context. `isOrphaned` keeps its meaning (the driver no longer declares the component), so a block stranded by an upgrade that drops the container reads `isOrphaned: false, isApplicable: false`: kept, returned, never injected.
+
 #### Environment-config update + fanout
 
 <!-- Extracted from specs/009-environment-update on 2026-05-08 -->

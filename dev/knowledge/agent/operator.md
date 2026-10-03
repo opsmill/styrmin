@@ -130,6 +130,32 @@ All resources created from a StyrminDeployment carry:
 - NetworkPolicies: `{release_reference}-{policy_name}` (e.g., `abc123def-default-deny-egress`)
 - NetworkPolicies per deployment: default-deny-egress, default-deny-ingress, allow-traefik-ingress, traefik-netpolicy-egress, prefect-netpolicy-egress, plus app-specific
 
+### Apply semantics
+
+<!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
+
+Custom resources go through `upsert_custom_resource`
+(`agent/service/kubernetes/primitives.py`): a create, then a patch on `409 Conflict`. Two
+callers opt into `replace_spec_keys_on_update=True`: the operator's HelmRelease apply
+(`operator/pipeline.py`) and the agent's StyrminDeployment CR applies
+(`agent/tasks/orchestration.py::_apply_styrmin_deployment_crd`, used on create, update, and
+upgrade). Every other custom resource keeps JSON merge-patch.
+
+| Path | Behaviour |
+|------|-----------|
+| Create | Body as rendered; the HelmRelease apply also sets `prune_none_on_create`, so a `null` marker is dropped rather than stored. |
+| Update, `spec` (opted in) | One JSON Patch (`application/json-patch+json`): an `add` per top-level spec key the body sets, nested `None` pruned. A top-level key set to `None` becomes `add {}` then `remove`. |
+| Update, `metadata.labels` / `metadata.annotations` (opted in) | An `add` per key the body sets (RFC 6901 escaping), so merge semantics hold and Flux's finalizer and kopf's annotations are untouched. |
+| Update (not opted in) | `application/merge-patch+json` (RFC 7386): maps merge, keys the body omits survive. |
+
+The rule is: **Styrmin owns each top-level spec key it writes; everything else merges.**
+`spec.values` on the HelmRelease and `spec.context` on the CR are replaced, so nested keys a
+new render no longer writes disappear (a cleared env var, a values-template key a migrated
+driver dropped). Spec keys Styrmin never writes survive: `spec.suspend` set by
+`flux suspend hr`, and the server-owned `spec.deletionRequested` on the CR, which the CRD's
+CEL rule forbids resetting after a delete request. See
+[ADR-057](../../adr/0057-post-render-component-overrides.md) §6.
+
 ## Kubernetes Events
 
 The operator emits events on the StyrminDeployment resource for observability:
