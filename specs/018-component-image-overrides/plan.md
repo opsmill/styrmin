@@ -15,8 +15,9 @@ and container names, removes its `image` (which fails when the container was mis
 image-less), sets the override, and moves it back. The guard also runs for env-var-only components,
 so a wrong container name fails the render whichever override targets it, and never adds a
 container (research D-001 to D-003). The operator recognises the guard's error in the HelmRelease
-status and fails the deployment at once with `COMPONENT_CONTAINER_NOT_FOUND`, naming the component
-and the container (D-004).
+status, for the current generation and in both the "waiting for HelmRelease" and `Ready` phases
+(so updates of running deployments are covered), and fails the deployment with
+`COMPONENT_CONTAINER_NOT_FOUND`, naming the component and the container (D-004).
 
 `{{ app.version }}` is plain regex substitution against `context.app.version` (D-006). A
 hand-written grammar check, shared with the frontend through one test-vector file (D-007), runs on
@@ -72,7 +73,7 @@ deployments without component-container patches (SC-002); component-container pa
 | §VII Documentation | ✅ | ADR-058, docs pages, `dev/knowledge`, `CONTEXT.md` (already drafted), towncrier fragments: all tasked in this change. |
 | Governance gate: GraphQL schema | ⚠️ Pre-approved | Listed under "Governance Gates Crossed" in the idea brief. Contract: [graphql-deltas.md](contracts/graphql-deltas.md). |
 | Governance gate: DB schema, deps, CI/CD, auth | ✅ Not crossed | |
-| High-risk area: operator status handling | ⚠️ Called out | The timer gains one narrow match on HelmRelease failure messages (D-004); other failures keep today's path. Unit-tested and exercised by E2E test 3. |
+| High-risk area: operator status handling | ⚠️ Called out | The timer gains one narrow, generation-aware match on HelmRelease failure messages in `CREATING_HELM_RELEASE` and `READY` (D-004); other failures keep today's path. Unit-tested and exercised by E2E test 3, which updates a running deployment. |
 
 **Post-design re-check**: unchanged. Phase 1 artifacts introduce no new violation.
 
@@ -84,7 +85,8 @@ deployments without component-container patches (SC-002); component-container pa
 specs/018-component-image-overrides/
 ├── spec.md
 ├── plan.md                    # This file
-├── research.md                # D-001..D-013
+├── research.md                # D-001..D-014
+├── critiques/critique-20261003.md
 ├── data-model.md
 ├── quickstart.md
 ├── contracts/
@@ -124,9 +126,10 @@ backend/styrmin_backend/
 
 backend/tests/
 ├── unit/services/image_overrides/                    # grammar (shared vectors), substitution, resolver, validator
-├── unit/services/component_container/                # patch rendering + kubectl-kustomize semantics + message parser
+├── unit/services/component_container/                # patch rendering (yaml.dump), pointer escaping, message parser, SC-002 no-patch golden
+├── integration/test_component_container_kustomize.py # kubectl-kustomize semantics (CI integration job has kubectl; D-014)
 ├── unit/agent/                                       # builder ordering, get_component_images ordering
-├── unit/operator/                                    # guard failure → Failed + COMPONENT_CONTAINER_NOT_FOUND
+├── unit/operator/                                    # guard failure → Failed in both phases; stale generation ignored
 ├── unit/services/test_deployment_*                   # write/upgrade validation, no task on rejection
 ├── functional/graphql/                               # propagation tests (contracts/graphql-deltas.md)
 └── e2e/
@@ -158,7 +161,10 @@ dev/knowledge/backend/hooks-and-actions.md                      # get_component_
 docs/docs/drivers/creating-a-driver.md                          # component container: images + guard
 docs/docs/drivers/context.md                                    # components[<name>].image_override (read-only)
 docs/docs/concepts-and-architecture/hooks-and-actions.md        # get_component_images ordering
-docs/docs/reference/styrminctl.md                               # manifest image field + pinned warning
+docs/docs/concepts-and-architecture/image-overrides.md          # NEW user page: set/clear, token vs pin, upgrade warning,
+                                                                #   guard failure, pull failures (Pods tab), unique tags,
+                                                                #   admission policies, rollback note, v1 limits
+docs/docs/reference/styrminctl.md                               # manifest image field, pinned warning, apply race
 docs/docs/concepts-and-architecture/glossary.md                 # Image override
 CONTEXT.md                                                      # already drafted (Image override, Component container)
 changelog/20.added.md, changelog/20.changed.md                  # towncrier
@@ -185,10 +191,17 @@ image-specific pure logic mirrors `services/container_overrides/`.
 4. **Upgrade path**: `update_deployment_version` resolves the target driver version, then validates
    each stored override whose component has a container in that version against the target
    application version, before no-op detection and task dispatch.
-5. **Operator** (D-004): `_check_helmrelease_ready` returns a small result (`ready`, `failed_message`)
-   instead of a bool. The timer calls `parse_guard_failure(message) -> (component, container) | None`;
-   on a match it sets `Failed`/`Error`, the condition with reason `ComponentContainerNotFound`, and the
-   typed message. Unit-tested with a captured helm-controller message.
+5. **Operator** (D-004, critique E1/E3): a new `read_helmrelease_guard_failure(namespace,
+   release_reference) -> (component, container) | None` in `operator/reconciler.py` GETs the
+   HelmRelease and returns a match only when `Ready` is `False` for the current generation
+   (condition `observedGeneration`, else `status.lastAttemptedGeneration`, equals
+   `metadata.generation`) and any condition message carries the guard key
+   (`parse_guard_failure(message)`). The timer calls it on every tick in `CREATING_HELM_RELEASE`
+   (before the readiness check) and in `READY` (before drift detection). On a match it sets
+   `Failed`/`Error`, the `HelmReleaseReady` condition `False` with reason
+   `ComponentContainerNotFound`, and the typed message, then returns. The existing readiness flow,
+   conditions handling, and 300 s timeout are unchanged. Unit-tested with captured helm-controller
+   messages, a stale-generation message (ignored), and both phases.
 6. **No-op detection**: `image_override` is `None` unless set, so instance contexts of deployments
    without overrides keep their shape; adding, changing, or clearing an override changes the
    context and is never a no-op.
@@ -209,7 +222,11 @@ image-specific pure logic mirrors `services/container_overrides/`.
 | A component's label matches several workloads, not all with `C` | The guard fails the render (correct: an override cannot apply). Documented for driver authors |
 | Moving `C` to `containers[0]` for image-only components changes `kubectl logs`' default container | Same accepted consequence as ADR-057 for env vars; documented |
 | `copy` from a missing `image` succeeds and writes `null` (env-only guard) | It writes `G/styrmin-image`, not `G/image`, so the following `remove G/image` still fails. Covered by a unit test |
-| Upgrade action stops components before a render failure | Up-front re-validation in `updateDeploymentVersion` (D-008) |
+| Upgrade action stops components before a render failure | Up-front re-validation in `updateDeploymentVersion` (D-008, spec FR-009) |
+| Stale `HelmReleaseReady=True` after an update hides the guard failure | Generation-aware guard check in both `CREATING_HELM_RELEASE` and `READY` (D-004) |
+| Stale guard message from an older HelmRelease generation falsely fails a fixed deployment | Match only when the failing condition's generation equals `metadata.generation` |
+| Platform rollback below this release: older `ComponentConfigBlock` (`extra="forbid"`) rejects `image` | ADR-058 consequence and `changed` fragment: clear overrides before rolling back |
+| Override and version change in one `apply` race the upgrade action's image read | Documented in the apply docs (same race as env vars) |
 
 ## Complexity Tracking
 

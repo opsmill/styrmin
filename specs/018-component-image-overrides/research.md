@@ -107,9 +107,18 @@ upgrade, as for any `postRenderers` change.
 HelmRelease. Today the operator never reads a HelmRelease's failure: a failed release shows up only
 as the 300 s readiness timeout ("Deployment did not reach Ready within 300s"), with no cause.
 
-**Decision**: the operator's StyrminDeployment timer, while waiting for the HelmRelease to become
-Ready, reads its `Ready` condition. When the condition is `False` and its message contains the guard
-key `styrmin.io~1component-container~1`, the operator parses the component and container from the
+**Second finding (critique E1)**: on a spec update the operator keeps the conditions of the previous
+rollout, so `HelmReleaseReady` is still `True`. The timer's `CREATING_HELM_RELEASE` branch then
+skips the HelmRelease check and moves to `Ready`. `_check_helmrelease_ready` also ignores
+generation. A check placed only on the "waiting for Ready" path would never see a guard failure on
+an existing deployment.
+
+**Decision**: on every tick in phase `CREATING_HELM_RELEASE` **or** `READY`, the operator's
+StyrminDeployment timer reads the HelmRelease. When its `Ready` condition is `False` for the current
+generation (the condition's `observedGeneration`, else `status.lastAttemptedGeneration`, equals
+`metadata.generation`, so a stale message from a fixed revision is ignored) and **any** condition
+message contains the guard key `styrmin.io~1component-container~1` (robust to helm-controller
+reporting it under `Ready` or `Released`), the operator parses the component and container from the
 key and fails the deployment at once: `phase: Failed`, `displayState: Error`, condition reason
 `ComponentContainerNotFound`, and the message of a typed `ComponentContainerNotFoundError`
 (`COMPONENT_CONTAINER_NOT_FOUND`): *"Component 'server': component container 'wrong' was not found
@@ -121,8 +130,14 @@ remediation, then the timeout), because they may be transient. The guard failure
 for a given config, so failing at once is safe. A later config or driver change re-applies the
 HelmRelease and leaves `Failed` the usual way.
 
+The failure is visible within one or two timer intervals (60 s by default): on an update, the first
+tick may still advance to `Ready` from the stale condition, and the next one fails it.
+
 **Alternatives considered**: surfacing every HelmRelease failure (broader behaviour change, out of
-scope); parsing nothing and relying on the timeout (fails SC-005 "visible within one reconcile").
+scope; recorded as a follow-up in ADR-058); resetting `HelmReleaseReady` on every update so the
+existing readiness path re-checks (rejected: the 300 s readiness timeout counts from the CR's
+creation timestamp, so every update of an older deployment would flash `Error`); parsing nothing
+and relying on the timeout (fails SC-005, and never fires after an update).
 
 ## D-005 — Dependency gap: extension and upstream evaluation (research directive)
 
@@ -181,8 +196,8 @@ gate says no new dependency and the frontend still needs its own copy.
 - **Upgrade** (`updateDeploymentVersion`): stored, applicable overrides are re-validated against the
   target application version before any task is dispatched. Without this check, the driver's
   `upgrade` action would stop the components before the render fails (the action stops `server`,
-  then calls `upgrade_deployment_version`). This is an addition to the brief's FR-009 and goes back
-  into the spec in the critique phase.
+  then calls `upgrade_deployment_version`). This extends the brief's FR-009; the spec's FR-009 and
+  User Story 4 Sc.5 were amended in the critique phase (E2).
 - **Render** (operator, `build_component_container_patches`): substitution and validation run again;
   failure raises `InvalidImageReferenceError` (reason `after_substitution`), and the operator records
   `HelmRelease creation failed: <message>` (ADR-057 §4 path). No fallback to the chart image.
@@ -282,4 +297,20 @@ ADR-058 "Image overrides and the component-container guard" extends ADR-057. It 
 ADR-057's consequence "a wrong container name fails the release, but only once env vars are set" to
 "a wrong container name fails the reconcile with `COMPONENT_CONTAINER_NOT_FOUND` whenever any
 override targets it; Styrmin never adds a container". It also records the `get_component_images`
-ordering and the Flux `replacements` follow-up.
+ordering and these follow-ups: the Flux `replacements` upstream route, a release-wide registry mirror
+and image pull secrets (separate issues), generic HelmRelease failure surfacing, and showing each
+token override's target reference in the upgrade dialog. Consequences note that a platform rollback
+below this release needs image overrides cleared first: older platforms validate
+`ComponentConfigBlock` with `extra="forbid"` and reject the `image` key.
+
+## D-014 — Test placement (critique E5, E6, P5)
+
+- Kustomize-semantics tests (`kubectl kustomize` over the builder's real output: existing,
+  missing, multi-container, init container, zero-match, env-only identity) live in
+  `backend/tests/integration/`. CI's integration job installs `kubectl`; the unit job does not.
+- SC-002: a unit test asserts the builder emits no component-container patch for a context without
+  overrides; the integration test asserts the env-only guard leaves the rendered workload identical
+  to the env strategic merge alone.
+- The JSON6902 block renders through `yaml.dump` only, never string formatting; unit tests cover
+  the JSON-pointer escape with `~` and `/` in component names and a reference with every allowed
+  separator.
