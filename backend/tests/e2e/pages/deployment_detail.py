@@ -309,7 +309,7 @@ class DeploymentDetailPage:
                 ).fill(",".join(str(v) for v in values))
 
     # ------------------------------------------------------------------
-    # Settings drawer — component env vars (017)
+    # Settings drawer — component overrides (017 env vars, 018 image)
     # ------------------------------------------------------------------
 
     async def set_component_env_vars(
@@ -319,22 +319,10 @@ class DeploymentDetailPage:
         ``env_vars``, then apply through the diff dialog.
 
         Rows are edited in place by index and extras removed from the end; a
-        block left with no env vars, command or args is removed. Closes the
-        drawer without submitting when the rows already match.
+        block left with no env vars, image, command or args is removed. Closes
+        the drawer without submitting when the rows already match.
         """
-        page = self._page
-        await page.get_by_role("button", name="Settings", exact=True).click()
-        await page.locator("[data-testid=settings-update-button]").click()
-        drawer = page.locator("[role=dialog][aria-labelledby=config-edit-drawer-title]")
-        await expect(drawer).to_be_visible()
-        await page.locator("[data-testid=section-nav-componentOverrides]").click()
-
-        trigger = page.locator(f"[data-testid=component-override-trigger-{component}]")
-        if await trigger.get_attribute("aria-expanded") != "true":
-            await trigger.click()
-        block = page.locator(
-            f"[data-testid=component-override-block][data-component='{component}']"
-        )
+        drawer, block = await self._open_component_override_block(component)
         add_block = block.locator(f"[data-testid=component-override-add-{component}]")
         add_row = block.locator(f"[data-testid=comp-env-add-{component}]")
         await expect(add_block.or_(add_row)).to_be_visible()
@@ -353,8 +341,7 @@ class DeploymentDetailPage:
             )
         desired = list(env_vars.items())
         if current == desired:
-            await page.locator("[data-testid=drawer-close-button]").click()
-            await expect(drawer).to_be_hidden()
+            await self._close_config_drawer(drawer)
             return
 
         if await add_block.is_visible():
@@ -376,15 +363,86 @@ class DeploymentDetailPage:
             ).click()
 
         if not desired:
-            other_rows = block.locator(
-                f"[data-testid^='comp-command-{component}-'], "
-                f"[data-testid^='comp-args-{component}-']"
-            )
-            if await other_rows.count() == 0:
-                await block.locator(
-                    f"[data-testid=component-override-remove-{component}]"
-                ).click()
+            await self._remove_component_block_if_empty(block, component)
+        await self._apply_config_drawer(drawer, what="component env var")
 
+    async def set_component_image(self, *, component: str, image: str | None) -> None:
+        """Fill (or clear, for ``None``) ``component``'s Image input in the
+        Settings edit drawer, then apply through the diff dialog.
+
+        A block left with no image, env vars, command or args is removed.
+        Closes the drawer without submitting when the input already matches.
+        """
+        drawer, block = await self._open_component_override_block(component)
+        add_block = block.locator(f"[data-testid=component-override-add-{component}]")
+        image_input = block.get_by_label(f"Image for {component}", exact=True)
+        await expect(add_block.or_(image_input)).to_be_visible()
+
+        current = (
+            await image_input.input_value() if await image_input.is_visible() else ""
+        )
+        desired = image or ""
+        if current == desired:
+            await self._close_config_drawer(drawer)
+            return
+
+        if await add_block.is_visible():
+            await add_block.click()
+        await image_input.fill(desired)
+        await image_input.press("Tab")
+        error = block.locator(f"[data-testid=comp-image-error-{component}]")
+        if await error.count() > 0:
+            raise ScenarioActionError(
+                f"image {desired!r} rejected inline: {await error.inner_text()}"
+            )
+
+        if not desired:
+            await self._remove_component_block_if_empty(block, component)
+        await self._apply_config_drawer(drawer, what="component image")
+
+    async def _open_component_override_block(
+        self, component: str
+    ) -> tuple[Locator, Locator]:
+        """Open the Settings edit drawer on the component overrides section and
+        expand ``component``'s block; returns ``(drawer, block)``."""
+        page = self._page
+        await page.get_by_role("button", name="Settings", exact=True).click()
+        await page.locator("[data-testid=settings-update-button]").click()
+        drawer = page.locator("[role=dialog][aria-labelledby=config-edit-drawer-title]")
+        await expect(drawer).to_be_visible()
+        await page.locator("[data-testid=section-nav-componentOverrides]").click()
+
+        trigger = page.locator(f"[data-testid=component-override-trigger-{component}]")
+        if await trigger.get_attribute("aria-expanded") != "true":
+            await trigger.click()
+        block = page.locator(
+            f"[data-testid=component-override-block][data-component='{component}']"
+        )
+        return drawer, block
+
+    async def _remove_component_block_if_empty(
+        self, block: Locator, component: str
+    ) -> None:
+        remaining = block.locator(
+            "[data-testid=component-env-var-row], "
+            f"[data-testid^='comp-command-{component}-'], "
+            f"[data-testid^='comp-args-{component}-']"
+        )
+        image_input = block.locator(f"[data-testid=comp-image-{component}]")
+        has_image = await image_input.count() > 0 and bool(
+            await image_input.input_value()
+        )
+        if await remaining.count() == 0 and not has_image:
+            await block.locator(
+                f"[data-testid=component-override-remove-{component}]"
+            ).click()
+
+    async def _close_config_drawer(self, drawer: Locator) -> None:
+        await self._page.locator("[data-testid=drawer-close-button]").click()
+        await expect(drawer).to_be_hidden()
+
+    async def _apply_config_drawer(self, drawer: Locator, *, what: str) -> None:
+        page = self._page
         review = page.locator("[data-testid=drawer-review-apply-button]")
         await expect(review).to_be_enabled()
         await review.click()
@@ -404,7 +462,7 @@ class DeploymentDetailPage:
                 else "(no error rendered)"
             )
             raise ScenarioActionError(
-                f"component env var apply did not close the diff dialog: {message}"
+                f"{what} apply did not close the diff dialog: {message}"
             ) from exc
         await expect(drawer).to_be_hidden()
 

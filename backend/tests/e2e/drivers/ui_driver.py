@@ -319,6 +319,21 @@ class UiScenarioDriver:
                 component=component, env_vars=env_vars
             )
 
+    async def set_component_image(
+        self, *, deployment_id: str, component: str, image: str | None
+    ) -> None:
+        environment_id = self._require_environment_context(deployment_id=deployment_id)
+        self._deployment_id = deployment_id
+        async with _ui_errors(
+            f"setting the image on component {component!r} of deployment {deployment_id}"
+        ):
+            await self._deployment_detail.goto(
+                environment_id=environment_id, deployment_id=deployment_id
+            )
+            await self._deployment_detail.set_component_image(
+                component=component, image=image
+            )
+
     async def update_environment_via_form(
         self,
         *,

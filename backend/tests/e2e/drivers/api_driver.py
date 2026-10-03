@@ -457,6 +457,7 @@ class ApiScenarioDriver:
                     # (omit = clear, never []).
                     command=(block.get("command") if isinstance(block, dict) else None),
                     args=(block.get("args") if isinstance(block, dict) else None),
+                    image=(block.get("image") if isinstance(block, dict) else None),
                 )
                 for name, block in components.items()
             ]
@@ -473,8 +474,25 @@ class ApiScenarioDriver:
     async def set_component_env_vars(
         self, *, deployment_id: str, component: str, env_vars: dict[str, str]
     ) -> None:
+        await self._replace_component_slot(
+            deployment_id=deployment_id,
+            component=component,
+            slot="env_vars",
+            value=dict(env_vars) if env_vars else None,
+        )
+
+    async def set_component_image(
+        self, *, deployment_id: str, component: str, image: str | None
+    ) -> None:
+        await self._replace_component_slot(
+            deployment_id=deployment_id, component=component, slot="image", value=image
+        )
+
+    async def _replace_component_slot(
+        self, *, deployment_id: str, component: str, slot: str, value: Any
+    ) -> None:
         # ``updateDeployment`` is full-replacement: resubmit the stored config
-        # with only this component's env vars swapped.
+        # with only this component slot swapped; ``None`` clears it.
         try:
             deployment = await self._client.deployments.get(deployment_id)
         except StyrminError as exc:
@@ -486,12 +504,12 @@ class ApiScenarioDriver:
             for name, block in (config.get("components") or {}).items()
         }
         block = {
-            key: value
-            for key, value in components.pop(component, {}).items()
-            if key != "env_vars" and value is not None
+            key: existing
+            for key, existing in components.pop(component, {}).items()
+            if key != slot and existing is not None
         }
-        if env_vars:
-            block["env_vars"] = dict(env_vars)
+        if value is not None:
+            block[slot] = value
         if block:
             components[component] = block
         config["components"] = components
