@@ -162,14 +162,14 @@ vars. These do not:
 If your application needs a user value in a Job, read it from the context and template it
 explicitly. Action Jobs started with `execute_commands(env_from_component=...)` copy the
 env of the component pod template's first container, which is the component container
-whenever env vars are set.
+whenever env vars or an image override are set.
 
 ## Failure modes to check
 
-- **Wrong container name.** The strategic merge adds a new, image-less container with that
-  name, and the API server rejects the workload. The Helm release fails with
-  `spec.template.spec.containers[0].image: Required value`. Nothing fails until a user first
-  sets an env var on that component, so verify the name when you write the driver.
+- **Wrong container name.** The post-render guard fails the Helm release with
+  `error in remove for path: '/spec/template/spec/styrmin.io~1component-container~1<component>~1<container>/image'`;
+  Styrmin never adds a container. Nothing fails until a user first sets an env var or an
+  image override on that component, so verify the name when you write the driver.
 - **Identifier label not on the workload.** If the first identifier label matches only pods,
   or only a kind other than `Deployment`/`StatefulSet`, the patch matches nothing and the env
   vars silently never arrive.
@@ -203,9 +203,9 @@ retired `component_env_vars` stub) are registered there. Add a unit test that dr
 filter through `ApplicationHelmReleaseBuilder.render_value_template`
 (see `backend/tests/unit/agent/test_render_value_template_env_vars.py`).
 
-The env var patches are built by `build_env_var_patches()` in
-`backend/styrmin_backend/services/env_vars/patch_builder.py` and rendered by
-`ContainerEnvPatch` in
+The env var patches are built by `build_component_container_patches()` in
+`backend/styrmin_backend/services/component_container/patch_builder.py` and rendered by
+`ContainerEnvPatch` (the merge) and `ComponentContainerPatch` (the guard) in
 `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py`.
 
 ## Related

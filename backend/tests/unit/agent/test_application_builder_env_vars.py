@@ -1,10 +1,10 @@
-"""Unit tests for env var patches in ``ApplicationHelmReleaseBuilder.build()``
-(017-post-render-env-vars, T008).
+"""Unit tests for component-container patches in ``ApplicationHelmReleaseBuilder.build()``
+(017-post-render-env-vars T008, 018-component-image-overrides T008).
 
-Pins research D-002: env patches come after every scheduling patch, so the
-scheduling ``ResourcesPatch`` (JSON patch on ``containers/0``) still hits the
-chart's original first container. Also pins critique E3: the rendered
-HelmRelease always sets both metadata maps the replace-spec update relies on.
+Pins 017 research D-002: the env merge and the guard (018) come after every other patch, so the
+scheduling ``ResourcesPatch`` (JSON patch on ``containers/0``) still hits the chart's original
+first container. Also pins critique E3: the rendered HelmRelease always sets both metadata maps the
+replace-spec update relies on.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from styrmin_backend.context.models.components import (
     Identifier,
     LabelIdentifier,
     ResolvedComponentEnvVars,
+    ResolvedComponentImageOverride,
     ResolvedComponentScheduling,
 )
 from styrmin_backend.context.models.config import (
@@ -45,6 +46,10 @@ from styrmin_backend.context.models.contexts import (
     InstanceContext,
 )
 from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
+from styrmin_backend.services.component_container.exceptions import GUARD_KEY_PREFIX
+from styrmin_backend.services.component_container.patch_builder import (
+    build_component_container_patches,
+)
 
 
 def _component(
@@ -53,6 +58,7 @@ def _component(
     *,
     env_vars: dict[str, str] | None,
     with_resources: bool = True,
+    image: str | None = None,
 ) -> ComponentContext:
     scheduling = (
         ResolvedComponentScheduling(
@@ -75,6 +81,11 @@ def _component(
         scheduling=scheduling,
         env_vars=(
             ResolvedComponentEnvVars(config=env_vars) if env_vars is not None else None
+        ),
+        image_override=(
+            ResolvedComponentImageOverride(reference=image)
+            if image is not None
+            else None
         ),
     )
 
@@ -127,6 +138,13 @@ def _is_env_patch(entry: dict[str, Any]) -> bool:
     return any("env" in c for c in containers.get("containers", []))
 
 
+def _is_guard_patch(entry: dict[str, Any]) -> bool:
+    doc = yaml.safe_load(entry["patch"])
+    return isinstance(doc, list) and any(
+        GUARD_KEY_PREFIX in op.get("path", "") for op in doc
+    )
+
+
 def _is_resources_patch(entry: dict[str, Any]) -> bool:
     doc = yaml.safe_load(entry["patch"])
     return isinstance(doc, list) and any(
@@ -134,8 +152,23 @@ def _is_resources_patch(entry: dict[str, Any]) -> bool:
     )
 
 
-class TestEnvPatchOrdering:
-    def test_env_patches_come_after_every_scheduling_patch(self) -> None:
+def _assert_component_container_patches_last(context: GlobalContext) -> None:
+    patches = _patches(_rendered(context))
+    expected = [tp.render_value() for tp in build_component_container_patches(context)]
+    head = patches[: len(patches) - len(expected)]
+
+    assert expected, "fixture must produce component-container patches"
+    assert patches[len(head) :] == expected, (
+        "component-container patches must be the last entries in the post-render list"
+    )
+    assert any(_is_resources_patch(p) for p in head), (
+        "fixture must produce scheduling resources patches"
+    )
+    assert not any(_is_env_patch(p) or _is_guard_patch(p) for p in head)
+
+
+class TestComponentContainerPatchOrdering:
+    def test_env_patches_come_after_every_other_patch(self) -> None:
         context = _context(
             _component("server", "simple-app", env_vars={"LOG_LEVEL": "debug"}),
             _component("database", "postgresql", env_vars={"PGTZ": "UTC"}),
@@ -143,14 +176,26 @@ class TestEnvPatchOrdering:
 
         patches = _patches(_rendered(context))
         env_idx = [i for i, p in enumerate(patches) if _is_env_patch(p)]
-        resources_idx = [i for i, p in enumerate(patches) if _is_resources_patch(p)]
+        guard_idx = [i for i, p in enumerate(patches) if _is_guard_patch(p)]
 
         assert len(env_idx) == 4, "two kinds per component with env vars"
-        assert resources_idx, "fixture must produce scheduling resources patches"
-        assert max(resources_idx) < min(env_idx)
-        assert env_idx == list(range(len(patches) - 4, len(patches))), (
-            "env patches must be the last entries in the post-render list"
+        assert len(guard_idx) == 4, "one guard per env merge"
+        _assert_component_container_patches_last(context)
+
+    def test_image_only_patches_come_after_every_other_patch(self) -> None:
+        context = _context(
+            _component(
+                "server", "simple-app", env_vars=None, image="simple-app-patched:0.1.0"
+            ),
+            _component("database", "postgresql", env_vars=None),
         )
+
+        patches = _patches(_rendered(context))
+        guards = [yaml.safe_load(p["patch"]) for p in patches if _is_guard_patch(p)]
+
+        assert not any(_is_env_patch(p) for p in patches)
+        assert [ops[2]["value"] for ops in guards] == ["simple-app-patched:0.1.0"] * 2
+        _assert_component_container_patches_last(context)
 
     def test_env_patch_targets_component_by_identifier_label(self) -> None:
         context = _context(
@@ -170,7 +215,7 @@ class TestEnvPatchOrdering:
             },
         ]
 
-    def test_no_env_patch_without_component_env_vars(self) -> None:
+    def test_no_component_container_patch_without_overrides(self) -> None:
         context = _context(
             _component("server", "simple-app", env_vars=None),
             _component("database", "postgresql", env_vars={}),
@@ -179,7 +224,7 @@ class TestEnvPatchOrdering:
         patches = _patches(_rendered(context))
 
         assert patches, "label and scheduling patches are still emitted"
-        assert not any(_is_env_patch(p) for p in patches)
+        assert not any(_is_env_patch(p) or _is_guard_patch(p) for p in patches)
 
 
 class TestMetadataMaps:

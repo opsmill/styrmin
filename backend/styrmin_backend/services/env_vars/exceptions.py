@@ -9,10 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from styrmin_backend.services.exceptions import (
-    PostRenderPatchRenderingError,
-    ServiceError,
-)
+from styrmin_backend.services.exceptions import ServiceError
 
 
 class InvalidEnvVarNameError(ServiceError):
@@ -384,9 +381,3 @@ class DriverEnvVarDocLevelMismatchError(ServiceError):
     @property
     def error_metadata(self) -> dict[str, Any]:
         return {"name": self.name, "level": self.level}
-
-
-class EnvVarPatchRenderingError(PostRenderPatchRenderingError):
-    """Failed to serialise an env var post-renderer patch into YAML."""
-
-    default_message = "Failed to serialise env var post-renderer patch"

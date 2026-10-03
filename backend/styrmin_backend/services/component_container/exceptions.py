@@ -1,4 +1,4 @@
-"""The missing-component-container guard failure and its parser (018, research D-002 and D-004).
+"""Component-container patch errors: the guard failure, its parser, and patch rendering (018).
 
 The post-render JSON6902 patch moves the component container to the temporary key
 ``/spec/template/spec/styrmin.io~1component-container~1<esc(N)>~1<esc(C)>`` and removes its
@@ -11,7 +11,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from styrmin_backend.services.exceptions import ServiceError
+from styrmin_backend.services.exceptions import (
+    PostRenderPatchRenderingError,
+    ServiceError,
+)
 
 GUARD_KEY_PREFIX = "styrmin.io~1component-container~1"
 
@@ -66,3 +69,9 @@ class ComponentContainerNotFoundError(ServiceError):
     @property
     def error_metadata(self) -> dict[str, Any]:
         return {"component_name": self.component_name, "container": self.container}
+
+
+class ComponentContainerPatchRenderingError(PostRenderPatchRenderingError):
+    """Failed to serialise a component-container post-renderer patch into YAML."""
+
+    default_message = "Failed to serialise component-container post-renderer patch"

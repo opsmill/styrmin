@@ -11,6 +11,7 @@ from styrmin_backend.context.models.config import (
     Toleration,
     TopologySpreadConstraint,
 )
+from styrmin_backend.services.component_container.exceptions import GUARD_KEY_PREFIX
 
 from .base import GenericBlock, KeyedBlock
 
@@ -731,7 +732,9 @@ class ContainerEnvPatch(Patch):
     Containers merge by ``name`` and env entries by env ``name``, so chart
     entries the patch does not name survive. Every entry carries
     ``valueFrom: null`` so a same-name chart ``valueFrom`` is replaced by the
-    literal ``value`` (017-post-render-env-vars research D-001).
+    literal ``value`` (017-post-render-env-vars research D-001). With no env
+    entries the patch only names the container, which moves it to
+    ``containers[0]`` for :class:`ComponentContainerPatch` (018 research D-001).
 
     Example:
         >>> patch = ContainerEnvPatch(container="app", env={"LOG_LEVEL": "debug"})
@@ -753,7 +756,7 @@ class ContainerEnvPatch(Patch):
     """
 
     container: str
-    env: dict[str, str]
+    env: dict[str, str] = field(default_factory=dict)
     kind: str = "Deployment"
     api_version: str = "apps/v1"
     name: str = "any"
@@ -761,11 +764,13 @@ class ContainerEnvPatch(Patch):
     _operation: str = field(init=False, default="add")
 
     def render_value(self) -> str:
-        entries = [
-            {"name": key, "value": value, "valueFrom": None}
-            for key, value in self.env.items()
-        ]
-        leaf = {"containers": [{"name": self.container, "env": entries}]}
+        container: dict[str, Any] = {"name": self.container}
+        if self.env:
+            container["env"] = [
+                {"name": key, "value": value, "valueFrom": None}
+                for key, value in self.env.items()
+            ]
+        leaf = {"containers": [container]}
         doc: dict[str, Any] = {
             "apiVersion": self.api_version,
             "kind": self.kind,
@@ -773,6 +778,75 @@ class ContainerEnvPatch(Patch):
             **_nested_dict(_POD_TEMPLATE_SPEC_PATH, leaf),
         }
         return yaml.dump(doc, default_flow_style=False, sort_keys=False)
+
+
+def _escape_json_pointer(token: str) -> str:
+    # RFC 6901: "~" first, so an escaped "/" is not escaped again.
+    return token.replace("~", "~0").replace("/", "~1")
+
+
+@dataclass
+class ComponentContainerPatch(Patch):
+    """JSON6902 patch guarding the component container and optionally setting its image.
+
+    Applied after a :class:`ContainerEnvPatch` naming the container, which moves it to
+    ``containers[0]`` or, when the name is missing, adds an image-less container there. The ops
+    move ``containers/0`` to a guard key naming the component and the container, remove its
+    ``image`` (which fails the render when the container was added), set the override or restore
+    the chart image, and move it back (018 contracts/post-render-patch.md).
+
+    Example:
+        >>> patch = ComponentContainerPatch(component="server", container="app", image="app:2")
+        >>> print(patch.render_value())
+        - op: move
+          from: /spec/template/spec/containers/0
+          path: /spec/template/spec/styrmin.io~1component-container~1server~1app
+        - op: remove
+          path: /spec/template/spec/styrmin.io~1component-container~1server~1app/image
+        - op: add
+          path: /spec/template/spec/styrmin.io~1component-container~1server~1app/image
+          value: app:2
+        - op: move
+          from: /spec/template/spec/styrmin.io~1component-container~1server~1app
+          path: /spec/template/spec/containers/0
+        <BLANKLINE>
+    """
+
+    component: str
+    container: str
+    image: str | None = None
+    kind: str = "Deployment"
+    _path: str = field(init=False, default="/spec/template/spec/containers/0")
+    _operation: str = field(init=False, default="move")
+
+    @property
+    def guard_path(self) -> str:
+        """The temporary key the container is moved to; ``parse_guard_failure`` reads it back."""
+        component = _escape_json_pointer(self.component)
+        container = _escape_json_pointer(self.container)
+        return f"/spec/template/spec/{GUARD_KEY_PREFIX}{component}~1{container}"
+
+    def render_value(self) -> str:
+        guard = self.guard_path
+        image = f"{guard}/image"
+        if self.image is not None:
+            body: list[dict[str, Any]] = [
+                {"op": "remove", "path": image},
+                {"op": "add", "path": image, "value": self.image},
+            ]
+        else:
+            saved = f"{guard}/styrmin-image"
+            body = [
+                {"op": "copy", "from": image, "path": saved},
+                {"op": "remove", "path": image},
+                {"op": "move", "from": saved, "path": image},
+            ]
+        ops = [
+            {"op": "move", "from": self._path, "path": guard},
+            *body,
+            {"op": "move", "from": guard, "path": self._path},
+        ]
+        return yaml.dump(ops, default_flow_style=False, sort_keys=False)
 
 
 @dataclass

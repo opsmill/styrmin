@@ -63,8 +63,16 @@ styrmin_backend/services/
 ├── env_vars/                      # Free-form deployment env vars (post-render injection, ADR-057)
 │   ├── validator.py               # name regex + size caps + risky-name warning
 │   ├── resolver.py                # env→dep→comp deepest-wins merge
-│   ├── patch_builder.py           # strategic-merge env patches into each component container
 │   └── exceptions.py              # InvalidEnvVarNameError, ComponentContainerNotDeclaredError, etc.
+│
+├── image_overrides/               # Per-component image overrides (018)
+│   ├── reference.py               # image-reference grammar + {{ app.version }} substitution
+│   ├── resolver.py                # stored overrides → live entries and orphans
+│   └── exceptions.py              # InvalidImageReferenceError, UnknownComponentImageOverrideError
+│
+├── component_container/           # Post-render patches into each component container (018)
+│   ├── patch_builder.py           # env merge + JSON6902 guard (and image) per Deployment/StatefulSet
+│   └── exceptions.py              # guard-failure parser, ComponentContainerNotFoundError
 │
 └── utilities/                     # Infrastructure utilities (ingress, etc.)
     └── utilities.py               # Utility management
