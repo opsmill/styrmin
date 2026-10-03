@@ -160,6 +160,17 @@ class ComponentConfig(StyrminModel, table=True):
     application_driver_version_id: UUID
 ```
 
+<!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
+
+`config` holds the component definition from the driver specification file
+(`components.<name>`), including the optional **component container**
+(`config["container"]`, a DNS-1123 label validated at driver registration). The definition is
+copied into each deployment's `Component.config` on deploy and on a driver-version switch, so a
+deployment's component container always follows its pinned driver version. The container has
+no column of its own: it rides the existing JSON, read through `ComponentConfig.container` and
+`Component.container` ([ADR-057](../../adr/0057-post-render-component-overrides.md) §1). Rows
+stored before 017 carry no `container` key and count as containerless.
+
 ### Helm Models
 
 #### HelmRepository

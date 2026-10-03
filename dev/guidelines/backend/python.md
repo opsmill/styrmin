@@ -114,6 +114,45 @@ Raise with exception chaining:
 raise InvalidContextError() from e
 ```
 
+### Retiring a driver-facing template surface
+
+<!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
+
+When a template filter or function that drivers call is removed, keep it registered in
+`get_jinja_environment()` as a stub that raises a typed `ServiceError`. Do not unregister it:
+Jinja's generic "no filter named …" error tells the user nothing about the fix.
+
+```python
+def component_env_vars(*args: object, **kwargs: object) -> NoReturn:  # noqa: ARG001
+    raise RetiredTemplateFilterError
+```
+
+The error carries an `error_code`, the retired name and a `migration_guide` URL in its
+metadata, and a `default_message` that tells **both** audiences what to do (users: upgrade the
+deployment's driver version; driver authors: what replaces the call) and includes the URL. The
+typed code does not survive the StyrminDeployment CR → operator hop, so the message string must
+be enough on its own.
+
+### Validate config writes by delta when a driver change can strand stored values
+
+<!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
+
+When a driver upgrade can make stored deployment config invalid (for example component env vars
+on a component that loses its component container), reject only what the write **adds or
+changes**. Accept unchanged re-submissions and removals:
+
+| Submitted vs stored | Result |
+|---|---|
+| identical | accepted |
+| subset (keys removed) | accepted |
+| new key or changed value | typed `ServiceError` |
+
+The frontend and `styrminctl apply` submit full configs, so an absolute check blocks every
+unrelated edit on that deployment and blocks removing the stranded values. Validate against the
+driver version the deployment is pinned to **after** the write, not the pre-switch version. Keep
+the stranded values and expose them through a read flag (e.g. `ComponentEnvVars.isApplicable`)
+rather than deleting them. Reference: `services/deployment.py::_validate_component_env_var_containers`.
+
 <!-- Extracted from specs/016-backup-retention-ttl on 2026-08-04 -->
 
 ### Never add new logic inside a swallow-and-proceed block
@@ -350,6 +389,50 @@ if context.instance.config.<field> is not None:
 No defaulting at render time, no defaulting at Pydantic-model time, no defaulting in the builder. `None` propagates from the Pydantic field through `ResolvedConfig` to the renderer, and the renderer treats `None` as "skip this annotation". The downstream controller (external-dns, Traefik, …) applies its own default for absent annotations — the platform does not claim authority over defaults it has no business setting.
 
 **Why:** always-emit-with-a-default rewrites the rendered manifest for every existing deployment on upgrade — even ones that never touched the knob. Code review should flag any `annotations["..."] = ... or "default"` shape. Chart-values templates honour the same rule with `{% if … %}` guards.
+
+### Per-component pod overrides go through post-render into the component container
+
+<!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
+
+A new per-component override of the pod spec (env vars today, images in #20 next) is a
+Kustomize post-render patch, not a Helm values key. Helm replaces lists, so writing a chart's
+list-shaped key from the values template drops every entry the chart ships.
+
+- Target the component's declared **component container** (`components.<name>.container`) by
+  `name` in a strategic-merge patch. kyaml merges containers and `env` entries by `name`, so
+  chart entries the patch does not name survive.
+- Target only `Deployment` and `StatefulSet`, narrowed by the component's identifier
+  `labelSelector`. Chart Jobs often share the component label.
+- Skip components without a component container. Never fall back to `containers[0]`.
+- Append the patches after every patch that addresses a container by index (e.g. the
+  scheduling `ResourcesPatch` on `containers/0`): a strategic merge moves the named container
+  to index 0.
+- Regenerate the patches from the resolved context on every render, so removing an override
+  removes its entry without a marker.
+- Test the outcome (entries present, chart entries kept, values replaced), not the exact
+  order: kyaml's ordering is implementation behaviour.
+
+See [ADR-057](../../adr/0057-post-render-component-overrides.md) and
+`services/env_vars/patch_builder.py`.
+
+### Custom-resource updates: replace the spec keys you write, merge the rest
+
+<!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
+
+For a custom resource whose `spec` Styrmin rebuilds from context on every reconcile, apply it
+with `upsert_custom_resource(..., replace_spec_keys_on_update=True)`. Styrmin owns each
+top-level spec key it writes; everything else merges.
+
+- Do not rely on JSON merge-patch alone: it keeps nested keys the new body omits, so a cleared
+  value stays live (a stale env var under `spec.values` or `spec.context`).
+- Do not replace the whole `spec`: that drops keys Styrmin never writes, such as `spec.suspend`
+  from `flux suspend hr` or the server-owned `spec.deletionRequested` on the
+  StyrminDeployment CR.
+- Never touch metadata wholesale: labels and annotations are added key by key so Flux's
+  finalizer and kopf's annotations survive.
+
+See [ADR-057](../../adr/0057-post-render-component-overrides.md) §6 and
+[`dev/knowledge/agent/operator.md`](../../knowledge/agent/operator.md#apply-semantics).
 
 ## GraphQL (Strawberry)
 

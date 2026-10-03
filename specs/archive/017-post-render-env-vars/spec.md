@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-02
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: Idea brief "Platform-owned env var injection via post-render" — [opsmill/styrmin#385 (comment)](https://github.com/opsmill/styrmin/issues/385#issuecomment-5956413845). Seed issue: [#385](https://github.com/opsmill/styrmin/issues/385). Related: [#334](https://github.com/opsmill/styrmin/issues/334) (infrahub task-manager `PROMETHEUS_MULTIPROC_DIR`), [#281](https://github.com/opsmill/styrmin/issues/281), [#20](https://github.com/opsmill/styrmin/issues/20) (image overrides, next on the same mechanism).
 

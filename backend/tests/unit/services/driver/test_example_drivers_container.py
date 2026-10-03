@@ -17,7 +17,7 @@ from styrmin_backend.services.driver.models.resources.driver import DriverSpec
 _EXAMPLES_DIR = Path(__file__).resolve().parents[5] / "driver" / "examples"
 _DRIVER_DIRS = sorted(p for p in _EXAMPLES_DIR.iterdir() if p.is_dir())
 
-# Mirrors specs/017-post-render-env-vars/driver-containers.md, verified by
+# Mirrors specs/archive/017-post-render-env-vars/driver-containers.md, verified by
 # `helm template` of each pinned chart with the driver's own values.
 _EXPECTED_CONTAINERS: dict[str, dict[str, str]] = {
     "simple-app": {"server": "simple-app", "database": "postgresql"},

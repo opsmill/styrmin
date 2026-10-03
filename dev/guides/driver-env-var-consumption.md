@@ -56,7 +56,7 @@ helm template styrmin-my-app <chart> -f rendered-values.yaml \
 The patch targets workloads by the component's **first** identifier label, matched against
 the workload's own `metadata.labels` (a Kustomize `target.labelSelector` matches the
 resource, not its pods). Most charts put the same labels on both; check that yours does.
-[`specs/017-post-render-env-vars/driver-containers.md`](../../specs/017-post-render-env-vars/driver-containers.md)
+[`specs/archive/017-post-render-env-vars/driver-containers.md`](../../specs/archive/017-post-render-env-vars/driver-containers.md)
 records the command and result for every in-repo driver.
 
 ## No template wiring
