@@ -23,7 +23,7 @@ the missing-container case fails with an error containing
 ```bash
 uv run pytest backend/tests/unit/services/image_overrides backend/tests/unit/agent -k "image or component_container" -v
 uv run pytest backend/tests/functional/graphql -k image_override -v
-cd frontend && pnpm test -- imageReference ComponentOverrides Upgrade
+cd frontend && pnpm test -- image-reference ComponentOverrides PinnedImageOverridesNotice
 ```
 
 Expected: grammar vectors pass in both languages; the propagation tests in

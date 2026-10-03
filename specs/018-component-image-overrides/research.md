@@ -174,8 +174,8 @@ messages leak template internals); a `$APP_VERSION` syntax (inconsistent with th
 `[domain[:port]/]path[:tag][@algorithm:hex]`, lowercase path components with `.`, `_`, `__` or `-`
 separators, tag `[\w][\w.-]{0,127}`, digest hex of at least 32 characters, name at most 255
 characters. An explicit tag or digest is required. Backend:
-`services/image_overrides/reference.py`; frontend: `src/lib/imageReference.ts`. Both test suites
-read one shared vector file (`frontend/src/lib/imageReference.vectors.json`), so the two
+`services/image_overrides/reference.py`; frontend: `src/lib/image-reference.ts`. Both test suites
+read one shared vector file (`frontend/src/lib/image-reference.vectors.json`), so the two
 implementations cannot drift silently.
 
 **Alternatives considered**: a Python package (`docker` or `oras`), rejected because the governance
@@ -257,7 +257,7 @@ brief); returning a dict (breaking change for third-party actions).
   prints one `warning:` line per affected deployment to stderr. Applicability is not consulted:
   `apply` has the raw config, and listing a stranded override is harmless. `apply` stays
   non-interactive.
-- The token check is the D-006 regex, shared by `frontend/src/lib/imageReference.ts` and the SDK
+- The token check is the D-006 regex, shared by `frontend/src/lib/image-reference.ts` and the SDK
   (`styrmin_sdk/models/image_reference.py`, a few lines with no dependency).
 - No warning on `sdk.deployments.update_version()` (out of scope).
 

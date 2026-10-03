@@ -147,7 +147,7 @@ python_sdk/src/styrmin_sdk/
 cli/src/styrminctl/commands/deployments.py            # warning line on stderr
 
 frontend/src/
-├── lib/imageReference.ts (+ .test.ts, .vectors.json)
+├── lib/image-reference.ts (+ .test.ts, .vectors.json)
 ├── graphql/ (get_deployment operation)
 ├── components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx (+ test)
 ├── components/deployment/configuration/sections/read/ComponentOverridesSummary.tsx (+ test)
