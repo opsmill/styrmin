@@ -1,0 +1,333 @@
+[
+  {
+    "reference": "simple-app:0.1.0",
+    "valid": true,
+    "note": "Bare name with a tag (the E2E chart image)."
+  },
+  {
+    "reference": "registry.example/acme/app:1.0.0",
+    "valid": true,
+    "note": "Domain, multi-component path, tag."
+  },
+  {
+    "reference": "localhost:5000/app:v1",
+    "valid": true,
+    "note": "Domain with a port; ':5000' is the port, 'v1' the tag."
+  },
+  {
+    "reference": "127.0.0.1:5000/app:1",
+    "valid": true,
+    "note": "IPv4 domain with a port."
+  },
+  {
+    "reference": "[::1]:5000/a/b:t",
+    "valid": true,
+    "note": "Bracketed IPv6 domain with a port and single-character path components."
+  },
+  {
+    "reference": "app@sha256:487d074cafebf49cceed5d20c2a33529af08d8e0df76c86c0b9398e23dd2cf37",
+    "valid": true,
+    "note": "Digest only, no tag."
+  },
+  {
+    "reference": "app:1.0@sha256:487d074cafebf49cceed5d20c2a33529af08d8e0df76c86c0b9398e23dd2cf37",
+    "valid": true,
+    "note": "Tag and digest together."
+  },
+  {
+    "reference": "registry.example/acme/app@sha256:487d074cafebf49cceed5d20c2a33529af08d8e0df76c86c0b9398e23dd2cf37",
+    "valid": true,
+    "note": "Domain and path with a digest."
+  },
+  {
+    "reference": "app@sha256:487d074cafebf49cceed5d20c2a33529",
+    "valid": true,
+    "note": "Digest at the 32-hex-character minimum."
+  },
+  {
+    "reference": "my.app:1",
+    "valid": true,
+    "note": "Path separator '.'."
+  },
+  {
+    "reference": "my_app:1",
+    "valid": true,
+    "note": "Path separator '_'."
+  },
+  {
+    "reference": "my__app:1",
+    "valid": true,
+    "note": "Path separator '__'."
+  },
+  {
+    "reference": "my-app:1",
+    "valid": true,
+    "note": "Path separator '-'."
+  },
+  {
+    "reference": "app:V1.0_rc-2",
+    "valid": true,
+    "note": "Tags may contain uppercase, '.', '_' and '-' after the first character."
+  },
+  {
+    "reference": "app:_x",
+    "valid": true,
+    "note": "A tag may start with '_' (it is a word character)."
+  },
+  {
+    "reference": "app:tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+    "valid": true,
+    "note": "Tag at the 128-character maximum."
+  },
+  {
+    "reference": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:t",
+    "valid": true,
+    "note": "Name (without tag or digest) at the 255-character maximum."
+  },
+  {
+    "reference": "app",
+    "valid": false,
+    "reason": "missing_tag_or_digest",
+    "note": "Grammatical name without a tag or digest."
+  },
+  {
+    "reference": "registry.example/acme/app",
+    "valid": false,
+    "reason": "missing_tag_or_digest",
+    "note": "Domain and path without a tag or digest (contracts/errors.md example)."
+  },
+  {
+    "reference": "localhost:5000/app",
+    "valid": false,
+    "reason": "missing_tag_or_digest",
+    "note": "The port is not a tag."
+  },
+  {
+    "reference": "App:1",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Uppercase path component."
+  },
+  {
+    "reference": "App",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Grammar is checked before the tag/digest requirement."
+  },
+  {
+    "reference": "app:",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Empty tag."
+  },
+  {
+    "reference": "app:-x",
+    "valid": false,
+    "reason": "grammar",
+    "note": "A tag cannot start with '-'."
+  },
+  {
+    "reference": "app:.x",
+    "valid": false,
+    "reason": "grammar",
+    "note": "A tag cannot start with '.'."
+  },
+  {
+    "reference": "app:ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Tag one character over the 128-character maximum."
+  },
+  {
+    "reference": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:t",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Name one character over the 255-character maximum."
+  },
+  {
+    "reference": "app:caf\u00e9",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Non-ASCII tag character; Python's \\w is Unicode-aware unless re.ASCII is set."
+  },
+  {
+    "reference": "app@sha256:abc",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Digest shorter than 32 hex characters."
+  },
+  {
+    "reference": "app@sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Non-hex digest characters."
+  },
+  {
+    "reference": "app@",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Empty digest."
+  },
+  {
+    "reference": "my..app:1",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Double '.' is not a separator."
+  },
+  {
+    "reference": "my___app:1",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Triple '_' is not a separator."
+  },
+  {
+    "reference": "-app:1",
+    "valid": false,
+    "reason": "grammar",
+    "note": "A path component cannot start with a separator."
+  },
+  {
+    "reference": "app-:1",
+    "valid": false,
+    "reason": "grammar",
+    "note": "A path component cannot end with a separator."
+  },
+  {
+    "reference": "acme//app:1",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Empty path component."
+  },
+  {
+    "reference": "localhost:abc/app:1",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Non-numeric port."
+  },
+  {
+    "reference": "",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Empty string (never a clear; null clears)."
+  },
+  {
+    "reference": " app:1",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Leading whitespace."
+  },
+  {
+    "reference": "app:1 ",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Trailing whitespace."
+  },
+  {
+    "reference": "app :1",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Inner whitespace."
+  },
+  {
+    "reference": "app:1\n",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Trailing newline; Python's '$' matches before it, so anchor with \\Z or fullmatch."
+  },
+  {
+    "reference": "app:1\t",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Trailing tab."
+  },
+  {
+    "reference": "app:1\u0000",
+    "valid": false,
+    "reason": "grammar",
+    "note": "NUL control character."
+  },
+  {
+    "reference": "app:\u00071",
+    "valid": false,
+    "reason": "grammar",
+    "note": "BEL control character inside the tag."
+  },
+  {
+    "reference": "app:{{ app.name }}",
+    "valid": false,
+    "reason": "template_expression",
+    "note": "Template expression other than {{ app.version }}."
+  },
+  {
+    "reference": "app:{% x %}",
+    "valid": false,
+    "reason": "template_expression",
+    "note": "Jinja statement block."
+  },
+  {
+    "reference": "app:1}}",
+    "valid": false,
+    "reason": "template_expression",
+    "note": "A stray '}}' is rejected as a template expression."
+  },
+  {
+    "reference": "app:{{ app.Version }}",
+    "valid": false,
+    "reason": "template_expression",
+    "note": "The token is case-sensitive, so this is not substituted."
+  },
+  {
+    "reference": "app:{{ app.version }",
+    "valid": false,
+    "reason": "template_expression",
+    "note": "Unterminated token is not substituted; the leftover '{{' is rejected."
+  },
+  {
+    "reference": "App:{{ app.name }}",
+    "valid": false,
+    "reason": "template_expression",
+    "note": "The template check runs before the grammar check."
+  },
+  {
+    "reference": "app:{{ app.version }}",
+    "valid": true,
+    "note": "Token case: validated after substituting the placeholder version \"0\" (validate_stored_reference / validateImageReference); resolves to \"app:0\"."
+  },
+  {
+    "reference": "app:{{app.version}}",
+    "valid": true,
+    "note": "Token case: validated after substituting the placeholder version \"0\" (validate_stored_reference / validateImageReference); no inner whitespace is required."
+  },
+  {
+    "reference": "app:{{   app.version   }}",
+    "valid": true,
+    "note": "Token case: validated after substituting the placeholder version \"0\" (validate_stored_reference / validateImageReference); any amount of inner whitespace is accepted."
+  },
+  {
+    "reference": "app:v{{ app.version }}-patched",
+    "valid": true,
+    "note": "Token case: validated after substituting the placeholder version \"0\" (validate_stored_reference / validateImageReference); the token can sit inside a tag; resolves to \"app:v0-patched\"."
+  },
+  {
+    "reference": "registry.example/acme/app-{{ app.version }}:stable",
+    "valid": true,
+    "note": "Token case: validated after substituting the placeholder version \"0\" (validate_stored_reference / validateImageReference); token in a path component; resolves to \"registry.example/acme/app-0:stable\"."
+  },
+  {
+    "reference": "registry.example/{{ app.version }}/app:{{ app.version }}",
+    "valid": true,
+    "note": "Token case: validated after substituting the placeholder version \"0\" (validate_stored_reference / validateImageReference); every occurrence is replaced; resolves to \"registry.example/0/app:0\"."
+  },
+  {
+    "reference": "registry.example/acme/app-{{ app.version }}",
+    "valid": false,
+    "reason": "missing_tag_or_digest",
+    "note": "Token case: validated after substituting the placeholder version \"0\" (validate_stored_reference / validateImageReference); a token in the path is not a tag."
+  },
+  {
+    "reference": "app@sha256:{{ app.version }}",
+    "valid": false,
+    "reason": "grammar",
+    "note": "Token case: validated after substituting the placeholder version \"0\" (validate_stored_reference / validateImageReference); \"app@sha256:0\" is not a valid digest."
+  }
+]

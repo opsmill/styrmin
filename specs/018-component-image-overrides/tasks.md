@@ -24,8 +24,8 @@ description: "Task list for 018-component-image-overrides"
 
 **Purpose**: Package skeletons and the shared grammar vectors both languages test against.
 
-- [ ] T001 Create `frontend/src/lib/image-reference.vectors.json`: an array of `{reference, valid, reason?, note}` cases covering research D-007. Valid: `simple-app:0.1.0`, `registry.example/acme/app:1.0.0`, `localhost:5000/app:v1`, `[::1]:5000/a/b:t`, `app@sha256:<64 hex>`, `app:1.0@sha256:<64 hex>`, path separators `.`, `_`, `__`, `-`, a 128-char tag. Invalid with `reason`: `app` (`missing_tag_or_digest`), `App:1` (`grammar`), `app:` (`grammar`), `app:-x` (`grammar`), a 129-char tag (`grammar`), `app@sha256:abc` (`grammar`), whitespace or control characters (`grammar`), `app:{{ app.name }}` (`template_expression`), `app:{% x %}` (`template_expression`). Token cases: `app:{{ app.version }}`, `app:{{app.version}}`, `app:{{   app.version   }}`, and `{{ app.version }}` in a path component.
-- [ ] T002 [P] Create package skeletons `backend/styrmin_backend/services/image_overrides/__init__.py` and `backend/styrmin_backend/services/component_container/__init__.py` (module docstrings only).
+- [X] T001 Create `frontend/src/lib/image-reference.vectors.json`: an array of `{reference, valid, reason?, note}` cases covering research D-007. Valid: `simple-app:0.1.0`, `registry.example/acme/app:1.0.0`, `localhost:5000/app:v1`, `[::1]:5000/a/b:t`, `app@sha256:<64 hex>`, `app:1.0@sha256:<64 hex>`, path separators `.`, `_`, `__`, `-`, a 128-char tag. Invalid with `reason`: `app` (`missing_tag_or_digest`), `App:1` (`grammar`), `app:` (`grammar`), `app:-x` (`grammar`), a 129-char tag (`grammar`), `app@sha256:abc` (`grammar`), whitespace or control characters (`grammar`), `app:{{ app.name }}` (`template_expression`), `app:{% x %}` (`template_expression`). Token cases: `app:{{ app.version }}`, `app:{{app.version}}`, `app:{{   app.version   }}`, and `{{ app.version }}` in a path component.
+- [X] T002 [P] Create package skeletons `backend/styrmin_backend/services/image_overrides/__init__.py` and `backend/styrmin_backend/services/component_container/__init__.py` (module docstrings only).
 
 ---
 
