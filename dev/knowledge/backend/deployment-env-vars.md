@@ -224,10 +224,11 @@ the message and the migration guide URL do.
 Two apply-path changes make clearing work on deployments created before
 017: both the operator's HelmRelease update and the agent's StyrminDeployment
 CR applies replace each top-level spec key they write (JSON Patch
-`add /spec/<key>`, `None` pruned, per-key metadata ops). `spec.values` and
-`spec.context` are replaced wholesale; keys Styrmin never writes
-(`spec.suspend`, `spec.deletionRequested`) are untouched. Without them,
-merge-patch kept stale values-template env entries and cleared context keys.
+`add /spec/<key>`, nested `None` pruned, a top-level `None` key removed,
+per-key metadata ops). `spec.values` and `spec.context` are replaced
+wholesale; keys Styrmin never writes (`spec.suspend`,
+`spec.deletionRequested`) are untouched. Without them, merge-patch kept stale
+values-template env entries and cleared context keys.
 
 History: 008 injected by a JSON-patch `replace` on `containers/0/env`, which
 clobbered chart defaults; 010 moved injection into driver templates

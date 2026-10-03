@@ -3,9 +3,10 @@ on the HelmRelease apply (017-post-render-env-vars, T009, FR-011, research
 D-003, critique E3).
 
 On a 409 the apply sends one JSON Patch that replaces each spec key the body
-sets (``None`` pruned) and adds each owned ``metadata.labels`` /
-``metadata.annotations`` key individually, so stale ``spec.values`` entries
-disappear while ``spec.suspend``, kopf annotations and Flux's finalizer survive.
+sets (nested ``None`` pruned, top-level ``None`` removed) and adds each owned
+``metadata.labels`` / ``metadata.annotations`` key individually, so stale
+``spec.values`` entries disappear while ``spec.suspend``, kopf annotations and
+Flux's finalizer survive.
 """
 
 from __future__ import annotations
@@ -65,16 +66,20 @@ def _unescape(token: str) -> str:
     return token.replace("~1", "/").replace("~0", "~")
 
 
-def _apply_add_ops(live: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str, Any]:
-    """Apply RFC 6902 ``add`` ops on object members; a missing parent fails."""
+def _apply_ops(live: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply RFC 6902 ``add`` / ``remove`` ops on object members; a missing
+    parent, or a ``remove`` of a missing member, fails."""
     result = copy.deepcopy(live)
     for op in ops:
-        assert op["op"] == "add"
         *parents, leaf = [_unescape(t) for t in op["path"].split("/")[1:]]
         node = result
         for token in parents:
             node = node[token]
-        node[leaf] = op["value"]
+        if op["op"] == "add":
+            node[leaf] = op["value"]
+        else:
+            assert op["op"] == "remove"
+            del node[leaf]
     return result
 
 
@@ -147,7 +152,7 @@ async def test_applied_patch_drops_stale_spec_and_keeps_foreign_metadata() -> No
     api = _mock_api()
 
     await _run(api, _BODY, replace_spec_keys_on_update=True)
-    result = _apply_add_ops(
+    result = _apply_ops(
         live, api.patch_namespaced_custom_object.call_args.kwargs["body"]
     )
 
@@ -168,6 +173,57 @@ async def test_applied_patch_drops_stale_spec_and_keeps_foreign_metadata() -> No
         == "{}"
     )
     assert result["status"] == {"observedGeneration": 3}
+
+
+_NULL_VALUES_BODY: dict[str, Any] = {
+    "metadata": {"name": "rel"},
+    "spec": {
+        "interval": "1h",
+        "chart": {"spec": {"chart": "c", "version": None}},
+        "values": None,
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_top_level_none_spec_key_emits_add_then_remove() -> None:
+    api = _mock_api()
+
+    await _run(api, _NULL_VALUES_BODY, replace_spec_keys_on_update=True)
+
+    assert api.patch_namespaced_custom_object.call_args.kwargs["body"] == [
+        {"op": "add", "path": "/spec/interval", "value": "1h"},
+        {"op": "add", "path": "/spec/chart", "value": {"spec": {"chart": "c"}}},
+        {"op": "add", "path": "/spec/values", "value": {}},
+        {"op": "remove", "path": "/spec/values"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "live_spec",
+    [
+        {"interval": "1h", "suspend": True, "values": {"extraEnv": [{"name": "X"}]}},
+        {"interval": "1h", "suspend": True},
+    ],
+    ids=["values-present", "values-absent"],
+)
+@pytest.mark.asyncio
+async def test_applied_patch_removes_top_level_none_key(
+    live_spec: dict[str, Any],
+) -> None:
+    api = _mock_api()
+
+    await _run(api, _NULL_VALUES_BODY, replace_spec_keys_on_update=True)
+    result = _apply_ops(
+        {"metadata": {"name": "rel"}, "spec": live_spec},
+        api.patch_namespaced_custom_object.call_args.kwargs["body"],
+    )
+
+    assert result["spec"] == {
+        "interval": "1h",
+        "suspend": True,
+        "chart": {"spec": {"chart": "c"}},
+    }
 
 
 @pytest.mark.asyncio
