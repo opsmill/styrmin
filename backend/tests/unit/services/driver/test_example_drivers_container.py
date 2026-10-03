@@ -62,7 +62,7 @@ def _declared_containers(driver_dir: Path) -> dict[str, str | None]:
 
 
 def test_expected_mapping_covers_existing_drivers() -> None:
-    assert set(_EXPECTED_CONTAINERS) <= {p.name for p in _DRIVER_DIRS}
+    assert set(_EXPECTED_CONTAINERS) == {p.name for p in _DRIVER_DIRS}
 
 
 @pytest.mark.parametrize("driver_dir", _DRIVER_DIRS, ids=lambda p: p.name)
@@ -71,8 +71,7 @@ def test_every_component_declares_container(driver_dir: Path) -> None:
 
     missing = sorted(name for name, container in containers.items() if not container)
     assert not missing, f"{driver_dir.name}: components without a container: {missing}"
-    if driver_dir.name in _EXPECTED_CONTAINERS:
-        assert containers == _EXPECTED_CONTAINERS[driver_dir.name]
+    assert containers == _EXPECTED_CONTAINERS[driver_dir.name]
 
 
 @pytest.mark.parametrize("driver_dir", _DRIVER_DIRS, ids=lambda p: p.name)

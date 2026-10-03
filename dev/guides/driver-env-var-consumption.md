@@ -5,7 +5,8 @@ environment variables reach its pods, what Styrmin then does on its own, and the
 modes to check for.
 
 The short version: declare one **component container** per component in
-`driver.styrmin.yml`, and do not mention env vars in `values.j2.yml`. Styrmin merges each
+`driver.styrmin.yml`, and do not wire user env vars into the chart's env values in
+`values.j2.yml`. Styrmin merges each
 component's resolved env vars into that container after the chart renders, by env var
 `name`, so the chart's own env entries survive.
 

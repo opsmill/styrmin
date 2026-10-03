@@ -28,7 +28,7 @@ independently. Paths are repository-relative.
 
 **Purpose**: Pin the data every later task depends on.
 
-- [X] T001 Render every in-repo driver chart with its driver's values (`helm template` with the `fullnameOverride` from each `driver/examples/*/values.j2.yml`) and, for each of the 30 components, record the identifier label, the matched `Deployment`/`StatefulSet` names, and the container name to declare in `specs/017-post-render-env-vars/driver-containers.md` (one table row per component, plus the exact `helm template` command per driver). Start from research.md D-010; flag any component whose label matches a workload lacking that container.
+- [X] T001 Render every in-repo driver chart with its driver's values (`helm template` with the `fullnameOverride` from each `driver/examples/*/values.j2.yml`) and, for each of the 28 components, record the identifier label, the matched `Deployment`/`StatefulSet` names, and the container name to declare in `specs/017-post-render-env-vars/driver-containers.md` (one table row per component, plus the exact `helm template` command per driver). Start from research.md D-010; flag any component whose label matches a workload lacking that container.
 
 ---
 

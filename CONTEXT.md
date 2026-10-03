@@ -191,7 +191,7 @@ The mechanism by which a **deployment**'s **component** config (`DeploymentConfi
 _Avoid_: "component patch", "component customisation".
 
 **Component container**:
-The single container in a **component**'s pod template that the **application driver** declares (`components.<name>.container` in the **driver specification file**) as the target of per-component post-render overrides — env vars today, images next ([#20](https://github.com/opsmill/styrmin/issues/20)). Optional: a component without one accepts no component-scope env vars (`COMPONENT_CONTAINER_NOT_DECLARED`) and is skipped by deployment- and environment-scope ones. Only `Deployment` and `StatefulSet` workloads are patched. A wrong name fails the Helm release rather than silently no-op'ing. See [ADR-057](dev/adr/0057-post-render-component-overrides.md).
+The single container in a **component**'s pod template that the **application driver** declares (`components.<name>.container` in the **driver specification file**) as the target of per-component post-render overrides — env vars today, images next ([#20](https://github.com/opsmill/styrmin/issues/20)). Optional: a component without one accepts no component-scope env vars (`COMPONENT_CONTAINER_NOT_DECLARED`) and is skipped by deployment- and environment-scope ones. Only `Deployment` and `StatefulSet` workloads are patched. With env vars set, a wrong name fails the Helm release rather than silently no-op'ing. See [ADR-057](dev/adr/0057-post-render-component-overrides.md).
 _Avoid_: "main container", "app container", "primary container", "target container".
 
 **Container override**:

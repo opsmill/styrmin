@@ -234,9 +234,10 @@ stored block. Unchanged re-submissions and removals (submitted ⊆ stored, compa
 | changed value | `COMPONENT_CONTAINER_NOT_DECLARED` |
 
 **Target version**: the driver version the deployment will be pinned to after the mutation
-(resolved in `update_deployment` before any task is submitted; on `deploy`, the selected
-version). This deliberately differs from `_validate_component_env_var_targets`, which checks the
-pre-switch version: validating the pre-switch version would let a version-switching write store
+(resolved in `update_deployment` before any task is submitted, where it is the current version
+since `updateDeployment` never switches versions; on `deploy`, the selected version). This
+deliberately differs from `_validate_component_env_var_targets`, which checks the pre-switch
+version: validating the pre-switch version would let a version-switching write store
 values on a component that loses its container (inert, violating SC-005) and wrongly reject
 values on a component that gains one. The existing unknown-component check is left unchanged.
 
