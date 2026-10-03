@@ -498,10 +498,12 @@ class ComponentConfigBlock(BaseModel):
     """Per-component override block carried under ``DeploymentConfig.components``.
 
     Carries the per-component free-form ``env_vars`` dict (008-deployment-env-vars,
-    FR-001 component scope, FR-002 deepest-wins precedence) plus the
+    FR-001 component scope, FR-002 deepest-wins precedence), the
     component-scope container ``command``/``args`` overrides
-    (014-component-container-overrides). Future iterations may add per-component
-    ``scheduling`` or ``inject`` overrides under the same block.
+    (014-component-container-overrides), and the component container's
+    ``image`` override (018-component-image-overrides). Future iterations may
+    add per-component ``scheduling`` or ``inject`` overrides under the same
+    block.
 
     The ``env_vars`` dict is validated against the same caps as the
     deployment-scope dict via :func:`validate_env_vars_dict` with
@@ -509,7 +511,10 @@ class ComponentConfigBlock(BaseModel):
     optional, nullable slots — ``None`` means "unset" (chart default flows
     through); each is validated through
     :func:`validate_container_override` (non-empty list-of-string, empty-string
-    elements accepted, ``[]`` rejected).
+    elements accepted, ``[]`` rejected). ``image`` is one full image reference,
+    optionally containing ``{{ app.version }}``; ``None`` means "chart image".
+    It is validated through :func:`validate_stored_reference`, which
+    substitutes a placeholder version because the real one is unknown here.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -517,6 +522,7 @@ class ComponentConfigBlock(BaseModel):
     env_vars: dict[str, str] | None = None
     command: list[str] | None = None
     args: list[str] | None = None
+    image: str | None = None
 
     @field_validator("env_vars")
     @classmethod
@@ -558,6 +564,17 @@ class ComponentConfigBlock(BaseModel):
 
         return validate_container_override("args", v)
 
+    # ``mode="before"`` for the same reason as ``command``/``args``: a non-string raises the
+    # typed ``InvalidImageReferenceError`` instead of a generic ``ValidationError``.
+    @field_validator("image", mode="before")
+    @classmethod
+    def _validate_image(cls, v: Any) -> Any:
+        from styrmin_backend.services.image_overrides.reference import (
+            validate_stored_reference,
+        )
+
+        return validate_stored_reference(v)
+
 
 class DeploymentConfig(ClusterConfig, EnvironmentConfig):
     """Deployment context.
@@ -572,13 +589,15 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
             environment scope per FR-002 deepest-wins precedence.
         components (dict[str, ComponentConfigBlock] | None): Per-component
             override blocks keyed by component name (US3). Each block carries
-            the component-scope ``env_vars`` dict plus the component-scope
+            the component-scope ``env_vars`` dict, the component-scope
             container ``command``/``args`` overrides
-            (014-component-container-overrides). Component names that do not
-            match a driver-declared component are rejected at the service
-            boundary with ``UnknownComponentEnvVarError`` (env-var block) or
+            (014-component-container-overrides), and the component
+            container's ``image`` override (018-component-image-overrides).
+            Component names that do not match a driver-declared component are
+            rejected at the service boundary with
+            ``UnknownComponentEnvVarError`` (env-var block),
             ``UnknownComponentContainerOverrideError`` (command/args block,
-            FR-004).
+            FR-004), or ``UnknownComponentImageOverrideError`` (image).
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -31,6 +31,7 @@ from styrmin_backend.context.models.services import ServiceReference
 from styrmin_backend.services import context as context_service
 from styrmin_backend.services.context import (
     _populate_component_container_overrides,
+    _populate_component_image_overrides,
     _populate_component_scheduling,
 )
 
@@ -268,3 +269,56 @@ class TestPopulateComponentContainerOverrides:
         )
         assert context.components is not None
         assert context.components.root["server"].container_override is None
+
+
+class TestPopulateComponentImageOverrides:
+    """018: image overrides reach the renderer via ``context.components[*].image_override``,
+    unsubstituted; orphans and components without an override never get one.
+    """
+
+    _TOKEN = "registry.example/acme/simple-app-patched:{{ app.version }}"
+
+    def test_live_override_attached_unsubstituted(self) -> None:
+        context = _make_context_with_component("server")
+        _populate_component_image_overrides(
+            context=context,
+            deployment_config={"components": {"server": {"image": self._TOKEN}}},
+        )
+        assert context.components is not None
+        override = context.components.root["server"].image_override
+        assert override is not None
+        assert override.reference == self._TOKEN
+        assert override.is_orphaned is False
+
+    def test_orphan_override_never_attached(self) -> None:
+        context = _make_context_with_component("server")
+        _populate_component_image_overrides(
+            context=context,
+            deployment_config={"components": {"ghost": {"image": "ghost:1"}}},
+        )
+        assert context.components is not None
+        assert "ghost" not in context.components.root
+        assert context.components.root["server"].image_override is None
+
+    def test_none_when_image_unset(self) -> None:
+        context = _make_context_with_component("server")
+        _populate_component_image_overrides(
+            context=context,
+            deployment_config={
+                "components": {"server": {"env_vars": {"X": "1"}, "command": ["s"]}}
+            },
+        )
+        assert context.components is not None
+        assert context.components.root["server"].image_override is None
+
+    def test_none_without_deployment_config(self) -> None:
+        context = _make_context_with_component("server")
+        _populate_component_image_overrides(context=context, deployment_config=None)
+        assert context.components is not None
+        assert context.components.root["server"].image_override is None
+
+    def test_populated_after_container_overrides(self) -> None:
+        source = inspect.getsource(context_service.generate_context_from_deployment)
+        container_call = source.index("_populate_component_container_overrides(")
+        image_call = source.index("_populate_component_image_overrides(")
+        assert container_call < image_call

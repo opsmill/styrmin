@@ -125,6 +125,21 @@ class ResolvedComponentContainerOverride(BaseModel):
         return self
 
 
+class ResolvedComponentImageOverride(BaseModel):
+    """Per-component image override for the component container (018).
+
+    Component-scope only, like :class:`ResolvedComponentContainerOverride`, so there is no
+    provenance. ``reference`` is the stored string with ``{{ app.version }}`` NOT substituted;
+    the patch builder substitutes ``context.app.version`` at render time. ``is_orphaned`` is set
+    when the driver no longer declares the component; orphans surface on read only.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reference: str
+    is_orphaned: bool = False
+
+
 class ComponentContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +149,7 @@ class ComponentContext(BaseModel):
     scheduling: ResolvedComponentScheduling | None = None
     env_vars: ResolvedComponentEnvVars | None = None
     container_override: ResolvedComponentContainerOverride | None = None
+    image_override: ResolvedComponentImageOverride | None = None
 
 
 class ComponentsContext(RootModel):
