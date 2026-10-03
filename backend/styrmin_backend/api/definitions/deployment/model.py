@@ -162,6 +162,38 @@ class ComponentContainerOverrides:
     )
 
 
+@strawberry.type(
+    description=(
+        "The image override for one component's component container. Orphaned "
+        "or non-applicable overrides stay visible but are not rendered."
+    )
+)
+class ComponentImageOverride:
+    component: str = strawberry.field(description="Name of the targeted component.")
+    reference: str = strawberry.field(
+        description="The stored image reference, `{{ app.version }}` tokens included."
+    )
+    resolved_reference: str = strawberry.field(
+        description=(
+            "`reference` with every `{{ app.version }}` token replaced by the "
+            "deployment's `applicationVersion`."
+        )
+    )
+    is_orphaned: bool = strawberry.field(
+        description=(
+            "True when the deployment's current driver no longer declares this "
+            "component (the upgrade renamed or removed it)."
+        )
+    )
+    is_applicable: bool = strawberry.field(
+        description=(
+            "False when the override cannot reach a container: the component is "
+            "orphaned (`isOrphaned`) or the driver declares no component container "
+            "for it. The stored reference is kept but not rendered."
+        )
+    )
+
+
 @strawberry.type
 class ResolvedComponentScheduling:
     """Per-component effective scheduling configuration plus provenance.
@@ -213,6 +245,11 @@ class ApplicationInstance:
             deployment_id=instance.deployment_id,
             instance=instance,
         )
+
+
+def _component_containers(deployment: DeploymentEntity) -> dict[str, str | None]:
+    """Map each deployment component to its component container (``None`` if undeclared)."""
+    return {c.name: c.config.get("container") for c in (deployment.components or [])}
 
 
 @strawberry.type
@@ -502,9 +539,7 @@ class Deployment:
             environment = await uow.environments.get(deployment.environment_id)
             env_config_raw = environment.config if environment is not None else None
             dep_config_raw = deployment.config
-            containers = {
-                c.name: c.config.get("container") for c in (deployment.components or [])
-            }
+            containers = _component_containers(deployment)
             driver_components = list(containers)
 
         env_cfg = (
@@ -622,6 +657,63 @@ class Deployment:
                 )
             )
         return results
+
+    @strawberry.field(
+        description=(
+            "Per-component image overrides: live components in driver order, then "
+            "orphaned blocks (``isOrphaned=true``) by name. Components without an "
+            "override are omitted."
+        )
+    )
+    async def component_image_overrides(
+        self, info: strawberry.Info
+    ) -> list[ComponentImageOverride]:
+        from styrmin_backend.services.image_overrides.reference import (
+            substitute_app_version,
+        )
+        from styrmin_backend.services.image_overrides.resolver import (
+            ImageOverridesResolver,
+        )
+
+        uow = info.context["uow"]
+        async with uow:
+            deployment = await uow.deployments.find(self.id)
+            if deployment is None:
+                logger.warning(
+                    "component_image_overrides: deployment {} not found (likely "
+                    "deleted between parent query and sub-field resolution)",
+                    self.id,
+                )
+                return []
+            dep_config_raw = deployment.config
+            version = deployment.application_version
+            containers = _component_containers(deployment)
+
+        dep_cfg = (
+            DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None
+        )
+        entries = ImageOverridesResolver.resolve_for_deployment(
+            component_overrides=dict(dep_cfg.components or {}) if dep_cfg else None,
+            driver_components=list(containers),
+        )
+        return [
+            ComponentImageOverride(
+                component=entry.component_name,
+                reference=entry.resolved.reference,
+                # Leave tokens visible rather than substituting an empty version.
+                resolved_reference=(
+                    substitute_app_version(entry.resolved.reference, version)
+                    if version
+                    else entry.resolved.reference
+                ),
+                is_orphaned=entry.resolved.is_orphaned,
+                is_applicable=(
+                    not entry.resolved.is_orphaned
+                    and containers.get(entry.component_name) is not None
+                ),
+            )
+            for entry in entries
+        ]
 
     @strawberry.field
     async def crd_status(self, info: strawberry.Info) -> DeploymentStatusType | None:

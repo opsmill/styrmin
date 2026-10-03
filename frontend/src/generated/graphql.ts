@@ -191,7 +191,7 @@ export type ComponentConfig = {
   name: Scalars['String']['output'];
 };
 
-/** Per-component override block for a deployment. Carries env-var overrides today; future per-component knobs (e.g. replicas) slot into this same input without a schema renumber. */
+/** Per-component override block for a deployment: env vars, the container ``command``/``args``, and the component container's ``image``. Future per-component knobs (e.g. replicas) slot into this same input without a schema renumber. */
 export type ComponentConfigInput = {
   /** Container args override for this component. Same shape and rules as ``command``, raising ``INVALID_CONTAINER_ARGS``. */
   args?: InputMaybe<Array<Scalars['String']['input']>>;
@@ -199,6 +199,8 @@ export type ComponentConfigInput = {
   command?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Environment-variable overrides scoped to this component. Submitted as a list of ``{name, value}`` rows; duplicates within the list raise ``DUPLICATE_ENV_VAR_NAME`` with the component scope in the payload. Adding or changing a value on a component that declares no component container raises ``COMPONENT_CONTAINER_NOT_DECLARED``; removing values or re-submitting the stored ones unchanged is accepted. */
   envVars?: InputMaybe<Array<EnvVarInput>>;
+  /** Image reference for this component's component container, scoped to this deployment. A full reference with an explicit tag or digest; every ``{{ app.version }}`` token is replaced with the deployment's application version at render time, and a literal tag pins the image. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart image applies). Raises ``UNKNOWN_COMPONENT_IMAGE_OVERRIDE``, ``INVALID_IMAGE_REFERENCE``, or ``COMPONENT_CONTAINER_NOT_DECLARED`` (adding or changing it on a component without a component container; removing it is always accepted). */
+  image?: InputMaybe<Scalars['String']['input']>;
   /** The component name as declared by the deployment's currently pinned application-driver version. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Env vars on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``). */
   name: Scalars['String']['input'];
 };
@@ -227,6 +229,21 @@ export type ComponentEnvVars = {
   isApplicable: Scalars['Boolean']['output'];
   /** True when the deployment's current driver no longer declares this component (the upgrade renamed or removed it). Orphaned blocks are visible in the API but are NOT injected into rendered pods, so the user can audit and clean them up. */
   isOrphaned: Scalars['Boolean']['output'];
+};
+
+/** The image override for one component's component container. Orphaned or non-applicable overrides stay visible but are not rendered. */
+export type ComponentImageOverride = {
+  __typename?: 'ComponentImageOverride';
+  /** Name of the targeted component. */
+  component: Scalars['String']['output'];
+  /** False when the override cannot reach a container: the component is orphaned (`isOrphaned`) or the driver declares no component container for it. The stored reference is kept but not rendered. */
+  isApplicable: Scalars['Boolean']['output'];
+  /** True when the deployment's current driver no longer declares this component (the upgrade renamed or removed it). */
+  isOrphaned: Scalars['Boolean']['output'];
+  /** The stored image reference, `{{ app.version }}` tokens included. */
+  reference: Scalars['String']['output'];
+  /** `reference` with every `{{ app.version }}` token replaced by the deployment's `applicationVersion`. */
+  resolvedReference: Scalars['String']['output'];
 };
 
 export type ComponentRestoreStatus = {
@@ -313,6 +330,8 @@ export type Deployment = {
   componentContainerOverrides: Array<ComponentContainerOverrides>;
   /** Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Non-applicable blocks (``isApplicable=false``: component renamed or removed by a driver upgrade, or no component container declared) are visible here but skipped by the post-render injector so no env entries reach rendered pods. */
   componentEnvVars: Array<ComponentEnvVars>;
+  /** Per-component image overrides: live components in driver order, then orphaned blocks (``isOrphaned=true``) by name. Components without an override are omitted. */
+  componentImageOverrides: Array<ComponentImageOverride>;
   components: Array<Component>;
   config: Scalars['JSON']['output'];
   crdStatus?: Maybe<DeploymentStatusType>;

@@ -68,9 +68,10 @@ class ParameterValueInput:
 
 @strawberry.input(
     description=(
-        "Per-component override block for a deployment. Carries env-var "
-        "overrides today; future per-component knobs (e.g. replicas) slot "
-        "into this same input without a schema renumber."
+        "Per-component override block for a deployment: env vars, the "
+        "container ``command``/``args``, and the component container's "
+        "``image``. Future per-component knobs (e.g. replicas) slot into "
+        "this same input without a schema renumber."
     )
 )
 class ComponentConfigInput:
@@ -111,6 +112,21 @@ class ComponentConfigInput:
         description=(
             "Container args override for this component. Same shape and rules "
             "as ``command``, raising ``INVALID_CONTAINER_ARGS``."
+        ),
+    )
+    image: str | None = strawberry.field(
+        default=None,
+        description=(
+            "Image reference for this component's component container, scoped "
+            "to this deployment. A full reference with an explicit tag or "
+            "digest; every ``{{ app.version }}`` token is replaced with the "
+            "deployment's application version at render time, and a literal "
+            "tag pins the image. Under full-replacement semantics "
+            "``null``/omitting it CLEARS the override (the chart image "
+            "applies). Raises ``UNKNOWN_COMPONENT_IMAGE_OVERRIDE``, "
+            "``INVALID_IMAGE_REFERENCE``, or ``COMPONENT_CONTAINER_NOT_DECLARED`` "
+            "(adding or changing it on a component without a component "
+            "container; removing it is always accepted)."
         ),
     )
 
@@ -320,11 +336,12 @@ def update_deployment_input_to_dict(input: UpdateDeploymentInput) -> dict[str, A
     * ``parameters`` — list of ``{name, value}`` → ``dict[str, Any]``
       with duplicate-name detection raising
       :class:`DuplicateParameterNameError`.
-    * ``components`` — list of ``{name, env_vars?, command?, args?}`` →
-      ``dict[str, dict]`` with duplicate-name detection raising
+    * ``components`` — list of ``{name, env_vars?, command?, args?, image?}``
+      → ``dict[str, dict]`` with duplicate-name detection raising
       :class:`DuplicateComponentNameError`. Each component's
       ``env_vars`` sub-list is flattened recursively with scope
-      ``f"component:{name}"``; ``command``/``args`` pass through verbatim.
+      ``f"component:{name}"``; ``command``/``args``/``image`` pass through
+      verbatim.
     * ``service_name_overrides`` — list of
       ``{driver_service_name, override_name}`` →
       ``dict[str, str]`` keyed on ``driver_service_name``.
@@ -458,8 +475,10 @@ def _flatten_components(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     The per-component ``env_vars`` sub-list is flattened recursively
     with scope ``f"component:{name}"`` so the eventual
     ``DUPLICATE_ENV_VAR_NAME`` payload identifies the offending
-    component. Duplicate component names raise
-    :class:`DuplicateComponentNameError` (FR-009).
+    component; the other slots (``command``, ``args``, ``image``) pass
+    through, and unset ones are already dropped by ``_convert_value``.
+    Duplicate component names raise :class:`DuplicateComponentNameError`
+    (FR-009).
     """
     from styrmin_backend.services.env_vars.exceptions import (
         DuplicateComponentNameError,

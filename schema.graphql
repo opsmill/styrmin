@@ -180,7 +180,7 @@ type ComponentConfig {
 }
 
 """
-Per-component override block for a deployment. Carries env-var overrides today; future per-component knobs (e.g. replicas) slot into this same input without a schema renumber.
+Per-component override block for a deployment: env vars, the container ``command``/``args``, and the component container's ``image``. Future per-component knobs (e.g. replicas) slot into this same input without a schema renumber.
 """
 input ComponentConfigInput {
   """
@@ -202,6 +202,11 @@ input ComponentConfigInput {
   Container args override for this component. Same shape and rules as ``command``, raising ``INVALID_CONTAINER_ARGS``.
   """
   args: [String!] = null
+
+  """
+  Image reference for this component's component container, scoped to this deployment. A full reference with an explicit tag or digest; every ``{{ app.version }}`` token is replaced with the deployment's application version at render time, and a literal tag pins the image. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart image applies). Raises ``UNKNOWN_COMPONENT_IMAGE_OVERRIDE``, ``INVALID_IMAGE_REFERENCE``, or ``COMPONENT_CONTAINER_NOT_DECLARED`` (adding or changing it on a component without a component container; removing it is always accepted).
+  """
+  image: String = null
 }
 
 """
@@ -246,6 +251,32 @@ type ComponentEnvVars {
 
   """
   False when these env vars cannot reach any container: the component is orphaned (`isOrphaned`) or the driver declares no component container for it. Stored values are kept but not injected.
+  """
+  isApplicable: Boolean!
+}
+
+"""
+The image override for one component's component container. Orphaned or non-applicable overrides stay visible but are not rendered.
+"""
+type ComponentImageOverride {
+  """Name of the targeted component."""
+  component: String!
+
+  """The stored image reference, `{{ app.version }}` tokens included."""
+  reference: String!
+
+  """
+  `reference` with every `{{ app.version }}` token replaced by the deployment's `applicationVersion`.
+  """
+  resolvedReference: String!
+
+  """
+  True when the deployment's current driver no longer declares this component (the upgrade renamed or removed it).
+  """
+  isOrphaned: Boolean!
+
+  """
+  False when the override cannot reach a container: the component is orphaned (`isOrphaned`) or the driver declares no component container for it. The stored reference is kept but not rendered.
   """
   isApplicable: Boolean!
 }
@@ -355,6 +386,11 @@ type Deployment {
   Per-component container ``command``/``args`` overrides, including orphaned blocks (``isOrphaned=true``). Component-scope only — there is NO environment/deployment layering. Live components with neither slot set are omitted to keep the surface tidy. Orphaned blocks (component renamed or removed by a driver upgrade — FR-005) are always surfaced here but skipped by the renderer so no value reaches a rendered pod. Cleared slots are returned as ``null``.
   """
   componentContainerOverrides: [ComponentContainerOverrides!]!
+
+  """
+  Per-component image overrides: live components in driver order, then orphaned blocks (``isOrphaned=true``) by name. Components without an override are omitted.
+  """
+  componentImageOverrides: [ComponentImageOverride!]!
   crdStatus: DeploymentStatusType
   createdBy: User!
 

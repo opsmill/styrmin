@@ -134,6 +134,15 @@ async def test_get_deployment_success(client: StyrminClient, mock_transport: Asy
                 "components": [
                     {"id": "44444444-5555-6666-7777-888888888888", "name": "web", "enabled": True},
                 ],
+                "componentImageOverrides": [
+                    {
+                        "component": "web",
+                        "reference": "registry.example/acme/web:{{ app.version }}",
+                        "resolvedReference": "registry.example/acme/web:1.0.0",
+                        "isOrphaned": False,
+                        "isApplicable": True,
+                    }
+                ],
                 "deployedServices": [],
             }
         }
@@ -148,6 +157,10 @@ async def test_get_deployment_success(client: StyrminClient, mock_transport: Asy
     assert deployment.application_instance.status == "running"
     assert len(deployment.components) == 1
     assert deployment.components[0].name == "web"
+    [override] = deployment.component_image_overrides
+    assert override.component == "web"
+    assert override.resolved_reference == "registry.example/acme/web:1.0.0"
+    assert override.is_applicable is True
 
 
 async def test_get_deployment_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -1073,6 +1086,7 @@ def _get_deployment_response(*, deployment_status: str = "running") -> dict[str,
                     "status": "running",
                 },
                 "components": [],
+                "componentImageOverrides": [],
                 "deployedServices": [],
             }
         }

@@ -27,6 +27,13 @@ query GetDeployment($deploymentId: UUID!) {
             name
             enabled
         }
+        componentImageOverrides {
+            component
+            reference
+            resolvedReference
+            isOrphaned
+            isApplicable
+        }
         deployedServices {
             id
             driverServiceName
