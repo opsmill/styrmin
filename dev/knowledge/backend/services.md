@@ -60,7 +60,7 @@ styrmin_backend/services/
 │
 ├── scheduling/                    # Pod scheduling helpers
 │
-├── env_vars/                      # Free-form deployment env vars (post-render injection, ADR-055)
+├── env_vars/                      # Free-form deployment env vars (post-render injection, ADR-057)
 │   ├── validator.py               # name regex + size caps + risky-name warning
 │   ├── resolver.py                # env→dep→comp deepest-wins merge
 │   ├── patch_builder.py           # strategic-merge env patches into each component container

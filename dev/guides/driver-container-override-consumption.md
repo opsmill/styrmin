@@ -8,7 +8,7 @@ deliberately does **not** do for you.
 
 Unlike env vars, `command`/`args` still flow through the values template. Env
 vars moved to post-render injection into the declared component container in
-017 ([ADR-055](../adr/0055-post-render-component-overrides.md),
+017 ([ADR-057](../adr/0057-post-render-component-overrides.md),
 [`driver-env-var-consumption.md`](driver-env-var-consumption.md)); moving
 `command`/`args` onto the same mechanism is a follow-up. The override filters
 return an **always-present list** (`[]` when unset), the chart guards
@@ -68,7 +68,7 @@ args:
   HelmRelease (an omitted key was left unchanged, so a cleared override
   persisted). Since 017 the operator replaces each HelmRelease spec key it writes
   on update, including `spec.values`
-  ([ADR-055](../adr/0055-post-render-component-overrides.md) §6), so an omitted
+  ([ADR-057](../adr/0057-post-render-component-overrides.md) §6), so an omitted
   key no longer lingers, but the always-present key stays the documented
   pattern and keeps the rendered values explicit.
 - The **chart** owns the safety guard: `{{- with .Values.command }}` skips an
@@ -105,7 +105,7 @@ This works because the operator strips `null`s before it applies the
 HelmRelease, so the key is absent and the chart's own default flows through —
 clearing reverts to the default (see
 [ADR-045](../adr/0045-container-override-no-layering-and-omit-marker.md) §5 and
-[ADR-055](../adr/0055-post-render-component-overrides.md) §6):
+[ADR-057](../adr/0057-post-render-component-overrides.md) §6):
 
 - on the **create POST**, `prune_none_on_create` strips them, so a first
   reconcile never persists a literal null that the unguarded chart would render
@@ -124,7 +124,7 @@ Both clear correctly; pick based on the remaining trade-off:
 
 | Approach | Pros | Cons |
 |---|---|---|
-| **`null` marker** (Infrahub) | No duplicated default; clearing reverts to the chart default | Relies on the operator's `null` prune on create and update (ADR-045 §5, ADR-055 §6) |
+| **`null` marker** (Infrahub) | No duplicated default; clearing reverts to the chart default | Relies on the operator's `null` prune on create and update (ADR-045 §5, ADR-057 §6) |
 | **Default fallback** | Self-contained in the template | Duplicates the chart's default, which can drift on a chart-version bump (pin the chart and keep it in sync) |
 
 Either way, **only the fields the chart actually exposes are overridable.** The
@@ -166,7 +166,7 @@ are injected into; the two are not cross-validated.
 
 - It never injects `command`/`args` into a container your template did not
   wire (no post-render injection for these two slots yet; env vars moved to
-  post-render in ADR-055).
+  post-render in ADR-057).
 - It does not template or expand override values — they pass through verbatim
   (FR-014).
 - It does not layer the value across scopes — there is exactly one source (the

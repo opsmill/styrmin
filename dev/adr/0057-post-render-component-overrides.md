@@ -1,4 +1,4 @@
-# ADR-055: Post-Render Component Overrides into a Declared Component Container
+# ADR-057: Post-Render Component Overrides into a Declared Component Container
 
 **Status**: Accepted
 **Date**: 2026-10-02

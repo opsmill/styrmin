@@ -200,7 +200,7 @@ workstream.
 <!-- Extracted from specs/017-post-render-env-vars on 2026-10-02 -->
 
 Styrmin injects env vars into each component's declared **component container**
-([ADR-055](../../adr/0055-post-render-component-overrides.md)), and the backend
+([ADR-057](../../adr/0057-post-render-component-overrides.md)), and the backend
 rejects added or changed component-scope env vars on a component without one
 (`COMPONENT_CONTAINER_NOT_DECLARED`). The Components section of the drawer
 (`ComponentOverridesSection.tsx`) mirrors that rule from `component.container`,
@@ -220,7 +220,7 @@ state with a tooltip, so driver authors can confirm what they declared.
 
 Deployment- and environment-scope editors carry no such hint: those scopes skip
 containerless components silently. Surfacing that in the UI is a deferred
-follow-up (ADR-055 consequences); the API exposes it as
+follow-up (ADR-057 consequences); the API exposes it as
 `ComponentEnvVars.isApplicable`.
 
 ### Testing
