@@ -16,6 +16,7 @@ import pytest
 from loguru import logger
 
 from styrmin_backend.services.env_vars.exceptions import (
+    ComponentContainerNotDeclaredError,
     DuplicateEnvVarNameError,
     EnvVarSizeLimitExceededError,
     InvalidEnvVarNameError,
@@ -312,3 +313,47 @@ class TestValidateEnvVarsInputList:
     def test_input_list_validates_dict_rules(self) -> None:
         with pytest.raises(InvalidEnvVarNameError):
             validate_env_vars_input_list([("1BAD", "v")], scope="deployment")
+
+
+class TestComponentContainerNotDeclaredError:
+    """Shared by env vars (017) and image overrides (018, contracts/errors.md)."""
+
+    def test_env_vars_default_keeps_message_and_adds_override(self) -> None:
+        error = ComponentContainerNotDeclaredError(
+            component_name="worker", components_with_container=["web", "api"]
+        )
+        assert error.error_code == "COMPONENT_CONTAINER_NOT_DECLARED"
+        assert error.error_metadata == {
+            "component_name": "worker",
+            "components_with_container": ["api", "web"],
+            "override": "env_vars",
+        }
+        assert str(error) == (
+            "Environment variables target component 'worker', which declares no "
+            "component container in the deployment's driver. Components that accept "
+            "env vars: ['api', 'web']"
+        )
+
+    def test_image_override_message_and_metadata(self) -> None:
+        error = ComponentContainerNotDeclaredError(
+            component_name="database",
+            components_with_container=["server"],
+            override="image",
+        )
+        assert error.error_metadata == {
+            "component_name": "database",
+            "components_with_container": ["server"],
+            "override": "image",
+        }
+        assert str(error) == (
+            "Image override targets component 'database', which declares no component "
+            "container in the deployment's driver. Components that accept overrides: "
+            "['server']"
+        )
+
+    def test_explicit_message_wins(self) -> None:
+        error = ComponentContainerNotDeclaredError(
+            "custom", component_name="x", override="image"
+        )
+        assert str(error) == "custom"
+        assert error.error_metadata["override"] == "image"
