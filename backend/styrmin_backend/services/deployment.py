@@ -34,6 +34,7 @@ from styrmin_backend.services.env_vars.exceptions import (
     UnknownComponentEnvVarError,
 )
 from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
+from styrmin_backend.services.image_overrides.reference import validate_reference
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
     DeploymentNameConflictError,
@@ -166,6 +167,27 @@ def _validate_component_env_var_containers(
                     if container
                 ],
             )
+
+
+def _validate_image_overrides_for_version(
+    stored_config: dict | None,
+    containers_by_component: dict[str, str | None],
+    version: str,
+) -> None:
+    """Re-validate stored image overrides that apply under ``containers_by_component``.
+
+    Runs before a version change dispatches anything, so the driver's upgrade action never
+    stops components for a reference that cannot render (018 FR-009). Containerless and
+    orphaned components are skipped: their override is never rendered.
+    """
+    stored_components = (stored_config or {}).get("components")
+    if not isinstance(stored_components, dict):
+        return
+    for name, container in containers_by_component.items():
+        block = stored_components.get(name)
+        image = block.get("image") if isinstance(block, dict) else None
+        if container and image is not None:
+            validate_reference(image, version=version, component_name=name)
 
 
 def _prevalidate_deployment_env_vars(deployment_config: dict | None) -> None:
@@ -731,6 +753,8 @@ async def update_deployment_version(
         DriverVersionNotFoundError: If the pinned driver version does not exist.
         InvalidVersionError: If no driver version (or the pinned one) supports
             ``version``, or the pin belongs to a different driver.
+        InvalidImageReferenceError: If a stored image override applicable in the
+            target driver version is invalid at ``version``.
 
     Returns:
         Task | None: The task created for the deployment update, or ``None``
@@ -806,6 +830,12 @@ async def update_deployment_version(
                 target_driver_version.id,
                 target_driver_version.application_supported_versions,
             )
+
+        # Overrides applicable in the target driver version must still resolve at the
+        # target application version (018 FR-009); reject before any task is dispatched.
+        _validate_image_overrides_for_version(
+            deployment.config, _containers_by_component(target_driver_version), version
+        )
 
         if target_driver_version.id != deployment.application_driver_version_id:
             # Store components state

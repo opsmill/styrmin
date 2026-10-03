@@ -507,20 +507,27 @@ async def get_component_images(
     namespace: str,
     label_selector: str,
     client: ApiClient = Depends(get_api_client),
+    *,
+    container: str | None = None,
 ) -> list[str]:
     """Extract container images from a component's Deployment or StatefulSet.
 
-    Returns images from all containers in the pod template spec.
+    Returns images from all containers in the pod template spec, in pod-template
+    order, except that the ``container`` image comes first when that container is
+    present. Init containers are never included.
 
     Args:
         namespace: The Kubernetes namespace.
         label_selector: Label selector string (e.g., "service=infrahub-server").
+        container: The component container's name, if the driver declares one.
 
     Returns:
         List of container image strings.
     """
     pod_template = await _find_workload_pod_template(namespace, label_selector, client)
-    return [container.image for container in pod_template.spec.containers]
+    # Stable sort: only the component container moves; the others keep their order.
+    containers = sorted(pod_template.spec.containers, key=lambda c: c.name != container)
+    return [c.image for c in containers]
 
 
 @inject
