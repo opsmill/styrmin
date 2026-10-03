@@ -62,5 +62,5 @@
 - 058-frontend-testing: Added TypeScript 5.9.3, React 19.2.4, Node 22 + Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI, React Router 7, React Hook Form 7
 
 <!-- SPECKIT START -->
-Active feature plan: [specs/010-environment-clone/plan.md](specs/010-environment-clone/plan.md) (spec: [spec.md](specs/010-environment-clone/spec.md), design: research.md, data-model.md, contracts/graphql.md, quickstart.md)
+Active feature plan: [specs/018-component-image-overrides/plan.md](specs/018-component-image-overrides/plan.md) (spec: [spec.md](specs/018-component-image-overrides/spec.md), design: research.md, data-model.md, contracts/graphql-deltas.md, contracts/errors.md, contracts/post-render-patch.md, contracts/client-surfaces.md, quickstart.md)
 <!-- SPECKIT END -->
