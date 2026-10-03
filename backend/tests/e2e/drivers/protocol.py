@@ -166,6 +166,29 @@ class ScenarioDriver(Protocol):
         need ``wait_for_deployment_running`` to observe the reconcile.
         """
 
+    async def set_component_image(
+        self, *, deployment_id: str, component: str, image: str | None
+    ) -> None:
+        """Set or clear one component's image override on a deployment (018).
+
+        ``image`` is the stored reference (it may carry ``{{ app.version }}``);
+        ``None`` clears it. Every other stored config field, including the
+        other components' blocks and this component's env vars and
+        ``command``/``args``, is preserved.
+
+        API driver: reads the stored ``Deployment.config``, swaps
+        ``components[<component>].image``, and resubmits the whole config
+        through ``update_deployment``. A block left empty is dropped.
+
+        UI driver: opens the Settings tab's edit drawer, expands
+        ``component-override-trigger-<component>``, fills or clears the
+        ``Image for <component>`` input, then applies through the diff dialog.
+        A block left with no image, env vars, command or args is removed.
+
+        Both block until the server has accepted the mutation; callers still
+        wait for the reconcile to reach the workload.
+        """
+
     async def get_deployment_timeline(
         self, *, deployment_id: str
     ) -> list[TimelineEntry]: ...

@@ -81,3 +81,62 @@ async def _wait_for_pod_template(
         f"Timed out waiting for {description} in namespace {namespace} "
         f"(selector={label_selector!r}): {last_seen}"
     )
+
+
+def container_spec(workload: Any, container_name: str) -> Any | None:
+    """The named container of a rendered pod template, or ``None``."""
+    for container in workload.spec.template.spec.containers or []:
+        if container.name == container_name:
+            return container
+    return None
+
+
+async def wait_for_ready_container_image(
+    vcluster: dict,
+    *,
+    namespace: str,
+    label_selector: str,
+    container_name: str,
+    image: str,
+    timeout: float = RECONCILE_TIMEOUT_SECONDS,
+) -> Any:
+    """Poll pods matching ``label_selector`` until one runs ``container_name``
+    with spec image ``image`` and reports it ready; returns that pod."""
+    core = kubeclient.CoreV1Api(vcluster["api"])
+    deadline = time.time() + timeout
+    last_seen = "(no matching pods)"
+    while time.time() < deadline:
+        pods = (
+            await core.list_namespaced_pod(
+                namespace=namespace, label_selector=label_selector
+            )
+        ).items
+        seen: list[str] = []
+        for pod in pods:
+            spec = next(
+                (c for c in pod.spec.containers or [] if c.name == container_name),
+                None,
+            )
+            status = next(
+                (
+                    s
+                    for s in (pod.status.container_statuses or [])
+                    if s.name == container_name
+                ),
+                None,
+            )
+            waiting = status.state.waiting if status and status.state else None
+            seen.append(
+                f"{pod.metadata.name}: image={spec.image if spec else None} "
+                f"ready={status.ready if status else None} "
+                f"waiting={waiting.reason if waiting else None}"
+            )
+            if spec is not None and spec.image == image and status and status.ready:
+                return pod
+        if seen:
+            last_seen = "; ".join(seen)
+        await asyncio.sleep(RECONCILE_POLL_INTERVAL)
+    raise TimeoutError(
+        f"Timed out waiting for a ready {container_name!r} container running "
+        f"{image} in namespace {namespace} (selector={label_selector!r}): {last_seen}"
+    )

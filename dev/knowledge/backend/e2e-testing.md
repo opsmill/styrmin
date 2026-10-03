@@ -60,7 +60,8 @@ The dual-entrypoint design is the reason every E2E scenario runs **twice by defa
 
 A test that calls **any** dual-entrypoint method on `scenario_driver`
 (`create_deployment` / `update_deployment` / `update_environment_via_form` /
-`set_environment_backup_ttl` / `set_component_env_vars` / `upgrade_deployment` / `create_backup` /
+`set_environment_backup_ttl` / `set_component_env_vars` / `set_component_image` /
+`upgrade_deployment` / `create_backup` /
 `start_components` / `stop_components` / `run_job` / `delete_*`) MUST run
 under both variants — these methods
 exercise both the UI form and the API code path, and the parametrisation

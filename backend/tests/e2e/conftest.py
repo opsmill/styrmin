@@ -1030,6 +1030,28 @@ def simple_app_image_v2() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Fixture: simple_app_override_images
+# ---------------------------------------------------------------------------
+SIMPLE_APP_OVERRIDE_REPOSITORY = "registry.example/acme/simple-app-patched"
+
+
+@pytest.fixture(scope="session")
+def simple_app_override_images(
+    simple_app_image: str, simple_app_image_v2: str
+) -> dict[str, str]:
+    """Re-tag the simple-app builds under a distinct reference for the image
+    override E2E (018); the vcluster nodes pull them from the host daemon like
+    the base images. Keyed by application version."""
+    tagged: dict[str, str] = {}
+    for source in (simple_app_image, simple_app_image_v2):
+        version = source.rsplit(":", 1)[1]
+        target = f"{SIMPLE_APP_OVERRIDE_REPOSITORY}:{version}"
+        subprocess.run(["docker", "tag", source, target], check=True)
+        tagged[version] = target
+    return tagged
+
+
+# ---------------------------------------------------------------------------
 # Fixture: velero_ready
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
