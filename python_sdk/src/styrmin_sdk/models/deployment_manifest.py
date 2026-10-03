@@ -106,6 +106,10 @@ class ApplyOutcome(BaseModel):
     deployment_id: UUID | None = None
     task_id: UUID | None = None
     failure_reason: str | None = None
+    # Set only when `apply` changes an existing deployment's application version.
+    target_version: str | None = None
+    # Components whose effective image override has no `{{ app.version }}` token (FR-008).
+    pinned_image_components: list[str] = Field(default_factory=list)
 
 
 class ApplyEvent(BaseModel):

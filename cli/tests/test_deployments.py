@@ -893,3 +893,100 @@ def test_deployments_apply_no_wait_does_not_install_callback(
     _args, kwargs = mock_client.deployments.apply_files.call_args
     assert kwargs["wait"] is False
     assert kwargs["on_event"] is None
+
+
+# --------------------------------------------------------------------------
+# Pinned image override warning (018, FR-008): stderr only, exit code unchanged.
+# --------------------------------------------------------------------------
+
+_PINNED_WARNING = (
+    "warning: my-app: pinned image override on server will not follow version 1.1.0 (no {{ app.version }} token)"
+)
+
+
+def _pinned_outcome(name: str, components: list[str]) -> ApplyOutcome:
+    return _outcome(name, "updated").model_copy(
+        update={"pinned_image_components": components, "target_version": "1.1.0"}
+    )
+
+
+def test_deployments_apply_prints_pinned_image_warning_to_stderr(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    mock_client.deployments.apply_files = AsyncMock(
+        return_value=[_outcome("other", "created"), _pinned_outcome("my-app", ["server"])]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest)])
+    assert exc.value.code == 0
+
+    captured = capsys.readouterr()
+    assert captured.err.splitlines() == [_PINNED_WARNING]
+    assert "warning:" not in captured.out
+    assert captured.out.splitlines() == [
+        "created other",
+        "updated my-app",
+        "1 created, 1 updated, 0 unchanged, 0 failed",
+    ]
+
+
+def test_deployments_apply_pinned_warning_names_every_component(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    mock_client.deployments.apply_files = AsyncMock(return_value=[_pinned_outcome("my-app", ["server", "worker"])])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest)])
+    assert exc.value.code == 0
+
+    assert capsys.readouterr().err.splitlines() == [
+        "warning: my-app: pinned image overrides on server, worker will not follow version 1.1.0 "
+        "(no {{ app.version }} token)"
+    ]
+
+
+def test_deployments_apply_pinned_warning_keeps_failure_exit_code(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    mock_client.deployments.apply_files = AsyncMock(
+        return_value=[_pinned_outcome("my-app", ["server"]), _outcome("broken", "failed", reason="boom")]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest)])
+    assert exc.value.code == 1
+
+    assert capsys.readouterr().err.splitlines() == [_PINNED_WARNING]
+
+
+def test_deployments_apply_wait_prints_pinned_warning_once_on_submit(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The warning lands with the ``submitted`` line, before the wait, and is not repeated."""
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    pinned = _pinned_outcome("my-app", ["server"])
+    mock_client.deployments.apply_files = _wait_apply_files_stub([("submitted", pinned), ("terminal", pinned)])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest), "--wait"])
+    assert exc.value.code == 0
+
+    captured = capsys.readouterr()
+    assert captured.err.splitlines() == [_PINNED_WARNING]
+    assert captured.out.splitlines() == [
+        "submitted my-app",
+        "running my-app",
+        "0 created, 1 updated, 0 unchanged, 0 failed",
+    ]

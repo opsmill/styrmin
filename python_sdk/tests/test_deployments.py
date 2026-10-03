@@ -1374,6 +1374,118 @@ async def test_apply_partial_update_failure_reports_partial_state(
 
 
 # ---------------------------------------------------------------------------
+# apply: pinned image overrides on a version change (018, FR-008)
+# ---------------------------------------------------------------------------
+
+PINNED_IMAGE = "registry.example/acme/app-patched:1.0.0"
+TOKEN_IMAGE = "registry.example/acme/app-patched:{{ app.version }}"
+STORED_IMAGE_CONFIG: dict[str, Any] = {
+    "components": {
+        "server": {"image": PINNED_IMAGE},
+        "worker": {"image": TOKEN_IMAGE},
+        "migrate": {"env_vars": {"MODE": "fast"}},
+    }
+}
+
+
+def _apply_update_side_effect(*, existing_version: str, stored_config: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _list_environments_response(),
+        _existing_deployment_response(version=existing_version, config=stored_config),
+        _update_response(),
+        _update_version_response() if existing_version != "2.0.0" else _update_version_noop_response(),
+    ]
+
+
+async def test_apply_version_change_reports_pinned_components_from_manifest(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """Manifest ``components`` replace the stored ones, so they alone decide what is pinned."""
+    mock_transport.execute.side_effect = _apply_update_side_effect(
+        existing_version="1.0.0", stored_config={"components": {"api": {"image": "registry.example/api:1"}}}
+    )
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            version="2.0.0",
+            config={
+                "components": [
+                    {"name": "worker", "image": TOKEN_IMAGE},
+                    {"name": "server", "image": PINNED_IMAGE},
+                    {"name": "migrate", "envVars": [{"name": "MODE", "value": "fast"}]},
+                ]
+            },
+        )
+    )
+
+    assert outcome.action == "updated"
+    assert outcome.pinned_image_components == ["server"]
+    assert outcome.target_version == "2.0.0"
+
+
+async def test_apply_version_change_reports_pinned_components_from_stored_config(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.side_effect = _apply_update_side_effect(
+        existing_version="1.0.0", stored_config=STORED_IMAGE_CONFIG
+    )
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(version="2.0.0", config={"ip_whitelist": ["10.0.0.0/8"]})
+    )
+
+    assert outcome.action == "updated"
+    assert outcome.pinned_image_components == ["server"]
+    assert outcome.target_version == "2.0.0"
+
+
+async def test_apply_version_change_with_empty_manifest_components_reports_none(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """An empty ``components`` list clears every stored block, so nothing stays pinned."""
+    mock_transport.execute.side_effect = _apply_update_side_effect(
+        existing_version="1.0.0", stored_config=STORED_IMAGE_CONFIG
+    )
+
+    outcome = await client.deployments.apply(_resolved_manifest(version="2.0.0", config={"components": []}))
+
+    assert outcome.action == "updated"
+    assert outcome.pinned_image_components == []
+
+
+async def test_apply_without_version_change_reports_no_pinned_components(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.side_effect = _apply_update_side_effect(
+        existing_version="2.0.0", stored_config=STORED_IMAGE_CONFIG
+    )
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(version="2.0.0", config={"ip_whitelist": ["10.0.0.0/8"]})
+    )
+
+    assert outcome.action == "updated"
+    assert outcome.pinned_image_components == []
+    assert outcome.target_version is None
+
+
+async def test_apply_create_reports_no_pinned_components(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+        _deploy_response(),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(version="2.0.0", config={"components": [{"name": "server", "image": PINNED_IMAGE}]})
+    )
+
+    assert outcome.action == "created"
+    assert outcome.pinned_image_components == []
+    assert outcome.target_version is None
+
+
+# ---------------------------------------------------------------------------
 # list (deployments-by-environment; backs the styrminctl deployment lookup)
 # ---------------------------------------------------------------------------
 

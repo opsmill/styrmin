@@ -254,6 +254,22 @@ def _format_wait_event_line(event: ApplyEvent) -> str | None:
     return f"running {outcome.name}"
 
 
+def _print_pinned_image_warning(outcome: ApplyOutcome) -> None:
+    """Warn on stderr that token-free image overrides stay pinned (FR-008); never changes the exit code."""
+    components = outcome.pinned_image_components
+    if not components:
+        return
+    noun = "override" if len(components) == 1 else "overrides"
+    # Flush stdout first so the warning follows its outcome line in a combined CI log.
+    sys.stdout.flush()
+    print(
+        f"warning: {outcome.name}: pinned image {noun} on {', '.join(components)} "
+        f"will not follow version {outcome.target_version} (no {{{{ app.version }}}} token)",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _summary_line(outcomes: list[ApplyOutcome]) -> str:
     created = sum(1 for o in outcomes if o.action == "created")
     updated = sum(1 for o in outcomes if o.action == "updated")
@@ -299,6 +315,10 @@ async def apply(
     clears it), while ``spec.parameters`` uses merge semantics (entries
     merge on top of the persisted parameters dict).
 
+    When a manifest changes an existing deployment's application version, a
+    ``warning:`` line on stderr names the components whose image override has
+    no ``{{ app.version }}`` token (they stay pinned). The exit code is unchanged.
+
     Example::
 
         styrminctl deployments apply -f my-app.yaml --version 1.2.3
@@ -310,6 +330,9 @@ async def apply(
         line = _format_wait_event_line(event)
         if line is not None:
             print(line)
+        # Warn with the submitted line, before the wait, so it is not lost behind a long poll.
+        if event.type == "submitted":
+            _print_pinned_image_warning(event.outcome)
 
     on_event = _stream_event if wait else None
 
@@ -324,6 +347,7 @@ async def apply(
     if not wait:
         for outcome in outcomes:
             print(_format_outcome_line(outcome))
+            _print_pinned_image_warning(outcome)
     print(_summary_line(outcomes))
 
     if any(o.action == "failed" for o in outcomes):

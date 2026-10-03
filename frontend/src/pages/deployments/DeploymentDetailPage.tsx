@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
+import { PinnedImageOverridesNotice } from "@/components/deployment/PinnedImageOverridesNotice";
 import { IfRole } from "@/auth/IfRole";
 import { PodsTab } from "./PodsTab";
 import { formatDriverVersionLabel } from "@/lib/driverVersion";
@@ -835,6 +836,9 @@ export default function DeploymentDetailPage() {
               the new application version; pick one to pin it explicitly.
             </p>
           </div>
+          <PinnedImageOverridesNotice
+            overrides={deployment.componentImageOverrides}
+          />
           <DialogFooter>
             <Button
               variant="outline"

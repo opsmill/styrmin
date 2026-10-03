@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from styrmin_sdk.models.image_reference import (
+    APP_VERSION_TOKEN_RE as SDK_APP_VERSION_TOKEN_RE,
+)
+from styrmin_sdk.models.image_reference import (
+    has_app_version_token as sdk_has_app_version_token,
+)
 
 from styrmin_backend.services.image_overrides.exceptions import (
     InvalidImageReferenceError,
@@ -142,6 +148,16 @@ def test_substitute_app_version_inserts_version_literally() -> None:
 def test_has_app_version_token(reference: str, expected: bool) -> None:  # noqa: FBT001
     assert has_app_version_token(reference) is expected
     assert (APP_VERSION_TOKEN_RE.search(reference) is not None) is expected
+
+
+# The SDK duplicates the token regex (it cannot import the backend); keep the two in step.
+@pytest.mark.parametrize("case", VECTORS, ids=_vector_id)
+def test_sdk_token_check_matches_backend(case: dict[str, Any]) -> None:
+    assert SDK_APP_VERSION_TOKEN_RE.pattern == APP_VERSION_TOKEN_RE.pattern
+    assert SDK_APP_VERSION_TOKEN_RE.flags == APP_VERSION_TOKEN_RE.flags
+    assert sdk_has_app_version_token(case["reference"]) is has_app_version_token(
+        case["reference"]
+    )
 
 
 def test_validate_reference_returns_reference_resolved_with_real_version() -> None:
