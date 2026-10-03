@@ -3,6 +3,7 @@
 Constitution §V: ``ComponentConfigInput.image`` written through ``updateDeployment`` and
 ``deploy`` reaches ``Deployment.config["components"][name]["image"]`` through the real service
 and repository layers, and ``Deployment.componentImageOverrides`` projects the stored state.
+``updateDeploymentVersion`` re-validates stored, applicable overrides at the target version.
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import (
     ApplicationDriver,
+    ApplicationDriverVersion,
     Component,
     ComponentConfig,
     Deployment,
+    Task,
 )
 
 from ._queries import load_query
@@ -288,3 +291,187 @@ async def test_component_image_overrides_projects_stored_state(
             "isApplicable": False,
         },
     ]
+
+
+# ---------------------------------------------------------------------------
+# US2 — updateDeploymentVersion re-validates stored, applicable overrides (T037)
+# ---------------------------------------------------------------------------
+
+# Tags disallow "+", so the token breaks only after substituting this version.
+BROKEN_TARGET = "1.1.0+build"
+TOKEN_REFERENCE = f"{PATCHED}:{{{{ app.version }}}}"
+
+
+async def _seed_target_driver_version(
+    session: AsyncSession, deployment_id: UUID, containers: dict[str, str | None]
+) -> UUID:
+    """Add a second version of the deployment's driver declaring ``containers``."""
+    deployment = await session.get(Deployment, deployment_id)
+    assert deployment is not None
+    current = await session.get(
+        ApplicationDriverVersion, deployment.application_driver_version_id
+    )
+    assert current is not None
+    driver = await session.get(ApplicationDriver, current.application_driver_id)
+    assert driver is not None
+    target = await seed_application_driver_version(
+        session, driver=driver, version="2.0.0"
+    )
+    target_id = target.id
+    for name, container in containers.items():
+        session.add(
+            ComponentConfig(
+                name=name,
+                config=_component_config(name, container),
+                application_driver_version_id=target_id,
+            )
+        )
+    await session.commit()
+    return target_id
+
+
+async def _store_config(
+    session: AsyncSession, deployment: Deployment, config: dict[str, Any]
+) -> None:
+    deployment.config = config
+    session.add(deployment)
+    await session.commit()
+
+
+async def _update_version(
+    client: AsyncClient,
+    deployment_id: UUID,
+    version: str,
+    driver_version_id: UUID | None,
+) -> dict[str, Any]:
+    variables: dict[str, Any] = {"deploymentId": str(deployment_id), "version": version}
+    if driver_version_id is not None:
+        variables["driverVersionId"] = str(driver_version_id)
+    response = await client.post(
+        "/graphql",
+        json={"query": load_query("update_deployment_version"), "variables": variables},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def _task_count(session: AsyncSession, deployment_id: UUID) -> int:
+    rows = await session.exec(select(Task).where(Task.deployment_id == deployment_id))
+    return len(rows.all())
+
+
+async def _stored_row(session: AsyncSession, deployment_id: UUID) -> Deployment:
+    session.expire_all()
+    return (
+        await session.exec(select(Deployment).where(Deployment.id == deployment_id))
+    ).one()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("current_containers", "target_containers"),
+    [
+        ({"server": "simple-app"}, None),
+        ({"server": None}, {"server": "simple-app"}),
+    ],
+    ids=["same-driver-version", "target-driver-version-declares-container"],
+)
+async def test_update_deployment_version_rejects_reference_broken_by_substitution(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    current_containers: dict[str, str | None],
+    target_containers: dict[str, str | None] | None,
+) -> None:
+    """A stored override applicable in the target driver version that resolves to an invalid
+    reference at the target application version rejects the upgrade before any task."""
+    _arm_prefect(prefect_manager_mock)
+    deployment = await _seed_deployment_with_components(session, current_containers)
+    deployment_id = deployment.id
+    driver_version_before = deployment.application_driver_version_id
+    config = {"components": {"server": {"image": TOKEN_REFERENCE}}}
+    await _store_config(session, deployment, config)
+    target_id = (
+        await _seed_target_driver_version(session, deployment_id, target_containers)
+        if target_containers is not None
+        else None
+    )
+
+    payload = await _update_version(client, deployment_id, BROKEN_TARGET, target_id)
+
+    assert "errors" in payload, payload
+    error = payload["errors"][0]
+    extensions = error.get("extensions") or {}
+    assert extensions.get("code") == "INVALID_IMAGE_REFERENCE", extensions
+    assert extensions.get("component_name") == "server", extensions
+    assert extensions.get("reference") == TOKEN_REFERENCE, extensions
+    assert extensions.get("reason") == "after_substitution", extensions
+    assert extensions.get("application_version") == BROKEN_TARGET, extensions
+    assert "'server'" in error["message"]
+
+    prefect_manager_mock.run_action.assert_not_awaited()
+    assert await _task_count(session, deployment_id) == 0
+    stored = await _stored_row(session, deployment_id)
+    assert stored.application_version == "1.0.0"
+    assert stored.application_driver_version_id == driver_version_before
+    assert stored.config == config
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("current_containers", "config", "target_containers"),
+    [
+        (
+            {"server": "simple-app", "worker": None},
+            {
+                "components": {
+                    "server": {"image": f"{PATCHED}:0.1.0"},
+                    "worker": {"image": TOKEN_REFERENCE},
+                }
+            },
+            None,
+        ),
+        (
+            {"server": "simple-app"},
+            {"components": {"server": {"image": TOKEN_REFERENCE}}},
+            {"server": None},
+        ),
+        (
+            {"server": "simple-app"},
+            {"components": {"server": {"image": TOKEN_REFERENCE}}},
+            {"api": "api"},
+        ),
+    ],
+    ids=[
+        "containerless-component",
+        "target-driver-version-drops-container",
+        "target-driver-version-drops-component",
+    ],
+)
+async def test_update_deployment_version_ignores_non_applicable_override(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    current_containers: dict[str, str | None],
+    config: dict[str, Any],
+    target_containers: dict[str, str | None] | None,
+) -> None:
+    """An override that is not applicable in the target driver version (containerless or
+    orphaned component) is never rendered, so it does not block the upgrade."""
+    _arm_prefect(prefect_manager_mock)
+    deployment = await _seed_deployment_with_components(session, current_containers)
+    deployment_id = deployment.id
+    await _store_config(session, deployment, config)
+    target_id = (
+        await _seed_target_driver_version(session, deployment_id, target_containers)
+        if target_containers is not None
+        else None
+    )
+
+    payload = await _update_version(client, deployment_id, BROKEN_TARGET, target_id)
+
+    assert "errors" not in payload, payload
+    assert await _task_count(session, deployment_id) == 1
+    stored = await _stored_row(session, deployment_id)
+    assert stored.application_version == BROKEN_TARGET
+    assert stored.config == config

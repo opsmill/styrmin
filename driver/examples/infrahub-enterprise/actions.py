@@ -20,8 +20,11 @@ async def upgrade(context: GlobalContext, target_version: str):
     await upgrade_deployment_version(target_version=target_version, context=context)
 
     images = await get_component_images(component="server", context=context)
-    image = next(img for img in images if "infrahub" in img)
-    image_base = image.rsplit(":", 1)[0]
+    # images[0] is the component container's image; drop any digest, then the tag
+    # (a ":" followed by a "/" is a registry port, not a tag).
+    name = images[0].split("@", 1)[0]
+    repository, separator, tag = name.rpartition(":")
+    image_base = repository if separator and "/" not in tag else name
 
     await execute_commands(
         [

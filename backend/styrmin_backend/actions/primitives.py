@@ -202,7 +202,10 @@ async def get_component_labels(
 async def get_component_images(component: str, context: GlobalContext) -> list[str]:
     """Get the container images from a component's Deployment or StatefulSet.
 
-    Returns images from all containers in the pod template spec.
+    Returns images from all containers in the pod template spec. When the
+    component declares a component container present in the pod template, its
+    image is element 0 (it carries any image override); the others keep their
+    pod-template order.
 
     Args:
         component: The component name (e.g., "server").
@@ -212,9 +215,11 @@ async def get_component_images(component: str, context: GlobalContext) -> list[s
         List of container image strings.
     """
     label_selector = _validate_component(component, context)
+    assert context.components is not None  # checked by _validate_component
     return await _k8s_get_component_images(
         namespace=context.instance.namespace,
         label_selector=label_selector,
+        container=context.components[component].config.container,
     )
 
 
