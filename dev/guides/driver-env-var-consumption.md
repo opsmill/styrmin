@@ -119,8 +119,10 @@ The result on the rendered workload:
 - a user entry with the same name as a chart entry replaces it, including a chart
   `valueFrom` entry;
 - entries the user clears disappear on the next reconcile; the chart's value comes back;
-- values are passed as strings, unescaped and uncoerced (`"true"`, `"0123"`, multi-line,
-  `$(VAR)` all arrive as written);
+- values are passed as strings that Styrmin does not escape, coerce, or expand (`"true"`,
+  `"0123"`, and multi-line values arrive as written); Kubernetes still applies its normal
+  `$(VAR)` expansion to references to earlier entries (see "Ordering and `$(VAR)` references"
+  below);
 - the user value wins over the same key from the chart's `envFrom` (Kubernetes `env` over
   `envFrom` precedence).
 
@@ -186,8 +188,8 @@ whenever env vars are set.
    other chart entry:
 
    ```bash
-   kubectl get deploy -n <namespace> -l <identifier-label> \
-     -o jsonpath='{.items[0].spec.template.spec.containers[0].env}'
+   kubectl get deploy,statefulset -n <namespace> -l <identifier-label> \
+     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{.spec.template.spec.containers[0].env}{"\n"}{end}'
    ```
 
 4. Clear the env var and confirm the chart default is back.
