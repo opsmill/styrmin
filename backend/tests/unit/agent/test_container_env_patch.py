@@ -81,6 +81,21 @@ class TestContainerEnvPatchShape:
             assert entry["valueFrom"] is None
 
 
+class TestContainerEnvPatchNameOnly:
+    """018 contracts/post-render-patch.md: an image-only component gets a name-only merge."""
+
+    def test_default_env_renders_name_only_container(self) -> None:
+        doc = _load(ContainerEnvPatch(container="app"))
+
+        assert _containers(doc) == [{"name": "app"}]
+
+    def test_empty_env_omits_env_key(self) -> None:
+        rendered = ContainerEnvPatch(container="app", env={}).render_value()
+
+        assert _containers(yaml.safe_load(rendered)) == [{"name": "app"}]
+        assert "env" not in rendered
+
+
 class TestContainerEnvPatchScalarRoundTrip:
     """Critique E5: YAML-significant scalars must come back as strings."""
 

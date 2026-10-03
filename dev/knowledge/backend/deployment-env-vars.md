@@ -193,10 +193,12 @@ Env vars reach pods through a **post-render Kustomize patch**, not through
 the driver's values template. Each driver component may declare a component
 container (`components.<name>.container`, a DNS-1123 label validated at
 driver registration). For every component with a container and non-empty,
-non-orphaned resolved env vars, `build_env_var_patches()` emits one
-strategic-merge `ContainerEnvPatch` per kind (`Deployment`, `StatefulSet`),
-targeted by the component's first identifier label. The HelmRelease builder
-appends them after every other post-render patch.
+non-orphaned resolved env vars, `build_component_container_patches()` emits,
+per kind (`Deployment`, `StatefulSet`), a strategic-merge `ContainerEnvPatch`
+followed by the JSON6902 `ComponentContainerPatch` guard (018), both targeted
+by the component's first identifier label. The guard fails the render when
+the named container is missing instead of letting the merge add it. The
+HelmRelease builder appends them after every other post-render patch.
 
 Each patch names the container and lists `{name, value, valueFrom: null}`
 per env var in resolution order. The merge keeps chart entries the patch does
@@ -262,8 +264,8 @@ foot setting them in the past.
 | Validator | `backend/styrmin_backend/services/env_vars/validator.py` |
 | Resolver (merge + orphan detection) | `backend/styrmin_backend/services/env_vars/resolver.py` |
 | Component container field + validation | `backend/styrmin_backend/services/driver/models/resources/driver.py::ArbitrarySectionModel`, `backend/styrmin_backend/context/models/components.py::ArbitrarySectionModel` |
-| Patch builder | `backend/styrmin_backend/services/env_vars/patch_builder.py::build_env_var_patches` |
-| Patch block | `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py::ContainerEnvPatch` |
+| Patch builder | `backend/styrmin_backend/services/component_container/patch_builder.py::build_component_container_patches` |
+| Patch blocks | `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py::ContainerEnvPatch`, `::ComponentContainerPatch` |
 | Patch placement + rendering-context exposure | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` (`ApplicationHelmReleaseBuilder.build`, `render_value_template`, retired `component_env_vars` stub) |
 | Write guard | `backend/styrmin_backend/services/deployment.py::_validate_component_env_var_containers`; error in `services/env_vars/exceptions.py` |
 | Retired-filter error | `backend/styrmin_backend/services/exceptions.py::RetiredTemplateFilterError` |
@@ -272,7 +274,8 @@ foot setting them in the past.
 | Reference driver | `driver/examples/simple-app/driver.styrmin.yml` and `driver/examples/simple-app/src/helm/templates/deployment.yaml` |
 | GraphQL types | `backend/styrmin_backend/api/definitions/deployment/model.py`, `.../environment/model.py`, `.../application_driver/model.py`, `.../deployment_timeline/model.py` |
 | Frontend gating | `frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx`, `frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx` |
-| Unit tests | `backend/tests/unit/agent/test_container_env_patch.py`, `.../test_application_builder_env_vars.py`, `.../test_upsert_custom_resource_replace_spec.py`, `backend/tests/unit/services/env_vars/test_patch_builder.py` |
+| Unit tests | `backend/tests/unit/agent/test_container_env_patch.py`, `.../test_component_container_patch.py`, `.../test_application_builder_env_vars.py`, `.../test_upsert_custom_resource_replace_spec.py`, `backend/tests/unit/services/component_container/test_patch_builder.py` |
+| Kustomize integration test | `backend/tests/integration/test_component_container_kustomize.py` |
 | E2E coverage | `backend/tests/e2e/test_deployment_env_vars.py`, `backend/tests/e2e/test_infrahub_services.py` (chart env defaults kept) |
 | Propagation + mutation-error tests | `backend/tests/functional/graphql/test_env_vars_propagation.py`, `.../test_update_deployment_input_errors.py`, `.../test_application_driver_version_propagation.py` |
 

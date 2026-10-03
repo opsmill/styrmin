@@ -407,13 +407,16 @@ list-shaped key from the values template drops every entry the chart ships.
 - Append the patches after every patch that addresses a container by index (e.g. the
   scheduling `ResourcesPatch` on `containers/0`): a strategic merge moves the named container
   to index 0.
+- Follow the strategic merge with the JSON6902 guard (`ComponentContainerPatch`). A merge that
+  names a missing container adds it; the guard's `remove …/image` fails the render instead, and
+  its key names the component and the container. Never add a container.
 - Regenerate the patches from the resolved context on every render, so removing an override
   removes its entry without a marker.
 - Test the outcome (entries present, chart entries kept, values replaced), not the exact
   order: kyaml's ordering is implementation behaviour.
 
 See [ADR-057](../../adr/0057-post-render-component-overrides.md) and
-`services/env_vars/patch_builder.py`.
+`services/component_container/patch_builder.py`.
 
 ### Custom-resource updates: replace the spec keys you write, merge the rest
 

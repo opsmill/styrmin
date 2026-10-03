@@ -21,7 +21,9 @@ from styrmin_backend.agent.service.kubernetes.resources.builders.backup_annotati
 from styrmin_backend.services.driver.models.resources.backup import (
     ComponentBackupConfig,
 )
-from styrmin_backend.services.env_vars.patch_builder import build_env_var_patches
+from styrmin_backend.services.component_container.patch_builder import (
+    build_component_container_patches,
+)
 from styrmin_backend.services.exceptions import (
     RetiredTemplateFilterError,
     SchedulingPatchRenderingError,
@@ -282,7 +284,7 @@ class ApplicationHelmReleaseBuilder:
             These paths are read-only data (e.g. to build a ConfigMap).
             Styrmin injects env vars into each component's declared
             component container by post-render patch, not through the values
-            template (see :meth:`build_env_var_post_rendering_patches` and
+            template (see :meth:`build_component_container_post_rendering_patches` and
             ``dev/guides/driver-env-var-consumption.md``).
         """
         # Turn the context model into a dict
@@ -453,10 +455,10 @@ class ApplicationHelmReleaseBuilder:
         )
         return patches
 
-    def build_env_var_post_rendering_patches(self) -> list[TargetPatch]:
-        """Build Kustomize patches merging resolved env vars into each
-        component's component container (017-post-render-env-vars)."""
-        return build_env_var_patches(self.context)
+    def build_component_container_post_rendering_patches(self) -> list[TargetPatch]:
+        """Build Kustomize patches applying env vars and image overrides to each
+        component's component container, with the missing-container guard (018)."""
+        return build_component_container_patches(self.context)
 
     def build_backup_annotation_patches(self) -> list[TargetPatch]:
         """Extract backup configs from components and build Velero annotation patches."""
@@ -554,9 +556,9 @@ class ApplicationHelmReleaseBuilder:
         # that later user-story phases extend.
         target_patches.extend(self.build_scheduling_post_rendering_patches())
 
-        # Env patches go last so the scheduling ResourcesPatch still hits the
-        # chart's original containers[0] (017 research D-002).
-        target_patches.extend(self.build_env_var_post_rendering_patches())
+        # Component-container patches go last: they move the component container
+        # to containers[0], so the scheduling ResourcesPatch must run first (017 research D-002).
+        target_patches.extend(self.build_component_container_post_rendering_patches())
 
         if target_patches:
             rh.add_spec(PostRenderers(target_patches=target_patches))
