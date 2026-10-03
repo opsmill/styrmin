@@ -187,16 +187,20 @@ The fixed set of sub-contexts that compose **GlobalContext**. Each level can ove
 _Avoid_: inventing additional context types without an ADR.
 
 **Component overrides**:
-The mechanism by which a **deployment**'s **component** config (`DeploymentConfig.components[<name>]`) overrides the **driver version**'s default `ComponentConfig`. First-class to the deployment-config feature. Component-scope env vars reach pods by a post-render patch into the **component container**, not through the values template ([ADR-057](dev/adr/0057-post-render-component-overrides.md)); **container overrides** still flow through the values template.
+The mechanism by which a **deployment**'s **component** config (`DeploymentConfig.components[<name>]`) overrides the **driver version**'s default `ComponentConfig`. First-class to the deployment-config feature. Component-scope env vars and **image overrides** reach pods by a post-render patch into the **component container**, not through the values template ([ADR-057](dev/adr/0057-post-render-component-overrides.md)); **container overrides** still flow through the values template.
 _Avoid_: "component patch", "component customisation".
 
 **Component container**:
-The single container in a **component**'s pod template that the **application driver** declares (`components.<name>.container` in the **driver specification file**) as the target of per-component post-render overrides — env vars today, images next ([#20](https://github.com/opsmill/styrmin/issues/20)). Optional: a component without one accepts no component-scope env vars (`COMPONENT_CONTAINER_NOT_DECLARED`) and is skipped by deployment- and environment-scope ones. Only `Deployment` and `StatefulSet` workloads are patched. With env vars set, a wrong name fails the Helm release rather than silently no-op'ing. See [ADR-057](dev/adr/0057-post-render-component-overrides.md).
+The single container in a **component**'s pod template that the **application driver** declares (`components.<name>.container` in the **driver specification file**) as the target of per-component post-render overrides — env vars and **image overrides**. Optional: a component without one accepts no component-scope env vars or **image override** (`COMPONENT_CONTAINER_NOT_DECLARED`) and is skipped by deployment- and environment-scope env vars. Only `Deployment` and `StatefulSet` workloads are patched. A declared name missing from the rendered workload fails the reconcile; Styrmin never adds a container. See [ADR-057](dev/adr/0057-post-render-component-overrides.md).
 _Avoid_: "main container", "app container", "primary container", "target container".
 
 **Container override**:
 The per-**component** `command` (container entrypoint) and/or `args` slot a user may set on a single **deployment**, scoped to that component only — no environment/deployment-wide scope, no layering (014-component-container-overrides). Two independent, optional, nullable lists; absence falls through to the chart/image default. Stored on `DeploymentConfig.components[<name>]`, consumed by the **driver version** through the `component_command` / `component_args` template filters. The `container` named in the driver's `spec.container_overrides` is informational and distinct from the **component container**.
 _Avoid_: "command override" / "args override" alone (they are the two slots **of** a container override), "entrypoint patch", "container customisation". Distinct from **component overrides** (the broader config-override mechanism) and from env vars (which **do** layer across scopes and are injected by post-render).
+
+**Image override**:
+The per-**component** image reference a user may set on a single **deployment**, applied by a post-render patch to the **component container** (`Deployment` and `StatefulSet` only). A full reference with an explicit tag or digest; a `{{ app.version }}` token resolves to the deployment's **application version** at render time, and a literal tag pins the image across **application version** upgrades. Component scope only, no layering. Stored on `DeploymentConfig.components[<name>]`. See [issue #20](https://github.com/opsmill/styrmin/issues/20).
+_Avoid_: "custom image", "image patch", "tag override". Distinct from a registry mirror (release-wide rewrite of every image, a separate issue).
 
 ### Recorded intent and kubernetes
 
