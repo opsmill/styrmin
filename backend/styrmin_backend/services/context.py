@@ -42,6 +42,7 @@ from styrmin_backend.services.container_overrides.resolver import (
     ContainerOverridesResolver,
 )
 from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
+from styrmin_backend.services.image_overrides.resolver import ImageOverridesResolver
 from styrmin_backend.services.env_vars.validator import (
     PER_SCOPE_BYTE_CAP,
     _serialised_dict_bytes,
@@ -298,6 +299,12 @@ async def generate_context_from_deployment(
             deployment_config=deployment.config,
         )
 
+        # Image overrides per component (018): live components only, token not substituted.
+        _populate_component_image_overrides(
+            context=context,
+            deployment_config=deployment.config,
+        )
+
         return context
 
 
@@ -508,6 +515,36 @@ def _populate_component_container_overrides(
             component_ctx.container_override = None
             continue
         component_ctx.container_override = entry.resolved
+
+
+def _populate_component_image_overrides(
+    *,
+    context: GlobalContext,
+    deployment_config: dict | None,
+) -> None:
+    """Populate ``ComponentContext.image_override`` for live components with an override.
+
+    The reference stays unsubstituted; the patch builder resolves ``{{ app.version }}`` at render.
+    Orphans are never attached, and components without an override keep ``None`` (SC-002).
+    """
+    if context.components is None or len(context.components.root) == 0:
+        return
+
+    dep_cfg = _validate_env_section(deployment_config, scope="deployment")
+    component_blocks: dict[str, ComponentConfigBlock | None] = {}
+    if isinstance(dep_cfg, DeploymentConfig):
+        component_blocks = dict(dep_cfg.components or {})
+
+    entries = ImageOverridesResolver.resolve_for_deployment(
+        component_overrides=component_blocks,
+        driver_components=list(context.components.root.keys()),
+    )
+    for entry in entries:
+        if entry.resolved.is_orphaned:
+            continue
+        component_ctx = context.components.root.get(entry.component_name)
+        if component_ctx is not None:
+            component_ctx.image_override = entry.resolved
 
 
 def _validate_env_section(
