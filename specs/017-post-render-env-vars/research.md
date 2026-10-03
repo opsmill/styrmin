@@ -155,7 +155,7 @@ and a whole-`spec` replace undid it on the next update. Per-key replace still dr
 keys under `spec.values` (the FR-011 fix) and keeps spec keys Styrmin never writes, as merge-patch
 did. `spec.postRenderers` is written on every render (the label patches are unconditional), so it
 cannot go stale. Rule for both callers: Styrmin owns each top-level spec key it writes; everything
-else merges (ADR-055 §6).
+else merges (ADR-057 §6).
 
 ---
 

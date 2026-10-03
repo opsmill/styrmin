@@ -9,7 +9,7 @@ This page is the user/contributor reference. The decisions behind the shape
 (free-form `dict[str, str]`, three-scope deepest-wins precedence) live in
 [ADR-013](../../adr/0013-driver-env-var-consumption.md); post-render
 injection into the component container lives in
-[ADR-055](../../adr/0055-post-render-component-overrides.md). The full
+[ADR-057](../../adr/0057-post-render-component-overrides.md). The full
 contracts are in [`specs/archive/008-deployment-env-vars/`](../../../specs/archive/008-deployment-env-vars/),
 [`specs/archive/010-driver-env-var-consumption/`](../../../specs/archive/010-driver-env-var-consumption/),
 and [`specs/017-post-render-env-vars/`](../../../specs/017-post-render-env-vars/).
@@ -119,7 +119,7 @@ skip containerless components at render time.
 the target. `styrminctl apply` calls `updateDeployment` before
 `updateDeploymentVersion` (ADR-048), so a manifest that switches version and
 adds component env vars in one go is validated against the pre-switch
-version — a known gap recorded in ADR-055.
+version — a known gap recorded in ADR-057.
 
 ## Driver-side documentation
 
@@ -233,7 +233,7 @@ History: 008 injected by a JSON-patch `replace` on `containers/0/env`, which
 clobbered chart defaults; 010 moved injection into driver templates
 ([ADR-013](../../adr/0013-driver-env-var-consumption.md)), where Helm's list
 replacement dropped chart defaults instead; 017 merges by name into the
-declared container ([ADR-055](../../adr/0055-post-render-component-overrides.md)).
+declared container ([ADR-057](../../adr/0057-post-render-component-overrides.md)).
 The [driver-author guide](../../guides/driver-env-var-consumption.md) covers
 declaring the container and the failure modes.
 
@@ -276,8 +276,8 @@ foot setting them in the past.
 
 ## Related
 
-- [ADR-055: Post-Render Component Overrides](../../adr/0055-post-render-component-overrides.md) — component container, strategic-merge injection, ordering, HelmRelease `spec` replace.
-- [ADR-013: Driver-Side Env Var Consumption](../../adr/0013-driver-env-var-consumption.md) — free-form `dict[str, str]`, three-scope deepest-wins; its values-template injection route is superseded by ADR-055.
+- [ADR-057: Post-Render Component Overrides](../../adr/0057-post-render-component-overrides.md) — component container, strategic-merge injection, ordering, HelmRelease `spec` replace.
+- [ADR-013: Driver-Side Env Var Consumption](../../adr/0013-driver-env-var-consumption.md) — free-form `dict[str, str]`, three-scope deepest-wins; its values-template injection route is superseded by ADR-057.
 - [Driver-author guide](../../guides/driver-env-var-consumption.md) — declaring the component container, ordering rules, failure modes.
 - [Migration guide](../../../docs/docs/drivers/migrating-env-vars.md) — user and driver-author steps off `component_env_vars`.
 - [ADR-004: Embed GlobalContext in StyrminDeployment CRD](../../adr/0004-embed-context-in-deployment-crd.md) — the carrier mechanism that flows resolved env vars to the operator/agent.

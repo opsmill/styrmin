@@ -219,7 +219,7 @@ async def execute_phase_helmrelease(
             namespace=namespace,
             # Replace each spec key Styrmin writes so stale values-template keys
             # do not linger, keep keys it doesn't (``spec.suspend``), and prune
-            # ``None`` on both paths so a ``null`` marker reads as absent (ADR-055).
+            # ``None`` on both paths so a ``null`` marker reads as absent (ADR-057).
             prune_none_on_create=True,
             replace_spec_keys_on_update=True,
         )

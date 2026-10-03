@@ -108,7 +108,7 @@ def component_command(components: object, name: str) -> list[str]:
     chart guards with ``{{- with .Values.command }}``, and an empty list is
     falsy so the chart skips the key and the image/chart default applies
     (FR-007/US2 Sc.2, FR-009). The HelmRelease ``spec`` is replaced on update
-    (ADR-055), so clearing also works when the key is omitted.
+    (ADR-057), so clearing also works when the key is omitted.
     """
     override = _resolved_container_override(components, name)
     if override is None:

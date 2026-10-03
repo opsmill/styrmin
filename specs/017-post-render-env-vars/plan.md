@@ -128,7 +128,7 @@ frontend/src/
 python_sdk/src/styrmin_sdk/graphql/*.graphql          # isApplicable, componentConfigs.container
 schema.graphql, generated SDK + frontend types        # regenerated
 
-dev/adr/0055-post-render-component-overrides.md       # NEW, supersedes ADR-013 §1 + FR-026, narrows ADR-045 §2
+dev/adr/0057-post-render-component-overrides.md       # NEW, supersedes ADR-013 §1 + FR-026, narrows ADR-045 §2
 dev/guides/driver-env-var-consumption.md              # rewrite
 dev/knowledge/backend/deployment-env-vars.md          # update
 docs/docs/drivers/{creating-a-driver,context}.md      # update

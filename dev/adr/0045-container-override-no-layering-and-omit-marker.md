@@ -6,16 +6,16 @@
 > operator's JSON merge-patch HelmRelease apply.
 
 
-**Status**: Accepted — superseded in part by [ADR-055](0055-post-render-component-overrides.md)
+**Status**: Accepted — superseded in part by [ADR-057](0057-post-render-component-overrides.md)
 **Date**: 2026-05-29
 **Source**: specs/archive/014-component-container-overrides/ (spec, plan, research)
 
-> **Superseded in part by [ADR-055](0055-post-render-component-overrides.md)** (2026-10-02,
+> **Superseded in part by [ADR-057](0057-post-render-component-overrides.md)** (2026-10-02,
 > 017-post-render-env-vars). The operator now replaces each HelmRelease spec key Styrmin
 > writes on update (JSON Patch `add /spec/<key>`, `None` pruned) instead of merge-patching it. §2's merge-patch rationale for
 > the always-present key no longer applies (an omitted key no longer lingers; the `[]` marker
 > stays harmless), and §5's `null` marker is pruned on both create and update. The
-> `component_env_vars` filter §2 cites as precedent was retired by ADR-055. `command`/`args`
+> `component_env_vars` filter §2 cites as precedent was retired by ADR-057. `command`/`args`
 > still flow through the values template.
 **Relationship**: A faithful port of the deployment env-vars precedent (008/010,
 [ADR-013](0013-driver-env-var-consumption.md)) with two deliberate
@@ -75,7 +75,7 @@ when unset. The driver template emits the key **unconditionally**
 is falsy, so the chart skips the key and the image/chart default applies. This
 mirrors the env-vars `component_env_vars` always-present-list convention.
 
-> **Note (ADR-055):** `component_env_vars` was retired; env vars are now injected by
+> **Note (ADR-057):** `component_env_vars` was retired; env vars are now injected by
 > post-render patch, so this precedent no longer exists. The empty-list marker itself is unchanged.
 
 **Why an always-present key (not an omitted one) — the merge-patch
@@ -176,7 +176,7 @@ changes no behaviour for any other custom resource and leaves the merge-patch
 path untouched. Full replace / server-side apply was rejected because it
 reshaped the apply path for **every** resource — this does not.
 
-> **Note (ADR-055):** the operator's HelmRelease apply now replaces each spec key Styrmin writes
+> **Note (ADR-057):** the operator's HelmRelease apply now replaces each spec key Styrmin writes
 > on update (one JSON Patch, `None` pruned), scoped to that caller and the StyrminDeployment CR
 > apply. The
 > `null` marker is therefore pruned on the update path too and reads as absent on both paths;

@@ -6,8 +6,8 @@
 |---|---|
 | Feature | Platform-owned env var injection via post-render (#385) |
 | Spec dir | `specs/017-post-render-env-vars/` |
-| Base commit | `d7d8825` |
-| Head commit (before this report) | `ea18d8c` |
+| Base commit | `c294559` (`d7d8825` before the rebase onto `develop`) |
+| Head commit (before this report) | `ca4b2c2` |
 | Commits | 19 (18 from the 14 chunks, 1 review fix) |
 | Diff | 101 files changed, +5499 / −942 |
 | Wall clock | 2026-10-02T16:47:17Z → 2026-10-02T19:48:38Z (about 3h01m) |
@@ -18,21 +18,21 @@ Chunks ran one at a time, each in a fresh subagent.
 
 | # | Chunk | Tasks | ✅ / ⚠️ / ❌ | Commits | Flagged upward |
 |---|---|---|---|---|---|
-| 1 | Phase 1 Setup | 1 (T001) | 1/0/0 | `adb1e4c` | There are 28 components, not 30. Every D-010 container name was confirmed with `helm template`. Found two existing bugs: slurpit passed `env` to its chart as a list when the chart expects a map, and the semaphore chart has no `extraEnv` key. |
-| 2 | Phase 2 Foundational | 4 (T002–T005) | 4/0/0 | `bf4298f` | No extra wiring was needed: `container` flows from the driver through to `ComponentContext`. Stored component configs now carry `"container": null` when none is declared. |
-| 3a | US1 backend core | 9 (T006–T009, T014–T018) | 9/0/0 | `acd37f5`, `a3ff101` | Added a `PostRenderPatchRenderingError` base class. The builder skips orphaned env vars. Per-key metadata ops need the label and annotation maps to exist, and the builder always sets both. An offline `kubectl kustomize` merge check passed. |
-| 3b | US1 E2E + simple-app | 7 (T010–T013, T019–T021) | 7/0/0 | `2242972`, `bc6984b`, `cb689e5` | **Out-of-task fix in a high-risk area (`2242972`):** research D-003 was incomplete. The agent merge-patched the StyrminDeployment CR, so cleared env vars stayed in `spec.context`. The agent's CR applies now replace each top-level spec key they write, and leave `spec.deletionRequested` alone. Also: the api and ui E2E variants must run as separate sessions. |
-| 4 | US2 | 4 (T022–T025) | 4/0/0 | `2672508` | The precedence cases passed first time; the builder needed no change. `test_us2` and `test_us3` stay `api_only` because the UI test driver only takes scheduling updates. |
-| 5a | US3 driver migrations | 8 (T027, T028, T034–T039) | 8/0/0 | `10099ac` | Six drivers migrated, all render-verified. slurpit env is back to map shape. infrahub's prefect-server gets its chart env defaults back. Added an extra `changelog/+example-driver-env-wiring.fixed.md` fragment. |
-| 5b | US3 filter retirement | 3 (T026, T032, T033) | 3/0/0 | `50f1a88` | The `RETIRED_TEMPLATE_FILTER` code and metadata collapse into a status string at the operator boundary; the message and the guide URL survive. contracts/errors.md accepts this. |
-| 5c | US3 driver-version GraphQL + UI | 5 (T029, T030, T040–T042) | 5/0/0 | `1f9ee83` | `invoke lint` reverts unstaged `_generated/` changes. Frontend `node_modules` reinstalled under Node 22. |
-| 5d | US3 SC-003 E2E | 2 (T031, T043) | 2/0/0 | `d1b8b62` | Reuses the existing `deployed_infrahub_enterprise_app` boot, so no extra cluster boot. No credentials needed. |
-| 6a | US4 backend | 6 (T044, T045, T047–T050) | 6/0/0 | `ffbe6ef` | Error metadata keys are snake_case, matching contracts/errors.md. The `styrminctl apply` ordering gap is described in §5. |
-| 6b | US4 frontend | 2 (T046, T051) | 2/0/0 | `09d51e1` | Read-only rows get a new test id; the E2E selectors are unchanged. |
-| 7 | US5 | 3 (T052–T054) | 3/0/0 | `b8ae426` | No new query. Rows from before this feature have no `container` key, so they read `isApplicable: false`. |
-| 8a | Docs | 8 (T055–T062) | 8/0/0 | `9231082`, `fc2f072` | ADR-055 written. `contracts/graphql-deltas.md` fixed to snake_case. Some docs went beyond the task list (changelog page, styrminctl reference, DRIVERS.md). |
-| 8b | Final gates | 3 (T063–T065) | 3/0/0 | `cbafd63` | All gates green. Two CLI tests fail on base and HEAD alike because they run as root. Quickstart corrected. The stale simple-app comments were fixed before the E2E run. |
-| — | Review fix | — | — | `ea18d8c` | Removed stale merge-patch reasoning from the `component_command`/`component_args` docstrings. |
+| 1 | Phase 1 Setup | 1 (T001) | 1/0/0 | `7926556` | There are 28 components, not 30. Every D-010 container name was confirmed with `helm template`. Found two existing bugs: slurpit passed `env` to its chart as a list when the chart expects a map, and the semaphore chart has no `extraEnv` key. |
+| 2 | Phase 2 Foundational | 4 (T002–T005) | 4/0/0 | `41a1214` | No extra wiring was needed: `container` flows from the driver through to `ComponentContext`. Stored component configs now carry `"container": null` when none is declared. |
+| 3a | US1 backend core | 9 (T006–T009, T014–T018) | 9/0/0 | `0d403f6`, `9b95b8e` | Added a `PostRenderPatchRenderingError` base class. The builder skips orphaned env vars. Per-key metadata ops need the label and annotation maps to exist, and the builder always sets both. An offline `kubectl kustomize` merge check passed. |
+| 3b | US1 E2E + simple-app | 7 (T010–T013, T019–T021) | 7/0/0 | `02045a7`, `21c8580`, `7e0324c` | **Out-of-task fix in a high-risk area (`02045a7`):** research D-003 was incomplete. The agent merge-patched the StyrminDeployment CR, so cleared env vars stayed in `spec.context`. The agent's CR applies now replace each top-level spec key they write, and leave `spec.deletionRequested` alone. Also: the api and ui E2E variants must run as separate sessions. |
+| 4 | US2 | 4 (T022–T025) | 4/0/0 | `e33c618` | The precedence cases passed first time; the builder needed no change. `test_us2` and `test_us3` stay `api_only` because the UI test driver only takes scheduling updates. |
+| 5a | US3 driver migrations | 8 (T027, T028, T034–T039) | 8/0/0 | `dcaf712` | Six drivers migrated, all render-verified. slurpit env is back to map shape. infrahub's prefect-server gets its chart env defaults back. Added an extra `changelog/+example-driver-env-wiring.fixed.md` fragment. |
+| 5b | US3 filter retirement | 3 (T026, T032, T033) | 3/0/0 | `097651e` | The `RETIRED_TEMPLATE_FILTER` code and metadata collapse into a status string at the operator boundary; the message and the guide URL survive. contracts/errors.md accepts this. |
+| 5c | US3 driver-version GraphQL + UI | 5 (T029, T030, T040–T042) | 5/0/0 | `5c091cd` | `invoke lint` reverts unstaged `_generated/` changes. Frontend `node_modules` reinstalled under Node 22. |
+| 5d | US3 SC-003 E2E | 2 (T031, T043) | 2/0/0 | `b801d62` | Reuses the existing `deployed_infrahub_enterprise_app` boot, so no extra cluster boot. No credentials needed. |
+| 6a | US4 backend | 6 (T044, T045, T047–T050) | 6/0/0 | `a87c1da` | Error metadata keys are snake_case, matching contracts/errors.md. The `styrminctl apply` ordering gap is described in §5. |
+| 6b | US4 frontend | 2 (T046, T051) | 2/0/0 | `f8bf738` | Read-only rows get a new test id; the E2E selectors are unchanged. |
+| 7 | US5 | 3 (T052–T054) | 3/0/0 | `d354e38` | No new query. Rows from before this feature have no `container` key, so they read `isApplicable: false`. |
+| 8a | Docs | 8 (T055–T062) | 8/0/0 | `225287e`, `ab2f917` | ADR-057 written. `contracts/graphql-deltas.md` fixed to snake_case. Some docs went beyond the task list (changelog page, styrminctl reference, DRIVERS.md). |
+| 8b | Final gates | 3 (T063–T065) | 3/0/0 | `6fbc5d7` | All gates green. Two CLI tests fail on base and HEAD alike because they run as root. Quickstart corrected. The stale simple-app comments were fixed before the E2E run. |
+| — | Review fix | — | — | `ca4b2c2` | Removed stale merge-patch reasoning from the `component_command`/`component_args` docstrings. |
 
 ## 2. Tasks not completed
 
@@ -95,8 +95,8 @@ The review was done by hand in the main context, without the `speckit-review-run
 
 | Severity | File | Summary | Status |
 |---|---|---|---|
-| Medium | `python_sdk` / `styrminctl apply` (config write then version switch) | `apply` writes config before it switches driver version, so the write guard checks against the old version. A manifest that both moves to a migrated driver and adds component env vars is rejected. A manifest that moves to a version where a component loses its container can store inert values; these are flagged `isApplicable: false` and never injected. | Deferred. Documented in ADR-055 and the migration guide ("upgrade first"). Fix by reordering `apply` or adding a combined mutation. |
-| Low | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` | The `component_command`/`component_args` docstrings still said the empty-list marker is required because of merge-patch. That stopped being true once the HelmRelease spec is replaced. | **Fixed** in `ea18d8c`. |
+| Medium | `python_sdk` / `styrminctl apply` (config write then version switch) | `apply` writes config before it switches driver version, so the write guard checks against the old version. A manifest that both moves to a migrated driver and adds component env vars is rejected. A manifest that moves to a version where a component loses its container can store inert values; these are flagged `isApplicable: false` and never injected. | Deferred. Documented in ADR-057 and the migration guide ("upgrade first"). Fix by reordering `apply` or adding a combined mutation. |
+| Low | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` | The `component_command`/`component_args` docstrings still said the empty-list marker is required because of merge-patch. That stopped being true once the HelmRelease spec is replaced. | **Fixed** in `ca4b2c2`. |
 | Low | `backend/styrmin_backend/operator/pipeline.py` (`execute_phase_helmrelease`) | The `RETIRED_TEMPLATE_FILTER` code and metadata collapse into the deployment status string `Failed to create HelmRelease: …`; the message and guide URL survive. | Deferred. contracts/errors.md accepts this, and a unit test pins it. |
 | Low | `backend/styrmin_backend/agent/service/kubernetes/primitives.py` (per-key spec replace) | Top-level spec keys whose new value is `None` are pruned rather than removed, so an old value would persist. `instanceId` is the only nullable key, and it never goes back to null in practice. | Deferred. |
 | Low | `backend/tests/e2e/test_deployment_container_overrides.py::test_us4_invalid_overrides_rejected` | One timeout: two back-to-back update flows wrote the CR 24 ms apart and the older write landed last. This last-writer-wins race exists with merge-patch too, so it isn't caused by this change. The re-run passed. | Deferred. Possible CI flake; worth an issue. |
@@ -107,7 +107,7 @@ The review was done by hand in the main context, without the `speckit-review-run
 
 - **No review skill.** Phase 6 says to invoke `speckit-review-run`. A saved user preference forbids review skills and review subagents, so I did the review by hand in the main context. Subagents were still used for implementation, which the preference does not cover.
 - **Chunking.** 14 chunks. US1 was split into backend core and E2E/simple-app. US3 was split four ways, with the **driver migrations run before the filter retirement**, the reverse of tasks.md order, so that no intermediate commit had unmigrated in-repo drivers failing to render. US4 was split into backend and frontend. Polish was split into docs and gates.
-- **Accepted the out-of-task high-risk fix `2242972`.** The agent's StyrminDeployment CR applies now replace each top-level spec key, leaving `spec.deletionRequested` alone. Without it, FR-011 (clearing restores chart defaults) failed end to end. It is recorded in research D-003 (addendum), in ADR-055, and covered by unit tests and the US1 E2E. **Please review it as high-risk operator/agent code.**
+- **Accepted the out-of-task high-risk fix `02045a7`.** The agent's StyrminDeployment CR applies now replace each top-level spec key, leaving `spec.deletionRequested` alone. Without it, FR-011 (clearing restores chart defaults) failed end to end. It is recorded in research D-003 (addendum), in ADR-057, and covered by unit tests and the US1 E2E. **Please review it as high-risk operator/agent code.**
 - **Accepted extra work beyond the task list:** the slurpit list-to-map env fix plus its changelog fragment, the restored infrahub prefect-server chart env defaults, and extra docs pages (changelog narrative, styrminctl reference, DRIVERS.md).
 - **Metadata casing.** I kept snake_case `COMPONENT_CONTAINER_NOT_DECLARED` metadata, matching contracts/errors.md and the sibling error, and corrected `contracts/graphql-deltas.md`. tasks.md T044 still says camelCase.
 - **Pre-existing failures not fixed.** Two CLI telemetry tests fail when run as root, on both d7d8825 and HEAD (`2 failed, 262 passed` both times).
@@ -115,24 +115,24 @@ The review was done by hand in the main context, without the `speckit-review-run
 
 ## 6. Suggested next steps
 
-1. Review `2242972` (CR spec-key replace) and `a3ff101` (HelmRelease spec replace) closely, since both are in the high-risk apply path.
+1. Review `02045a7` (CR spec-key replace) and `9b95b8e` (HelmRelease spec replace) closely, since both are in the high-risk apply path.
 2. Open the PR, with US1 and US3 landing together as planned (the PR template asks for high-risk callouts on operator/agent changes).
-3. File follow-ups: the `styrminctl apply` ordering gap, the `test_deployment_container_overrides` CR write race, UI-driver support for deployment-scope env vars, and `get_component_env` name-based container selection (ADR-055).
+3. File follow-ups: the `styrminctl apply` ordering gap, the `test_deployment_container_overrides` CR write race, UI-driver support for deployment-scope env vars, and `get_component_env` name-based container selection (ADR-057).
 4. Optionally run `speckit-reconcile-run` to fix the spec drift (component count, D-002 path, T044 casing).
 
 ## 7. Addendum: per-key HelmRelease apply (post-report)
 
-Follow-up decision after review (option A). The HelmRelease apply in `a3ff101` replaced the whole
+Follow-up decision after review (option A). The HelmRelease apply in `9b95b8e` replaced the whole
 `spec` (`add /spec`), which also undid spec keys Styrmin never writes, such as `spec.suspend`
 from `flux suspend hr`. It now uses the same per-key mode as the StyrminDeployment CR apply from
-`2242972`: one `add /spec/<key>` per top-level spec key Styrmin writes. The wholesale mode and
+`02045a7`: one `add /spec/<key>` per top-level spec key Styrmin writes. The wholesale mode and
 the `replace_spec_on_update` flag are removed. Rule for both resources: Styrmin owns each
-top-level spec key it writes; everything else merges (ADR-055 §6, research D-003 revision).
+top-level spec key it writes; everything else merges (ADR-057 §6, research D-003 revision).
 
 Pure merge-patch was ruled out because a merge-patch deletes a map key only through an explicit
 `null`, so stale user env keys in map-shaped values slots (infrahub, neo4j, slurpit) could never
 be cleared. Merge-patch with computed deletions, server-side apply, and dropping FR-011 are
-recorded as alternatives in ADR-055.
+recorded as alternatives in ADR-057.
 
 Evidence for this change is in `e2e-evidence.md` (per-key section). The env-vars module passed
 on api (5 passed) and ui (1 passed). container-overrides passed us1, us2, us3 and us6.
@@ -141,3 +141,26 @@ container-overrides `test_us4_invalid_overrides_rejected` failed again. The live
 confirmed the cause: two concurrent `apply_state` flows for one deployment, with the earlier
 mutation's CR write landing last. This is independent of the apply mode, so it is a
 pre-existing race for its own issue.
+
+## 8. Rebase onto develop
+
+Before the PR, the branch was rebased onto `develop` (`f89664f`, 50 commits ahead). The SHAs in
+this report are the rebased ones. Conflict resolutions:
+
+- `develop` already had ADR-0055 and ADR-0056, so this feature's ADR is now
+  `dev/adr/0057-post-render-component-overrides.md` (ADR-057). Every reference to it is
+  updated; references to `develop`'s ADR-055 (environment backups) are untouched.
+- `develop` moved the driver conformance suite to
+  `backend/tests/unit/test_e2e_driver_conformance.py`. The
+  `test_set_component_env_vars_is_declared_keyword_only` check moved with it (`17 passed`).
+- `dev/README.md` (ADR index) and `docs/docs/changelog.md`: both sides kept, with this
+  feature's changelog entry first.
+
+After the rebase:
+
+- `schema.graphql` and the generated SDK/frontend types regenerate with no diff, and
+  `validate-graphql` reports `230/230`.
+- `format lint` passes, and backend non-E2E tests give `2547 passed, 2 skipped`.
+- Frontend: `tsc -b` is clean, `641 passed`, and lint has 0 errors.
+- The docs build reports `[SUCCESS]`.
+- E2E was not re-run after the rebase.

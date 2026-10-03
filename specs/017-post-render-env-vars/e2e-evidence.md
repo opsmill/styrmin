@@ -285,7 +285,7 @@ infrahub-mcp.
 
 ## Per-key HelmRelease apply (post-review change)
 
-The HelmRelease apply moved from a whole-`spec` replace to per-key replace (ADR-055 §6). Images
+The HelmRelease apply moved from a whole-`spec` replace to per-key replace (ADR-057 §6). Images
 were built from the working tree with `STYRMIN_IMAGE_VER=local-fac017-perkey`. Each session was
 launched as `sleep infinity | uv run pytest <module> -k "<selector>" -v -s --pdb` from a runner
 script, and the runner killed the process group after the summary line.

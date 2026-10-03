@@ -11,7 +11,7 @@ component's resolved env vars into that container after the chart renders, by en
 
 For the user-facing reference (where env vars are set, validated, and queried), see
 [`dev/knowledge/backend/deployment-env-vars.md`](../knowledge/backend/deployment-env-vars.md).
-The decision record is [ADR-055](../adr/0055-post-render-component-overrides.md). Drivers
+The decision record is [ADR-057](../adr/0057-post-render-component-overrides.md). Drivers
 written for the retired values-template route should follow the
 [migration guide](../../docs/docs/drivers/migrating-env-vars.md).
 
@@ -207,7 +207,7 @@ The env var patches are built by `build_env_var_patches()` in
 
 ## Related
 
-- [ADR-055](../adr/0055-post-render-component-overrides.md) — the decision, ordering facts, and
+- [ADR-057](../adr/0057-post-render-component-overrides.md) — the decision, ordering facts, and
   consequences.
 - [ADR-013](../adr/0013-driver-env-var-consumption.md) — the retired values-template route
   (superseded in part).
