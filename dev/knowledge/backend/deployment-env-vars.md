@@ -104,8 +104,9 @@ Reads are typed: `Environment.envVars`, `Deployment.envVars`,
 ### Component-scope writes need a component container
 
 `updateDeployment` and `deploy` raise `COMPONENT_CONTAINER_NOT_DECLARED`
-(`ComponentContainerNotDeclaredError`, metadata `component_name` and
-`components_with_container`) when a component-scope block **adds a key or
+(`ComponentContainerNotDeclaredError`, metadata `component_name`,
+`components_with_container`, and `override`: `"env_vars"` here, `"image"` for
+image overrides) when a component-scope block **adds a key or
 changes a value** on a component that declares no component container in
 the deployment's pinned driver version. Removals and unchanged
 re-submissions pass, so the frontend's full-config submits and the removal

@@ -7,7 +7,7 @@ onto ``extensions.code``. Codes match ``data-model.md`` §7.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from styrmin_backend.services.exceptions import (
     PostRenderPatchRenderingError,
@@ -260,16 +260,17 @@ class UnknownComponentEnvVarError(ServiceError):
 
 
 class ComponentContainerNotDeclaredError(ServiceError):
-    """A component-scope env var write targets a component with no component container.
+    """A component-scope override write targets a component with no component container.
 
-    Raised when the write adds a key or changes a value relative to the stored
-    block, checked against the driver version the deployment is pinned to after
-    the write. Removals and unchanged re-submissions are accepted (FR-003).
+    Raised for env vars (017) and image overrides (018, ``override="image"``) when the write
+    adds or changes a value relative to the stored block, checked against the driver version
+    the deployment is pinned to after the write. Removals and unchanged re-submissions are
+    accepted (FR-003).
     """
 
     error_code = "COMPONENT_CONTAINER_NOT_DECLARED"
     default_message = (
-        "Environment variables target a component that declares no component container"
+        "An override targets a component that declares no component container"
     )
 
     def __init__(
@@ -277,17 +278,25 @@ class ComponentContainerNotDeclaredError(ServiceError):
         message: str = "",
         component_name: str = "",
         components_with_container: list[str] | None = None,
+        override: Literal["env_vars", "image"] = "env_vars",
     ) -> None:
         self.component_name = component_name
         self.components_with_container = sorted(components_with_container or [])
-        super().__init__(
-            message
-            or (
-                f"Environment variables target component {component_name!r}, "
+        self.override: Literal["env_vars", "image"] = override
+        super().__init__(message or self._build_default_message())
+
+    def _build_default_message(self) -> str:
+        if self.override == "image":
+            return (
+                f"Image override targets component {self.component_name!r}, "
                 "which declares no component container in the deployment's driver. "
-                "Components that accept env vars: "
-                f"{self.components_with_container}"
+                f"Components that accept overrides: {self.components_with_container}"
             )
+        return (
+            f"Environment variables target component {self.component_name!r}, "
+            "which declares no component container in the deployment's driver. "
+            "Components that accept env vars: "
+            f"{self.components_with_container}"
         )
 
     @property
@@ -295,6 +304,7 @@ class ComponentContainerNotDeclaredError(ServiceError):
         return {
             "component_name": self.component_name,
             "components_with_container": self.components_with_container,
+            "override": self.override,
         }
 
 

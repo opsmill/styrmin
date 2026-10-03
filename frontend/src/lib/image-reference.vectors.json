@@ -65,6 +65,11 @@
     "note": "Path separator '-'."
   },
   {
+    "reference": "my--app:1",
+    "valid": true,
+    "note": "Repeated '-' is one separator (distribution grammar '-+')."
+  },
+  {
     "reference": "app:V1.0_rc-2",
     "valid": true,
     "note": "Tags may contain uppercase, '.', '_' and '-' after the first character."
@@ -281,6 +286,12 @@
     "valid": false,
     "reason": "template_expression",
     "note": "Unterminated token is not substituted; the leftover '{{' is rejected."
+  },
+  {
+    "reference": "app:{{\u00a0app.version }}",
+    "valid": false,
+    "reason": "template_expression",
+    "note": "Only ASCII whitespace is allowed inside the token (Python re.ASCII \\s; in JS use [ \\t\\n\\r\\f\\v], not \\s), so this is not substituted."
   },
   {
     "reference": "App:{{ app.name }}",
