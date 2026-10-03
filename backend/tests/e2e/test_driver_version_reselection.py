@@ -15,7 +15,7 @@ goes through the SDK. Binding assertions read through the SDK in both modes
 
 The second driver build is published by cloning the harness's simple-app
 git repo (helm location already rewritten to the in-cluster chart server),
-bumping ``spec.version`` "1" → "2" with the supported range unchanged, and
+bumping ``spec.version`` to the next integer with the supported range unchanged, and
 pushing the commit as a new branch — a distinct provenance fingerprint per
 spec 013, hence a second ApplicationDriverVersion row on the same driver.
 """
@@ -39,10 +39,10 @@ pytestmark = [
 ]
 
 
-async def _publish_driver_v2(
-    *, vcluster: dict, tmp_path: Path, branch: str = "reselect-v2"
+async def _publish_next_driver_version(
+    *, vcluster: dict, tmp_path: Path, branch: str = "reselect-next"
 ) -> str:
-    """Push a driver-version-"2" build of simple-app to the harness git server.
+    """Push the next driver-version build of simple-app to the harness git server.
 
     Clones the already-rewritten repo from the in-cluster git server (so the
     helm chart location keeps pointing at the chart server), bumps only
@@ -58,8 +58,8 @@ async def _publish_driver_v2(
 
         spec_path = repo_dir / "driver.styrmin.yml"
         spec = yaml.safe_load(spec_path.read_text())
-        assert spec["spec"]["version"] == "1", "fixture drift: expected version 1"
-        spec["spec"]["version"] = "2"
+        # Bump relative to the fixture so example-driver version bumps don't break this.
+        spec["spec"]["version"] = str(int(spec["spec"]["version"]) + 1)
         # supported_versions intentionally untouched — the overlap is the point.
         spec_path.write_text(yaml.dump(spec, default_flow_style=False))
 
@@ -104,8 +104,8 @@ async def test_driver_version_reselection(
     app_version = deployment.application_version
     assert app_version is not None
 
-    # Publish driver version "2" with the same supported range and load it.
-    branch = await _publish_driver_v2(vcluster=vcluster, tmp_path=tmp_path)
+    # Publish the next driver version with the same supported range and load it.
+    branch = await _publish_next_driver_version(vcluster=vcluster, tmp_path=tmp_path)
     new_version = await scenario_driver.load_driver_version(
         git_url=git_server["simple-app"], ref=branch
     )
