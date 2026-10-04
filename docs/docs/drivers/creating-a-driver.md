@@ -182,11 +182,13 @@ already sets is better than fighting it.
 #### The component container
 
 The optional **`container`** field names the **component container**:
-the one container in the component's pod that receives the env vars
-users set on a deployment. Styrmin merges those env vars into it after
-the chart renders, by env var name, so every env entry the chart ships
-survives and a user value with the same name replaces the chart's. Your
-`values.j2.yml` does not mention env vars at all.
+the one container in the component's pod that receives the per-component
+overrides users set on a deployment: env vars and
+[image overrides](../concepts-and-architecture/image-overrides.md).
+Styrmin applies both after the chart renders. Env vars merge in by name,
+so every env entry the chart ships survives and a user value with the
+same name replaces the chart's; an image override replaces the
+container's image. Your `values.j2.yml` mentions neither.
 
 - Use the application container's name from the rendered chart (from
   Step 1's `helm install --dry-run`), not a sidecar's.
@@ -195,16 +197,20 @@ survives and a user value with the same name replaces the chart's. Your
   against the workload's own `metadata.labels`, so the chart must label
   the workload, not only its pods (`podLabels` alone is not enough; many
   charts also expose a `labels` or `commonLabels` value).
-- A wrong name fails the Helm release the first time a user sets an env
-  var on that component (`spec.template.spec.containers[0].image:
-  Required value`).
+- A wrong name fails the reconcile the first time a user sets an env var
+  or an image override on that component. Styrmin never adds a
+  container: the deployment fails with `COMPONENT_CONTAINER_NOT_FOUND`
+  and a message naming the component and the container.
 - Without `container`, the component accepts no component-scope env
-  vars, and deployment- or environment-scope env vars skip it.
+  vars and no image override, and deployment- or environment-scope env
+  vars skip it.
 
-User env vars reach only this container: not other containers in the
-pod, not init containers, and not chart `Job`s or `CronJob`s. In the
-container's env list, user entries come before the chart's, and the
-component container moves to the first position in the pod. See
+Overrides reach only this container: not other containers in the pod,
+not init containers, and not chart `Job`s or `CronJob`s. Once an env var
+or an image override applies, the component container moves to the
+first position in the pod, which changes the default container of
+`kubectl logs` for multi-container pods. In the container's env list,
+user entries come before the chart's. See
 [Migrating env var wiring](./migrating-env-vars.md) if your driver used
 the removed `component_env_vars` filter.
 
@@ -433,8 +439,11 @@ async def upgrade(context: GlobalContext, target_version: str):
     await upgrade_deployment_version(target_version=target_version, context=context)
 
     images = await get_component_images(component="server", context=context)
-    image = next(img for img in images if "my-app" in img)
-    image_base = image.rsplit(":", 1)[0]
+    # images[0] is the component container's image (with any image override);
+    # drop a digest, then the tag ("registry:5000/app" keeps its port).
+    name = images[0].split("@", 1)[0]
+    repository, separator, tag = name.rpartition(":")
+    image_base = repository if separator and "/" not in tag else name
 
     await execute_commands(
         ["my-app-upgrade"],
@@ -450,6 +459,12 @@ Use the built-in primitives (`stop_components`, `start_components`,
 `execute_commands`, `upgrade_deployment_version`, …) rather than
 calling Kubernetes directly. They're idempotent, tested, and
 consistent across drivers.
+
+`get_component_images` returns the image of every container in the
+component's pod template, with the component container's image first
+when the component declares one. Take `images[0]` rather than searching for an image name: when a user
+sets an image override, the first image is the override, so the
+migration Job runs the user's build.
 
 See [Lifecycle hooks and actions](../concepts-and-architecture/hooks-and-actions.md)
 for the full hook/mode model.
@@ -507,9 +522,9 @@ Before you call the driver done:
       made a conscious decision not to expose one).
 - [ ] Each component's `identifier.label` matches the pods you expect
       it to — verify with `kubectl get pods -l <label>=<value>`.
-- [ ] Each component that should receive env vars declares a
-      `container` that exists in every workload its label selects, and
-      `values.j2.yml` does not wire env vars.
+- [ ] Each component that should receive env vars or an image override
+      declares a `container` that exists in every workload its label
+      selects, and `values.j2.yml` does not wire env vars.
 - [ ] Every stateful component has a `backup` block with the right
       strategy.
 - [ ] Every externally reachable service is declared under

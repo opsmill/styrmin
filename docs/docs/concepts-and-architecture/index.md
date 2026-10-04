@@ -30,6 +30,7 @@ the deeper internal docs when you want more.
 | [The operator and `StyrminDeployment`](./operator-and-crds.md) | You've heard the word "CRD" or "operator" and want to know what Styrmin is doing with them. |
 | [Ingress and networking](./ingress-and-networking.md) | You want to understand how an application becomes reachable on a URL after you deploy it. |
 | [Backups and restores](./backups-and-restores.md) | You want to know what Styrmin actually does when you click "backup", and where the data ends up. |
+| [Image overrides](./image-overrides.md) | You want one component of a deployment to run a custom or patched build without forking its driver. |
 | [Lifecycle hooks and actions](./hooks-and-actions.md) | You're about to write a driver, or you want to know how Styrmin runs the right code at the right moment. |
 | [Status reporting](./status-reporting.md) | You're wondering how the UI stays up-to-date with what's actually running in the cluster. |
 
@@ -42,7 +43,7 @@ If you read top-to-bottom, the pages build on each other:
 2. **Reconciliation** — the core loop Styrmin runs over and over.
 3. **The operator and `StyrminDeployment`** — what reconciliation looks
    like once the agent is involved.
-4. The remaining four are independent — read whichever solves your
+4. The remaining pages are independent — read whichever solves your
    current problem.
 
 If you just want one specific answer, jump straight to that page from

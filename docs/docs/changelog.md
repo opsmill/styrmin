@@ -8,6 +8,40 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Run a custom image on one component
+
+A deployment can now point one component at a custom or patched build
+without forking its driver. Styrmin applies the **image override** after
+the Helm chart renders, to the component's declared **component
+container**. See [Image overrides](./concepts-and-architecture/image-overrides.md).
+
+#### What's new
+
+- Set an image per component in the deployment's Configuration editor,
+  in a `styrminctl deployments apply` manifest (`components[].image`), or
+  through `ComponentConfigInput.image` in the API and SDK. The
+  Configuration tab shows the stored and resolved reference and whether
+  it is applied.
+- A `{{ app.version }}` token follows the deployment's application
+  version; a literal tag or digest pins the image. The upgrade dialog and
+  `styrminctl deployments apply` warn about pinned overrides before an
+  application version change.
+- Invalid references are rejected when you save them, and an upgrade
+  that would make one invalid is rejected before any lifecycle action
+  runs.
+
+#### Migration
+
+- A driver whose declared component container name the chart does not
+  render now fails the deployment with `COMPONENT_CONTAINER_NOT_FOUND`,
+  naming the component and the container, as soon as env vars or an image
+  override target it. Styrmin never adds a container.
+- `get_component_images` returns the component container's image first.
+  Driver actions should take `images[0]` instead of searching for an
+  image name; the example drivers do.
+- Clear every image override before rolling Styrmin back below this
+  release: older releases reject the `image` key.
+
 ### Env vars keep the chart's env defaults
 
 Styrmin now merges the env vars users set on a deployment into each

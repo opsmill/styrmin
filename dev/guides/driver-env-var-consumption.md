@@ -167,9 +167,11 @@ whenever env vars or an image override are set.
 ## Failure modes to check
 
 - **Wrong container name.** The post-render guard fails the Helm release with
-  `error in remove for path: '/spec/template/spec/styrmin.io~1component-container~1<component>~1<container>/image'`;
-  Styrmin never adds a container. Nothing fails until a user first sets an env var or an
-  image override on that component, so verify the name when you write the driver.
+  `error in remove for path: '/spec/template/spec/styrmin.io~1component-container~1<component>~1<container>/image'`,
+  and the operator fails the deployment with `COMPONENT_CONTAINER_NOT_FOUND`, naming the
+  component and the container; Styrmin never adds a container. Nothing fails until a user
+  first sets an env var or an image override on that component, so verify the name when you
+  write the driver.
 - **Identifier label not on the workload.** If the first identifier label matches only pods,
   or only a kind other than `Deployment`/`StatefulSet`, the patch matches nothing and the env
   vars silently never arrive.

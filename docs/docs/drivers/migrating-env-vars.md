@@ -179,10 +179,9 @@ Styrmin already injects them, and the list replacement problem comes back.
 - **Upgrades keep stored values.** If a driver upgrade drops a component's container, its
   stored component-scope env vars are kept and reported with `isApplicable: false` in the
   API; they are not injected until a driver version declares the container again.
-- **A wrong container name fails the release.** Styrmin adds a container with that name and
-  no image, so the Helm release fails with
-  `spec.template.spec.containers[0].image: Required value` the first time an env var is set on
-  the component.
+- **A wrong container name fails the release.** The first time an env var (or an image
+  override) is set on the component, the deployment fails with `COMPONENT_CONTAINER_NOT_FOUND`
+  and a message naming the component and the container. Styrmin never adds a container.
 - **Rolling Styrmin back stops injection.** After you load migrated drivers, an older Styrmin
   release does not inject env vars into them: it ignores `container`, and the migrated values
   templates no longer write env vars.
