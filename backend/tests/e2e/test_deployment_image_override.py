@@ -291,7 +291,7 @@ async def test_token_follows_upgrade_and_action_job(
     )
 
     # The upgrade action's ``<release>-job`` image is not asserted: its primitives call the
-    # API unauthenticated and fail under default-deny until #188, so the Job never runs.
+    # API unauthenticated and fail under default-deny until #381, so the Job never runs.
 
     rows = await _read_image_overrides(client, deployment_id)
     assert rows["server"]["reference"] == TOKEN_IMAGE
