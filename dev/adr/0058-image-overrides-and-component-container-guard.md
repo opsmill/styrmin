@@ -99,8 +99,8 @@ matches when `Ready` is not `True` and a condition observed for the current gene
 `observedGeneration`, else `status.lastAttemptedGeneration`, equals `metadata.generation`) carries
 the guard key followed by `/image` in its message. helm-controller v1.1.0 reports it under both
 `Ready=False` and `Released=False` with reason `UpgradeFailed` (observed in E2E). The operator then
-sets `phase: Failed`, `displayState: Error`, and `HelmReleaseReady=False` with reason
-`ComponentContainerNotFound`, and the message of `ComponentContainerNotFoundError`:
+sets `phase: Failed`, `displayState: Error`, and `HelmReleaseReady=False` and `Ready=False` with
+reason `ComponentContainerNotFound`, and the message of `ComponentContainerNotFoundError`:
 
 ```text
 Component 'server': component container 'wrong-name' was not found in its rendered workload.

@@ -55,7 +55,7 @@ type Deployment {
 }
 ```
 
-- One entry per component with a stored override. Live components come first in driver order,
+- One entry per component with a stored override. Live components come first, sorted by name,
   then orphans sorted by name.
 - `resolvedReference`: `reference` with every token replaced by `Deployment.applicationVersion`.
 - `isApplicable`: `not isOrphaned and component.container != null` (the deployment's components,

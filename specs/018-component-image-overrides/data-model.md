@@ -63,7 +63,7 @@ ComponentImageOverride
 ```
 
 `Deployment.componentImageOverrides: [ComponentImageOverride!]!` returns one entry per component
-with a stored override, live first (driver order), then orphans (by name). Components without an
+with a stored override, live first (by name), then orphans (by name). Components without an
 override are omitted.
 
 ## 4. Render-time patches
@@ -92,7 +92,7 @@ builder's single entry point.
 |---|---|
 | `phase` | `Failed` |
 | `displayState` | `Error` |
-| condition `HelmReleaseReady` | `False`, reason `ComponentContainerNotFound` |
+| conditions `HelmReleaseReady` and `Ready` | `False`, reason `ComponentContainerNotFound` |
 | `message` | `ComponentContainerNotFoundError` message naming the component and the container |
 
 ## 7. SDK

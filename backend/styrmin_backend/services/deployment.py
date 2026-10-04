@@ -516,7 +516,8 @@ async def update_deployment(
 
             # Image overrides: unknown component, then grammar and substitution at
             # the stored application version, so the error names the component (018).
-            # Unchanged entries are skipped so a stranded override never blocks an edit.
+            # Unchanged references skip the grammar check; unknown components are
+            # rejected regardless, as for env vars and container overrides.
             validate_image_override_targets(deployment_config, known_names)
             prevalidate_image_overrides(
                 deployment_config,
@@ -807,13 +808,6 @@ async def update_deployment_version(
             deployment.application_version,
         )
 
-        # Ensure dedicated ingress controller is healthy if configured
-        await _ensure_ingress_controller(
-            environment_id=deployment.environment_id,
-            uow=uow,
-            created_by_user_id=deployment.created_by_user_id,
-        )
-
         # Get the application driver version
         application_driver_version = await uow.application_driver_versions.get(
             id=deployment.application_driver_version_id
@@ -861,6 +855,13 @@ async def update_deployment_version(
         # target application version (018 FR-009); reject before any task is dispatched.
         _validate_image_overrides_for_version(
             deployment.config, _containers_by_component(target_driver_version), version
+        )
+
+        # After validation: creating the ingress deployment dispatches its flow run immediately.
+        await _ensure_ingress_controller(
+            environment_id=deployment.environment_id,
+            uow=uow,
+            created_by_user_id=deployment.created_by_user_id,
         )
 
         if target_driver_version.id != deployment.application_driver_version_id:

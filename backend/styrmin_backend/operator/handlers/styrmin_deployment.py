@@ -80,6 +80,14 @@ async def _fail_on_component_container_guard(
         "ComponentContainerNotFound",
         message,
     )
+    # A guard failure after Ready must not leave Ready=True next to phase Failed.
+    set_condition(
+        conditions,
+        ConditionType.READY,
+        ConditionStatus.FALSE,
+        "ComponentContainerNotFound",
+        message,
+    )
     patch.status["conditions"] = conditions
     set_phase(patch.status, DeploymentPhase.FAILED, message)
     patch.status["displayState"] = DisplayState.ERROR.value

@@ -388,7 +388,7 @@ type Deployment {
   componentContainerOverrides: [ComponentContainerOverrides!]!
 
   """
-  Per-component image overrides: live components in driver order, then orphaned blocks (``isOrphaned=true``) by name. Components without an override are omitted.
+  Per-component image overrides: live components by name, then orphaned blocks (``isOrphaned=true``) by name. Components without an override are omitted.
   """
   componentImageOverrides: [ComponentImageOverride!]!
   crdStatus: DeploymentStatusType

@@ -660,9 +660,9 @@ class Deployment:
 
     @strawberry.field(
         description=(
-            "Per-component image overrides: live components in driver order, then "
-            "orphaned blocks (``isOrphaned=true``) by name. Components without an "
-            "override are omitted."
+            "Per-component image overrides: live components by name, then orphaned "
+            "blocks (``isOrphaned=true``) by name. Components without an override "
+            "are omitted."
         )
     )
     async def component_image_overrides(
@@ -694,7 +694,8 @@ class Deployment:
         )
         entries = ImageOverridesResolver.resolve_for_deployment(
             component_overrides=dict(dep_cfg.components or {}) if dep_cfg else None,
-            driver_components=list(containers),
+            # The components relationship is unordered; sort for a stable result.
+            driver_components=sorted(containers),
         )
         return [
             ComponentImageOverride(
