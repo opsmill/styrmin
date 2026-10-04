@@ -4,6 +4,7 @@ Constitution §V: ``ComponentConfigInput.image`` written through ``updateDeploym
 ``deploy`` reaches ``Deployment.config["components"][name]["image"]`` through the real service
 and repository layers, and ``Deployment.componentImageOverrides`` projects the stored state.
 ``updateDeploymentVersion`` re-validates stored, applicable overrides at the target version.
+Invalid writes are rejected with typed errors naming the component, before any task (US4).
 """
 
 from __future__ import annotations
@@ -17,6 +18,9 @@ from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
+    ComponentContainerPatch,
+)
 from styrmin_backend.db.models import (
     ApplicationDriver,
     ApplicationDriverVersion,
@@ -25,6 +29,11 @@ from styrmin_backend.db.models import (
     Deployment,
     Task,
 )
+from styrmin_backend.services.component_container.patch_builder import (
+    build_component_container_patches,
+)
+from styrmin_backend.services.context import generate_context_from_deployment_id
+from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 
 from ._queries import load_query
 from .conftest import gql
@@ -524,3 +533,464 @@ async def test_update_deployment_version_ignores_non_applicable_override(
     stored = await _stored_row(session, deployment_id)
     assert stored.application_version == BROKEN_TARGET
     assert stored.config == config
+
+
+# ---------------------------------------------------------------------------
+# US4 — write-time validation on deploy and updateDeployment (T055)
+# ---------------------------------------------------------------------------
+
+INVALID_REFERENCE_CASES = [
+    ("App:1", "1.0.0", "grammar", None),
+    (PATCHED, "1.0.0", "missing_tag_or_digest", None),
+    (f"{PATCHED}:{{{{ app.name }}}}", "1.0.0", "template_expression", None),
+    (TOKEN_REFERENCE, BROKEN_TARGET, "after_substitution", BROKEN_TARGET),
+]
+INVALID_REFERENCE_IDS = [
+    "grammar",
+    "missing-tag-or-digest",
+    "template-expression",
+    "after-substitution",
+]
+
+
+async def _post_update(
+    client: AsyncClient, deployment_id: UUID, components: list[dict]
+) -> dict[str, Any]:
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment_config"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {"components": components},
+            },
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def _seed_deploy_driver(
+    session: AsyncSession, containers: dict[str, str | None]
+) -> tuple[str, UUID]:
+    """Seed an environment and a driver version declaring ``containers``; return the
+    driver name and the environment id for a ``deploy`` call."""
+    environment = await seed_environment(session)
+    environment_id = environment.id
+    adv = await seed_application_driver_version(session, version="1.0.0")
+    for name, container in containers.items():
+        session.add(
+            ComponentConfig(
+                name=name,
+                config=_component_config(name, container),
+                application_driver_version_id=adv.id,
+            )
+        )
+    await session.commit()
+    driver_row = await session.get(ApplicationDriver, adv.application_driver_id)
+    assert driver_row is not None
+    return driver_row.name, environment_id
+
+
+async def _post_deploy(
+    client: AsyncClient,
+    driver_name: str,
+    environment_id: UUID,
+    components: list[dict],
+    *,
+    version: str = "1.0.0",
+) -> tuple[str, dict[str, Any]]:
+    name = f"image-deploy-{uuid4().hex[:8]}"
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("deploy_with_config"),
+            "variables": {
+                "driver": driver_name,
+                "environmentId": str(environment_id),
+                "version": version,
+                "name": name,
+                "config": {"components": components},
+            },
+        },
+    )
+    assert response.status_code == 200
+    return name, response.json()
+
+
+def _assert_error(payload: dict[str, Any], code: str, **metadata: Any) -> str:
+    """Assert the first error carries ``code`` and ``metadata``; return its message."""
+    assert "errors" in payload, payload
+    error = payload["errors"][0]
+    extensions = error.get("extensions") or {}
+    assert extensions.get("code") == code, extensions
+    for key, value in metadata.items():
+        assert extensions.get(key) == value, extensions
+    return error["message"]
+
+
+async def _assert_update_rejected_without_task(
+    session: AsyncSession,
+    prefect_manager_mock: Any,
+    deployment_id: UUID,
+    stored_before: dict | None,
+) -> None:
+    prefect_manager_mock.run_action.assert_not_awaited()
+    assert await _task_count(session, deployment_id) == 0
+    assert (await _stored_row(session, deployment_id)).config == stored_before
+
+
+async def _assert_deploy_rejected_without_task(
+    session: AsyncSession, prefect_manager_mock: Any, name: str
+) -> None:
+    prefect_manager_mock.run_action.assert_not_awaited()
+    session.expire_all()
+    created = await session.exec(select(Deployment).where(Deployment.name == name))
+    assert created.all() == []
+    assert (await session.exec(select(Task))).all() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reference", "application_version", "reason", "reported_version"),
+    INVALID_REFERENCE_CASES,
+    ids=INVALID_REFERENCE_IDS,
+)
+async def test_update_deployment_rejects_invalid_reference(  # noqa: PLR0913
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    reference: str,
+    application_version: str,
+    reason: str,
+    reported_version: str | None,
+) -> None:
+    """Every ``INVALID_IMAGE_REFERENCE`` reason names the component, with the token checked
+    against the deployment's current application version, and starts nothing."""
+    _arm_prefect(prefect_manager_mock)
+    deployment = await _seed_deployment_with_components(
+        session, {"server": "simple-app"}
+    )
+    deployment_id = deployment.id
+    deployment.application_version = application_version
+    session.add(deployment)
+    await session.commit()
+
+    payload = await _post_update(
+        client, deployment_id, [{"name": "server", "image": reference}]
+    )
+
+    message = _assert_error(
+        payload,
+        "INVALID_IMAGE_REFERENCE",
+        component_name="server",
+        reference=reference,
+        reason=reason,
+        application_version=reported_version,
+    )
+    assert "'server'" in message
+    await _assert_update_rejected_without_task(
+        session, prefect_manager_mock, deployment_id, None
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reference", "application_version", "reason", "reported_version"),
+    INVALID_REFERENCE_CASES,
+    ids=INVALID_REFERENCE_IDS,
+)
+async def test_deploy_rejects_invalid_reference(  # noqa: PLR0913
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    reference: str,
+    application_version: str,
+    reason: str,
+    reported_version: str | None,
+) -> None:
+    """``deploy`` checks the token against the requested application version and creates
+    neither a deployment nor a task on rejection."""
+    _arm_prefect(prefect_manager_mock)
+    driver_name, environment_id = await _seed_deploy_driver(
+        session, {"server": "simple-app"}
+    )
+
+    name, payload = await _post_deploy(
+        client,
+        driver_name,
+        environment_id,
+        [{"name": "server", "image": reference}],
+        version=application_version,
+    )
+
+    message = _assert_error(
+        payload,
+        "INVALID_IMAGE_REFERENCE",
+        component_name="server",
+        reference=reference,
+        reason=reason,
+        application_version=reported_version,
+    )
+    assert "'server'" in message
+    await _assert_deploy_rejected_without_task(session, prefect_manager_mock, name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reference", [f"{PATCHED}:0.1.0", "App"], ids=["valid", "invalid"]
+)
+async def test_update_deployment_rejects_unknown_component(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    reference: str,
+) -> None:
+    """The unknown-component check runs before the reference check."""
+    _arm_prefect(prefect_manager_mock)
+    deployment = await _seed_deployment_with_components(
+        session, {"server": "simple-app", "worker": None}
+    )
+    deployment_id = deployment.id
+
+    payload = await _post_update(
+        client, deployment_id, [{"name": "ghost", "image": reference}]
+    )
+
+    message = _assert_error(
+        payload,
+        "UNKNOWN_COMPONENT_IMAGE_OVERRIDE",
+        component_name="ghost",
+        known_components=["server", "worker"],
+    )
+    assert "'ghost'" in message
+    await _assert_update_rejected_without_task(
+        session, prefect_manager_mock, deployment_id, None
+    )
+
+
+@pytest.mark.asyncio
+async def test_deploy_rejects_unknown_component(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    driver_name, environment_id = await _seed_deploy_driver(
+        session, {"server": "simple-app", "worker": None}
+    )
+
+    name, payload = await _post_deploy(
+        client,
+        driver_name,
+        environment_id,
+        [{"name": "ghost", "image": f"{PATCHED}:0.1.0"}],
+    )
+
+    _assert_error(
+        payload,
+        "UNKNOWN_COMPONENT_IMAGE_OVERRIDE",
+        component_name="ghost",
+        known_components=["server", "worker"],
+    )
+    await _assert_deploy_rejected_without_task(session, prefect_manager_mock, name)
+
+
+# ``server`` declares a component container, ``worker`` declares none.
+STORED_WORKER_IMAGE = f"{PATCHED}:0.1.0"
+
+
+async def _seed_containerless_override(
+    session: AsyncSession, stored_worker_image: str | None
+) -> tuple[UUID, dict | None]:
+    deployment = await _seed_deployment_with_components(
+        session, {"server": "simple-app", "worker": None}
+    )
+    config = (
+        {"components": {"worker": {"image": stored_worker_image}}}
+        if stored_worker_image is not None
+        else None
+    )
+    if config is not None:
+        await _store_config(session, deployment, config)
+    return deployment.id, config
+
+
+def _assert_container_not_declared(payload: dict[str, Any]) -> None:
+    message = _assert_error(
+        payload,
+        "COMPONENT_CONTAINER_NOT_DECLARED",
+        component_name="worker",
+        components_with_container=["server"],
+        override="image",
+    )
+    assert message.startswith("Image override targets component 'worker'"), message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored_worker_image", "submitted"),
+    [
+        (None, f"{PATCHED}:0.2.0"),
+        (STORED_WORKER_IMAGE, f"{PATCHED}:0.2.0"),
+        (STORED_WORKER_IMAGE, TOKEN_REFERENCE),
+    ],
+    ids=["add", "change", "change-to-token"],
+)
+async def test_update_deployment_rejects_image_on_containerless_component(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    stored_worker_image: str | None,
+    submitted: str,
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, stored_before = await _seed_containerless_override(
+        session, stored_worker_image
+    )
+
+    payload = await _post_update(
+        client, deployment_id, [{"name": "worker", "image": submitted}]
+    )
+
+    _assert_container_not_declared(payload)
+    await _assert_update_rejected_without_task(
+        session, prefect_manager_mock, deployment_id, stored_before
+    )
+
+
+@pytest.mark.asyncio
+async def test_deploy_rejects_image_on_containerless_component(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """A new deployment has no stored config: every image is an addition."""
+    _arm_prefect(prefect_manager_mock)
+    driver_name, environment_id = await _seed_deploy_driver(
+        session, {"server": "simple-app", "worker": None}
+    )
+
+    name, payload = await _post_deploy(
+        client,
+        driver_name,
+        environment_id,
+        [{"name": "worker", "image": f"{PATCHED}:0.1.0"}],
+    )
+
+    _assert_container_not_declared(payload)
+    await _assert_deploy_rejected_without_task(session, prefect_manager_mock, name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("submitted_block", "expected_worker"),
+    [
+        ({"name": "worker"}, {}),
+        ({"name": "worker", "image": None}, {}),
+        (
+            {"name": "worker", "image": STORED_WORKER_IMAGE},
+            {"image": STORED_WORKER_IMAGE},
+        ),
+    ],
+    ids=["remove-omitted", "remove-null", "unchanged"],
+)
+async def test_update_deployment_accepts_removal_or_unchanged_on_containerless_component(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    submitted_block: dict[str, Any],
+    expected_worker: dict[str, Any],
+) -> None:
+    """A stored override on a containerless component can be removed or re-submitted as is."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, _ = await _seed_containerless_override(session, STORED_WORKER_IMAGE)
+
+    payload = await _post_update(client, deployment_id, [submitted_block])
+
+    assert "errors" not in payload, payload
+    assert await _stored_components(session, deployment_id) == {
+        "worker": expected_worker
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_env_vars_on_containerless_component_keep_env_error(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """Env vars and an unchanged image on a containerless component report the env-var slot."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, stored_before = await _seed_containerless_override(
+        session, STORED_WORKER_IMAGE
+    )
+
+    payload = await _post_update(
+        client,
+        deployment_id,
+        [
+            {
+                "name": "worker",
+                "image": STORED_WORKER_IMAGE,
+                "envVars": [{"name": "A", "value": "1"}],
+            }
+        ],
+    )
+
+    message = _assert_error(
+        payload,
+        "COMPONENT_CONTAINER_NOT_DECLARED",
+        component_name="worker",
+        override="env_vars",
+    )
+    assert message.startswith("Environment variables target component 'worker'")
+    await _assert_update_rejected_without_task(
+        session, prefect_manager_mock, deployment_id, stored_before
+    )
+
+
+# ---------------------------------------------------------------------------
+# US4 — an override stranded by a driver upgrade (T058)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_override_stranded_by_driver_upgrade_is_kept_but_not_rendered(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """A driver version that drops ``server``'s component container keeps its override,
+    reads it back as not applicable, and renders no patch for it."""
+    _arm_prefect(prefect_manager_mock)
+    deployment = await _seed_deployment_with_components(
+        session, {"server": "simple-app", "db": "postgres"}
+    )
+    deployment_id = deployment.id
+    db_image = f"{PATCHED}-db:0.1.0"
+    await _update(
+        client,
+        deployment_id,
+        [
+            {"name": "server", "image": TOKEN_REFERENCE},
+            {"name": "db", "image": db_image},
+        ],
+    )
+    target_id = await _seed_target_driver_version(
+        session, deployment_id, {"server": None, "db": "postgres"}
+    )
+
+    payload = await _update_version(client, deployment_id, "1.0.0", target_id)
+
+    assert "errors" not in payload, payload
+    stored = await _stored_row(session, deployment_id)
+    assert stored.application_driver_version_id == target_id
+    assert stored.config["components"]["server"] == {"image": TOKEN_REFERENCE}
+    rows = await _read_overrides(client, deployment_id)
+    assert [
+        (row["component"], row["isOrphaned"], row["isApplicable"]) for row in rows
+    ] == [("server", False, False), ("db", False, True)]
+
+    context = await generate_context_from_deployment_id(
+        deployment_id, SqlModelUnitOfWork(session=session)
+    )
+    assert context.components is not None
+    assert context.components.root["server"].image_override is not None
+    patches = build_component_container_patches(context)
+    guards = [
+        tp.patch for tp in patches if isinstance(tp.patch, ComponentContainerPatch)
+    ]
+    assert {(guard.component, guard.image) for guard in guards} == {("db", db_image)}

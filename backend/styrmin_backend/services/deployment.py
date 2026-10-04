@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID, uuid4
 
 from loguru import logger
@@ -35,6 +36,10 @@ from styrmin_backend.services.env_vars.exceptions import (
 )
 from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
 from styrmin_backend.services.image_overrides.reference import validate_reference
+from styrmin_backend.services.image_overrides.validator import (
+    prevalidate_image_overrides,
+    validate_image_override_targets,
+)
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
     DeploymentNameConflictError,
@@ -125,17 +130,38 @@ def _containers_by_component(
     return containers
 
 
-def _validate_component_env_var_containers(
+ComponentContainerSlot = Literal["env_vars", "image"]
+
+
+def _slot_adds_or_changes(
+    slot: ComponentContainerSlot, submitted_block: object, stored_block: object
+) -> bool:
+    """Return whether ``submitted_block`` adds or changes ``slot`` relative to ``stored_block``."""
+    submitted = submitted_block.get(slot) if isinstance(submitted_block, dict) else None
+    stored = stored_block.get(slot) if isinstance(stored_block, dict) else None
+    if slot == "image":
+        return submitted is not None and submitted != stored
+    if not isinstance(submitted, dict) or not submitted:
+        return False
+    if not isinstance(stored, dict):
+        stored = {}
+    return any(
+        key not in stored or stored[key] != value for key, value in submitted.items()
+    )
+
+
+def _validate_component_container_targets(
     submitted_config: dict | None,
     stored_config: dict | None,
     containers_by_component: dict[str, str | None],
+    slots: tuple[ComponentContainerSlot, ...] = ("env_vars", "image"),
 ) -> None:
-    """Reject added or changed component-scope env vars on containerless components.
+    """Reject added or changed component-container overrides on containerless components.
 
     ``containers_by_component`` comes from the driver version the deployment is
     pinned to after the write. Removals and unchanged re-submissions pass so
-    values stored before a driver upgrade can still be cleaned up (FR-003).
-    Unknown components are left to :func:`_validate_component_env_var_targets`.
+    values stored before a driver upgrade can still be cleaned up (017 FR-003,
+    018 FR-005). Unknown components are left to the per-slot target checks.
     """
     submitted_components = (submitted_config or {}).get("components")
     if not isinstance(submitted_components, dict):
@@ -146,27 +172,17 @@ def _validate_component_env_var_containers(
     for name, block in submitted_components.items():
         if name not in containers_by_component or containers_by_component[name]:
             continue
-        submitted_env = block.get("env_vars") if isinstance(block, dict) else None
-        if not isinstance(submitted_env, dict) or not submitted_env:
-            continue
-        stored_block = stored_components.get(name)
-        stored_env = (
-            stored_block.get("env_vars") if isinstance(stored_block, dict) else None
-        )
-        if not isinstance(stored_env, dict):
-            stored_env = {}
-        if any(
-            key not in stored_env or stored_env[key] != value
-            for key, value in submitted_env.items()
-        ):
-            raise ComponentContainerNotDeclaredError(
-                component_name=name,
-                components_with_container=[
-                    component
-                    for component, container in containers_by_component.items()
-                    if container
-                ],
-            )
+        for slot in slots:
+            if _slot_adds_or_changes(slot, block, stored_components.get(name)):
+                raise ComponentContainerNotDeclaredError(
+                    component_name=name,
+                    components_with_container=[
+                        component
+                        for component, container in containers_by_component.items()
+                        if container
+                    ],
+                    override=slot,
+                )
 
 
 def _validate_image_overrides_for_version(
@@ -498,6 +514,13 @@ async def update_deployment(
             # any reconcile (014 / FR-004, FR-006).
             _validate_component_container_overrides(deployment_config, known_names)
 
+            # Image overrides: unknown component, then grammar and substitution at
+            # the stored application version, so the error names the component (018).
+            validate_image_override_targets(deployment_config, known_names)
+            prevalidate_image_overrides(
+                deployment_config, version=deployment.application_version
+            )
+
             # Pre-validate env-var bundles so the typed error codes
             # (INVALID_ENV_VAR_NAME / ENV_VAR_SIZE_LIMIT_EXCEEDED /
             # DUPLICATE_ENV_VAR_NAME) survive the GraphQL boundary instead of
@@ -512,7 +535,7 @@ async def update_deployment(
 
             # updateDeployment never switches driver versions, so the pinned
             # version is the one the deployment keeps after this write (FR-003).
-            _validate_component_env_var_containers(
+            _validate_component_container_targets(
                 deployment_config, deployment.config, _containers_by_component(adv)
             )
 
@@ -1337,6 +1360,11 @@ async def deploy_application(
         # (014 / FR-002 covers both deploy and update flows; FR-004, FR-006).
         _validate_component_container_overrides(deployment_config, known_names)
 
+        # Image overrides: unknown component, then grammar and substitution at
+        # the requested application version, so the error names the component (018).
+        validate_image_override_targets(deployment_config, known_names)
+        prevalidate_image_overrides(deployment_config, version=version)
+
         # Pre-validate env-var bundles so the typed error codes
         # (INVALID_ENV_VAR_NAME / ENV_VAR_SIZE_LIMIT_EXCEEDED /
         # DUPLICATE_ENV_VAR_NAME) survive the GraphQL boundary instead of
@@ -1350,7 +1378,7 @@ async def deploy_application(
             raise InvalidContextError(str(e)) from e
 
         # A new deployment has no stored values: every block is an addition.
-        _validate_component_env_var_containers(
+        _validate_component_container_targets(
             deployment_config,
             None,
             _containers_by_component(application_driver_version),

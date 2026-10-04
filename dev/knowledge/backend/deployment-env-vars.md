@@ -267,7 +267,7 @@ foot setting them in the past.
 | Patch builder | `backend/styrmin_backend/services/component_container/patch_builder.py::build_component_container_patches` |
 | Patch blocks | `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py::ContainerEnvPatch`, `::ComponentContainerPatch` |
 | Patch placement + rendering-context exposure | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` (`ApplicationHelmReleaseBuilder.build`, `render_value_template`, retired `component_env_vars` stub) |
-| Write guard | `backend/styrmin_backend/services/deployment.py::_validate_component_env_var_containers`; error in `services/env_vars/exceptions.py` |
+| Write guard | `backend/styrmin_backend/services/deployment.py::_validate_component_container_targets` (env vars and image overrides); error in `services/env_vars/exceptions.py` |
 | Retired-filter error | `backend/styrmin_backend/services/exceptions.py::RetiredTemplateFilterError` |
 | HelmRelease / CR apply | `backend/styrmin_backend/agent/service/kubernetes/primitives.py::upsert_custom_resource` (`replace_spec_keys_on_update`); callers in `operator/pipeline.py` and `agent/tasks/orchestration.py` |
 | Driver-side docs | `backend/styrmin_backend/services/driver/models/resources/env_vars.py` |
