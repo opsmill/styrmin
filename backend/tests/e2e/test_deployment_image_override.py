@@ -7,7 +7,9 @@ reconciler → HelmRelease post-render patch on the declared component container
 → rendered pod spec on the vcluster. Asserts on the live workload and on
 ``Deployment.componentImageOverrides``. The upgrade test also covers the
 pinned-override listing and a ``{{ app.version }}`` override following an
-upgrade.
+upgrade. The misnamed-container test (SC-005) deploys a driver variant whose
+``server`` component container is ``wrong-name`` and asserts an override fails
+the deployment instead of adding a container.
 
 The override images are the simple-app builds re-tagged by the session fixture
 ``simple_app_override_images`` under ``registry.example/acme/simple-app-patched``;
@@ -16,14 +18,24 @@ the vcluster nodes pull them from the host Docker daemon like the base images.
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
-from typing import Any, AsyncGenerator
+from pathlib import Path
+from typing import Any, AsyncGenerator, Callable
 
 import pytest
+from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
+from styrmin_sdk.models import ComponentConfigInput, UpdateDeploymentInput
 
 from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.helpers.drivers import (
+    MISNAMED_CONTAINER,
+    MISNAMED_DRIVER_NAME,
+    publish_misnamed_simple_app_driver,
+)
 from tests.e2e.helpers.workloads import (
     _wait_for_pod_template,
     container_spec,
@@ -39,6 +51,10 @@ SERVER_SELECTOR = "app.kubernetes.io/name=simple-app"
 SERVER_CONTAINER = "simple-app"
 CHART_IMAGE = "simple-app:0.1.0"
 TOKEN_IMAGE = "registry.example/acme/simple-app-patched:{{ app.version }}"
+# Fixed by the simple-app values template's ``fullnameOverride``.
+SERVER_WORKLOAD = "styrmin-simple-app"
+# Two 5s operator timer ticks plus the Flux reconcile and the 5s status report, with headroom.
+GUARD_FAILURE_TIMEOUT_SECONDS = 120.0
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +170,32 @@ def _pod_shape(workload: Any) -> dict[str, Any]:
         "server_env": [e.to_dict() for e in server.env or []],
         "server_pull_policy": server.image_pull_policy,
     }
+
+
+async def _wait_for_deployment_status(
+    client: StyrminClient,
+    deployment_id: str,
+    predicate: Callable[[dict], bool],
+    *,
+    description: str,
+    timeout: float = RECONCILE_TIMEOUT_SECONDS,
+) -> dict:
+    """Poll ``Deployment.status`` and ``crdStatus`` until ``predicate`` holds."""
+    deadline = time.monotonic() + timeout
+    deployment: dict = {}
+    while time.monotonic() < deadline:
+        raw = await client._transport.execute(
+            load_query("get_deployment_status"), {"deploymentId": deployment_id}
+        )
+        assert "errors" not in raw, raw
+        deployment = raw["data"]["deployment"] or {}
+        if deployment and predicate(deployment):
+            return deployment
+        await asyncio.sleep(2)
+    raise TimeoutError(
+        f"Timed out after {timeout}s waiting for {description} on deployment "
+        f"{deployment_id}; last seen: {deployment}"
+    )
 
 
 async def _wait_for_server_image(vcluster: dict, namespace: str, image: str) -> Any:
@@ -314,3 +356,92 @@ async def test_token_follows_upgrade_and_action_job(
     assert rows["server"]["reference"] == TOKEN_IMAGE
     assert rows["server"]["resolvedReference"] == patched_v2
     assert rows["server"]["isApplicable"] is True
+
+
+# ---------------------------------------------------------------------------
+# US4 — a misnamed component container fails loudly (SC-005)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.ci
+@pytest.mark.api_only(
+    reason="asserts operator status and live workload only; no UI flow"
+)
+async def test_misnamed_container_never_added(
+    image_override_environment: dict,
+    simple_app_override_images: dict[str, str],
+    git_server: dict[str, str],
+    vcluster: dict,
+    tmp_path: Path,
+) -> None:
+    """SC-005 / FR-007: on a driver whose ``server`` component container is
+    ``wrong-name``, an image override fails the deployment with a message naming
+    the component and the container; the live workload keeps its one container
+    and the chart image."""
+    client: StyrminClient = image_override_environment["client"]
+    patched = simple_app_override_images["0.1.0"]
+
+    loaded = await publish_misnamed_simple_app_driver(
+        client=client, vcluster=vcluster, git_server=git_server, tmp_path=tmp_path
+    )
+    assert loaded.application_driver.name == MISNAMED_DRIVER_NAME
+    server_config = next(c for c in loaded.component_configs if c.name == "server")
+    assert server_config.container == MISNAMED_CONTAINER
+
+    # Without an override no patch is emitted, so the misnamed driver deploys normally.
+    task = await client.deployments.create(
+        driver=MISNAMED_DRIVER_NAME,
+        version="0.1.0",
+        environment_id=image_override_environment["environment_id"],
+        name="image-override-misnamed",
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": "simple-app-misnamed"}
+        ],
+    )
+    assert task.deployment_id is not None
+    deployment_id = str(task.deployment_id)
+    namespace = f"styrmin-{deployment_id}"
+    await _wait_for_deployment_status(
+        client,
+        deployment_id,
+        lambda d: d["status"] == "running",
+        description="status == running",
+    )
+    baseline = await _wait_for_server_image(vcluster, namespace, CHART_IMAGE)
+    assert [c.name for c in baseline.spec.template.spec.containers] == [
+        SERVER_CONTAINER
+    ]
+
+    await client.deployments.update(
+        deployment_id,
+        input=UpdateDeploymentInput(
+            components=[ComponentConfigInput(name="server", image=patched)]
+        ),
+    )
+    failed = await _wait_for_deployment_status(
+        client,
+        deployment_id,
+        lambda d: d["status"] == "failed",
+        description="status == failed",
+        timeout=GUARD_FAILURE_TIMEOUT_SECONDS,
+    )
+
+    crd_status = failed["crdStatus"]
+    assert crd_status["phase"] == "Failed", crd_status
+    message = crd_status["message"]
+    assert "Component 'server'" in message, message
+    assert f"component container '{MISNAMED_CONTAINER}' was not found" in message, (
+        message
+    )
+    helm_condition = next(
+        c for c in crd_status["conditions"] if c["type"] == "HelmReleaseReady"
+    )
+    assert helm_condition["status"] == "False", helm_condition
+    assert helm_condition["reason"] == "ComponentContainerNotFound", helm_condition
+
+    # Nothing was applied: no container added, the chart image still runs.
+    apps = kubeclient.AppsV1Api(vcluster["api"])
+    workload = await apps.read_namespaced_deployment(SERVER_WORKLOAD, namespace)
+    containers = workload.spec.template.spec.containers
+    assert [c.name for c in containers] == [SERVER_CONTAINER]
+    assert containers[0].image == CHART_IMAGE
