@@ -2,6 +2,8 @@
 
 **Run status: INCOMPLETE.** 75 of 76 tasks are done. T050 is ⚠️ partial: its upgrade-action Job assertion is blocked by a bug that predates this feature, [opsmill/styrmin#381](https://github.com/opsmill/styrmin/issues/381). No local-pass evidence is missing.
 
+> **Post-run updates (2026-10-04):** R1 fixed in `049f79e`. A `speckit-reconcile-run` then synced spec, plan, research, and contracts with the shipped code, narrowed T050 to what shipped and ticked it, and moved the action-Job assertion to **T077**, still blocked on #381.
+
 ## 1. Header
 
 | Field | Value |

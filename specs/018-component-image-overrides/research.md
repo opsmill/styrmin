@@ -114,7 +114,8 @@ generation. A check placed only on the "waiting for Ready" path would never see 
 an existing deployment.
 
 **Decision**: on every tick in phase `CREATING_HELM_RELEASE` **or** `READY`, the operator's
-StyrminDeployment timer reads the HelmRelease. When its `Ready` condition is `False` for the current
+StyrminDeployment timer reads the HelmRelease. When its `Ready` condition is not `True` (`False`, or
+`Unknown` while the key is only under `Released`; reconciled 2026-10-04) for the current
 generation (the condition's `observedGeneration`, else `status.lastAttemptedGeneration`, equals
 `metadata.generation`, so a stale message from a fixed revision is ignored) and **any** condition
 message contains the guard key `styrmin.io~1component-container~1` (robust to helm-controller
@@ -190,7 +191,10 @@ gate says no new dependency and the frontend still needs its own copy.
   tag/digest, or a foreign template expression → `INVALID_IMAGE_REFERENCE`, checked on the stored
   string with the token replaced, using the deployment's application version; adding or changing it
   on a component without a component container → `COMPONENT_CONTAINER_NOT_DECLARED` (now with
-  metadata `override: "image"`). Removal and unchanged re-submission pass. All of these run before
+  metadata `override: "image"`). Removal and unchanged re-submission pass. On `updateDeployment` the
+  `INVALID_IMAGE_REFERENCE` check skips entries equal to the stored reference (reconciled 2026-10-04,
+  review finding R1): a stranded token override that the current version breaks would otherwise
+  reject every later edit, since clients re-submit all stored blocks. All of these run before
   Pydantic config validation, like the env-var and container-override checks, so the typed codes
   reach GraphQL.
 - **Upgrade** (`updateDeploymentVersion`): stored, applicable overrides are re-validated against the
@@ -235,8 +239,10 @@ pre-upgrade pod template, which is why the in-repo actions rebuild the tag
   component declares a component container present in the pod template, that container's image is
   returned **first**. No new primitive.
 - The in-repo `upgrade` actions (`simple-app`, `infrahub`, `infrahub-enterprise`) take `images[0]`
-  instead of the first image matching a substring, and strip a digest before rebuilding the tag
-  (`image.split("@", 1)[0].rsplit(":", 1)[0]`).
+  instead of the first image matching a substring, and strip a digest before rebuilding the tag.
+  The tag is stripped only when the part after the last `:` contains no `/`, so a registry port
+  (`registry:5000/app`) survives (reconciled 2026-10-04; the planned one-liner
+  `image.split("@", 1)[0].rsplit(":", 1)[0]` cut `registry:5000/app` to `registry`).
 - With a token override the live image is `…-patched:<old>`, so the Job runs `…-patched:<target>`:
   the override is honoured. With a pinned override the Job still runs at the target version while
   the component stays pinned. That is the hazard FR-008's warning covers, and it is unchanged.
