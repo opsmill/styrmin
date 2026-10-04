@@ -109,7 +109,10 @@ spec:
 ```
 
 `spec.config` is replaced on every apply, so removing the `image` key
-(or the component's entry) and applying again clears the override. See
+(or the component's entry) and applying again clears the override. An
+omitted or empty `spec.config` is the exception: it keeps the stored
+configuration. When the override you remove is the only setting left,
+write `components: []` instead of deleting `spec.config`. See
 [the `styrminctl` reference](../reference/styrminctl.md#manifest-specconfig-shape).
 
 ### With the Python SDK or GraphQL

@@ -70,4 +70,5 @@ kubectl -n styrmin-<id> get deploy -l app.kubernetes.io/name=semaphore \
   -o jsonpath='{.items[*].spec.template.spec.containers[*].image}'
 ```
 
-Then re-apply with `version: 0.2.0` and a literal-tag image to see the pinned warning on stderr.
+Then re-apply with another `version` the driver supports (`>=2.15,<2.17`) and a literal-tag image
+such as `semaphoreui/semaphore:v2.16.47` to see the pinned warning on stderr.

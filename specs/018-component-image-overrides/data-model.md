@@ -47,8 +47,9 @@ ComponentContext
 - Populated by `services/context.py::_populate_component_image_overrides` from
   `ImageOverridesResolver.resolve_for_deployment(component_overrides, driver_components)`.
 - Attached only to live components that have an override; orphans never reach a component context.
-- `None` for every component without an override, so contexts of deployments without overrides
-  keep the same shape (SC-002).
+- `None` for every component without an override. The CR context and the rendering context are
+  dumped with `exclude_none`, so deployments without overrides render and reconcile exactly as
+  before (SC-002).
 - Substitution happens in the patch builder (render time), against `context.app.version`.
 
 ## 3. Read surface: `ComponentImageOverride` (GraphQL)
