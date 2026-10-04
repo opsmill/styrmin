@@ -41,11 +41,23 @@ def validate_image_override_targets(
             )
 
 
-def prevalidate_image_overrides(config: dict[str, Any] | None, *, version: str) -> None:
-    """Validate every submitted image override against the deployment's application ``version``.
+def prevalidate_image_overrides(
+    config: dict[str, Any] | None,
+    *,
+    version: str,
+    stored_config: dict[str, Any] | None = None,
+) -> None:
+    """Validate every new or changed image override against the application ``version``.
+
+    Entries equal to the ``stored_config`` value are skipped: they were validated when written,
+    and applicable ones are re-validated on every version change, so re-checking them would only
+    block unrelated edits on a deployment holding a stranded override.
 
     Raises :class:`InvalidImageReferenceError` naming the component (grammar, missing tag or
     digest, template expression, or ``after_substitution`` when only ``version`` breaks it).
     """
+    stored = dict(_submitted_images(stored_config))
     for name, image in _submitted_images(config):
+        if stored.get(name) == image:
+            continue
         validate_reference(image, version=version, component_name=name)

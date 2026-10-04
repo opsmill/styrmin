@@ -122,3 +122,42 @@ def test_prevalidate_image_overrides_rejects_non_string_reference() -> None:
 
     assert exc_info.value.reason == "grammar"
     assert exc_info.value.component_name == "server"
+
+
+BROKEN_VERSION = "1.1.0+build"
+
+
+def test_prevalidate_image_overrides_skips_entries_unchanged_from_stored() -> None:
+    """An unchanged stored reference is not re-checked, even when the version now breaks it."""
+    stored = {"components": {"worker": {"image": TOKEN_REFERENCE}}}
+    config = {
+        "components": {
+            "worker": {"image": TOKEN_REFERENCE},
+            "server": {"image": f"{PATCHED}:1"},
+        }
+    }
+
+    prevalidate_image_overrides(config, version=BROKEN_VERSION, stored_config=stored)
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        None,
+        {"components": {"worker": {"image": f"{PATCHED}:1"}}},
+        {"components": {"server": {"image": TOKEN_REFERENCE}}},
+    ],
+    ids=["no-stored-config", "changed", "stored-on-another-component"],
+)
+def test_prevalidate_image_overrides_checks_new_or_changed_entries(
+    stored: dict[str, Any] | None,
+) -> None:
+    config = {"components": {"worker": {"image": TOKEN_REFERENCE}}}
+
+    with pytest.raises(InvalidImageReferenceError) as exc_info:
+        prevalidate_image_overrides(
+            config, version=BROKEN_VERSION, stored_config=stored
+        )
+
+    assert exc_info.value.reason == "after_substitution"
+    assert exc_info.value.component_name == "worker"

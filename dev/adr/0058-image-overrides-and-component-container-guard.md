@@ -120,8 +120,11 @@ version does not declare the component), then `INVALID_IMAGE_REFERENCE` at the d
 application version (the request's version on `deploy`, the stored one on `updateDeployment`),
 then config validation, then `COMPONENT_CONTAINER_NOT_DECLARED` with metadata `override: "image"`
 when an image is added or changed on a containerless component. Removal and unchanged
-re-submission pass, as for env vars (ADR-057 §5). Environment clone creates counterparts through
-`deploy`, so it gets the same checks.
+re-submission pass, as for env vars (ADR-057 §5). On `updateDeployment` the reference check also
+skips entries equal to the stored value: they were checked when written, and applicable ones are
+re-checked on every version change. Without the skip, a stranded `{{ app.version }}` override that
+the current version breaks would reject every later edit, since clients re-submit all stored blocks.
+Environment clone creates counterparts through `deploy`, so it gets the same checks.
 
 `updateDeploymentVersion` re-validates every stored override whose component has a component
 container in the target driver version against the target application version, before no-op

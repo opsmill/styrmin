@@ -911,6 +911,34 @@ async def test_update_deployment_accepts_removal_or_unchanged_on_containerless_c
 
 
 @pytest.mark.asyncio
+async def test_update_deployment_accepts_unchanged_stranded_token_override_broken_at_current_version(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """A stranded token override that the current version breaks does not block other edits."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, _ = await _seed_containerless_override(session, TOKEN_REFERENCE)
+    deployment = await _stored_row(session, deployment_id)
+    deployment.application_version = BROKEN_TARGET
+    session.add(deployment)
+    await session.commit()
+
+    payload = await _post_update(
+        client,
+        deployment_id,
+        [
+            {"name": "worker", "image": TOKEN_REFERENCE},
+            {"name": "server", "image": f"{PATCHED}:0.1.0"},
+        ],
+    )
+
+    assert "errors" not in payload, payload
+    assert await _stored_components(session, deployment_id) == {
+        "worker": {"image": TOKEN_REFERENCE},
+        "server": {"image": f"{PATCHED}:0.1.0"},
+    }
+
+
+@pytest.mark.asyncio
 async def test_update_deployment_env_vars_on_containerless_component_keep_env_error(
     client: AsyncClient, session: AsyncSession, prefect_manager_mock
 ) -> None:
