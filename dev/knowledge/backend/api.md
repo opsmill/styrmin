@@ -405,7 +405,8 @@ type ComponentImageOverride {    # Deployment.componentImageOverrides
 
 Writes raise `UNKNOWN_COMPONENT_IMAGE_OVERRIDE`, then `INVALID_IMAGE_REFERENCE` (metadata
 `component_name`, `reference`, `reason`, `application_version`), then
-`COMPONENT_CONTAINER_NOT_DECLARED` with `override: "image"`. `updateDeploymentVersion` raises
+`COMPONENT_CONTAINER_NOT_DECLARED` with `override: "image"`. On `updateDeployment`, entries equal
+to the stored reference skip the `INVALID_IMAGE_REFERENCE` check. `updateDeploymentVersion` raises
 `INVALID_IMAGE_REFERENCE` before dispatching a task when a stored override that applies in the
 target driver version is invalid at the target application version. `COMPONENT_CONTAINER_NOT_FOUND`
 never reaches `extensions.code`: the operator writes its message to the StyrminDeployment status,

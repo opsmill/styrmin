@@ -516,9 +516,12 @@ async def update_deployment(
 
             # Image overrides: unknown component, then grammar and substitution at
             # the stored application version, so the error names the component (018).
+            # Unchanged entries are skipped so a stranded override never blocks an edit.
             validate_image_override_targets(deployment_config, known_names)
             prevalidate_image_overrides(
-                deployment_config, version=deployment.application_version
+                deployment_config,
+                version=deployment.application_version,
+                stored_config=deployment.config,
             )
 
             # Pre-validate env-var bundles so the typed error codes
