@@ -35,11 +35,56 @@ from styrmin_backend.operator.pipeline import (
     execute_phase_services,
     should_proceed_to_helmrelease,
 )
+from styrmin_backend.services.component_container.exceptions import (
+    ComponentContainerNotFoundError,
+)
 
 
 def _is_internal(spec: dict[str, Any]) -> bool:
     """Check if a StyrminDeployment is an internal deployment (e.g., ingress controller)."""
     return spec.get("internal", False)
+
+
+async def _fail_on_component_container_guard(
+    *,
+    crd_spec: dict[str, Any],
+    conditions: list[dict[str, str]],
+    namespace: str,
+    name: str,
+    patch: Any,
+    logger: Any,
+) -> bool:
+    """Fail the CR when its HelmRelease failed on the component-container guard (018, FR-007).
+
+    Returns True when the CR was failed, so the timer stops for this tick.
+    """
+    from styrmin_backend.operator.reconciler import read_helmrelease_guard_failure
+
+    failure = await read_helmrelease_guard_failure(
+        namespace=namespace,
+        release_reference=crd_spec.get("releaseReference", ""),
+    )
+    if failure is None:
+        return False
+
+    component_name, container = failure
+    message = str(
+        ComponentContainerNotFoundError(
+            component_name=component_name, container=container
+        )
+    )
+    set_condition(
+        conditions,
+        ConditionType.HELM_RELEASE_READY,
+        ConditionStatus.FALSE,
+        "ComponentContainerNotFound",
+        message,
+    )
+    patch.status["conditions"] = conditions
+    set_phase(patch.status, DeploymentPhase.FAILED, message)
+    patch.status["displayState"] = DisplayState.ERROR.value
+    logger.warning("Deployment %s/%s failed: %s", namespace, name, message)
+    return True
 
 
 async def on_styrmin_deployment_create(
@@ -494,6 +539,17 @@ async def kopf_styrmin_deployment_timer(
 
     # Phase advancement for in-progress deployments
     if phase == DeploymentPhase.CREATING_HELM_RELEASE.value:
+        # Checked first: on an update, HelmReleaseReady is still True from the previous rollout.
+        if await _fail_on_component_container_guard(
+            crd_spec=crd_spec,
+            conditions=conditions,
+            namespace=ns,
+            name=name,
+            patch=patch,
+            logger=logger,
+        ):
+            return
+
         hr_already_ready = is_condition_true(
             conditions, ConditionType.HELM_RELEASE_READY
         )
@@ -611,6 +667,16 @@ async def kopf_styrmin_deployment_timer(
     if phase == DeploymentPhase.READY.value:
         # Internal deployments have no utility resources to reconcile
         if _is_internal(crd_spec):
+            return
+
+        if await _fail_on_component_container_guard(
+            crd_spec=crd_spec,
+            conditions=conditions,
+            namespace=ns,
+            name=name,
+            patch=patch,
+            logger=logger,
+        ):
             return
 
         # Drift detection: reconcile all resources

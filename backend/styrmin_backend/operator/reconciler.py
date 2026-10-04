@@ -29,6 +29,9 @@ from styrmin_backend.operator.config import (
     LABEL_OPERATOR_MANAGED_VALUE,
     LABEL_RELEASE_REFERENCE,
 )
+from styrmin_backend.services.component_container.exceptions import (
+    parse_guard_failure,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -356,6 +359,33 @@ async def list_managed_resources(
     return resources
 
 
+async def _get_helmrelease(
+    namespace: str,
+    release_reference: str,
+) -> dict[str, Any] | None:
+    """GET a HelmRelease, or ``None`` when it is missing or unreadable."""
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
+
+    try:
+        async with get_kubernetes_client() as client:
+            custom_api = kubeclient.CustomObjectsApi(client)
+            return await custom_api.get_namespaced_custom_object(
+                group=HELMRELEASE_GROUP,
+                version=HELMRELEASE_VERSION,
+                namespace=namespace,
+                plural=HELMRELEASE_PLURAL,
+                name=release_reference,
+            )
+    except ApiException as exc:
+        if exc.status == 404:
+            logger.debug("HelmRelease %s not found in %s", release_reference, namespace)
+        else:
+            logger.exception("Failed to check HelmRelease %s status", release_reference)
+    except Exception:
+        logger.exception("Failed to check HelmRelease %s status", release_reference)
+    return None
+
+
 async def _check_helmrelease_ready(
     namespace: str,
     release_reference: str,
@@ -364,34 +394,55 @@ async def _check_helmrelease_ready(
 
     Returns True if the HelmRelease has a Ready=True condition.
     """
-    from styrmin_backend.operator.kubernetes import get_kubernetes_client
+    helmrelease = await _get_helmrelease(
+        namespace=namespace, release_reference=release_reference
+    )
+    if helmrelease is None:
+        return False
+    conditions = (helmrelease.get("status") or {}).get("conditions") or []
+    return any(
+        condition.get("type") == "Ready" and condition.get("status") == "True"
+        for condition in conditions
+    )
 
-    try:
-        async with get_kubernetes_client() as client:
-            custom_api = kubeclient.CustomObjectsApi(client)
-            hr = await custom_api.get_namespaced_custom_object(
-                group=HELMRELEASE_GROUP,
-                version=HELMRELEASE_VERSION,
-                namespace=namespace,
-                plural=HELMRELEASE_PLURAL,
-                name=release_reference,
-            )
-            status = hr.get("status", {})
-            conditions = status.get("conditions", [])
-            for condition in conditions:
-                if (
-                    condition.get("type") == "Ready"
-                    and condition.get("status") == "True"
-                ):
-                    return True
-    except ApiException as exc:
-        if exc.status == 404:
-            logger.debug("HelmRelease %s not found in %s", release_reference, namespace)
-        else:
-            logger.exception("Failed to check HelmRelease %s status", release_reference)
-    except Exception:
-        logger.exception("Failed to check HelmRelease %s status", release_reference)
-    return False
+
+def _helmrelease_guard_failure(helmrelease: dict[str, Any]) -> tuple[str, str] | None:
+    """Return ``(component, container)`` when the HelmRelease's current generation failed on the guard.
+
+    Ready must not be True, and the guard key must be in the message of a condition observed for
+    ``metadata.generation`` (its ``observedGeneration``, else ``status.lastAttemptedGeneration``).
+    """
+    generation = (helmrelease.get("metadata") or {}).get("generation")
+    status = helmrelease.get("status") or {}
+    conditions = status.get("conditions") or []
+    if generation is None or any(
+        condition.get("type") == "Ready" and condition.get("status") == "True"
+        for condition in conditions
+    ):
+        return None
+    for condition in conditions:
+        observed = condition.get("observedGeneration")
+        if observed is None:
+            observed = status.get("lastAttemptedGeneration")
+        if observed != generation:
+            continue
+        failure = parse_guard_failure(condition.get("message") or "")
+        if failure is not None:
+            return failure
+    return None
+
+
+async def read_helmrelease_guard_failure(
+    namespace: str,
+    release_reference: str,
+) -> tuple[str, str] | None:
+    """Read the HelmRelease once and return its component-container guard failure, if any."""
+    helmrelease = await _get_helmrelease(
+        namespace=namespace, release_reference=release_reference
+    )
+    if helmrelease is None:
+        return None
+    return _helmrelease_guard_failure(helmrelease)
 
 
 async def _check_any_pod_ready(namespace: str) -> bool:
