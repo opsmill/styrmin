@@ -3,7 +3,7 @@
 ## Token check (shared)
 
 `\{\{\s*app\.version\s*\}\}`, in `frontend/src/lib/image-reference.ts` and
-`styrmin_sdk/models/image_reference.py`. The image-reference grammar check (frontend only on the
+`python_sdk/src/styrmin_sdk/models/image_reference.py`. The image-reference grammar check (frontend only on the
 client side) uses the shared vectors in `frontend/src/lib/image-reference.vectors.json`, which the
 backend unit tests also read.
 

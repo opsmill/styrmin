@@ -168,9 +168,11 @@ its image.
   `apply` only sees the config, so it lists every token-free override,
   including one that does not currently apply.
 - **An upgrade that would break a reference is rejected up front.** If
-  the target version makes a stored override invalid (for example a
-  version with a `+`, which a tag cannot contain), the upgrade fails
-  with `INVALID_IMAGE_REFERENCE` before any lifecycle action runs.
+  the target version makes invalid a stored override that applies in the
+  target driver version (for example a version with a `+`, which a tag
+  cannot contain), the upgrade fails with `INVALID_IMAGE_REFERENCE`
+  before any lifecycle action runs. An override that does not apply
+  there is never rendered, so it is not checked.
 - **Driver upgrade actions see your image.** `get_component_images`
   returns the component container's image first. The example drivers'
   `upgrade` actions build their migration Job's image from it and the

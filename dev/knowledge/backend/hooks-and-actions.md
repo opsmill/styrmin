@@ -244,7 +244,9 @@ they drop any `@digest`, then strip the tag only when the part after the last `:
 `/`, so a registry port (`registry:5000/app`) survives. `upgrade_deployment_version` returns before
 the rollout, so the image read is usually the pre-upgrade pod template; rebuilding the tag is what
 moves the Job to the target version. With a `{{ app.version }}` image override the Job runs the
-override's repository at the target version; with a pinned override the Job does the same while the
+override's repository at the target version once the override has rendered: an `apply` that sets the
+override and changes the version together can race the action, whose first Job may then use the
+previous repository (ADR-058, Consequences), so set the override in a separate apply; with a pinned override the Job does the same while the
 component stays pinned (the upgrade dialog and `styrminctl apply` warn about it). Taking
 `images[0]` replaced a substring match on the image name, which missed overrides. See
 [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md) §6.

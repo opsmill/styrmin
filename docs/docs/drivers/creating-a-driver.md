@@ -524,7 +524,8 @@ Before you call the driver done:
       it to — verify with `kubectl get pods -l <label>=<value>`.
 - [ ] Each component that should receive env vars or an image override
       declares a `container` that exists in every workload its label
-      selects, and `values.j2.yml` does not wire env vars.
+      selects, and `values.j2.yml` wires neither env vars nor the
+      image override.
 - [ ] Every stateful component has a `backup` block with the right
       strategy.
 - [ ] Every externally reachable service is declared under

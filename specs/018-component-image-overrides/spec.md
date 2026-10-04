@@ -149,7 +149,7 @@ A user or driver author makes a mistake: an invalid reference, an override on a 
 - **SC-003**: Steady-state reconciles restart zero pods. Setting then clearing an override restores the chart image within one reconcile.
 - **SC-004**: 100% of invalid writes are rejected before any pod restarts, with a typed error naming the component.
 - **SC-005**: A wrong component container name never adds a container to a pod. The error is visible to the user within one reconcile.
-- **SC-006**: A custom build runs on a component with zero driver changes.
+- **SC-006**: A custom build runs on a component whose driver declares a component container, with zero driver changes.
 
 ## Assumptions
 

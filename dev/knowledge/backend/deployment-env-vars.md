@@ -234,13 +234,15 @@ and no container is ever added. For env vars only, the rendered workload is byte
 to the merge alone, so the extra patch restarts no pods.
 
 The operator turns that failure into a typed status. On every timer tick in
-`CreatingHelmRelease` (before the readiness check) and `Ready` (before drift detection),
+`CreatingHelmRelease` (before the readiness check) and, for non-internal deployments,
+`Ready` (before drift detection),
 `read_helmrelease_guard_failure()` (`operator/reconciler.py`) reads the HelmRelease and
 matches when `Ready` is not `True` and a condition observed for the current
 `metadata.generation` carries the guard key in its message (`parse_guard_failure()` in
 `services/component_container/exceptions.py`). helm-controller v1.1.0 reports it under
 `Ready=False` and `Released=False`, reason `UpgradeFailed`. The CR then goes
-`Failed` / `Error` with `HelmReleaseReady=False`, reason `ComponentContainerNotFound`, and
+`Failed` / `Error` with `HelmReleaseReady=False` and `Ready=False`, reason
+`ComponentContainerNotFound`, and
 the `ComponentContainerNotFoundError` (`COMPONENT_CONTAINER_NOT_FOUND`) message, which the
 status reporter copies to `Deployment.crdStatus.message`:
 

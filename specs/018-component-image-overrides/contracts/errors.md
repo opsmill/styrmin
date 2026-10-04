@@ -1,7 +1,8 @@
 # Contract: Typed errors
 
-All subclass `ServiceError` and surface `extensions.code` plus metadata through
-`StructuredErrorExtension`.
+All subclass `ServiceError`. Raised from a GraphQL resolver, they surface `extensions.code` plus
+metadata through `StructuredErrorExtension`; a render failure in the operator reaches the user only
+as the CR status message (see `COMPONENT_CONTAINER_NOT_FOUND`).
 
 ## New
 
