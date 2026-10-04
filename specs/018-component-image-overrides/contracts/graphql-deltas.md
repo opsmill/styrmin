@@ -58,6 +58,8 @@ type Deployment {
 - One entry per component with a stored override. Live components come first, sorted by name,
   then orphans sorted by name.
 - `resolvedReference`: `reference` with every token replaced by `Deployment.applicationVersion`.
+  When `applicationVersion` is empty, the stored `reference` is returned unchanged, token
+  included: treat a remaining token as unresolved.
 - `isApplicable`: `not isOrphaned and component.container != null` (the deployment's components,
   which mirror its pinned driver version).
 

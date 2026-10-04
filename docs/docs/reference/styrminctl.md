@@ -370,7 +370,9 @@ spec:
 reference with an explicit tag or digest, where every `{{ app.version }}`
 token becomes the deployment's application version. Quote it, since YAML
 reads an unquoted `{` as a map. Removing the key clears the override on the
-next apply. A reference that fails the image grammar, has no tag or digest,
+next apply, unless that leaves `spec.config` empty: an omitted or empty
+`spec.config` keeps the stored configuration, so write `components: []` to
+clear the last override. A reference that fails the image grammar, has no tag or digest,
 carries another template expression, or becomes invalid once
 `{{ app.version }}` is replaced by the application version fails with
 `INVALID_IMAGE_REFERENCE`;

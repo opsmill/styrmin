@@ -26,7 +26,7 @@ carries token-free image overrides, one line per deployment goes to stderr after
 ```text
 updated my-app
 warning: my-app: pinned image override on server will not follow version 1.1.0 (no {{ app.version }} token)
-1 created, 1 updated, 0 unchanged, 0 failed
+0 created, 1 updated, 0 unchanged, 0 failed
 ```
 
 Exit code is unchanged (warning only). Not emitted on create.
