@@ -216,6 +216,16 @@ which `get_deployment.graphql` selects on `Deployment.components`:
   with a remove button, the same treatment as orphaned override blocks. Removing
   them submits a subset of the stored block, which the backend accepts.
 
+Image overrides (018) follow the same rule. A component with a container gets an
+**Image** input checked against `lib/image-reference.ts`. While any component's
+reference is invalid, `DrawerDiffProvider` lists it and the footer disables
+**Review & apply** with a hint naming the components. A component without a
+container gets no input. A stored image renders read-only
+(`comp-image-readonly-<component>`) with a **not applied** badge, the env var
+explanation, and a remove button (`Remove image override for <component>`)
+that sets `image` to `null`, which the backend accepts as a removal. Orphaned
+blocks are removed whole, image included.
+
 The driver detail **Components** tab (`ComponentsTab.tsx`) shows each component's
 container from `componentConfigs[].container`, or an explicit **None declared**
 state with a tooltip, so driver authors can confirm what they declared.

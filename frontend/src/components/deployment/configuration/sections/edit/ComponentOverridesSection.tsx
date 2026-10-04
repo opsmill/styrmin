@@ -15,6 +15,7 @@ import type {
   GetDeploymentQuery,
   UpdateDeploymentInput,
 } from "@/generated/graphql";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -207,7 +208,8 @@ function ensureComponentBlock(
  *    grow without a structural rewrite.
  *
  * Components without a component container get no env var editor and no
- * Image input: stored env vars render read-only and removable (FR-006).
+ * Image input: stored env vars and a stored image render read-only and
+ * removable (FR-006; 018 FR-011).
  *
  * Field-array semantics: every read or write into the override list keys
  * on the component `name`. The array index is an implementation detail of
@@ -561,6 +563,20 @@ function ComponentOverrideBody({
         </form.Field>
       </div>
 
+      {!hasContainer && (
+        <form.Field name={`${blockPath}.image`}>
+          {(f: any) =>
+            f.state.value ? (
+              <ContainerlessImage
+                componentName={componentName}
+                image={String(f.state.value)}
+                onRemove={() => f.handleChange(null)}
+              />
+            ) : null
+          }
+        </form.Field>
+      )}
+
       {hasContainer && (
         <form.Field
           name={`${blockPath}.image`}
@@ -796,6 +812,68 @@ function ComponentOverrideBody({
   );
 }
 
+/** The "not applied" explanation shared by the containerless env var and image areas. */
+function noContainerText(subject: string): string {
+  return `The driver declares no container for this component, so ${subject} can't be applied to it.`;
+}
+
+interface ContainerlessImageProps {
+  componentName: string;
+  image: string;
+  onRemove: () => void;
+}
+
+/**
+ * Stored image override on a component without a component container. The
+ * backend rejects setting or changing it there, so it can only be removed.
+ */
+function ContainerlessImage({
+  componentName,
+  image,
+  onRemove,
+}: ContainerlessImageProps) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Image
+      </Label>
+      <div
+        className="flex items-center justify-between gap-2 rounded-md border border-dashed border-amber-400 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
+        data-testid={`comp-image-readonly-${componentName}`}
+      >
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <code className="break-all font-mono text-xs text-amber-900 dark:text-amber-200">
+            {image}
+          </code>
+          <Badge
+            data-testid={`comp-image-not-applied-${componentName}`}
+            variant="warning"
+            className="px-1.5 py-0 text-[10px]"
+          >
+            not applied
+          </Badge>
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label={`Remove image override for ${componentName}`}
+          onClick={onRemove}
+          data-testid={`comp-image-remove-${componentName}`}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+      <p
+        className="text-xs italic text-muted-foreground"
+        data-testid={`comp-image-no-container-${componentName}`}
+      >
+        {noContainerText("the image override")} It can only be removed.
+      </p>
+    </div>
+  );
+}
+
 interface ContainerlessEnvVarsProps {
   componentName: string;
   envRows: EnvVarInput[];
@@ -818,8 +896,7 @@ function ContainerlessEnvVars({
         className="text-xs italic text-muted-foreground"
         data-testid={`comp-env-no-container-${componentName}`}
       >
-        The driver declares no container for this component, so env vars
-        can&apos;t be applied to it.
+        {noContainerText("env vars")}
         {envRows.length > 0 && " Stored values can only be removed."}
       </p>
       {envRows.map((row, index) => (
