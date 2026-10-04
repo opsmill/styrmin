@@ -11,6 +11,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.46](https://github.com/opsmill/styrmin/tree/v0.1.46) - 2026-10-04
+
+### Removed
+
+- Removed the `component_env_vars` driver template filter. A driver `values.j2.yml` that still calls it now fails rendering with an error that names the [migration guide](https://styrmin.pages.dev/docs/drivers/migrating-env-vars), so a deployment pinned to an unmigrated driver version fails on its next change (including the redeploy an environment env var edit triggers) until it is upgraded to a driver version that declares component containers. ([#385](https://github.com/opsmill/styrmin/issues/385))
+
+### Added
+
+- Added environment clone: one action copies a live environment into a brand-new environment on the same cluster, built from a fresh backup of the source, with a choice of which deployments to include and a clone-time config override (set or clear captured config fields) so the copy can be made safe before it starts. Available as the `cloneEnvironment` mutation (ADMIN) plus the `environmentClone` / `environmentClones` queries, `client.environment_clones` in the SDK, the `styrminctl env-clones` command group, and a **Clones** tab with a clone dialog on the environment detail page. A clone's status is derived from its backup, the environment it created and the restores into that environment's deployments; deleting the created environment discards the clone. ([#6](https://github.com/opsmill/styrmin/issues/6))
+- Added environment-level backup and restore: one action snapshots an environment — its config plus the declared state and a constituent backup of every eligible deployment — and one action restores it in place. Available as the `createEnvironmentBackup`, `restoreEnvironmentBackup` (ADMIN, since it rewrites the environment's config) and `deleteEnvironmentBackup` mutations plus the `environmentBackup(s)` / `environmentRestore(s)` queries, `client.environment_backups` in the SDK, the `styrminctl env-backups` command group, and a **Backups** tab on the environment detail page. An environment backup's status is derived from its constituents and adds a `PARTIAL` outcome; existing per-deployment backups are unaffected. ([#7](https://github.com/opsmill/styrmin/issues/7))
+
+### Changed
+
+- Changed how env vars reach pods: a driver now declares one component container per component (`components.<name>.container`), and Styrmin merges the environment, deployment, and component env vars into that container by name after the Helm chart renders, so the chart's own env defaults are kept and a user value replaces a chart entry of the same name. User env vars no longer reach chart Jobs, init containers, or other containers; adding or changing a component env var on a component without a component container is rejected with `COMPONENT_CONTAINER_NOT_DECLARED`; and on every update Styrmin replaces each HelmRelease spec key it writes (keys it never writes, such as `spec.suspend`, are kept), so env values written by an old driver template no longer linger. Every example driver declares its component containers. Rolling Styrmin back below this release stops env var injection for drivers already migrated. ([#385](https://github.com/opsmill/styrmin/issues/385))
+
+### Fixed
+
+- Fixed `createUser`, `updateUser`, `createGroup`, and `updateGroup` returning an opaque "An internal error occurred" when a `groupIds`/`memberIds` entry is not a valid UUID: malformed IDs now return a typed `VALIDATION_ERROR` naming the offending value. ([#351](https://github.com/opsmill/styrmin/issues/351))
+- Fixed the example `slurpit` driver passing its hard-coded database credentials and warehouse tokens to the slurpit chart as a list: the chart expects a map, so its ConfigMaps held keys `0`, `1`, … and neither that wiring nor the chart's own env defaults reached the containers. Fixed the example `infrahub` and `infrahub-enterprise` drivers dropping the Prefect server chart's env defaults (`PREFECT_UI_SERVE_BASE`, plus `PROMETHEUS_MULTIPROC_DIR` on the community chart).
+
 ## [Styrmin - v0.1.45](https://github.com/opsmill/styrmin/tree/v0.1.45) - 2026-09-25
 
 ### Added
