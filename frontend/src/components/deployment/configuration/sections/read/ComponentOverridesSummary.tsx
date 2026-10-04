@@ -138,7 +138,8 @@ function ImageOverrideLine({ override }: { override: ImageOverride }) {
  * Components are a deployment-only concept — the cluster/environment
  * layers don't define them — so the dot fires whenever any per-component
  * block exists for that component at the deployment layer. A component
- * with an image override gets an extra line from `imageOverrides`.
+ * with an image override gets an extra line from `imageOverrides`; an
+ * override on a component the driver no longer declares gets its own row.
  */
 export function ComponentOverridesSummary({
   deploymentConfig,
@@ -148,9 +149,13 @@ export function ComponentOverridesSummary({
   const imageByComponent = new Map(
     imageOverrides.map((o) => [o.component, o] as const),
   );
+  const declared = new Set(components.map((c) => c.name));
+  const orphanedImages = imageOverrides.filter(
+    (o) => !declared.has(o.component),
+  );
   return (
     <ConfigSummaryCard title="Component Overrides">
-      {components.length === 0 ? (
+      {components.length === 0 && orphanedImages.length === 0 ? (
         <p className="text-sm italic text-muted-foreground">
           driver declares no components
         </p>
@@ -201,6 +206,28 @@ export function ComponentOverridesSummary({
               </li>
             );
           })}
+          {orphanedImages.map((orphan) => (
+            <li
+              key={`orphan-${orphan.component}`}
+              data-testid="component-override-orphan-row"
+              data-component={orphan.component}
+              className="space-y-1 text-sm"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
+                />
+                <span className="font-mono text-xs text-slate-900 dark:text-slate-100">
+                  {orphan.component}
+                </span>
+                <span className="ml-2 truncate text-xs italic text-muted-foreground">
+                  no longer declared by driver
+                </span>
+              </div>
+              <ImageOverrideLine override={orphan} />
+            </li>
+          ))}
         </ul>
       )}
     </ConfigSummaryCard>

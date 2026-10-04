@@ -132,6 +132,52 @@ describe("ComponentOverridesSummary: image overrides", () => {
     expect(serverRow).toHaveTextContent("env_vars: 1 key · image");
   });
 
+  it("shows an orphaned image override as not applied", () => {
+    renderSummary([
+      override({}),
+      override({
+        component: "legacy",
+        reference: PINNED_REF,
+        resolvedReference: PINNED_REF,
+        isOrphaned: true,
+        isApplicable: false,
+      }),
+    ]);
+
+    const orphanRow = screen.getByTestId("component-override-orphan-row");
+    expect(orphanRow).toHaveAttribute("data-component", "legacy");
+    expect(orphanRow).toHaveTextContent("no longer declared by driver");
+    const row = imageRow("legacy");
+    expect(orphanRow).toContainElement(row);
+    expect(
+      within(row).getByTestId("component-image-reference"),
+    ).toHaveTextContent(PINNED_REF);
+    expect(
+      within(row).getByTestId("component-image-applied-badge"),
+    ).toHaveTextContent(/^not applied$/);
+  });
+
+  it("shows orphaned image overrides when the driver declares no components", () => {
+    render(
+      <ComponentOverridesSummary
+        deploymentConfig={{}}
+        environmentConfig={{}}
+        clusterConfig={{}}
+        components={[]}
+        imageOverrides={[
+          override({
+            component: "legacy",
+            isOrphaned: true,
+            isApplicable: false,
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText("driver declares no components")).toBeNull();
+    expect(imageRow("legacy")).toHaveAttribute("data-applicable", "false");
+  });
+
   it("tolerates a missing override list", () => {
     render(
       <ComponentOverridesSummary
