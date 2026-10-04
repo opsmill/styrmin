@@ -247,6 +247,56 @@ describe("ConfigDiffDialog", () => {
     );
   });
 
+  it("shows a cleared image override as a removal and submits image: null (018 US3)", async () => {
+    const image = "registry.example/acme/simple-app-patched:0.1.0";
+    const deployment = buildDeployment({
+      config: { components: { server: { image } } },
+    });
+    const { getCalls } = stubFetch({ refetchDeployment: deployment });
+    const initial: UpdateDeploymentInput = {
+      ...INITIAL,
+      components: [{ name: "server", envVars: [], image }],
+    };
+    const cleared: UpdateDeploymentInput = {
+      ...INITIAL,
+      components: [{ name: "server", envVars: [], image: "" }],
+    };
+    const onApplySuccess = vi.fn();
+
+    await render(
+      <ConfigDiffDialog
+        open
+        onOpenChange={vi.fn()}
+        deployment={deployment}
+        initialValues={initial}
+        frozenInitialValues={initial}
+        currentValues={cleared}
+        driverSchema={[]}
+        onApplySuccess={onApplySuccess}
+        onBackToEdit={vi.fn()}
+        onReloadBaseline={vi.fn()}
+      />,
+    );
+
+    const rows = screen.getAllByTestId("diff-entry-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveAttribute("data-path", "components[server].image");
+    expect(rows[0]).toHaveAttribute("data-kind", "remove");
+    expect(screen.getByTestId("diff-line-before")).toHaveTextContent(image);
+    expect(screen.queryByTestId("diff-line-after")).toBeNull();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("diff-dialog-apply-button"));
+
+    await waitFor(() => expect(onApplySuccess).toHaveBeenCalledTimes(1));
+    const mutation = getCalls().find((c) =>
+      c.query.includes("mutation UpdateDeployment"),
+    );
+    expect(
+      (mutation?.variables.input as UpdateDeploymentInput).components,
+    ).toEqual([{ name: "server", envVars: [], image: null }]);
+  });
+
   it("opens to a clean state with diff visible when triggered", async () => {
     const deployment = buildDeployment();
     stubFetch({ refetchDeployment: deployment });

@@ -134,13 +134,13 @@ description: "Task list for 018-component-image-overrides"
 
 ### Tests for User Story 3
 
-- [ ] T051 [P] [US3] Extend `backend/tests/functional/graphql/test_image_overrides_propagation.py`: submitting the component block without `image` (and with `image: null`) clears it, and `componentImageOverrides` no longer lists it. Extend `backend/tests/unit/services/component_container/test_patch_builder.py`: after clearing, the context yields no image patch.
-- [ ] T052 [P] [US3] Extend `ComponentOverridesSection.test.tsx`: clearing the Image input submits `image: null` and the diff dialog shows a removal.
+- [X] T051 [P] [US3] Extend `backend/tests/functional/graphql/test_image_overrides_propagation.py`: submitting the component block without `image` (and with `image: null`) clears it, and `componentImageOverrides` no longer lists it. Extend `backend/tests/unit/services/component_container/test_patch_builder.py`: after clearing, the context yields no image patch.
+- [X] T052 [P] [US3] Extend `ComponentOverridesSection.test.tsx`: clearing the Image input submits `image: null` and the diff dialog shows a removal.
 
 ### Implementation for User Story 3
 
-- [ ] T053 [US3] Make the T051 and T052 cases pass with any fixes needed in `inputs.py`, `deployment-input.ts`, or `ComponentOverridesSection.tsx` (most clearing behaviour comes from full replacement and per-render patch regeneration).
-- [ ] T054 [US3] Extend `test_override_then_clear` in `backend/tests/e2e/test_deployment_image_override.py` with the clear half: `set_component_image(server, None)`, wait, assert the `simple-app` container image is back to `simple-app:0.1.0` and the read surface lists no override. Run to a pass with `--pdb`.
+- [X] T053 [US3] Make the T051 and T052 cases pass with any fixes needed in `inputs.py`, `deployment-input.ts`, or `ComponentOverridesSection.tsx` (most clearing behaviour comes from full replacement and per-render patch regeneration).
+- [X] T054 [US3] Extend `test_override_then_clear` in `backend/tests/e2e/test_deployment_image_override.py` with the clear half: `set_component_image(server, None)`, wait, assert the `simple-app` container image is back to `simple-app:0.1.0` and the read surface lists no override. Run to a pass with `--pdb`.
 
 **Checkpoint**: US1 and US3 together match brief test 1 (P1 + P3).
 
