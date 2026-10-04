@@ -99,6 +99,8 @@ builder's single entry point.
 
 - `ApplyOutcome.pinned_image_components: list[str] = []`: components whose effective image override
   has no token, filled only when `apply` changes the application version.
+- `ApplyOutcome.target_version: str | None`: the target version, set on an `updated` outcome that
+  changes the application version (reconciled 2026-10-04).
 - `styrmin_sdk.models.image_reference`: `APP_VERSION_TOKEN_RE`, `has_app_version_token(ref)`, and
   `pinned_image_components(overrides)`, a pure helper used by `apply` and the E2E API driver.
 

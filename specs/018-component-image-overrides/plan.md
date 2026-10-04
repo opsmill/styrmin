@@ -137,12 +137,12 @@ backend/tests/
     ├── drivers/{protocol,api_driver,ui_driver}.py    # + set_component_image, pinned_image_components
     └── pages/                                        # deployment-detail page object: image field, upgrade warning
 
-driver/examples/{simple-app,infrahub,infrahub-enterprise}/actions.py   # images[0] + digest-safe retag
+driver/examples/{simple-app,infrahub,infrahub-enterprise}/actions.py   # images[0] + digest- and port-safe retag
 
 python_sdk/src/styrmin_sdk/
 ├── graphql/get_deployment.graphql (+ new _full query)
 ├── models/image_reference.py                          # NEW token helper + pinned_image_components
-├── models/deployment_manifest.py                      # ApplyOutcome.pinned_image_components
+├── models/deployment_manifest.py                      # ApplyOutcome.pinned_image_components, target_version
 └── resources/deployments.py                           # _apply_update computes pinned components
 cli/src/styrminctl/commands/deployments.py            # warning line on stderr
 
@@ -188,12 +188,15 @@ image-specific pure logic mirrors `services/container_overrides/`.
 3. **Write path order** in `update_deployment` / `deploy_application`: unknown-component check →
    grammar/token pre-validation → `validate_deployment_config` → container-declared check (generalized
    `_validate_component_container_targets(submitted, stored, containers, slots=("env_vars", "image"))`).
+   On `update_deployment` the pre-validation receives the stored config and skips entries equal to
+   the stored reference (`prevalidate_image_overrides(..., stored_config=...)`).
 4. **Upgrade path**: `update_deployment_version` resolves the target driver version, then validates
    each stored override whose component has a container in that version against the target
    application version, before no-op detection and task dispatch.
 5. **Operator** (D-004, critique E1/E3): a new `read_helmrelease_guard_failure(namespace,
    release_reference) -> (component, container) | None` in `operator/reconciler.py` GETs the
-   HelmRelease and returns a match only when `Ready` is `False` for the current generation
+   HelmRelease and returns a match only when `Ready` is not `True` (`False`, or `Unknown` with the
+   key only under `Released`) for the current generation
    (condition `observedGeneration`, else `status.lastAttemptedGeneration`, equals
    `metadata.generation`) and any condition message carries the guard key
    (`parse_guard_failure(message)`). The timer calls it on every tick in `CREATING_HELM_RELEASE`
@@ -207,8 +210,9 @@ image-specific pure logic mirrors `services/container_overrides/`.
    context and is never a no-op.
 7. **Frontend**: the image input lives in `ComponentOverrideBody` next to command/args. The Zod
    schema gains `image: z.string().optional()` with a refinement calling
-   `validateImageReference`. Form-to-input mapping sends `image: null` when empty. The upgrade
-   dialog renders `PinnedImageOverridesNotice` from the deployment query.
+   `validateImageReference`. Form-to-input mapping sends `image: null` when empty. The drawer
+   footer disables Review & apply while any image is invalid (`useDrawerInvalidImages`). The upgrade
+   dialog renders `PinnedImageOverridesNotice` from the deployment query (applicable overrides only).
 8. **E2E harness**: a session fixture `simple_app_override_images` runs `docker tag` on the two built
    images. A helper publishes the `simple-app-misnamed` driver on a git-server branch.
    `ScenarioDriver` gains `set_component_image` and `pinned_image_components` with API and UI
@@ -231,3 +235,7 @@ image-specific pure logic mirrors `services/container_overrides/`.
 ## Complexity Tracking
 
 No constitution violations to justify.
+
+### Revision: Implementation Sync 2026-10-04
+
+- Reason: reconciled drift found after implementation. Design note 3 now records the unchanged-entry skip (review finding R1), note 5 the operator matching `Ready` not `True`, note 7 the drawer blocking Review & apply. The source tree now lists `ApplyOutcome.target_version` and the port-safe retag. research.md D-004, D-008, D-010, contracts/client-surfaces.md, and data-model.md §7 were updated to match. The action Job E2E assertion is tracked as T077 (blocked on opsmill/styrmin#381).
