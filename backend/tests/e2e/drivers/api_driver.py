@@ -488,6 +488,27 @@ class ApiScenarioDriver:
             deployment_id=deployment_id, component=component, slot="image", value=image
         )
 
+    async def pinned_image_components(
+        self,
+        *,
+        deployment_id: str,
+        target_version: str,  # noqa: ARG002 — the UI types it; the listing ignores it
+    ) -> list[str]:
+        from styrmin_sdk.models import pinned_image_components
+
+        try:
+            deployment = await self._client.deployments.get(deployment_id)
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        # Same filter as the upgrade dialog's notice: containerless overrides never apply.
+        return pinned_image_components(
+            {
+                row.component: row.reference
+                for row in deployment.component_image_overrides
+                if row.is_applicable
+            }
+        )
+
     async def _replace_component_slot(
         self, *, deployment_id: str, component: str, slot: str, value: Any
     ) -> None:

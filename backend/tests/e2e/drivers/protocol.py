@@ -189,6 +189,23 @@ class ScenarioDriver(Protocol):
         wait for the reconcile to reach the workload.
         """
 
+    async def pinned_image_components(
+        self, *, deployment_id: str, target_version: str
+    ) -> list[str]:
+        """Components, sorted, whose image override stays pinned on an upgrade (018).
+
+        Pinned means applicable (the component has a container) and without the
+        ``{{ app.version }}`` token. Nothing is upgraded.
+
+        API driver: applies the SDK ``pinned_image_components`` helper to the
+        applicable rows of ``Deployment.componentImageOverrides``;
+        ``target_version`` is unused because the listing does not depend on it.
+
+        UI driver: opens the Upgrade dialog, types ``target_version``, reads
+        the components in the "Pinned image overrides" notice (none when it is
+        absent), then cancels.
+        """
+
     async def get_deployment_timeline(
         self, *, deployment_id: str
     ) -> list[TimelineEntry]: ...

@@ -86,6 +86,24 @@ class DeploymentDetailPage:
         # Dialog closes on success; treat its disappearance as the signal.
         await dialog.wait_for(state="hidden")
 
+    async def read_pinned_image_warning(self, target_version: str) -> list[str]:
+        """Open the Upgrade dialog, type ``target_version``, and return the
+        sorted components the "Pinned image overrides" notice lists (empty when
+        it is absent); cancels without upgrading."""
+        await self.open_upgrade_dialog()
+        dialog = self._page.get_by_role("dialog", name="Upgrade Deployment")
+        await dialog.get_by_label("New Version").fill(target_version)
+        # The notice renders from the same query as the page header, so it is
+        # already settled once the dialog is open.
+        entries = await dialog.get_by_test_id("pinned-image-override").all()
+        components = [
+            await _required_attr(entry, "data-component", context="pinned override")
+            for entry in entries
+        ]
+        await dialog.get_by_role("button", name="Cancel", exact=True).click()
+        await dialog.wait_for(state="hidden")
+        return sorted(components)
+
     # ------------------------------------------------------------------
     # Scheduling dialog
     # ------------------------------------------------------------------
