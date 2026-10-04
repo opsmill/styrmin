@@ -68,6 +68,7 @@ styrmin_backend/services/
 ├── image_overrides/               # Per-component image overrides (018)
 │   ├── reference.py               # image-reference grammar + {{ app.version }} substitution
 │   ├── resolver.py                # stored overrides → live entries and orphans
+│   ├── validator.py               # write-time checks: unknown component, reference at the app version
 │   └── exceptions.py              # InvalidImageReferenceError, UnknownComponentImageOverrideError
 │
 ├── component_container/           # Post-render patches into each component container (018)

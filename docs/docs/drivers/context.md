@@ -136,8 +136,9 @@ components:        # ComponentsContext, keyed by component name
 Per-component configuration. A driver declares its components in
 `driver.styrmin.yml`; this is where the resolved per-component values
 end up at runtime: the component's definition under
-`components.<name>.config` (including its declared `container`) and its
-resolved env vars under `components.<name>.env_vars.config`.
+`components.<name>.config` (including its declared `container`), its
+resolved env vars under `components.<name>.env_vars.config`, and its
+image override under `components.<name>.image_override`.
 
 May be `None` if the driver has no per-component configuration.
 
@@ -159,6 +160,17 @@ Both are absent when nothing is set, so guard with
 `(instance.config.env_vars or {})`. Don't write them into a chart env
 key: Styrmin already injects them, and Helm's list replacement would
 drop the chart's own env defaults.
+
+#### Image overrides are read-only data
+
+Styrmin also applies a user's
+[image override](../concepts-and-architecture/image-overrides.md) to the
+component container after the chart renders, so templates do not wire
+it either. `components.<name>.image_override` is present only when the
+user set one, and it is applied only when the component declares a
+component container. Its `reference` is the stored string, with any
+`{{ app.version }}` token not yet substituted. Don't write it into a
+chart image key; Styrmin already sets the image.
 
 #### `parameters`
 

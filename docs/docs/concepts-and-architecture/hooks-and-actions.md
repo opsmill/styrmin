@@ -89,6 +89,17 @@ Three things to notice:
   ordered steps and a sanity check, you express that as Python — no
   shell scripts, no runbooks.
 
+### Reading a component's images
+
+Upgrade actions often run a migration Job with the component's own
+image at the target version. The `get_component_images` primitive
+returns the image of every container in the component's pod template,
+with the **component container**'s image first (when the driver
+declares one) and the rest in pod order. When a user sets an
+[image override](./image-overrides.md) on the component, that first
+image is the override, so an action that takes `images[0]` runs the
+user's build. Searching the list for an image name would miss it.
+
 ### Why Prefect?
 
 Actions are workflows: long-running, sometimes flaky, with steps that

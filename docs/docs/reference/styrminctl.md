@@ -358,18 +358,58 @@ spec:
         env_vars:
           - name: LOG_LEVEL
             value: debug
+        image: "registry.example/acme/app-patched:{{ app.version }}"
   parameters:
     replicas: 2
 ```
 
 `spec.parameters` stays a `{name: value}` map.
 
-Adding or changing per-component `env_vars` on a component whose driver
-version declares no component container fails with
+`components[].image` is the component's
+[image override](../concepts-and-architecture/image-overrides.md): one full
+reference with an explicit tag or digest, where every `{{ app.version }}`
+token becomes the deployment's application version. Quote it, since YAML
+reads an unquoted `{` as a map. Removing the key clears the override on the
+next apply. A reference that fails the image grammar, has no tag or digest,
+or carries another template expression fails with `INVALID_IMAGE_REFERENCE`;
+a component the driver version does not declare fails with
+`UNKNOWN_COMPONENT_IMAGE_OVERRIDE`.
+
+Adding or changing per-component `env_vars` or `image` on a component whose
+driver version declares no component container fails with
 `COMPONENT_CONTAINER_NOT_DECLARED`. `apply` writes `spec.config` before it
 moves the deployment to a new driver version, so the check runs against the
 current version. See
 [Migrating env var wiring](../drivers/migrating-env-vars.md).
+
+When a manifest changes an existing deployment's application version,
+`styrminctl deployments apply` prints a warning on stderr for each
+deployment whose image overrides have no `{{ app.version }}` token, since
+those components keep their pinned image after the upgrade:
+
+```text
+updated my-app
+warning: my-app: pinned image override on server will not follow version 1.3.0 (no {{ app.version }} token)
+0 created, 1 updated, 0 unchanged, 0 failed
+```
+
+The warning does not change the exit code, and `apply` never prompts. With
+`--wait`, it is printed once, when the change is submitted. `apply` reads only
+the config, so it lists every token-free override, including one on a
+component whose override does not currently apply. The SDK returns the same
+components as `ApplyOutcome.pinned_image_components`, with
+`ApplyOutcome.target_version` set on an `updated` outcome that changes the
+version.
+
+:::note Image override and version change in one apply
+
+`apply` writes `spec.config` before it changes the version, but the driver's
+upgrade action can read the component's workload before the new override
+reaches it. Its first Job can then run with the previous image repository.
+Apply the override on its own first, then change the version in a second
+apply.
+
+:::
 
 ### Related
 

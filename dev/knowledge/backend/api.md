@@ -384,6 +384,33 @@ type ComponentEnvVars {          # Deployment.componentEnvVars
 
 `container` is `null` when the driver declares no component container. `Component.container` follows the deployment's pinned driver version, because component rows are recreated on a driver-version switch. `isApplicable` is computed in the resolver from that driver version's component configs; it is not stored and not part of the instance context. `isOrphaned` keeps its meaning (the driver no longer declares the component), so a block stranded by an upgrade that drops the container reads `isOrphaned: false, isApplicable: false`: kept, returned, never injected.
 
+#### Image override fields
+
+<!-- Extracted from specs/018-component-image-overrides on 2026-10-04 -->
+
+Image overrides ride the same component container ([ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md)):
+
+```graphql
+input ComponentConfigInput {     # UpdateDeploymentInput.components, deploy config
+  image: String                  # null/omitted clears it (full replacement)
+}
+type ComponentImageOverride {    # Deployment.componentImageOverrides
+  component: String!
+  reference: String!             # stored, {{ app.version }} tokens included
+  resolvedReference: String!     # tokens replaced by Deployment.applicationVersion
+  isOrphaned: Boolean!
+  isApplicable: Boolean!         # not isOrphaned and the component declares a container
+}
+```
+
+Writes raise `UNKNOWN_COMPONENT_IMAGE_OVERRIDE`, then `INVALID_IMAGE_REFERENCE` (metadata
+`component_name`, `reference`, `reason`, `application_version`), then
+`COMPONENT_CONTAINER_NOT_DECLARED` with `override: "image"`. `updateDeploymentVersion` raises
+`INVALID_IMAGE_REFERENCE` before dispatching a task when a stored override that applies in the
+target driver version is invalid at the target application version. `COMPONENT_CONTAINER_NOT_FOUND`
+never reaches `extensions.code`: the operator writes its message to the StyrminDeployment status,
+read back as `Deployment.crdStatus.message`.
+
 #### Environment-config update + fanout
 
 <!-- Extracted from specs/009-environment-update on 2026-05-08 -->

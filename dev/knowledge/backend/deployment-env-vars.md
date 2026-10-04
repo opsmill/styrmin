@@ -208,7 +208,50 @@ User entries land before the chart's remaining entries and the component
 container moves to `containers[0]` (research D-002; observed kyaml behaviour,
 not a contract). Patches are rebuilt on every render, so clearing an env var
 needs no marker. One info log per component with patches records `component`,
-`container`, and the env var count, never values.
+`container`, the env var count, and whether an image override applies, never
+values.
+
+### The shared component-container guard (018)
+
+`build_component_container_patches()` (`services/component_container/patch_builder.py`)
+serves env vars and image overrides alike: a component with a component container gets
+patches when it has applicable env vars, a live image override, or both. Per kind, the
+strategic merge names the container (with env entries only when env vars apply), and the
+JSON6902 `ComponentContainerPatch` then:
+
+1. moves `containers/0` to the temporary key
+   `/spec/template/spec/styrmin.io~1component-container~1<component>~1<container>`
+   (names JSON-pointer escaped);
+2. removes its `image` and adds the substituted image override, or, for env vars only,
+   copies the chart image to `styrmin-image`, removes `image`, and moves it back;
+3. moves the container back to `containers/0`.
+
+kyaml's merge adds a container when the name is missing. Before 018 that container had no
+image and the API server rejected the workload; with an image override it would be valid.
+The `remove` fails on the added, image-less container, so a wrong name fails the Helm
+post-render with `error in remove for path: '…/styrmin.io~1component-container~1<component>~1<container>/image'`
+and no container is ever added. For env vars only, the rendered workload is byte-identical
+to the merge alone, so the extra patch restarts no pods.
+
+The operator turns that failure into a typed status. On every timer tick in
+`CreatingHelmRelease` (before the readiness check) and `Ready` (before drift detection),
+`read_helmrelease_guard_failure()` (`operator/reconciler.py`) reads the HelmRelease and
+matches when `Ready` is not `True` and a condition observed for the current
+`metadata.generation` carries the guard key in its message (`parse_guard_failure()` in
+`services/component_container/exceptions.py`). helm-controller v1.1.0 reports it under
+`Ready=False` and `Released=False`, reason `UpgradeFailed`. The CR then goes
+`Failed` / `Error` with `HelmReleaseReady=False`, reason `ComponentContainerNotFound`, and
+the `ComponentContainerNotFoundError` (`COMPONENT_CONTAINER_NOT_FOUND`) message, which the
+status reporter copies to `Deployment.crdStatus.message`:
+
+```text
+Component 'server': component container 'wrong-name' was not found in its rendered workload.
+Styrmin never adds a container; fix components.server.container in the driver specification file.
+```
+
+It shows up within one or two timer intervals (`STYRMIN_OPERATOR_RECONCILE_INTERVAL`, 60 s
+by default) after helm-controller reports. Other HelmRelease failures keep the readiness
+timeout path. See [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md).
 
 The resolved dicts stay in the rendering context as **read-only data**:
 
@@ -237,7 +280,9 @@ History: 008 injected by a JSON-patch `replace` on `containers/0/env`, which
 clobbered chart defaults; 010 moved injection into driver templates
 ([ADR-013](../../adr/0013-driver-env-var-consumption.md)), where Helm's list
 replacement dropped chart defaults instead; 017 merges by name into the
-declared container ([ADR-057](../../adr/0057-post-render-component-overrides.md)).
+declared container ([ADR-057](../../adr/0057-post-render-component-overrides.md));
+018 adds the guard shared with image overrides
+([ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md)).
 The [driver-author guide](../../guides/driver-env-var-consumption.md) covers
 declaring the container and the failure modes.
 
@@ -269,19 +314,22 @@ foot setting them in the past.
 | Patch placement + rendering-context exposure | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` (`ApplicationHelmReleaseBuilder.build`, `render_value_template`, retired `component_env_vars` stub) |
 | Write guard | `backend/styrmin_backend/services/deployment.py::_validate_component_container_targets` (env vars and image overrides); error in `services/env_vars/exceptions.py` |
 | Retired-filter error | `backend/styrmin_backend/services/exceptions.py::RetiredTemplateFilterError` |
+| Guard failure parser + error | `backend/styrmin_backend/services/component_container/exceptions.py` (`parse_guard_failure`, `ComponentContainerNotFoundError`) |
+| Guard failure surfacing | `backend/styrmin_backend/operator/reconciler.py::read_helmrelease_guard_failure`, `operator/handlers/styrmin_deployment.py::_fail_on_component_container_guard` |
 | HelmRelease / CR apply | `backend/styrmin_backend/agent/service/kubernetes/primitives.py::upsert_custom_resource` (`replace_spec_keys_on_update`); callers in `operator/pipeline.py` and `agent/tasks/orchestration.py` |
 | Driver-side docs | `backend/styrmin_backend/services/driver/models/resources/env_vars.py` |
 | Reference driver | `driver/examples/simple-app/driver.styrmin.yml` and `driver/examples/simple-app/src/helm/templates/deployment.yaml` |
 | GraphQL types | `backend/styrmin_backend/api/definitions/deployment/model.py`, `.../environment/model.py`, `.../application_driver/model.py`, `.../deployment_timeline/model.py` |
 | Frontend gating | `frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx`, `frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx` |
-| Unit tests | `backend/tests/unit/agent/test_container_env_patch.py`, `.../test_component_container_patch.py`, `.../test_application_builder_env_vars.py`, `.../test_upsert_custom_resource_replace_spec.py`, `backend/tests/unit/services/component_container/test_patch_builder.py` |
+| Unit tests | `backend/tests/unit/agent/test_container_env_patch.py`, `.../test_component_container_patch.py`, `.../test_application_builder_env_vars.py`, `.../test_upsert_custom_resource_replace_spec.py`, `backend/tests/unit/services/component_container/test_patch_builder.py`, `.../component_container/test_exceptions.py`, `backend/tests/unit/test_styrmin_deployment_timer.py` (guard failure surfacing) |
 | Kustomize integration test | `backend/tests/integration/test_component_container_kustomize.py` |
-| E2E coverage | `backend/tests/e2e/test_deployment_env_vars.py`, `backend/tests/e2e/test_infrahub_services.py` (chart env defaults kept) |
+| E2E coverage | `backend/tests/e2e/test_deployment_env_vars.py`, `backend/tests/e2e/test_infrahub_services.py` (chart env defaults kept), `backend/tests/e2e/test_deployment_image_override.py::test_misnamed_container_never_added` (guard failure) |
 | Propagation + mutation-error tests | `backend/tests/functional/graphql/test_env_vars_propagation.py`, `.../test_update_deployment_input_errors.py`, `.../test_application_driver_version_propagation.py` |
 
 ## Related
 
 - [ADR-057: Post-Render Component Overrides](../../adr/0057-post-render-component-overrides.md) — component container, strategic-merge injection, ordering, HelmRelease `spec` replace.
+- [ADR-058: Image Overrides and the Component-Container Guard](../../adr/0058-image-overrides-and-component-container-guard.md) — the JSON6902 guard shared with image overrides and its operator surfacing.
 - [ADR-013: Driver-Side Env Var Consumption](../../adr/0013-driver-env-var-consumption.md) — free-form `dict[str, str]`, three-scope deepest-wins; its values-template injection route is superseded by ADR-057.
 - [Driver-author guide](../../guides/driver-env-var-consumption.md) — declaring the component container, ordering rules, failure modes.
 - [Migration guide](../../../docs/docs/drivers/migrating-env-vars.md) — user and driver-author steps off `component_env_vars`.

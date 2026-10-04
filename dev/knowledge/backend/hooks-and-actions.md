@@ -225,13 +225,29 @@ Located in `actions/primitives.py`. These are Prefect `@task` functions that dri
 |-----------|-----------|-------------|
 | `stop_components` | `(components: list[str], context: GlobalContext)` | Calls internal GraphQL to disable components |
 | `start_components` | `(components: list[str], context: GlobalContext)` | Calls internal GraphQL to enable components |
-| `execute_commands` | `(commands: list[str], image: str, context: GlobalContext, env_from_component: str \| None = None, labels_from_component: str \| None = None)` | Runs commands as a Kubernetes Job. `image` is required; the optional `*_from_component` arguments copy env vars and labels from a named component pod. |
+| `execute_commands` | `(commands: list[str], image: str, context: GlobalContext, env_from_component: str \| None = None, labels_from_component: str \| None = None)` | Runs commands as a Kubernetes Job. `image` is required; the optional `*_from_component` arguments copy env vars and labels from a named component pod. `env_from_component` reads `containers[0]`, which is the component container whenever env vars or an image override apply. |
+| `get_component_images` | `(component: str, context: GlobalContext) -> list[str]` | Images of every container in the component's `Deployment`/`StatefulSet` pod template (init containers excluded). When the component declares a component container present in the template, its image is element 0 (it carries any image override, 018); the others keep pod-template order. |
+| `get_component_labels` | `(component: str, context: GlobalContext) -> dict[str, str]` | Pod template labels of the component's workload |
+| `upgrade_deployment_version` | `(target_version: str, context: GlobalContext)` | Calls `updateDeploymentVersion` and waits for the nested task, which completes when the CR is written, not when the rollout is done |
 
 Drivers import these from `styrmin_backend.actions`:
 
 ```python
 from styrmin_backend.actions import stop_components, start_components, execute_commands, GlobalContext
 ```
+
+### Reading the component image in an upgrade action
+
+The in-repo `upgrade` actions (`driver/examples/simple-app`, `infrahub`, `infrahub-enterprise`)
+build their migration Job's image from `get_component_images(...)[0]` and the target version:
+they drop any `@digest`, then strip the tag only when the part after the last `:` contains no
+`/`, so a registry port (`registry:5000/app`) survives. `upgrade_deployment_version` returns before
+the rollout, so the image read is usually the pre-upgrade pod template; rebuilding the tag is what
+moves the Job to the target version. With a `{{ app.version }}` image override the Job runs the
+override's repository at the target version; with a pinned override the Job does the same while the
+component stays pinned (the upgrade dialog and `styrminctl apply` warn about it). Taking
+`images[0]` replaced a substring match on the image name, which missed overrides. See
+[ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md) §6.
 
 ## Work Pools
 
@@ -345,6 +361,8 @@ If no upgrade core hook is defined for the application version, `_handle_upgrade
 | [services/applications.py](backend/styrmin_backend/services/applications.py) | Action registration during driver loading |
 | [workflows/manager.py](backend/styrmin_backend/workflows/manager.py) | `register_user_action`, `get_user_action_deployment_id` |
 | [workflows/catalogue.py](backend/styrmin_backend/workflows/catalogue.py) | Workflow registry (UPGRADE_INSTANCE definition) |
-| [actions/primitives.py](backend/styrmin_backend/actions/primitives.py) | `stop_components`, `start_components`, `execute_commands` |
+| [actions/primitives.py](backend/styrmin_backend/actions/primitives.py) | `stop_components`, `start_components`, `execute_commands`, `get_component_images`, `get_component_labels`, `upgrade_deployment_version` |
+| [agent/service/kubernetes/primitives.py](backend/styrmin_backend/agent/service/kubernetes/primitives.py) | Kubernetes side of `get_component_images` (component container image first) |
+| [driver/examples/simple-app/actions.py](driver/examples/simple-app/actions.py) | Reference `upgrade` action (`images[0]`, digest- and port-safe tag strip) |
 | [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | `create_instance_crd`, `update_instance_crd`, `upgrade_instance_crd` flows |
 | [services/reconciliation/remediation.py](backend/styrmin_backend/services/reconciliation/remediation.py) | `InstanceCreationStrategy`, `InstanceUpdateStrategy` |

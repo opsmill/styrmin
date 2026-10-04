@@ -62,13 +62,17 @@ scale) act on the Component as a unit.
 
 **Component container** — The one container in a Component's pod
 that the Application Driver names (`components.<name>.container`) to
-receive the env vars users set on a Deployment. Styrmin merges them
-into it by name after the Helm chart renders, so the chart's own env
-entries survive. See [Migrating env var wiring](../drivers/migrating-env-vars.md).
+receive the env vars and **Image override** users set on a Deployment.
+Styrmin applies them after the Helm chart renders: env vars merge in by
+name, so the chart's own env entries survive. A declared name the chart
+does not render fails the deployment with `COMPONENT_CONTAINER_NOT_FOUND`;
+Styrmin never adds a container. See [Creating a
+Driver](../drivers/creating-a-driver.md#the-component-container).
 
 **Component overrides** — The mechanism by which a Deployment
-overrides the Application Driver Version's default Component config.
-First-class to the deployment-config feature.
+overrides the Application Driver Version's default Component config:
+per-component env vars, **Image override**, and container
+`command`/`args`. First-class to the deployment-config feature.
 
 **Constituent backup / constituent restore** — An ordinary
 per-deployment backup (or restore) that belongs to an **Environment
@@ -152,6 +156,12 @@ Context.
 **Modes**.
 
 ### I
+
+**Image override** — The image reference a user sets on one Component
+of one Deployment, applied to its **Component container** after the
+Helm chart renders. A full reference with an explicit tag or digest; a
+`{{ app.version }}` token follows the Application Version, and a literal
+tag pins the image. See [Image overrides](./image-overrides.md).
 
 **Instance (ApplicationInstance)** — A frozen snapshot of what was
 deployed at a point in time. Generated from a Deployment at

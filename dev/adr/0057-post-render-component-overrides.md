@@ -1,8 +1,17 @@
 # ADR-057: Post-Render Component Overrides into a Declared Component Container
 
-**Status**: Accepted
+**Status**: Accepted — narrowed by [ADR-058](0058-image-overrides-and-component-container-guard.md)
 **Date**: 2026-10-02
 **Source**: specs/archive/017-post-render-env-vars/ (spec, plan, research D-001 – D-011, critique)
+
+> **Narrowed by [ADR-058](0058-image-overrides-and-component-container-guard.md)** (2026-10-04,
+> 018-component-image-overrides). `build_env_var_patches()` became
+> `build_component_container_patches()` (`services/component_container/patch_builder.py`), which
+> follows each strategic merge with a JSON6902 guard. The consequence "a wrong container name
+> fails the release, but only once env vars are set" no longer holds: a wrong name now fails the
+> reconcile with `COMPONENT_CONTAINER_NOT_FOUND` whenever env vars or an image override target the
+> component, and Styrmin never adds a container. The component container also moves to
+> `containers[0]` for image-only components, and `get_component_images` returns its image first.
 **Supersedes**: [ADR-013](0013-driver-env-var-consumption.md) §1 and the FR-026
 non-feature it records ("no platform-side post-render env var injection"). ADR-013 §2
 and §5 no longer describe how env vars reach pods; ADR-013 §3 (merged dicts) and the
