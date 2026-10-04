@@ -1,0 +1,62 @@
+"""Publish driver variants to the harness git server and load them through the SDK."""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import kr8s.asyncio
+import yaml
+from dulwich import porcelain
+from kr8s.asyncio.objects import Service as AsyncService
+from styrmin_sdk import StyrminClient
+from styrmin_sdk.models import ApplicationDriverVersion
+
+from tests.e2e.conftest import _portforward
+
+MISNAMED_DRIVER_NAME = "simple-app-misnamed"
+MISNAMED_CONTAINER = "wrong-name"
+MISNAMED_BRANCH = "misnamed-container"
+
+
+async def publish_misnamed_simple_app_driver(
+    *,
+    client: StyrminClient,
+    vcluster: dict,
+    git_server: dict[str, str],
+    tmp_path: Path,
+) -> ApplicationDriverVersion:
+    """Load ``simple-app-misnamed``: simple-app whose ``server`` component container is
+    ``wrong-name``, a container its chart never renders (018 SC-005)."""
+    repo_dir = tmp_path / MISNAMED_DRIVER_NAME
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+    git_svc = await AsyncService.get("git-server", namespace="default", api=kr8s_api)
+    async with _portforward(git_svc, remote_port=9418) as local_port:
+        # Clone the harness copy so the chart location already points at the chart server.
+        local_url = f"git://localhost:{local_port}/simple-app.git"
+        await asyncio.to_thread(porcelain.clone, local_url, str(repo_dir))
+
+        spec_path = repo_dir / "driver.styrmin.yml"
+        spec = yaml.safe_load(spec_path.read_text())
+        spec["metadata"]["name"] = MISNAMED_DRIVER_NAME
+        spec["spec"]["components"]["server"]["container"] = MISNAMED_CONTAINER
+        spec_path.write_text(yaml.dump(spec, default_flow_style=False))
+
+        await asyncio.to_thread(
+            porcelain.add, str(repo_dir), paths=["driver.styrmin.yml"]
+        )
+        await asyncio.to_thread(
+            porcelain.commit,
+            str(repo_dir),
+            message=b"misname the server component container",
+            author=b"test <test@test.com>",
+            committer=b"test <test@test.com>",
+        )
+        await asyncio.to_thread(
+            porcelain.push,
+            str(repo_dir),
+            remote_location=local_url,
+            refspecs=[f"HEAD:refs/heads/{MISNAMED_BRANCH}".encode()],
+            force=True,
+        )
+    return await client.drivers.load_version(git_server["simple-app"], MISNAMED_BRANCH)
