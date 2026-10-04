@@ -93,7 +93,8 @@ Three things to notice:
 
 Upgrade actions often run a migration Job with the component's own
 image at the target version. The `get_component_images` primitive
-returns the image of every container in the component's pod template,
+returns the image of every regular container in the component's pod
+template (init containers are excluded),
 with the **component container**'s image first (when the driver
 declares one) and the rest in pod order. When a user sets an
 [image override](./image-overrides.md) on the component, that first

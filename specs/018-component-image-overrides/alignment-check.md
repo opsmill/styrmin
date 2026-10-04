@@ -15,10 +15,11 @@
 ⚠️ **MINOR DRIFT (proceeding)**
 
 Every brief journey, FR-001 to FR-012, edge case, success criterion, assumption, out-of-scope item,
-governance gate, and test is present in `spec.md` with the same semantics. The brief's one open
-question is resolved as the brief recommended. The differences below are clarifications forced by
-the codebase, or additions that protect the brief's own success criteria. None removes or softens a
-requirement.
+governance gate, and test is present in `spec.md` with the same semantics, except FR-008:
+`styrminctl apply` warns in its output instead of before a confirmation (first finding below). The
+brief's one open question is resolved as the brief recommended. The other differences below are
+clarifications forced by the codebase, or additions that protect the brief's own success criteria.
+Apart from FR-008, none removes or softens a requirement.
 
 ## 3. Findings
 

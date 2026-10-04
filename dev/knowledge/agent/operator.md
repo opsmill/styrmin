@@ -102,7 +102,7 @@ A timer handler fires every 60s to compare desired vs actual state for all manag
 | `CreatingPrerequisites` / `CreatingHelmRelease` / `CreatingServices` | Deployment or update in progress |
 | `Failed` | Reconciliation failed (API error, permission denied) |
 
-In `CreatingHelmRelease` and `Ready`, the timer also reads the HelmRelease once per tick. When its current generation failed on the component-container guard (the guard key `styrmin.io~1component-container~1…` in a condition message, Ready not `True`), the CR goes to `Failed` / `Error` at once with `HelmReleaseReady=False`, reason `ComponentContainerNotFound`, and the typed `COMPONENT_CONTAINER_NOT_FOUND` message naming the component and container (spec 018, FR-007). Other HelmRelease failures still surface only through the readiness timeout.
+In `CreatingHelmRelease` and, for non-internal deployments, `Ready`, the timer also reads the HelmRelease once per tick. When its current generation failed on the component-container guard (the guard key `styrmin.io~1component-container~1…` in a condition message, Ready not `True`), the CR goes to `Failed` / `Error` at once with `HelmReleaseReady=False` and `Ready=False`, reason `ComponentContainerNotFound`, and the typed `COMPONENT_CONTAINER_NOT_FOUND` message naming the component and container (spec 018, FR-007). Other HelmRelease failures surface only through the readiness timeout, which runs only before the CR reaches `Ready`; once `Ready`, they are not reflected in the CR status.
 
 ## Managed Resources
 

@@ -41,27 +41,33 @@ Expected:
 | Test | Variants | Proves |
 |---|---|---|
 | `test_override_then_clear` | api, ui | US1 + US3: `simple-app` container runs `registry.example/acme/simple-app-patched:0.1.0`, no extra container, init container and env untouched, read-back is `applied`; clearing restores `simple-app:0.1.0` |
-| `test_token_follows_upgrade_and_action_job` | api, ui | US2 + FR-008 + FR-012: pinned override is listed before the upgrade; with the token, `server` runs `…-patched:0.2.0` after upgrading to 0.2.0 and the `<release>-job` action Job ran `…-patched:0.2.0` |
+| `test_token_follows_upgrade_and_action_job` | api, ui | US2 + FR-008: pinned override is listed before the upgrade; with the token, `server` runs `…-patched:0.2.0` after upgrading to 0.2.0 (the `<release>-job` image is not asserted until #381) |
 | `test_misnamed_container_never_added` | api | SC-005: the deployment fails within one reconcile with a message naming `server` and `wrong-name`; the live Deployment has only the `simple-app` container |
 
-## 4. Manual spot check (optional, dev stack)
+## 4. Manual spot check (optional, demo stack)
+
+`uv run invoke start` brings up the demo and bootstraps the `local` environment with the bundled
+`semaphore` driver; it prints the URL and admin credentials.
 
 ```bash
-uv run invoke dev
-styrminctl deployments apply -f - <<'EOF'
+uv run invoke start
+export STYRMIN_ADDRESS=<demo URL>
+uv run styrminctl login --username <admin>
+uv run styrminctl deployments apply -f - <<'EOF'
 apiVersion: styrmin/v1
 kind: Deployment
 metadata: {name: img-demo}
 spec:
-  driver: simple-app
-  version: 0.1.0
-  environment: dev
+  driver: semaphore
+  version: 2.16.47
+  environment: local
   config:
     components:
       - name: server
-        image: "simple-app:{{ app.version }}"
+        image: "semaphoreui/semaphore:v{{ app.version }}"
 EOF
-kubectl -n styrmin-<id> get deploy styrmin-simple-app -o jsonpath='{.spec.template.spec.containers[*].image}'
+kubectl -n styrmin-<id> get deploy -l app.kubernetes.io/name=semaphore \
+  -o jsonpath='{.items[*].spec.template.spec.containers[*].image}'
 ```
 
 Then re-apply with `version: 0.2.0` and a literal-tag image to see the pinned warning on stderr.

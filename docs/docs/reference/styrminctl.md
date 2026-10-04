@@ -371,7 +371,9 @@ reference with an explicit tag or digest, where every `{{ app.version }}`
 token becomes the deployment's application version. Quote it, since YAML
 reads an unquoted `{` as a map. Removing the key clears the override on the
 next apply. A reference that fails the image grammar, has no tag or digest,
-or carries another template expression fails with `INVALID_IMAGE_REFERENCE`;
+carries another template expression, or becomes invalid once
+`{{ app.version }}` is replaced by the application version fails with
+`INVALID_IMAGE_REFERENCE`;
 a component the driver version does not declare fails with
 `UNKNOWN_COMPONENT_IMAGE_OVERRIDE`.
 

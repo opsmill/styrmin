@@ -34,3 +34,4 @@
 - The user surfaces (GraphQL, SDK, `styrminctl apply`, configuration editor, upgrade dialog) and the workload kinds (`Deployment`, `StatefulSet`) are named because the source brief makes them part of the requirement, not as implementation choices. The post-render mechanism is named in the Context only, as the established ADR-057 placement.
 - The brief's single open question (shared FR-007 guard for env-var-only patches) is resolved in Clarifications, following the brief's recommendation.
 - The `{{ app.version }}` token and `COMPONENT_CONTAINER_NOT_DECLARED` are user-visible contract, kept verbatim from the brief.
+- FR-008's "computed client-side" is contract, not an implementation choice: the pinned list needs no new GraphQL field, and the SDK exposes it as `ApplyOutcome.pinned_image_components`, so the CLI and SDK list token-free overrides from the raw config.

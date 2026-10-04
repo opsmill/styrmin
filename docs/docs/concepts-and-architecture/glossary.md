@@ -65,8 +65,9 @@ that the Application Driver names (`components.<name>.container`) to
 receive the env vars and **Image override** users set on a Deployment.
 Styrmin applies them after the Helm chart renders: env vars merge in by
 name, so the chart's own env entries survive. A declared name the chart
-does not render fails the deployment with `COMPONENT_CONTAINER_NOT_FOUND`;
-Styrmin never adds a container. See [Creating a
+does not render fails the deployment with `COMPONENT_CONTAINER_NOT_FOUND`
+once an env var or image override targets the component; Styrmin never
+adds a container. See [Creating a
 Driver](../drivers/creating-a-driver.md#the-component-container).
 
 **Component overrides** — The mechanism by which a Deployment

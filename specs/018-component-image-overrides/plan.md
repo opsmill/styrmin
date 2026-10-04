@@ -38,7 +38,8 @@ TanStack Form/Query, Base UI, Zod; Cyclopts (CLI). No new dependency.
 the existing `Deployment.config` JSON.
 
 **Testing**: pytest (unit, functional GraphQL propagation, E2E on a per-session vCluster); Vitest +
-React Testing Library; `kubectl kustomize` (v5.7.1) in unit tests for the patch semantics, skipped
+React Testing Library; `kubectl kustomize` (v5.7.1) in integration tests (`backend/tests/integration/`)
+for the patch semantics, skipped
 when `kubectl` is absent.
 
 **Target Platform**: Kubernetes clusters running Flux helm-controller v2 APIs, managed by the Styrmin

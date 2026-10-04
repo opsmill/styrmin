@@ -282,7 +282,9 @@ brief); returning a dict (breaking change for third-party actions).
   image is back.
 - **Test 2** (US2 + FR-012, dual-entrypoint): its own deployment at 0.1.0 with
   `…-patched:{{ app.version }}`; `scenario_driver.upgrade_deployment` to 0.2.0; assert the `server`
-  image is `…-patched:0.2.0` and the action Job `<release>-job` ran `…-patched:0.2.0`. Before that,
+  image is `…-patched:0.2.0`. The action Job `<release>-job` image is not asserted: the action's
+  primitives call the API unauthenticated and fail under default-deny until #381, so the Job never
+  runs; the `get_component_images` unit tests cover FR-012. Before that,
   with a pinned override set, `scenario_driver.pinned_image_components(deployment_id,
   target_version)` must return `["server"]`, and with the token override `[]`. The API driver
   computes it with the SDK's client-side helper over `componentImageOverrides`; the UI driver opens
