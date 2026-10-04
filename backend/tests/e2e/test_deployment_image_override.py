@@ -182,7 +182,8 @@ async def test_override_then_clear(
 ) -> None:
     """US1: an image override on ``server`` replaces only the component
     container's image; the pod keeps its containers, init container and env,
-    and the read surface shows the override applied."""
+    and the read surface shows the override applied. US3: clearing it restores
+    the chart image on the next reconcile and the read surface lists nothing."""
     client: StyrminClient = image_override_environment["client"]
     deployment_id = image_override_deployment["deployment_id"]
     namespace = image_override_deployment["namespace"]
@@ -216,7 +217,23 @@ async def test_override_then_clear(
     assert rows["server"]["isApplicable"] is True
     assert rows["server"]["isOrphaned"] is False
 
-    # Clear half (US3): added by T054.
+    # Clear half (US3): the next render drops the patch, so the chart image returns.
+    await scenario_driver.set_component_image(
+        deployment_id=deployment_id, component="server", image=None
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+    workload = await _wait_for_server_image(vcluster, namespace, CHART_IMAGE)
+    assert _pod_shape(workload) == baseline_shape
+    await wait_for_ready_container_image(
+        vcluster,
+        namespace=namespace,
+        label_selector=SERVER_SELECTOR,
+        container_name=SERVER_CONTAINER,
+        image=CHART_IMAGE,
+    )
+    assert await _read_image_overrides(client, deployment_id) == {}
 
 
 # ---------------------------------------------------------------------------

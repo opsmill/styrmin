@@ -51,7 +51,10 @@ from styrmin_backend.services.component_container.exceptions import (
 from styrmin_backend.services.component_container.patch_builder import (
     build_component_container_patches,
 )
-from styrmin_backend.services.context import _populate_component_env_vars
+from styrmin_backend.services.context import (
+    _populate_component_env_vars,
+    _populate_component_image_overrides,
+)
 from styrmin_backend.services.image_overrides.exceptions import (
     InvalidImageReferenceError,
 )
@@ -320,6 +323,45 @@ class TestImageOverride:
         )
 
         assert build_component_container_patches(context) == []
+
+
+def _rendered_from_config(deployment_config: dict[str, Any]) -> GlobalContext:
+    """A fresh context resolved from the stored config, as every render builds one."""
+    context = _context(_component("server", label="simple-app", container="simple-app"))
+    _populate_component_env_vars(
+        context=context, environment_config=None, deployment_config=deployment_config
+    )
+    _populate_component_image_overrides(
+        context=context, deployment_config=deployment_config
+    )
+    return context
+
+
+class TestClearedOverride:
+    """US3: the next render after a clear carries no image, so the chart image applies."""
+
+    @pytest.mark.parametrize(
+        "cleared",
+        [{}, {"components": {}}, {"components": {"server": {}}}],
+        ids=["no-config", "block-dropped", "block-empty"],
+    )
+    def test_cleared_override_yields_no_image_patch(
+        self, cleared: dict[str, Any]
+    ) -> None:
+        overridden = _rendered_from_config(
+            {"components": {"server": {"image": _PATCHED}}}
+        )
+        assert [p.image for p in _guard_patches(overridden)] == [_PATCHED] * 2
+
+        assert build_component_container_patches(_rendered_from_config(cleared)) == []
+
+    def test_cleared_image_with_env_vars_keeps_env_only_guard(self) -> None:
+        context = _rendered_from_config(
+            {"components": {"server": {"env_vars": {"LOG_LEVEL": "debug"}}}}
+        )
+
+        assert [p.env for p in _env_patches(context)] == [{"LOG_LEVEL": "debug"}] * 2
+        assert [p.image for p in _guard_patches(context)] == [None, None]
 
 
 class TestNoOverrides:

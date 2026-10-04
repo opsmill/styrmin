@@ -148,11 +148,22 @@ async def test_update_deployment_image_round_trip(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cleared_block",
+    [
+        {"name": "server", "args": ["--debug"]},
+        {"name": "server", "image": None, "args": ["--debug"]},
+    ],
+    ids=["image-omitted", "image-null"],
+)
 async def test_update_deployment_omitting_image_clears_it(
-    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    cleared_block: dict[str, Any],
 ) -> None:
-    """Full replacement: re-submitting the block without ``image`` clears the override and
-    keeps the other slots."""
+    """Full replacement: re-submitting the block without ``image`` (or with ``image: null``)
+    clears the override and keeps the other slots."""
     _arm_prefect(prefect_manager_mock)
     deployment = await _seed_deployment_with_components(
         session, {"server": "simple-app"}
@@ -164,10 +175,48 @@ async def test_update_deployment_omitting_image_clears_it(
         deployment_id,
         [{"name": "server", "image": f"{PATCHED}:0.1.0", "args": ["--debug"]}],
     )
-    await _update(client, deployment_id, [{"name": "server", "args": ["--debug"]}])
+    assert [
+        row["component"] for row in await _read_overrides(client, deployment_id)
+    ] == ["server"]
+    await _update(client, deployment_id, [cleared_block])
 
     stored = await _stored_components(session, deployment_id)
     assert stored == {"server": {"args": ["--debug"]}}
+    assert await _read_overrides(client, deployment_id) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("components", "expected_stored"),
+    [
+        ([], {}),
+        ([{"name": "server"}], {"server": {}}),
+        ([{"name": "server", "image": None}], {"server": {}}),
+    ],
+    ids=["block-dropped", "block-empty", "image-null"],
+)
+async def test_update_deployment_clearing_image_only_override(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    components: list[dict[str, Any]],
+    expected_stored: dict[str, Any],
+) -> None:
+    """US3: clearing a block whose only slot was ``image`` leaves no stored image and
+    ``componentImageOverrides`` empty, as the drawer and the SDK submit it."""
+    _arm_prefect(prefect_manager_mock)
+    deployment = await _seed_deployment_with_components(
+        session, {"server": "simple-app"}
+    )
+    deployment_id = deployment.id
+
+    await _update(
+        client, deployment_id, [{"name": "server", "image": f"{PATCHED}:0.1.0"}]
+    )
+    await _update(client, deployment_id, components)
+
+    stored = await _stored_components(session, deployment_id)
+    assert stored == expected_stored
     assert await _read_overrides(client, deployment_id) == []
 
 

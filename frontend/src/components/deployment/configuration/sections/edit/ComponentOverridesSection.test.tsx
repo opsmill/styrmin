@@ -314,6 +314,32 @@ describe("ComponentOverridesSection: image override", () => {
     ).toHaveTextContent(/no tag or digest/i);
   });
 
+  it("clearing a stored image submits image: null and drops it from the summary", async () => {
+    const { components } = renderSection({
+      components: [{ name: "server", envVars: [], image: IMAGE }],
+    });
+
+    await openComponent("server");
+    fireEvent.change(screen.getByTestId("comp-image-server"), {
+      target: { value: "" },
+    });
+
+    await waitFor(() =>
+      expect(components()).toEqual([
+        { name: "server", envVars: [], image: "" },
+      ]),
+    );
+    expect(componentsFormToInput(components())).toEqual([
+      { name: "server", envVars: [], image: null },
+    ]);
+    expect(screen.queryByTestId("comp-image-error-server")).toBeNull();
+    const editor = screen.getByTestId("component-image-editor-server");
+    expect(editor.closest("[data-testid=changed-field-frame]")).not.toBeNull();
+    const trigger = screen.getByTestId("component-override-trigger-server");
+    expect(trigger).toHaveTextContent("override (empty)");
+    expect(trigger).not.toHaveTextContent("image");
+  });
+
   it("pre-fills a stored image", async () => {
     renderSection({
       components: [{ name: "server", envVars: [], image: IMAGE }],
