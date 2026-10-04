@@ -184,10 +184,10 @@ description: "Task list for 018-component-image-overrides"
 - [X] T070 [P] Update `docs/docs/concepts-and-architecture/glossary.md` (Image override) and review `CONTEXT.md`'s drafted entries (Image override, Component container, Component overrides) against the final behaviour, including `COMPONENT_CONTAINER_NOT_FOUND`.
 - [X] T071 [P] Update `dev/knowledge/backend/deployment-env-vars.md` (shared guard, `build_component_container_patches`, operator surfacing) and `dev/knowledge/backend/hooks-and-actions.md` (`get_component_images` ordering, in-repo upgrade actions).
 - [X] T072 [P] Add towncrier fragments: `changelog/20.added.md` (per-component image overrides with `{{ app.version }}`; UI, CLI, SDK) and `changelog/20.changed.md` (`get_component_images` returns the component container's image first; a misnamed component container now fails with `COMPONENT_CONTAINER_NOT_FOUND` instead of an image-less container rejection; clear image overrides before rolling back below this release). Follow `dev/guidelines/changelog.md`.
-- [ ] T073 Re-run `uv run styrmin export graphql-schema schema.graphql`, `uv run invoke validate-graphql`, and `uv run invoke generate`; confirm no diff remains.
-- [ ] T074 Run `uv run invoke format lint` and `cd frontend && pnpm lint && pnpm test`; fix findings.
-- [ ] T075 Run `uv run invoke test`, `uv run pytest backend/tests/integration/test_component_container_kustomize.py -v`, `uv run pytest python_sdk/tests cli/tests -v`, and the existing env-var and container-override E2E modules (`test_deployment_env_vars.py`, `test_deployment_container_overrides.py`) to confirm the shared guard did not regress them.
-- [ ] T076 Run the whole `backend/tests/e2e/test_deployment_image_override.py` module (both entrypoints) to a pass with `sleep infinity | uv run pytest … -v -s --pdb` and record the result.
+- [X] T073 Re-run `uv run styrmin export graphql-schema schema.graphql`, `uv run invoke validate-graphql`, and `uv run invoke generate`; confirm no diff remains.
+- [X] T074 Run `uv run invoke format lint` and `cd frontend && pnpm lint && pnpm test`; fix findings.
+- [X] T075 Run `uv run invoke test`, `uv run pytest backend/tests/integration/test_component_container_kustomize.py -v`, `uv run pytest python_sdk/tests cli/tests -v`, and the existing env-var and container-override E2E modules (`test_deployment_env_vars.py`, `test_deployment_container_overrides.py`) to confirm the shared guard did not regress them.
+- [X] T076 Run the whole `backend/tests/e2e/test_deployment_image_override.py` module (both entrypoints) to a pass with `sleep infinity | uv run pytest … -v -s --pdb` and record the result.
 
 ---
 
