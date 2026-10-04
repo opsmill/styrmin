@@ -54,6 +54,13 @@ def test_parse_guard_failure_unescapes_in_rfc6901_order(
     assert parse_guard_failure(message) == (component, "main")
 
 
+@pytest.mark.parametrize("component", ["my server", "it's", 'say "hi"', "a b~c/d"])
+def test_parse_guard_failure_accepts_free_form_component_names(component: str) -> None:
+    escaped = component.replace("~", "~0").replace("/", "~1")
+    message = f"error in remove for path: '/spec/template/spec/{GUARD_KEY_PREFIX}{escaped}~1main/image': x"
+    assert parse_guard_failure(message) == (component, "main")
+
+
 def test_parse_guard_failure_in_multiline_message() -> None:
     message = f"reconciliation failed\n\nLast error:\n{HELM_CONTROLLER_MESSAGE}\n"
     assert parse_guard_failure(message) == ("server", "wrong-name")

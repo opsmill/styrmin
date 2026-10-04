@@ -19,9 +19,10 @@ from styrmin_backend.services.exceptions import (
 GUARD_KEY_PREFIX = "styrmin.io~1component-container~1"
 
 # Container names are DNS-1123 labels (no "~" or "/"), so the last "~1" splits component from container.
+# Component keys are free-form: whitespace and quotes are allowed, "/" is escaped.
 _GUARD_FAILURE_RE = re.compile(
     re.escape(GUARD_KEY_PREFIX)
-    + r"(?P<component>[^/\s'\"]+)~1(?P<container>[^~/\s'\"]+)/image\b"
+    + r"(?P<component>[^/\n]+?)~1(?P<container>[^~/\s'\"]+)/image\b"
 )
 
 

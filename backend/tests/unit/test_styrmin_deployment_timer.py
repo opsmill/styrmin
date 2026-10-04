@@ -242,6 +242,10 @@ def _assert_failed_on_guard(patch: _Patch) -> None:
     assert hr_ready["status"] == "False"
     assert hr_ready["reason"] == "ComponentContainerNotFound"
     assert hr_ready["message"] == EXPECTED_GUARD_MESSAGE
+    ready = get_condition(patch.status["conditions"], ConditionType.READY)
+    assert ready is not None
+    assert ready["status"] == "False"
+    assert ready["reason"] == "ComponentContainerNotFound"
 
 
 def test_expected_guard_message_names_component_and_container() -> None:
@@ -334,7 +338,15 @@ async def test_guard_failure_fails_ready_deployment_before_drift_detection(
         {
             "phase": DeploymentPhase.READY.value,
             "displayState": DisplayState.RUNNING.value,
-            "conditions": [_stale_hr_ready_condition()],
+            "conditions": [
+                _stale_hr_ready_condition(),
+                {
+                    "type": ConditionType.READY.value,
+                    "status": "True",
+                    "reason": "AllPhasesComplete",
+                    "message": "All resources deployed",
+                },
+            ],
         },
         patch,
     )

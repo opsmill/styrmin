@@ -330,7 +330,7 @@ export type Deployment = {
   componentContainerOverrides: Array<ComponentContainerOverrides>;
   /** Per-component effective env vars, including orphaned blocks (``isOrphaned=true``). Component-level entries override deployment- and environment-level entries on a per-key basis (FR-002 deepest-wins). Non-applicable blocks (``isApplicable=false``: component renamed or removed by a driver upgrade, or no component container declared) are visible here but skipped by the post-render injector so no env entries reach rendered pods. */
   componentEnvVars: Array<ComponentEnvVars>;
-  /** Per-component image overrides: live components in driver order, then orphaned blocks (``isOrphaned=true``) by name. Components without an override are omitted. */
+  /** Per-component image overrides: live components by name, then orphaned blocks (``isOrphaned=true``) by name. Components without an override are omitted. */
   componentImageOverrides: Array<ComponentImageOverride>;
   components: Array<Component>;
   config: Scalars['JSON']['output'];

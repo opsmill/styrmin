@@ -27,6 +27,7 @@ from styrmin_backend.db.models import (
     Component,
     ComponentConfig,
     Deployment,
+    Environment,
     Task,
 )
 from styrmin_backend.services.component_container.patch_builder import (
@@ -294,11 +295,12 @@ async def test_component_image_overrides_empty_when_unset(
 async def test_component_image_overrides_projects_stored_state(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """Live entries in driver order, then orphans by name. A literal tag is not substituted;
+    """Live entries by name, then orphans by name. A literal tag is not substituted;
     a containerless or orphaned component is not applicable; blocks without ``image`` are
     omitted."""
+    # Seeded out of name order: live rows come back sorted by name.
     deployment = await _seed_deployment_with_components(
-        session, {"server": "simple-app", "worker": None, "db": "postgres"}
+        session, {"worker": None, "server": "simple-app", "db": "postgres"}
     )
     deployment.config = {
         "components": {
@@ -473,6 +475,39 @@ async def test_update_deployment_version_rejects_reference_broken_by_substitutio
     assert stored.application_version == "1.0.0"
     assert stored.application_driver_version_id == driver_version_before
     assert stored.config == config
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_version_rejects_before_ensuring_ingress(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """The rejection precedes the dedicated-ingress step, whose internal deployment would
+    dispatch a flow run (here: fail on the absent internal driver) before the rollback."""
+    _arm_prefect(prefect_manager_mock)
+    deployment = await _seed_deployment_with_components(
+        session, {"server": "simple-app"}
+    )
+    deployment_id = deployment.id
+    await _store_config(
+        session, deployment, {"components": {"server": {"image": TOKEN_REFERENCE}}}
+    )
+    environment = await session.get(Environment, deployment.environment_id)
+    assert environment is not None
+    environment.config = {
+        "dedicated_ingress": {"implementation": "traefik", "type": "ingress"}
+    }
+    session.add(environment)
+    await session.commit()
+
+    payload = await _update_version(client, deployment_id, BROKEN_TARGET, None)
+
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "INVALID_IMAGE_REFERENCE", extensions
+    prefect_manager_mock.run_action.assert_not_awaited()
+    assert await _task_count(session, deployment_id) == 0
 
 
 @pytest.mark.asyncio
@@ -1010,7 +1045,7 @@ async def test_override_stranded_by_driver_upgrade_is_kept_but_not_rendered(
     rows = await _read_overrides(client, deployment_id)
     assert [
         (row["component"], row["isOrphaned"], row["isApplicable"]) for row in rows
-    ] == [("server", False, False), ("db", False, True)]
+    ] == [("db", False, True), ("server", False, False)]
 
     context = await generate_context_from_deployment_id(
         deployment_id, SqlModelUnitOfWork(session=session)
