@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 
-import { useDrawerDiff } from "./DrawerDiffContext";
+import { useDrawerDiff, useDrawerInvalidImages } from "./DrawerDiffContext";
 
 interface Props {
   onDiscard: () => void;
@@ -16,26 +16,41 @@ interface Props {
  * disagree on what "changed" means.
  *
  * Both action buttons are disabled when there are no pending changes
- * (FR-013).
+ * (FR-013). Review & apply is also disabled while an image override is
+ * invalid (018), with a hint naming the components.
  */
 export function DrawerFooter({ onDiscard, onReviewApply }: Props) {
   const pendingCount = useDrawerDiff().entries.length;
   const noChanges = pendingCount === 0;
+  const invalidImages = useDrawerInvalidImages();
+  const blocked = invalidImages.length > 0;
 
   return (
     <footer
       data-testid="drawer-footer"
       className="sticky bottom-0 z-10 flex items-center justify-between gap-3 border-t border-border bg-background px-6 py-4 shadow-[0_-1px_2px_rgba(15,23,42,0.04)]"
     >
-      <p
-        className="text-sm text-muted-foreground"
-        data-testid="drawer-pending-count"
-        aria-live="polite"
-      >
-        {pendingCount === 0
-          ? "No pending changes"
-          : `${pendingCount} pending change${pendingCount === 1 ? "" : "s"}`}
-      </p>
+      <div className="min-w-0 space-y-0.5">
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid="drawer-pending-count"
+          aria-live="polite"
+        >
+          {pendingCount === 0
+            ? "No pending changes"
+            : `${pendingCount} pending change${pendingCount === 1 ? "" : "s"}`}
+        </p>
+        {blocked && (
+          <p
+            id="drawer-invalid-hint"
+            data-testid="drawer-invalid-hint"
+            className="text-xs text-destructive"
+          >
+            Fix the invalid image reference on {invalidImages.join(", ")} before
+            applying.
+          </p>
+        )}
+      </div>
       <div className="flex items-center gap-2">
         <Button
           type="button"
@@ -51,7 +66,8 @@ export function DrawerFooter({ onDiscard, onReviewApply }: Props) {
           type="button"
           size="sm"
           onClick={onReviewApply}
-          disabled={noChanges}
+          disabled={noChanges || blocked}
+          aria-describedby={blocked ? "drawer-invalid-hint" : undefined}
           data-testid="drawer-review-apply-button"
         >
           Review &amp; apply

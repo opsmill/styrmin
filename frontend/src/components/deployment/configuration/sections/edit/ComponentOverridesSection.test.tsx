@@ -8,9 +8,11 @@ import type {
   UpdateDeploymentInput,
 } from "@/generated/graphql";
 
+import { diff } from "@/lib/config-diff";
 import { componentsFormToInput } from "@/lib/deployment-input";
 
 import { DrawerDiffProvider } from "../../DrawerDiffContext";
+import { DrawerFooter } from "../../DrawerFooter";
 import {
   ComponentOverridesSection,
   componentOverridesSchema,
@@ -120,6 +122,7 @@ function Harness({
         anchorId="componentOverrides"
         components={COMPONENTS}
       />
+      <DrawerFooter onDiscard={() => {}} onReviewApply={() => {}} />
     </DrawerDiffProvider>
   );
 }
@@ -134,9 +137,9 @@ function renderSection(initial: UpdateDeploymentInput = {}) {
       }}
     />,
   );
-  const components = () =>
-    (formApi!.state.values as UpdateDeploymentInput).components ?? [];
-  return { components };
+  const values = () => formApi!.state.values as UpdateDeploymentInput;
+  const components = () => values().components ?? [];
+  return { components, values };
 }
 
 async function openComponent(name: string): Promise<void> {
@@ -265,6 +268,55 @@ describe("ComponentOverridesSection: image override", () => {
 
     expect(screen.queryByTestId("comp-image-migrate")).toBeNull();
     expect(screen.queryByLabelText("Image for migrate")).toBeNull();
+    expect(screen.queryByTestId("comp-image-readonly-migrate")).toBeNull();
+  });
+
+  it("shows a stored image read-only on a component without a container, with a working Remove", async () => {
+    const stored = "registry.example/acme/migrate:1.0.0";
+    const initial: UpdateDeploymentInput = {
+      components: [{ name: "migrate", envVars: [], image: stored }],
+    };
+    const { components, values } = renderSection(initial);
+
+    await openComponent("migrate");
+
+    const row = screen.getByTestId("comp-image-readonly-migrate");
+    expect(row).toHaveTextContent(stored);
+    expect(
+      screen.getByTestId("comp-image-not-applied-migrate"),
+    ).toHaveTextContent(/^not applied$/);
+    expect(
+      screen.getByTestId("comp-image-no-container-migrate"),
+    ).toHaveTextContent(
+      "The driver declares no container for this component, so the image override can't be applied to it.",
+    );
+    expect(screen.queryByTestId("comp-image-migrate")).toBeNull();
+    expect(screen.queryByLabelText("Image for migrate")).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove image override for migrate" }),
+    );
+
+    await waitFor(() =>
+      expect(components()).toEqual([
+        { name: "migrate", envVars: [], image: null },
+      ]),
+    );
+    expect(componentsFormToInput(components())).toEqual([
+      { name: "migrate", envVars: [], image: null },
+    ]);
+    const entries = diff(initial, values(), []).entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      path: "components[migrate].image",
+      kind: "remove",
+      before: stored,
+    });
+    expect(screen.queryByTestId("comp-image-readonly-migrate")).toBeNull();
+    expect(screen.queryByTestId("comp-image-migrate")).toBeNull();
+    expect(
+      screen.getByTestId("component-override-trigger-migrate"),
+    ).not.toHaveTextContent("image");
   });
 
   it("accepts a valid reference and maps it into the submitted component block", async () => {
@@ -301,7 +353,7 @@ describe("ComponentOverridesSection: image override", () => {
     ).toHaveTextContent("1 env var · image");
   });
 
-  it("shows an inline error for an invalid reference", async () => {
+  it("shows an inline error for an invalid reference and blocks Review & apply", async () => {
     renderSection({ components: [{ name: "server", envVars: [] }] });
 
     await openComponent("server");
@@ -312,6 +364,38 @@ describe("ComponentOverridesSection: image override", () => {
     expect(
       await screen.findByTestId("comp-image-error-server"),
     ).toHaveTextContent(/no tag or digest/i);
+    const apply = screen.getByTestId("drawer-review-apply-button");
+    expect(apply).toBeDisabled();
+    expect(apply).toHaveAccessibleDescription(
+      "Fix the invalid image reference on server before applying.",
+    );
+
+    // Re-query: the changed-field frame remounts the input.
+    fireEvent.change(screen.getByTestId("comp-image-server"), {
+      target: { value: IMAGE },
+    });
+
+    await waitFor(() => expect(apply).toBeEnabled());
+    expect(screen.queryByTestId("comp-image-error-server")).toBeNull();
+    expect(screen.queryByTestId("drawer-invalid-hint")).toBeNull();
+  });
+
+  it("unblocks Review & apply once the block carrying an invalid reference is removed", async () => {
+    renderSection({
+      components: [{ name: "server", envVars: [], image: IMAGE }],
+    });
+
+    await openComponent("server");
+    fireEvent.change(screen.getByTestId("comp-image-server"), {
+      target: { value: "App:1" },
+    });
+    const apply = screen.getByTestId("drawer-review-apply-button");
+    await waitFor(() => expect(apply).toBeDisabled());
+
+    fireEvent.click(screen.getByTestId("component-override-remove-server"));
+
+    await waitFor(() => expect(apply).toBeEnabled());
+    expect(screen.queryByTestId("drawer-invalid-hint")).toBeNull();
   });
 
   it("clearing a stored image submits image: null and drops it from the summary", async () => {
@@ -351,5 +435,29 @@ describe("ComponentOverridesSection: image override", () => {
     expect(
       screen.getByTestId("component-override-trigger-server"),
     ).toHaveTextContent("image");
+  });
+});
+
+describe("ComponentOverridesSection: orphaned override blocks", () => {
+  it("removes an orphaned block, image override included, as a whole", async () => {
+    const initial: UpdateDeploymentInput = {
+      components: [
+        { name: "legacy", envVars: [], image: "registry.example/acme/x:1.0" },
+      ],
+    };
+    const { components, values } = renderSection(initial);
+
+    const orphan = screen.getByTestId("component-override-orphan");
+    expect(orphan).toHaveAttribute("data-component", "legacy");
+    expect(screen.queryByTestId("comp-image-legacy")).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove orphaned override legacy" }),
+    );
+
+    await waitFor(() => expect(components()).toEqual([]));
+    expect(diff(initial, values(), []).entries).toEqual([
+      expect.objectContaining({ path: "components[legacy]", kind: "remove" }),
+    ]);
   });
 });

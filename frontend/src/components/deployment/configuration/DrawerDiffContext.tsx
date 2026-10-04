@@ -7,8 +7,10 @@ import type {
   ConfigurationDiff,
   DriverParameterSchema,
 } from "@/lib/configuration-types";
+import { validateImageReference } from "@/lib/image-reference";
 
 const DrawerDiffContextValue = createContext<ConfigurationDiff | null>(null);
+const DrawerInvalidImagesValue = createContext<readonly string[]>([]);
 
 interface FormLike {
   store: Parameters<typeof useStore>[0];
@@ -37,6 +39,9 @@ interface ProviderProps {
  * Consumers that need a per-section count filter the shared `entries`
  * array; that filter is O(entries) — cheap relative to a re-run of
  * `diff`.
+ *
+ * Also exposes the components whose image override fails validation, derived
+ * from the values so the footer can block Review & apply and name them.
  */
 export function DrawerDiffProvider({
   form,
@@ -54,11 +59,26 @@ export function DrawerDiffProvider({
     [initialValues, currentValues, driverSchema],
   );
 
+  const invalidImages = useMemo(
+    () =>
+      (currentValues.components ?? [])
+        .filter((block) => block?.image && validateImageReference(block.image))
+        .map((block) => block.name),
+    [currentValues.components],
+  );
+
   return (
     <DrawerDiffContextValue.Provider value={diffResult}>
-      {children}
+      <DrawerInvalidImagesValue.Provider value={invalidImages}>
+        {children}
+      </DrawerInvalidImagesValue.Provider>
     </DrawerDiffContextValue.Provider>
   );
+}
+
+/** Components whose image override is invalid; Review & apply stays blocked while any remain. */
+export function useDrawerInvalidImages(): readonly string[] {
+  return useContext(DrawerInvalidImagesValue);
 }
 
 export function useDrawerDiff(): ConfigurationDiff {
