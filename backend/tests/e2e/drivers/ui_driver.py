@@ -334,6 +334,21 @@ class UiScenarioDriver:
                 component=component, image=image
             )
 
+    async def pinned_image_components(
+        self, *, deployment_id: str, target_version: str
+    ) -> list[str]:
+        environment_id = self._require_environment_context(deployment_id=deployment_id)
+        self._deployment_id = deployment_id
+        async with _ui_errors(
+            f"reading pinned image overrides of deployment {deployment_id}"
+        ):
+            await self._deployment_detail.goto(
+                environment_id=environment_id, deployment_id=deployment_id
+            )
+            return await self._deployment_detail.read_pinned_image_warning(
+                target_version
+            )
+
     async def update_environment_via_form(
         self,
         *,

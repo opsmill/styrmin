@@ -5,7 +5,9 @@ Drives the user-facing path: ``set_component_image`` (SDK ``updateDeployment``
 or the Settings edit drawer's ``Image for <component>`` input) → server
 reconciler → HelmRelease post-render patch on the declared component container
 → rendered pod spec on the vcluster. Asserts on the live workload and on
-``Deployment.componentImageOverrides``.
+``Deployment.componentImageOverrides``. The upgrade test also covers the
+pinned-override listing and a ``{{ app.version }}`` override following an
+upgrade.
 
 The override images are the simple-app builds re-tagged by the session fixture
 ``simple_app_override_images`` under ``registry.example/acme/simple-app-patched``;
@@ -36,6 +38,7 @@ RECONCILE_TIMEOUT_SECONDS = 480.0
 SERVER_SELECTOR = "app.kubernetes.io/name=simple-app"
 SERVER_CONTAINER = "simple-app"
 CHART_IMAGE = "simple-app:0.1.0"
+TOKEN_IMAGE = "registry.example/acme/simple-app-patched:{{ app.version }}"
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +79,31 @@ async def image_override_deployment(
         "deployment_id": str(deployment.id),
         "namespace": f"styrmin-{deployment.id}",
         "kubeconfig_path": vcluster["kubeconfig_path"],
+    }
+
+
+@pytest.fixture(scope="module")
+async def image_override_upgrade_deployment(
+    image_override_environment: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    simple_app_override_images: dict[str, str],  # noqa: ARG001 — builds and tags
+) -> dict:
+    """A deployment of its own at 0.1.0 for the upgrade test; it renames its
+    service because service names are unique per environment."""
+    driver, _ = session_scenario_driver
+    deployment = await driver.create_deployment(
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=image_override_environment["environment_id"],
+        name="image-override-b",
+        service_name_overrides=[
+            {"driverServiceName": "simple-app", "overrideName": "simple-app-b"}
+        ],
+    )
+    deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
+    return {
+        "deployment_id": str(deployment.id),
+        "namespace": f"styrmin-{deployment.id}",
     }
 
 
@@ -189,3 +217,83 @@ async def test_override_then_clear(
     assert rows["server"]["isOrphaned"] is False
 
     # Clear half (US3): added by T054.
+
+
+# ---------------------------------------------------------------------------
+# US2 — follow the application version
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.ci
+async def test_token_follows_upgrade_and_action_job(
+    image_override_environment: dict,
+    image_override_upgrade_deployment: dict,
+    simple_app_override_images: dict[str, str],
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+) -> None:
+    """US2: a literal-tag override is listed as pinned before an upgrade; a
+    ``{{ app.version }}`` override is not, and after upgrading to 0.2.0 the
+    ``server`` container runs the 0.2.0 override image."""
+    client: StyrminClient = image_override_environment["client"]
+    deployment_id = image_override_upgrade_deployment["deployment_id"]
+    namespace = image_override_upgrade_deployment["namespace"]
+    patched_v1 = simple_app_override_images["0.1.0"]
+    patched_v2 = simple_app_override_images["0.2.0"]
+    scenario_driver.attach_to_deployment(
+        environment_id=image_override_environment["environment_id"]
+    )
+
+    # A literal tag stays pinned across the upgrade (FR-008).
+    await scenario_driver.set_component_image(
+        deployment_id=deployment_id, component="server", image=patched_v1
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+    assert await scenario_driver.pinned_image_components(
+        deployment_id=deployment_id, target_version="0.2.0"
+    ) == ["server"]
+
+    # The token follows the application version, so nothing is pinned.
+    await scenario_driver.set_component_image(
+        deployment_id=deployment_id, component="server", image=TOKEN_IMAGE
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+    assert (
+        await scenario_driver.pinned_image_components(
+            deployment_id=deployment_id, target_version="0.2.0"
+        )
+        == []
+    )
+    await _wait_for_server_image(vcluster, namespace, patched_v1)
+    rows = await _read_image_overrides(client, deployment_id)
+    assert rows["server"]["reference"] == TOKEN_IMAGE
+    assert rows["server"]["resolvedReference"] == patched_v1
+
+    await scenario_driver.upgrade_deployment(
+        deployment_id=deployment_id, version="0.2.0"
+    )
+    upgraded = await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+    assert upgraded.application_version == "0.2.0"
+
+    await _wait_for_server_image(vcluster, namespace, patched_v2)
+    await wait_for_ready_container_image(
+        vcluster,
+        namespace=namespace,
+        label_selector=SERVER_SELECTOR,
+        container_name=SERVER_CONTAINER,
+        image=patched_v2,
+    )
+
+    # The upgrade action's ``<release>-job`` image is not asserted: its primitives call the
+    # API unauthenticated and fail under default-deny until #188, so the Job never runs.
+
+    rows = await _read_image_overrides(client, deployment_id)
+    assert rows["server"]["reference"] == TOKEN_IMAGE
+    assert rows["server"]["resolvedReference"] == patched_v2
+    assert rows["server"]["isApplicable"] is True
