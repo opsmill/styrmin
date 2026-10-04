@@ -151,7 +151,7 @@ The frontend and `styrminctl apply` submit full configs, so an absolute check bl
 unrelated edit on that deployment and blocks removing the stranded values. Validate against the
 driver version the deployment is pinned to **after** the write, not the pre-switch version. Keep
 the stranded values and expose them through a read flag (e.g. `ComponentEnvVars.isApplicable`)
-rather than deleting them. Reference: `services/deployment.py::_validate_component_env_var_containers`.
+rather than deleting them. Reference: `services/deployment.py::_validate_component_container_targets`.
 
 <!-- Extracted from specs/016-backup-retention-ttl on 2026-08-04 -->
 
