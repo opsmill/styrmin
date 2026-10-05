@@ -290,6 +290,18 @@ class FakeBackupRepository(FakeRepository[Backup], BackupRepository):
 
 
 class FakeRestoreRepository(FakeRepository[Restore], RestoreRepository):
+    """In-memory restore repository.
+
+    ``backup_source`` and ``instance_source`` are wired by
+    :class:`FakeUnitOfWork` so the source-deployment lookup walks the same
+    restore -> backup -> instance join as the production query.
+    """
+
+    def __init__(self, models: list[Restore] | None = None) -> None:
+        super().__init__(models)
+        self.backup_source: "FakeBackupRepository | None" = None
+        self.instance_source: "FakeApplicationInstanceRepository | None" = None
+
     async def get_by_backup_id(
         self, backup_id: UUID, status: RestoreStatus | None = None
     ) -> list[Restore]:
@@ -305,6 +317,20 @@ class FakeRestoreRepository(FakeRepository[Restore], RestoreRepository):
         if status is not None:
             results = [r for r in results if r.status == status]
         return results
+
+    async def get_non_terminal_by_source_deployment_id(
+        self, deployment_id: UUID
+    ) -> list[Restore]:
+        backups = self.backup_source.models if self.backup_source else []
+        instances = self.instance_source.models if self.instance_source else []
+        instance_ids = {i.id for i in instances if i.deployment_id == deployment_id}
+        backup_ids = {b.id for b in backups if b.instance_id in instance_ids}
+        return [
+            r
+            for r in self.models
+            if r.backup_id in backup_ids
+            and r.status in (RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS)
+        ][::-1]
 
 
 class FakeEnvironmentBackupRepository(
@@ -781,6 +807,8 @@ class FakeUnitOfWork(UnitOfWork):
         self.deployed_services = deployed_services or FakeDeployedServiceRepository()
         self.backups = backups or FakeBackupRepository()
         self.restores = restores or FakeRestoreRepository()
+        self.restores.backup_source = self.backups
+        self.restores.instance_source = self.instances
         # The two environment-level guards are EXISTS queries over the
         # constituent rows, so the fakes are handed the constituent repos
         # rather than tracking a status of their own (research.md D6).

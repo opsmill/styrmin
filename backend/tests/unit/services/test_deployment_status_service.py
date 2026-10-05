@@ -4,7 +4,14 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from styrmin_backend.db.models import Restore, RestoreStatus
+from styrmin_backend.db.models import (
+    ApplicationInstance,
+    Backup,
+    BackupStatus,
+    InstanceStatus,
+    Restore,
+    RestoreStatus,
+)
 from styrmin_backend.domain.models import Deployment, DeploymentState, Instance
 from styrmin_backend.services.deployment_status import (
     extract_scheduling_conditions,
@@ -14,6 +21,7 @@ from tests.unit.services.fakes import (
     FakeActionRepository,
     FakeApplicationInstanceRepository,
     FakeApplicationRepository,
+    FakeBackupRepository,
     FakeClusterRepository,
     FakeDeployedServiceRepository,
     FakeDeploymentStatusRepository,
@@ -37,6 +45,8 @@ def _make_uow(
     deployment_statuses: FakeDeploymentStatusRepository | None = None,
     deployed_services: "FakeDeployedServiceRepository | None" = None,
     restores: FakeRestoreRepository | None = None,
+    instances: FakeApplicationInstanceRepository | None = None,
+    backups: FakeBackupRepository | None = None,
 ) -> FakeUnitOfWork:
     return FakeUnitOfWork(
         clusters=FakeClusterRepository(),
@@ -44,25 +54,59 @@ def _make_uow(
         helm_repositories=FakeHelmRepositoryRepository(),
         helm_charts=FakeHelmChartRepository(),
         application_driver_versions=FakeApplicationRepository(),
-        instances=FakeApplicationInstanceRepository(),
+        instances=instances or FakeApplicationInstanceRepository(),
         actions=FakeActionRepository(),
         tasks=FakeTaskRepository(),
         deployments=deployments,
         deployment_statuses=deployment_statuses,
         deployed_services=deployed_services,
         restores=restores,
+        backups=backups,
     )
 
 
-def _make_restore(target_namespace: str, status: RestoreStatus) -> Restore:
+def _make_restore(
+    target_namespace: str, status: RestoreStatus, backup_id: UUID | None = None
+) -> Restore:
     restore_id = uuid4()
     return Restore(
         id=restore_id,
         name=f"styrmin-{restore_id}",
         status=status,
         target_namespace=target_namespace,
-        backup_id=uuid4(),
+        backup_id=backup_id or uuid4(),
     )
+
+
+async def _make_uow_with_own_backup_restore(
+    dep: Deployment, target_namespace: str, restore_status: RestoreStatus
+) -> tuple[FakeUnitOfWork, FakeDeploymentRepository]:
+    """Build a uow holding *dep* and a restore of a backup of its instance."""
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    instance = ApplicationInstance(
+        id=uuid4(),
+        name="test-instance",
+        application_version="1.0.0",
+        status=InstanceStatus.RUNNING,
+        deployment_id=dep.id,
+        application_driver_version_id=uuid4(),
+    )
+    backup = Backup(
+        id=uuid4(),
+        name="test-backup",
+        status=BackupStatus.COMPLETED,
+        instance_id=instance.id,
+    )
+    restores = FakeRestoreRepository()
+    await restores.create(_make_restore(target_namespace, restore_status, backup.id))
+    uow = _make_uow(
+        deployments=dep_repo,
+        restores=restores,
+        instances=FakeApplicationInstanceRepository([instance]),
+        backups=FakeBackupRepository([backup]),
+    )
+    return uow, dep_repo
 
 
 def _make_deployment(
@@ -246,6 +290,55 @@ async def test_restoring_without_in_flight_restore_accepts_report(
             "display_state": "Running",
         }
     ]
+    _, deployments_updated = await report_deployment_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.RUNNING
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "restore_status", [RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS]
+)
+async def test_in_flight_restore_into_other_namespace_keeps_restoring(
+    restore_status: RestoreStatus,
+) -> None:
+    """``createRestore`` accepts any ``target_namespace``: an in-flight restore
+    of the deployment's own backup into another namespace still holds
+    RESTORING, since ``create_restore`` flipped the deployment for it."""
+    dep = _make_deployment(status=DeploymentState.RESTORING)
+    uow, dep_repo = await _make_uow_with_own_backup_restore(
+        dep, "custom-ns", restore_status
+    )
+
+    reports = [{"deployment_id": dep.id, "phase": "Ready", "display_state": "Running"}]
+    statuses_updated, deployments_updated = await report_deployment_statuses(
+        reports, uow
+    )
+
+    assert statuses_updated == 1
+    assert deployments_updated == 0
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.RESTORING
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "restore_status", [RestoreStatus.COMPLETED, RestoreStatus.FAILED]
+)
+async def test_settled_restore_into_other_namespace_accepts_report(
+    restore_status: RestoreStatus,
+) -> None:
+    """Once that restore is terminal, reports apply again."""
+    dep = _make_deployment(status=DeploymentState.RESTORING)
+    uow, dep_repo = await _make_uow_with_own_backup_restore(
+        dep, "custom-ns", restore_status
+    )
+
+    reports = [{"deployment_id": dep.id, "phase": "Ready", "display_state": "Running"}]
     _, deployments_updated = await report_deployment_statuses(reports, uow)
 
     assert deployments_updated == 1

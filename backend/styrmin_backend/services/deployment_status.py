@@ -7,9 +7,8 @@ from uuid import UUID
 
 from loguru import logger
 
-from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.db.models import DeploymentState, DeploymentStatus
-from styrmin_backend.services.backup.service import find_in_flight_restore
+from styrmin_backend.services.backup.service import has_in_flight_restore
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 # CRD displayState to DeploymentState mapping.
@@ -106,12 +105,7 @@ async def report_deployment_statuses(
             if (
                 deployment.status == DeploymentState.RESTORING
                 and target_state != DeploymentState.RESTORING
-                and await find_in_flight_restore(
-                    uow,
-                    deployment_id=deployment_id,
-                    target_namespace=get_kubernetes_reference(deployment_id),
-                )
-                is not None
+                and await has_in_flight_restore(uow, deployment_id)
             ):
                 logger.info(
                     "Skipping status update for deployment {}: a restore is in "
