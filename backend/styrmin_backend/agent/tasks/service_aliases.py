@@ -113,9 +113,6 @@ def compute_service_aliases(context: GlobalContext) -> list[dict[str, Any]]:
 async def apply_single_alias(
     alias_namespace: str, alias_name: str, resource: dict
 ) -> None:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     await apply_kubernetes_resource(resource=resource, namespace=alias_namespace)
 
 
@@ -128,9 +125,6 @@ async def apply_service_aliases(
 
     Ensures target namespaces exist, then creates/updates each alias.
     """
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
 
     # Collect unique namespaces that need to exist

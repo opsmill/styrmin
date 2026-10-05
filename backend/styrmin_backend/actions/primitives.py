@@ -24,6 +24,7 @@ import httpx
 from loguru import logger
 from prefect import task
 
+from styrmin_backend import config
 from styrmin_backend.agent.service.kubernetes.primitives import (
     get_component_env,
     get_component_images as _k8s_get_component_images,
@@ -52,9 +53,8 @@ async def _execute(
     client: httpx.AsyncClient, operation: str, variables: dict[str, Any]
 ) -> dict[str, Any]:
     """Run a GraphQL operation and return its ``data``; raise on GraphQL errors."""
-    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
     response = await client.post(
-        f"{api_url}/graphql",
+        config.SETTINGS.url.graphql,
         json={"query": _load_query(operation), "variables": variables},
     )
     data = response.json()

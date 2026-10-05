@@ -12,7 +12,6 @@ from styrmin_backend.agent.service.kubernetes.resources.utilities.factory import
     build_utility,
 )
 from styrmin_backend.context.models.contexts import GlobalContext, UtilityContext
-from styrmin_backend import config
 
 
 def _filter_out_operator_managed_resources(
@@ -36,9 +35,6 @@ async def _apply_utility(
     namespace_labels: dict[str, str] | None = None,
 ) -> None:
     """Shared logic for install and update utility flows."""
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     utility_obj = build_utility(utility_kind=utility.kind.value)
 
     resources = await render_utility_resources(
@@ -113,9 +109,6 @@ async def render_utility_resources(
     namespace: str,
     context: GlobalContext,
 ) -> list[dict[str, Any]]:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     builder = UtilityResourceBuilder(context=context)
     return builder.build(
         utility=utility,

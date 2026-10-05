@@ -58,8 +58,7 @@ Located at the top of `agent/tasks/orchestration.py`. POSTs to the server's Grap
 
 ```python
 async def orchestration_callback(flow, flow_run: FlowRun, state: State) -> None:
-    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
-    styrmin_server_url = f"{api_url}/graphql"
+    styrmin_server_url = config.SETTINGS.url.graphql
     async with httpx.AsyncClient() as client:
         await client.post(
             styrmin_server_url,

@@ -7,7 +7,6 @@ from prefect import flow
 
 from styrmin_backend.agent.service.kubernetes.dependency import get_api_client
 from styrmin_backend.workflows.models import KubernetesConnectivityResult
-from styrmin_backend import config
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +14,6 @@ logger = logging.getLogger(__name__)
 @flow(name="validate_kubernetes_connectivity")
 async def validate_kubernetes_connectivity() -> KubernetesConnectivityResult:
     """Validate connectivity to the configured Kubernetes cluster."""
-
-    config.SETTINGS.initialize_and_exit()
 
     gen = get_api_client()
     client = await gen.__anext__()

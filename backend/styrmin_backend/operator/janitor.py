@@ -2,7 +2,8 @@
 
 After a CR reaches ``phase: Deleted`` the operator leaves it in place so
 operators can inspect cluster-side state (final conditions, events) for
-the configured ``DELETED_CR_TTL_HOURS`` window. Once the window elapses,
+the configured ``DELETED_CR_TTL_HOURS`` window
+(``SETTINGS.operator.deleted_cr_ttl_hours``). Once the window elapses,
 this kopf timer reaps the CR.
 
 Deliberately scoped:
@@ -23,12 +24,11 @@ from typing import Any
 
 import kopf
 
+from styrmin_backend import config
 from styrmin_backend.operator.config import (
     CRD_GROUP,
     CRD_PLURAL,
     CRD_VERSION,
-    DELETED_CR_TTL_HOURS,
-    JANITOR_INTERVAL_SECONDS,
 )
 from styrmin_backend.operator.crd.schema import ConditionType, DeploymentPhase
 
@@ -52,7 +52,7 @@ def is_eligible_for_reap(
     status: dict[str, Any],
     *,
     now: datetime,
-    ttl_hours: int = DELETED_CR_TTL_HOURS,
+    ttl_hours: int,
 ) -> bool:
     """Decide whether a CR is eligible for janitor reaping.
 
@@ -89,8 +89,8 @@ def is_eligible_for_reap(
     CRD_GROUP,
     CRD_VERSION,
     CRD_PLURAL,
-    interval=JANITOR_INTERVAL_SECONDS,
-    initial_delay=JANITOR_INTERVAL_SECONDS,
+    interval=config.SETTINGS.operator.janitor_interval,
+    initial_delay=config.SETTINGS.operator.janitor_interval,
 )
 async def kopf_styrmin_deployment_janitor(
     *,
@@ -102,7 +102,10 @@ async def kopf_styrmin_deployment_janitor(
 ) -> None:
     """Reap StyrminDeployment CRs in ``phase: Deleted`` past the TTL."""
     ns = namespace or ""
-    if not is_eligible_for_reap(dict(status), now=datetime.now(tz=timezone.utc)):
+    ttl_hours = config.SETTINGS.operator.deleted_cr_ttl_hours
+    if not is_eligible_for_reap(
+        dict(status), now=datetime.now(tz=timezone.utc), ttl_hours=ttl_hours
+    ):
         return
 
     from kubernetes_asyncio import client as kubeclient
@@ -113,7 +116,7 @@ async def kopf_styrmin_deployment_janitor(
         "Janitor reaping StyrminDeployment %s/%s (TTL %sh elapsed)",
         ns,
         name,
-        DELETED_CR_TTL_HOURS,
+        ttl_hours,
     )
     try:
         async with get_kubernetes_client() as client:

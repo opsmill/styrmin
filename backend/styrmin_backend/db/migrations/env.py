@@ -8,12 +8,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 
-from styrmin_backend import config as app_config
 from styrmin_backend.db.models import SQLModel
 from styrmin_backend.db.utils import get_database_url, get_sync_database_url
-
-# Initialize application settings so get_database_url() can read STYRMIN_DB_* env vars.
-app_config.SETTINGS.initialize()
 
 target_metadata = SQLModel.metadata
 

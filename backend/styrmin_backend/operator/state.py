@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from styrmin_backend import config
 from styrmin_backend.agent.service.kubernetes.resources.builders.utility import (
     UtilityResourceBuilder,
 )
@@ -21,7 +22,6 @@ from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.operator.config import (
     LABEL_OPERATOR_MANAGED,
     LABEL_OPERATOR_MANAGED_VALUE,
-    STYRMIN_API_URL,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ async def fetch_context(deployment_id: str) -> GlobalContext:
     """
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
-            f"{STYRMIN_API_URL}/deployments/{deployment_id}/context",
+            f"{config.SETTINGS.url.api}/deployments/{deployment_id}/context",
         )
         response.raise_for_status()
         return GlobalContext.model_validate(response.json())

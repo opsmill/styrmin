@@ -150,14 +150,49 @@ class DatabaseSettings(BaseSettings):
     echo: bool = Field(default=False, alias="STYRMIN_DB_ECHO")
 
 
+class AgentSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="STYRMIN_AGENT_")
+
+    poll_retries: int = 60
+    poll_retry_delay_seconds: int = 10
+    poll_interval: int = 10
+    status_poll_interval: int = 5
+
+
+class OperatorSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="STYRMIN_OPERATOR_", populate_by_name=True
+    )
+
+    reconcile_interval: int = 60
+    deployment_ready_timeout: int = 300
+    peering_name: str = "styrmin-operator"
+    peering_priority: int = 100
+    deleted_cr_ttl_hours: int = Field(
+        default=6,
+        validation_alias=AliasChoices(
+            "STYRMIN_OPERATOR_DELETED_CR_TTL_HOURS", "DELETED_CR_TTL_HOURS"
+        ),
+    )
+    janitor_interval: int = Field(
+        default=1800,
+        validation_alias=AliasChoices(
+            "STYRMIN_OPERATOR_JANITOR_INTERVAL", "STYRMIN_JANITOR_INTERVAL"
+        ),
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STYRMIN_")
-    database: DatabaseSettings = DatabaseSettings()
-    workflow: WorkflowSettings = WorkflowSettings()
-    kubernetes: KubernetesSettings = KubernetesSettings()
-    driver: DriverSettings = DriverSettings()
-    agent_code: RemoteAgentCodeSettings = RemoteAgentCodeSettings()
-    url: UrlSettings = UrlSettings()  # type: ignore[call-arg]
+    # default_factory reads the sub-settings' env vars at load time, not import time.
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    workflow: WorkflowSettings = Field(default_factory=WorkflowSettings)
+    kubernetes: KubernetesSettings = Field(default_factory=KubernetesSettings)
+    driver: DriverSettings = Field(default_factory=DriverSettings)
+    agent_code: RemoteAgentCodeSettings = Field(default_factory=RemoteAgentCodeSettings)
+    agent: AgentSettings = Field(default_factory=AgentSettings)
+    operator: OperatorSettings = Field(default_factory=OperatorSettings)
+    url: UrlSettings = Field(default_factory=UrlSettings)
     log_level: str = Field(
         default="INFO",
         description="Log level for the application. Can be one of DEBUG, INFO, WARNING, ERROR, CRITICAL",
@@ -187,31 +222,45 @@ class Settings(BaseSettings):
 
 @dataclass
 class ConfiguredSettings:  # pylint: disable=too-many-public-methods
-    settings: Settings | None = None
+    """Process-wide settings, parsed once: by an entrypoint or on first access."""
 
-    def initialize(self, config_file: Optional[str] = None) -> None:
-        """Initialize the settings if they have not been initialized."""
-        if self.initialized:
-            return
-        if not config_file:
-            config_file_name = os.environ.get("STYRMIN_CONFIG", "styrmin.toml")
-            config_file = os.path.abspath(config_file_name)
-        self.settings = load(config_file)
+    settings: Settings | None = None
+    config_file: str | None = None
+
+    def initialize(self, config_file: Optional[str] = None) -> Settings:
+        """Load the settings unless they are already loaded, and return them.
+
+        Raises InitializationError when asked for another file than the one already loaded.
+        """
+        path = os.path.abspath(
+            config_file or os.environ.get("STYRMIN_CONFIG", "styrmin.toml")
+        )
+        if self.settings is None:
+            self.settings = load(path)
+            self.config_file = path
+        elif config_file and path != self.config_file:
+            msg = f"Settings already loaded from {self.config_file}, cannot load {path}"
+            raise InitializationError(msg)
+        return self.settings
 
     def initialize_and_exit(self, config_file: Optional[str] = None) -> None:
-        """Initialize the settings if they have not been initialized, exit on failures."""
-        if self.initialized:
-            return
-        if not config_file:
-            config_file_name = os.environ.get("STYRMIN_CONFIG", "styrmin.toml")
-            config_file = os.path.abspath(config_file_name)
-        load_and_exit(config_file)
+        """Same as initialize(), but print validation errors and exit."""
+        try:
+            self.initialize(config_file)
+        except ValidationError as err:
+            print(f"Configuration not valid, found {len(err.errors())} error(s)")
+            for error in err.errors():
+                error_locations = [str(location) for location in error["loc"]]
+                print(
+                    f"  {'/'.join(error_locations)} | {error['msg']} ({error['type']})"
+                )
+            sys.exit(1)
 
     @property
     def active_settings(self) -> Settings:
-        if self.settings:
-            return self.settings
-        raise InitializationError
+        if self.settings is None:
+            return self.initialize()
+        return self.settings
 
     @property
     def initialized(self) -> bool:
@@ -245,6 +294,14 @@ class ConfiguredSettings:  # pylint: disable=too-many-public-methods
     def agent_code(self) -> RemoteAgentCodeSettings:
         return self.active_settings.agent_code
 
+    @property
+    def agent(self) -> AgentSettings:
+        return self.active_settings.agent
+
+    @property
+    def operator(self) -> OperatorSettings:
+        return self.active_settings.operator
+
 
 def load(
     config_file_name: str = "styrmin.toml", config_data: Optional[dict[str, Any]] = None
@@ -265,31 +322,6 @@ def load(
         return Settings(**config_tmp)
 
     return Settings()
-
-
-def load_and_exit(
-    config_file_name: str = "styrmin.toml",
-    config_data: Optional[dict[str, Any]] = None,
-) -> None:
-    """Calls load, but wraps it in a try except block.
-
-    This is done to handle a ValidationError which is raised when settings are specified but invalid.
-    In such cases, a message is printed to the screen indicating the settings which don't pass validation.
-
-    Args:
-        config_file_name (str, optional): [description]. Defaults to "pyproject.toml".
-        config_data (dict, optional): [description]. Defaults to None.
-    """
-    try:
-        SETTINGS.settings = load(
-            config_file_name=config_file_name, config_data=config_data
-        )
-    except ValidationError as err:
-        print(f"Configuration not valid, found {len(err.errors())} error(s)")
-        for error in err.errors():
-            error_locations = [str(location) for location in error["loc"]]
-            print(f"  {'/'.join(error_locations)} | {error['msg']} ({error['type']})")
-        sys.exit(1)
 
 
 SETTINGS: ConfiguredSettings = ConfiguredSettings()

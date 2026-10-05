@@ -25,10 +25,6 @@ def show(
     Args:
         format: Output format (json or toml).
     """
-    # Initialize settings with defaults if not already initialized
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     settings = config.SETTINGS.active_settings
 
     # Convert settings to dict

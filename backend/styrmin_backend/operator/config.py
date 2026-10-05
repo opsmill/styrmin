@@ -1,10 +1,9 @@
-"""Operator configuration constants.
+"""Operator constants.
 
-Centralized definitions for labels, annotations, environment variables,
-and default intervals used by the kopf-based operator.
+Centralized definitions for labels, annotations and Kubernetes resource names
+used by the kopf-based operator. Configurable values live in
+``styrmin_backend.config.OperatorSettings``.
 """
-
-import os
 
 # --- Labels ---
 LABEL_MANAGED_BY = "app.kubernetes.io/managed-by"
@@ -17,14 +16,6 @@ LABEL_OPERATOR_MANAGED_VALUE = "true"
 # --- Annotations ---
 ANNOTATION_DEPLOYMENT_IN_PROGRESS = "styrmin.io/deployment-in-progress"
 ANNOTATION_DEPLOYMENT_ID = "styrmin.io/deployment-id"
-
-# --- Environment variables ---
-STYRMIN_API_URL = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
-
-# --- Operator settings ---
-RECONCILIATION_INTERVAL_SECONDS = int(
-    os.environ.get("STYRMIN_OPERATOR_RECONCILE_INTERVAL", "60")
-)
 
 # --- Kubernetes Event reasons ---
 EVENT_RECONCILE_SUCCEEDED = "ReconcileSucceeded"
@@ -51,30 +42,6 @@ PHASE_PREREQUISITES = "prerequisites"
 PHASE_HELM = "helm"
 PHASE_SERVICES = "services"
 
-# --- HelmRelease readiness timeout ---
-HELMRELEASE_READY_TIMEOUT_SECONDS = int(
-    os.environ.get("STYRMIN_OPERATOR_HR_READY_TIMEOUT", "600")
-)
-
-# --- Deployment ready timeout (for displayState) ---
-DEPLOYMENT_READY_TIMEOUT_SECONDS = int(
-    os.environ.get("STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT", "300")
-)
-
-# --- Peering ---
-PEERING_NAME = os.environ.get("STYRMIN_OPERATOR_PEERING_NAME", "styrmin-operator")
-PEERING_PRIORITY = int(os.environ.get("STYRMIN_OPERATOR_PEERING_PRIORITY", "100"))
-
 # --- Backoff ---
 BACKOFF_BASE_SECONDS = 5
 BACKOFF_MAX_SECONDS = 300
-
-# --- Forensic retention of deleted CRs ---
-# After a StyrminDeployment reaches phase: Deleted, the CR lingers for
-# this many hours so operators can inspect cluster-side state. The
-# janitor (operator/janitor.py) reaps CRs older than this threshold;
-# CRs stuck in phase: Deleting are NEVER auto-reaped.
-DELETED_CR_TTL_HOURS = int(os.environ.get("DELETED_CR_TTL_HOURS", "6"))
-
-# --- Janitor sweep interval ---
-JANITOR_INTERVAL_SECONDS = int(os.environ.get("STYRMIN_JANITOR_INTERVAL", "1800"))

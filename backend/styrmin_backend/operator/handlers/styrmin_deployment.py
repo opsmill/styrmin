@@ -11,12 +11,11 @@ from typing import Any
 
 import kopf
 
+from styrmin_backend import config
 from styrmin_backend.operator.config import (
     CRD_GROUP,
     CRD_PLURAL,
     CRD_VERSION,
-    DEPLOYMENT_READY_TIMEOUT_SECONDS,
-    RECONCILIATION_INTERVAL_SECONDS,
 )
 from styrmin_backend.operator.crd.schema import (
     ConditionStatus,
@@ -472,8 +471,8 @@ async def kopf_on_styrmin_deployment_update(
     CRD_GROUP,
     CRD_VERSION,
     CRD_PLURAL,
-    interval=RECONCILIATION_INTERVAL_SECONDS,
-    initial_delay=RECONCILIATION_INTERVAL_SECONDS,
+    interval=config.SETTINGS.operator.reconcile_interval,
+    initial_delay=config.SETTINGS.operator.reconcile_interval,
 )
 async def kopf_styrmin_deployment_timer(
     *,
@@ -531,7 +530,8 @@ async def kopf_styrmin_deployment_timer(
         if creation_ts:
             created_at = datetime.fromisoformat(creation_ts)
             elapsed = (datetime.now(tz=timezone.utc) - created_at).total_seconds()
-            if elapsed > DEPLOYMENT_READY_TIMEOUT_SECONDS:
+            ready_timeout = config.SETTINGS.operator.deployment_ready_timeout
+            if elapsed > ready_timeout:
                 current_display = status.get(
                     "displayState", DisplayState.DEPLOYING.value
                 )
@@ -539,7 +539,7 @@ async def kopf_styrmin_deployment_timer(
                     patch.status["displayState"] = DisplayState.ERROR.value
                     patch.status["message"] = (
                         f"Deployment did not reach Ready within"
-                        f" {DEPLOYMENT_READY_TIMEOUT_SECONDS}s (phase: {phase})"
+                        f" {ready_timeout}s (phase: {phase})"
                     )
                     logger.warning(
                         "Deployment %s/%s timed out in phase %s", ns, name, phase

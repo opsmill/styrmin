@@ -17,7 +17,6 @@ from styrmin_backend.agent.tasks.shared import (
 from styrmin_backend.agent.tasks.shared import (
     apply_helm_release as update_helm_release_task,
 )
-from styrmin_backend import config
 
 
 @flow(flow_run_name="Update Helm release: {namespace} {reference}")
@@ -31,9 +30,6 @@ async def update_helm_release(
 
     To keep modularity here, the agent verb should get everything variables from its arguments.
     """
-
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
 
     await apply_namespace(namespace=namespace, labels=namespace_labels)
 
@@ -54,9 +50,6 @@ async def apply_utility_resources(
 
     This flow runs on the k8s-agent (user-work-pool) which has Kubernetes access.
     """
-
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
 
     await apply_namespace(namespace=namespace, labels=namespace_labels)
 
@@ -91,9 +84,6 @@ async def create_helm_release(
 
     To keep modularity here, the agent verb should get everything variables from its arguments.
     """
-
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
 
     await apply_namespace(namespace=namespace, labels=namespace_labels)
 

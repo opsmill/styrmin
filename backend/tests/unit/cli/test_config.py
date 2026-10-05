@@ -33,7 +33,6 @@ def test_config_show_outputs_toml_by_default(
     """Test that config show outputs TOML format by default."""
     # Mock config.SETTINGS
     mock_config = mocker.patch("styrmin_backend.cli.config_cmd.config")
-    mock_config.SETTINGS.initialized = True
     mock_config.SETTINGS.active_settings.model_dump.return_value = {
         "database": {"db_type": "sqlite", "db_name": "test.db"}
     }
@@ -56,7 +55,6 @@ def test_config_show_json_format(
     """Test that config show --format json outputs JSON."""
     # Mock config.SETTINGS
     mock_config = mocker.patch("styrmin_backend.cli.config_cmd.config")
-    mock_config.SETTINGS.initialized = True
     mock_config.SETTINGS.active_settings.model_dump.return_value = {
         "database": {"db_type": "sqlite"}
     }

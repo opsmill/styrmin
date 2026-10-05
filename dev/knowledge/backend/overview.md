@@ -238,4 +238,15 @@ Startup sequence:
 4. Initialize Prefect workflow manager
 5. Initialize infrastructure utilities
 
+### Settings loading
+
+`config.SETTINGS` (`backend/styrmin_backend/config.py`) holds the settings for the whole process, and each process parses them once:
+
+- Entrypoints that accept `--config-file` (`styrmin server start`, `styrmin db ...`) call `SETTINGS.initialize(path)` before any code reads a setting.
+- Every other process (the agent, Prefect flow runs, Alembic) loads the settings on first access, from the file named by `STYRMIN_CONFIG` (default `styrmin.toml` in the working directory). Without that file, only environment variables and defaults apply.
+- Each section (`database`, `workflow`, `kubernetes`, `driver`, `agent_code`, `agent`, `operator`, `url`) reads its environment variables when the settings load, not when the module is imported.
+- `SETTINGS.initialize(path)` raises `InitializationError` when the settings were already loaded from another file, so a call made too late cannot silently ignore the requested file.
+
+Read configuration through `config.SETTINGS`, not `os.environ`. `AgentSettings` holds `STYRMIN_AGENT_*` and `OperatorSettings` holds `STYRMIN_OPERATOR_*`, `DELETED_CR_TTL_HOURS` and `STYRMIN_JANITOR_INTERVAL`. Kopf timer intervals and Prefect task retries are read when their modules are imported, so they take the values present when the agent process starts.
+
 The agent process is a separate entrypoint (`entrypoint/combined.py`) that runs the kopf operator, the Prefect worker, and the status reporter together — see [`../agent/overview.md`](../agent/overview.md).
