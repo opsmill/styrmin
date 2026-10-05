@@ -1,0 +1,35 @@
+backend/styrmin_backend/services/clusters.py
+  s_62ceb510153695::t_b53a0e250a10c2 15,108-114,119-123
+backend/styrmin_backend/services/exceptions.py
+  s_62ceb510153695::t_9ae4ec785c5017 83-104
+backend/tests/e2e/test_delete_deployment_api.py
+  s_62ceb510153695::t_ca9b40e5c1e8be 28-29,53,134,255-265
+backend/tests/functional/graphql/test_cluster.py
+  s_62ceb510153695::t_e6fa2a76a5cf8d 58-106
+backend/tests/unit/services/test_cluster_services.py
+  s_62ceb510153695::t_81e81fe2cb4783 5,15,132-153
+changelog/366.fixed.md
+  s_62ceb510153695::t_54e486eea0f1f3 1
+dev/knowledge/backend/api.md
+  s_62ceb510153695::t_de2381fed552b1 217-218
+dev/knowledge/backend/services.md
+  s_62ceb510153695::t_5850abc8510273 150
+docs/docs/installation/vcluster-local.md
+  s_62ceb510153695::t_b5bce1f574d8d4 394-398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "250406670fdb5c0cd2e82a9796bf5458c3005cb5",
+  "prompts": {},
+  "sessions": {
+    "s_62ceb510153695": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fc0d91e-e089-44f5-b92e-a7305e8b7176",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Simon AURA--SCUSSEL <simon@opsmill.com>"
+    }
+  }
+}
