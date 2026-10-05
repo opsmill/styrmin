@@ -195,3 +195,78 @@ async def test_delete_restore(
     await repository.delete(restore)
     result = await repository.get(restore.id)
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_non_terminal_by_source_deployment_id(
+    session: AsyncSession,
+    repository: SQLModelRestoreRepository,
+    deployment: Deployment,
+    backup: Backup,
+):
+    """Matches restores of the deployment's own backups in any namespace,
+    skipping terminal ones and restores of another deployment's backups."""
+    other_deployment = Deployment(
+        name="other-deployment",
+        application_version="1.0.0",
+        status=DeploymentState.RUNNING,
+        application_driver_version_id=uuid4(),
+        environment_id=deployment.environment_id,
+        created_by_user_id=deployment.created_by_user_id,
+    )
+    session.add(other_deployment)
+    await session.flush()
+    other_instance = ApplicationInstance(
+        name="other-instance",
+        application_version="1.0.0",
+        status=InstanceStatus.RUNNING,
+        deployment_id=other_deployment.id,
+        application_driver_version_id=uuid4(),
+    )
+    session.add(other_instance)
+    await session.flush()
+    other_backup = Backup(
+        name="other-backup",
+        status=BackupStatus.COMPLETED,
+        instance_id=other_instance.id,
+    )
+    session.add(other_backup)
+    await session.flush()
+
+    pending = await repository.create(
+        Restore(
+            name="restore-pending",
+            status=RestoreStatus.PENDING,
+            target_namespace="custom-ns",
+            backup_id=backup.id,
+        )
+    )
+    in_progress = await repository.create(
+        Restore(
+            name="restore-in-progress",
+            status=RestoreStatus.IN_PROGRESS,
+            target_namespace=f"styrmin-{deployment.id}",
+            backup_id=backup.id,
+        )
+    )
+    for name, status, backup_id in [
+        ("restore-completed", RestoreStatus.COMPLETED, backup.id),
+        ("restore-failed", RestoreStatus.FAILED, backup.id),
+        ("restore-other", RestoreStatus.IN_PROGRESS, other_backup.id),
+    ]:
+        await repository.create(
+            Restore(
+                name=name,
+                status=status,
+                target_namespace="custom-ns",
+                backup_id=backup_id,
+            )
+        )
+
+    results = await repository.get_non_terminal_by_source_deployment_id(deployment.id)
+
+    assert {r.id for r in results} == {pending.id, in_progress.id}
+    other_results = await repository.get_non_terminal_by_source_deployment_id(
+        other_deployment.id
+    )
+    assert [r.name for r in other_results] == ["restore-other"]

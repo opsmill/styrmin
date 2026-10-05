@@ -372,6 +372,26 @@ async def find_in_flight_restore(
     return None
 
 
+async def has_in_flight_restore(uow: UnitOfWork, deployment_id: UUID) -> bool:
+    """Return whether a non-terminal restore is landing in *deployment_id*.
+
+    Finds a restore into the canonical namespace (``find_in_flight_restore``)
+    and a restore of the deployment's own backups into any namespace, since
+    ``createRestore`` accepts a ``target_namespace`` from the client.
+    A clone restoring this deployment's backup into a counterpart matches too.
+    """
+    canonical_namespace = f"styrmin-{deployment_id}"
+    if (
+        await find_in_flight_restore(uow, deployment_id, canonical_namespace)
+        is not None
+    ):
+        return True
+    restores = await uow.restores.get_non_terminal_by_source_deployment_id(
+        deployment_id
+    )
+    return len(restores) > 0
+
+
 async def create_restore(
     backup_id: UUID,
     target_namespace: str,
