@@ -76,7 +76,7 @@ async def apply_state(
 
 Flow-side responsibility:
 
-1. Open a fresh `UnitOfWork` via `get_unit_of_work()`.
+1. Open a fresh `UnitOfWork` with `async with get_unit_of_work() as uow:`; the session closes when the block ends.
 2. Load the deployment by id; load both instances by id (converting DB models to domain `Instance` entities via the in-file `_build_instance_entity` helper, which mirrors the conversion already in `repository/deployment.py`).
 3. Create a `Comparator(current_instance, new_instance)` and call `comparator.compare()` to get a `DiffReport`.
 4. Create a `Remediator(uow)` and call `generate_remediation(diff_report)`.

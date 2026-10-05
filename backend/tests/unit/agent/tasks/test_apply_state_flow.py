@@ -13,6 +13,7 @@ from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.helpers.unit_of_work import yield_unit_of_work
 
 
 @pytest.mark.asyncio
@@ -51,7 +52,7 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     fake_uow.application_instances.get = AsyncMock(
         side_effect=lambda *, id: MagicMock(id=id)
     )
-    mock_get_uow.return_value = fake_uow
+    mock_get_uow.side_effect = yield_unit_of_work(fake_uow)
 
     mock_build_entity.side_effect = lambda model: (
         MagicMock(id=model.id) if model is not None else None
@@ -111,7 +112,7 @@ async def test_apply_state_flow_handles_no_remediation_needed(
     fake_uow.deployments.find = AsyncMock(return_value=MagicMock())
     fake_uow.application_instances = AsyncMock()
     fake_uow.application_instances.get = AsyncMock(return_value=MagicMock())
-    mock_get_uow.return_value = fake_uow
+    mock_get_uow.side_effect = yield_unit_of_work(fake_uow)
 
     mock_build_entity.side_effect = lambda model: (
         MagicMock(id=model.id) if model is not None else None

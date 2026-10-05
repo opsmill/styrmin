@@ -37,6 +37,7 @@ from prefect.client.schemas.objects import StateType
 
 from styrmin_backend.services.exceptions import RestoreNotFoundError
 from styrmin_backend.workflows.templates.backup import execute_restore_workflow
+from tests.helpers.unit_of_work import yield_unit_of_work
 
 MODULE = "styrmin_backend.workflows.templates.backup"
 
@@ -172,7 +173,7 @@ async def _run_restore_workflow(
     with (
         patch(f"{MODULE}.config", MagicMock()),
         patch(f"{MODULE}.get_run_logger", return_value=run.logger),
-        patch(f"{MODULE}.get_unit_of_work", AsyncMock(return_value=MagicMock())),
+        patch(f"{MODULE}.get_unit_of_work", yield_unit_of_work(MagicMock())),
         patch(f"{MODULE}.get_backup", AsyncMock(return_value=backup)),
         patch(f"{SERVICE_MODULE}.get_restore", AsyncMock(return_value=restore)),
         patch(f"{MODULE}.update_restore_status", AsyncMock(side_effect=_record_status)),

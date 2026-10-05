@@ -36,6 +36,7 @@ from prefect.client.schemas.objects import StateType
 from styrmin_backend.services.backup.ttl import DEFAULT_BACKUP_TTL
 from styrmin_backend.services.exceptions import BackupNotFoundError
 from styrmin_backend.workflows.templates.backup import execute_backup_workflow
+from tests.helpers.unit_of_work import yield_unit_of_work
 
 MODULE = "styrmin_backend.workflows.templates.backup"
 
@@ -202,7 +203,7 @@ async def _run_backup_workflow(
     with (
         patch(f"{MODULE}.config", MagicMock()),
         patch(f"{MODULE}.get_run_logger", return_value=run.logger),
-        patch(f"{MODULE}.get_unit_of_work", AsyncMock(return_value=uow)),
+        patch(f"{MODULE}.get_unit_of_work", yield_unit_of_work(uow)),
         patch(f"{MODULE}.get_backup", AsyncMock(return_value=backup)),
         patch(f"{MODULE}.update_backup_status", AsyncMock(side_effect=_record_status)),
         patch(f"{MODULE}.build_velero_backup", MagicMock(side_effect=_record_build)),

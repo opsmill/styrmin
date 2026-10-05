@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from types import TracebackType
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -207,9 +209,16 @@ class SqlModelUnitOfWork(UnitOfWork):
         await self.session.commit()
 
 
-async def get_unit_of_work() -> SqlModelUnitOfWork:
-    """Create a UnitOfWork for standalone use (outside FastAPI DI)."""
+@asynccontextmanager
+async def get_unit_of_work() -> AsyncGenerator[SqlModelUnitOfWork, None]:
+    """Yield a UnitOfWork on a fresh session for standalone use (outside FastAPI DI).
+
+    Mirrors ``get_unit_of_work_dependency``: the session is closed on exit, while
+    ``async with uow`` blocks inside stay transaction boundaries only.
+    """
     from styrmin_backend.db.utils import get_async_engine
 
-    session = AsyncSession(get_async_engine(), expire_on_commit=False)
-    return SqlModelUnitOfWork(session=session)
+    async with AsyncSession(get_async_engine(), expire_on_commit=False) as session:
+        uow = SqlModelUnitOfWork(session=session)
+        async with uow:
+            yield uow

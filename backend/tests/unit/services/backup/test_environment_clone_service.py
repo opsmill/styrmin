@@ -23,6 +23,7 @@ Four things are pinned here, all of them load-bearing for the 010 spec:
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -104,6 +105,7 @@ from styrmin_backend.services.exceptions import (
 )
 from styrmin_backend.workflows.models import PrefectAction
 from styrmin_backend.workflows.templates import clone as clone_flow
+from tests.helpers.unit_of_work import yield_unit_of_work
 from tests.unit.services.fakes import (
     FakeActionRepository,
     FakeApplicationDriverRepository,
@@ -908,9 +910,6 @@ def flow_harness(monkeypatch: pytest.MonkeyPatch, scenario: _Scenario):
     real_merge = clone_flow.merge_environment_config
     real_create_environment = clone_flow.create_environment
 
-    async def _get_uow():
-        return scenario.uow
-
     def _merge_environment_config(*args: Any, **kwargs: Any):
         merged = real_merge(*args, **kwargs)
         calls["order"].append(("merge", dict(merged)))
@@ -958,7 +957,9 @@ def flow_harness(monkeypatch: pytest.MonkeyPatch, scenario: _Scenario):
         async def run_action(self, **kwargs: Any) -> None:
             calls["dispatch"].append(kwargs)
 
-    monkeypatch.setattr(clone_flow, "get_unit_of_work", _get_uow)
+    monkeypatch.setattr(
+        clone_flow, "get_unit_of_work", yield_unit_of_work(scenario.uow)
+    )
     monkeypatch.setattr(clone_flow, "get_run_logger", lambda: logging.getLogger("test"))
     monkeypatch.setattr(clone_flow, "deploy_application", _deploy_application)
     monkeypatch.setattr(clone_flow, "create_restore", _create_restore)
@@ -2283,20 +2284,22 @@ async def test_an_unreadable_attribution_entry_is_never_erased_from_the_record(
 async def test_the_capture_poll_reuses_one_unit_of_work(
     scenario: _Scenario, prefect_manager_mock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Nothing closes an ``AsyncSession``, so the poll may not open one per turn.
+    """The poll holds one unit of work for every turn, not one per turn.
 
     At the shipped poll interval and timeout a single clone could churn 720
-    sessions against a pool of a few dozen. The loop therefore holds one unit of
-    work and rolls it back between turns — which is also what makes the poll
-    *see* the capture terminalise, instead of the identity map's first read.
+    sessions. The loop therefore holds one unit of work and rolls it back
+    between turns — which is also what makes the poll *see* the capture
+    terminalise, instead of the identity map's first read.
     """
     sessions: list[Any] = []
     rollbacks: list[int] = []
     real_rollback = scenario.uow.rollback
 
+    @asynccontextmanager
     async def _get_uow():
         sessions.append(scenario.uow)
-        return scenario.uow
+        async with scenario.uow:
+            yield scenario.uow
 
     async def _rollback() -> None:
         rollbacks.append(1)
@@ -2319,8 +2322,7 @@ async def test_the_capture_poll_reuses_one_unit_of_work(
     assert capture_status is EnvironmentOperationStatus.COMPLETED
     assert rollbacks, "the loop never discarded a read, so it would poll a stale one"
     assert len(sessions) == 1, (
-        f"the poll opened {len(sessions)} units of work; one is enough and "
-        "nothing ever closes them"
+        f"the poll opened {len(sessions)} units of work; one is enough"
     )
 
 
