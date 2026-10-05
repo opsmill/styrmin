@@ -153,10 +153,10 @@ class DatabaseSettings(BaseSettings):
 class AgentSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STYRMIN_AGENT_")
 
-    poll_retries: int = 60
-    poll_retry_delay_seconds: int = 10
-    poll_interval: int = 10
-    status_poll_interval: int = 5
+    poll_retries: int = Field(default=60, ge=0)
+    poll_retry_delay_seconds: int = Field(default=10, ge=1)
+    poll_interval: int = Field(default=10, ge=1)
+    status_poll_interval: int = Field(default=5, ge=1)
 
 
 class OperatorSettings(BaseSettings):
@@ -164,18 +164,20 @@ class OperatorSettings(BaseSettings):
         env_prefix="STYRMIN_OPERATOR_", populate_by_name=True
     )
 
-    reconcile_interval: int = 60
-    deployment_ready_timeout: int = 300
+    reconcile_interval: int = Field(default=60, ge=1)
+    deployment_ready_timeout: int = Field(default=300, ge=1)
     peering_name: str = "styrmin-operator"
     peering_priority: int = 100
     deleted_cr_ttl_hours: int = Field(
         default=6,
+        ge=0,
         validation_alias=AliasChoices(
             "STYRMIN_OPERATOR_DELETED_CR_TTL_HOURS", "DELETED_CR_TTL_HOURS"
         ),
     )
     janitor_interval: int = Field(
         default=1800,
+        ge=1,
         validation_alias=AliasChoices(
             "STYRMIN_OPERATOR_JANITOR_INTERVAL", "STYRMIN_JANITOR_INTERVAL"
         ),

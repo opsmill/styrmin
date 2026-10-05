@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from styrmin_backend import config
 from styrmin_backend.config import (
@@ -74,6 +75,27 @@ def test_operator_settings_accept_the_existing_env_var_names(
     assert operator.reconcile_interval == 5
     assert operator.deleted_cr_ttl_hours == 12
     assert operator.janitor_interval == 90
+
+
+@pytest.mark.parametrize(
+    ("env_var", "settings_class"),
+    [
+        ("STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS", AgentSettings),
+        ("STYRMIN_AGENT_POLL_INTERVAL", AgentSettings),
+        ("STYRMIN_AGENT_STATUS_POLL_INTERVAL", AgentSettings),
+        ("STYRMIN_OPERATOR_RECONCILE_INTERVAL", OperatorSettings),
+        ("STYRMIN_JANITOR_INTERVAL", OperatorSettings),
+    ],
+)
+def test_zero_intervals_are_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    env_var: str,
+    settings_class: type[AgentSettings] | type[OperatorSettings],
+) -> None:
+    monkeypatch.setenv(env_var, "0")
+
+    with pytest.raises(ValidationError, match="greater than or equal to 1"):
+        settings_class()
 
 
 def test_agent_and_operator_settings_load_from_toml(tmp_path: Path) -> None:
