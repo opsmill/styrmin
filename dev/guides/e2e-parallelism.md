@@ -2,18 +2,19 @@
 
 ## Overview
 
-E2E tests run in a 7-shard × 2-entrypoint CI matrix. Each cell is a
+E2E tests run in an 8-shard × 2-entrypoint CI matrix. Each cell is a
 GitHub Actions job that boots its own vcluster, installs styrmin via
 Helm, and runs only the tests carrying its shard marker.
 
-The seven shards:
+The eight shards:
 
 | Shard | Marker | Purpose | Sample tests |
 |---|---|---|---|
 | `general` | `shard_general` | Readonly readers + short-mutation tests (deploy, delete, admin, auth, smoke) | `test_ui_smoke`, `test_deploy_app`, `test_admin_*`, `test_service_discovery` |
 | `env` | `shard_env` | `test_deployment_env_vars.py` + `test_environment_update.py` (env-var precedence and env-level fan-out) | `test_us1_deployment_level_env_var`, `test_us1_environment_update_fans_out_to_all_deployments` |
 | `compute` | `shard_compute` | `test_pod_scheduling.py` + `test_ingress_controller.py` (scheduling / ingress) | `test_scheduling_end_to_end`, `test_ingress_controller` |
-| `backup` | `shard_backup` | Velero + Garage; cluster-wide state (kept isolated to avoid cross-test pollution) | `test_backup_restore`, `test_backup_restore_databases` |
+| `backup` | `shard_backup` | Deployment-level backup/restore on Velero + Garage; cluster-wide state (kept isolated to avoid cross-test pollution) | `test_backup_and_restore_lifecycle`, `test_restore_lifecycle_transitions`, `test_backup_restore_databases` |
+| `env_backup` | `shard_env_backup` | Environment-level backup/restore and environment clone on Velero + Garage (split out of `backup`, where the two tests made the cell about twice as long as any other) | `test_environment_backup_and_restore_lifecycle`, `test_environment_clone_lifecycle` |
 | `infrahub` | `shard_infrahub` | Infrahub-stack backup/restore (boots full Infrahub server + DB; isolated from `shard_backup` so simple-app backup tests aren't blocked by Infrahub boot) | `test_infrahub_backup_restore` |
 | `configuration` | `shard_configuration` | `backend/tests/e2e/configuration/` — unified config-drawer UI flows | `test_drawer_env_vars_edit`, `test_drawer_scheduling_edit` |
 | `apply` | `shard_apply` | `test_deployments_apply.py` — manifest `apply` / `apply_files` flows (all `api_only`, each test deploys fresh simple-apps; split out of `general`, where it was the bulk of the run) | `test_apply_creates_updates_then_noops`, `test_apply_files_batch_continues_past_failure` |
@@ -35,7 +36,8 @@ the marker rules.
        pytest.mark.api_only(reason="..."),  # or ui_only, or omit for dual
        pytest.mark.shard_general,           # one of shard_general,
                                              # shard_env, shard_compute,
-                                             # shard_backup, shard_infrahub,
+                                             # shard_backup, shard_env_backup,
+                                             # shard_infrahub,
                                              # shard_configuration,
                                              # shard_apply
    ]
