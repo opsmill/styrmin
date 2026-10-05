@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from uuid import UUID
+
+from loguru import logger
 
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.db.models import DeploymentState, DeploymentStatus
 from styrmin_backend.services.backup.service import find_in_flight_restore
 from styrmin_backend.services.unit_of_work import UnitOfWork
-
-logger = logging.getLogger(__name__)
 
 # CRD displayState to DeploymentState mapping.
 # The displayState is the user-facing state set by the operator, distinct
@@ -96,8 +95,8 @@ async def report_deployment_statuses(
                 and reported_instance_id != active_instance_id
             ):
                 logger.info(
-                    "Skipping status update for deployment %s: reported instance %s "
-                    "does not match active instance %s",
+                    "Skipping status update for deployment {}: reported instance {} "
+                    "does not match active instance {}",
                     deployment_id,
                     reported_instance_id,
                     active_instance_id,
@@ -115,8 +114,8 @@ async def report_deployment_statuses(
                 is not None
             ):
                 logger.info(
-                    "Skipping status update for deployment %s: a restore is in "
-                    "progress, ignoring reported state %s",
+                    "Skipping status update for deployment {}: a restore is in "
+                    "progress, ignoring reported state {}",
                     deployment_id,
                     display_state,
                 )
