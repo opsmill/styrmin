@@ -1,0 +1,23 @@
+backend/styrmin_backend/operator/handlers/styrmin_deployment.py
+  s_62ceb510153695::t_13778921e22536 206-211
+backend/tests/unit/test_deployment_deletion_operator.py
+  s_62ceb510153695::t_f3a5dd0e6ed1dd 299-335
+dev/knowledge/agent/operator.md
+  s_62ceb510153695::t_3d094edb188453 89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8da15e38aef3e36e9ac6d999d4f441d359bd1201",
+  "prompts": {},
+  "sessions": {
+    "s_62ceb510153695": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fc0d91e-e089-44f5-b92e-a7305e8b7176",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Simon AURA--SCUSSEL <simon@opsmill.com>"
+    }
+  }
+}
