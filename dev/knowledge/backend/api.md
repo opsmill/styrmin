@@ -412,6 +412,13 @@ target driver version is invalid at the target application version. `COMPONENT_C
 never reaches `extensions.code`: the operator writes its message to the StyrminDeployment status,
 read back as `Deployment.crdStatus.message`.
 
+<!-- Extracted from specs/018-component-image-overrides on 2026-10-05 -->
+
+`componentImageOverrides` returns one entry per component with a stored `image`: live components
+sorted by name, then orphans sorted by name (the `Deployment.components` relationship has no
+order, so the resolver sorts). When `applicationVersion` is empty, `resolvedReference` is the
+stored reference unchanged, so a remaining `{{ app.version }}` token means "not resolved".
+
 #### Environment-config update + fanout
 
 <!-- Extracted from specs/009-environment-update on 2026-05-08 -->

@@ -226,6 +226,22 @@ explanation, and a remove button (`Remove image override for <component>`)
 that sets `image` to `null`, which the backend accepts as a removal. Orphaned
 blocks are removed whole, image included.
 
+<!-- Extracted from specs/018-component-image-overrides on 2026-10-05 -->
+
+Two read-only views show image overrides from `Deployment.componentImageOverrides`:
+
+- **Read summary** (`ComponentOverridesSummary.tsx`): each declared component with
+  an override gets an image line with the stored reference, the resolved one when
+  `{{ app.version }}` makes them differ, and an **applied** or **not applied**
+  badge from `isApplicable`. Overrides on components the driver no longer
+  declares get their own row (`component-override-orphan-row`), badged
+  **not applied**, also when the driver declares no components.
+- **Upgrade dialog** (`PinnedImageOverridesNotice.tsx`, deployment detail page):
+  before Confirm, lists every override that applies under the current driver
+  version and has no `{{ app.version }}` token, with its reference. These
+  components keep their image after the upgrade. The token check is
+  `hasAppVersionToken` in `lib/image-reference.ts`.
+
 The driver detail **Components** tab (`ComponentsTab.tsx`) shows each component's
 container from `componentConfigs[].container`, or an explicit **None declared**
 state with a tooltip, so driver authors can confirm what they declared.

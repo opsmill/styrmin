@@ -77,6 +77,20 @@ Conventions:
 - Call `await uow.commit()` explicitly to persist changes
 - Naming: action verbs (`get_`, `create_`, `update_`, `delete_`, `deploy_`, `refresh_`)
 
+### Validate before any step that starts a flow run
+
+<!-- Extracted from specs/018-component-image-overrides on 2026-10-05 -->
+
+Run every validation of the request before calling anything that starts a Prefect flow run:
+`apply_state`, or `_ensure_ingress_controller`, which creates and reconciles the internal ingress
+deployment when an environment declares `dedicated_ingress`. `PrefectManager.run_action` creates
+the flow run immediately. If a later check raises, the unit of work rolls back the database rows,
+but the flow run already exists and runs against rows that were never committed.
+
+Order a service function as: load, validate everything, then the steps with side effects outside
+the database. Reference: `services/deployment.py::update_deployment_version`, which resolves the
+target driver version and re-checks image overrides before `_ensure_ingress_controller`.
+
 ## Repository Pattern
 
 Repositories use abstract base classes with concrete SQLModel implementations:
@@ -152,6 +166,18 @@ unrelated edit on that deployment and blocks removing the stranded values. Valid
 driver version the deployment is pinned to **after** the write, not the pre-switch version. Keep
 the stranded values and expose them through a read flag (e.g. `ComponentEnvVars.isApplicable`)
 rather than deleting them. Reference: `services/deployment.py::_validate_component_container_targets`.
+
+<!-- Extracted from specs/018-component-image-overrides on 2026-10-05 -->
+
+The same rule applies to checks that depend on the deployment's current state, such as an image
+reference that must stay valid once `{{ app.version }}` is replaced by the application version.
+On write, check only new or changed entries: an unchanged stored entry was checked when it was
+written. On a version change, re-check the stored entries that apply under the target driver
+version before any task starts, so the change is rejected instead of failing at render. Checks for
+an unknown target (a component the driver does not declare) still cover every submitted entry, as
+for env vars and container overrides. References:
+`services/image_overrides/validator.py::prevalidate_image_overrides` (`stored_config`) and
+`services/deployment.py::_validate_image_overrides_for_version`.
 
 <!-- Extracted from specs/016-backup-retention-ttl on 2026-08-04 -->
 
@@ -394,7 +420,7 @@ No defaulting at render time, no defaulting at Pydantic-model time, no defaultin
 
 <!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
 
-A new per-component override of the pod spec (env vars today, images in #20 next) is a
+A new per-component override of the pod spec (env vars and image overrides today) is a
 Kustomize post-render patch, not a Helm values key. Helm replaces lists, so writing a chart's
 list-shaped key from the values template drops every entry the chart ships.
 
@@ -415,7 +441,16 @@ list-shaped key from the values template drops every entry the chart ships.
 - Test the outcome (entries present, chart entries kept, values replaced), not the exact
   order: kyaml's ordering is implementation behaviour.
 
-See [ADR-057](../../adr/0057-post-render-component-overrides.md) and
+<!-- Extracted from specs/018-component-image-overrides on 2026-10-05 -->
+
+- Build JSON6902 patches as Python lists and render them with `yaml.dump`, never with string
+  formatting. A user-controlled value (an image reference, a component name) then cannot change
+  the patch structure.
+- JSON-pointer-escape every user-controlled name used in a patch path: `~` to `~0` first, then
+  `/` to `~1` (RFC 6901). Component names are free-form strings; unescaped, a `/` splits the path.
+
+See [ADR-057](../../adr/0057-post-render-component-overrides.md),
+[ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md), and
 `services/component_container/patch_builder.py`.
 
 ### Custom-resource updates: replace the spec keys you write, merge the rest
@@ -513,3 +548,12 @@ def my_task(context: Context) -> None:  # noqa: ARG001
 - Type hints optional in test files
 - **GraphQL schema changes require a propagation test** — see
   [`dev/guides/graphql-propagation-tests.md`](../../guides/graphql-propagation-tests.md).
+
+<!-- Extracted from specs/018-component-image-overrides on 2026-10-05 -->
+
+- **Validators implemented in both the backend and the frontend share one test-vector file.**
+  Both test suites read the same JSON list of inputs and expected results, so the two
+  implementations cannot drift without a test failing. Example:
+  `frontend/src/lib/image-reference.vectors.json`, read by
+  `backend/tests/unit/services/image_overrides/test_reference.py` and
+  `frontend/src/lib/image-reference.test.ts`.

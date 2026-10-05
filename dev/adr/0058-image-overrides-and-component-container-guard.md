@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-04
-**Source**: specs/018-component-image-overrides/ (spec, plan, research D-001 – D-014, critique)
+**Source**: specs/archive/018-component-image-overrides/ (spec, plan, research D-001 – D-014, critique)
 **Extends**: [ADR-057](0057-post-render-component-overrides.md) — image overrides are the second
 post-render override into the declared component container.
 **Narrows**: ADR-057's consequence "a wrong container name fails the release, but only once env
