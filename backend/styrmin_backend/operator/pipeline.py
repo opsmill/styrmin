@@ -8,9 +8,10 @@ Implements the three-phase deployment sequence:
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import Any
+
+from loguru import logger
 
 from styrmin_backend.agent.service.kubernetes.primitives import (
     apply_kubernetes_resource,
@@ -23,8 +24,6 @@ from styrmin_backend.operator.crd.status import is_condition_true
 from styrmin_backend.operator.state import (
     build_desired_resources,
 )
-
-logger = logging.getLogger(__name__)
 
 _PREREQUISITE_KINDS = {"NetworkPolicy", "Secret"}
 _SERVICE_KINDS = {"Service"}
@@ -113,10 +112,10 @@ async def execute_phase_prerequisites(
                 netpol_count += 1
             elif kind == "Secret":
                 secret_count += 1
-            logger.info("Applied %s/%s in %s", kind, name, namespace)
+            logger.info("Applied {}/{} in {}", kind, name, namespace)
         except Exception as exc:
             result.add_error(f"Failed to apply {kind}/{name}: {exc}")
-            logger.error("Failed to apply %s/%s: %s", kind, name, exc)
+            logger.error("Failed to apply {}/{}: {}", kind, name, exc)
 
     result.resource_details = {
         "networkPolicies": netpol_count,
@@ -150,7 +149,7 @@ async def execute_phase_helmrelease(
         helm = context.app.helm
     except Exception as exc:
         result.add_error(f"Failed to deserialize context: {exc}")
-        logger.error("Failed to deserialize context: %s", exc)
+        logger.error("Failed to deserialize context: {}", exc)
         return result
 
     from styrmin_backend.agent.service.kubernetes.primitives import (
@@ -176,10 +175,10 @@ async def execute_phase_helmrelease(
             version="v1",
             namespace="styrmin",
         )
-        logger.info("Created HelmRepository for %s", helm.repository.url)
+        logger.info("Created HelmRepository for {}", helm.repository.url)
     except Exception as exc:
         result.add_error(f"Failed to create HelmRepository: {exc}")
-        logger.error("Failed to create HelmRepository: %s", exc)
+        logger.error("Failed to create HelmRepository: {}", exc)
         return result
 
     # Step 2: Create HelmChart in styrmin namespace
@@ -197,10 +196,10 @@ async def execute_phase_helmrelease(
             version="v1",
             namespace="styrmin",
         )
-        logger.info("Created HelmChart %s:%s", helm.chart.name, helm.chart.version)
+        logger.info("Created HelmChart {}:{}", helm.chart.name, helm.chart.version)
     except Exception as exc:
         result.add_error(f"Failed to create HelmChart: {exc}")
-        logger.error("Failed to create HelmChart: %s", exc)
+        logger.error("Failed to create HelmChart: {}", exc)
         return result
 
     # Step 3: Create HelmRelease in deployment namespace
@@ -224,13 +223,13 @@ async def execute_phase_helmrelease(
             replace_spec_keys_on_update=True,
         )
         logger.info(
-            "Created HelmRelease %s in %s",
+            "Created HelmRelease {} in {}",
             context.instance.release_reference,
             namespace,
         )
     except Exception as exc:
         result.add_error(f"Failed to create HelmRelease: {exc}")
-        logger.error("Failed to create HelmRelease: %s", exc)
+        logger.error("Failed to create HelmRelease: {}", exc)
         return result
 
     result.created_count = 3
@@ -275,10 +274,10 @@ async def execute_phase_services(
                 service_count += 1
             else:
                 middleware_count += 1
-            logger.info("Applied %s/%s in %s", kind, name, namespace)
+            logger.info("Applied {}/{} in {}", kind, name, namespace)
         except Exception as exc:
             result.add_error(f"Failed to apply {kind}/{name}: {exc}")
-            logger.error("Failed to apply %s/%s: %s", kind, name, exc)
+            logger.error("Failed to apply {}/{}: {}", kind, name, exc)
 
     result.resource_details = {
         "services": service_count,
