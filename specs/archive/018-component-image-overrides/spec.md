@@ -4,9 +4,9 @@
 
 **Created**: 2026-10-03
 
-**Status**: Draft
+**Status**: Extracted
 
-**Input**: Idea brief "per-component image overrides (post-render)" — [opsmill/styrmin#20 (comment)](https://github.com/opsmill/styrmin/issues/20#issuecomment-5973303433). Seed issue: [#20](https://github.com/opsmill/styrmin/issues/20). The brief replaces the values-path PRD earlier in the issue and resolves the open questions of the [direction-change comment](https://github.com/opsmill/styrmin/issues/20#issuecomment-5953589459). Builds on [#387](https://github.com/opsmill/styrmin/issues/387) / [ADR-057](../../dev/adr/0057-post-render-component-overrides.md) (post-render env vars into a declared **component container**). Related: [#388](https://github.com/opsmill/styrmin/issues/388) (`apply` validates against the pre-switch driver version).
+**Input**: Idea brief "per-component image overrides (post-render)" — [opsmill/styrmin#20 (comment)](https://github.com/opsmill/styrmin/issues/20#issuecomment-5973303433). Seed issue: [#20](https://github.com/opsmill/styrmin/issues/20). The brief replaces the values-path PRD earlier in the issue and resolves the open questions of the [direction-change comment](https://github.com/opsmill/styrmin/issues/20#issuecomment-5953589459). Builds on [#387](https://github.com/opsmill/styrmin/issues/387) / [ADR-057](../../../dev/adr/0057-post-render-component-overrides.md) (post-render env vars into a declared **component container**). Related: [#388](https://github.com/opsmill/styrmin/issues/388) (`apply` validates against the pre-switch driver version).
 
 ## Context
 

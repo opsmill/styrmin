@@ -206,3 +206,19 @@ supplies flag overrides, streams one result line per manifest, prints the
 
 See [ADR-048](../../adr/0048-declarative-apply-client-side-orchestration.md) and
 [ADR-049](../../adr/0049-styrmin-v1-manifest-contract.md).
+
+<!-- Extracted from specs/018-component-image-overrides on 2026-10-05 -->
+
+**Pinned image warning.** When a manifest changes an existing deployment's application version,
+`_apply_update` computes the components whose effective `image` override has no
+`{{ app.version }}` token: the manifest's `components` when it sets them (they replace the stored
+blocks), else the stored config. It returns them as `ApplyOutcome.pinned_image_components`, with
+`ApplyOutcome.target_version` set. The CLI prints one `warning:` line per affected deployment on
+stderr, after its outcome line, and keeps the exit code. `apply` reads only the raw config, so it
+also lists overrides that do not currently apply; the UI upgrade dialog lists only applicable ones.
+See [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md) §7.
+
+**Clearing config.** `updateDeployment` replaces the stored config with the submitted one, except
+when the submitted config is empty: the resolver then passes `None` and the stored config is kept.
+An omitted or empty `spec.config` therefore changes nothing. To clear the last per-component
+override, a manifest writes `components: []`.
