@@ -283,13 +283,12 @@ async def _await_capture_terminal(
                     f"Environment clone {clone_id}: its capture was still "
                     f"{capture_status.value} after {CAPTURE_POLL_TIMEOUT_SECONDS}s"
                 )
+            # End this read's transaction before sleeping so the connection returns
+            # to the pool, and the next turn re-reads instead of the identity map.
+            # Never after a ``return``: callers must not get an expired clone.
+            await uow.rollback()
             await asyncio.sleep(POLL_RETRY_DELAY_SECONDS)
             elapsed += POLL_RETRY_DELAY_SECONDS
-            # Forget this iteration's read (and end its transaction) so the next one
-            # re-reads the capture instead of the identity map's copy of it. Placed
-            # after the sleep, never after a ``return``: the clone instance the
-            # callers go on to use must not be expired out from under them.
-            await uow.rollback()
 
 
 class _UsableConstituent:
