@@ -2350,10 +2350,14 @@ async def test_late_skips_survive_a_cancellation_mid_dispatch(
 
 
 @pytest.mark.asyncio
-async def test_a_dispatch_failure_leaves_the_constituent_restore_pending(
+async def test_a_dispatch_failure_fails_the_constituent_restore_and_its_deployment(
     environment: Environment, prefect_manager_mock, no_config_fanout
 ) -> None:
-    """A Prefect submission failure is a pending constituent, not a skip."""
+    """A Prefect submission failure is a failed constituent, not a skip.
+
+    Left ``PENDING``, the row would hold the deployment in ``RESTORING`` (status
+    reports skip it) and keep the environment's operation guard closed.
+    """
     adv = _driver_version()
     deployment = _deployment(environment_id=environment.id, adv=adv, name="infrahub")
     parent = _environment_backup(
@@ -2375,8 +2379,21 @@ async def test_a_dispatch_failure_leaves_the_constituent_restore_pending(
     )
 
     assert environment_restore.skipped_constituents is None
-    assert len(uow.restores.models) == 1
-    assert uow.restores.models[0].status == RestoreStatus.PENDING
+    (restore,) = uow.restores.models
+    assert restore.status == RestoreStatus.FAILED
+    assert restore.completed_at is not None
+    assert restore.error_message is not None
+    assert "never dispatched" in restore.error_message
+    assert "prefect is down" in restore.error_message
+    stored = await uow.deployments.find(deployment.id)
+    assert stored is not None
+    assert stored.status == DeploymentState.FAILED
+    assert (
+        await uow.environment_restores.has_in_progress_environment_restore(
+            environment.id
+        )
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------

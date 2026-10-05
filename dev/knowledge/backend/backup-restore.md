@@ -303,7 +303,7 @@ A restore is a multi-stage operation: velero recreates the namespace and its res
 
 ### Stages
 
-1. **Restore start (`services/backup/service.py:create_restore`).** The deployment's status is flipped to `DeploymentState.RESTORING` in the same transaction that creates the `Restore` record. Internal deployments are rejected. A second restore is rejected with `RestoreAlreadyInProgressError` when a **non-terminal `Restore` row** (`PENDING` or `IN_PROGRESS`) already targets that deployment, or when one already replays the same backup — the refusal always names the offending restore in `existing_restore_id`. The guard deliberately does **not** read `deployment.status`: an environment clone parks each counterpart in `RESTORING` so nothing reconciles it before its data lands (`specs/010-environment-clone/research.md` D5), and that state is the *precondition* of the first cross-target restore rather than a conflict with it. A deployment left `RESTORING` by a dead restore is therefore restorable again instead of permanently wedged.
+1. **Restore start (`services/backup/service.py:create_restore`).** The deployment's status is flipped to `DeploymentState.RESTORING` in the same transaction that creates the `Restore` record. Internal deployments are rejected. A second restore is rejected with `RestoreAlreadyInProgressError` when a **non-terminal `Restore` row** (`PENDING` or `IN_PROGRESS`) already targets that deployment, or when one already replays the same backup — the refusal always names the offending restore in `existing_restore_id`. The guard deliberately does **not** read `deployment.status`: an environment clone parks each counterpart in `RESTORING` so nothing reconciles it before its data lands (`specs/010-environment-clone/research.md` D5), and that state is the *precondition* of the first cross-target restore rather than a conflict with it. A deployment left `RESTORING` by a dead restore is therefore restorable again instead of permanently wedged. If the caller then cannot dispatch `execute_restore_workflow`, nothing would ever move the `PENDING` row, so `createRestore` and the environment-restore fan-out call `settle_undispatched_restore`, which marks the restore `FAILED` with the dispatch error and the deployment `FAILED` in one transaction; the clone flow does the same through `_settle_undispatched_restore`.
 2. **Velero work (USER flow).** Namespace is deleted, then velero restores everything from the backup. The CRD is recreated with empty status.
 3. **Operator quiesce.** While `phase == Restoring`, the operator's `kopf_styrmin_deployment_timer` early-returns — it does not advance phases and does not trip the 300 s readiness-timeout-to-Error branch.
 4. **Post-velero recovery (`operator/restore_recovery.py`).** Called from the USER flow after velero polling reports `Completed`:
@@ -323,7 +323,7 @@ The agent's status reporter maps CRD `displayState` to `deployment.status` (see 
 | `Restoring` | `RESTORING` |
 | `Error` | `FAILED` |
 
-A restore holds `deployment.status` at `RESTORING` while a non-terminal `Restore` row (`PENDING` or `IN_PROGRESS`) targets the deployment's namespace: a report updates the `DeploymentStatus` snapshot but not `deployment.status`, and stage 5 sets the final state. The CRD reads `Restoring` only after stage 4's `mark_restoring`, so reports sent before then carry the pre-restore `Running`, the teardown's `Deleting`, or the `Deploying` default of the status-less CRD that Velero recreates ([#389](https://github.com/opsmill/styrmin/issues/389)). Once the row is terminal, reports apply again.
+A restore holds `deployment.status` at `RESTORING` while a non-terminal `Restore` row (`PENDING` or `IN_PROGRESS`) targets the deployment's namespace: a report updates the `DeploymentStatus` snapshot but not `deployment.status`, and stage 5 sets the final state (or, when the workflow could not be dispatched, the caller fails both rows as described in stage 1). The CRD reads `Restoring` only after stage 4's `mark_restoring`, so reports sent before then carry the pre-restore `Running`, the teardown's `Deleting`, or the `Deploying` default of the status-less CRD that Velero recreates ([#389](https://github.com/opsmill/styrmin/issues/389)). Once the row is terminal, reports apply again.
 
 ## Environment-Level Backup & Restore
 
@@ -559,6 +559,9 @@ Two consequences worth knowing:
   constituent whose flow never ran stays `PENDING`, so its parent stays
   non-terminal and the guard keeps rejecting new operations. Deletion is the
   escape hatch, which is why `delete_environment_backup` has no status guard.
+  A constituent backup whose dispatch fails stays `PENDING` this way. A
+  constituent restore whose dispatch fails does not: the fan-out marks it
+  `FAILED` and its deployment `FAILED` (`settle_undispatched_restore`).
 - **Two racing create calls can both pass the check.** Accepted: the
   per-instance `has_in_progress_backup` guard then turns the loser's
   constituents into recorded `ConstituentError`s (a `PARTIAL` outcome) rather
@@ -581,7 +584,9 @@ order:
    once, before any dispatch**.
 4. **Exclusion-aware config fan-out**: `redeploy_for_environment_update` for
    every eligible deployment *not* receiving a constituent restore.
-5. **Dispatch** one `EXECUTE_RESTORE` per created constituent restore.
+5. **Dispatch** one `EXECUTE_RESTORE` per created constituent restore. A
+   dispatch failure marks that restore and its deployment `FAILED` and the
+   loop continues.
 
 Why the exclusion in step 4 is load-bearing: a deployment receiving a Velero
 data restore is being returned to its backup-time state, and its restored

@@ -41,6 +41,7 @@ from styrmin_backend.services.backup.service import (
     create_restore,
     delete_backup,
     resolve_backup_target,
+    settle_undispatched_restore,
 )
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.deployment import redeploy_for_environment_update
@@ -1102,16 +1103,25 @@ async def restore_environment_backup(
                 },
             )
         except Exception as exc:  # noqa: BLE001 — a dispatch failure is not a lost row
-            # The Restore row exists and stays PENDING, so this shows up as a
-            # non-terminal constituent rather than a skip — same contract as
-            # the per-deployment ``createRestore`` mutation.
+            # The Restore row exists, so this shows up as a failed constituent
+            # rather than a skip — same contract as the ``createRestore`` mutation.
             dispatch_failed += 1
             logger.warning(
                 "env_restore_dispatch_error environment_restore_id={} restore_id={} "
-                "restore record created but Velero execution not triggered: {}",
+                "restore record created but Velero execution not triggered, "
+                "marking the restore and its deployment failed: {}",
                 environment_restore_id,
                 pending.restore_id,
                 exc,
+            )
+            await settle_undispatched_restore(
+                restore_id=pending.restore_id,
+                deployment_id=pending.deployment_id,
+                uow=uow,
+                error=(
+                    "the restore was created but its workflow was never "
+                    f"dispatched: {exc}"
+                ),
             )
             continue
         restored += 1

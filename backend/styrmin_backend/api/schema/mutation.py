@@ -136,6 +136,7 @@ from styrmin_backend.services.backup.service import (
     create_restore as create_restore_service,
     delete_backup as delete_backup_service,
     resolve_backup_target,
+    settle_undispatched_restore,
 )
 from styrmin_backend.services.deployment import get_deployment
 from styrmin_backend.services.exceptions import (
@@ -1119,9 +1120,21 @@ class Mutation:
         except Exception as exc:
             logger.warning(
                 f"Failed to submit restore workflow for restore {restore.id}, "
-                "restore record created but Velero execution not triggered",
+                "restore record created but Velero execution not triggered; "
+                "marking the restore and its deployment failed",
                 exc_info=exc,
             )
+            settled = await settle_undispatched_restore(
+                restore_id=restore.id,
+                deployment_id=deployment_id,
+                uow=uow,
+                error=(
+                    "the restore was created but its workflow was never "
+                    f"dispatched: {exc}"
+                ),
+            )
+            if settled is not None:
+                restore = settled
 
         return RestoreType.from_instance(restore)
 
