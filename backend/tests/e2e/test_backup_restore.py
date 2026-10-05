@@ -56,6 +56,10 @@ DEPLOYMENT_RUNNING_TIMEOUT_SECONDS = 300.0
 # before pytest ever writes the real failure out.
 CLEANUP_WAIT_TIMEOUT_SECONDS = 180.0
 
+# A cleanup revert can write the value a deployment already runs with; the
+# fanout then skips it and no Task ever appears, so stop waiting after this.
+NOOP_FANOUT_GRACE_SECONDS = 15.0
+
 # One coordinated environment backup: N constituent per-instance Velero backups
 # dispatched concurrently after the parent commits. Calibrated off the sibling
 # per-instance budgets in this shard rather than guessed — 180s for one
@@ -470,6 +474,7 @@ async def wait_for_env_fanout_steady_state(
     deployment_id: str,
     pre_timeline_length: int,
     timeout: float = FANOUT_RECONCILE_TIMEOUT_SECONDS,
+    noop_grace: float | None = None,
 ) -> None:
     """Block until the redeploy fanout from an env-config write has settled.
 
@@ -482,13 +487,22 @@ async def wait_for_env_fanout_steady_state(
 
     Steady state is: the fanout Task appeared, every Task added by the fanout
     reached a terminal status, and the deployment is back to RUNNING.
+
+    ``noop_grace`` is for cleanup reverts only: the fanout skips a deployment
+    already at the written config, so return if no Task appears within it.
     """
-    deadline = asyncio.get_event_loop().time() + timeout
+    start = asyncio.get_event_loop().time()
+    deadline = start + timeout
     last_reason = "fanout Task never appeared on the timeline"
     while asyncio.get_event_loop().time() < deadline:
         timeline = await client.deployments.get_timeline(deployment_id=deployment_id)
         new_count = len(timeline) - pre_timeline_length
         if new_count <= 0:
+            if (
+                noop_grace is not None
+                and asyncio.get_event_loop().time() - start >= noop_grace
+            ):
+                return
             await asyncio.sleep(2)
             continue
         # Timeline is ordered newest-first (``TaskRepository.find_by_deployment``),
@@ -697,6 +711,7 @@ async def test_backup_and_restore_lifecycle(
                 client,
                 deployment_id=deployment_id,
                 pre_timeline_length=revert_timeline_length,
+                noop_grace=NOOP_FANOUT_GRACE_SECONDS,
             )
         # Leave the driver back on the deployment detail page: the UI driver's
         # page is session-scoped, and the sibling backup tests that follow act
@@ -1163,6 +1178,7 @@ async def test_environment_backup_and_restore_lifecycle(
                         deployment_id=deployment_id,
                         pre_timeline_length=length,
                         timeout=CLEANUP_WAIT_TIMEOUT_SECONDS,
+                        noop_grace=NOOP_FANOUT_GRACE_SECONDS,
                     )
                     for deployment_id, length in revert_timeline.items()
                 )
@@ -1884,6 +1900,7 @@ async def test_environment_clone_lifecycle(
                         deployment_id=deployment_id,
                         pre_timeline_length=length,
                         timeout=CLEANUP_WAIT_TIMEOUT_SECONDS,
+                        noop_grace=NOOP_FANOUT_GRACE_SECONDS,
                     )
                     for deployment_id, length in revert_timeline.items()
                 )
