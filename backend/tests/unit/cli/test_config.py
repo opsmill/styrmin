@@ -44,7 +44,8 @@ def test_config_show_outputs_toml_by_default(
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
 
-    # TOML format should have key = value pairs
+    # TOML format should have section headers and key = value pairs
+    assert "[database]" in output
     assert "db_type" in output
     assert "sqlite" in output
 
