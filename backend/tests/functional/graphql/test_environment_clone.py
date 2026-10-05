@@ -67,6 +67,7 @@ from styrmin_backend.services.backup.clone import (
 )
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 from styrmin_backend.workflows.templates import clone as clone_flow
+from tests.helpers.unit_of_work import yield_unit_of_work
 
 from ._queries import load_query
 from .conftest import gql
@@ -927,10 +928,6 @@ async def _run_clone_flow(
         The keyword arguments of every cross-target restore the flow created.
     """
     restore_calls: list[dict[str, Any]] = []
-    uow = SqlModelUnitOfWork(session=session)
-
-    async def _get_unit_of_work() -> SqlModelUnitOfWork:
-        return uow
 
     async def _create_restore(**kwargs: Any) -> tuple[Restore, UUID]:
         restore_calls.append(kwargs)
@@ -950,7 +947,11 @@ async def _run_clone_flow(
         async def run_action(self, **kwargs: Any) -> None:
             return None
 
-    monkeypatch.setattr(clone_flow, "get_unit_of_work", _get_unit_of_work)
+    monkeypatch.setattr(
+        clone_flow,
+        "get_unit_of_work",
+        yield_unit_of_work(SqlModelUnitOfWork(session=session)),
+    )
     monkeypatch.setattr(clone_flow, "get_run_logger", lambda: logging.getLogger("test"))
     monkeypatch.setattr(clone_flow, "create_restore", _create_restore)
     monkeypatch.setattr(clone_flow, "get_manager", lambda: _Manager())

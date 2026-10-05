@@ -383,19 +383,18 @@ async def execute_backup_workflow(
     config.SETTINGS.initialize_and_exit()
 
     logger = get_run_logger()
-    uow = await get_unit_of_work()
-
     try:
         # Mark as in-progress
-        await update_backup_status(
-            backup_id=backup_uuid,
-            status=BackupStatus.IN_PROGRESS,
-            uow=uow,
-        )
+        async with get_unit_of_work() as uow:
+            await update_backup_status(
+                backup_id=backup_uuid,
+                status=BackupStatus.IN_PROGRESS,
+                uow=uow,
+            )
 
         # Fetch backup record for names
-        uow = await get_unit_of_work()
-        backup = await get_backup(backup_uuid, uow)
+        async with get_unit_of_work() as uow:
+            backup = await get_backup(backup_uuid, uow)
         velero_backup_name = backup.name
         target_namespace = f"styrmin-{deployment_uuid}"
         velero_namespace = "styrmin"
@@ -416,8 +415,7 @@ async def execute_backup_workflow(
         # row hides its own scope and every shallower scope with it.
         missing_scope: str | None = None
         try:
-            uow = await get_unit_of_work()
-            async with uow:
+            async with get_unit_of_work() as uow:
                 deployment = await uow.deployments.find(deployment_uuid)
                 if deployment is None:
                     missing_scope = "deployment"
@@ -513,13 +511,13 @@ async def execute_backup_workflow(
         # would be accepted. The failure hazard the second write used to carry —
         # a record deleted between the two calls raising inside the ``except``
         # handler, which itself writes status — is fixed in the handler instead.
-        uow = await get_unit_of_work()
-        await update_backup_status(
-            backup_id=backup_uuid,
-            status=BackupStatus.IN_PROGRESS,
-            uow=uow,
-            metadata_updates={"ttl": ttl, "ttl_source": ttl_source},
-        )
+        async with get_unit_of_work() as uow:
+            await update_backup_status(
+                backup_id=backup_uuid,
+                status=BackupStatus.IN_PROGRESS,
+                uow=uow,
+                metadata_updates={"ttl": ttl, "ttl_source": ttl_source},
+            )
 
         # Build hooks from component configs
         hooks: list[VeleroBackupHook] = []
@@ -606,62 +604,62 @@ async def execute_backup_workflow(
             {"expires_at": expiration} if expiration else None
         )
 
-        uow = await get_unit_of_work()
-        if velero_phase == "Completed":
-            size_bytes = status.get("backupItemOperationsCompleted")
-            await update_backup_status(
-                backup_id=backup_uuid,
-                status=BackupStatus.COMPLETED,
-                uow=uow,
-                size_bytes=size_bytes,
-                metadata_updates=metadata_updates,
-            )
-            if not expiration:
-                # A stored backup always expires, so a Completed phase without
-                # ``status.expiration`` means we silently lost FR-006's expiry
-                # record. Say so — the Failed case below is expected and stays
-                # quiet, this one is not.
-                logger.warning(
-                    f"Backup {backup_uuid} completed but Velero reported no "
-                    "status.expiration, so no expiry was recorded — the UI and "
-                    "CLI will show no expiry date for a backup that does expire"
+        async with get_unit_of_work() as uow:
+            if velero_phase == "Completed":
+                size_bytes = status.get("backupItemOperationsCompleted")
+                await update_backup_status(
+                    backup_id=backup_uuid,
+                    status=BackupStatus.COMPLETED,
+                    uow=uow,
+                    size_bytes=size_bytes,
+                    metadata_updates=metadata_updates,
                 )
-            logger.info(f"Backup {backup_uuid} completed successfully")
-        else:
-            error_msg = status.get(
-                "failureReason", f"Velero backup phase: {velero_phase}"
-            )
-            await update_backup_status(
-                backup_id=backup_uuid,
-                status=BackupStatus.FAILED,
-                uow=uow,
-                error_message=error_msg,
-                metadata_updates=metadata_updates,
-            )
-            logger.error(f"Backup {backup_uuid} failed: {error_msg}")
+                if not expiration:
+                    # A stored backup always expires, so a Completed phase without
+                    # ``status.expiration`` means we silently lost FR-006's expiry
+                    # record. Say so — the Failed case below is expected and stays
+                    # quiet, this one is not.
+                    logger.warning(
+                        f"Backup {backup_uuid} completed but Velero reported no "
+                        "status.expiration, so no expiry was recorded — the UI and "
+                        "CLI will show no expiry date for a backup that does expire"
+                    )
+                logger.info(f"Backup {backup_uuid} completed successfully")
+            else:
+                error_msg = status.get(
+                    "failureReason", f"Velero backup phase: {velero_phase}"
+                )
+                await update_backup_status(
+                    backup_id=backup_uuid,
+                    status=BackupStatus.FAILED,
+                    uow=uow,
+                    error_message=error_msg,
+                    metadata_updates=metadata_updates,
+                )
+                logger.error(f"Backup {backup_uuid} failed: {error_msg}")
 
     except Exception as e:
         logger.error(f"Backup {backup_uuid} failed: {e}")
-        uow = await get_unit_of_work()
-        try:
-            await update_backup_status(
-                backup_id=backup_uuid,
-                status=BackupStatus.FAILED,
-                uow=uow,
-                error_message=str(e),
-            )
-        except BackupNotFoundError:
-            # The record was deleted mid-flight, so every ``update_backup_status``
-            # in this flow raises — including the one right here, whose whole job
-            # is to report why the flow failed. Letting that surface would raise
-            # a bookkeeping error *from inside the handler*, replacing the real
-            # cause with "Backup <id> not found" and losing it. There is nothing
-            # left to mark FAILED, so record why and re-raise the original below.
-            logger.warning(
-                f"Backup {backup_uuid} could not be marked FAILED: the record no "
-                f"longer exists (deleted while the backup was running). "
-                f"Re-raising the original failure instead"
-            )
+        async with get_unit_of_work() as uow:
+            try:
+                await update_backup_status(
+                    backup_id=backup_uuid,
+                    status=BackupStatus.FAILED,
+                    uow=uow,
+                    error_message=str(e),
+                )
+            except BackupNotFoundError:
+                # The record was deleted mid-flight, so every ``update_backup_status``
+                # in this flow raises — including the one right here, whose whole job
+                # is to report why the flow failed. Letting that surface would raise
+                # a bookkeeping error *from inside the handler*, replacing the real
+                # cause with "Backup <id> not found" and losing it. There is nothing
+                # left to mark FAILED, so record why and re-raise the original below.
+                logger.warning(
+                    f"Backup {backup_uuid} could not be marked FAILED: the record no "
+                    f"longer exists (deleted while the backup was running). "
+                    f"Re-raising the original failure instead"
+                )
         raise
 
 
@@ -745,26 +743,25 @@ async def execute_restore_workflow(
     config.SETTINGS.initialize_and_exit()
 
     logger = get_run_logger()
-    uow = await get_unit_of_work()
-
     try:
         # Mark as in-progress
-        await update_restore_status(
-            restore_id=restore_uuid,
-            status=RestoreStatus.IN_PROGRESS,
-            uow=uow,
-        )
+        async with get_unit_of_work() as uow:
+            await update_restore_status(
+                restore_id=restore_uuid,
+                status=RestoreStatus.IN_PROGRESS,
+                uow=uow,
+            )
 
         # Fetch backup to get Velero backup name
-        uow = await get_unit_of_work()
-        backup = await get_backup(backup_uuid, uow)
+        async with get_unit_of_work() as uow:
+            backup = await get_backup(backup_uuid, uow)
         velero_backup_name = backup.name
 
         # Fetch restore for names
         from styrmin_backend.services.backup.service import get_restore
 
-        uow = await get_unit_of_work()
-        restore = await get_restore(restore_uuid, uow)
+        async with get_unit_of_work() as uow:
+            restore = await get_restore(restore_uuid, uow)
         velero_restore_name = restore.name
 
         velero_namespace = "styrmin"
@@ -820,10 +817,10 @@ async def execute_restore_workflow(
         # with database access; the USER flow only applies it.
         counterpart_crd_body: dict[str, Any] | None = None
         if is_cross_target:
-            uow = await get_unit_of_work()
-            counterpart_crd_body = await _build_counterpart_crd_body(
-                deployment_id=UUID(deployment_id), uow=uow
-            )
+            async with get_unit_of_work() as uow:
+                counterpart_crd_body = await _build_counterpart_crd_body(
+                    deployment_id=UUID(deployment_id), uow=uow
+                )
 
         # Determine timeout
         timeout = 7200
@@ -873,70 +870,70 @@ async def execute_restore_workflow(
         velero_phase = status.get("phase", "")
         recovery = result.get("recovery", {}) if isinstance(result, dict) else {}
 
-        uow = await get_unit_of_work()
-        if velero_phase == "Completed" and recovery.get("recovered"):
-            await update_restore_status(
-                restore_id=restore_uuid,
-                status=RestoreStatus.COMPLETED,
-                uow=uow,
-            )
-            await _set_deployment_status_running(
-                deployment_id=UUID(deployment_id), uow=uow
-            )
-            logger.info(f"Restore {restore_uuid} completed successfully")
-        else:
-            if velero_phase == "Completed":
-                error_msg = (
-                    recovery.get("error")
-                    or "Velero completed but post-restore reapply failed"
+        async with get_unit_of_work() as uow:
+            if velero_phase == "Completed" and recovery.get("recovered"):
+                await update_restore_status(
+                    restore_id=restore_uuid,
+                    status=RestoreStatus.COMPLETED,
+                    uow=uow,
                 )
+                await _set_deployment_status_running(
+                    deployment_id=UUID(deployment_id), uow=uow
+                )
+                logger.info(f"Restore {restore_uuid} completed successfully")
             else:
-                error_msg = status.get(
-                    "failureReason", f"Velero restore phase: {velero_phase}"
+                if velero_phase == "Completed":
+                    error_msg = (
+                        recovery.get("error")
+                        or "Velero completed but post-restore reapply failed"
+                    )
+                else:
+                    error_msg = status.get(
+                        "failureReason", f"Velero restore phase: {velero_phase}"
+                    )
+                await update_restore_status(
+                    restore_id=restore_uuid,
+                    status=RestoreStatus.FAILED,
+                    uow=uow,
+                    error_message=error_msg,
                 )
-            await update_restore_status(
-                restore_id=restore_uuid,
-                status=RestoreStatus.FAILED,
-                uow=uow,
-                error_message=error_msg,
-            )
-            await _set_deployment_status_failed(
-                deployment_id=UUID(deployment_id),
-                uow=uow,
-                error_message=error_msg,
-            )
-            logger.error(f"Restore {restore_uuid} failed: {error_msg}")
+                await _set_deployment_status_failed(
+                    deployment_id=UUID(deployment_id),
+                    uow=uow,
+                    error_message=error_msg,
+                )
+                logger.error(f"Restore {restore_uuid} failed: {error_msg}")
 
     except Exception as e:
         logger.error(f"Restore {restore_uuid} failed: {e}")
-        uow = await get_unit_of_work()
-        try:
-            await update_restore_status(
-                restore_id=restore_uuid,
-                status=RestoreStatus.FAILED,
+        async with get_unit_of_work() as uow:
+            try:
+                await update_restore_status(
+                    restore_id=restore_uuid,
+                    status=RestoreStatus.FAILED,
+                    uow=uow,
+                    error_message=str(e),
+                )
+            except RestoreNotFoundError:
+                # The record was deleted mid-flight, so every ``update_restore_status``
+                # in this flow raises — including the one right here, whose whole job
+                # is to report why the flow failed. Letting that surface would raise
+                # a bookkeeping error *from inside the handler*, replacing the real
+                # cause with "Restore <id> not found" and losing it. There is nothing
+                # left to mark FAILED, so record why and re-raise the original below.
+                # Swallowing it here also keeps the deployment write below reachable:
+                # the deployment outlives the restore record, and leaving it stuck in
+                # RESTORING would be a second, longer-lived symptom.
+                logger.warning(
+                    f"Restore {restore_uuid} could not be marked FAILED: the record no "
+                    f"longer exists (deleted while the restore was running). "
+                    f"Re-raising the original failure instead"
+                )
+            await _set_deployment_status_failed(
+                deployment_id=UUID(deployment_id),
                 uow=uow,
                 error_message=str(e),
             )
-        except RestoreNotFoundError:
-            # The record was deleted mid-flight, so every ``update_restore_status``
-            # in this flow raises — including the one right here, whose whole job
-            # is to report why the flow failed. Letting that surface would raise
-            # a bookkeeping error *from inside the handler*, replacing the real
-            # cause with "Restore <id> not found" and losing it. There is nothing
-            # left to mark FAILED, so record why and re-raise the original below.
-            # Swallowing it here also keeps the deployment write below reachable:
-            # the deployment outlives the restore record, and leaving it stuck in
-            # RESTORING would be a second, longer-lived symptom.
-            logger.warning(
-                f"Restore {restore_uuid} could not be marked FAILED: the record no "
-                f"longer exists (deleted while the restore was running). "
-                f"Re-raising the original failure instead"
-            )
-        await _set_deployment_status_failed(
-            deployment_id=UUID(deployment_id),
-            uow=uow,
-            error_message=str(e),
-        )
         raise
 
 

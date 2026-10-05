@@ -121,6 +121,11 @@ class UnitOfWork(ABC):
 
 `__aexit__` calls `rollback()` automatically when the `async with` block exits with an exception; otherwise services must call `await uow.commit()` explicitly.
 
+`async with uow:` marks a transaction block, not the session's lifetime: a single unit of work is entered many times (once per service call and per GraphQL field resolver in a request), so `__aexit__` never closes the session. The code that creates the session closes it:
+
+- **API requests:** `get_session()` (`db/utils.py`) closes the request session when FastAPI tears down the `get_unit_of_work_dependency` dependency.
+- **Prefect flows and other standalone code:** `get_unit_of_work()` (`services/unit_of_work.py`) is an async context manager that opens a fresh session and closes it on exit. Use it as `async with get_unit_of_work() as uow:` around each step, so the connection returns to the pool before the flow waits on Kubernetes or Velero.
+
 `DeploymentRepository` exposes a `find_all_by_environment(environment_id)` accessor (added in 009-environment-update) that returns every deployment in an environment, including tombstoned and internal rows. Callers wanting the active-only subset filter the result in-loop. The fanout in `update_environment` uses this accessor and applies the tombstoned/internal exclusion at iteration time so the per-deployment counters can distinguish "evaluated but excluded" from "evaluated and dispatched/skipped".
 
 ### Usage Pattern

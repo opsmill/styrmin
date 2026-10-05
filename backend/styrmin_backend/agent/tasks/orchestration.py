@@ -175,8 +175,7 @@ async def apply_state(
     if not config.SETTINGS.initialized:
         config.SETTINGS.initialize()
 
-    uow = await get_unit_of_work()
-    async with uow:
+    async with get_unit_of_work() as uow:
         deployment = await uow.deployments.find(id=deployment_id)
         if deployment is None:
             return Completed(

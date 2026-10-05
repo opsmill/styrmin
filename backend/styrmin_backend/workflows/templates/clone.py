@@ -193,8 +193,7 @@ async def _save_progress(
     merges the attribution entries into what is stored rather than replacing the
     list (see :func:`_merge_results`).
     """
-    uow = await get_unit_of_work()
-    async with uow:
+    async with get_unit_of_work() as uow:
         clone = await uow.environment_clones.get(clone_id)
         if clone is None:
             raise EnvironmentCloneNotFoundError(
@@ -249,11 +248,9 @@ async def _await_capture_terminal(
         attributed the deletion on the record (research D9), so the flow has
         nothing left to decide.
 
-    One unit of work serves the whole loop. Nothing in this codebase closes an
-    ``AsyncSession`` (``UnitOfWork.__aexit__`` only rolls back on an exception),
-    so asking for a fresh one per iteration would open up to
-    ``CAPTURE_POLL_TIMEOUT_SECONDS / POLL_RETRY_DELAY_SECONDS`` sessions — 720 —
-    against a connection pool of a few dozen, for a single clone. The
+    One unit of work serves the whole loop and is closed when the poll ends,
+    rather than opening up to ``CAPTURE_POLL_TIMEOUT_SECONDS /
+    POLL_RETRY_DELAY_SECONDS`` sessions — 720 — for a single clone. The
     ``rollback`` between iterations is what makes reuse *correct* rather than
     merely cheap: the session's identity map would otherwise keep serving the
     first read of the capture, and the poll would never see it terminalise.
@@ -270,27 +267,29 @@ async def _await_capture_terminal(
     """
     logger = get_run_logger()
     elapsed = 0
-    uow = await get_unit_of_work()
-    while True:
-        clone = await _load_clone(clone_id, uow)
-        capture_status = derive_clone_capture_status(clone.environment_backup)
-        if capture_status is None:
-            logger.info("Clone %s has no reachable capture; ending quietly", clone_id)
-            return None, clone
-        if capture_status in TERMINAL_ENVIRONMENT_OPERATION_STATUSES:
-            return capture_status, clone
-        if elapsed >= CAPTURE_POLL_TIMEOUT_SECONDS:
-            raise RuntimeError(
-                f"Environment clone {clone_id}: its capture was still "
-                f"{capture_status.value} after {CAPTURE_POLL_TIMEOUT_SECONDS}s"
-            )
-        await asyncio.sleep(POLL_RETRY_DELAY_SECONDS)
-        elapsed += POLL_RETRY_DELAY_SECONDS
-        # Forget this iteration's read (and end its transaction) so the next one
-        # re-reads the capture instead of the identity map's copy of it. Placed
-        # after the sleep, never after a ``return``: the clone instance the
-        # callers go on to use must not be expired out from under them.
-        await uow.rollback()
+    async with get_unit_of_work() as uow:
+        while True:
+            clone = await _load_clone(clone_id, uow)
+            capture_status = derive_clone_capture_status(clone.environment_backup)
+            if capture_status is None:
+                logger.info(
+                    "Clone %s has no reachable capture; ending quietly", clone_id
+                )
+                return None, clone
+            if capture_status in TERMINAL_ENVIRONMENT_OPERATION_STATUSES:
+                return capture_status, clone
+            if elapsed >= CAPTURE_POLL_TIMEOUT_SECONDS:
+                raise RuntimeError(
+                    f"Environment clone {clone_id}: its capture was still "
+                    f"{capture_status.value} after {CAPTURE_POLL_TIMEOUT_SECONDS}s"
+                )
+            await asyncio.sleep(POLL_RETRY_DELAY_SECONDS)
+            elapsed += POLL_RETRY_DELAY_SECONDS
+            # Forget this iteration's read (and end its transaction) so the next one
+            # re-reads the capture instead of the identity map's copy of it. Placed
+            # after the sleep, never after a ``return``: the clone instance the
+            # callers go on to use must not be expired out from under them.
+            await uow.rollback()
 
 
 class _UsableConstituent:
@@ -409,8 +408,8 @@ async def _create_counterpart(
             the created deployment cannot be read back.
     """
     snapshot = constituent.snapshot
-    uow = await get_unit_of_work()
-    driver_version_id = await _resolve_pinned_driver_version(snapshot, uow)
+    async with get_unit_of_work() as uow:
+        driver_version_id = await _resolve_pinned_driver_version(snapshot, uow)
     if driver_version_id is None:
         raise RuntimeError(CLONE_REASON_DRIVER_VERSION_GONE)
 
@@ -418,26 +417,26 @@ async def _create_counterpart(
         "clone_environment records the invoking user; Deployment requires one"
     )
 
-    uow = await get_unit_of_work()
-    await deploy_application(
-        driver_name=snapshot.driver_name,
-        version=snapshot.application_version,
-        environment_id=created_environment_id,
-        uow=uow,
-        created_by_user_id=clone.created_by_user_id,
-        deployment_config=snapshot.config,
-        deployment_parameters=snapshot.parameters,
-        deployment_name=snapshot.deployment_name,
-        service_name_overrides=snapshot.service_name_overrides,
-        driver_version_id=driver_version_id,
-        skip_initial_reconcile=True,
-        release_reference=(
-            snapshot.release_reference or f"{_NAMESPACE_PREFIX}{snapshot.deployment_id}"
-        ),
-    )
+    async with get_unit_of_work() as uow:
+        await deploy_application(
+            driver_name=snapshot.driver_name,
+            version=snapshot.application_version,
+            environment_id=created_environment_id,
+            uow=uow,
+            created_by_user_id=clone.created_by_user_id,
+            deployment_config=snapshot.config,
+            deployment_parameters=snapshot.parameters,
+            deployment_name=snapshot.deployment_name,
+            service_name_overrides=snapshot.service_name_overrides,
+            driver_version_id=driver_version_id,
+            skip_initial_reconcile=True,
+            release_reference=(
+                snapshot.release_reference
+                or f"{_NAMESPACE_PREFIX}{snapshot.deployment_id}"
+            ),
+        )
 
-    uow = await get_unit_of_work()
-    async with uow:
+    async with get_unit_of_work() as uow:
         counterpart = await uow.deployments.get_by_name(
             snapshot.deployment_name, created_environment_id
         )
@@ -492,24 +491,24 @@ async def _settle_undispatched_restore(
     dispatch failure and a Velero failure leave the same recoverable state.
     """
     logger = get_run_logger()
-    uow = await get_unit_of_work()
-    try:
-        await update_restore_status(
-            restore_id=restore_id,
-            status=RestoreStatus.FAILED,
-            uow=uow,
-            error_message=error,
+    async with get_unit_of_work() as uow:
+        try:
+            await update_restore_status(
+                restore_id=restore_id,
+                status=RestoreStatus.FAILED,
+                uow=uow,
+                error_message=error,
+            )
+        except Exception:  # noqa: BLE001 — the counterpart flip below still matters
+            logger.exception(
+                "env_clone_restore_settle_error restore_id=%s could not be marked "
+                "FAILED after its dispatch failed",
+                restore_id,
+            )
+    async with get_unit_of_work() as uow:
+        await _set_deployment_status_failed(
+            deployment_id=deployment_id, uow=uow, error_message=error
         )
-    except Exception:  # noqa: BLE001 — the counterpart flip below still matters
-        logger.exception(
-            "env_clone_restore_settle_error restore_id=%s could not be marked "
-            "FAILED after its dispatch failed",
-            restore_id,
-        )
-    uow = await get_unit_of_work()
-    await _set_deployment_status_failed(
-        deployment_id=deployment_id, uow=uow, error_message=error
-    )
 
 
 async def _dispatch_cross_target_restore(
@@ -537,13 +536,13 @@ async def _dispatch_cross_target_restore(
             could not be dispatched.
     """
     target_namespace = f"{_NAMESPACE_PREFIX}{counterpart_deployment_id}"
-    uow = await get_unit_of_work()
-    restore, status_target_deployment_id = await create_restore(
-        backup_id=constituent.backup_id,
-        target_namespace=target_namespace,
-        uow=uow,
-        target_deployment_id=counterpart_deployment_id,
-    )
+    async with get_unit_of_work() as uow:
+        restore, status_target_deployment_id = await create_restore(
+            backup_id=constituent.backup_id,
+            target_namespace=target_namespace,
+            uow=uow,
+            target_deployment_id=counterpart_deployment_id,
+        )
 
     manager = get_manager()
     try:
@@ -623,14 +622,14 @@ async def _create_cloned_environment(
         )
         return None
 
-    uow = await get_unit_of_work()
     try:
-        environment = await create_environment(
-            name=clone.name,
-            cluster_id=source_environment.cluster_id,
-            uow=uow,
-            config=merged_config,
-        )
+        async with get_unit_of_work() as uow:
+            environment = await create_environment(
+                name=clone.name,
+                cluster_id=source_environment.cluster_id,
+                uow=uow,
+                config=merged_config,
+            )
     except EnvironmentAlreadyExistsError as exc:
         # The name was free when the mutation validated it and is taken now
         # (spec FR-011's TOCTOU case). Attributed, terminal, no side effects.
