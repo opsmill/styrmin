@@ -66,6 +66,9 @@ def test_sub_settings_read_env_vars_at_load_time(
 def test_operator_settings_accept_the_existing_env_var_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The STYRMIN_OPERATOR_* names take priority over the existing names.
+    monkeypatch.delenv("STYRMIN_OPERATOR_DELETED_CR_TTL_HOURS", raising=False)
+    monkeypatch.delenv("STYRMIN_OPERATOR_JANITOR_INTERVAL", raising=False)
     monkeypatch.setenv("STYRMIN_OPERATOR_RECONCILE_INTERVAL", "5")
     monkeypatch.setenv("DELETED_CR_TTL_HOURS", "12")
     monkeypatch.setenv("STYRMIN_JANITOR_INTERVAL", "90")

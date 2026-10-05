@@ -188,7 +188,7 @@ This records the database as being at the latest migration version without re-ru
 
 ## Configuration
 
-Migrations use the same database configuration as the application via `STYRMIN_DB_*` environment variables. There is no `alembic.ini`: `backend/styrmin_backend/cli/db.py` constructs the Alembic `Config` in code and sets only `script_location`, and `migrations/env.py` calls `get_database_url()`, which reads `config.SETTINGS` (loaded by `styrmin db --config-file`, or on first access). Do not add an `alembic.ini` — nothing reads one.
+Migrations use the same database configuration as the application via `STYRMIN_DB_*` environment variables. There is no `alembic.ini`: `backend/styrmin_backend/cli/db.py` constructs the Alembic `Config` in code and sets only `script_location`, and `migrations/env.py` calls `get_database_url()`, which reads `config.SETTINGS` (loaded by `styrmin db <command> --config-file <path>`, or on first access). Do not add an `alembic.ini` — nothing reads one.
 
 ## Architecture
 

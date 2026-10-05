@@ -248,6 +248,6 @@ Startup sequence:
 - Each section (`database`, `workflow`, `kubernetes`, `driver`, `agent_code`, `agent`, `operator`, `url`) reads its environment variables when the settings load, not when the module is imported.
 - `SETTINGS.initialize(path)` raises `InitializationError` when the settings were already loaded from another file, so a call made too late cannot silently ignore the requested file.
 
-Read configuration through `config.SETTINGS`, not `os.environ`. `AgentSettings` holds `STYRMIN_AGENT_*` and `OperatorSettings` holds `STYRMIN_OPERATOR_*`, `DELETED_CR_TTL_HOURS` and `STYRMIN_JANITOR_INTERVAL`. Kopf timer intervals and Prefect task retries are read when their modules are imported, so they take the values present when the agent process starts.
+Read configuration through `config.SETTINGS`, not `os.environ`. `AgentSettings` holds the `STYRMIN_AGENT_POLL_*` and `STYRMIN_AGENT_STATUS_POLL_INTERVAL` settings; `RemoteAgentCodeSettings` holds `STYRMIN_AGENT_SOURCE_*`. `OperatorSettings` holds `STYRMIN_OPERATOR_*`, `DELETED_CR_TTL_HOURS` and `STYRMIN_JANITOR_INTERVAL`. Kopf timer intervals and Prefect task retries are read when their modules are imported, so they take the values present when the agent process starts.
 
 The agent process is a separate entrypoint (`entrypoint/combined.py`) that runs the kopf operator, the Prefect worker, and the status reporter together — see [`../agent/overview.md`](../agent/overview.md).
