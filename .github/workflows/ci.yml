@@ -230,13 +230,13 @@ jobs:
     # test's own diagnostic. A wait that overruns raises an AssertionError naming
     # the deployment, the observed state and the budget; a cell killed on
     # timeout-minutes produces none of that, which is strictly worse to debug —
-    # and shard_backup is the cell where it bites, now that it runs four heavy
-    # lifecycle nodes under *both* entrypoints.
+    # and shard_env_backup is the cell where it bites, since it runs the two
+    # environment-level lifecycle nodes under *both* entrypoints.
     #
     # test_environment_backup_and_restore_lifecycle alone sums to ~48 minutes of
     # worst-case waits after those budgets were tightened (see the named
     # constants in test_backup_restore.py). It cannot go lower without dropping
-    # below values the repo already calibrated elsewhere in this shard — 480s for
+    # below values the repo already calibrated in the backup shards — 480s for
     # an env-config redeploy fanout (009), 600s for one Velero restore plus the
     # post-restore reapply (test_restore_lifecycle_transitions), 300s for a
     # deployment to reach RUNNING. Observed locally the same node takes 328s of
@@ -248,7 +248,7 @@ jobs:
       fail-fast: false
       matrix:
         entrypoint: [api, ui]
-        shard: [general, env, compute, backup, infrahub, configuration, apply]
+        shard: [general, env, compute, backup, env_backup, infrahub, configuration, apply]
         exclude:
           # A cell is excluded only when *every* test it would collect is
           # marked for the other entrypoint. Selecting zero tests makes pytest
@@ -268,9 +268,10 @@ jobs:
           # cell collects nothing.
           - {entrypoint: api, shard: configuration}
           #
-          # shard_backup is deliberately NOT excluded from either entrypoint.
-          # Its lifecycle tests drive create_backup / create_restore /
-          # delete_backup / set_environment_backup_ttl through the dual-entrypoint
+          # shard_backup and shard_env_backup are deliberately NOT excluded from
+          # either entrypoint. Their lifecycle tests drive create_backup /
+          # create_restore / delete_backup / set_environment_backup_ttl /
+          # create_environment_backup / clone_environment through the dual-entrypoint
           # scenario_driver, and per dev/knowledge/backend/e2e-testing.md
           # ("api_only audit discipline") the parametrisation over those methods
           # *is* the UI/API parity check, so they must run under both. Only

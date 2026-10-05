@@ -22,9 +22,8 @@ from tests.e2e.drivers import (
     ScenarioDriver,
 )
 
-pytestmark = [
-    pytest.mark.shard_backup,
-]
+# Shard markers are per test: deployment-level tests run in ``shard_backup``,
+# environment-level ones in ``shard_env_backup`` (split for CI wall-clock).
 
 # Environment-scope retention policy exercised by the lifecycle test
 # (016-backup-retention-ttl / US1). Deliberately different from the built-in
@@ -49,7 +48,7 @@ FANOUT_RECONCILE_TIMEOUT_SECONDS = 480.0
 DEPLOYMENT_RUNNING_TIMEOUT_SECONDS = 300.0
 
 # Best-effort waits in a ``finally`` block get their own, much smaller budget.
-# They exist to hand a sane environment to the sibling ``shard_backup`` tests,
+# They exist to hand a sane environment to the sibling tests in the same shard,
 # not to prove anything — and every one of them is wrapped in ``suppress``. On
 # the failure path a full reconcile budget per cleanup wait is actively harmful:
 # it can push the job past ``timeout-minutes`` so the runner kills the cell
@@ -532,6 +531,7 @@ async def wait_for_env_fanout_steady_state(
 
 
 @pytest.mark.ci
+@pytest.mark.shard_backup
 async def test_backup_and_restore_lifecycle(
     scenario_driver: ScenarioDriver,
     scenario_environment_id: str,
@@ -847,6 +847,7 @@ async def wait_for_constituent_outcomes(
 
 
 @pytest.mark.ci
+@pytest.mark.shard_env_backup
 async def test_environment_backup_and_restore_lifecycle(
     scenario_driver: ScenarioDriver,
     scenario_environment_id: str,
@@ -1158,7 +1159,7 @@ async def test_environment_backup_and_restore_lifecycle(
     finally:
         # The environment is session-shared. The restore above already reverts
         # the config, but a failure before that point would leave the mutated
-        # retention policy behind for every later ``shard_backup`` test — so the
+        # retention policy behind for every later ``shard_env_backup`` test — so the
         # revert runs unconditionally. The waits afterwards are best-effort so a
         # cleanup timeout can never mask the test's own failure.
         revert_timeline = {
@@ -1185,7 +1186,7 @@ async def test_environment_backup_and_restore_lifecycle(
             )
         # Delete the deployment this test created. The environment is
         # session-shared, so leaving it behind hands every later
-        # ``shard_backup`` test an extra peer: one more constituent in any
+        # ``shard_env_backup`` test an extra peer: one more constituent in any
         # snapshot they take, one more redeploy in any env-config fanout they
         # wait on, and a service-name that the next ``simple-app`` peer has to
         # avoid. Best-effort like the waits — a cleanup failure must not mask
@@ -1232,6 +1233,7 @@ async def _wait_for_deployment_status(
 
 
 @pytest.mark.ci
+@pytest.mark.shard_backup
 async def test_restore_lifecycle_transitions(
     deployed_simple_app: dict,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
@@ -1290,6 +1292,7 @@ async def test_restore_lifecycle_transitions(
 
 
 @pytest.mark.ci
+@pytest.mark.shard_backup
 @pytest.mark.api_only(
     reason="Every action is a raw SDK call — the driver half of "
     "``session_scenario_driver`` is discarded (``_, client = ...``) and no "
@@ -1357,6 +1360,7 @@ def _clone_results_by_deployment(
 
 
 @pytest.mark.ci
+@pytest.mark.shard_env_backup
 async def test_environment_clone_lifecycle(
     scenario_driver: ScenarioDriver,
     scenario_environment_id: str,
@@ -1873,7 +1877,7 @@ async def test_environment_clone_lifecycle(
     finally:
         # Every cleanup step below is best-effort *except* the retention revert:
         # the environment is session-shared, so leaving a 1800h policy behind
-        # would silently hand it to every later ``shard_backup`` test. A cleanup
+        # would silently hand it to every later ``shard_env_backup`` test. A cleanup
         # timeout must never mask the test's own failure.
         #
         # Clone-created environments go first: deleting them settles any clone
@@ -1906,7 +1910,7 @@ async def test_environment_clone_lifecycle(
                 )
             )
         # Delete the peer this test created. The environment is session-shared,
-        # so leaving it behind hands every later ``shard_backup`` test an extra
+        # so leaving it behind hands every later ``shard_env_backup`` test an extra
         # constituent in any snapshot, an extra redeploy in any env-config
         # fanout, and a service name the next ``simple-app`` peer must avoid.
         with suppress(Exception):

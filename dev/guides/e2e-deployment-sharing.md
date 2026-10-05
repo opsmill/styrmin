@@ -43,12 +43,20 @@ starve a shared shard. It MUST live in its own file and its own
 shard.
 
 - **Shards:**
-  - `backup` (Velero / Garage) — simple-app + database backup/restore.
+  - `backup` (Velero / Garage) — deployment-level simple-app + database
+    backup/restore.
+  - `env_backup` (Velero / Garage) — environment-level backup/restore
+    and environment clone; split out of `backup` so the two shards run
+    in parallel instead of one cell taking about twice as long as any
+    other.
   - `infrahub` (Infrahub stack) — boots a full Infrahub server + DB;
     split out of `backup` so debug iteration on the simple-app backup
     tests doesn't pay for the Infrahub boot.
-- **Examples:** `test_backup_restore`, `test_backup_restore_databases`
-  (in `shard_backup`); `test_infrahub_backup_restore` (in
+- **Examples:** `test_backup_and_restore_lifecycle`,
+  `test_backup_restore_databases` (in `shard_backup`);
+  `test_environment_backup_and_restore_lifecycle`,
+  `test_environment_clone_lifecycle` (in `shard_env_backup`, same
+  module, per-test markers); `test_infrahub_backup_restore` (in
   `shard_infrahub`).
 - **Review rule:** Adding another "heavy" test category? Open an ADR
   first — the matrix YAML in `.github/workflows/ci.yml` needs a new
@@ -116,8 +124,8 @@ Seed the baseline through `config` rather than a follow-up
 
 Every `@pytest.mark.ci` E2E test MUST carry exactly one bare-name
 shard marker (`shard_general`, `shard_env`, `shard_compute`,
-`shard_backup`, `shard_infrahub`, `shard_configuration`, or
-`shard_apply`). The conftest collection hook (`enforce_shard_markers`)
+`shard_backup`, `shard_env_backup`, `shard_infrahub`,
+`shard_configuration`, or `shard_apply`). The conftest collection hook (`enforce_shard_markers`)
 rejects the suite if any test is missing the marker or carries more
 than one.
 
