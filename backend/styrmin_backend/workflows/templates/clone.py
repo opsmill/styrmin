@@ -42,7 +42,6 @@ from prefect import flow
 from prefect.logging import get_run_logger
 
 from styrmin_backend import config
-from styrmin_backend.agent.tasks.shared import POLL_RETRY_DELAY_SECONDS
 from styrmin_backend.db.models import BackupStatus, EnvironmentClone, RestoreStatus
 from styrmin_backend.services.backup.clone import (
     CAPTURE_IN_FLIGHT_GUARD_SECONDS,
@@ -250,7 +249,7 @@ async def _await_capture_terminal(
 
     One unit of work serves the whole loop and is closed when the poll ends,
     rather than opening up to ``CAPTURE_POLL_TIMEOUT_SECONDS /
-    POLL_RETRY_DELAY_SECONDS`` sessions — 720 — for a single clone. The
+    poll_retry_delay_seconds`` sessions — 720 — for a single clone. The
     ``rollback`` between iterations is what makes reuse *correct* rather than
     merely cheap: the session's identity map would otherwise keep serving the
     first read of the capture, and the poll would never see it terminalise.
@@ -266,6 +265,7 @@ async def _await_capture_terminal(
             ``CAPTURE_IN_FLIGHT_GUARD_SECONDS``).
     """
     logger = get_run_logger()
+    poll_delay = config.SETTINGS.agent.poll_retry_delay_seconds
     elapsed = 0
     async with get_unit_of_work() as uow:
         while True:
@@ -287,8 +287,8 @@ async def _await_capture_terminal(
             # to the pool, and the next turn re-reads instead of the identity map.
             # Never after a ``return``: callers must not get an expired clone.
             await uow.rollback()
-            await asyncio.sleep(POLL_RETRY_DELAY_SECONDS)
-            elapsed += POLL_RETRY_DELAY_SECONDS
+            await asyncio.sleep(poll_delay)
+            elapsed += poll_delay
 
 
 class _UsableConstituent:
@@ -678,7 +678,6 @@ async def execute_environment_clone_workflow(clone_id: str) -> None:
             serialisation, like every other flow parameter here).
     """
     clone_uuid = UUID(clone_id)
-    config.SETTINGS.initialize_and_exit()
     logger = get_run_logger()
 
     try:

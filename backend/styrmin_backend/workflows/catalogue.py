@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Iterable
 
@@ -24,8 +23,6 @@ class PrefectCatalogue:
     """A catalogue of Prefect workflows and work pools for the Styrmin system."""
 
     def __init__(self) -> None:
-        config.SETTINGS.initialize_and_exit()
-
         self.work_pools_registry: dict[PrefectWorkPool, WorkPoolDefinition] = {}
         self.workflows_registry: dict[PrefectAction, WorkflowDefinition] = {}
 
@@ -110,20 +107,16 @@ class PrefectCatalogue:
             ] = config.SETTINGS.url.api_k8s
 
         # Forward agent poll settings to K8s jobs
-        poll_env_vars = {
-            "STYRMIN_AGENT_POLL_RETRIES": os.environ.get(
-                "STYRMIN_AGENT_POLL_RETRIES", ""
-            ),
-            "STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS": os.environ.get(
-                "STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS", ""
-            ),
-            "STYRMIN_AGENT_POLL_INTERVAL": os.environ.get(
-                "STYRMIN_AGENT_POLL_INTERVAL", ""
-            ),
-        }
-        for key, value in poll_env_vars.items():
-            if value:
-                job_template_variables["properties"]["env"]["default"][key] = value
+        agent = config.SETTINGS.agent
+        job_template_variables["properties"]["env"]["default"].update(
+            {
+                "STYRMIN_AGENT_POLL_RETRIES": str(agent.poll_retries),
+                "STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS": str(
+                    agent.poll_retry_delay_seconds
+                ),
+                "STYRMIN_AGENT_POLL_INTERVAL": str(agent.poll_interval),
+            }
+        )
 
         # Initialize the User work pool
         self.add_work_pool(

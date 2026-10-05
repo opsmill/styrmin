@@ -15,10 +15,8 @@ below is a placeholder describing scope, not the final content.
 Until the auto-generation pipeline is wired up, the authoritative
 sources are:
 
-- Server settings:
-  [`backend/styrmin_backend/config/`](https://github.com/opsmill/styrmin/tree/develop/backend/styrmin_backend/config)
-- Agent settings:
-  [`backend/styrmin_backend/agent/`](https://github.com/opsmill/styrmin/tree/develop/backend/styrmin_backend/agent)
+- Server, agent and operator settings:
+  [`backend/styrmin_backend/config.py`](https://github.com/opsmill/styrmin/blob/develop/backend/styrmin_backend/config.py)
 - Helm chart values: the `values.yaml` files under
   [`helm/styrmin/`](https://github.com/opsmill/styrmin/tree/develop/helm/styrmin)
   and

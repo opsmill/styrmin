@@ -1,5 +1,4 @@
 import asyncio
-import os
 from uuid import UUID
 
 import httpx
@@ -129,8 +128,7 @@ async def _clear_deployment_in_progress(namespace: str, release_reference: str) 
 
 
 async def orchestration_callback(flow, flow_run: FlowRun, state: State) -> None:  # type: ignore[no-untyped-def]
-    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
-    styrmin_server_url = f"{api_url}/graphql"
+    styrmin_server_url = config.SETTINGS.url.graphql
 
     # Check state
     async with httpx.AsyncClient() as client:
@@ -176,9 +174,6 @@ async def apply_state(
     retry sees fresh state, and DB writes that landed between scheduling
     and run no longer produce a stale plan.
     """
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     async with get_unit_of_work() as uow:
         deployment = await uow.deployments.find(id=deployment_id)
         if deployment is None:
@@ -316,9 +311,6 @@ async def upgrade_instance(
         posthook: Optional Prefect deployment ID for the driver's post-upgrade action.
     """
 
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     context = instance.context
 
@@ -433,9 +425,6 @@ async def update_instance(
     update_flow: UUID,
     apply_utility_flow: UUID | None = None,
 ) -> None:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     context = instance.context
 
@@ -527,9 +516,6 @@ async def create_instance(
         utilities (list[UtilityPayload]): The utilities to be installed.
         hook_deployments_payload (HookDeploymentsPayload): The hook deployments payload containing the pre, core and post hook deployment IDs.
     """
-
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
 
     context = instance.context
 
@@ -631,9 +617,6 @@ async def create_instance_crd(
 
     Driver pre/post hooks remain Prefect-managed.
     """
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     context = instance.context
     release_reference = context.instance.release_reference
@@ -696,9 +679,6 @@ async def update_instance_crd(
     instance: Instance,
 ) -> None:
     """Update the StyrminDeployment CRD spec for the operator to reconcile."""
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     context = instance.context
     release_reference = context.instance.release_reference
@@ -733,9 +713,6 @@ async def upgrade_instance_crd(
     posthook: UUID | None = None,
 ) -> None:
     """Upgrade via StyrminDeployment CRD. Driver hooks remain Prefect-managed."""
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     context = instance.context
     release_reference = context.instance.release_reference

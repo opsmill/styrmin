@@ -1,4 +1,3 @@
-import os
 from uuid import UUID
 
 import httpx
@@ -23,16 +22,10 @@ from styrmin_backend.services.helm.renderer import (
 from styrmin_backend.services.utils import get_helm_repository_type
 from styrmin_backend import config
 
-POLL_RETRIES = int(os.environ.get("STYRMIN_AGENT_POLL_RETRIES", "60"))
-POLL_RETRY_DELAY_SECONDS = int(
-    os.environ.get("STYRMIN_AGENT_POLL_RETRY_DELAY_SECONDS", "10")
-)
-POLL_INTERVAL = int(os.environ.get("STYRMIN_AGENT_POLL_INTERVAL", "10"))
-
 
 @task
 async def get_context(instance_id: UUID) -> GlobalContext:
-    styrmin_api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
+    styrmin_api_url = config.SETTINGS.url.api
 
     logger = get_run_logger()
     async with httpx.AsyncClient() as client:
@@ -49,9 +42,6 @@ async def get_context(instance_id: UUID) -> GlobalContext:
 
 @task
 async def render_helm_chart_specifications(helm: HelmInfo) -> dict:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     return render_helm_chart_spec(
         helm_chart_id=helm.chart.id,
         name=helm.chart.name,
@@ -62,9 +52,6 @@ async def render_helm_chart_specifications(helm: HelmInfo) -> dict:
 
 @task(task_run_name="Render helm repository specifications")
 async def render_helm_repository_specifications(helm: HelmInfo) -> dict:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     return render_helm_repository_spec(
         repository_id=helm.repository.id,
         repository_url=helm.repository.url,
@@ -74,9 +61,6 @@ async def render_helm_repository_specifications(helm: HelmInfo) -> dict:
 
 @task(task_run_name="apply namespace: {namespace}")
 async def apply_namespace(namespace: str, labels: dict[str, str] | None = None) -> None:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     logger.info(f"Creating namespace {namespace}")
     await apply_kubernetes_namespace(namespace=namespace, labels=labels)
@@ -99,8 +83,6 @@ async def apply_helm_repositories(helm_repositories: list[dict]) -> None:
 
 @task(task_run_name="apply helm charts")
 async def apply_helm_charts(charts: list[dict]) -> None:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
     logger = get_run_logger()
     logger.info("Applying Helm charts...")
     for chart in charts:
@@ -116,9 +98,6 @@ async def apply_helm_charts(charts: list[dict]) -> None:
 
 @task(task_run_name="patch helm release: {namespace}")
 async def patch_helm_release(namespace: str, patch: list, reference: str) -> None:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     logger.info(f"Patching custom resource {namespace}")
     await patch_custom_resource(
@@ -136,9 +115,6 @@ async def apply_helm_release(
     namespace: str,
     release_spec: dict,
 ) -> None:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     logger.info(f"Updating Helm release {namespace}")
     await upsert_custom_resource(
@@ -151,11 +127,11 @@ async def apply_helm_release(
     )
 
 
-@task(retries=POLL_RETRIES, retry_delay_seconds=POLL_RETRY_DELAY_SECONDS)
+@task(
+    retries=config.SETTINGS.agent.poll_retries,
+    retry_delay_seconds=config.SETTINGS.agent.poll_retry_delay_seconds,
+)
 async def poll_helm_release_status(namespace: str, reference: str) -> State:
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     logger.info(f"Polling Helm release status for {namespace}")
     try:
@@ -199,8 +175,8 @@ async def poll_helm_release_status(namespace: str, reference: str) -> State:
 
 @task(
     task_run_name="Poll Kubernetes deployments status: {namespace}",
-    retries=POLL_RETRIES,
-    retry_delay_seconds=POLL_RETRY_DELAY_SECONDS,
+    retries=config.SETTINGS.agent.poll_retries,
+    retry_delay_seconds=config.SETTINGS.agent.poll_retry_delay_seconds,
 )
 async def poll_kubernetes_deployments_status(namespace: str) -> None:
     """Check the status of all deployments in the instance namespace.
@@ -209,9 +185,6 @@ async def poll_kubernetes_deployments_status(namespace: str) -> None:
     run the updated pod template, and they are ready and available.
     When this task is successful, the rollout is complete.
     """
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     logger.info(f"Polling Kubernetes deployments status for {namespace}")
     deployments = await get_deployments(namespace=namespace)
@@ -248,8 +221,8 @@ async def poll_kubernetes_deployments_status(namespace: str) -> None:
 
 @task(
     task_run_name="Poll Kubernetes statefulsets status: {namespace}",
-    retries=POLL_RETRIES,
-    retry_delay_seconds=POLL_RETRY_DELAY_SECONDS,
+    retries=config.SETTINGS.agent.poll_retries,
+    retry_delay_seconds=config.SETTINGS.agent.poll_retry_delay_seconds,
 )
 async def poll_kubernetes_stateful_sets_status(namespace: str) -> None:
     """Check the status of all statefulsets in the instance namespace.
@@ -258,9 +231,6 @@ async def poll_kubernetes_stateful_sets_status(namespace: str) -> None:
     run the updated pod template, and they are ready.
     When this task is successful, the rollout is complete.
     """
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     logger = get_run_logger()
     logger.info(f"Polling Kubernetes statefulsets status for {namespace}")
     stateful_sets = await get_stateful_sets(namespace=namespace)

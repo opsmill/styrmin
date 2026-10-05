@@ -51,9 +51,6 @@ def _build_kubeconfig_dict(
 
 async def load_kubernetes_config() -> None:
     """Load Kubernetes configuration based on the configured mode."""
-    if not config.SETTINGS.initialized:
-        config.SETTINGS.initialize()
-
     settings = config.SETTINGS.kubernetes
     mode = settings.config_mode
 

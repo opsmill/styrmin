@@ -18,6 +18,7 @@ import pytest
 from httpx import ASGITransport
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend import config
 from styrmin_backend.actions import primitives
 from styrmin_backend.db.models import Role, TaskStatus, User
 from styrmin_backend.db.utils import get_session
@@ -53,7 +54,7 @@ def asgi_api(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> Iterator
             )
         ),
     )
-    monkeypatch.setenv("STYRMIN_URL_API", "http://test")
+    monkeypatch.setattr(config.SETTINGS.url, "api", "http://test")
     monkeypatch.delenv("STYRMIN_TOKEN", raising=False)
     monkeypatch.setattr(
         action_token,

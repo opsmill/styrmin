@@ -29,9 +29,7 @@ When you modify models in `backend/styrmin_backend/db/models.py`:
    STYRMIN_DB_TYPE=postgres STYRMIN_DB_NAME=styrmin \
    uv run python -c '
    from alembic import command
-   from styrmin_backend import config
    from styrmin_backend.cli.db import _get_alembic_config
-   config.SETTINGS.initialize()
    command.revision(_get_alembic_config(), message="describe your change", autogenerate=True)
    '
    ```
@@ -190,7 +188,7 @@ This records the database as being at the latest migration version without re-ru
 
 ## Configuration
 
-Migrations use the same database configuration as the application via `STYRMIN_DB_*` environment variables. There is no `alembic.ini`: `backend/styrmin_backend/cli/db.py` constructs the Alembic `Config` in code and sets only `script_location`, and `migrations/env.py` initializes the app settings and calls `get_database_url()`. Do not add an `alembic.ini` — nothing reads one.
+Migrations use the same database configuration as the application via `STYRMIN_DB_*` environment variables. There is no `alembic.ini`: `backend/styrmin_backend/cli/db.py` constructs the Alembic `Config` in code and sets only `script_location`, and `migrations/env.py` calls `get_database_url()`, which reads `config.SETTINGS` (loaded by `styrmin db --config-file`, or on first access). Do not add an `alembic.ini` — nothing reads one.
 
 ## Architecture
 

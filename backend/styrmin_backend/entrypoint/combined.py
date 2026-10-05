@@ -25,7 +25,7 @@ import styrmin_backend.operator.handlers.styrmin_deployment  # noqa: F401
 import styrmin_backend.operator.handlers.utility_resources  # noqa: F401
 import styrmin_backend.operator.janitor  # noqa: F401
 from styrmin_backend.agent.status.reporter import run_status_reporter
-from styrmin_backend.operator.config import PEERING_NAME, PEERING_PRIORITY
+from styrmin_backend import config
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,10 @@ _shutdown = asyncio.Event()
 @kopf.on.startup()
 async def on_startup(settings: kopf.OperatorSettings, **_: Any) -> None:
     """Configure kopf operator settings on startup."""
-    settings.peering.name = PEERING_NAME
+    operator = config.SETTINGS.operator
+    settings.peering.name = operator.peering_name
     settings.peering.mandatory = True
-    settings.peering.priority = PEERING_PRIORITY
+    settings.peering.priority = operator.peering_priority
     # Use a shorter, K8s-valid prefix for handler state annotations
     settings.persistence.finalizer = "styrmin.io/kopf-finalizer"
     settings.persistence.progress_storage = kopf.AnnotationsProgressStorage(
@@ -49,8 +50,8 @@ async def on_startup(settings: kopf.OperatorSettings, **_: Any) -> None:
     )
     logger.info(
         "Kopf operator starting with peering=%s priority=%d",
-        PEERING_NAME,
-        PEERING_PRIORITY,
+        operator.peering_name,
+        operator.peering_priority,
     )
 
 

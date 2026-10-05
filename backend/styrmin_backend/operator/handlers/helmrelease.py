@@ -10,6 +10,7 @@ from typing import Any
 
 import kopf
 
+from styrmin_backend import config
 from styrmin_backend.operator.config import (
     ANNOTATION_DEPLOYMENT_ID,
     ANNOTATION_DEPLOYMENT_IN_PROGRESS,
@@ -18,7 +19,6 @@ from styrmin_backend.operator.config import (
     LABEL_OPERATOR_MANAGED,
     LABEL_OPERATOR_MANAGED_VALUE,
     LABEL_RELEASE_REFERENCE,
-    RECONCILIATION_INTERVAL_SECONDS,
 )
 from styrmin_backend.operator.events import (
     emit_reconcile_failed,
@@ -257,8 +257,8 @@ async def kopf_on_helmrelease_delete(
         LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE,
         LABEL_OPERATOR_MANAGED: LABEL_OPERATOR_MANAGED_VALUE,
     },
-    interval=RECONCILIATION_INTERVAL_SECONDS,
-    initial_delay=RECONCILIATION_INTERVAL_SECONDS,
+    interval=config.SETTINGS.operator.reconcile_interval,
+    initial_delay=config.SETTINGS.operator.reconcile_interval,
 )
 async def kopf_helmrelease_timer(  # noqa: ARG001
     *,
@@ -271,7 +271,7 @@ async def kopf_helmrelease_timer(  # noqa: ARG001
 ) -> None:
     """Periodic full reconciliation of all utility resources for a deployment.
 
-    Runs every RECONCILIATION_INTERVAL_SECONDS to catch any missed events
+    Runs every ``SETTINGS.operator.reconcile_interval`` seconds to catch any missed events
     and ensure convergence.
     """
     ns = namespace or ""

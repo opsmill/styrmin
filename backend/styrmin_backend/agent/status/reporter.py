@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from uuid import UUID
 
 import httpx
 
+from styrmin_backend import config
 from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.agent.service.kubernetes.primitives import (
     get_custom_resource,
@@ -32,8 +32,6 @@ from styrmin_backend.agent.status.models import (
 from styrmin_backend.agent.status.queries import load_query
 
 logger = logging.getLogger(__name__)
-
-STATUS_POLL_INTERVAL = int(os.environ.get("STYRMIN_AGENT_STATUS_POLL_INTERVAL", "5"))
 
 _QUERY_DEPLOYMENTS = load_query("list_deployments_for_status")
 _MUTATION_REPORT_PODS = load_query("report_pod_statuses")
@@ -381,10 +379,9 @@ async def run_status_reporter(
         interval: Polling interval in seconds.
     """
     if graphql_url is None:
-        api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
-        graphql_url = f"{api_url}/graphql"
+        graphql_url = config.SETTINGS.url.graphql
     if interval is None:
-        interval = STATUS_POLL_INTERVAL
+        interval = config.SETTINGS.agent.status_poll_interval
 
     logger.info(
         "Status reporter starting (interval=%ds, url=%s)",

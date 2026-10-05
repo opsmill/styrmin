@@ -23,7 +23,6 @@ from prefect.runtime import flow_run as flow_run_ctx
 from prefect.variables import Variable
 
 from styrmin_backend import config
-from styrmin_backend.agent.tasks.shared import POLL_INTERVAL, POLL_RETRY_DELAY_SECONDS
 from styrmin_backend.agent.service.kubernetes.resources.builders.backup import (
     build_velero_backup,
     build_velero_restore,
@@ -138,7 +137,7 @@ async def execute_velero_backup_flow(
             name=velero_backup_name,
             namespace=velero_namespace,
             timeout=timeout,
-            interval=POLL_RETRY_DELAY_SECONDS,
+            interval=config.SETTINGS.agent.poll_retry_delay_seconds,
         )
 
         # Store result for cross-worker retrieval via Prefect Variable
@@ -243,7 +242,7 @@ async def execute_velero_restore_flow(
         # fully terminate, so allow generous headroom — the overall restore
         # flow budget is 7200s.
         ns_timeout = 600
-        poll_interval = POLL_RETRY_DELAY_SECONDS
+        poll_interval = config.SETTINGS.agent.poll_retry_delay_seconds
         elapsed = 0
         while elapsed < ns_timeout:
             try:
@@ -270,7 +269,7 @@ async def execute_velero_restore_flow(
             name=velero_restore_name,
             namespace=velero_namespace,
             timeout=timeout,
-            interval=POLL_RETRY_DELAY_SECONDS,
+            interval=config.SETTINGS.agent.poll_retry_delay_seconds,
         )
 
         # Post-velero recovery: claim the CRD's lifecycle, strip kopf
@@ -379,8 +378,6 @@ async def execute_backup_workflow(
     """
     backup_uuid = UUID(backup_id)
     deployment_uuid = UUID(deployment_id)
-
-    config.SETTINGS.initialize_and_exit()
 
     logger = get_run_logger()
     try:
@@ -558,7 +555,7 @@ async def execute_backup_workflow(
                 "velero_namespace": velero_namespace,
                 "timeout": timeout,
             },
-            poll_interval=POLL_INTERVAL,
+            poll_interval=config.SETTINGS.agent.poll_interval,
         )
 
         # Read result from the USER flow
@@ -740,8 +737,6 @@ async def execute_restore_workflow(
     resolved_source_deployment_id = source_deployment_id or deployment_id
     is_cross_target = resolved_source_deployment_id != deployment_id
 
-    config.SETTINGS.initialize_and_exit()
-
     logger = get_run_logger()
     try:
         # Mark as in-progress
@@ -839,7 +834,7 @@ async def execute_restore_workflow(
                 "restored_crd_name": restored_crd_name,
                 "counterpart_crd_body": counterpart_crd_body,
             },
-            poll_interval=POLL_INTERVAL,
+            poll_interval=config.SETTINGS.agent.poll_interval,
         )
 
         # Read result from the USER flow
