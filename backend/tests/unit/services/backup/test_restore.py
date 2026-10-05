@@ -254,6 +254,72 @@ class TestCreateRestore:
         assert excinfo.value.existing_restore_id == str(pending_restore.id)
 
     @pytest.mark.anyio
+    async def test_create_restore_blocks_on_a_restore_into_another_namespace(
+        self,
+    ) -> None:
+        """A restore of this deployment's other backup into a namespace the
+        client chose is still in flight for this deployment."""
+        deployment, instance, backup = make_chain()
+        other_backup = Backup(
+            name="other-backup",
+            status=BackupStatus.COMPLETED,
+            instance_id=instance.id,
+        )
+        in_flight = Restore(
+            name="custom-namespace-restore",
+            status=RestoreStatus.IN_PROGRESS,
+            target_namespace="custom-ns",
+            backup_id=other_backup.id,
+        )
+        uow = make_uow(
+            backups=[backup, other_backup],
+            restores=[in_flight],
+            instances=[instance],
+            deployments=[deployment],
+        )
+
+        with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
+            await create_restore(
+                backup_id=backup.id,
+                target_namespace=f"styrmin-{deployment.id}",
+                uow=uow,
+            )
+
+        assert excinfo.value.existing_restore_id == str(in_flight.id)
+
+    @pytest.mark.anyio
+    async def test_clone_restore_of_another_backup_does_not_block(self) -> None:
+        """An environment clone restoring this deployment's other backup into
+        its counterpart's namespace does not touch this deployment."""
+        deployment, instance, backup = make_chain()
+        other_backup = Backup(
+            name="other-backup",
+            status=BackupStatus.COMPLETED,
+            instance_id=instance.id,
+        )
+        clone_restore = Restore(
+            name="clone-restore",
+            status=RestoreStatus.IN_PROGRESS,
+            target_namespace=f"styrmin-{uuid4()}",
+            backup_id=other_backup.id,
+        )
+        uow = make_uow(
+            backups=[backup, other_backup],
+            restores=[clone_restore],
+            instances=[instance],
+            deployments=[deployment],
+        )
+
+        restore, deployment_id = await create_restore(
+            backup_id=backup.id,
+            target_namespace=f"styrmin-{deployment.id}",
+            uow=uow,
+        )
+
+        assert deployment_id == deployment.id
+        assert restore.status == RestoreStatus.PENDING
+
+    @pytest.mark.anyio
     async def test_restoring_state_without_an_in_flight_restore_does_not_block(
         self,
     ) -> None:

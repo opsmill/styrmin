@@ -41,6 +41,9 @@ if TYPE_CHECKING:
 DEFAULT_BACKUP_TIMEOUT: int = 3600  # 1 hour
 DEFAULT_RESTORE_TIMEOUT: int = 7200  # 2 hours
 
+# Every deployment runs in its own ``styrmin-<deployment id>`` namespace.
+_DEPLOYMENT_NAMESPACE_PREFIX = "styrmin-"
+
 STRATEGY_MAP: dict[str, type[BackupStrategy]] = {
     "disk": DiskSnapshotStrategy,
     "mariadb": MariadbBackupStrategy,
@@ -351,14 +354,17 @@ async def find_in_flight_restore(
     former from the latter, but the ``createRestore`` mutation takes
     ``target_namespace`` verbatim from the client, and a restore already in
     flight for the deployment must be found whichever namespace it was created
-    with.
+    with. For the same reason, a restore of the deployment's own backups is
+    found whatever namespace it targets, unless that namespace belongs to
+    another deployment: an environment clone restoring one of these backups
+    into its counterpart lands elsewhere and is not a conflict.
 
     ``PENDING`` counts as in flight: ``create_restore`` writes rows ``PENDING``
     and only ``execute_restore_workflow`` promotes them to ``IN_PROGRESS``, so a
     guard reading ``IN_PROGRESS`` alone would be blind for the whole dispatch
     window.
     """
-    canonical_namespace = f"styrmin-{deployment_id}"
+    canonical_namespace = f"{_DEPLOYMENT_NAMESPACE_PREFIX}{deployment_id}"
     namespaces = [target_namespace]
     if canonical_namespace != target_namespace:
         namespaces.append(canonical_namespace)
@@ -369,27 +375,37 @@ async def find_in_flight_restore(
         for restore in await uow.restores.get_by_target_namespace(namespace):
             if restore.status in NON_TERMINAL_RESTORE_STATUSES:
                 return restore
+
+    for restore in await uow.restores.get_non_terminal_by_source_deployment_id(
+        deployment_id
+    ):
+        if not _is_other_deployment_namespace(restore.target_namespace, deployment_id):
+            return restore
     return None
+
+
+def _is_other_deployment_namespace(namespace: str, deployment_id: UUID) -> bool:
+    """Return whether *namespace* is the ``styrmin-<id>`` of another deployment."""
+    if not namespace.startswith(_DEPLOYMENT_NAMESPACE_PREFIX):
+        return False
+    try:
+        owner = UUID(namespace.removeprefix(_DEPLOYMENT_NAMESPACE_PREFIX))
+    except ValueError:
+        return False
+    return owner != deployment_id
 
 
 async def has_in_flight_restore(uow: UnitOfWork, deployment_id: UUID) -> bool:
     """Return whether a non-terminal restore is landing in *deployment_id*.
 
-    Finds a restore into the canonical namespace (``find_in_flight_restore``)
-    and a restore of the deployment's own backups into any namespace, since
-    ``createRestore`` accepts a ``target_namespace`` from the client.
-    A clone restoring this deployment's backup into a counterpart matches too.
+    Uses the same lookup as the concurrent-restore guard in ``create_restore``
+    (``find_in_flight_restore``), so both agree on what is in flight.
     """
-    canonical_namespace = f"styrmin-{deployment_id}"
-    if (
+    canonical_namespace = f"{_DEPLOYMENT_NAMESPACE_PREFIX}{deployment_id}"
+    return (
         await find_in_flight_restore(uow, deployment_id, canonical_namespace)
         is not None
-    ):
-        return True
-    restores = await uow.restores.get_non_terminal_by_source_deployment_id(
-        deployment_id
     )
-    return len(restores) > 0
 
 
 async def create_restore(
