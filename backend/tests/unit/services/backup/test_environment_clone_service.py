@@ -2289,10 +2289,11 @@ async def test_the_capture_poll_reuses_one_unit_of_work(
     At the shipped poll interval and timeout a single clone could churn 720
     sessions. The loop therefore holds one unit of work and rolls it back
     between turns — which is also what makes the poll *see* the capture
-    terminalise, instead of the identity map's first read.
+    terminalise, instead of the identity map's first read. The rollback comes
+    before each sleep so the turn's connection is back in the pool while it waits.
     """
     sessions: list[Any] = []
-    rollbacks: list[int] = []
+    events: list[str] = []
     real_rollback = scenario.uow.rollback
 
     @asynccontextmanager
@@ -2302,16 +2303,19 @@ async def test_the_capture_poll_reuses_one_unit_of_work(
             yield scenario.uow
 
     async def _rollback() -> None:
-        rollbacks.append(1)
+        events.append("rollback")
         # Terminalise on the second turn, the way a real capture would land
         # between two reads.
         for backup in scenario.uow.backups.models:
             backup.status = BackupStatus.COMPLETED
         await real_rollback()
 
+    async def _sleep(_seconds: float) -> None:
+        events.append("sleep")
+
     monkeypatch.setattr(clone_flow, "get_unit_of_work", _get_uow)
     monkeypatch.setattr(clone_flow, "get_run_logger", lambda: logging.getLogger("test"))
-    monkeypatch.setattr(clone_flow.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr(clone_flow.asyncio, "sleep", _sleep)
     monkeypatch.setattr(scenario.uow, "rollback", _rollback)
 
     clone = await scenario.clone()
@@ -2320,7 +2324,14 @@ async def test_the_capture_poll_reuses_one_unit_of_work(
     capture_status, _ = await clone_flow._await_capture_terminal(clone.id)
 
     assert capture_status is EnvironmentOperationStatus.COMPLETED
-    assert rollbacks, "the loop never discarded a read, so it would poll a stale one"
+    assert "rollback" in events, (
+        "the loop never discarded a read, so it would poll a stale one"
+    )
+    assert all(
+        i > 0 and events[i - 1] == "rollback"
+        for i, e in enumerate(events)
+        if e == "sleep"
+    ), f"a turn slept while its read still held a connection: {events}"
     assert len(sessions) == 1, (
         f"the poll opened {len(sessions)} units of work; one is enough"
     )
