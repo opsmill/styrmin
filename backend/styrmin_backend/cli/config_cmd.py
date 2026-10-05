@@ -30,10 +30,11 @@ def show(
     # Convert settings to dict
     settings_dict = settings.model_dump()
 
+    # markup=False: Rich would otherwise strip TOML section headers like [database].
     if format == "json":
-        console.print(json.dumps(settings_dict, indent=2, default=str))
+        console.print(json.dumps(settings_dict, indent=2, default=str), markup=False)
     else:
-        console.print(toml.dumps(settings_dict))
+        console.print(toml.dumps(settings_dict), markup=False)
 
 
 @config_app.command
