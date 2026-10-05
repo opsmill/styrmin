@@ -579,6 +579,63 @@ async def update_restore_status(
         return restore
 
 
+async def settle_undispatched_restore(
+    restore_id: UUID, deployment_id: UUID, uow: UnitOfWork, error: str
+) -> Restore | None:
+    """Fail a restore whose workflow was never dispatched, and its deployment.
+
+    ``create_restore`` commits a ``PENDING`` row and moves the deployment to
+    ``RESTORING`` before the caller dispatches ``execute_restore_workflow``. If
+    that dispatch fails, nothing else settles either row: no process picks up a
+    ``PENDING`` restore, and while ``find_in_flight_restore`` returns it, agent
+    status reports cannot move the deployment out of ``RESTORING``. Both are
+    failed in one transaction, the way the workflow fails a restore it could not
+    finish. A restore that is no longer ``PENDING`` was picked up by the
+    workflow after all, so it and the deployment are left alone.
+
+    Never raises: the caller is already handling the dispatch error, and a
+    second error here must not replace it.
+
+    Returns:
+        The restore as it now stands, or ``None`` when its row no longer exists
+        or the write failed.
+    """
+    try:
+        async with uow:
+            restore = await uow.restores.get(restore_id)
+            if restore is None:
+                logger.warning(
+                    f"Restore {restore_id} could not be marked FAILED after its "
+                    "dispatch failed: the record no longer exists"
+                )
+            elif restore.status != RestoreStatus.PENDING:
+                return restore
+            else:
+                restore.status = RestoreStatus.FAILED
+                restore.completed_at = datetime.now(timezone.utc)
+                restore.error_message = error
+
+            deployment = await uow.deployments.find(deployment_id)
+            if deployment is None:
+                logger.warning(
+                    f"Deployment {deployment_id} could not be marked FAILED after "
+                    f"the dispatch of restore {restore_id} failed: it no longer exists"
+                )
+            elif deployment.status == DeploymentState.RESTORING:
+                deployment.status = DeploymentState.FAILED
+                await uow.deployments.save(deployment)
+
+            await uow.commit()
+            if restore is not None:
+                await uow.session.refresh(restore)  # Load server-generated fields
+            return restore
+    except Exception:  # noqa: BLE001 — must not replace the dispatch error
+        logger.exception(
+            f"Restore {restore_id} could not be marked FAILED after its dispatch failed"
+        )
+        return None
+
+
 async def update_restore_component_status(
     restore_id: UUID,
     component_name: str,

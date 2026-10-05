@@ -38,8 +38,10 @@ from styrmin_backend.services.backup.service import (
     create_restore,
     get_restore,
     get_restores,
+    settle_undispatched_restore,
     update_restore_status,
 )
+from styrmin_backend.services.deployment_status import report_deployment_statuses
 from styrmin_backend.services.exceptions import (
     BackupNotFoundError,
     DeploymentNotFoundError,
@@ -509,6 +511,166 @@ class TestUpdateRestoreStatus:
         )
 
         assert result.component_statuses == component_statuses
+
+
+DISPATCH_ERROR = "the restore was created but its workflow was never dispatched: boom"
+
+
+async def create_undispatched_restore(
+    deployment_status: DeploymentState = DeploymentState.RUNNING,
+) -> tuple[FakeUnitOfWork, Restore, Deployment]:
+    """A restore ``create_restore`` committed, whose dispatch then failed."""
+    deployment, instance, backup = make_chain(deployment_status=deployment_status)
+    uow = make_uow(backups=[backup], instances=[instance], deployments=[deployment])
+    restore, _ = await create_restore(
+        backup_id=backup.id,
+        target_namespace=f"styrmin-{deployment.id}",
+        uow=uow,
+    )
+    return uow, restore, deployment
+
+
+class TestSettleUndispatchedRestore:
+    @pytest.mark.anyio
+    async def test_fails_the_restore_and_the_restoring_deployment(self) -> None:
+        uow, restore, deployment = await create_undispatched_restore()
+        commits_before = uow.commit_count
+
+        result = await settle_undispatched_restore(
+            restore_id=restore.id,
+            deployment_id=deployment.id,
+            uow=uow,
+            error=DISPATCH_ERROR,
+        )
+
+        assert result is restore
+        assert restore.status == RestoreStatus.FAILED
+        assert restore.error_message == DISPATCH_ERROR
+        assert restore.completed_at is not None
+        stored = await uow.deployments.find(deployment.id)
+        assert stored is not None
+        assert stored.status == DeploymentState.FAILED
+        # One transaction for both rows.
+        assert uow.commit_count == commits_before + 1
+
+    @pytest.mark.anyio
+    async def test_status_reports_apply_again_after_settling(self) -> None:
+        """#395 review: a PENDING row left by a failed dispatch made every
+        status report skip the deployment, holding it in RESTORING."""
+        uow, restore, deployment = await create_undispatched_restore()
+
+        await settle_undispatched_restore(
+            restore_id=restore.id,
+            deployment_id=deployment.id,
+            uow=uow,
+            error=DISPATCH_ERROR,
+        )
+        await report_deployment_statuses(
+            [
+                {
+                    "deployment_id": deployment.id,
+                    "phase": "Ready",
+                    "display_state": "Running",
+                }
+            ],
+            uow,
+        )
+
+        stored = await uow.deployments.find(deployment.id)
+        assert stored is not None
+        assert stored.status == DeploymentState.RUNNING
+
+    @pytest.mark.anyio
+    async def test_leaves_a_deployment_that_is_no_longer_restoring(self) -> None:
+        uow, restore, deployment = await create_undispatched_restore()
+        stored = await uow.deployments.find(deployment.id)
+        assert stored is not None
+        stored.status = DeploymentState.DELETING
+
+        await settle_undispatched_restore(
+            restore_id=restore.id,
+            deployment_id=deployment.id,
+            uow=uow,
+            error=DISPATCH_ERROR,
+        )
+
+        assert restore.status == RestoreStatus.FAILED
+        assert stored.status == DeploymentState.DELETING
+
+    @pytest.mark.anyio
+    async def test_leaves_a_restore_the_workflow_already_picked_up(self) -> None:
+        uow, restore, deployment = await create_undispatched_restore()
+        restore.status = RestoreStatus.IN_PROGRESS
+
+        result = await settle_undispatched_restore(
+            restore_id=restore.id,
+            deployment_id=deployment.id,
+            uow=uow,
+            error=DISPATCH_ERROR,
+        )
+
+        assert result is restore
+        assert restore.status == RestoreStatus.IN_PROGRESS
+        assert restore.error_message is None
+        stored = await uow.deployments.find(deployment.id)
+        assert stored is not None
+        assert stored.status == DeploymentState.RESTORING
+
+    @pytest.mark.anyio
+    async def test_missing_restore_row_still_fails_the_deployment(self) -> None:
+        deployment, _, _ = make_chain(deployment_status=DeploymentState.RESTORING)
+        uow = make_uow(deployments=[deployment])
+
+        result = await settle_undispatched_restore(
+            restore_id=uuid4(),
+            deployment_id=deployment.id,
+            uow=uow,
+            error=DISPATCH_ERROR,
+        )
+
+        assert result is None
+        stored = await uow.deployments.find(deployment.id)
+        assert stored is not None
+        assert stored.status == DeploymentState.FAILED
+
+    @pytest.mark.anyio
+    async def test_missing_deployment_row_still_fails_the_restore(self) -> None:
+        restore = Restore(
+            name="test-restore",
+            status=RestoreStatus.PENDING,
+            target_namespace="test-ns",
+            backup_id=uuid4(),
+        )
+        uow = make_uow(restores=[restore])
+
+        result = await settle_undispatched_restore(
+            restore_id=restore.id,
+            deployment_id=uuid4(),
+            uow=uow,
+            error=DISPATCH_ERROR,
+        )
+
+        assert result is restore
+        assert restore.status == RestoreStatus.FAILED
+        assert restore.error_message == DISPATCH_ERROR
+
+    @pytest.mark.anyio
+    async def test_a_failed_write_does_not_raise(self) -> None:
+        uow, restore, deployment = await create_undispatched_restore()
+
+        async def failing_commit() -> None:
+            raise RuntimeError("database is down")
+
+        uow.commit = failing_commit  # type: ignore[method-assign]
+
+        result = await settle_undispatched_restore(
+            restore_id=restore.id,
+            deployment_id=deployment.id,
+            uow=uow,
+            error=DISPATCH_ERROR,
+        )
+
+        assert result is None
 
 
 def make_counterpart(
