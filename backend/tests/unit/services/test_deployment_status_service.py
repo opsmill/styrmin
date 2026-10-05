@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from styrmin_backend.db.models import Restore, RestoreStatus
 from styrmin_backend.domain.models import Deployment, DeploymentState, Instance
 from styrmin_backend.services.deployment_status import (
     extract_scheduling_conditions,
@@ -20,6 +21,7 @@ from tests.unit.services.fakes import (
     FakeEnvironmentRepository,
     FakeHelmChartRepository,
     FakeHelmRepositoryRepository,
+    FakeRestoreRepository,
     FakeTaskRepository,
     FakeUnitOfWork,
 )
@@ -34,6 +36,7 @@ def _make_uow(
     deployments: FakeDeploymentRepository | None = None,
     deployment_statuses: FakeDeploymentStatusRepository | None = None,
     deployed_services: "FakeDeployedServiceRepository | None" = None,
+    restores: FakeRestoreRepository | None = None,
 ) -> FakeUnitOfWork:
     return FakeUnitOfWork(
         clusters=FakeClusterRepository(),
@@ -47,6 +50,18 @@ def _make_uow(
         deployments=deployments,
         deployment_statuses=deployment_statuses,
         deployed_services=deployed_services,
+        restores=restores,
+    )
+
+
+def _make_restore(target_namespace: str, status: RestoreStatus) -> Restore:
+    restore_id = uuid4()
+    return Restore(
+        id=restore_id,
+        name=f"styrmin-{restore_id}",
+        status=status,
+        target_namespace=target_namespace,
+        backup_id=uuid4(),
     )
 
 
@@ -160,6 +175,83 @@ async def test_restoring_sets_restoring() -> None:
     found = await dep_repo.find(dep.id)
     assert found is not None
     assert found.status == DeploymentState.RESTORING
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "restore_status", [RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS]
+)
+@pytest.mark.parametrize(
+    "display_state", ["Running", "Deploying", "Error", "Deleting", "Deleted"]
+)
+async def test_in_flight_restore_keeps_restoring(
+    restore_status: RestoreStatus, display_state: str
+) -> None:
+    """#389: until Velero finishes, the CR still reads its pre-restore state
+    (or the teardown's, or none at all), so a report must not move the
+    deployment out of RESTORING while its restore is in flight."""
+    dep = _make_deployment(status=DeploymentState.RESTORING)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    restores = FakeRestoreRepository()
+    await restores.create(_make_restore(f"styrmin-{dep.id}", restore_status))
+    uow = _make_uow(deployments=dep_repo, restores=restores)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Ready",
+            "display_state": display_state,
+        }
+    ]
+    statuses_updated, deployments_updated = await report_deployment_statuses(
+        reports, uow
+    )
+
+    assert statuses_updated == 1
+    assert deployments_updated == 0
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.RESTORING
+    assert found.deleted_at is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("namespace_of", "restore_status"),
+    [
+        pytest.param("self", RestoreStatus.COMPLETED, id="restore-completed"),
+        pytest.param("self", RestoreStatus.FAILED, id="restore-failed"),
+        pytest.param("other", RestoreStatus.IN_PROGRESS, id="other-deployment"),
+    ],
+)
+async def test_restoring_without_in_flight_restore_accepts_report(
+    namespace_of: str, restore_status: RestoreStatus
+) -> None:
+    """Once no restore into the deployment is in flight, reports apply again,
+    so a restore workflow that settled its row but not the deployment still
+    converges on the CR's state."""
+    dep = _make_deployment(status=DeploymentState.RESTORING)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    target_id = dep.id if namespace_of == "self" else uuid4()
+    restores = FakeRestoreRepository()
+    await restores.create(_make_restore(f"styrmin-{target_id}", restore_status))
+    uow = _make_uow(deployments=dep_repo, restores=restores)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Ready",
+            "display_state": "Running",
+        }
+    ]
+    _, deployments_updated = await report_deployment_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.RUNNING
 
 
 @pytest.mark.anyio

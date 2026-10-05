@@ -323,6 +323,8 @@ The agent's status reporter maps CRD `displayState` to `deployment.status` (see 
 | `Restoring` | `RESTORING` |
 | `Error` | `FAILED` |
 
+A restore holds `deployment.status` at `RESTORING` while a non-terminal `Restore` row (`PENDING` or `IN_PROGRESS`) targets the deployment's namespace: a report updates the `DeploymentStatus` snapshot but not `deployment.status`, and stage 5 sets the final state. The CRD reads `Restoring` only after stage 4's `mark_restoring`, so reports sent before then carry the pre-restore `Running`, the teardown's `Deleting`, or the `Deploying` default of the status-less CRD that Velero recreates ([#389](https://github.com/opsmill/styrmin/issues/389)). Once the row is terminal, reports apply again.
+
 ## Environment-Level Backup & Restore
 
 Everything above is per-instance. `services/backup/environment.py` adds a
