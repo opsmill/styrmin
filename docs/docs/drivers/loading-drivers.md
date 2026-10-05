@@ -124,6 +124,13 @@ For git-sourced drivers, the fingerprint is the resolved commit SHA on
 the requested branch — loading the same `repo@branch@commit` twice is a
 no-op; loading after a new commit lands creates a new row.
 
+The recorded commit is also the code a deployment's actions run. Pushing
+new commits to the driver's branch does not change what a deployment
+executes: its actions keep running the commit shown in `sourceCommitSha`
+until you load the new commit and upgrade the deployment onto it. Driver
+versions loaded by an earlier Styrmin release keep following the branch tip
+until a new commit is loaded.
+
 See [`dev/guides/driver-iteration.md`](https://github.com/opsmill/styrmin/blob/develop/dev/guides/driver-iteration.md)
 for the full iteration-loop reference.
 

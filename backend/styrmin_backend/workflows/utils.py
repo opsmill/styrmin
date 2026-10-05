@@ -59,14 +59,14 @@ def get_repository_name(repository_url: str) -> str:
 
 
 def set_directory_pull_step(
-    directory: str, repository_name: str, branch: str
+    directory: str, clone_directory_name: str
 ) -> dict[str, Any]:
     """Set the working directory in a pull step.
 
     Args:
-        directory (str): The local directory to set.
-        repository_name (str): The name of the repository.
-        branch (str): The branch of the repository.
+        directory (str): The local directory to set, inside the clone.
+        clone_directory_name (str): The directory the preceding ``git_clone``
+            step checked the repository out into.
 
     Returns:
         dict[str, Any]: The pull step.
@@ -74,6 +74,6 @@ def set_directory_pull_step(
 
     return {
         "prefect.deployments.steps.set_working_directory": {
-            "directory": f"/opt/prefect/{repository_name}-{branch}/{directory}",
+            "directory": f"/opt/prefect/{clone_directory_name}/{directory}",
         }
     }

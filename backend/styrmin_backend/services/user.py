@@ -17,8 +17,10 @@ class PrefectDeploymentsCatalogue:
 class ActionsWorkflowBuilder:
     USER_NAMESPACE = "user"
 
-    def __init__(self, source: GitSource):
+    def __init__(self, source: GitSource, commit_sha: str | None = None):
         self.source: GitSource = source
+        # ``ApplicationDriverVersion.source_commit_sha``: every action pins to it.
+        self.commit_sha: str | None = commit_sha
 
     def build_user_action_workflow_definition(
         self, action: ActionDefinition
@@ -31,6 +33,7 @@ class ActionsWorkflowBuilder:
             function=function,
             repository=self.source.repository,
             branch=self.source.branch,
+            commit_sha=self.commit_sha,
             namespace=self.USER_NAMESPACE,
             token=self.source.token,
             type=WorkflowType.USER,
