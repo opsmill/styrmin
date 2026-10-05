@@ -81,7 +81,7 @@ services:
       - styrmin_db:/source/data
 
   task-manager:
-    image: "${TASK_MANAGER_DOCKER_IMAGE:-prefecthq/prefect:3.6.25-python3.14}"
+    image: "${TASK_MANAGER_DOCKER_IMAGE:-prefecthq/prefect:3.8.6-python3.14}"
     command: prefect server start --host 0.0.0.0 --ui
     restart: unless-stopped
     depends_on:
