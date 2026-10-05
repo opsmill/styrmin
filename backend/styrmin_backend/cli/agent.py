@@ -10,6 +10,8 @@ import logging
 from cyclopts import App
 from rich.console import Console
 
+from styrmin_backend import config
+
 agent_app = App(name="agent", help="Agent and operator management commands.")
 console = Console()
 
@@ -41,6 +43,9 @@ def start(
         f"[bold green]Starting Styrmin agent[/bold green] "
         f"(pool={work_pool}, clusterwide={clusterwide})"
     )
+
+    # The operator's handler modules read settings at import: load and validate them first.
+    config.SETTINGS.initialize_and_exit()
 
     from styrmin_backend.entrypoint.combined import main
 
