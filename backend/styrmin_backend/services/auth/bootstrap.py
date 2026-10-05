@@ -14,6 +14,7 @@ import warnings
 from uuid import UUID, uuid4
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -25,6 +26,11 @@ from styrmin_backend.services.auth.password import hash_password
 
 DEFAULT_ADMIN_USERNAME = "admin"
 _GENERATED_PASSWORD_BYTES = 24
+
+#: Built-in account that driver actions call the API as. See ADR-059.
+ACTIONS_SERVICE_ACCOUNT_USERNAME = "styrmin-actions"
+#: Not an Argon2 hash, so ``verify_password`` rejects every password for it.
+_UNUSABLE_PASSWORD_HASH = "!"
 
 
 def _build_insert(dialect_name: str):
@@ -95,6 +101,39 @@ async def bootstrap_default_admin(
             "Bootstrapped admin user '{}' from STYRMIN_ADMIN_PASSWORD", canonical
         )
     return inserted_id
+
+
+async def ensure_actions_service_account(session: AsyncSession) -> UUID:
+    """Return the id of the actions service account, creating it if missing.
+
+    The account has the READ_WRITE role and no usable password. An existing
+    row is returned as is, so an admin who deactivates it or changes its role
+    keeps that choice.
+    """
+    dialect_name = session.bind.dialect.name  # type: ignore[union-attr]
+    insert = _build_insert(dialect_name)
+    stmt = (
+        insert(User.__table__)
+        .values(
+            id=uuid4(),
+            username=ACTIONS_SERVICE_ACCOUNT_USERNAME,
+            password_hash=_UNUSABLE_PASSWORD_HASH,
+            display_name="Styrmin driver actions",
+            active=True,
+            role=Role.READ_WRITE.name,
+        )
+        .on_conflict_do_nothing(index_elements=["username"])
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        await session.execute(stmt)  # ty: ignore[deprecated]
+        result = await session.execute(  # ty: ignore[deprecated]
+            select(User.__table__.c.id).where(
+                User.__table__.c.username == ACTIONS_SERVICE_ACCOUNT_USERNAME
+            )
+        )
+    await session.commit()
+    return result.scalar_one()
 
 
 async def bootstrap_default_admin_from_settings() -> None:

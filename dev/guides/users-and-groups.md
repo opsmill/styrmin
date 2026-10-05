@@ -1,7 +1,7 @@
 # Users and Groups
 
 Operator guide to user, group, and role management in Styrmin. Covers
-roles, the bootstrap admin, the admin UI, lockout recovery, the SDK
+roles, the bootstrap admin, the driver actions user, the admin UI, lockout recovery, the SDK
 equivalent, and the "hide-not-disable" UI principle.
 
 ## Roles
@@ -52,6 +52,35 @@ Copy that password from the log — it is not persisted anywhere else and
 will not be re-emitted on subsequent restarts (the bootstrap is
 idempotent and only sets a password the first time the row is created).
 If you lose it, see [Lockout recovery](#lockout-recovery).
+
+## Driver actions user (`styrmin-actions`)
+
+Driver actions call the Styrmin API to stop components, start components and
+change the deployment version. They call it as the built-in user
+`styrmin-actions`. Styrmin creates this user the first time a reconcile runs
+(`ensure_actions_service_account` in
+`backend/styrmin_backend/services/auth/bootstrap.py`). See
+[ADR-059](../adr/0059-driver-action-api-tokens.md).
+
+- Its role is `READ_WRITE`, which `stopComponents`, `startComponents` and
+  `updateDeploymentVersion` require.
+- It has no password. Its stored hash is not an Argon2 hash, so `login`
+  rejects every password for it.
+- For each reconcile, `apply_state` creates a session for it that expires
+  after 24 hours, passes the token to the reconcile's actions in
+  `STYRMIN_TOKEN`, and deletes the session when the reconcile ends.
+
+The user appears in the Users list. Changes to it have these effects:
+
+- Deactivating it makes every action call to the API fail with
+  `Authentication is required`.
+- Setting its role to `READ_ONLY` makes those calls fail with
+  `Insufficient permissions`.
+- Adding it to a group with a higher role gives actions that higher role,
+  because actions use the user's effective role.
+- Resetting its password turns it into a user that someone can log in as.
+- Deleting it also deletes the sessions of reconciles that are running, so
+  their actions fail. The next reconcile creates the user again.
 
 ## Admin UI walkthrough
 
@@ -208,10 +237,12 @@ surface. They are not bugs — track them as follow-up features.
   need it.
 - **SSO / OIDC / SAML** — no external identity provider integration.
   All users are local rows in the Styrmin database.
-- **Service accounts** — the in-cluster agent still authenticates with
-  the bootstrap admin token until a dedicated service-account flow
-  ships (see the `TODO(#188)` follow-up in
-  `backend/styrmin_backend/api/auth/allowlist.py`).
+- **Agent credentials** — driver actions call the API as
+  [`styrmin-actions`](#driver-actions-user-styrmin-actions). The agent
+  status reporter, the flow-run state callback and the
+  `GET /deployments/{id}/context` route still accept calls without
+  credentials ([#396](https://github.com/opsmill/styrmin/issues/396), and
+  the `TODO(#396)` notes in `backend/styrmin_backend/api/auth/allowlist.py`).
 - **Audit-log tables** — admin mutations are emitted to stdout via the
   structured audit log line. There is no queryable history table; if
   you need durable audit history, ship the stdout stream to your log

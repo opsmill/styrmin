@@ -89,6 +89,20 @@ Three things to notice:
   ordered steps and a sanity check, you express that as Python — no
   shell scripts, no runbooks.
 
+### How actions call the Styrmin API
+
+`stop_components`, `start_components` and `upgrade_deployment_version`
+call the Styrmin API. Each time Styrmin reconciles a deployment, it creates
+a short-lived token for the built-in user `styrmin-actions` (role
+Read/write, no password), gives the token to the actions of that reconcile
+in the `STYRMIN_TOKEN` environment variable, and revokes the token when the
+reconcile ends. The Python SDK reads the same variable, so an action that
+uses the SDK is authenticated as `styrmin-actions` too.
+
+`styrmin-actions` appears in the user list. If an admin deactivates it, or
+sets its role to Read-only, the actions' calls to the API fail and the
+deployment's task ends as `failed`.
+
 ### Reading a component's images
 
 Upgrade actions often run a migration Job with the component's own

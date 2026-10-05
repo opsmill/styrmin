@@ -1,0 +1,8 @@
+mutation StopComponents($deploymentId: UUID!, $components: [String!]!) {
+    stopComponents(deploymentId: $deploymentId, components: $components) {
+        id
+        status
+        type
+        deploymentId
+    }
+}

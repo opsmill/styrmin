@@ -10,12 +10,15 @@ Key functionalities:
 - Execute custom shell commands as Kubernetes jobs within the deployment's namespace.
 
 Context: Those primitives are intended to be exposed to the developer of a driver to pilot Styrmin
-features during an application upgrade.
+features during an application upgrade. Their API calls authenticate with the short-lived token
+that the reconcile passes to each action in ``STYRMIN_TOKEN`` (ADR-059).
 """
 
 import asyncio
 import os
 import time
+from pathlib import Path
+from typing import Any
 
 import httpx
 from loguru import logger
@@ -27,45 +30,68 @@ from styrmin_backend.agent.service.kubernetes.primitives import (
     get_component_labels as _k8s_get_component_labels,
     run_job,
 )
+from styrmin_backend.agent.tasks.utils import API_TOKEN_ENV
 from styrmin_backend.context.models.contexts import GlobalContext
 
-_GET_TASK_QUERY = """
-    query GetTask($taskId: UUID!) {
-        task(taskId: $taskId) {
-            id
-            status
-        }
-    }
-"""
+_GRAPHQL_DIR = Path(__file__).resolve().parent
+
+
+def _load_query(name: str) -> str:
+    return (_GRAPHQL_DIR / f"{name}.graphql").read_text()
+
+
+def _api_client() -> httpx.AsyncClient:
+    """Client authenticated with the token the reconcile passed to this action (ADR-059)."""
+    token = os.environ.get(API_TOKEN_ENV)
+    return httpx.AsyncClient(
+        headers={"Authorization": f"Bearer {token}"} if token else None
+    )
+
+
+async def _execute(
+    client: httpx.AsyncClient, operation: str, variables: dict[str, Any]
+) -> dict[str, Any]:
+    """Run a GraphQL operation and return its ``data``; raise on GraphQL errors."""
+    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
+    response = await client.post(
+        f"{api_url}/graphql",
+        json={"query": _load_query(operation), "variables": variables},
+    )
+    data = response.json()
+    if errors := data.get("errors"):
+        raise RuntimeError(f"GraphQL error: {errors[0].get('message', errors)}")
+    return data.get("data") or {}
 
 
 async def _wait_for_task(
+    client: httpx.AsyncClient,
     task_id: str,
-    styrmin_server_url: str,
     timeout: float = 300.0,
     poll_interval: float = 5.0,
 ) -> None:
     """Poll a task until it reaches a terminal state (success/failed)."""
     start = time.time()
-    async with httpx.AsyncClient() as client:
-        while time.time() - start < timeout:
-            response = await client.post(
-                styrmin_server_url,
-                json={
-                    "variables": {"taskId": task_id},
-                    "query": _GET_TASK_QUERY,
-                },
-            )
-            data = response.json()
-            status = data.get("data", {}).get("task", {}).get("status")
-            logger.info(f"Task {task_id} status: {status}")
-            if status == "success":
-                return
-            if status == "failed":
-                message = data.get("data", {}).get("task", {}).get("message", "")
-                raise RuntimeError(f"Task {task_id} failed: {message}")
-            await asyncio.sleep(poll_interval)
+    while time.time() - start < timeout:
+        data = await _execute(client, "get_task", {"taskId": task_id})
+        task_data = data.get("task") or {}
+        status = task_data.get("status")
+        logger.info(f"Task {task_id} status: {status}")
+        if status == "success":
+            return
+        if status == "failed":
+            raise RuntimeError(f"Task {task_id} failed: {task_data.get('message')}")
+        await asyncio.sleep(poll_interval)
     raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
+
+
+async def _run_task_mutation(
+    operation: str, field: str, variables: dict[str, Any]
+) -> None:
+    """Run a mutation that returns a Task, then wait for that task to finish."""
+    async with _api_client() as client:
+        data = await _execute(client, operation, variables)
+        if task_data := data.get(field):
+            await _wait_for_task(client, task_data["id"])
 
 
 @task(task_run_name="Stop Components {components}")
@@ -82,34 +108,14 @@ async def stop_components(components: list[str], context: GlobalContext) -> None
     if context.components is None:
         raise ValueError("No components found in the context.")
 
-    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
-    styrmin_server_url = f"{api_url}/graphql"
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            styrmin_server_url,
-            json={
-                "variables": {
-                    "deploymentId": str(context.instance.deployment_id),
-                    "components": components,
-                },
-                "query": """
-                    mutation StopComponents($deploymentId: UUID!, $components: [String!]!) {
-                        stopComponents(deploymentId: $deploymentId, components: $components) {
-                            id
-                            status
-                            type
-                            deploymentId
-                        }
-                    }
-                """,
-            },
-        )
-        data = response.json()
-        if errors := data.get("errors"):
-            raise RuntimeError(f"GraphQL error: {errors[0].get('message', errors)}")
-        if task_data := data.get("data", {}).get("stopComponents"):
-            await _wait_for_task(task_data["id"], styrmin_server_url)
+    await _run_task_mutation(
+        "stop_components",
+        "stopComponents",
+        {
+            "deploymentId": str(context.instance.deployment_id),
+            "components": components,
+        },
+    )
 
 
 @task(task_run_name="Start Components {components}")
@@ -126,34 +132,14 @@ async def start_components(components: list[str], context: GlobalContext) -> Non
     if context.components is None:
         raise ValueError("No components found in the context.")
 
-    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
-    styrmin_server_url = f"{api_url}/graphql"
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            styrmin_server_url,
-            json={
-                "variables": {
-                    "deploymentId": str(context.instance.deployment_id),
-                    "components": components,
-                },
-                "query": """
-                    mutation StartComponents($deploymentId: UUID!, $components: [String!]!) {
-                        startComponents(deploymentId: $deploymentId, components: $components) {
-                            id
-                            status
-                            type
-                            deploymentId
-                        }
-                    }
-                """,
-            },
-        )
-        data = response.json()
-        if errors := data.get("errors"):
-            raise RuntimeError(f"GraphQL error: {errors[0].get('message', errors)}")
-        if task_data := data.get("data", {}).get("startComponents"):
-            await _wait_for_task(task_data["id"], styrmin_server_url)
+    await _run_task_mutation(
+        "start_components",
+        "startComponents",
+        {
+            "deploymentId": str(context.instance.deployment_id),
+            "components": components,
+        },
+    )
 
 
 def _validate_component(component_name: str, context: GlobalContext) -> str:
@@ -313,31 +299,11 @@ async def upgrade_deployment_version(
     Raises:
         ValueError: If the upgrade fails.
     """
-    api_url = os.environ.get("STYRMIN_URL_API", "http://localhost:8000")
-    styrmin_server_url = f"{api_url}/graphql"
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            styrmin_server_url,
-            json={
-                "variables": {
-                    "deploymentId": str(context.instance.deployment_id),
-                    "version": target_version,
-                },
-                "query": """
-                    mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!) {
-                        updateDeploymentVersion(deploymentId: $deploymentId, version: $version) {
-                            id
-                            status
-                            type
-                            deploymentId
-                        }
-                    }
-                """,
-            },
-        )
-        data = response.json()
-        if errors := data.get("errors"):
-            raise RuntimeError(f"GraphQL error: {errors[0].get('message', errors)}")
-        if task_data := data.get("data", {}).get("updateDeploymentVersion"):
-            await _wait_for_task(task_data["id"], styrmin_server_url)
+    await _run_task_mutation(
+        "update_deployment_version",
+        "updateDeploymentVersion",
+        {
+            "deploymentId": str(context.instance.deployment_id),
+            "version": target_version,
+        },
+    )

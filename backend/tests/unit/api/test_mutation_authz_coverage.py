@@ -162,7 +162,7 @@ def test_query_allow_list_only_contains_documented_entries() -> None:
     assert set(QUERY_ALLOW_LIST) == expected, (
         "QUERY_ALLOW_LIST drift detected. Update both api/auth/allowlist.py "
         "and this test together so the reviewer sees the deliberate change. "
-        "Remember: ``environments`` is a documented exception pending #188 "
+        "Remember: ``environments`` is a documented exception pending #396 "
         "service-account auth."
     )
 

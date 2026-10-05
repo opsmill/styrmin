@@ -1194,7 +1194,7 @@ class Mutation:
         return "Backup schedule deleted"
 
     # callback is on the documented allow-list (api/auth/allowlist.py).
-    # TODO(#188): replace with service-account auth so it can carry RequiresRole(ADMIN).
+    # TODO(#396): replace with service-account auth so it can carry RequiresRole(ADMIN).
     @strawberry.mutation
     async def callback(
         self,
@@ -1307,7 +1307,7 @@ class Mutation:
         return Task.from_instance(task) if task is not None else None
 
     # report_pod_statuses is on the documented allow-list (api/auth/allowlist.py).
-    # TODO(#188): replace with service-account auth so it can carry RequiresRole(ADMIN).
+    # TODO(#396): replace with service-account auth so it can carry RequiresRole(ADMIN).
     @strawberry.mutation
     async def report_pod_statuses(
         self,
@@ -1351,7 +1351,7 @@ class Mutation:
         )
 
     # report_deployment_statuses is on the documented allow-list (api/auth/allowlist.py).
-    # TODO(#188): replace with service-account auth so it can carry RequiresRole(ADMIN).
+    # TODO(#396): replace with service-account auth so it can carry RequiresRole(ADMIN).
     @strawberry.mutation
     async def report_deployment_statuses(
         self,

@@ -23,7 +23,7 @@ from __future__ import annotations
 #: status reporter. They have no caller user identity in v1; a follow-up
 #: issue introduces service-account session tokens so these can move to
 #: ``RequiresRole(ADMIN)``. Documented here so the gap is auditable.
-#: TODO(#188): replace agent allow-list entries with service-account auth.
+#: TODO(#396): replace agent allow-list entries with service-account auth.
 MUTATION_ALLOW_LIST: frozenset[str] = frozenset(
     {
         "login",
@@ -43,10 +43,10 @@ MUTATION_ALLOW_LIST: frozenset[str] = frozenset(
 #: above: the in-cluster status reporter polls
 #: ``ListDeploymentsForStatus`` (a traversal under ``Query.environments``)
 #: to discover which deployments to report on. It has no caller user
-#: identity in v1; the same #188 follow-up that introduces service-account
+#: identity in v1; the same #396 follow-up that introduces service-account
 #: session tokens for the report mutations covers this read path.
 #:
-#: TODO(#188): Two follow-ups land together once service-account auth
+#: TODO(#396): Two follow-ups land together once service-account auth
 #:   ships:
 #:     1. The agent status reporter (``agent/status/reporter.py``) must
 #:        pass an ``Authorization: Bearer <svc-token>`` header on every

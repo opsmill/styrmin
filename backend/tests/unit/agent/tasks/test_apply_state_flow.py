@@ -6,9 +6,11 @@ The flow must:
   instance from the freshly-committed DB.
 - Build a DiffReport via Comparator.
 - Generate a Remediation via Remediator.
-- Call `remediation.apply()` (the existing sub-flow chain).
+- Call `remediation.apply()` (the existing sub-flow chain) with a
+  freshly minted driver action token (ADR-059).
 """
 
+from contextlib import asynccontextmanager
 from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,7 +18,16 @@ import pytest
 from tests.helpers.unit_of_work import yield_unit_of_work
 
 
+@asynccontextmanager
+async def _fake_action_api_token():
+    yield "action-token"
+
+
 @pytest.mark.asyncio
+@patch(
+    "styrmin_backend.agent.tasks.orchestration.action_api_token",
+    new=_fake_action_api_token,
+)
 @patch(
     "styrmin_backend.agent.tasks.orchestration._build_instance_entity",
     create=True,
@@ -79,7 +90,7 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     fake_uow.deployments.find.assert_awaited_with(id=deployment_id)
     mock_comparator_cls.assert_called_once()
     mock_remediator_cls.assert_called_once()
-    fake_remediation.apply.assert_awaited_once()
+    fake_remediation.apply.assert_awaited_once_with(api_token="action-token")
 
 
 @pytest.mark.asyncio
