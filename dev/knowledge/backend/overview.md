@@ -243,7 +243,8 @@ Startup sequence:
 `config.SETTINGS` (`backend/styrmin_backend/config.py`) holds the settings for the whole process, and each process parses them once:
 
 - Entrypoints that accept `--config-file` (`styrmin server start`, `styrmin db ...`) call `SETTINGS.initialize(path)` before any code reads a setting.
-- Every other process (the agent, Prefect flow runs, Alembic) loads the settings on first access, from the file named by `STYRMIN_CONFIG` (default `styrmin.toml` in the working directory). Without that file, only environment variables and defaults apply.
+- `styrmin agent start` calls `SETTINGS.initialize_and_exit()` before it imports the operator's handler modules, which read settings at import, so invalid settings print a validation summary instead of a traceback.
+- Every other process (Prefect flow runs, Alembic) loads the settings on first access, from the file named by `STYRMIN_CONFIG` (default `styrmin.toml` in the working directory). Without that file, only environment variables and defaults apply.
 - Each section (`database`, `workflow`, `kubernetes`, `driver`, `agent_code`, `agent`, `operator`, `url`) reads its environment variables when the settings load, not when the module is imported.
 - `SETTINGS.initialize(path)` raises `InitializationError` when the settings were already loaded from another file, so a call made too late cannot silently ignore the requested file.
 
