@@ -11,6 +11,7 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
+from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import ResourceNotFoundError
 
 from tests.e2e.conftest import _portforward, _wait_for_http
@@ -1232,6 +1233,49 @@ async def _wait_for_deployment_status(
     )
 
 
+async def _read_status_and_last_poll(
+    client: StyrminClient, deployment_id
+) -> tuple[str, str | None]:
+    """Read ``deployment.status`` and the last agent status report time together."""
+    raw = await client._transport.execute(
+        load_query("get_deployment_status"), {"deploymentId": str(deployment_id)}
+    )
+    assert "errors" not in raw, raw
+    deployment = raw["data"]["deployment"]
+    return deployment["status"], (deployment.get("crdStatus") or {}).get("lastPolledAt")
+
+
+async def _status_after_next_report(
+    client: StyrminClient,
+    deployment_id,
+    restore_id: str,
+    max_wait: float,
+    poll: float = 1.0,
+) -> str:
+    """Return ``deployment.status`` read after the next agent status report.
+
+    Fails if the restore is no longer in flight once that report has landed,
+    because the report would then prove nothing about the restore window.
+    """
+    _, baseline = await _read_status_and_last_poll(client, deployment_id)
+    deadline = asyncio.get_event_loop().time() + max_wait
+    while asyncio.get_event_loop().time() < deadline:
+        status, last_polled_at = await _read_status_and_last_poll(client, deployment_id)
+        if last_polled_at != baseline:
+            # Read after the deployment: a restore still in flight now was in
+            # flight when the status above was read.
+            restore = await client.backups.get_restore(restore_id)
+            assert restore.status in {"pending", "in_progress"}, (
+                f"Restore {restore_id} reached {restore.status!r} before an agent "
+                f"status report landed during it"
+            )
+            return status
+        await asyncio.sleep(poll)
+    raise AssertionError(
+        f"No agent status report for deployment {deployment_id} within {max_wait}s"
+    )
+
+
 @pytest.mark.ci
 @pytest.mark.shard_backup
 async def test_restore_lifecycle_transitions(
@@ -1275,6 +1319,13 @@ async def test_restore_lifecycle_transitions(
         max_wait=10,
     )
     assert observed == "restoring"
+
+    # #389: an agent status report sent before Velero finishes used to
+    # overwrite RESTORING with the CR's pre-restore state. Wait for one.
+    after_report = await _status_after_next_report(
+        client, deployment_id, restore_id=created_restore.id, max_wait=300
+    )
+    assert after_report == "restoring"
 
     # Velero + post-restore reapply runs to completion.
     restore = await driver.wait_for_restore(restore_id=created_restore.id, max_wait=600)

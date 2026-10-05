@@ -111,7 +111,7 @@ Every poll cycle, the reporter:
    - Fetches the `StyrminDeployment` CRD (`styrmin.io/v1alpha1`) and reads `spec.instanceId`, `status.phase`, `status.displayState`, `status.message`, `status.conditions`, and `status.managedResources`. A missing CRD is not an error — that deployment is simply skipped this cycle.
 3. Posts two independent GraphQL mutations to the server's `/graphql` endpoint:
    - `reportPodStatuses(reports: [DeploymentPodStatusReport!]!)` — server upserts pod rows and deletes stale ones (handled by `services/pod_status.py::report_pod_statuses`).
-   - `reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!)` — server snapshots CRD status and, when `displayState` maps to a known `DeploymentState`, updates `Deployment.status` (subject to the instance-mismatch guard described in [`../backend/reconciliation.md`](../backend/reconciliation.md) and `services/deployment_status.py`).
+   - `reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!)` — server snapshots CRD status and, when `displayState` maps to a known `DeploymentState`, updates `Deployment.status` (subject to the instance-mismatch guard described in [`../backend/reconciliation.md`](../backend/reconciliation.md) and `services/deployment_status.py`, and to the in-flight restore guard described in [`../backend/backup-restore.md`](../backend/backup-restore.md#display-state-mapping)).
 
 Pod and CRD collection are wrapped in independent `try` blocks: a failure in one does not block reporting of the other.
 

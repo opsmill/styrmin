@@ -480,7 +480,7 @@ async def _settle_undispatched_restore(
     ``create_restore`` **commits** a ``PENDING`` row and parks the counterpart in
     ``RESTORING`` before the flow run is dispatched, so a dispatch failure
     leaves behind a restore nothing will ever pick up. Left alone that row is
-    worse than invisible: ``_find_in_flight_restore`` counts ``PENDING`` as in
+    worse than invisible: ``find_in_flight_restore`` counts ``PENDING`` as in
     flight, so it refuses **every** future restore into that counterpart —
     naming a restore that never ran — and no ``PENDING``-restore reaper exists
     anywhere to settle it.

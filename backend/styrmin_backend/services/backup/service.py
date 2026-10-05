@@ -340,7 +340,7 @@ async def update_backup_component_status(
 # ---------------------------------------------------------------------------
 
 
-async def _find_in_flight_restore(
+async def find_in_flight_restore(
     uow: UnitOfWork, deployment_id: UUID, target_namespace: str
 ) -> Restore | None:
     """Return a non-terminal restore already landing in *deployment_id*, if any.
@@ -404,7 +404,7 @@ async def create_restore(
             to the target's active instance so the row records which
             counterpart the data landed in. A counterpart already sitting in
             ``RESTORING`` because the clone put it there is *not* a conflict —
-            see ``_find_in_flight_restore``. ``None`` (the default) keeps the
+            see ``find_in_flight_restore``. ``None`` (the default) keeps the
             shipped in-place behaviour: the target is resolved from the
             backup.
 
@@ -471,7 +471,7 @@ async def create_restore(
         # that populates it — naming no restore, because there was none. A
         # refusal always names the row it collided with; when no row can be
         # named there is nothing to collide with.
-        in_flight = await _find_in_flight_restore(
+        in_flight = await find_in_flight_restore(
             uow, deployment_id=deployment_id, target_namespace=target_namespace
         )
         if in_flight is not None:

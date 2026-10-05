@@ -6,7 +6,9 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
+from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.db.models import DeploymentState, DeploymentStatus
+from styrmin_backend.services.backup.service import find_in_flight_restore
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,12 @@ async def report_deployment_statuses(
     in-progress upgrade) and must not be allowed to overwrite the status of
     the new instance still rolling out. Reports with ``instance_id=None``
     (legacy CRDs without the field) bypass the guard for backward compat.
+
+    A deployment in ``RESTORING`` with a non-terminal restore keeps that state
+    whatever the report says: the restore workflow sets the final state. The
+    CR only reads ``Restoring`` once Velero has finished, so reports sent
+    earlier carry the pre-restore ``Running``, the teardown's ``Deleting``, or
+    the ``Deploying`` default of the status-less CR that Velero recreates.
 
     Args:
         reports: List of dicts with keys: deployment_id (UUID), phase (str),
@@ -93,6 +101,24 @@ async def report_deployment_statuses(
                     deployment_id,
                     reported_instance_id,
                     active_instance_id,
+                )
+                continue
+
+            if (
+                deployment.status == DeploymentState.RESTORING
+                and target_state != DeploymentState.RESTORING
+                and await find_in_flight_restore(
+                    uow,
+                    deployment_id=deployment_id,
+                    target_namespace=get_kubernetes_reference(deployment_id),
+                )
+                is not None
+            ):
+                logger.info(
+                    "Skipping status update for deployment %s: a restore is in "
+                    "progress, ignoring reported state %s",
+                    deployment_id,
+                    display_state,
                 )
                 continue
 
