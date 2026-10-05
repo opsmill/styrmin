@@ -234,7 +234,7 @@ async def _reapply_phases_and_finalize(
             "conditions": conditions,
         },
     )
-    logger.info("Restore lifecycle complete for %s/%s", namespace, name)
+    logger.info("Restore lifecycle complete for {}/{}", namespace, name)
 
 
 async def _upsert_crd(
@@ -493,7 +493,7 @@ async def reapply_with_counterpart_identity(
     }
     await _upsert_crd(api_client, namespace, body)
     logger.info(
-        "Applied counterpart StyrminDeployment %s/%s over restored CR %s",
+        "Applied counterpart StyrminDeployment {}/{} over restored CR {}",
         namespace,
         counterpart_name,
         restored_crd_name,
@@ -504,7 +504,7 @@ async def reapply_with_counterpart_identity(
             api_client, namespace, restored_crd_name
         )
         logger.info(
-            "Deleted restored source-named StyrminDeployment %s/%s",
+            "Deleted restored source-named StyrminDeployment {}/{}",
             namespace,
             restored_crd_name,
         )
@@ -514,7 +514,7 @@ async def reapply_with_counterpart_identity(
         api_client, namespace, source_namespace=restored_crd_name
     )
     logger.info(
-        "Retargeted %d restored Helm release revision(s) in %s from %s",
+        "Retargeted {} restored Helm release revision(s) in {} from {}",
         retargeted,
         namespace,
         restored_crd_name,
@@ -554,7 +554,7 @@ async def mark_failed(
         # and let the workflow's DB-side failure handling take over — the
         # restore record + deployment.status carry the failure signal.
         logger.warning(
-            "Could not patch CRD %s/%s after restore failure: %s",
+            "Could not patch CRD {}/{} after restore failure: {}",
             namespace,
             name,
             exc,
