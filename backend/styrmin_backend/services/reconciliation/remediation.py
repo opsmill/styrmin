@@ -8,7 +8,10 @@ from fast_depends import Depends, inject
 from loguru import logger
 from prefect.client.schemas.objects import FlowRun
 
-from styrmin_backend.agent.tasks.utils import run_deployment_or_fail
+from styrmin_backend.agent.tasks.utils import (
+    api_token_job_variables,
+    run_deployment_or_fail,
+)
 
 from pydantic import BaseModel
 
@@ -48,8 +51,8 @@ class Remediation(BaseModel):
     parameters: dict
     type: RemediationType
 
-    async def apply(self) -> FlowRun:
-        """Apply the remediation."""
+    async def apply(self, api_token: str | None = None) -> FlowRun:
+        """Apply the remediation; ``api_token`` reaches the driver actions it runs."""
         logger.info(
             "Applying remediation: type={} instance_id={} flow_id={}",
             self.type,
@@ -61,6 +64,7 @@ class Remediation(BaseModel):
         flow_info = await run_deployment_or_fail(
             name=self.flow_id,
             parameters=self.parameters,
+            job_variables=api_token_job_variables(api_token),
         )
 
         logger.info(

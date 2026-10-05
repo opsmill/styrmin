@@ -126,6 +126,10 @@ _Avoid_: "lifecycle event", "phase" (that is the operator's term), "stage".
 The execution phase within a **hook**: `pre`, `core`, or `post`. Ordering inside a **mode** is unspecified; ordering across **modes** is strict.
 _Avoid_: "phase" (reserved for operator phases), "stage", "step".
 
+**Action token**:
+The session token that `apply_state` creates once per **reconciliation** for the built-in `styrmin-actions` user (role `READ_WRITE`, no password) and deletes when the **reconciliation** ends. It reaches every **action** of that **reconciliation** in the `STYRMIN_TOKEN` environment variable, and the action primitives send it as a bearer token. See [ADR-059](dev/adr/0059-driver-action-api-tokens.md).
+_Avoid_: "service token", "agent token" (the agent status reporter does not use it), "API key".
+
 **Utility**:
 A cluster-level resource (e.g. ingress controller, service discovery) managed by the same builders that produce application resources. Defined by a `Utility` row with a Jinja2 `resource_template`. Internal deployments are marked `internal: true` on the `Deployment` row.
 _Avoid_: "system service", "platform service", "infra resource".

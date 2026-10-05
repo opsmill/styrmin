@@ -102,17 +102,23 @@ The top-level orchestration wrapper. Has all lifecycle callbacks.
 async def apply_state(
     task_id: UUID,
     deployment_id: UUID,
-    remediation: Remediation | None,
+    new_instance_id: UUID,
+    current_instance_id: UUID | None,
 ) -> State | None:
+    # Loads the deployment and both instances, diffs them, builds the remediation.
+    ...
     if remediation is None:
         return Completed(message="No remediation needed")
-    flow_info = await remediation.apply()
+    async with action_api_token() as api_token:
+        flow_info = await remediation.apply(api_token=api_token)
     return flow_info.state
 ```
 
 Called by: `PrefectManager.run_action(PrefectAction.APPLY_STATE, parameters={...})`
 
-The `remediation.apply()` method calls `arun_deployment(name=self.flow_id, parameters=self.parameters)`, which triggers one of the inner flows below.
+The `remediation.apply()` method calls `arun_deployment(name=self.flow_id, parameters=self.parameters, job_variables=...)`, which triggers one of the inner flows below.
+
+`action_api_token()` creates a session for the built-in `styrmin-actions` user and deletes it when the remediation ends. The token reaches the inner flow's Job as `STYRMIN_TOKEN` through the flow run's `env` job variable, and the inner flow passes it on to each driver action with `run_driver_action_or_fail`. The action primitives send it as a bearer token. See [ADR-059](../../adr/0059-driver-action-api-tokens.md).
 
 **Key**: Only `apply_state` has callbacks. Inner flows do NOT register callbacks because they run as sub-flows within `apply_state`.
 

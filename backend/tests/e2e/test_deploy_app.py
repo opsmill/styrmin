@@ -52,6 +52,36 @@ async def test_deploy_simple_app(
             assert response.status_code == 200
 
 
+async def _assert_upgrade_action_succeeded(
+    scenario_driver: ScenarioDriver,
+    deployment_id: str,
+    version: str,
+    timeout: float = 300.0,
+) -> None:
+    """Wait for the upgrade's tasks to finish and assert none failed (#381).
+
+    The simple-app ``upgrade`` action calls ``stop_components`` and
+    ``start_components``, which add two tasks at ``version`` next to the
+    upgrade's own task. Seeing three means the action ran and the API
+    accepted its calls; a failed task means a step was rejected.
+    """
+    deadline = time.time() + timeout
+    entries = []
+    while time.time() < deadline:
+        timeline = await scenario_driver.get_deployment_timeline(
+            deployment_id=deployment_id
+        )
+        entries = [e for e in timeline if e.application_version == version]
+        failed = [e for e in entries if e.task_status == "failed"]
+        assert not failed, f"upgrade to {version} has failed tasks: {failed}"
+        if len(entries) >= 3 and all(e.task_status == "success" for e in entries):
+            return
+        await asyncio.sleep(3.0)
+    raise AssertionError(
+        f"upgrade to {version} did not finish its action within {timeout}s: {entries}"
+    )
+
+
 @pytest.mark.ci
 async def test_upgrade_simple_app(
     scenario_driver: ScenarioDriver,
@@ -68,6 +98,7 @@ async def test_upgrade_simple_app(
         deployment_id=deployment_id, version="0.2.0"
     )
     await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
+    await _assert_upgrade_action_succeeded(scenario_driver, deployment_id, "0.2.0")
 
     kubeconfig_path = vcluster["kubeconfig_path"]
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)

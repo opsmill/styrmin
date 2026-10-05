@@ -29,7 +29,10 @@ def hash_token(raw_token: str) -> bytes:
 
 
 async def create_session(
-    db_session: AsyncSession, user_id: UUID
+    db_session: AsyncSession,
+    user_id: UUID,
+    *,
+    lifetime: timedelta = ABSOLUTE_LIFETIME,
 ) -> tuple[SessionModel, str]:
     """Mint a session token and persist the session row.
 
@@ -44,7 +47,7 @@ async def create_session(
         token_hash=digest,
         created_at=now,
         last_used_at=now,
-        expires_at=now + ABSOLUTE_LIFETIME,
+        expires_at=now + lifetime,
     )
     db_session.add(session_row)
     await db_session.commit()

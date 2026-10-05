@@ -203,14 +203,14 @@ Returns the first matching deployment's UUID, or `None`.
 
 ## Execution
 
-Hooks are called via `arun_deployment()` from Prefect, which triggers the registered workflow in the user work pool (Kubernetes):
+Hooks are called via `run_driver_action_or_fail()` (`agent/tasks/utils.py`), which wraps Prefect's `arun_deployment()`, triggers the registered workflow in the user work pool (Kubernetes), raises when the flow run fails, and passes this Job's `STYRMIN_TOKEN` to the action's Job (ADR-059):
 
 ```python
-from prefect.deployments.flow_runs import arun_deployment
+from styrmin_backend.agent.tasks.utils import run_driver_action_or_fail
 
 # In orchestration flows:
 if prehook:
-    await arun_deployment(
+    await run_driver_action_or_fail(
         flow_run_name=f"Run {context.app.name} pre-hook",
         name=prehook,                          # UUID of Prefect deployment
         parameters={"context": context},        # GlobalContext passed to user function
@@ -235,6 +235,16 @@ Drivers import these from `styrmin_backend.actions`:
 ```python
 from styrmin_backend.actions import stop_components, start_components, execute_commands, GlobalContext
 ```
+
+### How the API primitives authenticate
+
+`stop_components`, `start_components` and `upgrade_deployment_version` call GraphQL mutations
+that require `READ_WRITE`, then poll `Query.task`. They send `Authorization: Bearer` with the
+token in `STYRMIN_TOKEN`. `apply_state` creates that token for the built-in `styrmin-actions` user
+once per reconcile, passes it to the remediation flow's Job, which passes it to each action's Job
+(`run_driver_action_or_fail`), and deletes the session when the reconcile ends. Without the
+variable, the calls fail with `Authentication is required`. See
+[ADR-059](../../adr/0059-driver-action-api-tokens.md).
 
 ### Reading the component image in an upgrade action
 

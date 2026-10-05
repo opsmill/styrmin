@@ -14,7 +14,10 @@ from styrmin_backend.agent.service.kubernetes.primitives import (
     patch_custom_resource,
     run_kubernetes_job,
 )
-from styrmin_backend.agent.tasks.utils import run_deployment_or_fail
+from styrmin_backend.agent.tasks.utils import (
+    run_deployment_or_fail,
+    run_driver_action_or_fail,
+)
 from styrmin_backend.agent.tasks.core import (
     render_application_helm_release_specifications,
 )
@@ -37,6 +40,7 @@ from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
 from styrmin_backend.services.reconciliation.diffs.comparison import Comparator
 from styrmin_backend.services.reconciliation.remediation import Remediator
+from styrmin_backend.services.auth.action_token import action_api_token
 from styrmin_backend.services.unit_of_work import get_unit_of_work
 from styrmin_backend.agent.service.kubernetes.primitives import (
     patch_custom_resource_status,
@@ -209,7 +213,8 @@ async def apply_state(
         if remediation is None:
             return Completed(message="No remediation needed")
 
-        flow_info = await remediation.apply()
+        async with action_api_token() as api_token:
+            flow_info = await remediation.apply(api_token=api_token)
         return flow_info.state
 
 
@@ -641,7 +646,7 @@ async def create_instance_crd(
 
     # Run pre-hook before CRD creation (imperative action)
     if prehook:
-        await run_deployment_or_fail(
+        await run_driver_action_or_fail(
             flow_run_name=f"Run {context.app.name} pre-hook",
             name=prehook,
             parameters={"context": context},
@@ -677,7 +682,7 @@ async def create_instance_crd(
 
     # Run post-hook after CRD creation (imperative action)
     if posthook:
-        await run_deployment_or_fail(
+        await run_driver_action_or_fail(
             flow_run_name=f"Run {context.app.name} post-hook",
             name=posthook,
             parameters={"context": context},
@@ -767,13 +772,13 @@ async def upgrade_instance_crd(
     )
 
     if prehook:
-        await run_deployment_or_fail(
+        await run_driver_action_or_fail(
             flow_run_name=f"Run {context.app.name} upgrade pre-hook",
             name=prehook,
             parameters={"context": context, "target_version": target_version},
         )
 
-    await run_deployment_or_fail(
+    await run_driver_action_or_fail(
         flow_run_name=f"Upgrade {context.app.name} to {target_version}",
         name=upgrade_hook,
         parameters={"context": context, "target_version": target_version},
@@ -789,7 +794,7 @@ async def upgrade_instance_crd(
         )
 
     if posthook:
-        await run_deployment_or_fail(
+        await run_driver_action_or_fail(
             flow_run_name=f"Run {context.app.name} upgrade post-hook",
             name=posthook,
             parameters={"context": context, "target_version": target_version},
