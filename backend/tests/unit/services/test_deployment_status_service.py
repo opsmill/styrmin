@@ -348,6 +348,24 @@ async def test_settled_restore_into_other_namespace_accepts_report(
 
 
 @pytest.mark.anyio
+async def test_clone_restore_of_own_backup_does_not_hold_restoring() -> None:
+    """An environment clone restoring this deployment's backup lands in the
+    counterpart's namespace, so it does not hold this deployment's state."""
+    dep = _make_deployment(status=DeploymentState.RESTORING)
+    uow, dep_repo = await _make_uow_with_own_backup_restore(
+        dep, f"styrmin-{uuid4()}", RestoreStatus.IN_PROGRESS
+    )
+
+    reports = [{"deployment_id": dep.id, "phase": "Ready", "display_state": "Running"}]
+    _, deployments_updated = await report_deployment_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.RUNNING
+
+
+@pytest.mark.anyio
 async def test_error_sets_failed() -> None:
     dep = _make_deployment()
     dep_repo = FakeDeploymentRepository()
