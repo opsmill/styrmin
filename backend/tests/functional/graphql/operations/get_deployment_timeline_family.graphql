@@ -1,0 +1,35 @@
+query GetDeploymentTimelineFamily($deploymentId: UUID!) {
+    deploymentTimeline(deploymentId: $deploymentId) {
+        task {
+            id
+            type
+            result
+            startedByStepId
+            startedBy {
+                id
+                type
+                result
+            }
+            startedTasks {
+                id
+                type
+                result
+            }
+            steps {
+                id
+                key
+                status
+                supersededBy {
+                    id
+                    type
+                    result
+                }
+                startedTasks {
+                    id
+                    type
+                    result
+                }
+            }
+        }
+    }
+}

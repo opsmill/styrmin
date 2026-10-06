@@ -1,0 +1,14 @@
+mutation StartComponentsStartedBy(
+    $deploymentId: UUID!
+    $components: [String!]!
+    $startedByStepId: UUID
+) {
+    startComponents(
+        deploymentId: $deploymentId
+        components: $components
+        startedByStepId: $startedByStepId
+    ) {
+        id
+        startedByStepId
+    }
+}

@@ -1,0 +1,14 @@
+mutation UpdateDeploymentVersionStartedBy(
+    $deploymentId: UUID!
+    $version: String!
+    $startedByStepId: UUID
+) {
+    updateDeploymentVersion(
+        deploymentId: $deploymentId
+        version: $version
+        startedByStepId: $startedByStepId
+    ) {
+        id
+        startedByStepId
+    }
+}

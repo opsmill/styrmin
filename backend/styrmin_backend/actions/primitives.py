@@ -32,8 +32,8 @@ from styrmin_backend.agent.service.kubernetes.primitives import (
     get_component_labels as _k8s_get_component_labels,
     run_job,
 )
-from styrmin_backend.agent.steps.reporter import StepReporter
-from styrmin_backend.agent.tasks.utils import API_TOKEN_ENV
+from styrmin_backend.agent.steps.reporter import StepReporter, uuid_from_env
+from styrmin_backend.agent.tasks.utils import API_TOKEN_ENV, STEP_ID_ENV
 from styrmin_backend.context.models.contexts import GlobalContext
 
 _GRAPHQL_DIR = Path(__file__).resolve().parent
@@ -89,7 +89,16 @@ async def _wait_for_task(
 async def _run_task_mutation(
     operation: str, field: str, variables: dict[str, Any]
 ) -> None:
-    """Run a mutation that returns a Task, then wait for that task to finish."""
+    """Run a mutation that returns a Task, then wait for that task to finish.
+
+    The task is linked to the hook step that runs this action (``STYRMIN_STEP_ID``),
+    so the hook's task lists it among its started tasks (019 research D12).
+    """
+    step_id = uuid_from_env(STEP_ID_ENV)
+    variables = {
+        **variables,
+        "startedByStepId": str(step_id) if step_id is not None else None,
+    }
     async with _api_client() as client:
         data = await _execute(client, operation, variables)
         if task_data := data.get(field):

@@ -11,6 +11,17 @@ query GetDeploymentTimelineReadModel($deploymentId: UUID!) {
             type
             status
             startedByStepId
+            result
+            startedBy {
+                id
+                type
+                result
+            }
+            startedTasks {
+                id
+                type
+                result
+            }
             steps {
                 id
                 key
@@ -32,6 +43,16 @@ query GetDeploymentTimelineReadModel($deploymentId: UUID!) {
                 rollbackMessage
                 hasOutput
                 outputTruncated
+                supersededBy {
+                    id
+                    type
+                    result
+                }
+                startedTasks {
+                    id
+                    type
+                    result
+                }
                 taskId
                 backupId
                 restoreId

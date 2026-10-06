@@ -16,11 +16,22 @@ from uuid import uuid4
 import httpx
 import pytest
 from httpx import ASGITransport
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend import config
 from styrmin_backend.actions import primitives
-from styrmin_backend.db.models import Role, TaskStatus, User
+from styrmin_backend.agent.tasks.utils import STEP_ID_ENV
+from styrmin_backend.db.models import (
+    Role,
+    Step as StepRow,
+    StepKind,
+    StepStatus,
+    Task as TaskRow,
+    TaskStatus,
+    TaskType,
+    User,
+)
 from styrmin_backend.db.utils import get_session
 from styrmin_backend.server.app import app
 from styrmin_backend.services.auth import action_token
@@ -56,6 +67,7 @@ def asgi_api(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> Iterator
     )
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://test")
     monkeypatch.delenv("STYRMIN_TOKEN", raising=False)
+    monkeypatch.delenv(STEP_ID_ENV, raising=False)
     monkeypatch.setattr(
         action_token,
         "get_unit_of_work",
@@ -117,6 +129,44 @@ async def test_primitive_dispatches_with_action_token(
 
     prefect_manager_mock.run_action.assert_awaited_once()
     wait_for_task.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("primitive", sorted(_PRIMITIVE_CALLS))
+async def test_primitive_links_its_task_to_the_hook_step(
+    session: AsyncSession,
+    prefect_manager_mock,
+    monkeypatch: pytest.MonkeyPatch,
+    primitive: str,
+) -> None:
+    """``STYRMIN_STEP_ID`` reaches ``task.started_by_step_id`` (spec 019, research D12)."""
+    prefect_manager_mock.run_action = _flow_info()
+    monkeypatch.setattr(primitives, "_wait_for_task", AsyncMock())
+    deployment = await seed_deployment(session)
+    upgrade = await seed_task(
+        session, deployment=deployment, task_type=TaskType.UPGRADE_INSTANCE
+    )
+    hook = StepRow(
+        task_id=upgrade.id,
+        key="hook:upgrade:core",
+        name="Run the upgrade hook",
+        kind=StepKind.HOOK,
+        status=StepStatus.RUNNING,
+    )
+    session.add(hook)
+    await session.commit()
+    deployment_id, hook_id = deployment.id, hook.id
+    monkeypatch.setenv(STEP_ID_ENV, str(hook_id))
+
+    async with action_token.action_api_token() as token:
+        monkeypatch.setenv("STYRMIN_TOKEN", token)
+        await _PRIMITIVE_CALLS[primitive](_context(deployment_id))
+
+    session.expire_all()
+    (started,) = (
+        await session.exec(select(TaskRow).where(TaskRow.started_by_step_id == hook_id))
+    ).all()
+    assert started.deployment_id == deployment_id
 
 
 @pytest.mark.asyncio

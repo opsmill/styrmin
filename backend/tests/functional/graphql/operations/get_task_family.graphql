@@ -1,0 +1,33 @@
+query GetTaskFamily($taskId: UUID!) {
+    task(taskId: $taskId) {
+        id
+        type
+        result
+        startedByStepId
+        startedBy {
+            id
+            type
+            result
+        }
+        startedTasks {
+            id
+            type
+            result
+        }
+        steps {
+            id
+            key
+            status
+            supersededBy {
+                id
+                type
+                result
+            }
+            startedTasks {
+                id
+                type
+                result
+            }
+        }
+    }
+}

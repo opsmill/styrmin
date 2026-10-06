@@ -967,12 +967,14 @@ export type MutationRunJobArgs = {
 export type MutationStartComponentsArgs = {
   components: Array<Scalars['String']['input']>;
   deploymentId: Scalars['UUID']['input'];
+  startedByStepId?: InputMaybe<Scalars['UUID']['input']>;
 };
 
 
 export type MutationStopComponentsArgs = {
   components: Array<Scalars['String']['input']>;
   deploymentId: Scalars['UUID']['input'];
+  startedByStepId?: InputMaybe<Scalars['UUID']['input']>;
 };
 
 
@@ -1011,6 +1013,7 @@ export type MutationUpdateDeploymentVersionArgs = {
   deploymentId: Scalars['UUID']['input'];
   driverVersionId?: InputMaybe<Scalars['UUID']['input']>;
   parameters?: InputMaybe<Scalars['JSON']['input']>;
+  startedByStepId?: InputMaybe<Scalars['UUID']['input']>;
   version: Scalars['String']['input'];
 };
 
@@ -1480,13 +1483,25 @@ export type Task = {
   deploymentId?: Maybe<Scalars['UUID']['output']>;
   id: Scalars['UUID']['output'];
   message?: Maybe<Scalars['String']['output']>;
+  /** The task result, calculated from the steps of the task and of the tasks its hook steps started. */
+  result: TaskResult;
+  /** The task whose hook step started this task. */
+  startedBy?: Maybe<Task>;
   startedByStepId?: Maybe<Scalars['UUID']['output']>;
+  /** Tasks started by this task's hook steps. */
+  startedTasks: Array<Task>;
   status: Scalars['String']['output'];
   /** The steps of the task by start time, pending steps last. */
   steps: Array<Step>;
   type: Scalars['String']['output'];
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };
+
+export type TaskResult =
+  | 'FAILED'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'SUPERSEDED';
 
 export type TolerationEffect =
   | 'NO_EXECUTE'

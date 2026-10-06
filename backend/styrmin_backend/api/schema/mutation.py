@@ -5,6 +5,7 @@ This is where the different routes and their types are defined.
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 import strawberry
@@ -165,6 +166,11 @@ from styrmin_backend.workflows.models import PrefectAction
 def _requires(role: Role) -> PermissionExtension:
     """Sugar for the per-mutation permission extension. See ADR-017."""
     return PermissionExtension([RequiresRole(role)])
+
+
+_STARTED_BY_STEP_ID = (
+    "The hook step that starts the task; Styrmin's driver action primitives set it."
+)
 
 
 @strawberry.type
@@ -1255,6 +1261,9 @@ class Mutation:
         deployment_id: UUID,
         components: list[str],
         info: strawberry.Info,
+        started_by_step_id: Annotated[
+            UUID | None, strawberry.argument(description=_STARTED_BY_STEP_ID)
+        ] = None,
     ) -> Task | None:
         """Stop the components of an application instance."""
         uow = info.context["uow"]
@@ -1262,6 +1271,7 @@ class Mutation:
             deployment_id=deployment_id,
             components=components,
             uow=uow,
+            started_by_step_id=started_by_step_id,
         )
         return Task.from_instance(task)
 
@@ -1271,6 +1281,9 @@ class Mutation:
         deployment_id: UUID,
         components: list[str],
         info: strawberry.Info,
+        started_by_step_id: Annotated[
+            UUID | None, strawberry.argument(description=_STARTED_BY_STEP_ID)
+        ] = None,
     ) -> Task | None:
         """Start the components of an application instance."""
         uow = info.context["uow"]
@@ -1278,6 +1291,7 @@ class Mutation:
             deployment_id=deployment_id,
             components=components,
             uow=uow,
+            started_by_step_id=started_by_step_id,
         )
         return Task.from_instance(task)
 
@@ -1309,6 +1323,9 @@ class Mutation:
         info: strawberry.Info,
         parameters: JSON | None = None,
         driver_version_id: UUID | None = None,
+        started_by_step_id: Annotated[
+            UUID | None, strawberry.argument(description=_STARTED_BY_STEP_ID)
+        ] = None,
     ) -> Task | None:
         """Update the version of an application instance.
 
@@ -1326,6 +1343,7 @@ class Mutation:
             version=version,
             uow=uow,
             driver_version_id=driver_version_id,
+            started_by_step_id=started_by_step_id,
         )
         return Task.from_instance(task) if task is not None else None
 

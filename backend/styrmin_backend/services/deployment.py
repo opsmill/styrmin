@@ -767,6 +767,7 @@ async def update_deployment_version(
     uow: UnitOfWork,
     deployment_parameters: dict | None = None,
     driver_version_id: UUID | None = None,
+    started_by_step_id: UUID | None = None,
 ) -> Task | None:
     """Update a deployment's application version and driver-version binding.
 
@@ -789,6 +790,7 @@ async def update_deployment_version(
         driver_version_id (UUID | None): Pin a specific driver version instead
             of latest-wins resolution. Must belong to the deployment's driver
             and support ``version``.
+        started_by_step_id (UUID | None): The hook step that starts the task.
 
     Raises:
         InvalidContextError: If the context is invalid.
@@ -797,6 +799,7 @@ async def update_deployment_version(
             ``version``, or the pin belongs to a different driver.
         InvalidImageReferenceError: If a stored image override applicable in the
             target driver version is invalid at ``version``.
+        StepNotFoundError: If ``started_by_step_id`` names no step.
 
     Returns:
         Task | None: The task created for the deployment update, or ``None``
@@ -989,6 +992,7 @@ async def update_deployment_version(
             current_instance=current_instance,
             uow=uow,
             task_type=TaskType.UPGRADE_INSTANCE,
+            started_by_step_id=started_by_step_id,
         )
 
         await uow.deployments.save(deployment=deployment)

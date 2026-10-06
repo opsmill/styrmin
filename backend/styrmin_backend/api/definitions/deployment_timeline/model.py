@@ -4,8 +4,9 @@ import strawberry
 
 from styrmin_backend.api.scalars import JSON
 
-from styrmin_backend.api.definitions.step.model import Step
+from styrmin_backend.api.definitions.step.model import NOT_LOADED, Step
 from styrmin_backend.api.definitions.task.model import Task
+from styrmin_backend.domain.models import Step as StepEntity
 from styrmin_backend.domain.models import Task as TaskEntity
 from styrmin_backend.services.deployment_timeline import (
     ContextChange as ContextChangeData,
@@ -16,10 +17,45 @@ from styrmin_backend.services.deployment_timeline import (
 
 
 def timeline_task(task: TaskEntity, read_model: TimelineReadModel) -> Task:
-    """A task of the timeline whose fields read the read model instead of querying."""
+    """A task of the timeline whose fields read the read model instead of querying.
+
+    A view the read model cannot fill (a link to a task it did not load) is
+    left unset, so its resolver queries.
+    """
+    result = read_model.result_of(task.id)
+    started_by = read_model.starting_task(task)
     return Task.from_instance(
         task,
-        steps=[Step.from_instance(step) for step in read_model.steps_of(task.id)],
+        steps=[
+            timeline_step(step, read_model) for step in read_model.steps_of(task.id)
+        ],
+        result=result if result is not None else NOT_LOADED,
+        started_by=(
+            started_by
+            if started_by is not None or task.started_by_step_id is None
+            else NOT_LOADED
+        ),
+        started_tasks=read_model.started_tasks_of(task.id),
+        task_results=read_model.results,
+    )
+
+
+def timeline_step(step: StepEntity, read_model: TimelineReadModel) -> Step:
+    """A step of a timeline task, with the tasks it links to from the read model."""
+    superseded_by = (
+        read_model.task(step.superseded_by_task_id)
+        if step.superseded_by_task_id is not None
+        else None
+    )
+    return Step.from_instance(
+        step,
+        superseded_by=(
+            superseded_by
+            if superseded_by is not None or step.superseded_by_task_id is None
+            else NOT_LOADED
+        ),
+        started_tasks=read_model.started_by(step.id),
+        task_results=read_model.results,
     )
 
 

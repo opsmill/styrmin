@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -90,6 +91,8 @@ class Step:
     superseded_by_view: strawberry.Private[TaskEntity | None | _NotLoaded] = NOT_LOADED
     started_tasks_view: strawberry.Private[list[TaskEntity] | _NotLoaded] = NOT_LOADED
     no_report_since_view: strawberry.Private[datetime | None | _NotLoaded] = NOT_LOADED
+    #: Results a read model calculated, so the linked tasks need no query for theirs.
+    task_results_view: strawberry.Private[Mapping[UUID, TaskResultEntity] | None] = None
 
     @strawberry.field(
         description="Seconds between startedAt and endedAt; null until both are set."
@@ -119,7 +122,7 @@ class Step:
         task = self.superseded_by_view
         if task is NOT_LOADED:
             task = await get_task(task_id=task_id, uow=info.context["uow"])
-        return Task.from_instance(task) if task is not None else None
+        return Task.linked(task, self.task_results_view) if task is not None else None
 
     @strawberry.field(description="Tasks that this hook step started.")
     async def started_tasks(
@@ -130,7 +133,7 @@ class Step:
         tasks = self.started_tasks_view
         if tasks is NOT_LOADED:
             tasks = await get_started_tasks(step_id=self.id, uow=info.context["uow"])
-        return [Task.from_instance(task) for task in tasks]
+        return [Task.linked(task, self.task_results_view) for task in tasks]
 
     @strawberry.field(
         description=(
@@ -151,6 +154,7 @@ class Step:
         superseded_by: TaskEntity | None | _NotLoaded = NOT_LOADED,
         started_tasks: list[TaskEntity] | _NotLoaded = NOT_LOADED,
         no_report_since: datetime | None | _NotLoaded = NOT_LOADED,
+        task_results: Mapping[UUID, TaskResultEntity] | None = None,
     ) -> Step:
         """Build the type; a read model passes the views it computed for many steps."""
         return cls(
@@ -175,6 +179,7 @@ class Step:
             superseded_by_view=superseded_by,
             started_tasks_view=started_tasks,
             no_report_since_view=no_report_since,
+            task_results_view=task_results,
         )
 
 
