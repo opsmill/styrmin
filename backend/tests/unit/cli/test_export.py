@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
+from styrmin_backend.api.scalars import SCALAR_MAP
 from styrmin_backend.cli.export import export_app
 
 
@@ -93,7 +94,7 @@ def test_exported_schema_contains_mutation_type(
 def test_export_graphql_schema_uses_correct_types(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
-    """Test that export uses Query and Mutation from styrmin_backend.api.schema."""
+    """Test that export uses the API's Query, Mutation and custom scalar map."""
     mock_schema_class = mocker.patch("styrmin_backend.cli.export.strawberry.Schema")
     mock_schema_instance = mock_schema_class.return_value
     mock_schema_instance.__str__ = mocker.Mock(return_value=MOCK_SDL)
@@ -107,7 +108,12 @@ def test_export_graphql_schema_uses_correct_types(
         export_app(["graphql-schema", str(output_path)])
 
     assert exc_info.value.code == 0
-    mock_schema_class.assert_called_once_with(query=mock_query, mutation=mock_mutation)
+    mock_schema_class.assert_called_once()
+    kwargs = mock_schema_class.call_args.kwargs
+    assert kwargs["query"] is mock_query
+    assert kwargs["mutation"] is mock_mutation
+    # Without the scalar map, building a schema that uses BigInt fails.
+    assert kwargs["config"].scalar_map == SCALAR_MAP
 
 
 def test_export_graphql_schema_handles_write_error(
