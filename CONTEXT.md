@@ -116,7 +116,7 @@ _Avoid_: "field" (UI term), "option", "setting", conflating with **prompt argume
 
 **Action**:
 A Python function declared by the **application driver** under `spec.actions` and implemented in the driver's `actions.py`. Runs inside a **Prefect** flow as part of the `setup` or `upgrade` **hook** at the `pre`, `core`, or `post` **mode**.
-_Avoid_: "task" (that is the database tracking record), "step", "function", "hook" (a **hook** is the lifecycle slot, an **action** is the work that runs in it).
+_Avoid_: "task" (that is the database tracking record), "step" (running all actions of one **mode** is one **step**; the action itself is not), "function", "hook" (a **hook** is the lifecycle slot, an **action** is the work that runs in it).
 
 **Hook**:
 A lifecycle slot at which **actions** run. Currently two: `setup` (during create) and `upgrade` (during upgrade). Each **hook** is composed of three **modes**.
@@ -124,7 +124,7 @@ _Avoid_: "lifecycle event", "phase" (that is the operator's term), "stage".
 
 **Mode**:
 The execution phase within a **hook**: `pre`, `core`, or `post`. Ordering inside a **mode** is unspecified; ordering across **modes** is strict.
-_Avoid_: "phase" (reserved for operator phases), "stage", "step".
+_Avoid_: "phase" (reserved for operator phases), "stage", "step" (one run of a mode is one **step**; the mode itself is not).
 
 **Action token**:
 The session token that `apply_state` creates once per **reconciliation** for the built-in `styrmin-actions` user (role `READ_WRITE`, no password) and deletes when the **reconciliation** ends. It reaches every **action** of that **reconciliation** in the `STYRMIN_TOKEN` environment variable, and the action primitives send it as a bearer token. See [ADR-059](dev/adr/0059-driver-action-api-tokens.md).
@@ -245,6 +245,14 @@ _Avoid_: "job", "workflow" alone when it could be misread, "pipeline".
 **Task** (database record):
 A `Task` row tracking one asynchronous operation: `status`, `type`, optional `message`, and `prefect_flow_run_id`. Distinct from Prefect's in-process `task` primitive.
 _Avoid_: when referring to Prefect's primitive, qualify as "Prefect task" — never let "task" alone refer to it.
+
+**Step**:
+One unit of work inside a **task**, a backup or a restore, recorded so users can view it: name, status, start time, end time, an error message when it fails, and the end of the command output when a command fails. One run of a **hook**'s **mode** is one step (e.g. "run the upgrade pre-hook"); each **operator** phase is one step (e.g. "create the HelmRelease"). Ordered by start time. See [issue #2](https://github.com/opsmill/styrmin/issues/2).
+_Avoid_: "substep", "TaskStep" (backups and restores are not **tasks**), "stage", "phase" (reserved for the **operator**'s phases), "event" (reserved for Kubernetes Events).
+
+**Task result**:
+The result of a **task** as users view it, derived from its **steps** on every read and never stored: `RUNNING` while any step is running or not started; `FAILED` when any step, or any task its hook started, has failed; `SUCCEEDED` when all steps have succeeded; `SUPERSEDED` when a task it did not start interrupted its operator phases. Distinct from `Task.status`, which follows only the Prefect flow run and which driver actions wait on. See [issue #2](https://github.com/opsmill/styrmin/issues/2).
+_Avoid_: "operation result" (ambiguous with **GraphQL operation**), "outcome" (used by `styrminctl deployments apply`), "task status" (that is `Task.status`).
 
 **Status reporter**:
 The third coroutine in the **agent**'s shared event loop. Polls Kubernetes every ~5 s for pod state and **StyrminDeployment** CRD status, then posts the snapshots back via `reportPodStatuses` and `reportDeploymentStatuses` GraphQL mutations. Distinct from Prefect's flow-state callbacks.
