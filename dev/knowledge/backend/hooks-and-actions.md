@@ -203,19 +203,23 @@ Returns the first matching deployment's UUID, or `None`.
 
 ## Execution
 
-Hooks are called via `run_driver_action_or_fail()` (`agent/tasks/utils.py`), which wraps Prefect's `arun_deployment()`, triggers the registered workflow in the user work pool (Kubernetes), raises when the flow run fails, and passes this Job's `STYRMIN_TOKEN` to the action's Job (ADR-059):
+Hooks are called via `run_driver_action_or_fail()` (`agent/tasks/utils.py`), which wraps Prefect's `arun_deployment()`, triggers the registered workflow in the user work pool (Kubernetes), raises when the flow run fails, and passes this Job's `STYRMIN_TOKEN` (ADR-059) and `STYRMIN_TASK_ID` to the action's Job. Each run of a hook mode is recorded as one hook step of the task, and the flow passes that step's id as `step_id`, which reaches the action's Job as `STYRMIN_STEP_ID`:
 
 ```python
 from styrmin_backend.agent.tasks.utils import run_driver_action_or_fail
 
 # In orchestration flows:
 if prehook:
-    await run_driver_action_or_fail(
-        flow_run_name=f"Run {context.app.name} pre-hook",
-        name=prehook,                          # UUID of Prefect deployment
-        parameters={"context": context},        # GlobalContext passed to user function
-    )
+    async with reporter.step(*steps.SETUP_PRE_HOOK) as step:
+        await run_driver_action_or_fail(
+            step_id=step.id,                       # The hook step; None when not recorded
+            flow_run_name=f"Run {context.app.name} pre-hook",
+            name=prehook,                          # UUID of Prefect deployment
+            parameters={"context": context},        # GlobalContext passed to user function
+        )
 ```
+
+The hook step succeeds when the action's flow run completes, and fails with the formatted exception when `run_driver_action_or_fail` raises. The hook step keys are `hook:setup:pre`, `hook:setup:post`, `hook:upgrade:pre`, `hook:upgrade:core` and `hook:upgrade:post`; see [orchestration-flows.md](orchestration-flows.md#remediation-flow-steps) for the full list of steps a remediation flow records.
 
 ## Action Primitives
 
@@ -228,7 +232,7 @@ Located in `actions/primitives.py`. These are Prefect `@task` functions that dri
 | `execute_commands` | `(commands: list[str], image: str, context: GlobalContext, env_from_component: str \| None = None, labels_from_component: str \| None = None)` | Runs commands as a Kubernetes Job. `image` is required; the optional `*_from_component` arguments copy env vars and labels from a named component pod. `env_from_component` reads `containers[0]`, which is the component container whenever env vars or an image override apply. |
 | `get_component_images` | `(component: str, context: GlobalContext) -> list[str]` | Images of every container in the component's `Deployment`/`StatefulSet` pod template (init containers excluded). When the component declares a component container present in the template, its image is element 0 (it carries any image override; spec 018); the others keep pod-template order. |
 | `get_component_labels` | `(component: str, context: GlobalContext) -> dict[str, str]` | Pod template labels of the component's workload |
-| `upgrade_deployment_version` | `(target_version: str, context: GlobalContext)` | Calls `updateDeploymentVersion` and waits for the nested task, which completes when the CR is written, not when the rollout is done |
+| `upgrade_deployment_version` | `(target_version: str, context: GlobalContext)` | Calls `updateDeploymentVersion` and waits for the nested task, which completes when the CR is written, not when the rollout is done. When the deployment already has `target_version`, the server finds no change, starts no task and returns `null`, and the primitive returns without waiting. The bundled drivers' `upgrade` actions call it with the hook's `target_version`, which the upgrade already set, so there it starts no task |
 
 Drivers import these from `styrmin_backend.actions`:
 
@@ -245,6 +249,44 @@ once per reconcile, passes it to the remediation flow's Job, which passes it to 
 (`run_driver_action_or_fail`), and deletes the session when the reconcile ends. Without the
 variable, the calls fail with `Authentication is required`. See
 [ADR-059](../../adr/0059-driver-action-api-tokens.md).
+
+### Tasks started by a hook step
+
+The same three primitives send `startedByStepId` with the value of `STYRMIN_STEP_ID` (or `null`
+when it is unset or not a UUID) on `stopComponents`, `startComponents` and
+`updateDeploymentVersion`. The server stores it in `Task.started_by_step_id`, so the task that ran
+the hook lists the new task in `Task.startedTasks`, the new task links back through
+`Task.startedBy`, and the hook's task result includes the started task's steps (see
+[ADR-060](../../adr/0060-steps-and-derived-task-result.md)). A step id that names no step fails the
+mutation with `StepNotFoundError`. An action that calls the API through the SDK instead of these
+primitives sends no `startedByStepId`, so the tasks it creates are not linked to the hook step.
+
+## Command output of a failed Job
+
+`execute_commands` runs its commands as a Kubernetes Job (container `user-job`) through `run_job`
+in `agent/service/kubernetes/primitives.py`. When the Job fails, `run_job` reads the end of the
+output before it raises (`read_job_output_tail` in `agent/service/kubernetes/job_logs.py`):
+
+- It lists the Job's pods by the label `batch.kubernetes.io/job-name`, then by the older label
+  `job-name`, and reads a failed pod before a retry that has not ended, then the newest one.
+- It asks the Kubernetes log API for the last 201 lines and at most 65,537 bytes, and keeps at
+  most the last 200 lines and 64 KiB. Getting more than that means earlier output was cut, and
+  `truncated` is set.
+- It raises `JobFailedError(message, output=..., truncated=...)`, which replaced the
+  `RuntimeError` that `run_job` raised before. When the output cannot be read (no pod, or a
+  Kubernetes API error), `output` is `None` and the message ends with "The output could not be
+  read: <reason>".
+
+`execute_commands` catches `JobFailedError`, records the output on the hook step named by
+`STYRMIN_STEP_ID` with the `OUTPUT` event of `recordStep`, and re-raises. The hook step then fails
+with the error when the action's flow run fails. Without `STYRMIN_STEP_ID` or the action token, the
+output is not recorded. `run_kubernetes_job` (used by the `run_job_command` flow) reads the output
+of the manifest's first container the same way, and `run_job_command` records it on its `command`
+step.
+
+The server stores the output on the step (`step.output`, `step.output_truncated`) and cuts it
+again to the last 200 lines and 64 KiB. Every signed-in user can read it through `Step.output`,
+`READ_ONLY` users included, so commands that actions run must not print secrets.
 
 ### Reading the component image in an upgrade action
 
@@ -374,7 +416,10 @@ If no upgrade core hook is defined for the application version, `_handle_upgrade
 | [workflows/manager.py](backend/styrmin_backend/workflows/manager.py) | `register_user_action`, `get_user_action_deployment_id` |
 | [workflows/catalogue.py](backend/styrmin_backend/workflows/catalogue.py) | Workflow registry (UPGRADE_INSTANCE definition) |
 | [actions/primitives.py](backend/styrmin_backend/actions/primitives.py) | `stop_components`, `start_components`, `execute_commands`, `get_component_images`, `get_component_labels`, `upgrade_deployment_version` |
-| [agent/service/kubernetes/primitives.py](backend/styrmin_backend/agent/service/kubernetes/primitives.py) | Kubernetes side of `get_component_images` (component container image first) |
+| [agent/service/kubernetes/primitives.py](backend/styrmin_backend/agent/service/kubernetes/primitives.py) | Kubernetes side of `get_component_images` (component container image first); `run_job` and `run_kubernetes_job` raise `JobFailedError` with the end of the output |
+| [agent/service/kubernetes/job_logs.py](backend/styrmin_backend/agent/service/kubernetes/job_logs.py) | `read_job_output_tail`: the end of a failed Job's output |
+| [agent/steps/reporter.py](backend/styrmin_backend/agent/steps/reporter.py) | `StepReporter`: hook-step output and steps recorded through `recordStep` |
+| [agent/tasks/utils.py](backend/styrmin_backend/agent/tasks/utils.py) | `run_driver_action_or_fail` (`STYRMIN_TOKEN`, `STYRMIN_TASK_ID`, `STYRMIN_STEP_ID`) |
 | [driver/examples/simple-app/actions.py](driver/examples/simple-app/actions.py) | Reference `upgrade` action (`images[0]`, digest- and port-safe tag strip) |
 | [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | `create_instance_crd`, `update_instance_crd`, `upgrade_instance_crd` flows |
 | [services/reconciliation/remediation.py](backend/styrmin_backend/services/reconciliation/remediation.py) | `InstanceCreationStrategy`, `InstanceUpdateStrategy` |

@@ -7,6 +7,8 @@
 [ADR-017](0017-authorization-model.md) (the default-deny gate, the allow-list and `RequiresRole`).
 Follow-up for the callers that are still allow-listed:
 [issue #396](https://github.com/opsmill/styrmin/issues/396).
+Extended by [ADR-060](0060-steps-and-derived-task-result.md): `run_job` tasks, backups and restores
+also create an action token, and flows use it to record steps.
 
 ## Context
 

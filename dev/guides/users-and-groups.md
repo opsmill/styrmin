@@ -56,31 +56,44 @@ If you lose it, see [Lockout recovery](#lockout-recovery).
 ## Driver actions user (`styrmin-actions`)
 
 Driver actions call the Styrmin API to stop components, start components and
-change the deployment version. They call it as the built-in user
-`styrmin-actions`. Styrmin creates this user the first time a reconcile runs
-(`ensure_actions_service_account` in
+change the deployment version. Styrmin's flows and actions also record the
+steps of tasks, backups and restores through the `recordStep` mutation. They
+call the API as the built-in user `styrmin-actions`. Styrmin creates this user
+the first time it needs a token for it (`ensure_actions_service_account` in
 `backend/styrmin_backend/services/auth/bootstrap.py`). See
-[ADR-059](../adr/0059-driver-action-api-tokens.md).
+[ADR-059](../adr/0059-driver-action-api-tokens.md) and
+[ADR-060](../adr/0060-steps-and-derived-task-result.md).
 
-- Its role is `READ_WRITE`, which `stopComponents`, `startComponents` and
-  `updateDeploymentVersion` require.
+- Its role is `READ_WRITE`, which `stopComponents`, `startComponents`,
+  `updateDeploymentVersion` and `recordStep` require.
+- `recordStep` accepts only this user. Every other user, admins included,
+  gets `FORBIDDEN`, so no person can change the recorded steps.
 - It has no password. Its stored hash is not an Argon2 hash, so `login`
   rejects every password for it.
-- For each reconcile, `apply_state` creates a session for it that expires
-  after 24 hours, passes the token to the reconcile's actions in
-  `STYRMIN_TOKEN`, and deletes the session when the reconcile ends.
+- Styrmin creates a session for it that expires after 24 hours, passes the
+  token to the Kubernetes Job that does the work in `STYRMIN_TOKEN`, and
+  deletes the session when the work ends. This happens once for each:
+  - reconcile (`apply_state`), whose actions also receive the token;
+  - `run_job` task;
+  - backup;
+  - restore.
+
+  So several sessions of this user can exist at the same time while
+  reconciles, jobs, backups or restores run.
 
 The user appears in the Users list. Changes to it have these effects:
 
 - Deactivating it makes every action call to the API fail with
-  `Authentication is required`.
+  `Authentication is required`. Steps are then no longer recorded; the
+  work itself goes on, because a failed step write never fails it.
 - Setting its role to `READ_ONLY` makes those calls fail with
-  `Insufficient permissions`.
+  `Insufficient permissions`, with the same effect on steps.
 - Adding it to a group with a higher role gives actions that higher role,
   because actions use the user's effective role.
 - Resetting its password turns it into a user that someone can log in as.
-- Deleting it also deletes the sessions of reconciles that are running, so
-  their actions fail. The next reconcile creates the user again.
+- Deleting it also deletes the sessions of reconciles, jobs, backups and
+  restores that are running, so their actions fail and their steps stop
+  being recorded. The next of these operations creates the user again.
 
 ## Admin UI walkthrough
 

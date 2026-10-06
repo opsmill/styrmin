@@ -59,6 +59,7 @@ The full list, in the order they appear on `type Query` in `schema.graphql`:
 | `backupStorageLocations` | — | `[BackupStorageLocation!]!` |
 | `backupStorageLocation` | `backupStorageLocationId` | `BackupStorageLocation` |
 | `task` | `taskId` | `Task` |
+| `step` | `stepId` | `Step` (any signed-in user; `NOT_FOUND` for an unknown id; used to load one step's `output`) |
 | `tasks` | — | `[Task!]!` |
 | `environments` | — | `[Environment!]!` |
 | `environment` | `environmentId?, environmentName?, clusterId?, clusterName?` | `Environment` |
@@ -138,10 +139,11 @@ Defined on `type Mutation`:
 | `updateBackupSchedule` | `scheduleId, name?, cronExpression?, retentionCount?, enabled?` | `BackupSchedule` |
 | `deleteBackupSchedule` | `scheduleId` | `String` |
 | `callback` | `taskId, stateName, stateMessage?, stateType` | `CallbackResponse!` (Prefect → server) |
-| `stopComponents` | `deploymentId, components` | `Task` |
-| `startComponents` | `deploymentId, components` | `Task` |
+| `recordStep` | `input: RecordStepInput!` | `Step!` (Styrmin's flows and driver actions → server, with the action token; see [Step](#step)) |
+| `stopComponents` | `deploymentId, components, startedByStepId?` | `Task` |
+| `startComponents` | `deploymentId, components, startedByStepId?` | `Task` |
 | `runJob` | `deploymentId, commands, env, image` | `Task` |
-| `updateDeploymentVersion` | `deploymentId, version, parameters?` | `Task` — **`null` on a no-op** (see below) |
+| `updateDeploymentVersion` | `deploymentId, version, parameters?, driverVersionId?, startedByStepId?` | `Task` — **`null` on a no-op** (see below) |
 | `reportPodStatuses` | `reports: [DeploymentPodStatusReport!]!` | `ReportPodStatusesResponse!` (agent → server) |
 | `reportDeploymentStatuses` | `reports: [DeploymentStatusReportInput!]!` | `ReportDeploymentStatusesResponse!` (agent → server) |
 
@@ -180,7 +182,9 @@ Clients map the null to "unchanged": the SDK returns
 [reconciliation.md](reconciliation.md) for the guard's placement inside the
 two-UoW `update_deployment` flow.
 
-The agent callbacks (`callback`, `reportPodStatuses`, `reportDeploymentStatuses`) are documented in [`../agent/overview.md`](../agent/overview.md) and [`reconciliation.md`](reconciliation.md).
+The agent callbacks (`callback`, `reportPodStatuses`, `reportDeploymentStatuses`) are documented in [`../agent/overview.md`](../agent/overview.md) and [`reconciliation.md`](reconciliation.md). All three are still on the unauthenticated allow-list (`api/auth/allowlist.py`, tracked by [#396](https://github.com/opsmill/styrmin/issues/396)). Since spec 019, `reportDeploymentStatuses` also moves the operator-phase steps of the reported task (`services/steps/operator_history.py`), so a caller who can reach the API can change those steps as well as `Deployment.status`.
+
+`startedByStepId` on `stopComponents`, `startComponents` and `updateDeploymentVersion` is optional. Styrmin's driver action primitives set it to the hook step that runs the action (`STYRMIN_STEP_ID`); the server stores it in `Task.started_by_step_id` and rejects an id that names no step with `NOT_FOUND` (`StepNotFoundError`). See [hooks-and-actions.md](hooks-and-actions.md#tasks-started-by-a-hook-step).
 
 ## Context Injection
 
@@ -475,13 +479,79 @@ type Task {
   status: String!                # Stored as TaskStatus enum value (see below)
   message: String
   deploymentId: UUID
+  startedByStepId: UUID          # The hook step that started this task
   createdOn: DateTime
   updatedOn: DateTime
   deployment: Deployment
+  steps: [Step!]!                # By start time, pending steps last
+  result: TaskResult!            # Calculated on every read, never stored
+  startedBy: Task                # The task whose hook step started this task
+  startedTasks: [Task!]!         # Tasks started by this task's hook steps
 }
 ```
 
-`type` and `status` are exposed as `String!` (not GraphQL enums), but they always carry one of the database enum values — see "Status strings" below.
+`type` and `status` are exposed as `String!` (not GraphQL enums), but they always carry one of the database enum values — see "Status strings" below. `status` follows only the Prefect flow run; `result` is what users view, calculated from the steps of the task and of the tasks its hook steps started, at any depth (`services/steps/results.py`; rules in [data-models.md](data-models.md#task-result) and [ADR-060](../../adr/0060-steps-and-derived-task-result.md)).
+
+### Step
+
+<!-- Extracted from specs/019-task-steps on 2026-10-06 -->
+
+One unit of work inside a task, a backup or a restore. Read through `Task.steps`, `Backup.steps`, `Restore.steps` and `Query.step`.
+
+```graphql
+type Step {
+  id: UUID!
+  key: String!                   # Stable within the parent, e.g. "hook:upgrade:core"
+  name: String!                  # What users view, e.g. "Run the upgrade hook"
+  kind: StepKind!
+  status: StepStatus!
+  startedAt: DateTime
+  endedAt: DateTime
+  attemptCount: Int!
+  errors: [StepError!]!          # The error of each failed attempt, oldest first
+  detail: String                 # FluxCD's current reason and message, HelmRelease step only
+  rolledBackAt: DateTime
+  rollbackMessage: String
+  output: String                 # End of a failed command's output; request for one step at a time
+  outputTruncated: Boolean!
+  taskId: UUID
+  backupId: UUID
+  restoreId: UUID
+  durationSeconds: Float         # Derived: endedAt - startedAt, null until both are set
+  error: String                  # Derived: the newest error
+  hasOutput: Boolean!            # Derived: output is stored
+  supersededBy: Task             # The later task that interrupted this step
+  startedTasks: [Task!]!         # Tasks that this hook step started
+  noReportSince: DateTime        # See below
+}
+
+type StepError {
+  attempt: Int!
+  message: String!
+  occurredAt: DateTime!
+}
+
+input RecordStepInput {
+  stepId: UUID                   # Address an existing step, or ...
+  taskId: UUID                   # ... exactly one parent id with a key
+  backupId: UUID
+  restoreId: UUID
+  key: String
+  name: String                   # Required with STARTED when the step does not exist yet
+  kind: StepKind                 # Same
+  event: StepEvent!
+  error: String                  # Required with FAILED
+  output: String                 # Required with OUTPUT, allowed with FAILED
+  outputTruncated: Boolean! = false
+  occurredAt: DateTime           # The writer's clock; defaults to the server's time
+}
+```
+
+`recordStep(input: RecordStepInput!): Step!` is the only way into the step recorder from outside the server. It carries `PermissionExtension([RequiresRole(Role.READ_WRITE), IsActionsServiceAccount()])`: an unauthenticated caller gets `UNAUTHENTICATED`, and every authenticated user other than the built-in `styrmin-actions` user, admins included, gets `FORBIDDEN`, so no person can change the record of what happened. Styrmin's USER flows and driver actions call it with the action token ([ADR-059](../../adr/0059-driver-action-api-tokens.md)) through the flow step reporter (`agent/steps/reporter.py`). It is not on the allow-list. A record that names no step, or no single parent with a key, or lacks a required field raises `VALIDATION_ERROR` (`InvalidStepRecordError`); an unknown step, task, backup or restore raises `NOT_FOUND`. A transition the state rules forbid (for example a late `SUCCEEDED` on a superseded step) is logged and returns the step unchanged.
+
+`Step.noReportSince` is calculated on each read: for a running `OPERATOR_PHASE` step, it is the deployment's `DeploymentStatus.last_polled_at` (or the step's `startedAt` when there is no report) when that time is more than 60 seconds ago, and `null` otherwise (`services/steps/reads.py`). Nothing is stored for it.
+
+**Read cost.** Resolvers in this schema query per object and there are no data loaders, so per-field resolvers for steps, results and links would run about one query per task and step on every 10-second refresh of the deployment page. `deploymentTimeline` therefore builds a read model in `services/deployment_timeline.py` (`load_timeline_read_model`): one query for the steps of all the timeline's tasks, one for the tasks those steps started (two more per generation of started tasks outside the timeline), and one for the last agent reports of the deployments, only when a running operator-phase step needs it. Task results and `noReportSince` are calculated in memory. The GraphQL `Task` and `Step` objects carry their part of the read model in `strawberry.Private` fields (`steps_view`, `result_view`, `started_by_view`, `started_tasks_view`, `superseded_by_view`, `no_report_since_view`); their resolvers use these when set and query only for single reads such as `Query.task` and `Query.step`. Lists of backups and restores load their steps in one query per list. The timeline query does not request `output`; clients read `hasOutput` and load the output of one step with `Query.step`.
 
 ### PodStatus
 
@@ -538,7 +608,7 @@ For accumulated lists (affinity terms, tolerations, topology-spread constraints)
 
 <!-- Extracted from specs/001-deployment-history-timeline on 2026-05-17 -->
 
-Per-deployment history exposed through the `deploymentTimeline(deploymentId: UUID!): [DeploymentTimelineEntry!]!` query, ordered `created_on DESC` (newest first). The entry, version, and context diff are all **derived server-side** from the existing `Task` and `ApplicationInstance` rows — no schema additions back this query. See [ADR-028](../adr/0028-deployment-history-derived-from-existing-data.md).
+Per-deployment history exposed through the `deploymentTimeline(deploymentId: UUID!): [DeploymentTimelineEntry!]!` query, ordered `created_on DESC` (newest first). The entry, version, and context diff are all **derived server-side** from the existing `Task` and `ApplicationInstance` rows — no schema additions back this query. See [ADR-028](../adr/0028-deployment-history-derived-from-existing-data.md). Each entry's `task` also carries its steps, result and task links from the timeline read model (see [Step](#step)).
 
 ```graphql
 type DeploymentTimelineEntry {
@@ -622,7 +692,7 @@ type DeploymentStatusType {
 }
 ```
 
-The agent-side wire payload additionally carries `displayState` and `instanceId` (see [`data-models.md`](data-models.md) → `DeploymentStatus`) — those drive the parent `Deployment.status` and the stale-instance guard, and are **not** exposed on this GraphQL type.
+The agent-side wire payload additionally carries `displayState` and `instanceId` (see [`data-models.md`](data-models.md) → `DeploymentStatus`) — those drive the parent `Deployment.status`, the stale-instance guard and the operator-phase steps of the task that rolled out that instance, and are **not** exposed on this GraphQL type. `instanceId` is the CR's `status.instanceId`, else its `spec.instanceId`.
 
 ## Enums
 
@@ -633,6 +703,10 @@ GraphQL enums in the schema:
 - `PodPhase` — `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `UNKNOWN` (uppercase wire format; the agent's `agent/status/models.py::PodPhase` mirrors these values).
 - `BackupStatus` — `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`.
 - `RestoreStatus` — `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`.
+- `StepStatus` — `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `SUPERSEDED`.
+- `StepKind` — `PLAN`, `HOOK`, `RESOURCE_WRITE`, `OPERATOR_PHASE`, `COMMAND`, `RESTORE`, `BACKUP_COMPONENT`.
+- `StepEvent` — `STARTED`, `SUCCEEDED`, `FAILED`, `OUTPUT` (input only, on `RecordStepInput`).
+- `TaskResult` — `RUNNING`, `FAILED`, `SUCCEEDED`, `SUPERSEDED`.
 
 ### Status strings
 
@@ -640,7 +714,7 @@ Fields typed `String!` that carry well-known enum values:
 
 - `Deployment.status` — `pending`, `deploying`, `running`, `restoring`, `failed` (lowercase; values come from `DeploymentState` in `db/models.py`).
 - `Task.status` — `pending`, `running`, `success`, `failed` (`TaskStatus`).
-- `Task.type` — `noop`, `create_instance`, `delete_instance`, `update_instance`, `upgrade_instance`, `stop_components`, `start_components`, `run_job` (`TaskType`).
+- `Task.type` — `noop`, `create_instance`, `delete_instance`, `update_instance`, `upgrade_instance`, `stop_components`, `start_components`, `run_job`, `delete_deployment` (`TaskType`). Reconcile tasks carry the operation their caller started (see [orchestration-flows.md](orchestration-flows.md#task-types-of-reconcile-tasks)); `noop` remains on reconcile tasks created before spec 019.
 - `Backup.status` / `Restore.status` — same casing as the corresponding GraphQL enums above.
 
 The DB-level enum casing is intentionally lowercase; the agent-side `PodPhase` happens to be uppercase to match the GraphQL wire format. See [`data-models.md`](data-models.md) for the authoritative list of database enum values.
@@ -659,6 +733,12 @@ A representative subset:
 | `ApplicationDriverVersion` | `applicationDriver` | `ApplicationDriver` | No | Sync resolver (eager-loaded) |
 | `ApplicationInstance` | `applicationDriverVersion` | `ApplicationDriverVersion` | No | Via FK |
 | `Task` | `deployment` | `Deployment` | Yes | `deployment_id` may be null |
+| `Task` | `startedBy` | `Task` | Yes | Via `started_by_step_id` → step → task |
+| `Task` | `startedTasks` | `[Task!]!` | No | Tasks whose `started_by_step_id` is one of the task's steps |
+| `Step` | `supersededBy` | `Task` | Yes | Via `superseded_by_task_id` |
+| `Step` | `startedTasks` | `[Task!]!` | No | Tasks whose `started_by_step_id` is the step |
+| `Backup` | `steps` | `[Step!]!` | No | One step per component |
+| `Restore` | `steps` | `[Step!]!` | No | The three restore steps |
 | `BackupSchedule` | `deployment` | `Deployment` | No | Via `deployment_id` FK |
 | `Backup` | `instance` | `ApplicationInstance` | No | Via `instance_id` FK |
 | `Restore` | `backup` | `Backup` | No | Via `backup_id` FK |
@@ -683,4 +763,8 @@ All `*Id` scalar fields are preserved alongside the nested object fields for bac
 | [api/dependency.py](backend/styrmin_backend/api/dependency.py) | `get_context` (DI for `UnitOfWork`) |
 | [api/errors.py](backend/styrmin_backend/api/errors.py) | `StructuredErrorExtension` middleware |
 | [api/definitions/](backend/styrmin_backend/api/definitions/) | One subpackage per domain (cluster, deployment, task, ...) |
+| [api/definitions/step/model.py](backend/styrmin_backend/api/definitions/step/model.py) | `Step`, `StepError`, the step enums, `RecordStepInput` |
+| [api/auth/permissions.py](backend/styrmin_backend/api/auth/permissions.py) | `RequiresRole`, `IsActionsServiceAccount` |
+| [services/deployment_timeline.py](backend/styrmin_backend/services/deployment_timeline.py) | Timeline and its read model (steps, started tasks, results, no-report times) |
+| [services/steps/reads.py](backend/styrmin_backend/services/steps/reads.py) | Step reads and the `noReportSince` rule |
 | [schema.graphql](schema.graphql) | Generated schema; the authoritative inventory |

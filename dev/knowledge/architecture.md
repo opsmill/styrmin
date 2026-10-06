@@ -53,6 +53,11 @@ The server never calls the agent directly. Direction flows through
 Status flows back the other way: Prefect callbacks POST to the server's
 internal GraphQL endpoint to update task and deployment status; the agent's
 status reporter periodically writes pod and CRD snapshots to the database.
+Flows and driver actions record the steps of their task, backup or restore
+through the `recordStep` mutation with the action token, and the server turns
+each CRD snapshot into the operator-phase steps of the task that rolled out
+the reported instance (the CR's `status.instanceId`) — see
+[ADR-060](../adr/0060-steps-and-derived-task-result.md).
 
 ### 1.3 What the agent does
 
@@ -92,7 +97,9 @@ The agent is a single process but fulfils several distinct functions:
   `reportPodStatuses` and `reportDeploymentStatuses` GraphQL mutations.
   This is distinct from Prefect's flow-state callbacks: the reporter
   describes *what is running in the cluster*, not *what workflows are
-  doing*.
+  doing*. The CRD snapshot carries `status.instanceId`, the instance the
+  operator acted on, which links it to the task whose operator-phase steps
+  it moves.
   → details: [`agent/overview.md`](agent/overview.md) (Status Reporter section)
 
 ---
@@ -294,9 +301,16 @@ amend the constitution — and update this document accordingly.
 - **Remediator** — service that maps a `DiffReport` to a `Remediation`.
 - **Server** — the FastAPI + GraphQL backend. Owns the database and the
   public API.
+- **Step** — one unit of work inside a task, a backup or a restore (a hook
+  mode, the CRD write, an operator phase, a restore stage, one component of
+  a backup), with its status, times, attempts and errors. Written only
+  through the step recorder.
 - **StyrminDeployment** — the operator's CRD. Carries the embedded
   `GlobalContext` and is the agent's single source of truth about what
   should be running.
 - **Task** — database record tracking an asynchronous operation
-  (`DEPLOYMENT`, `CREATE_INSTANCE`, `UPDATE_INSTANCE`, …) and its Prefect
-  flow run.
+  (`CREATE_INSTANCE`, `UPDATE_INSTANCE`, `UPGRADE_INSTANCE`, …) and its
+  Prefect flow run. `Task.status` follows only the flow run.
+- **Task result** — the result users view for a task (`RUNNING`, `FAILED`,
+  `SUCCEEDED`, `SUPERSEDED`). Calculated on every read from the steps of
+  the task and of the tasks its hook steps started, and never stored.

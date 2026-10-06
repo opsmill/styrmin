@@ -27,8 +27,13 @@ Orchestration flows are Prefect `@flow` functions that execute multi-step deploy
 
     Standalone (not wrapped by apply_state):
             ┌──────────────┐
-            │   run_job    │  <-- Has own callbacks
-            └──────────────┘
+            │   run_job    │  <-- INTERNAL, has own callbacks
+            └──────┬───────┘
+                   │ run_deployment_or_fail()
+                   v
+         ┌──────────────────┐
+         │ run_job_command  │  <-- USER, runs the Kubernetes Job
+         └──────────────────┘
 ```
 
 The non-CRD variants (`create_instance`, `update_instance`, `upgrade_instance`) still exist in `agent/tasks/orchestration.py` for now but are not registered in the catalogue and are not on the live execution path. The CRD variants are what the operator actually drives — see [ADR-006](../adr/0006-prefect-crd-intent-declaration.md).
@@ -86,6 +91,47 @@ The internal `callback` mutation in `api/schema/mutation.py` maps Prefect states
 | COMPLETED | SUCCESS | RUNNING |
 | FAILED | FAILED | FAILED |
 
+When the callback sets a task to `FAILED`, `update_task_state` (`services/tasks.py`) also fails every pending or running step of the task that a flow records (every step kind except `OPERATOR_PHASE`), with the Prefect state message, or "The flow run failed" when Prefect sent none. The flow that owned those steps can no longer end them.
+
+## Steps recorded by the flows
+
+<!-- Extracted from specs/019-task-steps on 2026-10-06 -->
+
+Each flow records its units of work as steps of its task, backup or restore, so users can view what ran, how long it took and why it failed without access to Prefect. The step recorder (`services/steps/recorder.py`) is the only code that creates or changes a step. Flows reach it in two ways, depending on the work pool they run on. See [ADR-060](../../adr/0060-steps-and-derived-task-result.md).
+
+- **INTERNAL flows** (`styrmin-work-pool`, database access) call the recorder directly through `services/steps/internal_flows.py`: `open_task_step`, `end_step` and `fail_open_steps`. Each write runs in its own transaction.
+- **USER flows and driver actions** (`user-work-pool`, no database access) use the flow step reporter (`agent/steps/reporter.py`). `StepReporter.from_env()` reads the action token and the step parent from the Job's environment and sends `recordStep` events to the API with `Authorization: Bearer <STYRMIN_TOKEN>`. `reporter.step(key, name, kind)` is an async context manager: it records `STARTED`, then `SUCCEEDED`, or `FAILED` with the formatted exception before it re-raises. Each event carries `occurredAt`, the writer's clock.
+
+A step write never fails the work. When the token or the parent variable is missing, the reporter does nothing. When a write fails (network error, GraphQL error, timeout after 10 seconds), the reporter or the INTERNAL helper logs a warning and the flow continues.
+
+### Job variables
+
+`action_job_variables(token, *, task_id=None, backup_id=None, restore_id=None, step_id=None)` (`agent/tasks/utils.py`) builds the Prefect job variables that put these values in the `env` of the flow run's Job. Prefect adds them to the work pool's default `env`. Values that are `None` are left out, and the function returns `{}` when all are `None`.
+
+| Variable | Meaning |
+|---|---|
+| `STYRMIN_TOKEN` | The action token (ADR-059). |
+| `STYRMIN_TASK_ID`, `STYRMIN_BACKUP_ID`, `STYRMIN_RESTORE_ID` | The parent of the steps the Job records. The caller sets one of them. |
+| `STYRMIN_STEP_ID` | Set only for a driver action's Job: the hook step that runs the action. |
+
+`Remediation.apply(api_token, task_id)` passes the token and `STYRMIN_TASK_ID` to the remediation flow's Job. `run_driver_action_or_fail(step_id=..., **kwargs)` forwards `STYRMIN_TOKEN` and `STYRMIN_TASK_ID` from the current Job's environment and adds `STYRMIN_STEP_ID`. See [hooks-and-actions.md](hooks-and-actions.md) for what an action does with it.
+
+### Task types of reconcile tasks
+
+The `apply_state` service function (`services/reconciliation/__init__.py`) takes a `task_type` argument and stores the new instance in `Task.instance_id`, so operator reports find the task. Each caller passes the operation it starts:
+
+| Caller | Task type |
+|---|---|
+| `deploy_application` (`deploy`) | `create_instance` |
+| `update_deployment`, `refresh_deployment`, `redeploy_for_environment_update` | `update_instance` |
+| `_ensure_ingress_controller` | `create_instance` when the ingress controller has no instance yet, else `update_instance` |
+| `update_deployment_version` (`updateDeploymentVersion`) | `upgrade_instance` |
+| `stop_components`, `start_components` (`services/primitives.py`) | `stop_components`, `start_components` |
+
+The type names the operation the user asked for, not the flow that runs: a version change is an `upgrade_instance` task even when the driver has no upgrade hook and the remediation runs `update_instance_crd`. The step list shows which flow ran. Tasks created before this change keep the type `noop`; `noop` remains the default of the argument.
+
+`stop_components`, `start_components` and `update_deployment_version` also accept `started_by_step_id`. `apply_state` raises `StepNotFoundError` when it names no step, and otherwise stores it in `Task.started_by_step_id`.
+
 ## Flow: apply_state
 
 The top-level orchestration wrapper. Has all lifecycle callbacks.
@@ -104,24 +150,36 @@ async def apply_state(
     new_instance_id: UUID,
     current_instance_id: UUID | None,
 ) -> State | None:
-    async with get_unit_of_work() as uow:
-        # Loads the deployment and both instances, diffs them, builds the remediation.
-        ...
-        if remediation is None:
-            return Completed(message="No remediation needed")
+    plan_step_id = await open_task_step(task_id, steps.PLAN)
+    try:
+        # Loads the deployment and both instances, diffs them, builds the remediation,
+        # or returns Completed(message="No remediation needed").
+        remediation = await _plan_remediation(...)
+    except Exception as exc:
+        await end_step(plan_step_id, error=format_exception(exc))
+        raise
+    await end_step(plan_step_id)
+    if isinstance(remediation, State):
+        return remediation
 
     async with action_api_token() as api_token:
-        flow_info = await remediation.apply(api_token=api_token)
+        try:
+            flow_info = await remediation.apply(api_token=api_token, task_id=task_id)
+        except Exception as exc:
+            await fail_open_steps(StepParent.of_task(task_id), str(exc))
+            raise
     return flow_info.state
 ```
 
 Called by: `PrefectManager.run_action(PrefectAction.APPLY_STATE, parameters={...})`
 
-The flow applies the remediation after the unit of work closes, so the session's database connection is released while the inner flow runs, and the action token's writes do not overlap it.
+The flow records the `plan` step ("Plan the changes") through the recorder directly. The service that schedules `apply_state` commits the task row after it dispatches the flow, so `open_task_step` retries every 0.5 seconds while the task row does not exist, for up to 10 seconds, then logs a warning and returns `None`; `end_step(None)` does nothing. A task with nothing to apply has only the `plan` step.
+
+The flow applies the remediation after the unit of work closes, so the session's database connection is released while the inner flow runs, and the action token's writes do not overlap it. When the remediation flow run fails or crashes, `run_deployment_or_fail` raises, and `apply_state` fails the task's open flow-kind steps with the error before it re-raises: a crashed Job cannot end the step it was running.
 
 The `remediation.apply()` method calls `arun_deployment(name=self.flow_id, parameters=self.parameters, job_variables=...)`, which triggers one of the inner flows below.
 
-`action_api_token()` creates a session for the built-in `styrmin-actions` user and deletes it when the remediation ends. The token reaches the inner flow's Job as `STYRMIN_TOKEN` through the flow run's `env` job variable, and the inner flow passes it on to each driver action with `run_driver_action_or_fail`. The action primitives send it as a bearer token. See [ADR-059](../../adr/0059-driver-action-api-tokens.md).
+`action_api_token()` creates a session for the built-in `styrmin-actions` user and deletes it when the remediation ends. The token reaches the inner flow's Job as `STYRMIN_TOKEN` through the flow run's `env` job variable, together with `STYRMIN_TASK_ID`, and the inner flow passes both on to each driver action with `run_driver_action_or_fail`. The inner flow records its steps with the token, and the action primitives send it as a bearer token. See [ADR-059](../../adr/0059-driver-action-api-tokens.md).
 
 **Key**: Only `apply_state` has callbacks. Inner flows do NOT register callbacks because they run as sub-flows within `apply_state`.
 
@@ -139,20 +197,24 @@ async def create_instance_crd(
 ) -> None
 ```
 
-Execution order:
+Execution order, with the step that each part records:
 
 ```text
 1. Extract context, release_reference, namespace from instance.context
-2. Run pre-hook (if prehook is not None)
-3. Build the StyrminDeployment CRD body from the resolved context
+2. Run pre-hook (if prehook is not None)  step hook:setup:pre
+3. Build the StyrminDeployment CRD body   step resource:styrmindeployment
+   from the resolved context              (steps 3 to 5)
 4. Apply the deployment namespace with labels
 5. Upsert the StyrminDeployment CRD       ──> operator reconciles in
                                               ordered phases (NetworkPolicies,
                                               Secrets -> HelmRelease ->
                                               Services, Middlewares)
-6. Apply cross-namespace ExternalName service aliases (if any)
-7. Run post-hook (if posthook is not None)
+6. Apply cross-namespace ExternalName     step resource:service-aliases
+   service aliases (if any)               (only when there are aliases)
+7. Run post-hook (if posthook is not None) step hook:setup:post
 ```
+
+When the `resource:styrmindeployment` step succeeds, the recorder supersedes the open operator-phase steps of the deployment's other tasks and creates this task's four operator-phase steps (none for an internal deployment). See [Remediation-flow steps](#remediation-flow-steps).
 
 Called via `Remediation(type=CREATE_INSTANCE, flow_id=<CREATE_INSTANCE deployment>, parameters={instance, prehook, posthook, internal})`.
 
@@ -171,11 +233,12 @@ Execution order:
 
 ```text
 1. Extract context, release_reference, namespace from instance.context
-2. Build the new StyrminDeployment CRD body
+2. Build the new StyrminDeployment CRD body  step resource:styrmindeployment
 3. Upsert the CRD                          ──> operator reconciles
                                               the new HelmRelease and
                                               utility resources
-4. Apply cross-namespace service aliases (if any)
+4. Apply cross-namespace service aliases   step resource:service-aliases
+   (if any)
 ```
 
 Called via `Remediation(type=UPDATE_INSTANCE, flow_id=<UPDATE_INSTANCE deployment>, parameters={instance})`. No hooks are involved in updates.
@@ -198,15 +261,16 @@ async def upgrade_instance_crd(
 Execution order:
 
 ```text
-1. Build and upsert StyrminDeployment CRD (the new spec)
+1. Build and upsert StyrminDeployment CRD (the new spec)   step resource:styrmindeployment
 2. Patch CRD status to displayState=Deploying / phase=Pending atomically
    with the spec change. Without this, a stale "Running" displayState
    could race the agent into reporting the new instance as healthy
-   before the new rollout has even started.
-3. Run pre-hook (if prehook is not None)
-4. Run core upgrade hook (driver's upgrade function — e.g. stop, migrate, start)
-5. Apply cross-namespace service aliases (if any)
-6. Run post-hook (if posthook is not None)
+   before the new rollout has even started.   (still resource:styrmindeployment)
+3. Run pre-hook (if prehook is not None)                   step hook:upgrade:pre
+4. Run core upgrade hook (driver's upgrade function —      step hook:upgrade:core
+   e.g. stop, migrate, start)
+5. Apply cross-namespace service aliases (if any)          step resource:service-aliases
+6. Run post-hook (if posthook is not None)                 step hook:upgrade:post
 ```
 
 Called via `Remediation(type=UPGRADE_INSTANCE, flow_id=<UPGRADE_INSTANCE deployment>, parameters={instance, upgrade_hook, target_version, prehook, posthook})`.
@@ -219,9 +283,35 @@ The CRD spec is written *before* the hooks run because driver upgrade hooks freq
 - Passes `target_version` to all hooks so driver code knows what version it's upgrading to.
 - Writes the CRD spec at the very start so hook-driven nested CRD updates layer correctly.
 
+## Remediation-flow steps
+
+The three CRD flows record their steps with `StepReporter.from_env()`. Keys, names and kinds come from `domain/steps.py`:
+
+| Key | Name | Kind | Recorded by |
+|---|---|---|---|
+| `plan` | Plan the changes | `PLAN` | `apply_state`, directly |
+| `hook:setup:pre` | Run the setup pre-hook | `HOOK` | `create_instance_crd`, when the driver has a setup pre-hook |
+| `resource:styrmindeployment` | Write the StyrminDeployment resource | `RESOURCE_WRITE` | all three CRD flows |
+| `hook:upgrade:pre` | Run the upgrade pre-hook | `HOOK` | `upgrade_instance_crd`, when the driver has an upgrade pre-hook |
+| `hook:upgrade:core` | Run the upgrade hook | `HOOK` | `upgrade_instance_crd` |
+| `resource:service-aliases` | Create service aliases | `RESOURCE_WRITE` | all three CRD flows, only when the context has aliases |
+| `hook:setup:post` | Run the setup post-hook | `HOOK` | `create_instance_crd`, when the driver has a setup post-hook |
+| `hook:upgrade:post` | Run the upgrade post-hook | `HOOK` | `upgrade_instance_crd`, when the driver has an upgrade post-hook |
+
+A hook step covers one run of a hook mode. The flow passes the hook step's id to `run_driver_action_or_fail(step_id=...)`, which sends it to the action's Job as `STYRMIN_STEP_ID`.
+
+The flows do not record the operator's work. When `resource:styrmindeployment` succeeds, the recorder:
+
+1. Supersedes the pending and running operator-phase steps of the deployment's other tasks (status `SUPERSEDED`, `superseded_by_task_id` set to this task), because the operator abandons an earlier rollout as soon as the spec changes.
+2. Creates this task's operator-phase steps: `operator:prerequisites` ("Create network policies and secrets") as running, then `operator:helmrelease` ("Install or upgrade the HelmRelease"), `operator:services` ("Create services and middlewares") and `operator:ready` ("Wait for the deployment to be ready") as pending. An internal deployment gets none, because the status reporter does not report internal deployments.
+
+The status reporter's reports then move those steps forward (`services/steps/operator_history.py`, called from `report_deployment_statuses`). See [`../agent/operator.md`](../agent/operator.md) for the CR status that drives them.
+
+A delete has no flow. `delete_deployment` records `resource:delete-request` ("Request the deletion") as succeeded after it patches the CR, supersedes the open operator-phase steps of the deployment's other tasks, and creates `operator:teardown` ("Remove the deployment's resources and namespace") as pending. Reports in the `Deleting` and `Deleted` phases go to the deployment's newest `delete_deployment` task.
+
 ## Flow: run_job
 
-Standalone flow for one-off Kubernetes Jobs. Has its own callbacks.
+`runJob` (`services/primitives.py`) creates a `run_job` task and starts `PrefectAction.RUN_JOB`. The work runs in two flows, so that the INTERNAL flow can create and delete the action token and the USER flow can create the Kubernetes Job.
 
 ```python
 @flow(
@@ -231,25 +321,39 @@ Standalone flow for one-off Kubernetes Jobs. Has its own callbacks.
     on_crashed=[orchestration_callback],
     on_running=[orchestration_callback],
 )
-async def run_job(
+async def run_job(  # INTERNAL, styrmin-work-pool
     task_id: UUID,
     runtime_class: str,
     env: list[dict],
     namespace: str,
     commands: list[str],
     image: str,
-) -> None
+) -> None:
+    async with action_api_token() as api_token:
+        try:
+            await run_deployment_or_fail(
+                name="run_job_command/run_job_command",
+                parameters={...},  # the same arguments
+                job_variables=action_job_variables(api_token, task_id=task_id),
+            )
+        except Exception as exc:
+            await fail_open_steps(StepParent.of_task(task_id), str(exc))
+            raise
+
+
+@flow(flow_run_name="Run job command")
+async def run_job_command(...) -> None:  # USER, user-work-pool
+    ...
 ```
 
-Builds a Kubernetes Job manifest with:
+`run_job` keeps the lifecycle callbacks, because it is not wrapped by `apply_state`. `run_job_command` builds the Kubernetes Job manifest with:
 
 - Pod affinity to Neo4j instances
 - Tolerations for node failures
-- Custom container with specified image, env, and commands
+- Custom container `prefect-job` with the specified image, env, and commands
+- `metadata.generateName: job-run-<task_id>-`, so Kubernetes names the Job
 
-Then calls `run_kubernetes_job(manifest, namespace)`.
-
-**Note**: `run_job` has its own callbacks because it is NOT wrapped by `apply_state`. It is triggered directly by `PrefectManager.run_action(PrefectAction.RUN_JOB)`.
+It runs `run_kubernetes_job(manifest, namespace)` inside the `command` step ("Run the job's command", kind `COMMAND`). `run_kubernetes_job` polls the Job by the name Kubernetes gave it; before this change it read `metadata.name` from the manifest when the Job failed, which raised `KeyError` for a manifest with only `generateName`. When the Job fails, `run_kubernetes_job` raises `JobFailedError` carrying the end of the output of the manifest's first container (see [hooks-and-actions.md](hooks-and-actions.md#command-output-of-a-failed-job)); `run_job_command` records that output on the `command` step, and the step fails with the error. When `run_job_command` fails or crashes, `run_job` fails the task's open flow-kind steps before it re-raises.
 
 ## Rendering Tasks
 
@@ -316,7 +420,8 @@ Located in `workflows/catalogue.py`. Maps `PrefectAction` enums to `WorkflowDefi
 | PrefectAction | Flow Function | Module | Type |
 |---|---|---|---|
 | `APPLY_STATE` | `apply_state` | `agent.tasks.orchestration` | INTERNAL |
-| `RUN_JOB` | `run_job` | `agent.tasks.orchestration` | USER |
+| `RUN_JOB` | `run_job` | `agent.tasks.orchestration` | INTERNAL |
+| `RUN_JOB_COMMAND` | `run_job_command` | `agent.tasks.orchestration` | USER |
 | `CREATE_HELM_RELEASE` | `create_helm_release` | `agent.tasks.application` | USER |
 | `UPDATE_HELM_RELEASE` | `update_helm_release` | `agent.tasks.application` | USER |
 | `CREATE_INSTANCE` | `create_instance_crd` | `agent.tasks.orchestration` | USER |
@@ -344,6 +449,7 @@ class PrefectAction(Enum):
     UPDATE_INSTANCE = "orchestrate_instance_update"
     UPGRADE_INSTANCE = "orchestrate_instance_upgrade"
     RUN_JOB = "run_job"
+    RUN_JOB_COMMAND = "run_job_command"
 
     EXECUTE_BACKUP = "execute_backup"
     EXECUTE_RESTORE = "execute_restore"
@@ -384,7 +490,13 @@ See ADR-006 for the rationale behind this responsibility shift.
 
 | File | Purpose |
 |------|---------|
-| [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | `apply_state`, `create_instance_crd`, `update_instance_crd`, `upgrade_instance_crd`, `run_job` (plus the legacy `create_instance` / `update_instance` / `upgrade_instance` flows, currently unregistered) |
+| [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | `apply_state`, `create_instance_crd`, `update_instance_crd`, `upgrade_instance_crd`, `run_job`, `run_job_command` (plus the legacy `create_instance` / `update_instance` / `upgrade_instance` flows, currently unregistered) |
+| [agent/tasks/utils.py](backend/styrmin_backend/agent/tasks/utils.py) | `action_job_variables`, `run_deployment_or_fail`, `run_driver_action_or_fail` |
+| [agent/steps/reporter.py](backend/styrmin_backend/agent/steps/reporter.py) | Flow step reporter: `recordStep` calls from USER flows and driver actions |
+| [services/steps/internal_flows.py](backend/styrmin_backend/services/steps/internal_flows.py) | Step writes from INTERNAL flows (`open_task_step`, `end_step`, `fail_open_steps`) |
+| [services/steps/recorder.py](backend/styrmin_backend/services/steps/recorder.py) | Step recorder, the only code that changes steps |
+| [domain/steps.py](backend/styrmin_backend/domain/steps.py) | Step keys, names and kinds |
+| [services/reconciliation/__init__.py](backend/styrmin_backend/services/reconciliation/__init__.py) | `apply_state` service function (`task_type`, `instance_id`, `started_by_step_id`) |
 | [agent/tasks/application.py](backend/styrmin_backend/agent/tasks/application.py) | `create_helm_release`, `update_helm_release` |
 | [agent/tasks/core.py](backend/styrmin_backend/agent/tasks/core.py) | `render_application_helm_release_specifications` |
 | [agent/tasks/shared.py](backend/styrmin_backend/agent/tasks/shared.py) | `get_context`, `render_helm_chart_specifications`, `render_helm_repository_specifications` |

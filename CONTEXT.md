@@ -127,7 +127,7 @@ The execution phase within a **hook**: `pre`, `core`, or `post`. Ordering inside
 _Avoid_: "phase" (reserved for operator phases), "stage", "step" (one run of a mode is one **step**; the mode itself is not).
 
 **Action token**:
-The session token that `apply_state` creates once per **reconciliation** for the built-in `styrmin-actions` user (role `READ_WRITE`, no password) and deletes when the **reconciliation** ends. It reaches every **action** of that **reconciliation** in the `STYRMIN_TOKEN` environment variable, and the action primitives send it as a bearer token. See [ADR-059](dev/adr/0059-driver-action-api-tokens.md).
+A session token for the built-in `styrmin-actions` user (role `READ_WRITE`, no password) that an INTERNAL **flow** creates for the work it hands to a Kubernetes Job and deletes when that work ends: `apply_state` once per **reconciliation**, `run_job` once per `run_job` **task**, and the backup and restore workflows once per backup or restore. It reaches the Job in the `STYRMIN_TOKEN` environment variable, next to the step parent (`STYRMIN_TASK_ID`, `STYRMIN_BACKUP_ID` or `STYRMIN_RESTORE_ID`); the remediation flow passes it on to every **action**, with the hook **step** in `STYRMIN_STEP_ID`. The action primitives send it as a bearer token, and flows and actions use it to record **steps** through `recordStep`, which accepts no other user. See [ADR-059](dev/adr/0059-driver-action-api-tokens.md) and [ADR-060](dev/adr/0060-steps-and-derived-task-result.md).
 _Avoid_: "service token", "agent token" (the agent status reporter does not use it), "API key".
 
 **Utility**:
@@ -213,7 +213,7 @@ The flow of direction from **server** to **agent**: GraphQL → service → **Ta
 _Avoid_: "command", "RPC", "push" (the agent pulls).
 
 **StyrminDeployment** (CRD):
-Styrmin's primary Custom Resource Definition. Carries the embedded **GlobalContext** in `spec` and is the **operator**'s single source of truth about what should be running. Watched by the **kopf operator**.
+Styrmin's primary Custom Resource Definition. Carries the embedded **GlobalContext** in `spec` and is the **operator**'s single source of truth about what should be running. Watched by the **kopf operator**. Its `status.instanceId` names the **instance** whose `spec.instanceId` the operator's create, update or resume handler last acted on (written also when the handler fails), so it changes only once the operator has picked up a new spec; `spec.instanceId` is the instance the last **flow** wrote. `status.rolloutStartedAt` is when the current rollout started, and the readiness timeout counts from it.
 _Avoid_: "deployment CRD" (ambiguous with the database `Deployment`), "the CR".
 
 **Operator**:
@@ -243,19 +243,19 @@ A unit of orchestration submitted to Prefect (`CREATE_INSTANCE`, `UPDATE_INSTANC
 _Avoid_: "job", "workflow" alone when it could be misread, "pipeline".
 
 **Task** (database record):
-A `Task` row tracking one asynchronous operation: `status`, `type`, optional `message`, and `prefect_flow_run_id`. Distinct from Prefect's in-process `task` primitive.
+A `Task` row tracking one asynchronous operation: `status`, `type`, optional `message`, `prefect_flow_run_id`, the **instance** it rolls out (`instance_id`), and the hook **step** that started it (`started_by_step_id`). A **reconciliation** stores the type of the operation its caller starts (`create_instance`, `update_instance`, `upgrade_instance`, `stop_components`, `start_components`); rows from before [issue #2](https://github.com/opsmill/styrmin/issues/2) keep `noop`. `Task.status` follows only the Prefect flow run; users view the **task result**. Distinct from Prefect's in-process `task` primitive.
 _Avoid_: when referring to Prefect's primitive, qualify as "Prefect task" — never let "task" alone refer to it.
 
 **Step**:
-One unit of work inside a **task**, a backup or a restore, recorded so users can view it: name, status, start time, end time, an error message when it fails, and the end of the command output when a command fails. One run of a **hook**'s **mode** is one step (e.g. "run the upgrade pre-hook"); each **operator** phase is one step (e.g. "create the HelmRelease"). Ordered by start time. See [issue #2](https://github.com/opsmill/styrmin/issues/2).
+One unit of work inside a **task**, a backup or a restore, recorded so users can view it: name, status (`pending`, `running`, `succeeded`, `failed`, `superseded`), start time, end time, attempt count, the error of each failed attempt, and the end of the command output when a command fails. One run of a **hook**'s **mode** is one step (e.g. "Run the upgrade pre-hook"); each **operator** phase is one step (e.g. "Install or upgrade the HelmRelease"); a restore has three steps and a backup one step per **component**. A step is `superseded` when a later **task** of the same **deployment** interrupted the operator phase it waited for. Created and changed only by the step recorder (`services/steps/recorder.py`), which server code and INTERNAL **flows** call directly, USER flows and **actions** reach through `recordStep` with the **action token**, and the **status reporter**'s reports reach through the operator phase history. Ordered by start time, pending steps last. See [issue #2](https://github.com/opsmill/styrmin/issues/2) and [ADR-060](dev/adr/0060-steps-and-derived-task-result.md).
 _Avoid_: "substep", "TaskStep" (backups and restores are not **tasks**), "stage", "phase" (reserved for the **operator**'s phases), "event" (reserved for Kubernetes Events).
 
 **Task result**:
-The result of a **task** as users view it, derived from its **steps** on every read and never stored: `RUNNING` while any step is running, or is not started and does not wait behind a failed step; `FAILED` when any step, or any task its hook started, has failed; `SUCCEEDED` when all steps have succeeded; `SUPERSEDED` when a task it did not start interrupted its operator phases. Distinct from `Task.status`, which follows only the Prefect flow run and which driver actions wait on. See [issue #2](https://github.com/opsmill/styrmin/issues/2).
+The result of a **task** as users view it, derived on every read and never stored. It covers the task and every task that its hook **steps** started, at any depth, and the first rule that matches wins: `RUNNING` while a step of these tasks is running, or is not started and does not wait behind a failed step of its own task; `FAILED` when a step of these tasks has failed; `SUPERSEDED` when a step of these tasks was superseded by a task outside them; `SUCCEEDED` otherwise. A task without steps, such as one from before steps were recorded, counts by its `Task.status`. Distinct from `Task.status`, which follows only the Prefect flow run and which driver actions wait on. See [issue #2](https://github.com/opsmill/styrmin/issues/2) and [ADR-060](dev/adr/0060-steps-and-derived-task-result.md).
 _Avoid_: "operation result" (ambiguous with **GraphQL operation**), "outcome" (used by `styrminctl deployments apply`), "task status" (that is `Task.status`).
 
 **Status reporter**:
-The third coroutine in the **agent**'s shared event loop. Polls Kubernetes every ~5 s for pod state and **StyrminDeployment** CRD status, then posts the snapshots back via `reportPodStatuses` and `reportDeploymentStatuses` GraphQL mutations. Distinct from Prefect's flow-state callbacks.
+The third coroutine in the **agent**'s shared event loop. Polls Kubernetes every ~5 s for pod state and **StyrminDeployment** CRD status, then posts the snapshots back via `reportPodStatuses` and `reportDeploymentStatuses` GraphQL mutations. A CRD snapshot carries the CR's `status.instanceId` (else `spec.instanceId`), and the server uses it to move the operator-phase **steps** of the task that rolled out that **instance**. Distinct from Prefect's flow-state callbacks.
 _Avoid_: "status poller", "watcher" (kopf is the watcher), "reporter" alone.
 
 ### Observed state
@@ -326,6 +326,7 @@ contents". Use "shard" when talking about the CI matrix cell; use
 - A **flow** runs on the **agent**'s **Prefect worker**, resolves a **GlobalContext**, and writes a **StyrminDeployment** CRD whose `spec` embeds that context.
 - The **operator** watches **StyrminDeployment** CRDs and reconciles the cluster; FluxCD then reconciles the **HelmRelease** into actual workloads.
 - The **status reporter** polls the cluster and writes **PodStatus** + **DeploymentStatus** back via GraphQL — this is the only path that updates `Deployment.status` and the only path that stamps `deleted_at` on the terminal `Deleted` transition.
+- A **task**, a backup or a restore has zero or more **steps**; a hook **step** can start **tasks**, and a **task result** covers the task and every task its hook steps started.
 - A **GlobalContext** is composed of **ClusterContext**, **EnvironmentContext**, **DeploymentContext**, **InstanceContext**, **ApplicationContext**, **ComponentsContext**, and a list of **UtilityContext**; lower levels override higher ones.
 - An **environment clone** links two **environments** — the source it captured and the one it created — and owns one **counterpart deployment** per included source **deployment**.
 - The **server** never calls the **agent** directly — direction flows through **recorded intent**.

@@ -36,6 +36,37 @@ This page will document, field by field:
 - `status` — `phase`, `conditions`, `observedGeneration`,
   per-component readiness
 
+### Rollout fields in `status`
+
+These fields are documented here until the generated reference exists.
+They describe the rollout the operator is working on:
+
+- `status.instanceId` — the ID of the application instance whose spec the
+  operator last handled. The create, update and resume handlers write it,
+  also when the handler fails. The status reporter sends it to the server,
+  and sends `spec.instanceId` for a CR that has no `status.instanceId`.
+- `status.rolloutStartedAt` — when the create or update handler started
+  the current rollout. The readiness timeout counts from it, or from
+  `metadata.creationTimestamp` when it is missing. The resume handler
+  sets it only when it is missing.
+- The `HelmReleaseReady` condition — set to `Unknown` with the reason
+  `Progressing` at the start of each rollout. While FluxCD has not
+  reported the HelmRelease's current generation ready, it copies the
+  status and transition time of FluxCD's `Ready` condition, with the
+  reason and message of the failed install or upgrade when there is one.
+  It becomes `True` with the reason `FluxReady` when FluxCD reports the
+  current generation ready.
+- The `HelmReleaseRemediated` condition — a copy of FluxCD's
+  `Remediated=True` condition for the current generation: FluxCD rolled
+  back or uninstalled a failed release. The operator removes it at the
+  start of each rollout.
+
+The condition types are `NetworkPoliciesReady`, `SecretsReady`,
+`HelmReleaseReady`, `HelmReleaseRemediated`, `ServicesReady`,
+`MiddlewaresReady`, `Ready` and `Deleted`. For how the operator uses
+them, see
+[When a rollout is ready or failed](../concepts-and-architecture/operator-and-crds.md#when-a-rollout-is-ready-or-failed).
+
 ### Auto-generation source
 
 - **Schema**: the CRD's OpenAPI schema (the same one the kopf operator

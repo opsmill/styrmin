@@ -3,7 +3,7 @@
 The agent is the in-cluster process responsible for everything that happens inside the target Kubernetes cluster. A single container runs three coroutines on a shared async event loop:
 
 - **Kopf operator** — watches `StyrminDeployment` CRDs and drives Kubernetes resources to match. See [operator.md](operator.md).
-- **Prefect worker** — executes the internal orchestration flows that the server submits (`apply_state`, `create_instance`, `update_instance`, `upgrade_instance`, `run_job`). The flow definitions live under `agent/tasks/` but the catalogue, manager API, and callback wiring belong to the orchestration layer (see [`../backend/orchestration-flows.md`](../backend/orchestration-flows.md)).
+- **Prefect worker** — executes the internal orchestration flows that the server submits (`apply_state`, `create_instance`, `update_instance`, `upgrade_instance`, `run_job`). The USER flows that these start (the remediation flows `create_instance_crd`, `update_instance_crd` and `upgrade_instance_crd`, and `run_job_command`) run as Kubernetes Jobs in the user work pool. The flow definitions live under `agent/tasks/` but the catalogue, manager API, and callback wiring belong to the orchestration layer (see [`../backend/orchestration-flows.md`](../backend/orchestration-flows.md)).
 - **Status reporter** — periodically observes pod and CRD state and reports it back to the server. See [Status Reporter](#status-reporter).
 
 [ADR-002](../../adr/0002-shared-async-event-loop-kopf-prefect.md) covers the shared event loop. ADR-004, ADR-005, and ADR-006 cover the operator's responsibility split with Prefect.
@@ -26,7 +26,7 @@ backend/styrmin_backend/
 │   ├── tasks/                  # Prefect flow definitions executed by the agent's worker
 │   │   ├── core.py             # Rendering tasks
 │   │   ├── application.py      # Application-specific (create/update HelmRelease)
-│   │   ├── orchestration.py    # apply_state, create_instance, update_instance, upgrade_instance, run_job
+│   │   ├── orchestration.py    # apply_state, create_instance, update_instance, upgrade_instance, run_job, run_job_command
 │   │   ├── extra.py            # Utility install/update
 │   │   └── shared.py           # Shared task utilities
 │   │
@@ -36,10 +36,17 @@ backend/styrmin_backend/
 │   │   ├── queries.py          # load_query() helper
 │   │   └── *.graphql           # list_deployments_for_status, report_pod_statuses, report_deployment_statuses
 │   │
+│   ├── steps/                  # Step writes from USER flows and driver actions (spec 019)
+│   │   ├── reporter.py         # StepReporter: recordStep calls with the action token
+│   │   ├── backup_components.py # One step per component of a Velero backup
+│   │   ├── queries.py          # load_query() helper
+│   │   └── record_step.graphql
+│   │
 │   └── service/                # Kubernetes service layer
 │       ├── exceptions.py
 │       └── kubernetes/
 │           ├── primitives.py   # Low-level K8s ops (apply, delete, list, get_custom_resource)
+│           ├── job_logs.py     # End of a failed Job's output (read_job_output_tail)
 │           ├── utils.py        # Reference helpers (namespace, release_reference)
 │           └── resources/      # Resource builders
 │               ├── custom_resource.py     # HelmRelease CRD
@@ -108,12 +115,28 @@ Every poll cycle, the reporter:
 1. Calls the `listDeploymentsForStatus` GraphQL query against the server to discover all non-internal deployments grouped by environment.
 2. For each deployment, in its namespace:
    - Lists pods via `kr8s` and extracts phase, readiness, restart count, container statuses, node, start time, and the `styrmin/component` label (recorded as-is — see [ADR-007](../../adr/0007-pod-status-records-observed-state-not-declared-state.md)). Pods without the component label are reported with `component_name = None` rather than dropped.
-   - Fetches the `StyrminDeployment` CRD (`styrmin.io/v1alpha1`) and reads `spec.instanceId`, `status.phase`, `status.displayState`, `status.message`, `status.conditions`, and `status.managedResources`. A missing CRD is not an error — that deployment is simply skipped this cycle.
+   - Fetches the `StyrminDeployment` CRD (`styrmin.io/v1alpha1`) and reads `status.instanceId`, `status.phase`, `status.displayState`, `status.message`, `status.conditions`, and `status.managedResources`. A missing CRD is not an error — that deployment is simply skipped this cycle.
+   - Sends `status.instanceId` as the report's `instanceId`: the instance whose spec the operator last handled (see [operator.md](operator.md#status)). A CR that no operator handler has touched since the agent was upgraded has no `status.instanceId`; the reporter then sends `spec.instanceId`. Before, the reporter always sent `spec.instanceId`, so right after a flow wrote a new spec a report could pair the new instance with the previous rollout's `Ready` phase.
 3. Posts two independent GraphQL mutations to the server's `/graphql` endpoint:
    - `reportPodStatuses(reports: [DeploymentPodStatusReport!]!)` — server upserts pod rows and deletes stale ones (handled by `services/pod_status.py::report_pod_statuses`).
-   - `reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!)` — server snapshots CRD status and, when `displayState` maps to a known `DeploymentState`, updates `Deployment.status` (subject to the instance-mismatch guard described in [`../backend/reconciliation.md`](../backend/reconciliation.md) and `services/deployment_status.py`, and to the in-flight restore guard described in [`../backend/backup-restore.md`](../backend/backup-restore.md#display-state-mapping)).
+   - `reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!)` — server snapshots CRD status, runs the [phase history](#phase-history) for the report, and, when `displayState` maps to a known `DeploymentState`, updates `Deployment.status` (subject to the instance-mismatch guard described in [`../backend/reconciliation.md`](../backend/reconciliation.md) and `services/deployment_status.py`, and to the in-flight restore guard described in [`../backend/backup-restore.md`](../backend/backup-restore.md#display-state-mapping)).
 
 Pod and CRD collection are wrapped in independent `try` blocks: a failure in one does not block reporting of the other.
+
+### Phase history
+
+<!-- Extracted from specs/019-task-steps on 2026-10-06 -->
+
+For each deployment report, after it upserts the `DeploymentStatus` snapshot, `report_deployment_statuses` calls `services/steps/operator_history.py::apply_operator_report`. The phase history turns the report into changes of the task's operator-phase steps ([ADR-060](../../adr/0060-steps-and-derived-task-result.md)):
+
+- **Finding the task.** A report in the `Deleting` or `Deleted` phase goes to the newest `delete_deployment` task of the deployment. Any other report goes to the task whose `instance_id` equals the report's `instanceId`, when that task belongs to the reporting deployment. A report that finds no task, or a task whose operator-phase steps are all `succeeded` or `superseded`, changes nothing and locks no row.
+- **Moving forward.** `CreatingPrerequisites`, `CreatingHelmRelease`, `CreatingServices` and `Ready` succeed the earlier rollout steps and start the step of that phase. A step ends at the transition time of its CR condition (`NetworkPoliciesReady` and `SecretsReady`, `HelmReleaseReady`, `ServicesReady`, `Ready`) when the condition is `True`, else at the report time. `Deleting` starts the teardown step and `Deleted` succeeds it.
+- **Failures.** Phase `Failed` or `displayState: Error` fails the first unfinished rollout step with the CR message. For the HelmRelease step and "Wait for the deployment to be ready", the error also lists up to five pods that have not finished and whose containers wait or ended with a reason such as `ImagePullBackOff` or `CrashLoopBackOff`, read from the stored pod statuses.
+- **Attempts and FluxCD.** A failed step starts a new attempt when a later report shows the operator working on it again, and succeeds with a new attempt when a later phase is reported. On the HelmRelease step, FluxCD's reason and message are kept as the step's detail, each new FluxCD reason ending in `Failed` adds an error, and `HelmReleaseRemediated` records the rollback time and message. The operator reads FluxCD every 60 seconds, so FluxCD attempts that fail faster than that count as one.
+
+The phase history runs in a savepoint (`session.begin_nested()`) of the report's transaction. When it raises, its own writes roll back, the error is logged, and the snapshot and the `Deployment.status` change still commit.
+
+`reportDeploymentStatuses` is on the unauthenticated allow-list (issue [#396](https://github.com/opsmill/styrmin/issues/396)), so a caller who can reach the API can also move operator-phase steps through it.
 
 ### Cadence and lifecycle
 
@@ -166,5 +189,8 @@ def generate_release_reference(context: GlobalContext) -> str:
 | [agent/status/reporter.py](backend/styrmin_backend/agent/status/reporter.py) | Periodic pod + CRD status reporter (`run_status_reporter`) |
 | [agent/status/models.py](backend/styrmin_backend/agent/status/models.py) | Wire-format DTOs for the status reporter |
 | [services/pod_status.py](backend/styrmin_backend/services/pod_status.py) | Server-side handler for `reportPodStatuses` (upsert + `delete_stale`) |
-| [services/deployment_status.py](backend/styrmin_backend/services/deployment_status.py) | Server-side handler for `reportDeploymentStatuses` (snapshot + `displayState` → `Deployment.status`) |
+| [services/deployment_status.py](backend/styrmin_backend/services/deployment_status.py) | Server-side handler for `reportDeploymentStatuses` (snapshot + `displayState` → `Deployment.status`, then the phase history) |
+| [services/steps/operator_history.py](backend/styrmin_backend/services/steps/operator_history.py) | Phase history: turns each status report into operator-phase step changes |
+| [agent/steps/reporter.py](backend/styrmin_backend/agent/steps/reporter.py) | Flow step reporter: `recordStep` calls from USER flows and driver actions |
+| [agent/service/kubernetes/job_logs.py](backend/styrmin_backend/agent/service/kubernetes/job_logs.py) | Reads the end of a failed Job's output |
 | [entrypoint/combined.py](backend/styrmin_backend/entrypoint/combined.py) | Shared event loop: kopf + Prefect worker + status reporter |

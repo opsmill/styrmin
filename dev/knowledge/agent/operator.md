@@ -55,8 +55,13 @@ The CRD is `scope: Namespaced` and lives **inside the deployment's own namespace
 |-------|-------------|
 | `phase` | `Pending` / `CreatingPrerequisites` / `CreatingHelmRelease` / `CreatingServices` / `Ready` / `Failed` / `Deleting` / `Deleted` |
 | `displayState` | User-facing state surfaced to the UI: `Deploying` / `Running` / `Restoring` / `Error` / `Deleting` / `Deleted` |
-| `conditions` | K8s-standard condition array: `NetworkPoliciesReady`, `SecretsReady`, `HelmReleaseReady`, `ServicesReady`, `MiddlewaresReady`, `Ready`, `Deleted` |
+| `message` | The message of the current phase, or the reason of a failure |
+| `conditions` | K8s-standard condition array: `NetworkPoliciesReady`, `SecretsReady`, `HelmReleaseReady`, `HelmReleaseRemediated`, `ServicesReady`, `MiddlewaresReady`, `Ready`, `Deleted` |
 | `managedResources` | Counts by type (networkPolicies, secrets, helmReleases, services, middlewares) |
+| `instanceId` | The `spec.instanceId` that the create, update or resume handler last acted on. Written at the end of the handler, also when the handler raises. The status reporter sends it, so the server can link each report to the task that rolled out that instance. |
+| `rolloutStartedAt` | When the current rollout started (ISO 8601). Set by the create and update handlers; the resume handler sets it only when it is missing. The readiness timeout counts from it. |
+
+The CRD's status schema keeps `x-kubernetes-preserve-unknown-fields: true`, so `instanceId`, `rolloutStartedAt` and `HelmReleaseRemediated` need no CRD change on existing installs. `helm/agent/crds/styrmin.io_styrmindeployments.yaml` documents them.
 
 Printer columns for `kubectl get styrmindeployments`: Phase, App, Version, Age.
 
@@ -71,7 +76,7 @@ StyrminDeployment Created
     │   (HelmRelease is NOT created until all prerequisites are verified)
     │
     ├── Phase 2: HelmRelease
-    │   (Wait for FluxCD Ready condition)
+    │   (Wait for FluxCD to report the HelmRelease's current generation Ready)
     │
     └── Phase 3: Services + Middlewares
          │
@@ -102,7 +107,53 @@ A timer handler fires every 60s to compare desired vs actual state for all manag
 | `CreatingPrerequisites` / `CreatingHelmRelease` / `CreatingServices` | Deployment or update in progress |
 | `Failed` | Reconciliation failed (API error, permission denied) |
 
-In `CreatingHelmRelease` and, for non-internal deployments, `Ready`, the timer also reads the HelmRelease once per tick. When its current generation failed on the component-container guard (the guard key `styrmin.io~1component-container~1…` in a condition message, Ready not `True`), the CR goes to `Failed` / `Error` at once with `HelmReleaseReady=False` and `Ready=False`, reason `ComponentContainerNotFound`, and the typed `COMPONENT_CONTAINER_NOT_FOUND` message naming the component and container (spec 018, FR-007). Other HelmRelease failures surface only through the readiness timeout, which runs only before the CR reaches `Ready`; once `Ready`, they are not reflected in the CR status.
+In `CreatingHelmRelease` and, for non-internal deployments, `Ready`, the timer also reads the HelmRelease once per tick. When its current generation failed on the component-container guard (the guard key `styrmin.io~1component-container~1…` in a condition message, Ready not `True`), the CR goes to `Failed` / `Error` at once with `HelmReleaseReady=False` and `Ready=False`, reason `ComponentContainerNotFound`, and the typed `COMPONENT_CONTAINER_NOT_FOUND` message naming the component and container (spec 018, FR-007). During a rollout, the timer also follows FluxCD's state of the current generation, as described in the next section. Once the CR is `Ready`, the timer checks only the guard: a later HelmRelease failure without a spec change is not reflected in the CR status.
+
+## HelmRelease readiness during a rollout
+
+<!-- Extracted from specs/019-task-steps on 2026-10-06 -->
+
+The operator judges the HelmRelease only on its current generation, so an update or an upgrade reaches `Ready` only after FluxCD has applied the new release ([ADR-060](../../adr/0060-steps-and-derived-task-result.md)). Before this rule, the update handler kept `HelmReleaseReady=True` from the previous rollout, and the timer moved the CR to `Ready` on its next tick.
+
+### Start of a rollout
+
+The create and update handlers:
+
+- set `HelmReleaseReady` to `Unknown` with reason `Progressing` ("Waiting for FluxCD to apply the HelmRelease");
+- remove `HelmReleaseRemediated`, which belonged to the previous rollout;
+- set `status.rolloutStartedAt` to the current time.
+
+A kopf retry of these handlers (for example after `kopf.TemporaryError`) runs them again, so it resets `rolloutStartedAt` too. The resume handler continues the rollout: it does not reset `HelmReleaseReady`, and it sets `rolloutStartedAt` only when it is missing, so an operator restart does not extend the readiness timeout.
+
+### Current-generation rule
+
+A FluxCD condition of the HelmRelease counts only when its `observedGeneration` equals the HelmRelease's `metadata.generation`. A condition without `observedGeneration` is compared through `status.lastAttemptedGeneration`. This is the same rule as the component-container guard. `operator/reconciler.py::observe_helmrelease` reads the HelmRelease once per tick and returns FluxCD's `Ready` and `Released` conditions, `Remediated` and `Stalled` when they are `True`, and the guard failure, all for the current generation.
+
+### What the timer writes in `CreatingHelmRelease`
+
+| FluxCD state of the current generation | CR status |
+|---|---|
+| No condition yet | Nothing changes |
+| `Ready=True` | `HelmReleaseReady=True`, reason `FluxReady`; in the same tick the timer creates the services and middlewares and, when that succeeds, moves the CR to `Ready` |
+| `Ready` not `True` | `HelmReleaseReady` gets FluxCD's `Ready` status and transition time. When `Ready=False`, the reason and message come from `Released=False` when FluxCD has it (after a rollback, `Ready` describes the rollback), else from `Ready` |
+| `Remediated=True` | Copied into `HelmReleaseRemediated` (status, reason such as `RollbackSucceeded` or `UninstallSucceeded`, message, transition time). The phase does not change, because FluxCD tries again after each rollback (`remediation.retries: 3` for install and upgrade) |
+| `Stalled=True` | Phase `Failed`, `displayState: Error`, message `"<Stalled message>: <failure message>"`, and `Ready=False` with the `Stalled` reason, for example `RetriesExceeded`. FluxCD has used all its retries |
+
+The timer writes a condition only when its status, reason, message or transition time changes (`operator/crd/status.py::replace_condition`), so a slow rollout does not write the status on every tick.
+
+An internal deployment, such as the ingress controller, also counts as ready when one of its pods is ready, because its HelmRelease can stay `Progressing` while a LoadBalancer gets no external IP. A ready pod wins over `Stalled`.
+
+### Readiness timeout
+
+While the phase is not `Ready`, `Failed` or `Deleting`, the timer compares the time since `status.rolloutStartedAt` with `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` (default 300 seconds). A CR written by an older operator, without `rolloutStartedAt`, counts from `metadata.creationTimestamp`. After the timeout, the timer sets `displayState: Error` and the message `Deployment did not reach Ready within <timeout>s (phase: <phase>)`. The phase does not change, so a later FluxCD attempt that succeeds still moves the CR to `Ready` and `displayState: Running`. The timeout is the safety net when FluxCD never reports `Stalled`.
+
+### Known issue: rolled-back post-render overrides
+
+Under review. After FluxCD rolls back a change that only adds post-render overrides (image or environment variable overrides, [ADR-057](../../adr/0057-post-render-component-overrides.md) and [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md)), FluxCD can report the release Ready again for the current generation. The operator then moves the CR to `Ready`, so the task's failed HelmRelease step later shows `succeeded` although the override was not applied.
+
+## Steps of a rollout
+
+The operator does not write steps. The server builds the operator-phase steps of a task ("Create network policies and secrets", "Install or upgrade the HelmRelease", "Create services and middlewares", "Wait for the deployment to be ready") from the status reports, using `status.instanceId`, the phase, `displayState`, `message` and the conditions above. FluxCD's reasons, rollbacks (`HelmReleaseRemediated`) and retries (`HelmReleaseReady` back to `Progressing`) become the HelmRelease step's detail, rollback and attempts. See [Status Reporter](overview.md#status-reporter) and [ADR-060](../../adr/0060-steps-and-derived-task-result.md).
 
 ## Managed Resources
 

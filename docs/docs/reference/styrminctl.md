@@ -333,6 +333,46 @@ redeploy.
 
 :::
 
+### Failure reasons of `deployments apply --wait`
+
+With `--wait`, `apply` prints `submitted <name>` when it submits a
+change, then `running <name>` or `failed <name>: <reason>` when the
+deployment reaches a final state. When the deployment state becomes
+`FAILED`, the reason names the failed step, in the form
+`step "<step name>" failed: <error>`. `apply` looks for it in the steps of
+the task that the apply started, then in the tasks that the task's hook
+steps started, nearest first. When it finds no failed step, the reason
+is `deployment reconciliation failed (status: <status>)`.
+
+`--wait` gives up after 300 seconds with the reason `wait timeout`. The
+operator's default readiness timeout is also 300 seconds, but counts from
+the start of the rollout, which is later, and FluxCD retries a failed
+release before it reports it as stalled. A failed HelmRelease can
+therefore end the wait with `wait timeout` instead of a step. Read the steps
+with `styrminctl tasks get <task-id>`; `styrminctl tasks list` shows the
+type and deployment of each task.
+
+### `tasks get` — a task's steps
+
+`styrminctl tasks get <task-id>` prints three parts:
+
+1. A "Task" table with the columns `id`, `type`, `status`, `result`,
+   `message` and `deploymentId`. `status` follows only the Prefect flow
+   run; `result` is the task result, calculated from the task's steps and
+   from the tasks its hook steps started (`RUNNING`, `FAILED`,
+   `SUCCEEDED` or `SUPERSEDED`).
+2. A "Steps" table with one row per step, in start order with pending
+   steps last: `step` (the step's name), `status`, `duration` (`running`
+   while the step runs), `attempts` and `error`. The `error` column holds
+   the newest error, FluxCD's current reason for the HelmRelease step, and
+   the last line of a failed command's output, one per line. A task
+   without steps prints "No steps recorded for this task." instead.
+3. A "Started tasks" table with the `id`, `type` and `result` of each
+   task that the task's hook steps started. It is printed only when there
+   is one.
+
+The full output of a failed command is on the deployment page.
+
 ### Manifest `spec.config` shape
 
 `spec.config` accepts the same typed configuration whether `apply` creates
