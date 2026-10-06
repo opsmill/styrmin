@@ -66,6 +66,26 @@ OPERATOR_TEARDOWN = StepDefinition(
     StepKind.OPERATOR_PHASE,
 )
 
+RESTORE_NAMESPACE = StepDefinition(
+    "restore:namespace", "Delete the namespace", StepKind.RESTORE
+)
+RESTORE_VELERO = StepDefinition(
+    "restore:velero", "Run the Velero restore", StepKind.RESTORE
+)
+RESTORE_RECOVERY = StepDefinition(
+    "restore:recovery", "Run the recovery", StepKind.RESTORE
+)
+
+
+def backup_component_step(component: str) -> StepDefinition:
+    """The step that backs up one component of a backup."""
+    return StepDefinition(
+        f"backup:component:{component}",
+        f"Back up {component}",
+        StepKind.BACKUP_COMPONENT,
+    )
+
+
 #: The operator-phase steps of a rollout, in the order the operator runs them.
 ROLLOUT_OPERATOR_STEPS = (
     OPERATOR_PREREQUISITES,

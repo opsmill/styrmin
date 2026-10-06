@@ -59,3 +59,12 @@ class FakeStepApi:
             for r in self.records
             if r["event"] == "FAILED" and r.get("stepId") == str(self.ids[key])
         )
+
+    def record(self, event: str, key: str) -> dict:
+        """The ``event`` record of step ``key``, addressed by key or by step id."""
+        return next(
+            r
+            for r in self.records
+            if r["event"] == event
+            and (r.get("key") == key or r.get("stepId") == str(self.ids.get(key)))
+        )
