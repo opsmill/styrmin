@@ -735,6 +735,8 @@ export type Mutation = {
   loadRemoteApplicationDriverVersion?: Maybe<ApplicationDriverVersion>;
   login: LoginResult;
   logout: Scalars['Boolean']['output'];
+  /** Record a step event. Called by Styrmin's own flows and actions with the action token. */
+  recordStep: Step;
   reportDeploymentStatuses: ReportDeploymentStatusesResponse;
   reportPodStatuses: ReportPodStatusesResponse;
   resetUserPassword: Scalars['Boolean']['output'];
@@ -925,6 +927,11 @@ export type MutationLoadRemoteApplicationDriverVersionArgs = {
 export type MutationLoginArgs = {
   password: Scalars['String']['input'];
   username: Scalars['String']['input'];
+};
+
+
+export type MutationRecordStepArgs = {
+  input: RecordStepInput;
 };
 
 
@@ -1121,6 +1128,8 @@ export type Query = {
   podStatuses: Array<PodStatus>;
   restore?: Maybe<Restore>;
   restores: Array<Restore>;
+  /** One step, for example to load its output. Any signed-in user. */
+  step?: Maybe<Step>;
   task?: Maybe<Task>;
   tasks: Array<Task>;
   user?: Maybe<User>;
@@ -1253,6 +1262,11 @@ export type QueryRestoresArgs = {
 };
 
 
+export type QueryStepArgs = {
+  stepId: Scalars['UUID']['input'];
+};
+
+
 export type QueryTaskArgs = {
   taskId: Scalars['UUID']['input'];
 };
@@ -1267,6 +1281,26 @@ export type QueryUsersArgs = {
   active?: InputMaybe<Scalars['Boolean']['input']>;
   role?: InputMaybe<Role>;
   search?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type RecordStepInput = {
+  backupId?: InputMaybe<Scalars['UUID']['input']>;
+  /** Required with FAILED. */
+  error?: InputMaybe<Scalars['String']['input']>;
+  event: StepEvent;
+  key?: InputMaybe<Scalars['String']['input']>;
+  kind?: InputMaybe<StepKind>;
+  /** Required with STARTED when the step does not exist yet. */
+  name?: InputMaybe<Scalars['String']['input']>;
+  /** When the event happened, in the writer's clock. Defaults to the server's time. */
+  occurredAt?: InputMaybe<Scalars['DateTime']['input']>;
+  /** Used with OUTPUT, and allowed with FAILED. */
+  output?: InputMaybe<Scalars['String']['input']>;
+  outputTruncated?: Scalars['Boolean']['input'];
+  restoreId?: InputMaybe<Scalars['UUID']['input']>;
+  /** Address an existing step. Use instead of a parent and key. */
+  stepId?: InputMaybe<Scalars['UUID']['input']>;
+  taskId?: InputMaybe<Scalars['UUID']['input']>;
 };
 
 export type ReportDeploymentStatusesResponse = {
@@ -1373,6 +1407,71 @@ export type StandardStorageInput = {
   /** The Kubernetes storage class name used as the standard storage option for this cluster. */
   storageClass: Scalars['String']['input'];
 };
+
+/** One unit of work inside a task, a backup or a restore. */
+export type Step = {
+  __typename?: 'Step';
+  attemptCount: Scalars['Int']['output'];
+  backupId?: Maybe<Scalars['UUID']['output']>;
+  /** FluxCD's current reason and message, HelmRelease step only. */
+  detail?: Maybe<Scalars['String']['output']>;
+  /** Seconds between startedAt and endedAt; null until both are set. */
+  durationSeconds?: Maybe<Scalars['Float']['output']>;
+  endedAt?: Maybe<Scalars['DateTime']['output']>;
+  /** The newest error, or null. */
+  error?: Maybe<Scalars['String']['output']>;
+  /** The error of each failed attempt, oldest first. */
+  errors: Array<StepError>;
+  hasOutput: Scalars['Boolean']['output'];
+  id: Scalars['UUID']['output'];
+  key: Scalars['String']['output'];
+  kind: StepKind;
+  name: Scalars['String']['output'];
+  /** Set while a running operator-phase step has had no agent report for more than 60 seconds. */
+  noReportSince?: Maybe<Scalars['DateTime']['output']>;
+  /** End of a failed command's output. Request it only for one step at a time. */
+  output?: Maybe<Scalars['String']['output']>;
+  outputTruncated: Scalars['Boolean']['output'];
+  restoreId?: Maybe<Scalars['UUID']['output']>;
+  rollbackMessage?: Maybe<Scalars['String']['output']>;
+  rolledBackAt?: Maybe<Scalars['DateTime']['output']>;
+  startedAt?: Maybe<Scalars['DateTime']['output']>;
+  /** Tasks that this hook step started. */
+  startedTasks: Array<Task>;
+  status: StepStatus;
+  /** The later task that interrupted this step. */
+  supersededBy?: Maybe<Task>;
+  taskId?: Maybe<Scalars['UUID']['output']>;
+};
+
+export type StepError = {
+  __typename?: 'StepError';
+  attempt: Scalars['Int']['output'];
+  message: Scalars['String']['output'];
+  occurredAt: Scalars['DateTime']['output'];
+};
+
+export type StepEvent =
+  | 'FAILED'
+  | 'OUTPUT'
+  | 'STARTED'
+  | 'SUCCEEDED';
+
+export type StepKind =
+  | 'BACKUP_COMPONENT'
+  | 'COMMAND'
+  | 'HOOK'
+  | 'OPERATOR_PHASE'
+  | 'PLAN'
+  | 'RESOURCE_WRITE'
+  | 'RESTORE';
+
+export type StepStatus =
+  | 'FAILED'
+  | 'PENDING'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'SUPERSEDED';
 
 export type Task = {
   __typename?: 'Task';

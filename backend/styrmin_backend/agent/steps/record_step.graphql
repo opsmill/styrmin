@@ -1,0 +1,6 @@
+mutation RecordStep($input: RecordStepInput!) {
+    recordStep(input: $input) {
+        id
+        status
+    }
+}

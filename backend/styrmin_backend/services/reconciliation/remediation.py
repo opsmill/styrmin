@@ -9,7 +9,7 @@ from loguru import logger
 from prefect.client.schemas.objects import FlowRun
 
 from styrmin_backend.agent.tasks.utils import (
-    api_token_job_variables,
+    action_job_variables,
     run_deployment_or_fail,
 )
 
@@ -51,8 +51,10 @@ class Remediation(BaseModel):
     parameters: dict
     type: RemediationType
 
-    async def apply(self, api_token: str | None = None) -> FlowRun:
-        """Apply the remediation; ``api_token`` reaches the driver actions it runs."""
+    async def apply(
+        self, api_token: str | None = None, task_id: UUID | None = None
+    ) -> FlowRun:
+        """Apply the remediation for ``task_id``; ``api_token`` reaches the driver actions it runs."""
         logger.info(
             "Applying remediation: type={} instance_id={} flow_id={}",
             self.type,
@@ -64,7 +66,7 @@ class Remediation(BaseModel):
         flow_info = await run_deployment_or_fail(
             name=self.flow_id,
             parameters=self.parameters,
-            job_variables=api_token_job_variables(api_token),
+            job_variables=action_job_variables(api_token, task_id=task_id),
         )
 
         logger.info(
