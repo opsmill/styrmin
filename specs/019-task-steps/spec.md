@@ -210,7 +210,7 @@ Any signed-in user opens a restore of one deployment and views its steps: delete
 - FluxCD rolls back failed upgrades by default.
 - The agent reports every 5 seconds, and the deployment page refreshes every 10 seconds.
 - FluxCD's reason travels to the server in the existing StyrminDeployment conditions, so the input of the agent's status report does not change.
-- Backup and restore flows run as internal flows with database access, so they write their steps without an action token.
+- The parts of the backup and restore flows that run with database access write their steps directly. The restore steps and the per-component backup work run in the cluster, so those parts write their steps with an action token, like every other Prefect flow (FR-014). [CLAUDE RECOMMENDED – based on where the code runs today; the PRD expected all backup and restore steps to be written directly; see [research.md](research.md) D13]
 
 ## Out of Scope
 
@@ -229,6 +229,7 @@ Any signed-in user opens a restore of one deployment and views its steps: delete
 - The agent's status reporter and its `reportDeploymentStatuses` path, which carries operator phases and conditions.
 - The deployment timeline from [ADR-028](../../dev/adr/0028-deployment-history-derived-from-existing-data.md).
 - The coexistence of the CRD phase and the task callback from [ADR-019](../../dev/adr/0019-crd-phase-and-task-callback-coexist.md).
+- The operator's readiness check. Today the operator reports an update or upgrade as ready without waiting for FluxCD to apply the new HelmRelease, so a HelmRelease failure after an update is not visible ([`operator/handlers/styrmin_deployment.py`](../../backend/styrmin_backend/operator/handlers/styrmin_deployment.py), [`dev/knowledge/agent/operator.md`](../../dev/knowledge/agent/operator.md)). User Story 2 acceptance scenario 1, FR-004 and SC-003 depend on the operator judging the HelmRelease that FluxCD is applying now. As a result, a deployment reaches `RUNNING` after an update only when FluxCD reports the new release Ready, and a failed update ends `FAILED`. [CLAUDE RECOMMENDED – based on the operator code on `develop`; see [research.md](research.md) D5]
 
 ## Governance Gates Crossed
 

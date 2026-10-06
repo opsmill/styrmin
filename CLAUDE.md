@@ -2,6 +2,8 @@
 
 ## Active Technologies
 
+- Python 3.14+ (backend, agent, operator, SDK, CLI) + Strawberry GraphQL, SQLModel/SQLAlchemy (async), Prefect, kopf, kubernetes-asyncio; TypeScript 5.9.3/React 19 + TanStack Query v5 (frontend). PostgreSQL: new `step` table plus `task.instance_id` and `task.started_by_step_id` via one Alembic revision; task result derived, never stored (019-task-steps)
+
 - Python 3.14+ (backend, SDK, CLI); TypeScript 5.9.3 (frontend, Node 22) + Strawberry GraphQL, SQLModel + SQLAlchemy (async, asyncpg), Pydantic, Cyclopts (CLI), httpx (SDK), `dulwich` (git driver provider). Frontend: React 19, TanStack Query/Router, Radix UI, Tailwind. (013-driver-fingerprint)
 
 - PostgreSQL via SQLModel/SQLAlchemy. Schema is versioned with **Alembic** — every model change ships a revision in `backend/styrmin_backend/db/migrations/versions/`, applied via `styrmin db migrate` (see [ADR-001](dev/adr/0001-alembic-database-migrations.md) and [`dev/guides/database-migrations.md`](dev/guides/database-migrations.md)). `metadata.create_all()` only builds a *fresh* database at startup and in test fixtures; it never evolves an existing one. (013-driver-fingerprint)
@@ -62,5 +64,5 @@
 - 058-frontend-testing: Added TypeScript 5.9.3, React 19.2.4, Node 22 + Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI, React Router 7, React Hook Form 7
 
 <!-- SPECKIT START -->
-Active feature plan: [specs/archive/018-component-image-overrides/plan.md](specs/archive/018-component-image-overrides/plan.md) (spec: [spec.md](specs/archive/018-component-image-overrides/spec.md), design: research.md, data-model.md, contracts/graphql-deltas.md, contracts/errors.md, contracts/post-render-patch.md, contracts/client-surfaces.md, quickstart.md)
+Active feature plan: [specs/019-task-steps/plan.md](specs/019-task-steps/plan.md) (spec: [spec.md](specs/019-task-steps/spec.md), design: research.md, data-model.md, contracts/graphql.md, contracts/operator-status.md, contracts/flow-step-reporter.md, contracts/client-surfaces.md, quickstart.md)
 <!-- SPECKIT END -->
