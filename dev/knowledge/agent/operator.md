@@ -127,17 +127,18 @@ A kopf retry of these handlers (for example after `kopf.TemporaryError`) runs th
 
 ### Current-generation rule
 
-A FluxCD condition of the HelmRelease counts only when its `observedGeneration` equals the HelmRelease's `metadata.generation`. A condition without `observedGeneration` is compared through `status.lastAttemptedGeneration`. This is the same rule as the component-container guard. `operator/reconciler.py::observe_helmrelease` reads the HelmRelease once per tick and returns FluxCD's `Ready` and `Released` conditions, `Remediated` and `Stalled` when they are `True`, and the guard failure, all for the current generation.
+A FluxCD condition of the HelmRelease counts only when its `observedGeneration` equals the HelmRelease's `metadata.generation`. A condition without `observedGeneration` is compared through `status.lastAttemptedGeneration`. This is the same rule as the component-container guard. `operator/reconciler.py::observe_helmrelease` reads the HelmRelease once per tick and returns FluxCD's `Ready` and `Released` conditions, `Remediated` and `Stalled` when they are `True`, and the guard failure, all for the current generation. It also returns whether FluxCD's newest release is its rollback of a failed release (see [Rollback reported Ready](#rollback-reported-ready)).
 
 ### What the timer writes in `CreatingHelmRelease`
 
 | FluxCD state of the current generation | CR status |
 |---|---|
 | No condition yet | Nothing changes |
-| `Ready=True` | `HelmReleaseReady=True`, reason `FluxReady`; in the same tick the timer creates the services and middlewares and, when that succeeds, moves the CR to `Ready` |
+| `Ready=True`, and the newest release is not FluxCD's rollback | `HelmReleaseReady=True`, reason `FluxReady`; in the same tick the timer creates the services and middlewares and, when that succeeds, moves the CR to `Ready` |
 | `Ready` not `True` | `HelmReleaseReady` gets FluxCD's `Ready` status and transition time. When `Ready=False`, the reason and message come from `Released=False` when FluxCD has it (after a rollback, `Ready` describes the rollback), else from `Ready` |
 | `Remediated=True` | Copied into `HelmReleaseRemediated` (status, reason such as `RollbackSucceeded` or `UninstallSucceeded`, message, transition time). The phase does not change, because FluxCD tries again after each rollback (`remediation.retries: 3` for install and upgrade) |
 | `Stalled=True` | Phase `Failed`, `displayState: Error`, message `"<Stalled message>: <failure message>"`, and `Ready=False` with the `Stalled` reason, for example `RetriesExceeded`. FluxCD has used all its retries |
+| `Ready=True` for FluxCD's rollback of a failed release of this generation | Phase `Failed`, `displayState: Error`, message `"FluxCD rolled the release back after release v<N> failed: <failure message>"`, and `Ready=False` with reason `RolledBack`. `HelmReleaseReady` keeps FluxCD's failure, or becomes `False` with reason `RolledBack` when the timer did not see the failure |
 
 The timer writes a condition only when its status, reason, message or transition time changes (`operator/crd/status.py::replace_condition`), so a slow rollout does not write the status on every tick.
 
@@ -147,9 +148,14 @@ An internal deployment, such as the ingress controller, also counts as ready whe
 
 While the phase is not `Ready`, `Failed` or `Deleting`, the timer compares the time since `status.rolloutStartedAt` with `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` (default 300 seconds). A CR written by an older operator, without `rolloutStartedAt`, counts from `metadata.creationTimestamp`. After the timeout, the timer sets `displayState: Error` and the message `Deployment did not reach Ready within <timeout>s (phase: <phase>)`. The phase does not change, so a later FluxCD attempt that succeeds still moves the CR to `Ready` and `displayState: Running`. The timeout is the safety net when FluxCD never reports `Stalled`.
 
-### Known issue: rolled-back post-render overrides
+### Rollback reported Ready
 
-Under review. After FluxCD rolls back a change that only adds post-render overrides (image or environment variable overrides, [ADR-057](../../adr/0057-post-render-component-overrides.md) and [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md)), FluxCD can report the release Ready again for the current generation. The operator then moves the CR to `Ready`, so the task's failed HelmRelease step later shows `succeeded` although the override was not applied.
+FluxCD can report `Ready=True` for the current generation after it rolled that generation back. With helm-controller v1.1.0, the version in `helm/agent`, this happens to a change that only adds or changes post-render overrides (image or environment variable overrides, [ADR-057](../../adr/0057-post-render-component-overrides.md) and [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md)). Observed in `test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason`:
+
+1. The upgrade to release v3 fails at FluxCD's 5-minute timeout. FluxCD rolls back to v2, which creates release v4 ("Rollback to 2"), and sets `Released=False` (`UpgradeFailed`) and `Remediated=True` (`RollbackSucceeded`).
+2. 11 to 38 seconds later in E2E runs, FluxCD finds v4 in sync with the current generation, because after an attempt at a generation it compares only the chart and the values, not the post-renderers. It sets `Ready=True` and `Released=True`, both with reason `UpgradeSucceeded` and the message "Helm upgrade succeeded for release <name>.v4", removes `Remediated`, and records the new post-renderers digest. It does not try again.
+
+So FluxCD's conditions cannot tell this state from a retry that succeeded, and with the default 60-second timer interval the timer can miss `Remediated` altogether. FluxCD's release history can: the timer counts FluxCD's `Ready=True` as a rollback when FluxCD counted a failed install or upgrade for the current generation (`status.installFailures` or `status.upgradeFailures`, which FluxCD resets for each new generation), and the newest entry of `status.history` is `deployed` and has the version right after a `failed` entry. While failures are counted, FluxCD rolls back each failed release before it tries again, so that entry is the rollback. A retry that succeeds adds a newer release after the rollback, so it still moves the CR to `Ready`. The timer then fails the CR as described in the table above. An internal deployment with a ready pod still counts as ready.
 
 ## Steps of a rollout
 

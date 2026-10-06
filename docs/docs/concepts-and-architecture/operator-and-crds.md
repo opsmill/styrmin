@@ -181,12 +181,23 @@ rollout, it keeps the recorded start, so a restart does not extend the
 timeout. When kopf runs the create or update handler again after a
 temporary error, the handler records a new start.
 
-Known issue, under review: when a change only adds post-render
-overrides, such as an [image override](./image-overrides.md) or
-environment variables, and FluxCD rolls it back, FluxCD can report the
-release `Ready` again. The operator then reports the deployment `Ready`,
-and the failed HelmRelease step later shows as succeeded, although the
-override was not applied.
+FluxCD can also report the release `Ready` after it rolled back the
+failed upgrade. This happens when a change only adds or changes
+post-render overrides, such as an [image override](./image-overrides.md)
+or environment variables: after the rollback, FluxCD compares only the
+chart and the values with the HelmRelease, finds the rolled-back release
+in sync, and reports it as a successful upgrade, although the override
+was never applied. The operator recognises this state from FluxCD's
+release history: FluxCD counted a failed install or upgrade for the
+current generation of the HelmRelease, and the newest release is
+`deployed` right after a `failed` one, so it is the rollback. The
+operator then sets the phase `Failed` and the display state `Error`,
+with the message "FluxCD rolled the release back after release v<N>
+failed" followed by the failure message when it recorded one, and the
+`Ready` condition becomes `False` with the reason `RolledBack`. The
+HelmRelease step and the task stay failed. A retry by FluxCD that
+succeeds creates a newer release after the rollback, so the deployment
+still reaches `Ready`.
 
 ### What this means in practice
 

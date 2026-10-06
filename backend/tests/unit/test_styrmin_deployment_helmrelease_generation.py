@@ -3,8 +3,9 @@
 Create and update reset ``HelmReleaseReady`` and record ``rolloutStartedAt``;
 resume keeps both. The timer counts FluxCD's ``Ready=True`` only for the
 HelmRelease's current generation, copies FluxCD's reason and remediation into
-the CR status, fails the CR on ``Stalled=True`` and writes conditions only when
-they change.
+the CR status, fails the CR on ``Stalled=True`` and on ``Ready=True`` for
+FluxCD's rollback of the generation's failed release, and writes conditions only
+when they change.
 """
 
 from __future__ import annotations
@@ -88,14 +89,33 @@ def _flux(
     return condition
 
 
+def _snapshot(version: int, status: str) -> dict[str, Any]:
+    """One entry of FluxCD's ``status.history``."""
+    return {
+        "name": "my-release",
+        "namespace": NAMESPACE,
+        "version": version,
+        "status": status,
+        "chartName": "simple-app",
+        "chartVersion": "0.1.0",
+        "configDigest": "sha256:fc2de67daf30f",
+    }
+
+
 def _helmrelease(
     *conditions: dict[str, Any],
     generation: int = 2,
     last_attempted_generation: int | None = None,
+    history: list[dict[str, Any]] | None = None,
+    upgrade_failures: int | None = None,
 ) -> dict[str, Any]:
     status: dict[str, Any] = {"conditions": list(conditions)}
     if last_attempted_generation is not None:
         status["lastAttemptedGeneration"] = last_attempted_generation
+    if history is not None:
+        status["history"] = history
+    if upgrade_failures is not None:
+        status["upgradeFailures"] = upgrade_failures
     return {
         "apiVersion": "helm.toolkit.fluxcd.io/v2",
         "kind": "HelmRelease",
@@ -436,6 +456,7 @@ async def test_stalled_fails_the_deployment(mocker, services) -> None:
 async def test_retry_that_succeeds_after_a_rollback_reaches_ready(
     mocker, services
 ) -> None:
+    # v3 failed, v4 is FluxCD's rollback, and FluxCD's retry released v5.
     upgraded = _helmrelease(
         _flux(
             "Ready", "True", "UpgradeSucceeded", "Helm upgrade succeeded", 2, T_READY
@@ -443,6 +464,12 @@ async def test_retry_that_succeeds_after_a_rollback_reaches_ready(
         _flux(
             "Released", "True", "UpgradeSucceeded", "Helm upgrade succeeded", 2, T_READY
         ),
+        history=[
+            _snapshot(5, "deployed"),
+            _snapshot(4, "superseded"),
+            _snapshot(3, "failed"),
+        ],
+        upgrade_failures=1,
     )
     _serve(mocker, _rolled_back_helmrelease(), upgraded)
     # The readiness timeout fired while FluxCD was still retrying.
@@ -462,6 +489,149 @@ async def test_retry_that_succeeds_after_a_rollback_reaches_ready(
     assert remediated is not None
     assert remediated["lastTransitionTime"] == T_ROLLED_BACK
     services.assert_awaited_once()
+
+
+ROLLBACK_RELEASED = (
+    "Helm upgrade succeeded for release styrmin-deadbeef/my-release.v4 with chart "
+    "simple-app@0.1.0"
+)
+
+
+def _ready_after_rollback_helmrelease(**overrides: Any) -> dict[str, Any]:
+    """FluxCD after it rolled back v3 to v4 and found v4 in sync (H1, helm-controller v1.1.0).
+
+    FluxCD compared only the chart and the values, so it reports the rollback as the
+    released upgrade, and removed ``Remediated``.
+    """
+    arguments: dict[str, Any] = {
+        "history": [
+            _snapshot(4, "deployed"),
+            _snapshot(3, "failed"),
+            _snapshot(2, "superseded"),
+        ],
+        "upgrade_failures": 1,
+        **overrides,
+    }
+    return _helmrelease(
+        _flux("Ready", "True", "UpgradeSucceeded", ROLLBACK_RELEASED, 2, T_READY),
+        _flux("Released", "True", "UpgradeSucceeded", ROLLBACK_RELEASED, 2, T_READY),
+        **arguments,
+    )
+
+
+def _assert_failed_by_rollback(patch: _Patch, message: str) -> None:
+    assert patch.status["phase"] == DeploymentPhase.FAILED.value
+    assert patch.status["displayState"] == DisplayState.ERROR.value
+    assert patch.status["message"] == message
+    ready = _condition(patch, ConditionType.READY)
+    assert ready is not None
+    assert (ready["status"], ready["reason"], ready["message"]) == (
+        "False",
+        "RolledBack",
+        message,
+    )
+
+
+@pytest.mark.anyio
+async def test_ready_after_a_rollback_of_this_generation_fails_the_deployment(
+    mocker, services
+) -> None:
+    """H1: FluxCD's rollback of a post-render override is not the release of the generation."""
+    _serve(mocker, _rolled_back_helmrelease(), _ready_after_rollback_helmrelease())
+    # The readiness timeout fired while FluxCD was still waiting for the upgrade.
+    status = {**_rolling_out_status(), "displayState": DisplayState.ERROR.value}
+
+    first = await _tick(status)
+    second = await _tick(_apply(status, first))
+
+    assert "phase" not in first.status
+    _assert_failed_by_rollback(
+        second,
+        f"FluxCD rolled the release back after release v3 failed: {UPGRADE_FAILURE}",
+    )
+    # The failed upgrade and the rollback stay recorded for the step history.
+    hr_ready = _condition(second, ConditionType.HELM_RELEASE_READY)
+    assert hr_ready is not None
+    assert (hr_ready["status"], hr_ready["reason"], hr_ready["message"]) == (
+        "False",
+        "UpgradeFailed",
+        UPGRADE_FAILURE,
+    )
+    remediated = _condition(second, ConditionType.HELM_RELEASE_REMEDIATED)
+    assert remediated is not None
+    assert remediated["lastTransitionTime"] == T_ROLLED_BACK
+    services.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_ready_after_a_rollback_the_operator_did_not_see_fails_the_deployment(
+    mocker, services
+) -> None:
+    """With the production 60-second interval, the timer can miss FluxCD's failure and rollback."""
+    _serve(mocker, _ready_after_rollback_helmrelease())
+
+    patch = await _tick(_rolling_out_status())
+
+    message = "FluxCD rolled the release back after release v3 failed"
+    _assert_failed_by_rollback(patch, message)
+    hr_ready = _condition(patch, ConditionType.HELM_RELEASE_READY)
+    assert hr_ready is not None
+    assert (hr_ready["status"], hr_ready["reason"], hr_ready["message"]) == (
+        "False",
+        "RolledBack",
+        message,
+    )
+    services.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # A new generation resets FluxCD's failure counters.
+        {"upgrade_failures": 0},
+        {"upgrade_failures": None},
+        # The newest release is not the next version after the failed one.
+        {
+            "history": [
+                _snapshot(5, "deployed"),
+                _snapshot(3, "failed"),
+                _snapshot(2, "superseded"),
+            ]
+        },
+        # An ordinary upgrade of a release with no failure in its history.
+        {"history": [_snapshot(4, "deployed"), _snapshot(3, "superseded")]},
+        {"history": [_snapshot(4, "deployed")]},
+    ],
+    ids=["failures-reset", "no-failures", "version-gap", "no-failed", "one-release"],
+)
+@pytest.mark.anyio
+async def test_ready_without_a_rollback_of_this_generation_reaches_ready(
+    mocker, services, overrides: dict[str, Any]
+) -> None:
+    _serve(mocker, _ready_after_rollback_helmrelease(**overrides))
+
+    patch = await _tick(_rolling_out_status())
+
+    assert patch.status["phase"] == DeploymentPhase.READY.value
+    assert patch.status["displayState"] == DisplayState.RUNNING.value
+    services.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_internal_deployment_with_a_ready_pod_reaches_ready_after_a_rollback(
+    mocker, services
+) -> None:
+    _serve(mocker, _ready_after_rollback_helmrelease())
+    mocker.patch.object(
+        reconciler_module,
+        "_check_any_pod_ready",
+        new=mocker.AsyncMock(return_value=True),
+    )
+
+    patch = await _tick(_rolling_out_status(), spec={**SPEC, "internal": True})
+
+    assert patch.status["phase"] == DeploymentPhase.READY.value
+    assert patch.status["displayState"] == DisplayState.RUNNING.value
 
 
 @pytest.mark.anyio
