@@ -223,8 +223,8 @@ Run each E2E node with `--pdb` (in a non-interactive shell: `sleep infinity | uv
 - [X] T097 [US6] Write propagation tests in `backend/tests/functional/graphql/test_backup_restore_steps_propagation.py`: seeded backup and restore steps reach `Backup.steps`/`Restore.steps` for a `READ_ONLY` caller; steps deleted with their backup
 - [X] T098 [US6] Extend `frontend/src/graphql/list_backups.graphql` and `list_restores.graphql` with steps, run `pnpm codegen`, and render `StepList` in `BackupRow` and `RestoreRow` in `frontend/src/pages/deployments/DeploymentDetailPage.tsx`; tests in `frontend/src/__tests__/deployment-detail/BackupRestoreSteps.test.tsx`
 - [X] T099 [US6] Extend `python_sdk/src/styrmin_sdk/graphql/get_backup.graphql`, `get_restore.graphql`, `list_backups.graphql` and `list_restores.graphql` with steps; run `uv run invoke generate`; parsing tests in `python_sdk/tests/test_backups.py`
-- [ ] T100 [US6] Extend `backend/tests/e2e/test_backup_restore.py` (`shard_backup`): a completed restore lists its three steps in order with durations; a backup lists one step per component; a failed restore (remove the Velero backup with a `DeleteBackupRequest`, wait until the `Backup` object is gone, restore) fails "Run the Velero restore" with Velero's validation error
-- [ ] T101 [US6] Run the changed nodes of `backend/tests/e2e/test_backup_restore.py` and record evidence in `specs/019-task-steps/e2e-evidence.md`
+- [X] T100 [US6] Extend `backend/tests/e2e/test_backup_restore.py` (`shard_backup`): a completed restore lists its three steps in order with durations; a backup lists one step per component; a failed restore (remove the Velero backup with a `DeleteBackupRequest`, wait until the `Backup` object is gone, restore) fails "Run the Velero restore" with Velero's validation error
+- [X] T101 [US6] Run the changed nodes of `backend/tests/e2e/test_backup_restore.py` and record evidence in `specs/019-task-steps/e2e-evidence.md`
 
 **Checkpoint**: Restores and backups of one deployment show their steps.
 

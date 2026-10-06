@@ -50,12 +50,16 @@ class BackupRef:
     id: str
     name: str
     status: str
+    # One step per component (spec 019); empty on the ref ``create_backup`` returns.
+    steps: tuple[StepRef, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class RestoreRef:
     id: str
     status: str
+    # The restore's steps (spec 019); empty on the ref ``create_restore`` returns.
+    steps: tuple[StepRef, ...] = ()
 
 
 #: Derived environment-operation statuses that never change again, as the raw
