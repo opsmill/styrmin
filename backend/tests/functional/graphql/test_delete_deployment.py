@@ -19,19 +19,24 @@ from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import (
     Deployment,
     DeploymentState,
+    Step,
+    StepStatus,
     Task,
     TaskStatus,
     TaskType,
 )
 
+from styrmin_backend.repository.deployment import SQLModelDeploymentRepository
+
 from ._queries import load_query
 from .conftest import gql
-from .seeds import seed_deployment
+from .seeds import seed_deployment, seed_environment
 
 
 @pytest.fixture
@@ -241,3 +246,112 @@ async def test_delete_deployment_rejects_internal_deployment(
         err["extensions"].get("code") == "OPERATION_DENIED" for err in payload["errors"]
     ), payload["errors"]
     patch_crd_mock.assert_not_called()
+
+
+async def _step_statuses(session: AsyncSession, task_id: UUID) -> dict[str, StepStatus]:
+    rows = (await session.exec(select(Step).where(Step.task_id == task_id))).all()
+    return {step.key: step.status for step in rows}
+
+
+async def _report_deleted(client: AsyncClient, deployment_id: UUID) -> None:
+    await gql(
+        client,
+        "report_deployment_statuses",
+        {
+            "reports": [
+                {
+                    "deploymentId": str(deployment_id),
+                    "phase": "Deleted",
+                    "displayState": "Deleted",
+                }
+            ]
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_last_app_tombstone_tears_down_ingress_controller(
+    client: AsyncClient,
+    session: AsyncSession,
+    patch_crd_mock,
+) -> None:
+    """#252: tombstoning an environment's last app flags its internal ingress
+    controller for deletion; the controller's own terminal report then
+    tombstones it, and it no longer counts as the environment's controller."""
+
+    environment = await seed_environment(session)
+    app = await seed_deployment(session, environment=environment)
+    ingress = await seed_deployment(
+        session,
+        environment=environment,
+        name="styrmin-ingress-controller",
+        internal=True,
+    )
+    app.status = DeploymentState.DELETING
+    session.add(app)
+    await session.commit()
+    environment_id, app_id, ingress_id = environment.id, app.id, ingress.id
+
+    await _report_deleted(client, app_id)
+
+    patch_crd_mock.assert_called_once()
+    assert patch_crd_mock.call_args.kwargs["reference"] == f"styrmin-{ingress_id}"
+    session.expire_all()
+    ingress_db = await session.get(Deployment, ingress_id)
+    assert ingress_db is not None
+    assert ingress_db.status == DeploymentState.DELETING
+    assert ingress_db.deleted_at is None
+    ingress_tasks = (
+        await session.exec(select(Task).where(Task.deployment_id == ingress_id))
+    ).all()
+    assert [task.type for task in ingress_tasks] == [TaskType.DELETE_DEPLOYMENT]
+    delete_task_id = ingress_tasks[0].id
+    assert await _step_statuses(session, delete_task_id) == {
+        "resource:delete-request": StepStatus.SUCCEEDED,
+        "operator:teardown": StepStatus.PENDING,
+    }
+
+    await _report_deleted(client, ingress_id)
+
+    session.expire_all()
+    ingress_db = await session.get(Deployment, ingress_id)
+    assert ingress_db is not None
+    assert ingress_db.status == DeploymentState.DELETED
+    assert ingress_db.deleted_at is not None
+    assert (await _step_statuses(session, delete_task_id))[
+        "operator:teardown"
+    ] == StepStatus.SUCCEEDED
+    assert patch_crd_mock.call_count == 1
+    repository = SQLModelDeploymentRepository(session)
+    assert await repository.find_internal_by_environment(environment_id) is None
+
+
+@pytest.mark.asyncio
+async def test_non_last_app_tombstone_keeps_ingress_controller(
+    client: AsyncClient,
+    session: AsyncSession,
+    patch_crd_mock,
+) -> None:
+    """#252: another live app in the environment keeps the controller."""
+
+    environment = await seed_environment(session)
+    app = await seed_deployment(session, environment=environment)
+    await seed_deployment(session, environment=environment)
+    ingress = await seed_deployment(
+        session,
+        environment=environment,
+        name="styrmin-ingress-controller",
+        internal=True,
+    )
+    app.status = DeploymentState.DELETING
+    session.add(app)
+    await session.commit()
+    ingress_id = ingress.id
+
+    await _report_deleted(client, app.id)
+
+    patch_crd_mock.assert_not_called()
+    session.expire_all()
+    ingress_db = await session.get(Deployment, ingress_id)
+    assert ingress_db is not None
+    assert ingress_db.status == DeploymentState.PENDING

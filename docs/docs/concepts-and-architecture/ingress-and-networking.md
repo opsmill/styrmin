@@ -48,8 +48,11 @@ Styrmin gives every environment its own Traefik instance because:
 
 The per-environment ingress controller is itself just a Styrmin-managed
 deployment — Styrmin uses its own driver model to install it. You don't
-have to install or manage it; it appears when you create the
-environment.
+have to install or manage it. Styrmin installs it when you deploy the
+first application into the environment, and removes it after you delete
+the last application in the environment. While that removal runs,
+Styrmin rejects new deployments into the environment; deploy again once
+the removal completes, and Styrmin installs a new ingress controller.
 
 ### How an application URL gets assigned
 

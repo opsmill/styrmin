@@ -555,6 +555,42 @@ class TestGetActiveDeployments:
             results = await _get_active_deployments(GRAPHQL_URL)
         assert len(results) == 1
 
+    @pytest.mark.anyio
+    async def test_keeps_internal_being_deleted(self) -> None:
+        """An internal ingress controller in teardown is reported, so the
+        backend can tombstone it once its CR is gone (#252)."""
+        deleting_id = str(uuid4())
+        mock_resp = _mock_response(
+            {
+                "data": {
+                    "environments": [
+                        {
+                            "deployments": [
+                                {
+                                    "id": deleting_id,
+                                    "status": "deleting",
+                                    "internal": True,
+                                },
+                                {
+                                    "id": str(uuid4()),
+                                    "status": "pending",
+                                    "internal": True,
+                                },
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+        with patch("styrmin_backend.agent.status.reporter.httpx.AsyncClient") as mock:
+            mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
+            mock.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock.return_value.post = AsyncMock(return_value=mock_resp)
+            results = await _get_active_deployments(GRAPHQL_URL)
+        assert [(str(dep_id), status) for dep_id, status in results] == [
+            (deleting_id, "deleting")
+        ]
+
 
 # ---------------------------------------------------------------------------
 # D. Poll cycle resilience tests

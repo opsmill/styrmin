@@ -170,7 +170,8 @@ async def _collect_crd_status(namespace: str, crd_name: str) -> dict | None:
 
 
 async def _get_active_deployments(graphql_url: str) -> list[tuple[UUID, str]]:
-    """Query the backend for active non-internal deployments.
+    """Query the backend for active non-internal deployments, plus internal
+    ones being torn down so their terminal ``DELETED`` transition is reported.
 
     Returns tuples of ``(deployment_id, status)`` so the caller can decide
     how to handle each based on its current lifecycle state — in
@@ -197,7 +198,7 @@ async def _get_active_deployments(graphql_url: str) -> list[tuple[UUID, str]]:
             for env_data in (gql.data or {}).get("environments", []):
                 env = EnvironmentForStatus.model_validate(env_data)
                 for dep in env.deployments:
-                    if not dep.internal:
+                    if not dep.internal or dep.status == "deleting":
                         results.append((UUID(dep.id), dep.status))
             return results
     except httpx.ConnectError, httpx.ConnectTimeout:
