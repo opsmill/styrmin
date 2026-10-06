@@ -17,7 +17,7 @@
 ### Components
 
 - `components/deployment/StepList.tsx` (new): an ordered list of steps.
-  - Each row: status icon and label, name, duration (or "running for <elapsed>"), attempt count when above 1.
+  - Each row: status icon with a text label (status is never shown by colour alone), name, duration (or "running for <elapsed>"), attempt count when above 1.
   - A failed step shows its error, each earlier attempt's error, FluxCD's `detail`, and "FluxCD rolled back the release at <time>: <message>" when `rolledBackAt` is set.
   - `hasOutput` shows "Show output", which loads `GetStepOutput` and renders it in a scrollable monospace block, with "Earlier output was cut" when `outputTruncated`.
   - A superseded step shows "Superseded by <task type>" linking to that timeline entry.
@@ -28,10 +28,13 @@
   - Shows `TaskResultBadge` instead of `StatusBadge(task.status)`.
   - Every entry can expand. The expanded area shows the step list, then the existing context diff.
   - A task started by a hook shows "Started by <task type>" with a link.
-  - A finished task with no steps shows "No steps recorded for this task." (FR-010).
+  - A finished task with no steps shows "No steps recorded for this task." (FR-010). An unfinished task with no steps shows "Waiting for the first step."
   - Entries with result `RUNNING` or `FAILED` start expanded.
+  - `TASK_TYPE_LABELS` gains `delete_deployment: "Delete"` (FR-019).
   - Data attributes for E2E: `data-task-result` on the entry; `data-step-key`, `data-step-status` on each step row.
-- `DeploymentDetailPage.tsx`: `BackupRow` and `RestoreRow` show a `StepList` of their steps.
+- `DeploymentDetailPage.tsx`:
+  - `BackupRow` and `RestoreRow` show a `StepList` of their steps.
+  - The Overview tab's "Recent Timeline" shows `TaskResultBadge` instead of `Task.status`, so both views agree.
 
 Refresh stays at the existing `refetchInterval: 10_000` while auto-refresh is on (FR-005).
 

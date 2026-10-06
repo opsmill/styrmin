@@ -51,7 +51,7 @@ Each hook step's id is passed to the action's Job as `STYRMIN_STEP_ID`.
 
 | Code | Steps |
 |---|---|
-| `apply_state` flow | `plan`; on a failed remediation flow, fails the task's open flow-kind steps before raising |
+| `apply_state` flow | `plan` (retries on `TaskNotFoundError` for up to 10 seconds, because the caller may not have committed the task row yet); on a failed remediation flow, fails the task's open flow-kind steps before raising |
 | `run_job` flow (INTERNAL wrapper) | On a failed command flow, fails the task's open flow-kind steps before raising |
 | `execute_backup_workflow`, `execute_restore_workflow` | On a failed or crashed USER flow, fail the parent's open steps |
 | `delete_deployment` service | `resource:delete-request` (succeeded when the CR patch succeeds), then supersede |
@@ -79,6 +79,7 @@ Both read the output before they raise, so a later Job cleanup ([#374](https://g
 - Each item gives `spec.pod.name`, `spec.volume`, `status.phase` (`New`, `InProgress`, `Completed`, `Failed`), `status.startTimestamp`, `status.completionTimestamp`, `status.message`.
 - The flow maps pods to components with the pod label `styrmin/component`. A component's step starts at its earliest `startTimestamp`, ends at its latest `completionTimestamp` once all its items are terminal, and fails when any item failed (error: the item's `status.message`).
 - `poll_backup_status` gains an optional `on_poll` callback that receives the Backup object after each poll.
+- `poll_backup_status` and `poll_restore_status` treat Velero's `FailedValidation` phase as terminal, next to `Completed`, `PartiallyFailed` and `Failed`. The step's error is the joined `status.validationErrors`.
 - The agent's ClusterRole gains `get` and `list` on `podvolumebackups` in `velero.io` (`helm/agent/templates/roles.yaml`).
 
 ## Unit tests

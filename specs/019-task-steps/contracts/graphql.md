@@ -124,9 +124,11 @@ input RecordStepInput {
 
 type Mutation {
   """Record a step event. Called by Styrmin's own flows and actions with the action token."""
-  recordStep(input: RecordStepInput!): Step! @requiresRole  # READ_WRITE
+  recordStep(input: RecordStepInput!): Step! @requiresRole  # READ_WRITE, and only the styrmin-actions user
 }
 ```
+
+Access: `PermissionExtension([RequiresRole(Role.READ_WRITE), IsActionsServiceAccount()])`. The second permission accepts only the built-in `styrmin-actions` user (`ACTIONS_SERVICE_ACCOUNT_USERNAME`), so a person cannot change the record of what happened (research D14).
 
 Semantics:
 
@@ -142,7 +144,15 @@ Side effects in the recorder:
 - `SUCCEEDED` on `resource:styrmindeployment` creates the task's operator-phase steps (not for internal deployments) and supersedes open operator-phase steps of the deployment's other tasks.
 - The server keeps at most the last 200 lines and 64 KiB of `output`.
 
-Errors: `StepNotFoundError`, `TaskNotFoundError`, `BackupNotFoundError`, `RestoreNotFoundError` (all `NOT_FOUND`); `InvalidStepRecordError` (`VALIDATION_ERROR`). Unauthenticated calls get `UNAUTHENTICATED`; `READ_ONLY` callers get `FORBIDDEN`.
+Errors: `StepNotFoundError`, `TaskNotFoundError`, `BackupNotFoundError`, `RestoreNotFoundError` (all `NOT_FOUND`); `InvalidStepRecordError` (`VALIDATION_ERROR`). Unauthenticated calls get `UNAUTHENTICATED`; `READ_ONLY` callers and every user other than `styrmin-actions`, including admins, get `FORBIDDEN`.
+
+## Read model for lists
+
+Styrmin's resolvers query per object (`api/resolvers.py`), with no data loaders. To keep the timeline at a fixed number of queries:
+
+- `build_deployment_timeline` returns, with each entry, the task's steps, its started tasks (with their steps), the summaries of superseding tasks, the family result, and the deployment's last report time.
+- `Task` and `Step` GraphQL objects hold that data in `strawberry.Private` fields (`steps_view`, `result_view`, `started_tasks_view`, `superseded_by_view`, `no_report_since_view`). Each resolver returns the private value when it is set, and queries otherwise (single reads: `Query.task`, `Query.step`, `Backup.steps`, `Restore.steps`).
+- A unit test counts the database queries of `deploymentTimeline` for 20 tasks with 10 steps each and fails when the count grows with the number of tasks.
 
 ## Changed mutations
 
@@ -170,8 +180,9 @@ type Mutation {
 | Surface | Write reaches the database | Database reaches the resolver |
 |---|---|---|
 | `recordStep` (each event, each parent) | yes | returned `Step` |
-| `recordStep` without a token / as `READ_ONLY` | rejected, nothing written | — |
+| `recordStep` without a token / as `READ_ONLY` / as a `READ_WRITE` or `ADMIN` person | rejected, nothing written | — |
 | `startedByStepId` on the three mutations | `task.started_by_step_id` | `Task.startedBy`, `Task.startedTasks`, `Step.startedTasks` |
 | Every `Step` field | — | seeded row → field |
-| `Task.steps`, `Task.result` (four values), `Backup.steps`, `Restore.steps`, `Query.step` | — | seeded rows → fields, read as `READ_ONLY` |
+| `Task.steps`, `Task.result` (four values, including a family with a sibling-superseded started task and one interrupted by an outside task), `Backup.steps`, `Restore.steps`, `Query.step` | — | seeded rows → fields, read as `READ_ONLY` |
+| `Task.type` for tasks created by each caller in research D19 | `task.type` | `Task.type` |
 | `Step.noReportSince` | — | seeded `DeploymentStatus.last_polled_at` → field |
