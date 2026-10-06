@@ -7,7 +7,17 @@ query GetDeploymentTimeline($deploymentId: UUID!) {
       message
       createdOn
       updatedOn
+      result
       startedByStepId
+      startedBy {
+        id
+        type
+      }
+      startedTasks {
+        id
+        type
+        result
+      }
       steps {
         id
         key
@@ -26,6 +36,15 @@ query GetDeploymentTimeline($deploymentId: UUID!) {
         error
         detail
         hasOutput
+        supersededBy {
+          id
+          type
+        }
+        startedTasks {
+          id
+          type
+          result
+        }
       }
     }
     applicationVersion

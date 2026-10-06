@@ -1265,7 +1265,17 @@ class Client(AsyncBaseClient):
                   message
                   createdOn
                   updatedOn
+                  result
                   startedByStepId
+                  startedBy {
+                    id
+                    type
+                  }
+                  startedTasks {
+                    id
+                    type
+                    result
+                  }
                   steps {
                     id
                     key
@@ -1284,6 +1294,15 @@ class Client(AsyncBaseClient):
                     error
                     detail
                     hasOutput
+                    supersededBy {
+                      id
+                      type
+                    }
+                    startedTasks {
+                      id
+                      type
+                      result
+                    }
                   }
                 }
                 applicationVersion

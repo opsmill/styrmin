@@ -8,17 +8,31 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TaskLink } from "@/components/deployment/TaskLink";
+import { TaskResultBadge } from "@/components/deployment/TaskResultBadge";
 import {
   useGetStepOutputQuery,
   type StepKind,
   type StepStatus,
+  type TaskResult,
 } from "@/generated/graphql";
+import { taskTypeLabel } from "@/lib/task-display";
 import { cn } from "@/lib/utils";
 
 export interface StepErrorItem {
   attempt: number;
   message: string;
   occurredAt?: string | null;
+}
+
+/** Another task that a step or a task links to. */
+export interface LinkedTask {
+  id: string;
+  type: string;
+}
+
+export interface StartedTask extends LinkedTask {
+  result: TaskResult;
 }
 
 export interface StepListItem {
@@ -37,6 +51,8 @@ export interface StepListItem {
   rollbackMessage?: string | null;
   hasOutput?: boolean;
   outputTruncated?: boolean;
+  supersededBy?: LinkedTask | null;
+  startedTasks?: StartedTask[];
 }
 
 interface StepStatusConfig {
@@ -227,6 +243,34 @@ function StepFailureDetails({ step }: { step: StepListItem }) {
   );
 }
 
+// The tasks a hook step started, each with its result and a link to its entry.
+function StartedTasks({ tasks }: { tasks: StartedTask[] }) {
+  return (
+    <div className="flex flex-col gap-1 sm:pl-31">
+      <p className="text-xs text-muted-foreground">Started tasks</p>
+      <ul
+        className="flex flex-col gap-1"
+        aria-label="Started tasks"
+        data-testid="started-tasks"
+      >
+        {tasks.map((task) => (
+          <li
+            key={task.id}
+            className="flex flex-wrap items-center gap-2 text-xs"
+            data-testid="started-task"
+            data-task-id={task.id}
+            data-task-type={task.type}
+            data-task-result={task.result}
+          >
+            <TaskLink taskId={task.id}>{taskTypeLabel(task.type)}</TaskLink>
+            <TaskResultBadge result={task.result} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function StepRow({ step }: { step: StepListItem }) {
   const status = STEP_STATUS[step.status] ?? {
     label: step.status,
@@ -253,6 +297,7 @@ function StepRow({ step }: { step: StepListItem }) {
       data-step-ended-at={step.endedAt ?? ""}
       data-step-attempts={step.attemptCount}
       data-step-has-output={step.hasOutput ? "true" : "false"}
+      data-superseded-by-task-id={step.supersededBy?.id ?? ""}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span
@@ -294,7 +339,22 @@ function StepRow({ step }: { step: StepListItem }) {
           </span>
         )}
       </div>
+      {step.supersededBy && (
+        <p
+          className="text-xs text-muted-foreground sm:pl-31"
+          data-testid="step-superseded-by"
+          data-superseded-by-task-id={step.supersededBy.id}
+          data-superseded-by-task-type={step.supersededBy.type}
+        >
+          <TaskLink taskId={step.supersededBy.id}>
+            Superseded by {taskTypeLabel(step.supersededBy.type)}
+          </TaskLink>
+        </p>
+      )}
       <StepFailureDetails step={step} />
+      {step.startedTasks && step.startedTasks.length > 0 && (
+        <StartedTasks tasks={step.startedTasks} />
+      )}
     </li>
   );
 }

@@ -248,8 +248,7 @@ class TimelineEntry:
     created_on: str | None
     steps: tuple[StepRef, ...] = ()
     started_by_step_id: str | None = None
-    # Task.result, Task.startedBy and Task.startedTasks arrive with T071/T074;
-    # both drivers leave these at their defaults until then.
+    # ``started_by.result`` stays None: the timeline reads only its id and type.
     result: str | None = None
     started_by: TaskLinkRef | None = None
     started_tasks: tuple[TaskLinkRef, ...] = ()
