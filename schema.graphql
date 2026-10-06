@@ -89,7 +89,11 @@ type Backup {
   updatedOn: DateTime
   startedAt: DateTime
   completedAt: DateTime
-  sizeBytes: Int
+
+  """
+  Bytes of volume data the backup read, summed over Velero's PodVolumeBackups. Measured before deduplication and compression, so the space used in object storage is usually smaller. Kubernetes resource manifests are not counted. Null when the backup captured no volume data, did not complete, or the size could not be read.
+  """
+  sizeBytes: BigInt
   errorMessage: String
   instanceId: UUID!
 
@@ -144,6 +148,11 @@ type BackupStorageLocation {
   environmentCount: Int!
 }
 
+"""
+Integer that can exceed the 32-bit range of Int, such as a byte count. Serialized as a JSON number, exact up to 2^53.
+"""
+scalar BigInt
+
 type CallbackResponse {
   message: String!
   success: Boolean!
@@ -173,7 +182,7 @@ type Component {
 type ComponentBackupStatus {
   componentName: String!
   status: String!
-  sizeBytes: Int
+  sizeBytes: BigInt
   errorMessage: String
 }
 

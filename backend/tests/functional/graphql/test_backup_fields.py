@@ -1,4 +1,4 @@
-"""Propagation tests for the retention fields on the ``Backup`` GraphQL type.
+"""Propagation tests for the retention and size fields on the ``Backup`` GraphQL type.
 
 ``Backup.ttl`` and ``Backup.expiresAt`` are resolver-backed projections of the
 ``metadata`` JSON column (keys ``ttl`` / ``expires_at``), not stored columns.
@@ -68,6 +68,7 @@ async def seed_backup(
     metadata: dict | None,
     status: BackupStatus = BackupStatus.COMPLETED,
     name: str = "backup-ttl-seed",
+    size_bytes: int | None = None,
 ) -> Backup:
     instance = await seed_application_instance(session)
     backup = Backup(
@@ -75,6 +76,7 @@ async def seed_backup(
         status=status,
         instance_id=instance.id,
         metadata_=metadata,
+        size_bytes=size_bytes,
     )
     session.add(backup)
     await session.commit()
@@ -135,3 +137,29 @@ async def test_failed_backup_reports_ttl_without_expires_at(
 
     assert row["ttl"] == "720h"
     assert row["expiresAt"] is None
+
+
+@pytest.mark.asyncio
+async def test_backup_projects_recorded_size_bytes(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """A recorded volume byte count projects through GraphQL after a DB round-trip."""
+    backup = await seed_backup(
+        session, metadata=None, name="backup-with-size", size_bytes=5_368_709_120
+    )
+
+    data = await gql(fresh_client, "get_backup_size", {"backupId": str(backup.id)})
+
+    assert data["backup"]["sizeBytes"] == 5_368_709_120
+
+
+@pytest.mark.asyncio
+async def test_backup_without_a_byte_count_reports_null_size(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """No byte count recorded (no volume data, or size unreadable) reports null, not 0."""
+    backup = await seed_backup(session, metadata=None, name="backup-without-size")
+
+    data = await gql(fresh_client, "get_backup_size", {"backupId": str(backup.id)})
+
+    assert data["backup"]["sizeBytes"] is None

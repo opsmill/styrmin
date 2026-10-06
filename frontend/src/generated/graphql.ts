@@ -14,6 +14,8 @@ export type Scalars = {
   Boolean: { input: boolean; output: boolean; }
   Int: { input: number; output: number; }
   Float: { input: number; output: number; }
+  /** Integer that can exceed the 32-bit range of Int, such as a byte count. Serialized as a JSON number, exact up to 2^53. */
+  BigInt: { input: number; output: number; }
   /** Date with time (isoformat) */
   DateTime: { input: any; output: any; }
   /** The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf). */
@@ -106,7 +108,8 @@ export type Backup = {
   instance: ApplicationInstance;
   instanceId: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
-  sizeBytes?: Maybe<Scalars['Int']['output']>;
+  /** Bytes of volume data the backup read, summed over Velero's PodVolumeBackups. Measured before deduplication and compression, so the space used in object storage is usually smaller. Kubernetes resource manifests are not counted. Null when the backup captured no volume data, did not complete, or the size could not be read. */
+  sizeBytes?: Maybe<Scalars['BigInt']['output']>;
   startedAt?: Maybe<Scalars['DateTime']['output']>;
   status: Scalars['String']['output'];
   /** One step per component, by start time, pending steps last. Empty for backups taken before steps were recorded. */
@@ -180,7 +183,7 @@ export type ComponentBackupStatus = {
   __typename?: 'ComponentBackupStatus';
   componentName: Scalars['String']['output'];
   errorMessage?: Maybe<Scalars['String']['output']>;
-  sizeBytes?: Maybe<Scalars['Int']['output']>;
+  sizeBytes?: Maybe<Scalars['BigInt']['output']>;
   status: Scalars['String']['output'];
 };
 

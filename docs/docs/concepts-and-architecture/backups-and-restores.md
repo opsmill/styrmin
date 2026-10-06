@@ -78,6 +78,22 @@ server:
 6. Styrmin records the backup, including the underlying Velero backup
    name, so it can be referenced later.
 
+#### Backup size
+
+The size shown for a completed backup (`sizeBytes` in GraphQL, `size_bytes`
+in the SDK and `styrminctl backups`) is the number of bytes of volume data
+that Velero read from the deployment's volumes. Styrmin adds up the bytes
+that each of Velero's `PodVolumeBackup` objects reports for the backup.
+
+- The value is measured before Velero deduplicates and compresses the data,
+  so the space the backup uses in the BSL is usually smaller.
+- The Kubernetes resource definitions that Velero also stores are not
+  counted.
+- The size is empty when the backup captured no volume data (for example,
+  no component declares a backup strategy, or a `disk` component names no
+  volume), when the backup did not complete, or when Styrmin could not read
+  the `PodVolumeBackup` objects.
+
 ### What happens when you restore
 
 A restore is the same machinery, run in reverse:

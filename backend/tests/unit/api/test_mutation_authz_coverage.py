@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 import strawberry
+from strawberry.schema.config import StrawberryConfig
 from graphql import GraphQLError
 
 from styrmin_backend.api.auth.allowlist import (
@@ -29,12 +30,17 @@ from styrmin_backend.api.auth.allowlist import (
 )
 from styrmin_backend.api.auth.extensions import RequiresAuthentication
 from styrmin_backend.api.auth.permissions import RequiresRole
+from styrmin_backend.api.scalars import SCALAR_MAP
 from styrmin_backend.api.schema.mutation import Mutation
 from styrmin_backend.api.schema.query import Query
 
 
 def _build_schema() -> strawberry.Schema:
-    return strawberry.Schema(query=Query, mutation=Mutation)
+    return strawberry.Schema(
+        query=Query,
+        mutation=Mutation,
+        config=StrawberryConfig(scalar_map=SCALAR_MAP),
+    )
 
 
 def _has_requires_role(strawberry_field: object) -> bool:

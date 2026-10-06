@@ -1,0 +1,6 @@
+query GetBackupSize($backupId: UUID!) {
+    backup(backupId: $backupId) {
+        id
+        sizeBytes
+    }
+}

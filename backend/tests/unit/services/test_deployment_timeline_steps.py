@@ -19,11 +19,13 @@ from uuid import UUID
 
 import pytest
 import strawberry
+from strawberry.schema.config import StrawberryConfig
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend.api.scalars import SCALAR_MAP
 from styrmin_backend.api.schema.mutation import Mutation
 from styrmin_backend.api.schema.query import Query
 from styrmin_backend.db.models import (
@@ -62,7 +64,11 @@ SUPERSEDED_STEP = 2
 RUNNING_STEP = 3
 #: In the past, so the running step has had no report for more than 60 seconds.
 T0 = datetime(2020, 1, 6, 12, 0, tzinfo=UTC)
-SCHEMA = strawberry.Schema(query=Query, mutation=Mutation)
+SCHEMA = strawberry.Schema(
+    query=Query,
+    mutation=Mutation,
+    config=StrawberryConfig(scalar_map=SCALAR_MAP),
+)
 
 
 @pytest.fixture(params=["sqlite", "postgresql"])

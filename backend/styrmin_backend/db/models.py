@@ -9,6 +9,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -654,7 +655,8 @@ class Backup(StyrminModel, table=True):
 
     started_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
     completed_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
-    size_bytes: int | None = Field(default=None)
+    # Volume bytes routinely exceed the 2 GiB a 32-bit INTEGER holds (#136).
+    size_bytes: int | None = Field(sa_type=BigInteger, default=None)  # type: ignore[call-overload]
     error_message: str | None = Field(default=None)
     component_statuses: dict | None = Field(default=None, sa_column=Column(JSON))
     metadata_: dict | None = Field(default=None, sa_column=Column("metadata", JSON))

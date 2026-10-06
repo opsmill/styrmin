@@ -627,7 +627,8 @@ async def test_velero_backup_flow_records_a_step_per_component(
         )
 
     assert result is final
-    assert velero.listed == [("styrmin", "styrmin-backup-1")] * 2
+    # Two listings for the component steps, one for the backup size.
+    assert velero.listed == [("styrmin", "styrmin-backup-1")] * 3
     assert events == [
         ("STARTED", "backup:component:db"),
         ("SUCCEEDED", "backup:component:db"),
@@ -697,7 +698,8 @@ async def test_velero_backup_flow_without_components_records_no_steps(
         )
 
     assert events == []
-    assert velero.listed == []
+    # Only the backup size lists PodVolumeBackups.
+    assert velero.listed == [("styrmin", "styrmin-backup-1")]
 
 
 # execute_backup_workflow (INTERNAL) ------------------------------------------

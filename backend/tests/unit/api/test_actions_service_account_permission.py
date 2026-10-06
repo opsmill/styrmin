@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 import strawberry
+from strawberry.schema.config import StrawberryConfig
 from graphql import GraphQLError
 from strawberry.permission import PermissionExtension
 
@@ -17,6 +18,7 @@ from styrmin_backend.api.auth.permissions import (
     RequiresRole,
     StartedByStepRequiresActionsServiceAccount,
 )
+from styrmin_backend.api.scalars import SCALAR_MAP
 from styrmin_backend.api.schema.mutation import Mutation
 from styrmin_backend.api.schema.query import Query
 from styrmin_backend.db.models import Role, User
@@ -73,7 +75,11 @@ def test_refusal_is_forbidden() -> None:
 
 
 def _mutation_extension(name: str) -> PermissionExtension:
-    schema = strawberry.Schema(query=Query, mutation=Mutation)
+    schema = strawberry.Schema(
+        query=Query,
+        mutation=Mutation,
+        config=StrawberryConfig(scalar_map=SCALAR_MAP),
+    )
     field = schema._schema.type_map["Mutation"].fields[name]
     definition = field.extensions["strawberry-definition"]
     extensions = [

@@ -5,7 +5,9 @@ from pathlib import Path
 import strawberry
 from cyclopts import App
 from rich.console import Console
+from strawberry.schema.config import StrawberryConfig
 
+from styrmin_backend.api.scalars import SCALAR_MAP
 from styrmin_backend.api.schema.mutation import Mutation
 from styrmin_backend.api.schema.query import Query
 
@@ -23,7 +25,11 @@ def graphql_schema(output_file: Path) -> None:
         Path to write the GraphQL schema file.
 
     """
-    schema = strawberry.Schema(query=Query, mutation=Mutation)
+    schema = strawberry.Schema(
+        query=Query,
+        mutation=Mutation,
+        config=StrawberryConfig(scalar_map=SCALAR_MAP),
+    )
     sdl_content = str(schema)
 
     try:
