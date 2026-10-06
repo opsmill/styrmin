@@ -1,10 +1,10 @@
 """The deployment timeline reads the steps of its tasks with a fixed number of queries.
 
-Spec 019, T039 and T071 (research D14). ``deploymentTimeline`` runs through
-the real schema against a real database; the operation lists every field the
-timeline read model must serve (steps, task results, started-by links and
-superseding tasks), so a field that falls back to a query per task or per
-step makes the count grow with the number of tasks.
+Spec 019, T039, T071 and T079 (research D14). ``deploymentTimeline`` runs
+through the real schema against a real database; the operation lists every
+field the timeline read model must serve (steps, task results, started-by
+links, superseding tasks and the no-report time), so a field that falls back
+to a query per task or per step makes the count grow with the number of tasks.
 """
 
 from __future__ import annotations
@@ -58,6 +58,8 @@ STEPS_PER_TASK = 10
 #: Each task's hook step starts the next task, which supersedes its third step.
 HOOK_STEP = 1
 SUPERSEDED_STEP = 2
+#: An operator-phase step still running, long after the last agent report.
+RUNNING_STEP = 3
 T0 = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
 SCHEMA = strawberry.Schema(query=Query, mutation=Mutation)
 
@@ -134,7 +136,7 @@ def _kind(index: int) -> StepKind:
 
 
 def _steps_of(task: Task) -> list[Step]:
-    """Nine started steps, the last one failed twice, and one pending step."""
+    """Nine started steps, one running and the last failed twice, and one pending step."""
     steps: list[Step] = []
     for index in range(STEPS_PER_TASK - 1):
         started = T0 + timedelta(minutes=index)
@@ -148,6 +150,9 @@ def _steps_of(task: Task) -> list[Step]:
         )
         step.ended_at = started + timedelta(seconds=30)
         steps.append(step)
+    running = steps[RUNNING_STEP]
+    running.status = StepStatus.RUNNING
+    running.ended_at = None
     failed = steps[-1]
     failed.status = StepStatus.FAILED
     failed.attempt_count = 2
@@ -249,8 +254,9 @@ async def test_timeline_query_count_does_not_grow_with_tasks(
     assert len(large.entries) == 20
     assert all(len(e["task"]["steps"]) == STEPS_PER_TASK for e in large.entries)
     assert len(large.queries) == len(small.queries), large.queries
-    # Tasks, instances, the steps of all tasks and the tasks those steps started.
-    assert len(large.queries) <= 4, large.queries
+    # Tasks, instances, the steps of all tasks, the tasks those steps started,
+    # and the last agent report of the deployment.
+    assert len(large.queries) <= 5, large.queries
 
 
 async def test_timeline_links_started_and_superseding_tasks_with_results(
@@ -305,3 +311,8 @@ async def test_timeline_steps_are_grouped_by_task_in_start_order(
         assert failed["durationSeconds"] == 30.0
         assert steps[-1]["status"] == "PENDING"
         assert steps[-1]["startedAt"] is None
+        # No agent report was seeded, so the running step's start stands in for it.
+        running = steps[RUNNING_STEP]
+        assert running["status"] == "RUNNING"
+        assert running["noReportSince"] == running["startedAt"]
+        assert [s["key"] for s in steps if s["noReportSince"]] == [running["key"]]

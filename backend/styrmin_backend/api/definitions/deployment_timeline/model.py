@@ -41,7 +41,7 @@ def timeline_task(task: TaskEntity, read_model: TimelineReadModel) -> Task:
 
 
 def timeline_step(step: StepEntity, read_model: TimelineReadModel) -> Step:
-    """A step of a timeline task, with the tasks it links to from the read model."""
+    """A step of a timeline task; its links and no-report time come from the read model."""
     superseded_by = (
         read_model.task(step.superseded_by_task_id)
         if step.superseded_by_task_id is not None
@@ -55,6 +55,7 @@ def timeline_step(step: StepEntity, read_model: TimelineReadModel) -> Step:
             else NOT_LOADED
         ),
         started_tasks=read_model.started_by(step.id),
+        no_report_since=read_model.no_report_since(step.id),
         task_results=read_model.results,
     )
 

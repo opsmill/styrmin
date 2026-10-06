@@ -48,6 +48,7 @@ query GetDeploymentTimeline($deploymentId: UUID!) {
           type
           result
         }
+        noReportSince
       }
     }
     applicationVersion

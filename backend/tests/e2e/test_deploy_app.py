@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import time
-from datetime import datetime
+import warnings
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import kr8s.asyncio
@@ -27,6 +29,11 @@ OPERATOR_STEPS = (
     "operator:ready",
 )
 FINAL_RESULTS = {"FAILED", "SUCCEEDED", "SUPERSEDED"}
+#: SC-002: a user views each step change within 15 seconds, plus 2 for clock differences.
+STEP_VISIBLE_WITHIN = timedelta(seconds=15 + 2)
+#: This step starts at FluxCD's Ready time, which the operator reads every 60 seconds.
+FLUXCD_TIMED_STEPS = {"operator:services": timedelta(seconds=60)}
+TIMELINE_POLL_INTERVAL = 2.0
 
 
 @pytest.mark.ci
@@ -233,27 +240,129 @@ def _assert_upgrade_family(
         assert all(s.superseded_by in siblings for s in superseded), summary
 
 
+def _utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+class _StepObserver:
+    """Reads the timeline every 2 seconds and notes when each new step is first seen started.
+
+    Spec 019 US4, SC-002 (T083). Steps already started on entry are ignored.
+    """
+
+    def __init__(self, driver: ScenarioDriver, deployment_id: str) -> None:
+        self._driver = driver
+        self._deployment_id = deployment_id
+        self._known: set[str] = set()
+        self._poller: asyncio.Task[None] | None = None
+        self.started_on = datetime.now(UTC)
+        self.first_seen: dict[str, tuple[StepRef, datetime]] = {}
+
+    async def __aenter__(self) -> "_StepObserver":
+        self.started_on = datetime.now(UTC)
+        self._known = {step.id for step in await self._started_steps()}
+        self._poller = asyncio.create_task(self._poll_until_stopped())
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        if self._poller is not None:  # The test failed before ``stop``.
+            self._poller.cancel()
+
+    async def stop(self) -> None:
+        """Stop polling, then read once more for steps started since the last read."""
+        assert self._poller is not None, "observer is not polling"
+        poller, self._poller = self._poller, None
+        poller.cancel()
+        # Re-raises an error that stopped the poller early.
+        with contextlib.suppress(asyncio.CancelledError):
+            await poller
+        await self._poll()
+
+    async def _started_steps(self) -> list[StepRef]:
+        timeline = await self._driver.get_deployment_timeline(
+            deployment_id=self._deployment_id
+        )
+        return [s for e in timeline for s in e.steps if s.started_at is not None]
+
+    async def _poll(self) -> None:
+        steps = await self._started_steps()
+        seen_at = datetime.now(UTC)
+        for step in steps:
+            if step.id not in self._known and step.id not in self.first_seen:
+                self.first_seen[step.id] = (step, seen_at)
+
+    async def _poll_until_stopped(self) -> None:
+        while True:
+            began = time.monotonic()
+            await self._poll()
+            elapsed = time.monotonic() - began
+            await asyncio.sleep(max(0.0, TIMELINE_POLL_INTERVAL - elapsed))
+
+
+def _assert_steps_seen_in_time(
+    observer: _StepObserver, upgrade: TimelineEntry, by_id: dict[str, TimelineEntry]
+) -> None:
+    """SC-002: each step the upgrade started was in the timeline within 15 seconds."""
+    if _utc(upgrade.created_on or "") < observer.started_on:
+        # The upgrade is idempotent: an earlier test upgraded the shared deployment.
+        warnings.warn(
+            f"upgrade {upgrade.task_id} predates the observer; step latency not checked",
+            stacklevel=2,
+        )
+        return
+    family = [upgrade, *(by_id[t.id] for t in upgrade.started_tasks)]
+    started = [s for e in family for s in e.steps if s.started_at is not None]
+    unseen = [s.key for s in started if s.id not in observer.first_seen]
+    assert not unseen, f"started steps never observed by the poller: {unseen}"
+
+    report = []
+    late = []
+    for step, seen_at in observer.first_seen.values():
+        delay = seen_at - _utc(step.started_at or "")
+        limit = STEP_VISIBLE_WITHIN + FLUXCD_TIMED_STEPS.get(step.key, timedelta())
+        report.append(f"{step.key} {step.id}: {delay.total_seconds():.1f}s")
+        if delay > limit:
+            late.append(f"{step.key} {step.id}: {delay} > {limit}")
+    print("time from startedAt to first observation:\n" + "\n".join(report))
+    assert not late, "steps observed late:\n" + "\n".join(late)
+
+
 @pytest.mark.ci
 async def test_upgrade_simple_app(
     scenario_driver: ScenarioDriver,
     deployed_simple_app: dict,
     simple_app_image_v2: str,  # noqa: ARG001 — v0.2.0 image
     vcluster: dict,
+    driver_mode: str,
 ) -> None:
     # Upgrade the shared session deployment in place. ``upgrade_deployment``
     # is idempotent — if another test already bumped the version, this is a
     # no-op and we go straight to the /version check.
     deployment_id = deployed_simple_app["deployment_id"]
     namespace = deployed_simple_app["namespace"]
-    await scenario_driver.upgrade_deployment(
-        deployment_id=deployment_id, version="0.2.0"
-    )
-    await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
-    await _assert_upgrade_action_succeeded(scenario_driver, deployment_id, "0.2.0")
-    upgrade, by_id = await _wait_for_upgrade_family(
-        scenario_driver, deployment_id, "0.2.0"
-    )
+    async with contextlib.AsyncExitStack() as stack:
+        # API variant only: the poll reads the timeline through the SDK (T083).
+        observer = (
+            await stack.enter_async_context(
+                _StepObserver(scenario_driver, deployment_id)
+            )
+            if driver_mode == "api"
+            else None
+        )
+        await scenario_driver.upgrade_deployment(
+            deployment_id=deployment_id, version="0.2.0"
+        )
+        await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
+        await _assert_upgrade_action_succeeded(scenario_driver, deployment_id, "0.2.0")
+        upgrade, by_id = await _wait_for_upgrade_family(
+            scenario_driver, deployment_id, "0.2.0"
+        )
+        if observer is not None:
+            await observer.stop()
     _assert_upgrade_family(upgrade, by_id)
+    if observer is not None:
+        _assert_steps_seen_in_time(observer, upgrade, by_id)
 
     kubeconfig_path = vcluster["kubeconfig_path"]
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)

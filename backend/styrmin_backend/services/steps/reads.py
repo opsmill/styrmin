@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -66,6 +67,11 @@ async def get_starting_task(task: Task, uow: UnitOfWork) -> Task | None:
         return await uow.tasks.find(step.task_id)
 
 
+def waits_for_agent_reports(step: Step) -> bool:
+    """Only agent reports move a running operator-phase step forward."""
+    return step.kind is StepKind.OPERATOR_PHASE and step.status is StepStatus.RUNNING
+
+
 def no_report_since(
     step: Step, last_polled_at: datetime | None, now: datetime
 ) -> datetime | None:
@@ -74,10 +80,7 @@ def no_report_since(
     Without a report, the step's start time stands in for it. Returns ``None``
     for every other step and while the report is recent.
     """
-    if (
-        step.kind is not StepKind.OPERATOR_PHASE
-        or step.status is not StepStatus.RUNNING
-    ):
+    if not waits_for_agent_reports(step):
         return None
     reference = last_polled_at or step.started_at
     if reference is None:
@@ -91,10 +94,7 @@ async def get_no_report_since(
     step: Step, uow: UnitOfWork, now: datetime | None = None
 ) -> datetime | None:
     """``no_report_since`` for one step, reading its deployment's last report."""
-    if (
-        step.kind is not StepKind.OPERATOR_PHASE
-        or step.status is not StepStatus.RUNNING
-    ):
+    if not waits_for_agent_reports(step):
         return None
     last_polled_at = None
     if step.task_id is not None:
@@ -106,3 +106,35 @@ async def get_no_report_since(
                 )
                 last_polled_at = status.last_polled_at if status is not None else None
     return no_report_since(step, last_polled_at, now or datetime.now(UTC))
+
+
+async def no_report_since_by_step(
+    steps: Iterable[Step], tasks: Mapping[UUID, Task], uow: UnitOfWork, now: datetime
+) -> dict[UUID, datetime]:
+    """``no_report_since`` of many steps, reading the last reports in one query.
+
+    ``tasks`` holds the steps' tasks, which name their deployments. Runs in the
+    caller's transaction and queries nothing when no step waits for reports.
+    Steps without a notice are left out.
+    """
+    waiting = [
+        (step, _deployment_of(step, tasks))
+        for step in steps
+        if waits_for_agent_reports(step)
+    ]
+    statuses = await uow.deployment_statuses.find_by_deployments(
+        {deployment_id for _, deployment_id in waiting if deployment_id is not None}
+    )
+    last_reports = {status.deployment_id: status.last_polled_at for status in statuses}
+    notices: dict[UUID, datetime] = {}
+    for step, deployment_id in waiting:
+        last_report = last_reports.get(deployment_id) if deployment_id else None
+        since = no_report_since(step, last_report, now)
+        if since is not None:
+            notices[step.id] = since
+    return notices
+
+
+def _deployment_of(step: Step, tasks: Mapping[UUID, Task]) -> UUID | None:
+    task = tasks.get(step.task_id) if step.task_id is not None else None
+    return task.deployment_id if task is not None else None

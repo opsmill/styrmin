@@ -5,6 +5,7 @@ import {
   CircleSlash,
   CircleX,
   LoaderCircle,
+  TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,8 @@ export interface StepListItem {
   outputTruncated?: boolean;
   supersededBy?: LinkedTask | null;
   startedTasks?: StartedTask[];
+  /** Set while a running operator-phase step has had no agent report for over 60 seconds. */
+  noReportSince?: string | null;
 }
 
 interface StepStatusConfig {
@@ -339,6 +342,19 @@ function StepRow({ step }: { step: StepListItem }) {
           </span>
         )}
       </div>
+      {step.noReportSince && (
+        <p
+          className="flex items-center gap-1.5 text-xs text-foreground sm:pl-31"
+          data-testid="step-no-report"
+          data-no-report-since={step.noReportSince}
+        >
+          <TriangleAlert
+            aria-hidden="true"
+            className="h-3.5 w-3.5 shrink-0 text-warning"
+          />
+          No report from the agent since {formatTimestamp(step.noReportSince)}
+        </p>
+      )}
       {step.supersededBy && (
         <p
           className="text-xs text-muted-foreground sm:pl-31"

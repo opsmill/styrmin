@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from styrmin_backend.domain.models import Step, Task, TaskResult
+from styrmin_backend.services.steps.reads import no_report_since_by_step
 from styrmin_backend.services.steps.results import family_results, load_families
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
@@ -45,6 +47,8 @@ class TimelineReadModel:
     tasks: dict[UUID, Task] = field(default_factory=dict)
     results: dict[UUID, TaskResult] = field(default_factory=dict)
     steps: dict[UUID, Step] = field(default_factory=dict)
+    #: The "no report from the agent" time of each loaded step that has one.
+    no_reports: dict[UUID, datetime] = field(default_factory=dict)
 
     def steps_of(self, task_id: UUID) -> list[Step]:
         """The steps of a task by start time, pending steps last."""
@@ -57,6 +61,10 @@ class TimelineReadModel:
     def result_of(self, task_id: UUID) -> TaskResult | None:
         """The task result of a loaded task; None when it is not loaded."""
         return self.results.get(task_id)
+
+    def no_report_since(self, step_id: UUID) -> datetime | None:
+        """The last agent report time shown on a loaded step; None for no notice."""
+        return self.no_reports.get(step_id)
 
     def started_by(self, step_id: UUID) -> list[Task]:
         """The tasks that a loaded step started, oldest first."""
@@ -85,19 +93,25 @@ def _creation_order(task: Task) -> tuple[bool, float]:
 
 
 async def load_timeline_read_model(
-    tasks: Sequence[Task], uow: UnitOfWork
+    tasks: Sequence[Task], uow: UnitOfWork, now: datetime | None = None
 ) -> TimelineReadModel:
     """Load the read model of ``tasks`` inside the caller's transaction.
 
     Two queries: the steps of the tasks, and the tasks those steps started.
     Started tasks outside ``tasks`` (another deployment) add two queries for
-    their own steps and started tasks.
+    their own steps and started tasks. A running operator-phase step adds one
+    query for the last agent reports of the deployments.
     """
     families = await load_families(tasks, uow)
     loaded = {task.id: task for task in tasks}
     for started in families.started_by_step.values():
         for task in started:
             loaded.setdefault(task.id, task)
+    steps = {
+        step.id: step
+        for task_steps in families.steps_by_task.values()
+        for step in task_steps
+    }
     return TimelineReadModel(
         steps_by_task=families.steps_by_task,
         started_by_step=families.started_by_step,
@@ -105,11 +119,10 @@ async def load_timeline_read_model(
         results=family_results(
             loaded.values(), families.steps_by_task, families.started_by_step
         ),
-        steps={
-            step.id: step
-            for task_steps in families.steps_by_task.values()
-            for step in task_steps
-        },
+        steps=steps,
+        no_reports=await no_report_since_by_step(
+            steps.values(), loaded, uow, now or datetime.now(UTC)
+        ),
     )
 
 

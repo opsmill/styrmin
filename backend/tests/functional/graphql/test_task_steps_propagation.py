@@ -1,8 +1,9 @@
 """``Task.steps``, ``Task.startedByStepId`` and ``Task.type`` reach the caller (spec 019, T040).
 
 Seeded steps reach a ``READ_ONLY`` user through ``Query.task`` (query
-fallback) and ``Query.deploymentTimeline`` (read model). Each mutation of
-research D19 stores its task with the type its caller means.
+fallback) and ``Query.deploymentTimeline`` (read model), and so does the
+deployment's last agent report as ``Step.noReportSince`` (T080). Each mutation
+of research D19 stores its task with the type its caller means.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import (
     DeploymentState,
+    DeploymentStatus,
     Role,
     Step as StepRow,
     StepKind,
@@ -315,6 +317,92 @@ async def test_task_without_steps_returns_an_empty_list(
 
     assert data["task"]["steps"] == []
     assert data["task"]["startedByStepId"] is None
+
+
+# Step.noReportSince: the deployment's last agent report reaches a READ_ONLY caller.
+
+
+async def _read_steps(
+    client: AsyncClient, operation: str, task: TaskRow, token: str
+) -> list[dict[str, Any]]:
+    if operation == "get_task_steps":
+        data = await _read(client, operation, {"taskId": str(task.id)}, token)
+        return data["task"]["steps"]
+    data = await _read(
+        client, operation, {"deploymentId": str(task.deployment_id)}, token
+    )
+    (entry,) = data["deploymentTimeline"]
+    return entry["task"]["steps"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation", ["get_task_steps", "get_deployment_timeline_steps"]
+)
+@pytest.mark.parametrize(
+    ("report_age", "shown"),
+    [
+        pytest.param(timedelta(minutes=2), True, id="report-2-minutes-ago"),
+        pytest.param(timedelta(seconds=10), False, id="report-10-seconds-ago"),
+    ],
+)
+async def test_no_report_since_reaches_read_only(
+    unauth_client: AsyncClient,
+    session: AsyncSession,
+    operation: str,
+    report_age: timedelta,
+    shown: bool,
+) -> None:
+    now = datetime.now(UTC)
+    deployment = await seed_deployment(session)
+    task = await seed_task(
+        session,
+        deployment=deployment,
+        task_type=TaskType.UPGRADE_INSTANCE,
+        status=TaskStatus.SUCCESS,
+    )
+    last_report = now - report_age
+    # Started before the last report, so only the report decides the notice.
+    running = StepRow(
+        task_id=task.id,
+        key="operator:helmrelease",
+        name="Install or upgrade the HelmRelease",
+        kind=StepKind.OPERATOR_PHASE,
+        status=StepStatus.RUNNING,
+        started_at=now - timedelta(minutes=5),
+        attempt_count=1,
+    )
+    finished = StepRow(
+        task_id=task.id,
+        key="operator:prerequisites",
+        name="Create network policies and secrets",
+        kind=StepKind.OPERATOR_PHASE,
+        status=StepStatus.SUCCEEDED,
+        started_at=now - timedelta(minutes=6),
+        ended_at=now - timedelta(minutes=5),
+        attempt_count=1,
+    )
+    session.add_all(
+        [
+            running,
+            finished,
+            DeploymentStatus(
+                deployment_id=deployment.id,
+                phase="CreatingHelmRelease",
+                last_polled_at=last_report,
+            ),
+        ]
+    )
+    await session.commit()
+    token = await _read_only_token(session)
+
+    steps = {
+        step["key"]: _parse_times(step)
+        for step in await _read_steps(unauth_client, operation, task, token)
+    }
+
+    assert steps[running.key]["noReportSince"] == (last_report if shown else None)
+    assert steps[finished.key]["noReportSince"] is None
 
 
 # Task.type: each mutation of research D19 stores its task with its type.
