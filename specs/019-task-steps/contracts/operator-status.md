@@ -76,6 +76,8 @@ When the phase history fails the HelmRelease step or the "Wait for the deploymen
 
 `ImagePullBackOff`, `ErrImagePull`, `InvalidImageName`, `CrashLoopBackOff`, `CreateContainerConfigError`, `CreateContainerError`, `Error`, `OOMKilled`.
 
+Pods that have finished (phase `Succeeded` or `Failed`, such as the pods of a failed Job run by a hook) are not part of the rollout and are left out.
+
 Format: `Pods not ready: <pod> (<container>: <reason>), …`, at most 5 pods.
 
 ### Delete steps

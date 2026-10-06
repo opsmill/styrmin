@@ -170,14 +170,18 @@ async def _running_helmrelease(uow: SqlModelUnitOfWork, parents: Parents) -> Non
 
 
 async def _seed_pod(
-    uow: SqlModelUnitOfWork, parents: Parents, name: str, *states: tuple[str, str]
+    uow: SqlModelUnitOfWork,
+    parents: Parents,
+    name: str,
+    *states: tuple[str, str],
+    phase: PodPhase = PodPhase.PENDING,
 ) -> None:
     """A stored pod status with one container per ``(container, state)``."""
     uow.session.add(
         PodStatus(
             pod_name=name,
             namespace="styrmin-steps",
-            phase=PodPhase.PENDING,
+            phase=phase,
             container_statuses=[
                 {
                     "name": container,
@@ -887,6 +891,36 @@ async def test_each_listed_container_reason_is_appended(
     helmrelease = await _step(uow, parents, HELMRELEASE)
     assert helmrelease.errors[0].message == (
         f"{TIMEOUT}\nPods not ready: app-0 (app: {reason})"
+    )
+
+
+async def test_pod_reasons_skip_finished_pods(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    # The pods of a failed Job sort first and would fill the five places.
+    await _running_helmrelease(uow, parents)
+    for index in range(5):
+        await _seed_pod(
+            uow,
+            parents,
+            f"app-job-{index}",
+            ("user-job", "terminated:Error"),
+            phase=PodPhase.FAILED,
+        )
+    await _seed_pod(
+        uow,
+        parents,
+        "app-migrate",
+        ("job", "terminated:Error"),
+        phase=PodPhase.SUCCEEDED,
+    )
+    await _seed_pod(uow, parents, "app-server", ("app", "waiting:ImagePullBackOff"))
+
+    await apply_operator_report(_timed_out(parents), _at(300), uow)
+
+    helmrelease = await _step(uow, parents, HELMRELEASE)
+    assert helmrelease.errors[0].message == (
+        f"{TIMEOUT}\nPods not ready: app-server (app: ImagePullBackOff)"
     )
 
 

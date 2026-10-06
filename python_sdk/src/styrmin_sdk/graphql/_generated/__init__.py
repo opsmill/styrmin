@@ -208,6 +208,7 @@ from .get_environment_services import (
 from .get_group import GetGroup, GetGroupGroup
 from .get_pod_statuses import GetPodStatuses, GetPodStatusesPodStatuses
 from .get_restore import GetRestore, GetRestoreRestore
+from .get_step_output import GetStepOutput, GetStepOutputStep
 from .get_task import GetTask, GetTaskTask
 from .get_user import GetUser, GetUserUser, GetUserUserGroups
 from .input_types import (
@@ -511,6 +512,8 @@ __all__ = [
     "GetPodStatusesPodStatuses",
     "GetRestore",
     "GetRestoreRestore",
+    "GetStepOutput",
+    "GetStepOutputStep",
     "GetTask",
     "GetTaskTask",
     "GetUser",

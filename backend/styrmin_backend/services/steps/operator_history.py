@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from styrmin_backend.db.models import PodPhase
 from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import Step, StepKind, StepStatus, Task, TaskType
 from styrmin_backend.services.steps.recorder import (
@@ -76,6 +77,8 @@ _POD_FAILURE_REASONS = frozenset(
     }
 )
 _MAX_PODS = 5
+#: Finished pods, such as those of a failed Job, are not part of the rollout.
+_FINISHED_POD_PHASES = frozenset({PodPhase.SUCCEEDED, PodPhase.FAILED})
 _POD_REASON_STEPS = frozenset(
     {steps.OPERATOR_HELMRELEASE.key, steps.OPERATOR_READY.key}
 )
@@ -371,6 +374,8 @@ async def _pod_reasons(deployment_id: Any, uow: UnitOfWork) -> str | None:
     entries: list[str] = []
     pods = await uow.pod_statuses.find_by_deployment(deployment_id)
     for pod in sorted(pods, key=lambda pod: pod.pod_name):
+        if pod.phase in _FINISHED_POD_PHASES:
+            continue
         containers = [
             f"{container.get('name')}: {reason}"
             for container in pod.container_statuses or ()

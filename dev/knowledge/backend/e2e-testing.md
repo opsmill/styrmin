@@ -177,6 +177,14 @@ upgrade and delete slept ~60s *after* Kubernetes had finished:
 duration, check this value reached the agent pod before looking anywhere
 else.
 
+The same `agent.extraEnv` sets `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT: "270"`.
+FluxCD rolls a failed Helm upgrade back at its 5-minute timeout, and the
+rollback removes the failing pods. At the default of 300 s, the operator's
+readiness timeout fires at the same moment, so a failed HelmRelease step lists
+the pods' reasons (for example `ImagePullBackOff`) only by chance.
+`test_task_steps.py` asserts those reasons, so the E2E stack fails the rollout
+30 s before FluxCD rolls it back.
+
 The next cost is **Prefect scheduling latency**. The agent runs its own
 Prefect `ProcessWorker` (`entrypoint/combined.py`), which polls its work
 pool every `PREFECT_WORKER_QUERY_SECONDS` — Prefect's default is 10s —
@@ -312,14 +320,16 @@ A bare git daemon that hosts the application driver source code.
 | **Purpose** | Serve the driver spec so Styrmin can load a driver version |
 | **Image** | Built from `tests/e2e/fixtures/git-server/Dockerfile` |
 | **How it works** | Alpine with `git-daemon`, initializes a bare repo at `/git/simple-app.git` |
-| **Cluster address** | `git://git-server.default.svc.cluster.local/simple-app.git` |
+| **Cluster address** | `git://git-server.default.svc.cluster.local/<driver>.git`, one repository per driver |
 
 At setup time, the fixture:
 
-1. Copies the driver source from `driver/examples/simple-app/` to a temp directory
-2. Patches `driver.styrmin.yml` to point the Helm chart location at the chart server's cluster-internal URL
+1. Copies each driver source to a temp directory: the examples under `driver/examples/` and the test drivers under `tests/e2e/fixtures/drivers/`
+2. Patches `driver.styrmin.yml` to point the Helm chart location at the chart server's cluster-internal URL (drivers that use the chart server's charts)
 3. Initializes a git repository using [dulwich](https://www.dulwich.io/) (pure Python git)
 4. Port-forwards the git-daemon service and pushes the repo
+
+The test drivers exist only for E2E scenarios. `failing-actions` reuses the simple-app chart, and its upgrade action fails on purpose for some target versions; `test_task_steps.py` uses it to cause the failures of spec 019.
 
 ## Styrmin Deployment
 
@@ -480,7 +490,7 @@ For debugging, prefer `-v -s --pdb` (see `dev/CLAUDE.md`).
 | [tests/e2e/drivers/api_driver.py](backend/tests/e2e/drivers/api_driver.py) | `ApiScenarioDriver` (SDK driver) |
 | [tests/e2e/drivers/ui_driver.py](backend/tests/e2e/drivers/ui_driver.py) | `UiScenarioDriver` (Playwright driver) |
 | [tests/e2e/pages/](backend/tests/e2e/pages/) | Playwright page objects (deploy form, deployment detail, etc.) |
-| [tests/e2e/fixtures/](backend/tests/e2e/fixtures/) | Chart-server, git-server, and Helm values |
+| [tests/e2e/fixtures/](backend/tests/e2e/fixtures/) | Chart-server, git-server, test drivers, and Helm values |
 | [dev/local/garage.yaml](dev/local/garage.yaml) | Single-node Garage (S3 store for Velero); shared with the local demo |
 | [tests/e2e/test_deploy_app.py](backend/tests/e2e/test_deploy_app.py) | Canonical end-to-end deploy test |
 | [driver/examples/simple-app/](driver/examples/simple-app/) | Test application (FastAPI + PostgreSQL + Helm chart) |

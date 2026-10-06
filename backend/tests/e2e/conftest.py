@@ -489,6 +489,11 @@ async def git_server(
         "infrahub-enterprise": {
             "source": PROJECT_ROOT / "driver" / "examples" / "infrahub-enterprise",
         },
+        # Test driver of test_task_steps.py: the simple-app chart, failing actions.
+        "failing-actions": {
+            "source": FIXTURES_DIR / "drivers" / "failing-actions",
+            "chart_name": "simple-app",
+        },
     }
 
     tmp_repo = tmp_path_factory.mktemp("driver-repo")
