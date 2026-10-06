@@ -1,5 +1,13 @@
-mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!) {
-    updateDeploymentVersion(deploymentId: $deploymentId, version: $version) {
+mutation UpdateDeploymentVersion(
+    $deploymentId: UUID!
+    $version: String!
+    $startedByStepId: UUID
+) {
+    updateDeploymentVersion(
+        deploymentId: $deploymentId
+        version: $version
+        startedByStepId: $startedByStepId
+    ) {
         id
         status
         type

@@ -73,7 +73,7 @@ class StepReporter:
             logger.info(
                 "Step reporting is off: the Job has no action token or step parent"
             )
-        return cls(token, parent, _uuid_from_env(STEP_ID_ENV))
+        return cls(token, parent, uuid_from_env(STEP_ID_ENV))
 
     @property
     def enabled(self) -> bool:
@@ -200,7 +200,8 @@ def _parent_from_env() -> StepParent | None:
         return None
 
 
-def _uuid_from_env(name: str) -> UUID | None:
+def uuid_from_env(name: str) -> UUID | None:
+    """The UUID in environment variable ``name``; None when unset or not a UUID."""
     value = os.environ.get(name)
     if not value:
         return None

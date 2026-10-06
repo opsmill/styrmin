@@ -904,10 +904,36 @@ type Mutation {
   Record a step event. Called by Styrmin's own flows and actions with the action token.
   """
   recordStep(input: RecordStepInput!): Step! @requiresRole @isActionsServiceAccount
-  stopComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
-  startComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
+  stopComponents(
+    deploymentId: UUID!
+    components: [String!]!
+
+    """
+    The hook step that starts the task; Styrmin's driver action primitives set it.
+    """
+    startedByStepId: UUID = null
+  ): Task @requiresRole
+  startComponents(
+    deploymentId: UUID!
+    components: [String!]!
+
+    """
+    The hook step that starts the task; Styrmin's driver action primitives set it.
+    """
+    startedByStepId: UUID = null
+  ): Task @requiresRole
   runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task @requiresRole
-  updateDeploymentVersion(deploymentId: UUID!, version: String!, parameters: JSON = null, driverVersionId: UUID = null): Task @requiresRole
+  updateDeploymentVersion(
+    deploymentId: UUID!
+    version: String!
+    parameters: JSON = null
+    driverVersionId: UUID = null
+
+    """
+    The hook step that starts the task; Styrmin's driver action primitives set it.
+    """
+    startedByStepId: UUID = null
+  ): Task @requiresRole
   reportPodStatuses(reports: [DeploymentPodStatusReport!]!): ReportPodStatusesResponse!
   reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!): ReportDeploymentStatusesResponse!
 }
@@ -1245,6 +1271,24 @@ type Task {
 
   """The steps of the task by start time, pending steps last."""
   steps: [Step!]!
+
+  """
+  The task result, calculated from the steps of the task and of the tasks its hook steps started.
+  """
+  result: TaskResult!
+
+  """The task whose hook step started this task."""
+  startedBy: Task
+
+  """Tasks started by this task's hook steps."""
+  startedTasks: [Task!]!
+}
+
+enum TaskResult {
+  RUNNING
+  FAILED
+  SUCCEEDED
+  SUPERSEDED
 }
 
 enum TolerationEffect {

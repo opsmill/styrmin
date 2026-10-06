@@ -110,6 +110,13 @@ class StepStatus(str, Enum):
     SUPERSEDED = "SUPERSEDED"
 
 
+class TaskResult(str, Enum):
+    RUNNING = "RUNNING"
+    FAILED = "FAILED"
+    SUCCEEDED = "SUCCEEDED"
+    SUPERSEDED = "SUPERSEDED"
+
+
 class TolerationEffect(str, Enum):
     NO_SCHEDULE = "NO_SCHEDULE"
     PREFER_NO_SCHEDULE = "PREFER_NO_SCHEDULE"

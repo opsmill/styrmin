@@ -13,6 +13,7 @@ import pytest
 
 from styrmin_backend.api.definitions.step.model import RecordStepInput
 from styrmin_backend.api.definitions.step.model import Step as StepType
+from styrmin_backend.api.definitions.task.model import Task as TaskGraphQLType
 from styrmin_backend.api.schema.mutation import Mutation
 from styrmin_backend.api.schema.query import Query
 from styrmin_backend.db.models import DeploymentStatus
@@ -24,6 +25,7 @@ from styrmin_backend.domain.models import (
     StepParent,
     StepStatus,
     Task,
+    TaskResult,
     TaskType,
 )
 from styrmin_backend.services.steps.exceptions import StepNotFoundError
@@ -222,3 +224,51 @@ async def test_views_are_returned_without_queries(parents: Parents) -> None:
     empty = StepType.from_instance(step, started_tasks=[], no_report_since=None)
     assert await empty.started_tasks(no_uow) == []
     assert await empty.no_report_since(no_uow) is None
+
+
+async def test_task_views_and_linked_results_are_returned_without_queries(
+    parents: Parents,
+) -> None:
+    starter = Task.create(type=TaskType.UPGRADE_INSTANCE, deployment_id=uuid4())
+    started = Task.create(
+        type=TaskType.STOP_COMPONENTS,
+        deployment_id=starter.deployment_id,
+        started_by_step_id=uuid4(),
+    )
+    no_uow = SimpleNamespace(context={})
+    results = {
+        starter.id: TaskResult.SUCCEEDED,
+        started.id: TaskResult.SUPERSEDED,
+        parents.other_task.id: TaskResult.RUNNING,
+    }
+    task = TaskGraphQLType.from_instance(
+        started,
+        result=TaskResult.SUPERSEDED,
+        started_by=starter,
+        started_tasks=[],
+        task_results=results,
+    )
+    step = StepType.from_instance(
+        _failed_step(parents),
+        superseded_by=parents.other_task,
+        started_tasks=[started],
+        task_results=results,
+    )
+
+    starting = await task.started_by(no_uow)
+    superseding = await step.superseded_by(no_uow)
+    (linked,) = await step.started_tasks(no_uow)
+
+    assert await task.result(no_uow) is TaskResult.SUPERSEDED
+    assert await task.started_tasks(no_uow) == []
+    assert starting is not None
+    assert (starting.id, await starting.result(no_uow)) == (
+        starter.id,
+        TaskResult.SUCCEEDED,
+    )
+    assert superseding is not None
+    assert await superseding.result(no_uow) is TaskResult.RUNNING
+    assert (linked.id, await linked.result(no_uow)) == (
+        started.id,
+        TaskResult.SUPERSEDED,
+    )

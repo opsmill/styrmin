@@ -100,6 +100,7 @@ async def stop_components(
     deployment_id: UUID,
     components: list[str],
     uow: UnitOfWork,
+    started_by_step_id: UUID | None = None,
 ) -> Task:
     """Stop components for a deployment by its ID.
 
@@ -107,9 +108,11 @@ async def stop_components(
         deployment_id (UUID): The ID of the deployment to stop components for.
         components (list[str]): The list of component names to stop.
         uow (UnitOfWork): The unit of work to use.
+        started_by_step_id (UUID | None): The hook step that starts the task.
 
     Raises:
         DeploymentNotFoundError: If the deployment is not found.
+        StepNotFoundError: If ``started_by_step_id`` names no step.
 
     Returns:
         Task: The task created for the deployment refresh.
@@ -146,6 +149,7 @@ async def stop_components(
             current_instance=current_instance,
             uow=uow,
             task_type=TaskType.STOP_COMPONENTS,
+            started_by_step_id=started_by_step_id,
         )
 
         await uow.deployments.save(deployment=deployment)
@@ -163,6 +167,7 @@ async def start_components(
     deployment_id: UUID,
     components: list[str],
     uow: UnitOfWork,
+    started_by_step_id: UUID | None = None,
 ) -> Task:
     """Start components for a deployment by its ID.
 
@@ -170,9 +175,11 @@ async def start_components(
         deployment_id (UUID): The ID of the deployment to start components for.
         components (list[str]): The list of component names to start.
         uow (UnitOfWork): The unit of work to use.
+        started_by_step_id (UUID | None): The hook step that starts the task.
 
     Raises:
         DeploymentNotFoundError: If the deployment is not found.
+        StepNotFoundError: If ``started_by_step_id`` names no step.
 
     Returns:
         Task: The task created for the deployment refresh.
@@ -209,6 +216,7 @@ async def start_components(
             current_instance=current_instance,
             uow=uow,
             task_type=TaskType.START_COMPONENTS,
+            started_by_step_id=started_by_step_id,
         )
 
         await uow.deployments.save(deployment=deployment)

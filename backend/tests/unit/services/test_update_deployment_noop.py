@@ -151,8 +151,18 @@ async def _seed_steady_state_deployment(
     return deployment
 
 
-async def _fake_apply_state(deployment, current_instance, uow, task_type):  # noqa: ANN001
-    stub = Task.create(type=task_type, deployment_id=deployment.id)
+async def _fake_apply_state(
+    deployment,
+    current_instance,
+    uow,
+    task_type,
+    started_by_step_id=None,  # noqa: ANN001
+):
+    stub = Task.create(
+        type=task_type,
+        deployment_id=deployment.id,
+        started_by_step_id=started_by_step_id,
+    )
     await uow.tasks.save(stub)
     return stub
 

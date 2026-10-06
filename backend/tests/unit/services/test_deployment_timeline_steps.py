@@ -1,8 +1,9 @@
 """The deployment timeline reads the steps of its tasks with a fixed number of queries.
 
-Spec 019, T039 (research D14). ``deploymentTimeline`` runs through the real
-schema against a real database; the operation lists every field the timeline
-read model must serve, so a field that falls back to a query per task or per
+Spec 019, T039 and T071 (research D14). ``deploymentTimeline`` runs through
+the real schema against a real database; the operation lists every field the
+timeline read model must serve (steps, task results, started-by links and
+superseding tasks), so a field that falls back to a query per task or per
 step makes the count grow with the number of tasks.
 """
 
@@ -54,6 +55,9 @@ OPERATION = (
 ).read_text()
 
 STEPS_PER_TASK = 10
+#: Each task's hook step starts the next task, which supersedes its third step.
+HOOK_STEP = 1
+SUPERSEDED_STEP = 2
 T0 = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
 SCHEMA = strawberry.Schema(query=Query, mutation=Mutation)
 
@@ -123,6 +127,12 @@ async def _seed_deployment(session: AsyncSession, name: str) -> UUID:
     return deployment.id
 
 
+def _kind(index: int) -> StepKind:
+    if index == 0:
+        return StepKind.PLAN
+    return StepKind.HOOK if index == HOOK_STEP else StepKind.OPERATOR_PHASE
+
+
 def _steps_of(task: Task) -> list[Step]:
     """Nine started steps, the last one failed twice, and one pending step."""
     steps: list[Step] = []
@@ -132,7 +142,7 @@ def _steps_of(task: Task) -> list[Step]:
             StepParent.of_task(task.id),
             f"step:{index}",
             f"Step {index}",
-            StepKind.OPERATOR_PHASE if index else StepKind.PLAN,
+            _kind(index),
             StepStatus.SUCCEEDED,
             started,
         )
@@ -158,17 +168,28 @@ def _steps_of(task: Task) -> list[Step]:
 
 
 async def _seed_timeline(uow: SqlModelUnitOfWork, name: str, tasks: int) -> UUID:
+    """Tasks whose hook step starts the next task, which supersedes one of its steps."""
     deployment_id = await _seed_deployment(uow.session, name)
+    previous: list[Step] = []
     for _ in range(tasks):
         task = Task.create(
             type=TaskType.UPGRADE_INSTANCE,
             deployment_id=deployment_id,
             status=TaskStatus.SUCCESS,
+            started_by_step_id=previous[HOOK_STEP].id if previous else None,
         )
         await uow.tasks.save(task)
         await uow.session.flush()
-        for step in _steps_of(task):
+        steps = _steps_of(task)
+        for step in steps:
             await uow.steps.save(step)
+        if previous:
+            superseded = previous[SUPERSEDED_STEP]
+            superseded.status = StepStatus.SUPERSEDED
+            superseded.superseded_by_task_id = task.id
+            await uow.steps.save(superseded)
+        await uow.session.flush()
+        previous = steps
     await uow.session.commit()
     return deployment_id
 
@@ -228,8 +249,38 @@ async def test_timeline_query_count_does_not_grow_with_tasks(
     assert len(large.entries) == 20
     assert all(len(e["task"]["steps"]) == STEPS_PER_TASK for e in large.entries)
     assert len(large.queries) == len(small.queries), large.queries
-    # Tasks, instances and the steps of all tasks.
-    assert len(large.queries) <= 3, large.queries
+    # Tasks, instances, the steps of all tasks and the tasks those steps started.
+    assert len(large.queries) <= 4, large.queries
+
+
+async def test_timeline_links_started_and_superseding_tasks_with_results(
+    engine: AsyncEngine, uow: SqlModelUnitOfWork
+) -> None:
+    deployment_id = await _seed_timeline(uow, "linked", tasks=3)
+
+    read = await _read_timeline(engine, uow, deployment_id)
+
+    # The seeded tasks share a creation time, so follow the started-by chain.
+    by_starting_step = {
+        entry["task"]["startedByStepId"]: entry["task"] for entry in read.entries
+    }
+    first = by_starting_step[None]
+    second = by_starting_step[first["steps"][HOOK_STEP]["id"]]
+    third = by_starting_step[second["steps"][HOOK_STEP]["id"]]
+    assert first["startedBy"] is None
+    assert second["startedBy"] == {
+        "id": first["id"],
+        "type": "upgrade_instance",
+        "result": "RUNNING",
+    }
+    assert [task["id"] for task in first["startedTasks"]] == [second["id"]]
+    assert first["steps"][HOOK_STEP]["startedTasks"] == first["startedTasks"]
+    superseded = first["steps"][SUPERSEDED_STEP]
+    assert superseded["status"] == "SUPERSEDED"
+    assert superseded["supersededBy"]["id"] == second["id"]
+    assert third["startedTasks"] == []
+    # Each task has a pending step, so each family is still running.
+    assert {task["result"] for task in (first, second, third)} == {"RUNNING"}
 
 
 async def test_timeline_steps_are_grouped_by_task_in_start_order(

@@ -48,6 +48,24 @@ async def get_started_tasks(step_id: UUID, uow: UnitOfWork) -> list[Task]:
         return await uow.tasks.find_started_by_steps([step_id])
 
 
+async def get_tasks_started_by_task(task_id: UUID, uow: UnitOfWork) -> list[Task]:
+    """List the tasks that the steps of a task started, oldest first."""
+    async with uow:
+        steps = await uow.steps.list_by_task_ids([task_id])
+        return await uow.tasks.find_started_by_steps([step.id for step in steps])
+
+
+async def get_starting_task(task: Task, uow: UnitOfWork) -> Task | None:
+    """The task whose step started ``task``; None when no step started it."""
+    if task.started_by_step_id is None:
+        return None
+    async with uow:
+        step = await uow.steps.get(task.started_by_step_id)
+        if step is None or step.task_id is None:
+            return None
+        return await uow.tasks.find(step.task_id)
+
+
 def no_report_since(
     step: Step, last_polled_at: datetime | None, now: datetime
 ) -> datetime | None:

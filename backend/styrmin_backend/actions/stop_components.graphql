@@ -1,5 +1,13 @@
-mutation StopComponents($deploymentId: UUID!, $components: [String!]!) {
-    stopComponents(deploymentId: $deploymentId, components: $components) {
+mutation StopComponents(
+    $deploymentId: UUID!
+    $components: [String!]!
+    $startedByStepId: UUID
+) {
+    stopComponents(
+        deploymentId: $deploymentId
+        components: $components
+        startedByStepId: $startedByStepId
+    ) {
         id
         status
         type
