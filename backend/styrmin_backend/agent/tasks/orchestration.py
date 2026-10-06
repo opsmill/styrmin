@@ -213,9 +213,11 @@ async def apply_state(
         if remediation is None:
             return Completed(message="No remediation needed")
 
-        async with action_api_token() as api_token:
-            flow_info = await remediation.apply(api_token=api_token)
-        return flow_info.state
+    # Applied after the unit of work closes, so its connection is not held
+    # while the remediation flow runs or while the action token is written.
+    async with action_api_token() as api_token:
+        flow_info = await remediation.apply(api_token=api_token)
+    return flow_info.state
 
 
 @flow(

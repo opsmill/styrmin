@@ -105,16 +105,20 @@ async def apply_state(
     new_instance_id: UUID,
     current_instance_id: UUID | None,
 ) -> State | None:
-    # Loads the deployment and both instances, diffs them, builds the remediation.
-    ...
-    if remediation is None:
-        return Completed(message="No remediation needed")
+    async with get_unit_of_work() as uow:
+        # Loads the deployment and both instances, diffs them, builds the remediation.
+        ...
+        if remediation is None:
+            return Completed(message="No remediation needed")
+
     async with action_api_token() as api_token:
         flow_info = await remediation.apply(api_token=api_token)
     return flow_info.state
 ```
 
 Called by: `PrefectManager.run_action(PrefectAction.APPLY_STATE, parameters={...})`
+
+The flow applies the remediation after the unit of work closes, so the session's database connection is released while the inner flow runs, and the action token's writes do not overlap it.
 
 The `remediation.apply()` method calls `arun_deployment(name=self.flow_id, parameters=self.parameters, job_variables=...)`, which triggers one of the inner flows below.
 
