@@ -859,6 +859,24 @@ class Client(AsyncBaseClient):
                 updatedOn
                 ttl
                 expiresAt
+                steps {
+                  id
+                  key
+                  name
+                  kind
+                  status
+                  startedAt
+                  endedAt
+                  durationSeconds
+                  attemptCount
+                  errors {
+                    attempt
+                    message
+                    occurredAt
+                  }
+                  error
+                  hasOutput
+                }
               }
             }
             """)
@@ -1710,6 +1728,24 @@ class Client(AsyncBaseClient):
                 completedAt
                 createdOn
                 updatedOn
+                steps {
+                  id
+                  key
+                  name
+                  kind
+                  status
+                  startedAt
+                  endedAt
+                  durationSeconds
+                  attemptCount
+                  errors {
+                    attempt
+                    message
+                    occurredAt
+                  }
+                  error
+                  hasOutput
+                }
               }
             }
             """)
@@ -1907,6 +1943,24 @@ class Client(AsyncBaseClient):
                 updatedOn
                 ttl
                 expiresAt
+                steps {
+                  id
+                  key
+                  name
+                  kind
+                  status
+                  startedAt
+                  endedAt
+                  durationSeconds
+                  attemptCount
+                  errors {
+                    attempt
+                    message
+                    occurredAt
+                  }
+                  error
+                  hasOutput
+                }
               }
             }
             """)
@@ -2134,6 +2188,24 @@ class Client(AsyncBaseClient):
                 completedAt
                 createdOn
                 updatedOn
+                steps {
+                  id
+                  key
+                  name
+                  kind
+                  status
+                  startedAt
+                  endedAt
+                  durationSeconds
+                  attemptCount
+                  errors {
+                    attempt
+                    message
+                    occurredAt
+                  }
+                  error
+                  hasOutput
+                }
               }
             }
             """)

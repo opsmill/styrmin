@@ -109,6 +109,8 @@ export type Backup = {
   sizeBytes?: Maybe<Scalars['Int']['output']>;
   startedAt?: Maybe<Scalars['DateTime']['output']>;
   status: Scalars['String']['output'];
+  /** One step per component, by start time, pending steps last. Empty for backups taken before steps were recorded. */
+  steps: Array<Step>;
   /** Retention TTL applied to this backup when it was created (e.g. ``"2160h"``). Null for backups taken before retention was recorded. */
   ttl?: Maybe<Scalars['String']['output']>;
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
@@ -1355,6 +1357,8 @@ export type Restore = {
   name: Scalars['String']['output'];
   startedAt?: Maybe<Scalars['DateTime']['output']>;
   status: Scalars['String']['output'];
+  /** The restore steps (delete the namespace, run the Velero restore, run the recovery) by start time, pending steps last. Empty for restores run before steps were recorded. */
+  steps: Array<Step>;
   targetInstanceId?: Maybe<Scalars['UUID']['output']>;
   targetNamespace: Scalars['String']['output'];
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
@@ -1886,7 +1890,7 @@ export type ListBackupsQueryVariables = Exact<{
 }>;
 
 
-export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null, ttl?: string | null, expiresAt?: any | null }> };
+export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null, ttl?: string | null, expiresAt?: any | null, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }> }> }> };
 
 export type ListClustersQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1939,7 +1943,7 @@ export type ListRestoresQueryVariables = Exact<{
 }>;
 
 
-export type ListRestoresQuery = { __typename?: 'Query', restores: Array<{ __typename?: 'Restore', id: string, name: string, status: string, createdOn: any, startedAt?: any | null, completedAt?: any | null, targetNamespace: string, errorMessage?: string | null, componentStatuses?: Array<{ __typename?: 'ComponentRestoreStatus', componentName: string, status: string, errorMessage?: string | null }> | null }> };
+export type ListRestoresQuery = { __typename?: 'Query', restores: Array<{ __typename?: 'Restore', id: string, name: string, status: string, createdOn: any, startedAt?: any | null, completedAt?: any | null, targetNamespace: string, errorMessage?: string | null, componentStatuses?: Array<{ __typename?: 'ComponentRestoreStatus', componentName: string, status: string, errorMessage?: string | null }> | null, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }> }> }> };
 
 export type ListUsersQueryVariables = Exact<{
   active?: InputMaybe<Scalars['Boolean']['input']>;
@@ -3251,6 +3255,23 @@ export const ListBackupsDocument = `
     errorMessage
     ttl
     expiresAt
+    steps {
+      id
+      key
+      name
+      kind
+      status
+      startedAt
+      endedAt
+      durationSeconds
+      attemptCount
+      error
+      errors {
+        attempt
+        message
+        occurredAt
+      }
+    }
   }
 }
     `;
@@ -3558,6 +3579,23 @@ export const ListRestoresDocument = `
       componentName
       status
       errorMessage
+    }
+    steps {
+      id
+      key
+      name
+      kind
+      status
+      startedAt
+      endedAt
+      durationSeconds
+      attemptCount
+      error
+      errors {
+        attempt
+        message
+        occurredAt
+      }
     }
   }
 }

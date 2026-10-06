@@ -182,6 +182,13 @@ class Step:
             task_results_view=task_results,
         )
 
+    @classmethod
+    def of_backup_or_restore(cls, instance: StepEntity) -> Step:
+        """A backup or restore step: it has no task links and no agent reports."""
+        return cls.from_instance(
+            instance, superseded_by=None, started_tasks=[], no_report_since=None
+        )
+
 
 @strawberry.input
 class RecordStepInput:

@@ -90,6 +90,11 @@ type Backup {
   sizeBytes: Int
   errorMessage: String
   instanceId: UUID!
+
+  """
+  One step per component, by start time, pending steps last. Empty for backups taken before steps were recorded.
+  """
+  steps: [Step!]!
   instance: ApplicationInstance!
   componentStatuses: [ComponentBackupStatus!]
 
@@ -1119,6 +1124,11 @@ type Restore {
   errorMessage: String
   backupId: UUID!
   targetInstanceId: UUID
+
+  """
+  The restore steps (delete the namespace, run the Velero restore, run the recovery) by start time, pending steps last. Empty for restores run before steps were recorded.
+  """
+  steps: [Step!]!
   backup: Backup!
   componentStatuses: [ComponentRestoreStatus!]
 }

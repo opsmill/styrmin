@@ -55,7 +55,17 @@ class StepRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def list_by_backup_ids(self, backup_ids: Sequence[UUID]) -> list[StepEntity]:
+        raise NotImplementedError
+
+    @abstractmethod
     async def list_by_restore(self, restore_id: UUID) -> list[StepEntity]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def list_by_restore_ids(
+        self, restore_ids: Sequence[UUID]
+    ) -> list[StepEntity]:
         raise NotImplementedError
 
     @abstractmethod
@@ -212,13 +222,25 @@ class SQLModelStepRepository(StepRepository):
         )
 
     async def list_by_backup(self, backup_id: UUID) -> list[StepEntity]:
+        return await self.list_by_backup_ids([backup_id])
+
+    async def list_by_backup_ids(self, backup_ids: Sequence[UUID]) -> list[StepEntity]:
+        if not backup_ids:
+            return []
         return await self._many(
-            select(StepModel).where(StepModel.backup_id == backup_id)
+            select(StepModel).where(col(StepModel.backup_id).in_(backup_ids))
         )
 
     async def list_by_restore(self, restore_id: UUID) -> list[StepEntity]:
+        return await self.list_by_restore_ids([restore_id])
+
+    async def list_by_restore_ids(
+        self, restore_ids: Sequence[UUID]
+    ) -> list[StepEntity]:
+        if not restore_ids:
+            return []
         return await self._many(
-            select(StepModel).where(StepModel.restore_id == restore_id)
+            select(StepModel).where(col(StepModel.restore_id).in_(restore_ids))
         )
 
     async def list_open_operator_steps_for_deployment(

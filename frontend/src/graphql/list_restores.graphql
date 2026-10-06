@@ -13,5 +13,22 @@ query ListRestores($backupId: UUID!, $status: RestoreStatus) {
       status
       errorMessage
     }
+    steps {
+      id
+      key
+      name
+      kind
+      status
+      startedAt
+      endedAt
+      durationSeconds
+      attemptCount
+      error
+      errors {
+        attempt
+        message
+        occurredAt
+      }
+    }
   }
 }

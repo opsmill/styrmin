@@ -274,7 +274,27 @@ function StartedTasks({ tasks }: { tasks: StartedTask[] }) {
   );
 }
 
-function StepRow({ step }: { step: StepListItem }) {
+// Shown for backups and restores, whose users read when each part ran.
+function StepTimes({ step }: { step: StepListItem }) {
+  if (!step.startedAt) return null;
+  return (
+    <p
+      className="text-xs tabular-nums text-muted-foreground sm:pl-31"
+      data-testid="step-times"
+    >
+      Started {formatTimestamp(step.startedAt)}
+      {step.endedAt ? `, ended ${formatTimestamp(step.endedAt)}` : ""}
+    </p>
+  );
+}
+
+function StepRow({
+  step,
+  showTimes,
+}: {
+  step: StepListItem;
+  showTimes: boolean;
+}) {
   const status = STEP_STATUS[step.status] ?? {
     label: step.status,
     icon: Circle,
@@ -342,6 +362,7 @@ function StepRow({ step }: { step: StepListItem }) {
           </span>
         )}
       </div>
+      {showTimes && <StepTimes step={step} />}
       {step.noReportSince && (
         <p
           className="flex items-center gap-1.5 text-xs text-foreground sm:pl-31"
@@ -377,10 +398,12 @@ function StepRow({ step }: { step: StepListItem }) {
 
 interface StepListProps {
   steps: StepListItem[];
+  /** Show when each step started and ended, under its name. */
+  showTimes?: boolean;
 }
 
 /** The steps of a task, backup or restore, in the order the API returns them. */
-export function StepList({ steps }: StepListProps) {
+export function StepList({ steps, showTimes = false }: StepListProps) {
   if (steps.length === 0) return null;
   return (
     <ol
@@ -388,7 +411,7 @@ export function StepList({ steps }: StepListProps) {
       data-testid="step-list"
     >
       {steps.map((step) => (
-        <StepRow key={step.id} step={step} />
+        <StepRow key={step.id} step={step} showTimes={showTimes} />
       ))}
     </ol>
   );
