@@ -7,7 +7,7 @@ The flow must:
 - Build a DiffReport via Comparator.
 - Generate a Remediation via Remediator.
 - Call `remediation.apply()` (the existing sub-flow chain) with a
-  freshly minted driver action token (ADR-059).
+  freshly minted driver action token (ADR-059), after the UoW closes.
 """
 
 from contextlib import asynccontextmanager
@@ -18,16 +18,8 @@ import pytest
 from tests.helpers.unit_of_work import yield_unit_of_work
 
 
-@asynccontextmanager
-async def _fake_action_api_token():
-    yield "action-token"
-
-
 @pytest.mark.asyncio
-@patch(
-    "styrmin_backend.agent.tasks.orchestration.action_api_token",
-    new=_fake_action_api_token,
-)
+@patch("styrmin_backend.agent.tasks.orchestration.action_api_token")
 @patch(
     "styrmin_backend.agent.tasks.orchestration._build_instance_entity",
     create=True,
@@ -49,6 +41,7 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     mock_comparator_cls,
     mock_get_uow,
     mock_build_entity,
+    mock_action_api_token,
 ) -> None:
     from styrmin_backend.agent.tasks.orchestration import apply_state
 
@@ -63,7 +56,17 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     fake_uow.application_instances.get = AsyncMock(
         side_effect=lambda *, id: MagicMock(id=id)
     )
+    events: list[str] = []
+    fake_uow.__aexit__.side_effect = lambda *_: events.append("uow closed")
     mock_get_uow.side_effect = yield_unit_of_work(fake_uow)
+
+    @asynccontextmanager
+    async def _fake_action_api_token():
+        events.append("token created")
+        yield "action-token"
+        events.append("token revoked")
+
+    mock_action_api_token.side_effect = _fake_action_api_token
 
     mock_build_entity.side_effect = lambda model: (
         MagicMock(id=model.id) if model is not None else None
@@ -73,9 +76,13 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     mock_comparator_cls.return_value.compare = MagicMock(return_value=diff_report)
 
     fake_remediation = MagicMock()
-    fake_remediation.apply = AsyncMock(
-        return_value=MagicMock(state=MagicMock(name="Completed"))
-    )
+    flow_info = MagicMock(state=MagicMock(name="Completed"))
+
+    def _apply(*, api_token: str) -> MagicMock:
+        events.append("remediation applied")
+        return flow_info
+
+    fake_remediation.apply = AsyncMock(side_effect=_apply)
     mock_remediator_cls.return_value.generate_remediation = AsyncMock(
         return_value=fake_remediation
     )
@@ -91,6 +98,13 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     mock_comparator_cls.assert_called_once()
     mock_remediator_cls.assert_called_once()
     fake_remediation.apply.assert_awaited_once_with(api_token="action-token")
+    # The UoW's connection must be released before the token and the remediation.
+    assert events == [
+        "uow closed",
+        "token created",
+        "remediation applied",
+        "token revoked",
+    ]
 
 
 @pytest.mark.asyncio

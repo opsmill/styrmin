@@ -81,7 +81,7 @@ Flow-side responsibility:
 3. Create a `Comparator(current_instance, new_instance)` and call `comparator.compare()` to get a `DiffReport`.
 4. Create a `Remediator(uow)` and call `generate_remediation(diff_report)`.
 5. If no remediation is needed, return `Completed("No remediation needed")`.
-6. Call `remediation.apply()` (which chains into the appropriate sub-flow: `create_instance`, `update_instance`, `upgrade_instance`, …) and return its state.
+6. After the `get_unit_of_work()` block ends, create a driver action token with `action_api_token()`, call `remediation.apply()` (which chains into the appropriate sub-flow: `create_instance`, `update_instance`, `upgrade_instance`, …) and return its state. The remediation holds only domain models and IDs, so it does not need the session, and the session's connection is released while the sub-flow runs.
 
 Because the flow re-reads from the DB at run time, retries see fresh state — DB writes that landed between scheduling and the flow start are picked up rather than silently ignored. This is what closes the #237 bug class structurally.
 
