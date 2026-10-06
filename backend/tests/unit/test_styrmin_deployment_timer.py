@@ -127,6 +127,77 @@ async def test_timer_still_trips_timeout_for_non_restoring_phase() -> None:
     assert "did not reach Ready" in patch.status.get("message", "")
 
 
+def _ago(seconds: int) -> str:
+    return (datetime.now(tz=timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+
+@pytest.mark.parametrize(
+    ("created_ago", "rollout_started_ago", "times_out"),
+    [
+        # An update of an old resource: the rollout started 10 s ago.
+        (86400, 10, False),
+        (86400, 600, True),
+        (10, 600, True),
+    ],
+    ids=["old-resource-new-rollout", "old-rollout", "rollout-start-wins"],
+)
+@pytest.mark.anyio
+async def test_timeout_counts_from_the_rollout_start(
+    mocker: Any, created_ago: int, rollout_started_ago: int, times_out: bool
+) -> None:
+    """Spec 019 research D5: the readiness timeout measures the rollout, not the CR's age."""
+    _mock_helmrelease(mocker, None)
+    patch = _Patch()
+
+    await kopf_styrmin_deployment_timer(
+        body=_make_body(creation_offset_seconds=created_ago),
+        spec=SPEC,
+        status={
+            "phase": DeploymentPhase.CREATING_HELM_RELEASE.value,
+            "displayState": DisplayState.DEPLOYING.value,
+            "rolloutStartedAt": _ago(rollout_started_ago),
+        },
+        name="my-deployment",
+        namespace="styrmin-deadbeef",
+        patch=patch,
+        logger=_Logger(),
+    )
+
+    if times_out:
+        assert patch.status["displayState"] == DisplayState.ERROR.value
+        assert "did not reach Ready" in patch.status["message"]
+    else:
+        assert patch.status == {}
+
+
+@pytest.mark.parametrize("rollout_started_at", [None, "", "not-a-time"])
+@pytest.mark.anyio
+async def test_timeout_falls_back_to_the_creation_time(
+    mocker: Any, rollout_started_at: str | None
+) -> None:
+    """A CR an older operator created has no ``rolloutStartedAt``."""
+    _mock_helmrelease(mocker, None)
+    status: dict[str, Any] = {
+        "phase": DeploymentPhase.CREATING_HELM_RELEASE.value,
+        "displayState": DisplayState.DEPLOYING.value,
+    }
+    if rollout_started_at is not None:
+        status["rolloutStartedAt"] = rollout_started_at
+    patch = _Patch()
+
+    await kopf_styrmin_deployment_timer(
+        body=_make_body(creation_offset_seconds=600),
+        spec=SPEC,
+        status=status,
+        name="my-deployment",
+        namespace="styrmin-deadbeef",
+        patch=patch,
+        logger=_Logger(),
+    )
+
+    assert patch.status["displayState"] == DisplayState.ERROR.value
+
+
 # --- Component-container guard failure surfacing (018, T056) ---
 
 # helm-controller v1 wraps the post-renderer error in its Released/Ready condition message.
@@ -533,8 +604,8 @@ async def test_creating_helm_release_keeps_waiting_on_stale_guard_failure(
     )
 
     assert patch.status == {}
-    # One GET for the guard, one for the existing readiness check.
-    assert get_hr.await_count == 2
+    # Spec 019: one GET per tick serves the guard and the readiness check.
+    assert get_hr.await_count == 1
 
 
 @pytest.mark.parametrize(

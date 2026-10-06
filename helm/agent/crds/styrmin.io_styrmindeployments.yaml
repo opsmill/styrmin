@@ -115,9 +115,20 @@ spec:
                 rolloutStartedAt:
                   type: string
                   format: date-time
-                  description: When the current rollout started; the readiness timeout counts from it
+                  description: |
+                    When the create or update handler started the current rollout. The readiness
+                    timeout counts from it, or from metadata.creationTimestamp when it is missing.
                 conditions:
                   type: array
+                  description: |
+                    NetworkPoliciesReady, SecretsReady, HelmReleaseReady, HelmReleaseRemediated,
+                    ServicesReady, MiddlewaresReady, Ready and Deleted. Each rollout resets
+                    HelmReleaseReady to Unknown (reason Progressing) and removes
+                    HelmReleaseRemediated. While FluxCD has not reported the current HelmRelease
+                    generation Ready, HelmReleaseReady carries FluxCD's Ready status and transition
+                    time, and the reason and message of the failed install or upgrade when there is
+                    one. HelmReleaseRemediated copies FluxCD's Remediated=True condition of the
+                    current generation: FluxCD rolled back or uninstalled a failed release.
                   items:
                     type: object
                     properties:

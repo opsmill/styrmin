@@ -56,6 +56,47 @@ def set_condition(
     return conditions
 
 
+_COMPARED_FIELDS = ("status", "reason", "message", "lastTransitionTime")
+
+
+def replace_condition(
+    conditions: list[dict[str, str]],
+    condition: dict[str, str],
+) -> bool:
+    """Put ``condition`` in place of the condition of its type, keeping its own transition time.
+
+    Returns False, and changes nothing, when an equal condition is already there. A condition
+    without ``lastTransitionTime`` is compared without it and gets the current time when written.
+    """
+    fields = (
+        _COMPARED_FIELDS
+        if condition.get("lastTransitionTime")
+        else _COMPARED_FIELDS[:-1]
+    )
+    new_condition = {
+        **condition,
+        "lastTransitionTime": condition.get("lastTransitionTime")
+        or datetime.datetime.now(tz=datetime.UTC).isoformat(),
+    }
+    for index, current in enumerate(conditions):
+        if current.get("type") != condition["type"]:
+            continue
+        if all(current.get(key) == condition.get(key) for key in fields):
+            return False
+        conditions[index] = new_condition
+        return True
+    conditions.append(new_condition)
+    return True
+
+
+def remove_condition(conditions: list[dict[str, str]], condition_type: str) -> bool:
+    """Remove the condition of ``condition_type``; False when there was none."""
+    kept = [cond for cond in conditions if cond.get("type") != condition_type]
+    removed = len(kept) != len(conditions)
+    conditions[:] = kept
+    return removed
+
+
 def get_condition(
     conditions: list[dict[str, str]],
     condition_type: str,

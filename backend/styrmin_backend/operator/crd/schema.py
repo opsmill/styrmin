@@ -49,6 +49,8 @@ class ConditionType(StrEnum):
     NETWORK_POLICIES_READY = "NetworkPoliciesReady"
     SECRETS_READY = "SecretsReady"
     HELM_RELEASE_READY = "HelmReleaseReady"
+    # FluxCD rolled back or uninstalled a failed release during the current rollout.
+    HELM_RELEASE_REMEDIATED = "HelmReleaseRemediated"
     SERVICES_READY = "ServicesReady"
     MIDDLEWARES_READY = "MiddlewaresReady"
     READY = "Ready"

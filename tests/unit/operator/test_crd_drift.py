@@ -3,49 +3,48 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from styrmin_backend.operator.reconciler import _check_helmrelease_ready  # noqa: PLC2701
+from styrmin_backend.operator.reconciler import observe_helmrelease
 
 
-class TestCheckHelmReleaseReady:
+def _helmrelease(ready_status: str) -> dict:
+    return {
+        "metadata": {"generation": 1},
+        "status": {
+            "conditions": [
+                {"type": "Ready", "status": ready_status, "observedGeneration": 1},
+            ],
+        },
+    }
+
+
+class TestObserveHelmRelease:
     @pytest.mark.anyio
-    async def test_returns_true_when_ready(self) -> None:
-        mock_hr = {
-            "status": {
-                "conditions": [
-                    {"type": "Ready", "status": "True"},
-                ],
-            },
-        }
+    async def test_ready_when_current_generation_is_ready(self) -> None:
         with patch(
-            "styrmin_backend.operator.reconciler.get_custom_resource",
+            "styrmin_backend.operator.reconciler._get_helmrelease",
             new_callable=AsyncMock,
-            return_value=mock_hr,
+            return_value=_helmrelease("True"),
         ):
-            assert await _check_helmrelease_ready("ns", "ref-123") is True
-
-    @pytest.mark.anyio
-    async def test_returns_false_when_not_ready(self) -> None:
-        mock_hr = {
-            "status": {
-                "conditions": [
-                    {"type": "Ready", "status": "False"},
-                ],
-            },
-        }
-        with patch(
-            "styrmin_backend.operator.reconciler.get_custom_resource",
-            new_callable=AsyncMock,
-            return_value=mock_hr,
-        ):
-            assert await _check_helmrelease_ready("ns", "ref-123") is False
+            observation = await observe_helmrelease("ns", "ref-123")
+        assert observation is not None
+        assert observation.is_ready is True
 
     @pytest.mark.anyio
-    async def test_returns_false_when_not_found(self) -> None:
-        from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
-
+    async def test_not_ready_when_current_generation_is_not_ready(self) -> None:
         with patch(
-            "styrmin_backend.operator.reconciler.get_custom_resource",
+            "styrmin_backend.operator.reconciler._get_helmrelease",
             new_callable=AsyncMock,
-            side_effect=CustomResourceNotFound("not found"),
+            return_value=_helmrelease("False"),
         ):
-            assert await _check_helmrelease_ready("ns", "ref-123") is False
+            observation = await observe_helmrelease("ns", "ref-123")
+        assert observation is not None
+        assert observation.is_ready is False
+
+    @pytest.mark.anyio
+    async def test_none_when_not_found(self) -> None:
+        with patch(
+            "styrmin_backend.operator.reconciler._get_helmrelease",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            assert await observe_helmrelease("ns", "ref-123") is None
