@@ -8,7 +8,17 @@ from enum import Enum, IntEnum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, Index, LargeBinary, UniqueConstraint, text, true
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    LargeBinary,
+    Text,
+    UniqueConstraint,
+    false,
+    text,
+    true,
+)
 from sqlmodel import JSON, Column, DateTime, Field, Relationship, SQLModel, func
 from sqlmodel import Enum as SQLModelEnum
 
@@ -745,6 +755,146 @@ class Task(StyrminModel, table=True):
 
     deployment_id: UUID = Field(foreign_key="deployment.id")
     deployment: Deployment = Relationship(back_populates="tasks")
+
+    # The instance this task rolls out; links operator reports to the task.
+    instance_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey(
+                "applicationinstance.id",
+                ondelete="SET NULL",
+                name="task_instance_id_fkey",
+            ),
+            nullable=True,
+            index=True,
+        ),
+    )
+    # ``use_alter`` because ``step.task_id`` points back at ``task``.
+    started_by_step_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey(
+                "step.id",
+                ondelete="SET NULL",
+                use_alter=True,
+                name="task_started_by_step_id_fkey",
+            ),
+            nullable=True,
+            index=True,
+        ),
+    )
+
+
+class StepStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"
+
+
+class StepKind(str, Enum):
+    PLAN = "plan"
+    HOOK = "hook"
+    RESOURCE_WRITE = "resource_write"
+    OPERATOR_PHASE = "operator_phase"
+    COMMAND = "command"
+    RESTORE = "restore"
+    BACKUP_COMPONENT = "backup_component"
+
+
+#: Exactly one parent is set. Written without ``num_nonnulls`` so SQLite accepts it.
+STEP_ONE_PARENT_CHECK = (
+    "(CASE WHEN task_id IS NULL THEN 0 ELSE 1 END)"
+    " + (CASE WHEN backup_id IS NULL THEN 0 ELSE 1 END)"
+    " + (CASE WHEN restore_id IS NULL THEN 0 ELSE 1 END) = 1"
+)
+
+
+def _step_parent_key_index(parent_column: str) -> Index:
+    """Unique (parent, key) over the rows of one parent type."""
+    predicate = text(f"{parent_column} IS NOT NULL")
+    return Index(
+        f"uq_step_{parent_column}_key",
+        parent_column,
+        "key",
+        unique=True,
+        postgresql_where=predicate,
+        sqlite_where=predicate,
+    )
+
+
+class Step(StyrminModel, table=True):
+    """One unit of work inside a task, a backup or a restore. See spec 019."""
+
+    __table_args__ = (
+        CheckConstraint(STEP_ONE_PARENT_CHECK, name="ck_step_one_parent"),
+        _step_parent_key_index("task_id"),
+        _step_parent_key_index("backup_id"),
+        _step_parent_key_index("restore_id"),
+    )
+
+    task_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("task.id", ondelete="CASCADE", name="step_task_id_fkey"),
+            nullable=True,
+        ),
+    )
+    backup_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("backup.id", ondelete="CASCADE", name="step_backup_id_fkey"),
+            nullable=True,
+        ),
+    )
+    restore_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey("restore.id", ondelete="CASCADE", name="step_restore_id_fkey"),
+            nullable=True,
+        ),
+    )
+
+    key: str
+    name: str
+    kind: StepKind = Field(sa_column=Column(SQLModelEnum(StepKind), nullable=False))
+    status: StepStatus = Field(
+        sa_column=Column(SQLModelEnum(StepStatus), nullable=False)
+    )
+
+    started_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
+    ended_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]
+    attempt_count: int = Field(default=0)
+    # List of {"attempt": int, "message": str, "occurred_at": iso8601}.
+    errors: list[dict] | None = Field(default=None, sa_column=Column(JSON))
+
+    detail: str | None = Field(default=None)
+    rolled_back_at: datetime | None = Field(  # type: ignore[call-overload]
+        sa_type=DateTime(timezone=True), default=None
+    )
+    rollback_message: str | None = Field(default=None)
+
+    output: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    # ``server_default`` mirrors the add-steps revision.
+    output_truncated: bool = Field(
+        default=False,
+        nullable=False,
+        sa_column_kwargs={"server_default": false()},
+    )
+
+    superseded_by_task_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            ForeignKey(
+                "task.id",
+                ondelete="SET NULL",
+                name="step_superseded_by_task_id_fkey",
+            ),
+            nullable=True,
+            index=True,
+        ),
+    )
 
 
 class PodStatus(StyrminModel, table=True):

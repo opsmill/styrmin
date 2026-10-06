@@ -272,6 +272,21 @@ class FakeTaskRepository(FakeRepository[Task], TaskRepository):
     async def find_by_deployment(self, deployment_id: UUID):
         return [m for m in self.models if m.deployment_id == deployment_id]
 
+    async def find_by_instance(self, instance_id: UUID):
+        matches = [m for m in self.models if m.instance_id == instance_id]
+        return matches[-1] if matches else None
+
+    async def find_latest_by_type(self, deployment_id: UUID, type):
+        matches = [
+            m
+            for m in self.models
+            if m.deployment_id == deployment_id and m.type == type
+        ]
+        return matches[-1] if matches else None
+
+    async def find_started_by_steps(self, step_ids):
+        return [m for m in self.models if m.started_by_step_id in set(step_ids)]
+
 
 class FakeBackupRepository(FakeRepository[Backup], BackupRepository):
     async def get_by_instance_id(
