@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import SecretStr
 from kubernetes_asyncio.client import ApiException
 from prefect.client.schemas.objects import StateType
 
@@ -64,7 +65,7 @@ def restore_id(monkeypatch: pytest.MonkeyPatch) -> UUID:
     for name in (TASK_ID_ENV, BACKUP_ID_ENV, STEP_ID_ENV):
         monkeypatch.delenv(name, raising=False)
     restore_id = uuid4()
-    monkeypatch.setenv(API_TOKEN_ENV, "action-token")
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr("action-token"))
     monkeypatch.setenv(RESTORE_ID_ENV, str(restore_id))
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://styrmin.test")
     return restore_id

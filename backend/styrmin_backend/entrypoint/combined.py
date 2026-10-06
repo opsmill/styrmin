@@ -151,7 +151,9 @@ async def run_prefect_worker(
 
 
 async def main(
-    work_pool_name: str = "styrmin-work-pool", clusterwide: bool = True
+    settings: config.Settings,
+    work_pool_name: str = "styrmin-work-pool",
+    clusterwide: bool = True,
 ) -> None:
     """Run both kopf operator and Prefect worker concurrently."""
     logger.info(
@@ -162,5 +164,9 @@ async def main(
     await asyncio.gather(
         kopf.operator(clusterwide=clusterwide),
         run_prefect_worker(work_pool_name),
-        run_status_reporter(shutdown_event=_shutdown),
+        run_status_reporter(
+            shutdown_event=_shutdown,
+            graphql_url=settings.url.graphql,
+            interval=settings.agent.status_poll_interval,
+        ),
     )

@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import SecretStr
 
 from styrmin_backend import config
 from styrmin_backend.agent.service.kubernetes.exceptions import JobFailedError
@@ -249,7 +250,7 @@ def step_api(
     for name in (BACKUP_ID_ENV, RESTORE_ID_ENV, STEP_ID_ENV):
         monkeypatch.delenv(name, raising=False)
     task_id = uuid4()
-    monkeypatch.setenv(API_TOKEN_ENV, "action-token")
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr("action-token"))
     monkeypatch.setenv(TASK_ID_ENV, str(task_id))
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://styrmin.test")
     api = FakeStepApi(events)

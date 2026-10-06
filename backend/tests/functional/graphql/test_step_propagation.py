@@ -14,6 +14,7 @@ from uuid import UUID
 
 import httpx
 import pytest
+from pydantic import SecretStr
 from httpx import ASGITransport, AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -21,7 +22,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from styrmin_backend import config
 from styrmin_backend.agent.steps import reporter as reporter_module
 from styrmin_backend.agent.steps.reporter import StepReporter
-from styrmin_backend.agent.tasks.utils import API_TOKEN_ENV, TASK_ID_ENV
+from styrmin_backend.agent.tasks.utils import TASK_ID_ENV
 from styrmin_backend.db.models import (
     Backup,
     BackupStatus,
@@ -473,7 +474,7 @@ async def test_flow_step_reporter_records_through_the_api(
         ),
     )
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://test")
-    monkeypatch.setenv(API_TOKEN_ENV, actions_token)
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr(actions_token))
     monkeypatch.setenv(TASK_ID_ENV, str(parents.task_id))
     reporter = StepReporter.from_env()
 

@@ -143,9 +143,9 @@ The phase history runs in a savepoint (`session.begin_nested()`) of the report's
 - **Cadence**: configurable via `STYRMIN_AGENT_STATUS_POLL_INTERVAL` (seconds, default `5`).
 - **Backend address**: `STYRMIN_URL_API` (default `http://localhost:8000`); the reporter posts to `${STYRMIN_URL_API}/graphql`.
 - **Connection failures**: backend unreachable → log at `debug` and retry next cycle; never fatal.
-- **Shutdown**: `run_status_reporter(shutdown_event)` shares the same `asyncio.Event` as the Prefect worker. When kopf signals shutdown, the reporter exits its loop cleanly.
+- **Shutdown**: `run_status_reporter(shutdown_event, graphql_url, interval)` shares the same `asyncio.Event` as the Prefect worker. When kopf signals shutdown, the reporter exits its loop cleanly.
 
-Entry point wiring lives in `entrypoint/combined.py`, where `asyncio.gather()` runs `kopf.operator(...)`, the Prefect worker, and `run_status_reporter(...)` together.
+Entry point wiring lives in `entrypoint/combined.py`, where `asyncio.gather()` runs `kopf.operator(...)`, the Prefect worker, and `run_status_reporter(...)` together. `main()` takes the `Settings` that `styrmin agent start` loaded and passes the reporter its GraphQL URL and interval from them.
 
 ### Why polling, not watching
 

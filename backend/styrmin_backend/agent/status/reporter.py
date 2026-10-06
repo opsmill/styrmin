@@ -12,7 +12,6 @@ from uuid import UUID
 
 import httpx
 
-from styrmin_backend import config
 from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.agent.service.kubernetes.primitives import (
     get_custom_resource,
@@ -369,8 +368,8 @@ async def _poll_once(graphql_url: str) -> None:
 
 async def run_status_reporter(
     shutdown_event: asyncio.Event,
-    graphql_url: str | None = None,
-    interval: int | None = None,
+    graphql_url: str,
+    interval: int,
 ) -> None:
     """Run the periodic pod status reporter until shutdown.
 
@@ -379,11 +378,6 @@ async def run_status_reporter(
         graphql_url: Backend GraphQL endpoint URL.
         interval: Polling interval in seconds.
     """
-    if graphql_url is None:
-        graphql_url = config.SETTINGS.url.graphql
-    if interval is None:
-        interval = config.SETTINGS.agent.status_poll_interval
-
     logger.info(
         "Status reporter starting (interval=%ds, url=%s)",
         interval,

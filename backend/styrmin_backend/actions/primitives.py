@@ -15,7 +15,6 @@ that the reconcile passes to each action in ``STYRMIN_TOKEN`` (ADR-059).
 """
 
 import asyncio
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -33,7 +32,7 @@ from styrmin_backend.agent.service.kubernetes.primitives import (
     run_job,
 )
 from styrmin_backend.agent.steps.reporter import StepReporter, uuid_from_env
-from styrmin_backend.agent.tasks.utils import API_TOKEN_ENV, STEP_ID_ENV
+from styrmin_backend.agent.tasks.utils import STEP_ID_ENV
 from styrmin_backend.context.models.contexts import GlobalContext
 
 _GRAPHQL_DIR = Path(__file__).resolve().parent
@@ -45,9 +44,11 @@ def _load_query(name: str) -> str:
 
 def _api_client() -> httpx.AsyncClient:
     """Client authenticated with the token the reconcile passed to this action (ADR-059)."""
-    token = os.environ.get(API_TOKEN_ENV)
+    token = config.SETTINGS.agent.api_token
     return httpx.AsyncClient(
-        headers={"Authorization": f"Bearer {token}"} if token else None
+        headers={"Authorization": f"Bearer {token.get_secret_value()}"}
+        if token
+        else None
     )
 
 

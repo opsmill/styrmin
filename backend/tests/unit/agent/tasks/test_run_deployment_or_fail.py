@@ -5,9 +5,10 @@ from uuid import uuid4
 
 import pytest
 from prefect.workers.base import BaseJobConfiguration
+from pydantic import SecretStr
 
+from styrmin_backend import config
 from styrmin_backend.agent.tasks.utils import (
-    API_TOKEN_ENV,
     BACKUP_ID_ENV,
     RESTORE_ID_ENV,
     STEP_ID_ENV,
@@ -16,6 +17,7 @@ from styrmin_backend.agent.tasks.utils import (
     run_deployment_or_fail,
     run_driver_action_or_fail,
 )
+from styrmin_backend.config import API_TOKEN_ENV
 from styrmin_backend.services.reconciliation.remediation import (
     Remediation,
     RemediationType,
@@ -71,7 +73,7 @@ async def test_explicit_poll_interval_is_kept() -> None:
 async def test_driver_action_receives_this_jobs_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(API_TOKEN_ENV, "action-token")
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr("action-token"))
     run = AsyncMock(return_value=_completed_flow_run())
     with patch(f"{MODULE}.arun_deployment", run):
         await run_driver_action_or_fail(name="flow/deployment", parameters={})
@@ -86,7 +88,7 @@ async def test_driver_action_receives_this_jobs_token(
 async def test_driver_action_without_token_gets_no_job_variables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv(API_TOKEN_ENV, raising=False)
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", None)
     run = AsyncMock(return_value=_completed_flow_run())
     with patch(f"{MODULE}.arun_deployment", run):
         await run_driver_action_or_fail(name="flow/deployment", parameters={})
@@ -100,7 +102,7 @@ async def test_driver_action_forwards_token_and_task_and_adds_hook_step(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     task_id, step_id = uuid4(), uuid4()
-    monkeypatch.setenv(API_TOKEN_ENV, "action-token")
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr("action-token"))
     monkeypatch.setenv(TASK_ID_ENV, str(task_id))
     run = AsyncMock(return_value=_completed_flow_run())
     with patch(f"{MODULE}.arun_deployment", run):

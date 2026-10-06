@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from pydantic import SecretStr
 
 from styrmin_backend import config
 from styrmin_backend.actions import primitives as action_primitives
@@ -18,7 +19,6 @@ from styrmin_backend.actions.primitives import execute_commands
 from styrmin_backend.agent.service.kubernetes import primitives as k8s_primitives
 from styrmin_backend.agent.service.kubernetes.exceptions import JobFailedError
 from styrmin_backend.agent.tasks.utils import (
-    API_TOKEN_ENV,
     BACKUP_ID_ENV,
     RESTORE_ID_ENV,
     STEP_ID_ENV,
@@ -47,7 +47,7 @@ def step_api(monkeypatch: pytest.MonkeyPatch, events: list[Event]) -> FakeStepAp
         monkeypatch.delenv(name, raising=False)
     api = FakeStepApi(events)
     api.ids[HOOK_STEP] = uuid4()
-    monkeypatch.setenv(API_TOKEN_ENV, "action-token")
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr("action-token"))
     monkeypatch.setenv(TASK_ID_ENV, str(uuid4()))
     monkeypatch.setenv(STEP_ID_ENV, str(api.ids[HOOK_STEP]))
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://styrmin.test")

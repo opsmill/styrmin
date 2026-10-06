@@ -16,6 +16,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from httpx import ASGITransport
+from pydantic import SecretStr
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -66,7 +67,7 @@ def asgi_api(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> Iterator
         ),
     )
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://test")
-    monkeypatch.delenv("STYRMIN_TOKEN", raising=False)
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", None)
     monkeypatch.delenv(STEP_ID_ENV, raising=False)
     monkeypatch.setattr(
         action_token,
@@ -124,7 +125,7 @@ async def test_primitive_dispatches_with_action_token(
     deployment = await seed_deployment(session)
 
     async with action_token.action_api_token() as token:
-        monkeypatch.setenv("STYRMIN_TOKEN", token)
+        monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr(token))
         await _PRIMITIVE_CALLS[primitive](_context(deployment.id))
 
     prefect_manager_mock.run_action.assert_awaited_once()
@@ -159,7 +160,7 @@ async def test_primitive_links_its_task_to_the_hook_step(
     monkeypatch.setenv(STEP_ID_ENV, str(hook_id))
 
     async with action_token.action_api_token() as token:
-        monkeypatch.setenv("STYRMIN_TOKEN", token)
+        monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr(token))
         await _PRIMITIVE_CALLS[primitive](_context(deployment_id))
 
     session.expire_all()
@@ -176,7 +177,7 @@ async def test_wait_for_task_reads_task_with_action_token(
     task = await seed_task(session, status=TaskStatus.SUCCESS)
 
     async with action_token.action_api_token() as token:
-        monkeypatch.setenv("STYRMIN_TOKEN", token)
+        monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr(token))
         async with primitives._api_client() as client:
             await primitives._wait_for_task(client, str(task.id), timeout=5.0)
 
@@ -189,7 +190,7 @@ async def test_action_token_is_revoked_on_exit(
     with pytest.raises(ValueError, match="boom"):
         async with action_token.action_api_token() as token:
             raise ValueError("boom")
-    monkeypatch.setenv("STYRMIN_TOKEN", token)
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr(token))
 
     with pytest.raises(RuntimeError, match="Authentication is required"):
         await primitives.stop_components.fn([], _context(deployment.id))
@@ -207,7 +208,7 @@ async def test_deactivated_service_account_token_is_rejected(
     await session.commit()
 
     async with action_token.action_api_token() as token:
-        monkeypatch.setenv("STYRMIN_TOKEN", token)
+        monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr(token))
         with pytest.raises(RuntimeError, match="Authentication is required"):
             await primitives.stop_components.fn([], _context(deployment.id))
 

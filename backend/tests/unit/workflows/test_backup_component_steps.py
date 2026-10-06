@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from pydantic import SecretStr
 from loguru import logger
 from prefect.client.schemas.objects import StateType
 
@@ -164,7 +165,7 @@ def backup_id(monkeypatch: pytest.MonkeyPatch) -> UUID:
     for name in (TASK_ID_ENV, RESTORE_ID_ENV, STEP_ID_ENV):
         monkeypatch.delenv(name, raising=False)
     backup_id = uuid4()
-    monkeypatch.setenv(API_TOKEN_ENV, "action-token")
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr("action-token"))
     monkeypatch.setenv(BACKUP_ID_ENV, str(backup_id))
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://styrmin.test")
     return backup_id
@@ -494,7 +495,7 @@ async def test_nothing_is_listed_without_an_action_token(
     monkeypatch: pytest.MonkeyPatch, backup_id: UUID
 ) -> None:
     del backup_id
-    monkeypatch.delenv(API_TOKEN_ENV)
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", None)
     items = Items()
     steps = _steps(["db"], items)
 

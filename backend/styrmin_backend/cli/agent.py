@@ -45,8 +45,10 @@ def start(
     )
 
     # The operator's handler modules read settings at import: load and validate them first.
-    config.SETTINGS.initialize_and_exit()
+    settings = config.SETTINGS.initialize_and_exit()
 
     from styrmin_backend.entrypoint.combined import main
 
-    asyncio.run(main(work_pool_name=work_pool, clusterwide=clusterwide))
+    asyncio.run(
+        main(settings=settings, work_pool_name=work_pool, clusterwide=clusterwide)
+    )

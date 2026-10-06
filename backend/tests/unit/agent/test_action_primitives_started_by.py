@@ -16,10 +16,11 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from styrmin_backend import config
 from styrmin_backend.actions import primitives
-from styrmin_backend.agent.tasks.utils import API_TOKEN_ENV, STEP_ID_ENV
+from styrmin_backend.agent.tasks.utils import STEP_ID_ENV
 
 DEPLOYMENT_ID = uuid4()
 
@@ -66,7 +67,7 @@ def sent_requests(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     )
     monkeypatch.setattr(primitives, "_wait_for_task", AsyncMock())
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://styrmin.test")
-    monkeypatch.setenv(API_TOKEN_ENV, "action-token")
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr("action-token"))
     return sent
 
 

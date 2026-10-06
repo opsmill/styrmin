@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import SecretStr
 
 from styrmin_backend import config
 from styrmin_backend.agent.tasks import orchestration
@@ -21,7 +22,6 @@ from styrmin_backend.agent.tasks.orchestration import (
     upgrade_instance_crd,
 )
 from styrmin_backend.agent.tasks.utils import (
-    API_TOKEN_ENV,
     BACKUP_ID_ENV,
     RESTORE_ID_ENV,
     STEP_ID_ENV,
@@ -90,10 +90,10 @@ class Cluster:
 
 @pytest.fixture(autouse=True)
 def step_env(monkeypatch: pytest.MonkeyPatch) -> UUID:
-    for name in (API_TOKEN_ENV, BACKUP_ID_ENV, RESTORE_ID_ENV, STEP_ID_ENV):
+    for name in (BACKUP_ID_ENV, RESTORE_ID_ENV, STEP_ID_ENV):
         monkeypatch.delenv(name, raising=False)
     task_id = uuid4()
-    monkeypatch.setenv(API_TOKEN_ENV, "action-token")
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr("action-token"))
     monkeypatch.setenv(TASK_ID_ENV, str(task_id))
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://styrmin.test")
     return task_id
@@ -390,7 +390,7 @@ async def test_without_token_flows_run_unchanged_and_actions_get_no_step(
     events: list[Event],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv(API_TOKEN_ENV)
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", None)
     core = uuid4()
 
     await upgrade_instance_crd(

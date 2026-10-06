@@ -1,5 +1,4 @@
 import logging
-import os
 from typing import Any, AsyncGenerator
 
 from kubernetes_asyncio import config as kubeconfig
@@ -64,7 +63,7 @@ async def load_kubernetes_config() -> None:
             raise kubeconfig.ConfigException(msg) from exc
 
     elif mode == config.KubernetesConfigMode.KUBECONFIG:
-        config_file = os.environ.get("KUBECONFIG", None)
+        config_file = settings.kubeconfig
         try:
             await kubeconfig.load_kube_config(config_file=config_file)
         except Exception as exc:

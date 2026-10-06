@@ -82,11 +82,10 @@ class TestGetApiClient:
         with pytest.raises(StopAsyncIteration):
             await gen.__anext__()
 
-    async def test_kubeconfig_mode(self, mocker, monkeypatch):
-        monkeypatch.setenv("KUBECONFIG", "/home/user/.kube/config")
-
+    async def test_kubeconfig_mode(self, mocker):
         mock_settings = mocker.MagicMock()
         mock_settings.config_mode = KubernetesConfigMode.KUBECONFIG
+        mock_settings.kubeconfig = "/home/user/.kube/config"
         mocker.patch("styrmin_backend.config.SETTINGS").kubernetes = mock_settings
 
         mock_load = mocker.patch(
@@ -110,11 +109,10 @@ class TestGetApiClient:
         with pytest.raises(StopAsyncIteration):
             await gen.__anext__()
 
-    async def test_kubeconfig_mode_without_env_var(self, mocker, monkeypatch):
-        monkeypatch.delenv("KUBECONFIG", raising=False)
-
+    async def test_kubeconfig_mode_without_kubeconfig(self, mocker):
         mock_settings = mocker.MagicMock()
         mock_settings.config_mode = KubernetesConfigMode.KUBECONFIG
+        mock_settings.kubeconfig = None
         mocker.patch("styrmin_backend.config.SETTINGS").kubernetes = mock_settings
 
         mock_load = mocker.patch(
