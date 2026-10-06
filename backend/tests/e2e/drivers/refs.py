@@ -228,6 +228,8 @@ class StepRef:
     errors: tuple[StepErrorRef, ...]
     detail: str | None
     has_output: bool
+    # The id of the task that interrupted this step, when it is superseded.
+    superseded_by: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

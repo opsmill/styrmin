@@ -1,5 +1,6 @@
 import asyncio
 import time
+from datetime import datetime
 
 import httpx
 import kr8s.asyncio
@@ -7,11 +8,25 @@ import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 from tests.e2e.conftest import _portforward, _wait_for_http
-from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.drivers import ScenarioDriver, StepRef, TaskLinkRef, TimelineEntry
 
 pytestmark = [
     pytest.mark.shard_general,
 ]
+
+# Flow steps of the upgrade, in order, with their kinds (spec 019 data-model).
+UPGRADE_FLOW_STEPS = {
+    "plan": "PLAN",
+    "resource:styrmindeployment": "RESOURCE_WRITE",
+    "hook:upgrade:core": "HOOK",
+}
+OPERATOR_STEPS = (
+    "operator:prerequisites",
+    "operator:helmrelease",
+    "operator:services",
+    "operator:ready",
+)
+FINAL_RESULTS = {"FAILED", "SUCCEEDED", "SUPERSEDED"}
 
 
 @pytest.mark.ci
@@ -82,6 +97,142 @@ async def _assert_upgrade_action_succeeded(
     )
 
 
+def _created(entry: TimelineEntry) -> datetime:
+    assert entry.created_on is not None, f"timeline entry without created_on: {entry}"
+    return datetime.fromisoformat(entry.created_on)
+
+
+def _family_summary(upgrade: TimelineEntry, by_id: dict[str, TimelineEntry]) -> str:
+    lines = []
+    for entry in (upgrade, *(by_id.get(t.id) for t in upgrade.started_tasks)):
+        if entry is None:
+            continue
+        steps = ", ".join(
+            f"{s.key}={s.status}"
+            + (f" (superseded by {s.superseded_by})" if s.superseded_by else "")
+            for s in entry.steps
+        )
+        lines.append(f"{entry.task_type} {entry.task_id} {entry.result}: {steps}")
+    return "\n".join(lines)
+
+
+async def _wait_for_upgrade_family(
+    scenario_driver: ScenarioDriver,
+    deployment_id: str,
+    version: str,
+    timeout: float = 120.0,
+) -> tuple[TimelineEntry, dict[str, TimelineEntry]]:
+    """Read the timeline until the upgrade and the tasks its hook started have a final result.
+
+    The upgrade is the oldest task at ``version`` that no step started. Results
+    settle after the last operator report, which can come after ``RUNNING``.
+    """
+    deadline = time.time() + timeout
+    while True:
+        timeline = await scenario_driver.get_deployment_timeline(
+            deployment_id=deployment_id
+        )
+        by_id = {entry.task_id: entry for entry in timeline}
+        upgrades = [
+            e
+            for e in timeline
+            if e.application_version == version and e.started_by is None
+        ]
+        upgrade = min(upgrades, key=_created) if upgrades else None
+        if upgrade is not None:
+            family = [upgrade, *(by_id.get(t.id) for t in upgrade.started_tasks)]
+            if all(e is not None and e.result in FINAL_RESULTS for e in family):
+                return upgrade, by_id
+        if time.time() >= deadline:
+            summary = _family_summary(upgrade, by_id) if upgrade else "no upgrade task"
+            raise AssertionError(
+                f"upgrade to {version} has no final result within {timeout}s:\n{summary}"
+            )
+        await asyncio.sleep(3.0)
+
+
+def _assert_upgrade_steps(upgrade: TimelineEntry, started_ids: set[str]) -> StepRef:
+    """The upgrade's steps are in order; returns its upgrade hook step.
+
+    The prerequisites step starts when the CR write ends, so it is listed before
+    the hook. A task the hook started can interrupt the upgrade's own rollout.
+    """
+    keys = [step.key for step in upgrade.steps]
+    steps = {step.key: step for step in upgrade.steps}
+    assert [k for k in keys if k in UPGRADE_FLOW_STEPS] == list(UPGRADE_FLOW_STEPS), (
+        f"upgrade flow steps out of order: {keys}"
+    )
+    assert [k for k in keys if k.startswith("operator:")] == list(OPERATOR_STEPS), (
+        f"upgrade operator steps out of order: {keys}"
+    )
+    for key, kind in UPGRADE_FLOW_STEPS.items():
+        assert steps[key].kind == kind, steps[key]
+        assert steps[key].status == "SUCCEEDED", steps[key]
+
+    cr_written = datetime.fromisoformat(
+        steps["resource:styrmindeployment"].ended_at or ""
+    )
+    for key in OPERATOR_STEPS:
+        step = steps[key]
+        assert step.kind == "OPERATOR_PHASE", step
+        # A sibling's interruption is the upgrade's own work (research D8).
+        assert step.status == "SUCCEEDED" or (
+            step.status == "SUPERSEDED" and step.superseded_by in started_ids
+        ), step
+        if step.started_at is not None:
+            assert datetime.fromisoformat(step.started_at) >= cr_written, step
+
+    # Started steps in start-time order, steps that never started last.
+    started = [s.started_at for s in upgrade.steps if s.started_at is not None]
+    assert keys[: len(started)] == [
+        s.key for s in upgrade.steps if s.started_at is not None
+    ], f"a step that never started is listed before a started one: {keys}"
+    assert [datetime.fromisoformat(t) for t in started] == sorted(
+        datetime.fromisoformat(t) for t in started
+    ), f"steps not in start-time order: {keys}"
+    return steps["hook:upgrade:core"]
+
+
+def _assert_upgrade_family(
+    upgrade: TimelineEntry, by_id: dict[str, TimelineEntry]
+) -> None:
+    """Spec 019 US3: the hook's started tasks, their links and the task results."""
+    summary = _family_summary(upgrade, by_id)
+    assert upgrade.task_type == "upgrade_instance", summary
+    started_ids = {task.id for task in upgrade.started_tasks}
+    hook = _assert_upgrade_steps(upgrade, started_ids)
+
+    # The action's upgrade_deployment_version asks for the version the upgrade
+    # already set, a no-op that starts no task (spec 014).
+    started = [by_id[task.id] for task in upgrade.started_tasks]
+    assert sorted(e.task_type for e in started) == [
+        "start_components",
+        "stop_components",
+    ], summary
+    for link, entry in zip(upgrade.started_tasks, started, strict=True):
+        # The hook step lists each task with its result, and each task links back.
+        assert link.type == entry.task_type and link.result == entry.result, (
+            link,
+            entry,
+        )
+        assert entry.started_by_step_id == hook.id, entry
+        assert entry.started_by == TaskLinkRef(
+            id=upgrade.task_id, type="upgrade_instance", result=None
+        ), entry
+
+    assert upgrade.result == "SUCCEEDED", summary
+    last, *earlier = sorted(started, key=_created, reverse=True)
+    assert last.task_type == "start_components", summary
+    assert last.result == "SUCCEEDED", summary
+    for entry in earlier:
+        assert entry.result in ("SUCCEEDED", "SUPERSEDED"), summary
+        superseded = [s for s in entry.steps if s.status == "SUPERSEDED"]
+        if entry.result == "SUPERSEDED":
+            assert superseded, summary
+        siblings = started_ids - {entry.task_id}
+        assert all(s.superseded_by in siblings for s in superseded), summary
+
+
 @pytest.mark.ci
 async def test_upgrade_simple_app(
     scenario_driver: ScenarioDriver,
@@ -99,6 +250,10 @@ async def test_upgrade_simple_app(
     )
     await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
     await _assert_upgrade_action_succeeded(scenario_driver, deployment_id, "0.2.0")
+    upgrade, by_id = await _wait_for_upgrade_family(
+        scenario_driver, deployment_id, "0.2.0"
+    )
+    _assert_upgrade_family(upgrade, by_id)
 
     kubeconfig_path = vcluster["kubeconfig_path"]
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)

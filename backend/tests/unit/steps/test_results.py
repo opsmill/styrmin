@@ -99,30 +99,41 @@ def test_each_result_of_a_task_with_steps(
 
 
 def test_failed_helmrelease_fails_a_task_whose_flow_succeeded() -> None:
-    # US3 acceptance scenario 1: Task.status keeps the Prefect flow outcome.
+    # US3 acceptance scenario 1: Task.status keeps the Prefect flow outcome. The
+    # steps after the failed one stay pending, as the operator leaves them (SC-003).
     task = _task(status=TaskStatus.SUCCESS)
     task_steps = [
         _step(task, SUCCEEDED, steps.STYRMIN_DEPLOYMENT_WRITE),
         _step(task, SUCCEEDED, steps.OPERATOR_PREREQUISITES),
         _step(task, FAILED, steps.OPERATOR_HELMRELEASE),
-        _step(task, PENDING, steps.OPERATOR_SERVICES).model_copy(
-            update={"status": SUPERSEDED, "superseded_by_task_id": uuid4()}
-        ),
+        _step(task, PENDING, steps.OPERATOR_SERVICES),
+        _step(task, PENDING, steps.OPERATOR_READY),
     ]
 
     assert _result(task, task_steps) is TaskResult.FAILED
 
 
+def test_new_attempt_of_a_failed_step_runs_the_task_again() -> None:
+    task = _task(status=TaskStatus.SUCCESS)
+    task_steps = [
+        _step(task, SUCCEEDED, steps.OPERATOR_PREREQUISITES),
+        _step(task, RUNNING, steps.OPERATOR_HELMRELEASE),
+        _step(task, PENDING, steps.OPERATOR_SERVICES),
+    ]
+
+    assert _result(task, task_steps) is TaskResult.RUNNING
+
+
 @pytest.mark.parametrize(
     ("statuses", "expected"),
     [
-        ([FAILED, PENDING], TaskResult.RUNNING),
+        ([FAILED, PENDING], TaskResult.FAILED),
         ([FAILED, RUNNING], TaskResult.RUNNING),
         ([SUPERSEDED, RUNNING], TaskResult.RUNNING),
         ([SUPERSEDED, FAILED], TaskResult.FAILED),
     ],
     ids=[
-        "pending-before-failed",
+        "failed-blocks-pending",
         "running-before-failed",
         "running-before-superseded",
         "failed-before-superseded",
@@ -263,6 +274,17 @@ def test_running_started_task_keeps_the_family_running() -> None:
     assert results[upgrade.upgrade.id] is TaskResult.RUNNING
     assert results[upgrade.start.id] is TaskResult.RUNNING
     assert results[upgrade.version.id] is TaskResult.FAILED
+
+
+def test_failure_blocks_only_the_pending_steps_of_its_own_task() -> None:
+    upgrade = Upgrade()
+    upgrade.replace(upgrade.version, steps.OPERATOR_HELMRELEASE.key, status=FAILED)
+    upgrade.replace(upgrade.start, steps.OPERATOR_READY.key, status=PENDING)
+
+    results = upgrade.results()
+
+    assert results[upgrade.upgrade.id] is TaskResult.RUNNING
+    assert results[upgrade.start.id] is TaskResult.RUNNING
 
 
 @pytest.mark.parametrize(

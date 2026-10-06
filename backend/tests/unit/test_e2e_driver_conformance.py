@@ -507,3 +507,45 @@ def test_ui_step_rows_without_failures_have_no_errors_or_detail() -> None:
     ref = _step_ref_from_row(row, context="test")
 
     assert (ref.errors, ref.detail, ref.has_output) == ((), None, False)
+    assert ref.superseded_by is None
+
+
+def test_superseded_step_names_the_interrupting_task_on_both_entrypoints() -> None:
+    """``StepList`` publishes the interrupting task's id as ``data-superseded-by-task-id``."""
+    task_id = "0b0f8f6e-3c1a-4c55-9d43-3f1d1c1c2a10"
+    step = GetDeploymentTimelineDeploymentTimelineTaskSteps.model_validate(
+        {
+            "id": "7f6c1f3e-5d0b-4b8e-9a43-0c7c0b1d2e3f",
+            "key": "operator:ready",
+            "name": "Wait for the deployment to be ready",
+            "kind": "OPERATOR_PHASE",
+            "status": "SUPERSEDED",
+            "startedAt": None,
+            "endedAt": "2026-10-06T10:00:09Z",
+            "durationSeconds": None,
+            "attemptCount": 0,
+            "errors": [],
+            "error": None,
+            "detail": None,
+            "hasOutput": False,
+            "supersededBy": {"id": task_id, "type": "start_components"},
+            "startedTasks": [],
+        }
+    )
+    row = {
+        "stepId": "7f6c1f3e-5d0b-4b8e-9a43-0c7c0b1d2e3f",
+        "stepKey": "operator:ready",
+        "stepKind": "OPERATOR_PHASE",
+        "stepStatus": "SUPERSEDED",
+        "stepStartedAt": "",
+        "stepEndedAt": "2026-10-06T10:00:09Z",
+        "stepAttempts": "0",
+        "stepHasOutput": "false",
+        "supersededByTaskId": task_id,
+        "name": "Wait for the deployment to be ready",
+        "errors": [],
+        "detail": None,
+    }
+
+    assert _step_ref(step).superseded_by == task_id
+    assert _step_ref_from_row(row, context="test") == _step_ref(step)

@@ -251,7 +251,7 @@ One unit of work inside a **task**, a backup or a restore, recorded so users can
 _Avoid_: "substep", "TaskStep" (backups and restores are not **tasks**), "stage", "phase" (reserved for the **operator**'s phases), "event" (reserved for Kubernetes Events).
 
 **Task result**:
-The result of a **task** as users view it, derived from its **steps** on every read and never stored: `RUNNING` while any step is running or not started; `FAILED` when any step, or any task its hook started, has failed; `SUCCEEDED` when all steps have succeeded; `SUPERSEDED` when a task it did not start interrupted its operator phases. Distinct from `Task.status`, which follows only the Prefect flow run and which driver actions wait on. See [issue #2](https://github.com/opsmill/styrmin/issues/2).
+The result of a **task** as users view it, derived from its **steps** on every read and never stored: `RUNNING` while any step is running, or is not started and does not wait behind a failed step; `FAILED` when any step, or any task its hook started, has failed; `SUCCEEDED` when all steps have succeeded; `SUPERSEDED` when a task it did not start interrupted its operator phases. Distinct from `Task.status`, which follows only the Prefect flow run and which driver actions wait on. See [issue #2](https://github.com/opsmill/styrmin/issues/2).
 _Avoid_: "operation result" (ambiguous with **GraphQL operation**), "outcome" (used by `styrminctl deployments apply`), "task status" (that is `Task.status`).
 
 **Status reporter**:

@@ -94,10 +94,8 @@ async def test_deployment_timeline_has_entries(
         assert entry.created_on is not None, (
             f"Timeline entry missing created_on: {entry}"
         )
-        # TODO(T076): require a result on every task once T071/T074 expose
-        # Task.result to both drivers; until then the drivers return None.
-        assert entry.result is None or entry.result in VALID_TASK_RESULTS, (
-            f"Unexpected task result: {entry.result}"
+        assert entry.result in VALID_TASK_RESULTS, (
+            f"Task {entry.task_id} has no valid task result: {entry.result}"
         )
 
     # The initial deploy should have version 0.1.0
@@ -108,6 +106,8 @@ async def test_deployment_timeline_has_entries(
     assert len(creates) == 1, (
         f"Expected one create_instance task, got {[e.task_type for e in timeline]}"
     )
+    # US3: every step of the create succeeded and its hooks started no task.
+    assert creates[0].result == "SUCCEEDED", creates[0]
     steps = {step.key: step for step in creates[0].steps}
     keys = [step.key for step in creates[0].steps]
     missing = CREATE_STEP_KINDS.keys() - steps.keys()

@@ -150,11 +150,14 @@ family_ids   = ids of family
 family_steps = steps of every family member
                (a member with no steps counts by its status, as in the first rule)
 
-if any family step is pending or running:                          RUNNING
+if any family step is running, or pending in a member
+   that has no failed step:                                        RUNNING
 if any family step failed:                                         FAILED
 if any family step is superseded by a task not in family_ids:      SUPERSEDED
 otherwise:                                                         SUCCEEDED
 ```
+
+A pending step waits behind a failed step of its own task: the operator leaves the steps after a failed phase pending until it retries that phase, and the retry makes the failed step `running` again. So a pending step does not make a task with a failed step `RUNNING` (US3 acceptance scenario 1, SC-003).
 
 Each started task also has its own result, calculated the same way on its own family. A `stop_components` task interrupted by its sibling `upgrade_deployment_version` task is `SUPERSEDED` on its own entry, while the upgrade that started both counts that interruption as its own work.
 
