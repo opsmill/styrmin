@@ -228,6 +228,16 @@ declared by the Application Driver and materialised as a Kubernetes
 Kubernetes and posts `PodStatus` / `DeploymentStatus` snapshots back
 to the server. See [Status reporting](./status-reporting.md).
 
+**Step** — One unit of work inside a Task, a backup or a restore,
+recorded so users can view it: its name, status (`PENDING`, `RUNNING`,
+`SUCCEEDED`, `FAILED` or `SUPERSEDED`), start and end time, number of
+attempts, the error of each failed attempt, and the end of a failed
+command's output. One run of a Hook's Mode is one step (for example "Run
+the upgrade pre-hook"); each operator phase is one step (for example
+"Install or upgrade the HelmRelease"). See [Status
+reporting](./status-reporting.md#steps-from-status-reports) and
+[Lifecycle hooks and actions](./hooks-and-actions.md#steps-of-a-hook).
+
 **StyrminDeployment (CRD)** — Styrmin's primary Custom Resource
 Definition. Carries the embedded Context in `spec`; watched by the
 **operator**.
@@ -235,8 +245,21 @@ Definition. Carries the embedded Context in `spec`; watched by the
 ### T
 
 **Task (database record)** — A row tracking one asynchronous
-operation, with `status`, `type`, and the Prefect flow run id. Not to
-be confused with Prefect's in-process `task` primitive.
+operation, with `status`, `type` (for example `create_instance`,
+`update_instance`, `upgrade_instance`, `stop_components`,
+`start_components`, `run_job` or `delete_deployment`), and the Prefect
+flow run id. Its `status` follows only the Prefect flow run. Not to be
+confused with Prefect's in-process `task` primitive.
+
+**Task result** — The result of a Task as users view it, calculated
+from its Steps on every read and never stored. It covers the task and
+every task that its hook steps started, at any depth. The first rule
+that matches wins: `RUNNING` while a step of these tasks runs or has not
+started (a step that waits behind a failed step of its own task does not
+count); `FAILED` when a step of these tasks failed; `SUPERSEDED` when a
+task outside them interrupted the operator phases of one of them;
+`SUCCEEDED` otherwise. A task without steps takes its result from its
+`status`.
 
 **Tombstone / tombstoned deployment** — A Deployment row whose
 cluster-side workload has been torn down but whose record is retained

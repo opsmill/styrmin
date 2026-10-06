@@ -53,6 +53,8 @@ class StyrminModel(SQLModel):
 
 `ApplicationDriverVersion` references a single `HelmChart` (N:1) and owns its own `ComponentConfig` rows (1:N). The chart and repository have no direct link to `ComponentConfig`.
 
+Not drawn: each `Step` row belongs to exactly one `Task`, `Backup` or `Restore` (N:1), and a `Task` can point at the `ApplicationInstance` it rolls out and at the `Step` that started it. See [Step](#step).
+
 ### Infrastructure Models
 
 #### Cluster
@@ -255,7 +257,66 @@ class Task(StyrminModel, table=True):
     prefect_flow_run_id: UUID | None
 
     deployment_id: UUID
+    instance_id: UUID | None         # FK applicationinstance.id, ON DELETE SET NULL, indexed
+    started_by_step_id: UUID | None  # FK step.id, ON DELETE SET NULL, indexed
 ```
+
+- `status` follows only the Prefect flow run (through the `callback` mutation) and is what driver actions wait on. It is not the result users view; see "Task result" below.
+- `instance_id` is the instance the task rolls out. The `apply_state` service function sets it for every reconcile task, so operator reports, which carry the CR's `status.instanceId`, find their task. One instance belongs to one task. Tasks that roll out no instance (`run_job`, `delete_deployment`) and tasks created before this column existed have `NULL`.
+- `started_by_step_id` is the hook step whose driver action started the task through `stopComponents`, `startComponents` or `updateDeploymentVersion` (see [hooks-and-actions.md](hooks-and-actions.md#tasks-started-by-a-hook-step)). The foreign key is created with `use_alter=True`, because `step.task_id` points back at `task`.
+
+#### Step
+
+<!-- Extracted from specs/019-task-steps on 2026-10-06 -->
+
+One unit of work inside a task, a backup or a restore: a run of a hook mode, a resource write, an operator phase, a command, a restore stage, or the backup of one component. The step recorder (`services/steps/recorder.py`) is the only code that creates or changes rows. See [ADR-060](../../adr/0060-steps-and-derived-task-result.md).
+
+```python
+class Step(StyrminModel, table=True):
+    # Exactly one parent is set (check ck_step_one_parent); each FK is ON DELETE CASCADE.
+    task_id: UUID | None
+    backup_id: UUID | None
+    restore_id: UUID | None
+
+    key: str                          # Stable within the parent, e.g. "operator:helmrelease"
+    name: str                         # What users view, e.g. "Install or upgrade the HelmRelease"
+    kind: StepKind
+    status: StepStatus
+
+    started_at: datetime | None
+    ended_at: datetime | None
+    attempt_count: int = 0
+    errors: list[dict] | None         # JSON: [{"attempt", "message", "occurred_at"}], oldest first
+
+    detail: str | None                # FluxCD's current reason and message (HelmRelease step)
+    rolled_back_at: datetime | None   # Newest FluxCD rollback of the HelmRelease step
+    rollback_message: str | None
+
+    output: str | None                # TEXT: end of a failed command's output
+    output_truncated: bool = False    # server_default false
+
+    superseded_by_task_id: UUID | None  # FK task.id, ON DELETE SET NULL, indexed
+```
+
+- Three partial unique indexes, `uq_step_task_id_key`, `uq_step_backup_id_key` and `uq_step_restore_id_key`, make `(parent, key)` unique for each parent type. The recorder opens a step with `INSERT … ON CONFLICT DO NOTHING`, so opening the same step twice is harmless.
+- Deleting a task, backup or restore deletes its steps. Steps live as long as their parent; there is no separate retention.
+- `StepStatus` and `StepKind` are PostgreSQL enum types that store the upper-case member names (`PENDING`, `OPERATOR_PHASE`), like the other `SQLModelEnum` columns.
+- State rules: `succeeded` and `superseded` are final. `failed` is final except for `OPERATOR_PHASE` steps, which can run again or succeed with a new attempt. The recorder logs and ignores a forbidden transition, and never sets `ended_at` before `started_at`.
+- Reads order steps by `started_at` with nulls last, then `created_on`.
+- The `step` table, the two `task` columns and the enum types ship in the Alembic revision `e2f3a4b5c6d7` (`e2f3a4b5c6d7_add_steps.py`). The downgrade drops the `task` columns and their foreign keys first, then the table and the enum types.
+
+Step keys and names are defined in `domain/steps.py`; [orchestration-flows.md](orchestration-flows.md#remediation-flow-steps) and [backup-restore.md](backup-restore.md#backup-and-restore-steps) list them.
+
+#### Task result
+
+The task result (`RUNNING`, `FAILED`, `SUCCEEDED`, `SUPERSEDED`) is calculated from the steps on every read (`services/steps/results.py`) and never stored. It covers the task's family: the task and every task that its steps started, at any depth. The first rule that matches gives the result:
+
+1. `RUNNING` when a step of the family is running, or is pending and its own task has no failed step.
+2. `FAILED` when a step of the family failed.
+3. `SUPERSEDED` when a step of the family was superseded by a task outside the family.
+4. `SUCCEEDED` otherwise.
+
+A family member without steps counts by its `Task.status`: `pending` and `running` give `RUNNING`, `success` gives `SUCCEEDED`, `failed` gives `FAILED`. See [ADR-060](../../adr/0060-steps-and-derived-task-result.md).
 
 #### Utility
 
@@ -312,7 +373,7 @@ class DeploymentStatus(StyrminModel, table=True):
 - `phase`, `conditions`, `managed_resource_counts` are pass-through views of the CRD — the server does not interpret them.
 - The wire payload from the agent carries two additional fields that are **not** persisted on this row but drive other state:
   - `displayState` — the operator's user-facing state (`Deploying`, `Running`, `Restoring`, `Error`, `Deleting`, `Deleted`). Mapped to a `DeploymentState` and written to the parent `Deployment.status` (sole source of truth for that column). On the terminal `Deleted` transition, the status reporter atomically stamps `Deployment.deleted_at = now()` — that is the ONLY code path that writes `deleted_at`.
-  - `instanceId` — the `spec.instanceId` from the CRD at poll time. Used as a stale-instance guard: if it does not match `deployment.active_application_instance_id`, the `Deployment.status` update is skipped so a superseded instance cannot overwrite the status of the new one rolling out.
+  - `instanceId` — the CR's `status.instanceId` at poll time: the instance whose spec the operator last handled. The status reporter falls back to `spec.instanceId` for a CR that no operator handler has touched since the upgrade that added the field. Used as a stale-instance guard: if it does not match `deployment.active_application_instance_id`, the `Deployment.status` update is skipped so a superseded instance cannot overwrite the status of the new one rolling out. The operator phase history (`services/steps/operator_history.py`) also uses it to find the task whose operator-phase steps the report moves (`Task.instance_id`).
 
 ### Status Enums
 
@@ -340,7 +401,7 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 class TaskType(str, Enum):
-    NOOP = "noop"                                # Reconciliation produced no remediation
+    NOOP = "noop"                                # Default of apply_state; reconcile tasks created before spec 019
     CREATE_INSTANCE = "create_instance"
     DELETE_INSTANCE = "delete_instance"
     UPDATE_INSTANCE = "update_instance"
@@ -356,7 +417,25 @@ class PodPhase(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     UNKNOWN = "unknown"  # Used when the observed phase doesn't match a known value
+
+class StepStatus(str, Enum):
+    PENDING = "pending"        # Expected, not started
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"  # A later task interrupted it
+
+class StepKind(str, Enum):
+    PLAN = "plan"
+    HOOK = "hook"
+    RESOURCE_WRITE = "resource_write"
+    OPERATOR_PHASE = "operator_phase"  # The only kind the operator phase history changes
+    COMMAND = "command"
+    RESTORE = "restore"
+    BACKUP_COMPONENT = "backup_component"
 ```
+
+`TaskResult` (`RUNNING`, `FAILED`, `SUCCEEDED`, `SUPERSEDED`) and `StepEvent` (`STARTED`, `SUCCEEDED`, `FAILED`, `OUTPUT`) exist only in `domain/models.py` and the GraphQL schema; neither is stored.
 
 <!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
 
@@ -455,10 +534,16 @@ class Task(BaseModel):
     message: str | None
     prefect_flow_run_id: UUID | None
     deployment_id: UUID
+    instance_id: UUID | None
+    started_by_step_id: UUID | None
 
     @classmethod
     def create(cls, type: TaskType, deployment_id: UUID, ...) -> Task: ...
 ```
+
+### Step (Domain)
+
+`Step` mirrors the table, with the three parent ids grouped in a frozen `StepParent` (a validator requires exactly one) and `errors` as a list of `StepError(attempt, message, occurred_at)`. `StepParent.of_task`, `of_backup` and `of_restore` build a parent from one id.
 
 ## Context Models
 
@@ -668,6 +753,10 @@ Both FQDN fields default to `None` when `ResolvedConfig.fqdn_suffix` is unset. W
 |------|---------|
 | [db/models.py](backend/styrmin_backend/db/models.py) | Database ORM models |
 | [domain/models.py](backend/styrmin_backend/domain/models.py) | Business logic domain models |
+| [domain/steps.py](backend/styrmin_backend/domain/steps.py) | Step keys, names and kinds; output limits (200 lines, 64 KiB) |
+| [repository/steps.py](backend/styrmin_backend/repository/steps.py) | Step data access (`insert_if_absent`, ordered lists, open operator-phase steps of a deployment) |
+| [services/steps/results.py](backend/styrmin_backend/services/steps/results.py) | Task result calculation |
+| [db/migrations/versions/e2f3a4b5c6d7_add_steps.py](backend/styrmin_backend/db/migrations/versions/e2f3a4b5c6d7_add_steps.py) | Alembic revision for `step`, `task.instance_id` and `task.started_by_step_id` |
 | [context/models/contexts.py](backend/styrmin_backend/context/models/contexts.py) | Deployment context models |
 | [context/models/config.py](backend/styrmin_backend/context/models/config.py) | Configuration models |
 | [context/models/helm.py](backend/styrmin_backend/context/models/helm.py) | Helm-related models |

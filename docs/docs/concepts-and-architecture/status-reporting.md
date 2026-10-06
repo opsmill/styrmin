@@ -77,13 +77,81 @@ sends the full current state every cycle, and the server prunes rows
 that no longer exist in the cluster. So if you delete a deployment, the
 pods stop reporting and disappear from the UI within a few seconds.
 
+### Which instance a report is about
+
+Each `StyrminDeployment` report carries an `instanceId`: the application
+instance whose spec the operator last handled. The reporter reads it from
+the CR's `status.instanceId`, which the operator writes when it starts
+working on a new spec. A CR that no operator handler has touched since
+Styrmin was upgraded has no `status.instanceId`, so the reporter sends
+`spec.instanceId` instead.
+
+Right after a flow writes a new spec, the CR still shows the phase of the
+previous rollout. Because `status.instanceId` changes only when the
+operator acts on the new spec, the server never reads the previous
+rollout's `Ready` phase as the result of the new instance.
+
+### Steps from status reports
+
+The operator's work appears on the deployment page as the steps of the
+task that rolled out the instance. For each report, the server finds that
+task by the reported `instanceId` and moves its four operator-phase steps
+forward:
+
+- `CreatingPrerequisites`: "Create network policies and secrets" runs.
+- `CreatingHelmRelease`: "Install or upgrade the HelmRelease" runs.
+- `CreatingServices`: "Create services and middlewares" runs.
+- `Ready`: every step succeeds, including "Wait for the deployment to be
+  ready".
+
+A report can skip phases between two polls; the steps in between then
+succeed. A step ends at the time its CR condition became `True` when the
+report carries that condition, and at the time of the report otherwise.
+
+Reports in the `Deleting` and `Deleted` phases go to the newest delete
+task of the deployment instead: its step "Remove the deployment's
+resources and namespace" runs during `Deleting` and succeeds at
+`Deleted`.
+
+When a report shows the phase `Failed` or the display state `Error`, the
+first unfinished step fails with the CR's message. For the HelmRelease
+step and the ready step, the error also names up to five pods that are not
+ready and their container reasons, such as `ImagePullBackOff` or
+`CrashLoopBackOff`, from the stored pod statuses. When a later report
+shows the operator working on the step again, the step runs again as a new
+attempt; when a later phase is reported, the failed step succeeds.
+
+The reporter does not report internal deployments, such as the
+per-environment ingress controller, so their tasks have no operator-phase
+steps.
+
+`reportDeploymentStatuses`, the mutation the reporter calls, accepts calls
+without credentials
+([issue #396](https://github.com/opsmill/styrmin/issues/396) tracks
+adding authentication). Anyone who can reach the server's API can
+therefore change a deployment's state and its operator-phase steps.
+
+### When the agent stops reporting
+
+While an operator-phase step is running, the server checks when the
+agent last reported the deployment. When that was more than 60
+seconds ago (or, without any report, when the step started more than 60
+seconds ago), the step shows "No report from the agent since" followed
+by that time. The notice goes away with the next report. It tells a
+stopped agent apart from a phase that is slow.
+
+The deployment page reloads its data every 10 seconds. With the 5-second
+report interval, a change of an operator-phase step appears on the page
+within about 15 seconds.
+
 ### What this means in practice
 
 - The UI is _eventually consistent_ on a ~5-second cadence. A pod that
   crashed half a second ago will show as healthy until the next poll.
-- If the agent is unhealthy, status updates stop. The UI will keep
-  showing the last known state. There's no "is the agent alive" signal
-  beyond fresh status updates.
+- If the agent is unhealthy, status updates stop. The UI keeps showing
+  the last known state, and a running operator-phase step shows "No
+  report from the agent since" and the time of the last report after 60
+  seconds without one.
 - The same data is available through the GraphQL API — `podStatuses`
   and `deploymentStatuses` fields — so external dashboards can consume
   it too.

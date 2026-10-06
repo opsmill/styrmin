@@ -104,6 +104,46 @@ transaction so a restore either lands whole or not at all. Your
 application may log a few connection errors during that window; it should
 reconnect on its own once the restore finishes.
 
+### Following a backup or a restore
+
+On the deployment page, each backup and each restore row lists its steps
+under "Steps", with their status, times and errors.
+
+A restore has three steps, in this order:
+
+1. "Delete the namespace": Styrmin deletes the target namespace and waits
+   until it is gone, so the restore starts from a clean namespace.
+2. "Run the Velero restore": Styrmin creates the Velero `Restore` object
+   and waits for Velero to finish.
+3. "Run the recovery": Styrmin prepares the restored `StyrminDeployment`
+   so that the operator takes it over again. This step runs only after
+   Velero completed the restore.
+
+A backup has one step per component, "Back up" followed by the component
+name. Velero backs up the whole namespace at once and creates one
+`PodVolumeBackup` object for each pod volume it backs up. Styrmin maps
+each of these objects to a component through the pod's
+`styrmin/component` label: a component's step starts with its first pod
+volume, ends with its last one, and fails when one of them failed. A
+component without pod volumes gets the start time, end time and result of
+the whole backup.
+
+A restore of a backup that Velero no longer has, for example because it
+was removed from the storage location, fails within seconds: Velero
+rejects the restore in its `FailedValidation` phase, and "Run the Velero
+restore" fails with an error that starts with "Velero restore failed
+validation:" followed by Velero's validation errors.
+
+Backups and restores that ran before Styrmin recorded steps show "No
+steps recorded for this backup." or "No steps recorded for this
+restore." When the server cannot create the token that the backup or
+restore flow uses to record its steps, the backup or restore runs without
+steps.
+
+Known issue, under review: when a restore ends in Velero's
+`FailedValidation` phase, the restore's own error message is empty. The
+"Run the Velero restore" step carries Velero's validation errors.
+
 ### Why one BSL per environment?
 
 A Backup Storage Location is attached to an **environment**, not to a

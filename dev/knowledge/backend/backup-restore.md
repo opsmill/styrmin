@@ -23,6 +23,7 @@ GraphQL Mutation (createBackup / createRestore)
   USER Flow (execute_velero_backup / execute_velero_restore)
         |   - Creates Velero CRDs in K8s
         |   - Polls for completion
+        |   - Records steps through recordStep (action token)
         v
   Prefect Variable (cross-worker result channel)
         |
@@ -289,13 +290,46 @@ Results are passed between workers via **Prefect Variables** (a cross-worker com
 
 **Backup:**
 
-1. `execute_backup_workflow` (INTERNAL) — marks backup IN_PROGRESS, resolves the retention TTL and records it (see [Retention TTL](#retention-ttl-servicesbackupttlpy)), builds Velero CRD, dispatches to USER flow, updates status and `expires_at` from result
-2. `execute_velero_backup_flow` (USER) — creates Velero Backup CRD, polls completion, stores result (phase + `status.expiration`) in Prefect Variable
+1. `execute_backup_workflow` (INTERNAL) — marks backup IN_PROGRESS, resolves the retention TTL and records it (see [Retention TTL](#retention-ttl-servicesbackupttlpy)), builds Velero CRD, creates an action token, dispatches to USER flow with the token and `STYRMIN_BACKUP_ID`, updates status and `expires_at` from result
+2. `execute_velero_backup_flow` (USER) — creates Velero Backup CRD, polls completion, records one step per component, stores result (phase + `status.expiration`) in Prefect Variable
 
 **Restore:**
 
-1. `execute_restore_workflow` (INTERNAL) — marks restore IN_PROGRESS, builds Velero CRD, dispatches to USER flow, transitions `deployment.status` between `RESTORING` and `RUNNING` / `FAILED` based on the result.
-2. `execute_velero_restore_flow` (USER) — deletes target namespace first, creates Velero Restore CRD, polls completion, then runs the post-velero recovery (see [Restore Lifecycle](#restore-lifecycle) below), stores result in Prefect Variable.
+1. `execute_restore_workflow` (INTERNAL) — marks restore IN_PROGRESS, builds Velero CRD, creates an action token, dispatches to USER flow with the token and `STYRMIN_RESTORE_ID`, transitions `deployment.status` between `RESTORING` and `RUNNING` / `FAILED` based on the result.
+2. `execute_velero_restore_flow` (USER) — deletes target namespace first, creates Velero Restore CRD, polls completion, then runs the post-velero recovery (see [Restore Lifecycle](#restore-lifecycle) below), records the three restore steps, stores result in Prefect Variable.
+
+### Backup and restore steps
+
+<!-- Extracted from specs/019-task-steps on 2026-10-06 -->
+
+Backups and restores record steps, like tasks, so users can view each stage and why it failed on the deployment page (`Backup.steps`, `Restore.steps`). The work runs in the USER flows, which have no database access, so they record steps through the `recordStep` mutation with the flow step reporter (`agent/steps/reporter.py`). See [ADR-060](../../adr/0060-steps-and-derived-task-result.md) and [orchestration-flows.md](orchestration-flows.md#steps-recorded-by-the-flows).
+
+**Action token.** `execute_backup_workflow` and `execute_restore_workflow` create one action token for the built-in `styrmin-actions` user per backup or restore (`_step_token`, which wraps `action_api_token()`, [ADR-059](../../adr/0059-driver-action-api-tokens.md)) and delete the session when the USER flow returns. They pass it with `action_job_variables(token, backup_id=...)` or `action_job_variables(token, restore_id=...)`, which put `STYRMIN_TOKEN` and `STYRMIN_BACKUP_ID` or `STYRMIN_RESTORE_ID` in the Job's `env`. When the token cannot be created, the INTERNAL flow logs a warning and the backup or restore runs without steps. A step write that fails never fails the backup or restore.
+
+**Restore steps.** `execute_velero_restore_flow` records, in order:
+
+| Key | Name | Recorded |
+|---|---|---|
+| `restore:namespace` | Delete the namespace | Around the namespace deletion and the wait for it to disappear; fails with "Namespace <name> was not deleted within 600s" or the Kubernetes error. |
+| `restore:velero` | Run the Velero restore | Started before the Velero `Restore` is created. Succeeds on phase `Completed`. Fails when creating or polling raises, and on any other final phase with `failure_message("restore", status)`: "Velero restore failed validation: <validationErrors joined by "; ">", else Velero's `failureReason`, else "Velero restore phase: <phase> (<n> errors)". |
+| `restore:recovery` | Run the recovery | Only after a `Completed` Velero restore, around `mark_restoring` and `reapply_and_finalize` (or `reapply_with_counterpart_identity`). Fails with "Restore reapply failed: <error>". |
+
+A step is created when it starts, so a restore that fails while deleting the namespace has only `restore:namespace`.
+
+**Backup steps.** Velero backs up the whole namespace and creates one `PodVolumeBackup` per backed-up pod volume. `execute_velero_backup_flow` receives the backup's components (the keys of `Backup.component_statuses`) and records one `backup:component:<name>` step ("Back up <name>", kind `BACKUP_COMPONENT`) per component (`agent/steps/backup_components.py`):
+
+- On each poll of `poll_backup_status` (`on_poll` callback), it lists the backup's `PodVolumeBackup` objects (`VeleroClient.list_pod_volume_backups`, label `velero.io/backup-name`, with Velero's cut-and-hash rule for names longer than 63 characters) and maps each pod to its component through the pod's `styrmin/component` label.
+- A component's step starts at the earliest `startTimestamp` of its items and ends, once every item has ended (`Completed`, `Failed` or `Canceled`), at the latest `completionTimestamp`. It fails when an item failed, with "Pod volume <pod>/<volume>: <message>" for each failed item, joined by "; ".
+- When the Velero backup ends, `finish` ends every component that has not ended with the backup's result and its start and completion times. This covers components without pod volumes. A backup that did not complete gives those components `failure_message("backup", status)`.
+- Failures to list or record are logged and never fail the backup. A write that was not recorded is sent again on the next poll.
+
+**Crashes.** When the USER flow fails or crashes, the INTERNAL flow fails every pending or running step of the backup or restore with the error (`fail_open_steps` in `services/steps/internal_flows.py`) before it marks the record `FAILED`.
+
+**Velero's `FailedValidation` phase.** `poll_backup_status` and `poll_restore_status` return on every phase in `TERMINAL_PHASES`: `Completed`, `PartiallyFailed`, `Failed` and `FailedValidation`. Before spec 019, `FailedValidation` was not final, so a restore of a Velero backup that no longer exists was polled until the 7,200-second timeout. It now fails within one poll, and `restore:velero` fails with Velero's validation errors.
+
+**Known issue (under review).** For a restore that ends in `FailedValidation`, the `Restore` record's own error message is empty: the USER flow passes Velero's `failureReason` (empty for that phase) through the Prefect Variable, and the INTERNAL flow uses it as the error. The `restore:velero` step carries the cause.
+
+**RBAC.** The agent's role grants `get` and `list` on `podvolumebackups` in `velero.io` (`helm/agent/templates/roles.yaml`), for the backup component steps.
 
 ## Restore Lifecycle
 
@@ -942,6 +976,8 @@ Two related notes:
 
 ### Queries
 
+`Backup.steps` and `Restore.steps` (`[Step!]!`, by start time, pending steps last) return the steps described in [Backup and restore steps](#backup-and-restore-steps); they are empty for backups and restores that ran before steps were recorded. List queries load the steps of all their rows in one query.
+
 ```graphql
 backup(backupId: UUID!): Backup
 backups(instanceId: UUID!, status: BackupStatus): [Backup!]!
@@ -1070,6 +1106,8 @@ for the stamp to move and fails fast on a `Failed` entry in
 | [workflows/templates/clone.py](backend/styrmin_backend/workflows/templates/clone.py) | `EXECUTE_ENVIRONMENT_CLONE` — polls the capture, creates the environment and counterparts, dispatches the cross-target restores |
 | [operator/restore_recovery.py](backend/styrmin_backend/operator/restore_recovery.py) | Post-restore CR recovery, incl. `reapply_with_counterpart_identity` for cross-target restores |
 | [agent/service/kubernetes/resources/builders/backup.py](backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup.py) | Velero CRD builders |
+| [agent/service/kubernetes/velero/client.py](backend/styrmin_backend/agent/service/kubernetes/velero/client.py) | `VeleroClient` polls (`TERMINAL_PHASES`, `on_poll`), `list_pod_volume_backups`, `failure_message` |
+| [agent/steps/backup_components.py](backend/styrmin_backend/agent/steps/backup_components.py) | One `backup:component:<name>` step per component from `PodVolumeBackup` objects |
 | [agent/service/kubernetes/resources/builders/backup_annotations.py](backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup_annotations.py) | Volume annotation patches |
 | [api/definitions/backup/environment_backup.py](backend/styrmin_backend/api/definitions/backup/environment_backup.py) | `EnvironmentBackup` strawberry types incl. the derived-status and constituents resolvers |
 | [api/definitions/backup/environment_restore.py](backend/styrmin_backend/api/definitions/backup/environment_restore.py) | `EnvironmentRestore` strawberry types incl. skipped constituents |

@@ -58,7 +58,9 @@ the cluster and works through a small set of phases:
    built-in controllers (and FluxCD, for the HelmRelease) take it from
    there.
 3. **Wait** — let everything come up. Mark the `StyrminDeployment` as
-   ready when the application's pods are healthy.
+   ready when FluxCD reports the new release ready, or as failed when
+   FluxCD gives up (see
+   [When a rollout is ready or failed](#when-a-rollout-is-ready-or-failed)).
 4. **Re-check periodically** — every so often, look at the cluster
    again. If something drifted from what was declared (a pod was
    deleted, a ConfigMap was edited), put it back.
@@ -119,12 +121,81 @@ For day-to-day use you only need to know that the `HelmRelease` is what
 actually puts the application's resources into the cluster, and that
 it's created and updated by Styrmin in response to your deployment.
 
+### When a rollout is ready or failed
+
+Each time the operator starts a rollout, for a new `StyrminDeployment` or
+a changed spec, it:
+
+- sets the `HelmReleaseReady` condition to `Unknown` with the reason
+  `Progressing`, so that the `True` value of the previous rollout does not
+  count for the new one;
+- removes the `HelmReleaseRemediated` condition of the previous rollout;
+- records the start of the rollout in `status.rolloutStartedAt`;
+- writes the application instance it is rolling out to
+  `status.instanceId`, also when the handler fails. The status reporter
+  sends this value to the server (see
+  [Status reporting](./status-reporting.md#which-instance-a-report-is-about)).
+
+While the phase is `CreatingHelmRelease`, the operator reads the
+HelmRelease once per timer run (every 60 seconds by default). It uses only
+FluxCD's conditions for the HelmRelease's current generation: a condition
+counts when its `observedGeneration`, or the HelmRelease's
+`status.lastAttemptedGeneration` when the condition has none, equals the
+HelmRelease's `metadata.generation`. A `Ready=True` left from the previous
+release therefore does not make the new release ready.
+
+- When FluxCD reports the current generation `Ready=True`, the operator
+  sets `HelmReleaseReady` to `True` with the reason `FluxReady`, creates
+  the services and moves the CR to `Ready`.
+- Until then, `HelmReleaseReady` copies the status and transition time of
+  FluxCD's `Ready` condition. When `Ready` is `False`, the reason and
+  message come from FluxCD's `Released=False` condition when there is one,
+  which names the failed install or upgrade, and from `Ready` otherwise.
+- When FluxCD's `Remediated` condition is `True` for the current
+  generation, FluxCD has rolled back or uninstalled the failed release.
+  The operator copies that condition into `HelmReleaseRemediated`. This is
+  not a final failure: Styrmin's HelmReleases allow FluxCD 3 retries for
+  an install or an upgrade, and a later attempt can succeed.
+- When FluxCD's `Stalled` condition is `True` for the current generation,
+  FluxCD has used all its retries. The operator sets the phase `Failed`
+  and the display state `Error`. The CR's message is the message of
+  FluxCD's `Stalled` condition followed by the failure message, in the
+  form `<Stalled message>: <failure message>`. The `Ready` condition
+  becomes `False` with the reason of FluxCD's `Stalled` condition, for
+  example `RetriesExceeded`.
+
+The operator writes a condition only when its content changed. An internal
+deployment, such as the per-environment ingress controller, also counts as
+ready as soon as one of its pods is ready, even when FluxCD reports
+`Stalled`.
+
+The readiness timeout is the safety net when FluxCD never reports
+`Stalled`. When a rollout has not reached `Ready` or `Failed` within
+`STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` seconds (300 by default), the
+operator sets the display state `Error` with the message "Deployment did
+not reach Ready within" followed by the timeout and the phase. The phase
+does not change, so the rollout can still become `Ready` later. The
+timeout counts from `status.rolloutStartedAt`, or from the CR's creation
+time when that field is missing. When the operator restarts and resumes a
+rollout, it keeps the recorded start, so a restart does not extend the
+timeout. When kopf runs the create or update handler again after a
+temporary error, the handler records a new start.
+
+Known issue, under review: when a change only adds post-render
+overrides, such as an [image override](./image-overrides.md) or
+environment variables, and FluxCD rolls it back, FluxCD can report the
+release `Ready` again. The operator then reports the deployment `Ready`,
+and the failed HelmRelease step later shows as succeeded, although the
+override was not applied.
+
 ### What this means in practice
 
 - A `StyrminDeployment` is what Styrmin's operator acts on. If you're
   debugging Styrmin, that's the object to look at.
 - A `HelmRelease` is what FluxCD acts on. If a chart fails to install,
-  that's where the error message will be.
+  FluxCD's reason is copied into the `StyrminDeployment`'s
+  `HelmReleaseReady` condition, and the deployment page shows it on the
+  step "Install or upgrade the HelmRelease".
 - "Drift correction" — the operator periodically re-checking the
   cluster — is the reason you can't just delete a pod to make Styrmin
   forget about it. It'll come back.
