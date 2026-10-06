@@ -309,14 +309,14 @@ Step keys and names are defined in `domain/steps.py`; [orchestration-flows.md](o
 
 #### Task result
 
-The task result (`RUNNING`, `FAILED`, `SUCCEEDED`, `SUPERSEDED`) is calculated from the steps on every read (`services/steps/results.py`) and never stored. It covers the task's family: the task and every task that its steps started, at any depth. The first rule that matches gives the result:
+The task result (`RUNNING`, `FAILED`, `SUCCEEDED`, `SUPERSEDED`) is calculated from the steps and `Task.status` on every read (`services/steps/results.py`) and never stored. It covers the task's family: the task and every task that its steps started, at any depth. The first rule that matches gives the result:
 
-1. `RUNNING` when a step of the family is running, or is pending and its own task has no failed step.
-2. `FAILED` when a step of the family failed.
+1. `RUNNING` when the `Task.status` of a family member is `pending` or `running`, or a step of the family is running, or is pending and its own task has no failed step.
+2. `FAILED` when the `Task.status` of a family member is `failed`, or a step of the family failed.
 3. `SUPERSEDED` when a step of the family was superseded by a task outside the family.
 4. `SUCCEEDED` otherwise.
 
-A family member without steps counts by its `Task.status`: `pending` and `running` give `RUNNING`, `success` gives `SUCCEEDED`, `failed` gives `FAILED`. See [ADR-060](../../adr/0060-steps-and-derived-task-result.md).
+`Task.status` counts in addition to the steps, because a flow can fail, or still run, between two steps (for example, `apply_state` fails after "Plan the changes" succeeded and before the remediation flow records a step). A member whose flow succeeded (`success`) counts by its steps only, so the operator-phase steps keep a task `RUNNING` after its flow ended. A family member without steps counts by its `Task.status` only. See [ADR-060](../../adr/0060-steps-and-derived-task-result.md).
 
 #### Utility
 

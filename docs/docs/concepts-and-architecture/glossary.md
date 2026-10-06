@@ -252,14 +252,14 @@ flow run id. Its `status` follows only the Prefect flow run. Not to be
 confused with Prefect's in-process `task` primitive.
 
 **Task result** — The result of a Task as users view it, calculated
-from its Steps on every read and never stored. It covers the task and
+from its Steps and its `status` on every read and never stored. It covers the task and
 every task that its hook steps started, at any depth. The first rule
-that matches wins: `RUNNING` while a step of these tasks runs or has not
-started (a step that waits behind a failed step of its own task does not
-count); `FAILED` when a step of these tasks failed; `SUPERSEDED` when a
-task outside them interrupted the operator phases of one of them;
-`SUCCEEDED` otherwise. A task without steps takes its result from its
-`status`.
+that matches wins: `RUNNING` while the flow of one of these tasks runs,
+or a step of these tasks runs or has not started (a step that waits
+behind a failed step of its own task does not count); `FAILED` when the
+flow or a step of one of these tasks failed; `SUPERSEDED` when a task
+outside them interrupted the operator phases of one of them; `SUCCEEDED`
+otherwise. A task without steps takes its result from its `status`.
 
 **Tombstone / tombstoned deployment** — A Deployment row whose
 cluster-side workload has been torn down but whose record is retained

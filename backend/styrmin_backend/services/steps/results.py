@@ -62,16 +62,15 @@ def task_family(
 def _signals(
     member: Task, family_ids: set[UUID], steps_by_task: StepsByTask
 ) -> set[TaskResult]:
-    """The results that one family member's steps call for.
+    """The results that one family member's ``Task.status`` and steps call for.
 
-    A member without steps calls for the result of its ``Task.status``.
+    The status counts even when every step succeeded: the flow can fail, or
+    still run, between two steps.
     """
+    signals = {_RESULT_OF_STATUS[member.status]}
     member_steps = steps_by_task.get(member.id, ())
-    if not member_steps:
-        return {_RESULT_OF_STATUS[member.status]}
     # Pending steps wait behind a failed step until it runs again (SC-003).
     blocked = any(step.status is StepStatus.FAILED for step in member_steps)
-    signals: set[TaskResult] = set()
     for step in member_steps:
         if step.status is StepStatus.RUNNING or (
             step.status is StepStatus.PENDING and not blocked

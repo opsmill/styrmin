@@ -1561,7 +1561,8 @@ async def test_restore_of_removed_velero_backup_fails_velero_step(
 
     Spec 019 US6 acceptance scenario 1 and SC-005: the restore lists its steps
     in order with durations, and the Velero step is failed with Velero's
-    validation error. The restore deletes the deployment's namespace before
+    validation error, which is also the restore's error message. The restore
+    deletes the deployment's namespace before
     Velero rejects it, so the test uses its own environment and deployment;
     deleting the environment removes them even though their CR is gone.
     """
@@ -1641,6 +1642,12 @@ async def test_restore_of_removed_velero_backup_fails_velero_step(
         assert [(error.attempt, error.message) for error in velero_step.errors] == [
             (1, velero_step.error)
         ], velero_step.errors
+        # The restore record carries the same error as the step.
+        assert restore.error_message, restore
+        assert restore.error_message.startswith(VELERO_VALIDATION_ERROR_PREFIX), (
+            restore.error_message
+        )
+        assert restore.error_message == velero_step.error, restore
     finally:
         with suppress(Exception):
             await client.environments.delete(environment_id=environment.id)

@@ -327,7 +327,7 @@ A step is created when it starts, so a restore that fails while deleting the nam
 
 **Velero's `FailedValidation` phase.** `poll_backup_status` and `poll_restore_status` return on every phase in `TERMINAL_PHASES`: `Completed`, `PartiallyFailed`, `Failed` and `FailedValidation`. Before spec 019, `FailedValidation` was not final, so a restore of a Velero backup that no longer exists was polled until the 7,200-second timeout. It now fails within one poll, and `restore:velero` fails with Velero's validation errors.
 
-**Known issue (under review).** For a restore that ends in `FailedValidation`, the `Restore` record's own error message is empty: the USER flow passes Velero's `failureReason` (empty for that phase) through the Prefect Variable, and the INTERNAL flow uses it as the error. The `restore:velero` step carries the cause.
+**Error message of the record.** When Velero does not complete a backup or restore, the USER flow passes Velero's `failureReason` through the Prefect Variable. When Velero gives none, as for `FailedValidation` and `PartiallyFailed`, it passes the text of the failed step instead (`failure_message`, for example "Velero restore failed validation: …"). The INTERNAL flow stores it as the `Backup` or `Restore` record's error message, and falls back to "Velero backup phase: <phase>" or "Velero restore phase: <phase>" when the Variable holds an empty reason.
 
 **RBAC.** The agent's role grants `get` and `list` on `podvolumebackups` in `velero.io` (`helm/agent/templates/roles.yaml`), for the backup component steps.
 

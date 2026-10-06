@@ -358,9 +358,9 @@ type and deployment of each task.
 
 1. A "Task" table with the columns `id`, `type`, `status`, `result`,
    `message` and `deploymentId`. `status` follows only the Prefect flow
-   run; `result` is the task result, calculated from the task's steps and
-   from the tasks its hook steps started (`RUNNING`, `FAILED`,
-   `SUCCEEDED` or `SUPERSEDED`).
+   run; `result` is the task result, calculated from the steps and the
+   `status` of the task and of the tasks its hook steps started
+   (`RUNNING`, `FAILED`, `SUCCEEDED` or `SUPERSEDED`).
 2. A "Steps" table with one row per step, in start order with pending
    steps last: `step` (the step's name), `status`, `duration` (`running`
    while the step runs), `attempts` and `error`. The `error` column holds

@@ -157,13 +157,20 @@ one backup for the whole namespace and creates one `PodVolumeBackup` per backed-
 21. **The task result is calculated on every read** (`services/steps/results.py`), like the status
     of an environment backup (ADR-055). It covers the task's family: the task and the tasks its
     hook steps started, at any depth. The rules apply in this order:
-    - `RUNNING` when a step of the family runs, or is pending and its task has no failed step;
-    - `FAILED` when a step of the family failed;
+    - `RUNNING` when the `Task.status` of a family member is `pending` or `running`, or a step of
+      the family runs, or is pending and its task has no failed step;
+    - `FAILED` when the `Task.status` of a family member is `failed`, or a step of the family
+      failed;
     - `SUPERSEDED` when a step of the family was superseded by a task outside the family;
     - `SUCCEEDED` otherwise.
 
-    A family member without steps, such as a task from before this change, counts by its
-    `Task.status`. `Task.status` keeps its meaning, because driver actions wait on it.
+    `Task.status` counts in addition to the steps, because a flow can fail, or still run, between
+    two steps: `apply_state` can fail after "Plan the changes" succeeded and before the remediation
+    flow records a step, and Prefect starts the remediation flow some seconds after the plan step
+    ended. A member whose flow succeeded counts by its steps only, so the operator-phase steps keep
+    the task `RUNNING` after its flow ended. A family member without steps, such as a task from
+    before this change, counts by its `Task.status` only. `Task.status` keeps its meaning, because
+    driver actions wait on it.
 22. **Why the family.** The tasks that one upgrade hook starts interrupt the rollouts before them:
     in the simple-app upgrade, the `stop_components` task writes the CR while the operator still
     rolls out the upgrade, and the `start_components` task writes it again while the operator
@@ -277,9 +284,10 @@ one backup for the whole namespace and creates one `PodVolumeBackup` per backed-
   HelmRelease failure can reach `apply --wait` as a wait timeout before the step fails.
 - Tasks, backups and restores from before this change have no steps; a task without steps gets
   its result from `Task.status`.
+- The `callback` mutation rejects Prefect's `Crashed` and `Cancelled` states as unknown, and a
+  flow run that the zombie automation marks `Crashed` sends no callback. The `Task.status` of such
+  a task stays `running`, so its task result stays `RUNNING`.
 - Known issue, under review: after FluxCD rolls back a change that only adds post-render overrides
   (image or environment variable overrides), FluxCD can report the release Ready again. The
   operator then reports `Ready`, and the failed HelmRelease step later shows `succeeded` although
   the override was not applied.
-- Known issue, under review: for a restore that ends in `FailedValidation`, the restore's own error
-  message is empty. The "Run the Velero restore" step holds Velero's validation errors.

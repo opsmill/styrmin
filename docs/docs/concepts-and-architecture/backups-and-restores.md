@@ -132,17 +132,15 @@ A restore of a backup that Velero no longer has, for example because it
 was removed from the storage location, fails within seconds: Velero
 rejects the restore in its `FailedValidation` phase, and "Run the Velero
 restore" fails with an error that starts with "Velero restore failed
-validation:" followed by Velero's validation errors.
+validation:" followed by Velero's validation errors. The restore's error
+message is the same. When Velero ends a backup or a restore without a
+failure reason, its error message is the error of the failed step.
 
 Backups and restores that ran before Styrmin recorded steps show "No
 steps recorded for this backup." or "No steps recorded for this
 restore." When the server cannot create the token that the backup or
 restore flow uses to record its steps, the backup or restore runs without
 steps.
-
-Known issue, under review: when a restore ends in Velero's
-`FailedValidation` phase, the restore's own error message is empty. The
-"Run the Velero restore" step carries Velero's validation errors.
 
 ### Why one BSL per environment?
 

@@ -142,20 +142,19 @@ Rules the recorder enforces:
 Inputs: the task, its steps, the tasks started by its hook steps (transitively, with their steps), and the task's `status`. See [research.md](research.md) D8 for why the calculation uses the family.
 
 ```text
-if the task has no steps:
-    RUNNING if status in (pending, running); SUCCEEDED if success; FAILED if failed
-
 family       = {task} ∪ every task whose started_by_step_id is a step of a family member (visited set)
 family_ids   = ids of family
 family_steps = steps of every family member
-               (a member with no steps counts by its status, as in the first rule)
 
-if any family step is running, or pending in a member
+if any family member's status is pending or running,
+   or any family step is running, or pending in a member
    that has no failed step:                                        RUNNING
-if any family step failed:                                         FAILED
+if any family member's status is failed, or any family step failed: FAILED
 if any family step is superseded by a task not in family_ids:      SUPERSEDED
 otherwise:                                                         SUCCEEDED
 ```
+
+The `status` of each family member counts in addition to its steps, because the flow can fail, or still run, between two steps. The `apply_state` flow can fail after the plan step succeeded and before the remediation flow records a step, for example when it cannot create the action token. Prefect also starts the remediation flow some seconds after the plan step ended. A member whose flow succeeded counts by its steps only, so the operator-phase steps keep a task `RUNNING` after its flow ended. A task without steps, such as a task from before this feature, counts by its `status` only.
 
 A pending step waits behind a failed step of its own task: the operator leaves the steps after a failed phase pending until it retries that phase, and the retry makes the failed step `running` again. So a pending step does not make a task with a failed step `RUNNING` (US3 acceptance scenario 1, SC-003).
 
@@ -165,7 +164,7 @@ Each started task also has its own result, calculated the same way on its own fa
 
 | Event | Effect |
 |---|---|
-| `callback` sets a task `FAILED` (flow failed, crashed or was cancelled) | Pending and running steps of a flow kind on that task fail with the state message |
+| `callback` sets a task `FAILED` (flow failed; a `Crashed` or `Cancelled` state is rejected as unknown and leaves `status` unchanged) | Pending and running steps of a flow kind on that task fail with the state message |
 | `apply_state` catches a failed or crashed remediation flow | Same, before it raises |
 | The INTERNAL backup or restore flow sees its USER flow fail or crash | Pending and running steps of that backup or restore fail with the state message |
 | A `resource:styrmindeployment` or `resource:delete-request` step succeeds | Open `operator_phase` steps of the deployment's other tasks become superseded by this task |

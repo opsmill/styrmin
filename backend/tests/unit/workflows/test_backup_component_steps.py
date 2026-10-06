@@ -503,6 +503,46 @@ async def test_velero_backup_flow_records_a_step_per_component(
     kubernetes.api_client.close.assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    ("final", "error"),
+    [
+        pytest.param(
+            _backup("FailedValidation", validationErrors=["no storage location"]),
+            "Velero backup failed validation: no storage location",
+            id="failed-validation",
+        ),
+        pytest.param(
+            _backup("PartiallyFailed", errors=2),
+            "Velero backup phase: PartiallyFailed (2 errors)",
+            id="partially-failed",
+        ),
+        pytest.param(
+            _backup("Failed", failureReason="BackupStorageLocation unavailable"),
+            "BackupStorageLocation unavailable",
+            id="failed",
+        ),
+    ],
+)
+async def test_velero_backup_flow_stores_the_step_error_as_the_failure_reason(
+    api: FakeStepApi, final: dict[str, Any], error: str
+) -> None:
+    velero = FakeVelero([(final, [])])
+
+    async with _kubernetes(velero) as kubernetes:
+        await execute_velero_backup_flow.fn(
+            crd_body={"kind": "Backup"},
+            velero_backup_name="styrmin-backup-1",
+            velero_namespace="styrmin",
+            timeout=60,
+            components=["config"],
+        )
+
+    assert api.record("FAILED", "backup:component:config")["error"] == error
+    # The INTERNAL flow stores it as the backup's error message.
+    stored = kubernetes.variable.set.await_args.kwargs["value"]["status"]
+    assert stored["failureReason"] == error
+
+
 async def test_velero_backup_flow_without_components_records_no_steps(
     api: FakeStepApi, events: list[Event]
 ) -> None:
@@ -531,6 +571,7 @@ async def _internal_backup_flow(
     state_type: StateType = StateType.COMPLETED,
     state_message: str = "",
     token_error: Exception | None = None,
+    velero_result: dict[str, Any] | None = None,
 ) -> AsyncIterator[SimpleNamespace]:
     backup = MagicMock()
     backup.name = "styrmin-backup-1"
@@ -571,7 +612,8 @@ async def _internal_backup_flow(
 
     variable = MagicMock()
     variable.get = AsyncMock(
-        return_value={"status": {"phase": "Completed", "expiration": None}}
+        return_value=velero_result
+        or {"status": {"phase": "Completed", "expiration": None}}
     )
     variable.unset = AsyncMock()
     built = MagicMock()
@@ -646,6 +688,34 @@ async def test_backup_workflow_fails_open_steps_when_the_user_flow_dies(
     flow.fail_open.assert_awaited_once_with(StepParent.of_backup(backup_id), message)
     # The backup is still marked FAILED with the same message.
     assert flow.status.await_args.kwargs["error_message"] == message
+
+
+@pytest.mark.parametrize(
+    ("failure_reason", "message"),
+    [
+        pytest.param(
+            "Velero backup phase: PartiallyFailed (2 errors)",
+            "Velero backup phase: PartiallyFailed (2 errors)",
+            id="reason",
+        ),
+        # A result without a reason still gives the backup an error message.
+        pytest.param("", "Velero backup phase: PartiallyFailed", id="empty"),
+    ],
+)
+async def test_failed_velero_backup_gives_the_backup_an_error_message(
+    events: list[Event], failure_reason: str, message: str
+) -> None:
+    velero_result = {
+        "status": {"phase": "PartiallyFailed", "failureReason": failure_reason}
+    }
+
+    async with _internal_backup_flow(events, velero_result=velero_result) as flow:
+        await execute_backup_workflow.fn(
+            backup_id=str(uuid4()), deployment_id=str(uuid4())
+        )
+
+    kwargs = flow.status.await_args.kwargs
+    assert (kwargs["status"].name, kwargs["error_message"]) == ("FAILED", message)
 
 
 async def test_backup_runs_without_steps_when_no_token_can_be_created(

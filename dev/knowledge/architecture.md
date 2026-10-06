@@ -312,5 +312,6 @@ amend the constitution — and update this document accordingly.
   (`CREATE_INSTANCE`, `UPDATE_INSTANCE`, `UPGRADE_INSTANCE`, …) and its
   Prefect flow run. `Task.status` follows only the flow run.
 - **Task result** — the result users view for a task (`RUNNING`, `FAILED`,
-  `SUCCEEDED`, `SUPERSEDED`). Calculated on every read from the steps of
-  the task and of the tasks its hook steps started, and never stored.
+  `SUCCEEDED`, `SUPERSEDED`). Calculated on every read from the steps and
+  `Task.status` of the task and of the tasks its hook steps started, and
+  never stored.
