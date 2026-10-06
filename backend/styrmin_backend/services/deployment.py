@@ -76,6 +76,7 @@ from styrmin_backend.services.steps.recorder import (
     add_pending_steps,
     open_step,
     succeed_step,
+    supersede_operator_steps,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
@@ -1655,10 +1656,14 @@ async def delete_deployment(
 async def _record_delete_steps(
     task: Task, requested_at: datetime, patched_at: datetime, uow: UnitOfWork
 ) -> None:
-    """Record the CR patch as done; the operator's teardown waits for its first report."""
+    """Record the CR patch as done; the operator's teardown waits for its first report.
+
+    The request interrupts the open operator-phase steps of the deployment's other tasks.
+    """
     parent = StepParent.of_task(task.id)
     request = await open_step(parent, *steps.DELETE_REQUEST, requested_at, uow=uow)
     await succeed_step(request, patched_at, uow=uow)
+    await supersede_operator_steps(task.deployment_id, task.id, patched_at, uow=uow)
     await add_pending_steps(parent, [steps.OPERATOR_TEARDOWN], patched_at, uow=uow)
 
 

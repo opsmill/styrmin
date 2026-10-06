@@ -148,6 +148,7 @@ if the task has no steps:
 family       = {task} ∪ every task whose started_by_step_id is a step of a family member (visited set)
 family_ids   = ids of family
 family_steps = steps of every family member
+               (a member with no steps counts by its status, as in the first rule)
 
 if any family step is pending or running:                          RUNNING
 if any family step failed:                                         FAILED
