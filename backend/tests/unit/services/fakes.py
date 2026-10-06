@@ -1,4 +1,5 @@
 import contextlib
+from collections.abc import Collection
 from typing import TypeVar
 from uuid import UUID
 
@@ -593,6 +594,11 @@ class FakeDeploymentStatusRepository(
             if m.deployment_id == deployment_id:
                 return m
         return None
+
+    async def find_by_deployments(
+        self, deployment_ids: Collection[UUID]
+    ) -> list[DeploymentStatus]:
+        return [m for m in self.models if m.deployment_id in deployment_ids]
 
     async def upsert(self, crd_status: DeploymentStatus) -> DeploymentStatus:
         for i, m in enumerate(self.models):

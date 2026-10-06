@@ -174,12 +174,12 @@ Run each E2E node with `--pdb` (in a non-interactive shell: `sleep infinity | uv
 
 **Independent Test**: During an upgrade, each step change is visible within 15 seconds of being recorded; with no agent report for over 60 seconds, the running operator step shows "No report from the agent since <time>".
 
-- [ ] T078 [P] [US4] Write `backend/tests/unit/steps/test_reads.py` for `no_report_since`: running operator step with an old report, recent report, no report (step start used), non-operator and finished steps
-- [ ] T079 [US4] Resolve `Step.noReportSince` from the read model (deployment `DeploymentStatus.last_polled_at`, loaded once per timeline) and from a query for single reads in `backend/styrmin_backend/api/definitions/step/model.py` and `backend/styrmin_backend/services/deployment_timeline.py`
-- [ ] T080 [US4] Add the `noReportSince` case to `backend/tests/functional/graphql/test_task_steps_propagation.py` (seeded `last_polled_at` 2 minutes ago → field set; 10 seconds ago → null)
-- [ ] T081 [US4] Show "No report from the agent since <time>" in `frontend/src/components/deployment/StepList.tsx`; start `RUNNING` and `FAILED` entries expanded in `DeploymentTimeline.tsx`; keep `refetchInterval: 10_000` in `DeploymentDetailPage.tsx`
-- [ ] T082 [P] [US4] Write `frontend/src/__tests__/deployment-detail/StepListLive.test.tsx`: no-report notice, default expansion, elapsed time updates on re-render
-- [ ] T083 [US4] In `test_upgrade_simple_app` (`backend/tests/e2e/test_deploy_app.py`, API variant), poll the timeline every 2 seconds after submitting the upgrade and assert that each step is first observed at most 15 seconds after its recorded `startedAt` (allow 2 seconds of clock difference); run it and record evidence in `specs/019-task-steps/e2e-evidence.md`
+- [X] T078 [P] [US4] Write `backend/tests/unit/steps/test_reads.py` for `no_report_since`: running operator step with an old report, recent report, no report (step start used), non-operator and finished steps
+- [X] T079 [US4] Resolve `Step.noReportSince` from the read model (deployment `DeploymentStatus.last_polled_at`, loaded once per timeline) and from a query for single reads in `backend/styrmin_backend/api/definitions/step/model.py` and `backend/styrmin_backend/services/deployment_timeline.py`
+- [X] T080 [US4] Add the `noReportSince` case to `backend/tests/functional/graphql/test_task_steps_propagation.py` (seeded `last_polled_at` 2 minutes ago → field set; 10 seconds ago → null)
+- [X] T081 [US4] Show "No report from the agent since <time>" in `frontend/src/components/deployment/StepList.tsx`; start `RUNNING` and `FAILED` entries expanded in `DeploymentTimeline.tsx`; keep `refetchInterval: 10_000` in `DeploymentDetailPage.tsx`
+- [X] T082 [P] [US4] Write `frontend/src/__tests__/deployment-detail/StepListLive.test.tsx`: no-report notice, default expansion, elapsed time updates on re-render
+- [X] T083 [US4] In `test_upgrade_simple_app` (`backend/tests/e2e/test_deploy_app.py`, API variant), poll the timeline every 2 seconds after submitting the upgrade and assert that each step is first observed at most 15 seconds after its recorded `startedAt` (allow 2 seconds of clock difference); run it and record evidence in `specs/019-task-steps/e2e-evidence.md`
 
 **Checkpoint**: Users can follow a running task and tell a lost agent from a slow phase.
 

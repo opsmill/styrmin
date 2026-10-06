@@ -27,6 +27,12 @@ import { ChevronRight, Clock, History } from "lucide-react";
 // Task.status values after which no new step starts.
 const FINISHED_TASK_STATUSES = new Set(["success", "failed"]);
 
+// Entries with these results start expanded, so a running task can be followed.
+const EXPANDED_RESULTS: ReadonlySet<TaskResult> = new Set([
+  "RUNNING",
+  "FAILED",
+]);
+
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) return "N/A";
   return new Date(value).toLocaleString();
@@ -70,6 +76,17 @@ interface DeploymentTimelineProps {
 export function DeploymentTimeline({ entries }: DeploymentTimelineProps) {
   // Kept here, by task id, so a link can expand another entry.
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // An entry keeps its first state after a refresh, so it does not collapse when it finishes.
+  const unseen = entries.filter((entry) => !(entry.task.id in expanded));
+  if (unseen.length > 0) {
+    setExpanded((current) => {
+      const next = { ...current };
+      for (const { task } of unseen) {
+        next[task.id] ??= EXPANDED_RESULTS.has(task.result);
+      }
+      return next;
+    });
+  }
   const [linkTarget, setLinkTarget] = useState<{
     taskId: string;
     seq: number;

@@ -1,9 +1,10 @@
-"""Step reads against a real database (spec 019, T013)."""
+"""Step reads against a real database (spec 019, T013 and T078)."""
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from pytest_mock import MockerFixture
 
 from styrmin_backend.db.models import DeploymentStatus
 from styrmin_backend.domain.models import (
@@ -21,6 +22,7 @@ from styrmin_backend.services.steps.reads import (
     get_step,
     list_steps,
     no_report_since,
+    no_report_since_by_step,
 )
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 from tests.unit.steps.conftest import Parents
@@ -100,14 +102,18 @@ async def test_get_started_tasks_lists_the_tasks_a_step_started(
 # no_report_since --------------------------------------------------------
 
 
-def _operator_step(status: StepStatus = StepStatus.RUNNING) -> Step:
+def _operator_step(
+    status: StepStatus = StepStatus.RUNNING,
+    task_id: UUID | None = None,
+    started_at: datetime | None = T0,
+) -> Step:
     return Step.create(
-        StepParent.of_task(uuid4()),
+        StepParent.of_task(task_id or uuid4()),
         "operator:helmrelease",
         "Install or upgrade the HelmRelease",
         StepKind.OPERATOR_PHASE,
         status,
-        T0,
+        started_at,
     )
 
 
@@ -128,11 +134,35 @@ def test_no_report_since_uses_the_step_start_without_a_report() -> None:
     assert no_report_since(_operator_step(), None, T0 + timedelta(minutes=2)) == T0
 
 
+def test_no_report_since_is_none_for_a_recent_step_start_without_a_report() -> None:
+    assert no_report_since(_operator_step(), None, T0 + timedelta(seconds=30)) is None
+
+
+def test_no_report_since_shows_an_old_report_on_a_step_that_just_started() -> None:
+    # The agent stopped reporting before the step started.
+    last_report = T0 - timedelta(minutes=5)
+
+    assert (
+        no_report_since(_operator_step(), last_report, T0 + timedelta(seconds=1))
+        == last_report
+    )
+
+
+def test_no_report_since_reads_a_stored_time_without_a_zone_as_utc() -> None:
+    naive_report = datetime(2026, 10, 6, 12, 0)
+
+    assert no_report_since(
+        _operator_step(), naive_report, T0 + timedelta(minutes=2)
+    ) == naive_report.replace(tzinfo=UTC)
+
+
 @pytest.mark.parametrize(
     "step",
     [
         _operator_step(StepStatus.SUCCEEDED),
-        _operator_step(StepStatus.PENDING),
+        _operator_step(StepStatus.FAILED),
+        _operator_step(StepStatus.SUPERSEDED),
+        _operator_step(StepStatus.PENDING, started_at=None),
         Step.create(
             StepParent.of_task(uuid4()),
             "hook",
@@ -142,7 +172,7 @@ def test_no_report_since_uses_the_step_start_without_a_report() -> None:
             T0,
         ),
     ],
-    ids=["finished", "pending", "flow-step"],
+    ids=["succeeded", "failed", "superseded", "pending", "flow-step"],
 )
 def test_no_report_since_is_none_for_other_steps(step: Step) -> None:
     assert no_report_since(step, T0, T0 + timedelta(hours=1)) is None
@@ -172,3 +202,92 @@ async def test_get_no_report_since_reads_the_deployment_last_report(
         step, uow, now=last_report + timedelta(minutes=2)
     ) == (last_report)
     assert await get_no_report_since(step, uow, now=last_report) is None
+
+
+async def test_get_no_report_since_uses_the_step_start_without_a_report(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    step = await _seed(
+        uow,
+        StepParent.of_task(parents.task.id),
+        "operator:prerequisites",
+        T0,
+        kind=StepKind.OPERATOR_PHASE,
+    )
+
+    assert await get_no_report_since(step, uow, now=T0 + timedelta(minutes=2)) == T0
+    assert await get_no_report_since(step, uow, now=T0 + timedelta(seconds=30)) is None
+
+
+# no_report_since_by_step (the timeline read model) ----------------------
+
+
+async def test_no_report_since_by_step_reads_the_last_reports_in_one_query(
+    uow: SqlModelUnitOfWork, parents: Parents, mocker: MockerFixture
+) -> None:
+    now = T0 + timedelta(minutes=10)
+    last_report = now - timedelta(minutes=2)
+    uow.session.add(
+        DeploymentStatus(
+            deployment_id=parents.deployment_id,
+            phase="CreatingHelmRelease",
+            last_polled_at=last_report,
+        )
+    )
+    await uow.session.flush()
+    unreported = Task.create(type=TaskType.UPGRADE_INSTANCE, deployment_id=uuid4())
+    tasks = {task.id: task for task in (parents.task, parents.other_task, unreported)}
+    reported = [
+        _operator_step(task_id=parents.task.id),
+        _operator_step(task_id=parents.other_task.id),
+    ]
+    never_reported = _operator_step(task_id=unreported.id)
+    others = [
+        _operator_step(StepStatus.SUCCEEDED, task_id=parents.task.id),
+        Step.create(
+            StepParent.of_task(parents.task.id),
+            "hook",
+            "Run the hook",
+            StepKind.HOOK,
+            StepStatus.RUNNING,
+            T0,
+        ),
+    ]
+    spy = mocker.spy(uow.deployment_statuses, "find_by_deployments")
+
+    notices = await no_report_since_by_step(
+        [*reported, never_reported, *others], tasks, uow, now
+    )
+
+    assert notices == {
+        reported[0].id: last_report,
+        reported[1].id: last_report,
+        never_reported.id: T0,
+    }
+    spy.assert_awaited_once()
+
+
+async def test_no_report_since_by_step_leaves_out_steps_with_recent_reports(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    now = T0 + timedelta(minutes=10)
+    uow.session.add(
+        DeploymentStatus(
+            deployment_id=parents.deployment_id,
+            phase="CreatingHelmRelease",
+            last_polled_at=now - timedelta(seconds=10),
+        )
+    )
+    await uow.session.flush()
+    step = _operator_step(task_id=parents.task.id)
+
+    assert (
+        await no_report_since_by_step([step], {parents.task.id: parents.task}, uow, now)
+        == {}
+    )
+
+
+async def test_find_by_deployments_reads_nothing_for_no_deployments(
+    uow: SqlModelUnitOfWork,
+) -> None:
+    assert await uow.deployment_statuses.find_by_deployments(set()) == []

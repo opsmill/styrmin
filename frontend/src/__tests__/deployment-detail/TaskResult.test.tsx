@@ -221,7 +221,10 @@ describe("DeploymentTimeline task results", () => {
       "data-started-by-task-type",
       "upgrade_instance",
     );
+    // A FAILED entry starts expanded; collapse it so the link must expand it.
     const upgrade = entryById(UPGRADE_ID);
+    expect(upgrade).toHaveAttribute("data-expanded", "true");
+    await user.click(within(upgrade).getByTestId("timeline-entry-trigger"));
     expect(upgrade).toHaveAttribute("data-expanded", "false");
 
     await user.click(
@@ -283,7 +286,8 @@ describe("DeploymentTimeline task results", () => {
       "Failed",
     );
 
-    await user.click(within(upgrade).getByTestId("timeline-entry-trigger"));
+    // FAILED entries start expanded, so the hook step's links are visible.
+    expect(upgrade).toHaveAttribute("data-expanded", "true");
     await user.click(
       within(items[2]).getByRole("link", { name: "Start Components" }),
     );
@@ -457,5 +461,24 @@ describe("DeploymentDetailPage Overview", () => {
       ["task-new", "FAILED", "Failed"],
       ["task-old", "SUPERSEDED", "Superseded"],
     ]);
+  });
+
+  it("refreshes the timeline every 10 seconds (US4, FR-005)", async () => {
+    useGetDeploymentQueryMock.mockReturnValue({
+      ...noopQueryResult,
+      data: { deployment: makeDeployment() },
+      dataUpdatedAt: Date.now(),
+    });
+    useGetDeploymentTimelineQueryMock.mockReturnValue({
+      ...noopQueryResult,
+      data: { deploymentTimeline: [] },
+    });
+
+    await renderPage();
+
+    expect(useGetDeploymentTimelineQueryMock).toHaveBeenLastCalledWith(
+      { deploymentId: "dep-1" },
+      { refetchInterval: 10_000 },
+    );
   });
 });

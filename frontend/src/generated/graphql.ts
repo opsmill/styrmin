@@ -1821,7 +1821,7 @@ export type GetDeploymentTimelineQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentTimelineQuery = { __typename?: 'Query', deploymentTimeline: Array<{ __typename?: 'DeploymentTimelineEntry', applicationVersion?: string | null, task: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, createdOn?: any | null, updatedOn?: any | null, result: TaskResult, startedByStepId?: string | null, startedBy?: { __typename?: 'Task', id: string, type: string } | null, startedTasks: Array<{ __typename?: 'Task', id: string, type: string, result: TaskResult }>, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, detail?: string | null, rolledBackAt?: any | null, rollbackMessage?: string | null, hasOutput: boolean, outputTruncated: boolean, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }>, supersededBy?: { __typename?: 'Task', id: string, type: string } | null, startedTasks: Array<{ __typename?: 'Task', id: string, type: string, result: TaskResult }> }> }, contextDiff?: { __typename?: 'ContextDiff', changes: Array<{ __typename?: 'ContextChange', path: string, action: string, oldValue?: Record<string, unknown> | null, newValue?: Record<string, unknown> | null }> } | null }> };
+export type GetDeploymentTimelineQuery = { __typename?: 'Query', deploymentTimeline: Array<{ __typename?: 'DeploymentTimelineEntry', applicationVersion?: string | null, task: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, createdOn?: any | null, updatedOn?: any | null, result: TaskResult, startedByStepId?: string | null, startedBy?: { __typename?: 'Task', id: string, type: string } | null, startedTasks: Array<{ __typename?: 'Task', id: string, type: string, result: TaskResult }>, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, detail?: string | null, rolledBackAt?: any | null, rollbackMessage?: string | null, hasOutput: boolean, outputTruncated: boolean, noReportSince?: any | null, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }>, supersededBy?: { __typename?: 'Task', id: string, type: string } | null, startedTasks: Array<{ __typename?: 'Task', id: string, type: string, result: TaskResult }> }> }, contextDiff?: { __typename?: 'ContextDiff', changes: Array<{ __typename?: 'ContextChange', path: string, action: string, oldValue?: Record<string, unknown> | null, newValue?: Record<string, unknown> | null }> } | null }> };
 
 export type GetDriverQueryVariables = Exact<{
   applicationDriverId: Scalars['UUID']['input'];
@@ -2819,6 +2819,7 @@ export const GetDeploymentTimelineDocument = `
           type
           result
         }
+        noReportSince
       }
     }
     applicationVersion

@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 from uuid import UUID
 
-from sqlmodel import select
+from sqlmodel import col, select
 
 from styrmin_backend.db.models import DeploymentStatus
 from styrmin_backend.repository.base import BaseRepository
@@ -14,6 +15,13 @@ class DeploymentStatusRepository(BaseRepository[DeploymentStatus], ABC):
     @abstractmethod
     async def find_by_deployment(self, deployment_id: UUID) -> DeploymentStatus | None:
         """Get the status snapshot for a deployment."""
+        raise NotImplementedError("Method not implemented yet.")
+
+    @abstractmethod
+    async def find_by_deployments(
+        self, deployment_ids: Collection[UUID]
+    ) -> list[DeploymentStatus]:
+        """Get the status snapshots of several deployments in one query."""
         raise NotImplementedError("Method not implemented yet.")
 
     @abstractmethod
@@ -36,6 +44,18 @@ class SQLModelDeploymentStatusRepository(
         )
         result = await self.session.exec(statement)
         return result.first()
+
+    async def find_by_deployments(
+        self, deployment_ids: Collection[UUID]
+    ) -> list[DeploymentStatus]:
+        """Get the status snapshots of several deployments in one query."""
+        if not deployment_ids:
+            return []
+        statement = select(self.model_class).where(
+            col(self.model_class.deployment_id).in_(deployment_ids)
+        )
+        result = await self.session.exec(statement)
+        return list(result.all())
 
     async def upsert(self, status: DeploymentStatus) -> DeploymentStatus:
         """Upsert a status snapshot by deployment_id."""

@@ -53,6 +53,7 @@ query GetDeploymentTimelineReadModel($deploymentId: UUID!) {
                     type
                     result
                 }
+                noReportSince
                 taskId
                 backupId
                 restoreId
