@@ -377,7 +377,7 @@ async def families(session: AsyncSession) -> Families:
     seed = _Seeder(session, deployment.id)
     succeeded = StepStatus.SUCCEEDED
 
-    # Single tasks: the steps decide, whatever Task.status says.
+    # Single tasks: the steps decide, and a running or failed Task.status also counts.
     await seed.task(
         "running", TaskType.UPDATE_INSTANCE, "RUNNING", status=TaskStatus.RUNNING
     )
@@ -389,6 +389,13 @@ async def families(session: AsyncSession) -> Families:
     await seed.task(
         "no-steps", TaskType.UPDATE_INSTANCE, "FAILED", status=TaskStatus.FAILED
     )
+    # The flow failed, or still runs, after its only recorded step succeeded.
+    for name, status, expected in (
+        ("flow-failed", TaskStatus.FAILED, "FAILED"),
+        ("flow-running", TaskStatus.RUNNING, "RUNNING"),
+    ):
+        await seed.task(name, TaskType.UPDATE_INSTANCE, expected, status=status)
+        await seed.step(name, "plan", succeeded, kind=StepKind.PLAN)
 
     # Started tasks that interrupt each other: the upgrade counts it as its own work.
     await seed.task("upgrade", TaskType.UPGRADE_INSTANCE, "SUCCEEDED")

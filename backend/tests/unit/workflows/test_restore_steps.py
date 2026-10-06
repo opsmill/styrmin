@@ -238,10 +238,24 @@ async def test_a_failed_velero_restore_fails_the_velero_step_with_veleros_error(
     # The existing failure handling is unchanged: the CR is marked failed.
     cluster.recovery.mark_failed.assert_awaited_once()
     cluster.recovery.mark_restoring.assert_not_awaited()
-    assert (
-        _stored_result(cluster.variable)["status"]["phase"]
-        == (restore["status"]["phase"])
-    )
+    assert _stored_result(cluster.variable)["status"] == {
+        "phase": restore["status"]["phase"],
+        # The INTERNAL flow stores it as the restore's error message.
+        "failureReason": error,
+    }
+
+
+async def test_a_completed_velero_restore_stores_no_failure_reason(
+    api: FakeStepApi,
+) -> None:
+    del api
+    async with _user_flow() as cluster:
+        await _restore()
+
+    assert _stored_result(cluster.variable)["status"] == {
+        "phase": "Completed",
+        "failureReason": "",
+    }
 
 
 async def test_a_velero_restore_that_cannot_be_polled_fails_the_velero_step(
@@ -289,6 +303,7 @@ async def _internal_restore_flow(
     state_type: StateType = StateType.COMPLETED,
     state_message: str = "",
     token_error: Exception | None = None,
+    velero_result: dict[str, Any] | None = None,
 ) -> AsyncIterator[SimpleNamespace]:
     backup = MagicMock()
     backup.name = "styrmin-backup-1"
@@ -325,7 +340,8 @@ async def _internal_restore_flow(
 
     variable = MagicMock()
     variable.get = AsyncMock(
-        return_value={"status": {"phase": "Completed"}, "recovery": {"recovered": True}}
+        return_value=velero_result
+        or {"status": {"phase": "Completed"}, "recovery": {"recovered": True}}
     )
     variable.unset = AsyncMock()
     built = MagicMock()
@@ -407,6 +423,33 @@ async def test_restore_workflow_fails_open_steps_when_the_user_flow_dies(
     flow.fail_open.assert_awaited_once_with(StepParent.of_restore(restore_id), message)
     # The restore is still marked FAILED with the same message.
     assert flow.status.await_args.kwargs["error_message"] == message
+
+
+@pytest.mark.parametrize(
+    ("failure_reason", "message"),
+    [
+        pytest.param(
+            "Velero restore failed validation: backup not found",
+            "Velero restore failed validation: backup not found",
+            id="reason",
+        ),
+        # A result without a reason still gives the restore an error message.
+        pytest.param("", "Velero restore phase: FailedValidation", id="empty"),
+    ],
+)
+async def test_failed_velero_restore_gives_the_restore_an_error_message(
+    events: list[Event], failure_reason: str, message: str
+) -> None:
+    velero_result = {
+        "status": {"phase": "FailedValidation", "failureReason": failure_reason},
+        "recovery": {"recovered": False, "error": None},
+    }
+
+    async with _internal_restore_flow(events, velero_result=velero_result) as flow:
+        await _run_restore_workflow(uuid4())
+
+    kwargs = flow.status.await_args.kwargs
+    assert (kwargs["status"].name, kwargs["error_message"]) == ("FAILED", message)
 
 
 async def test_restore_runs_without_steps_when_no_token_can_be_created(

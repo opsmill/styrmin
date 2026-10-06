@@ -86,6 +86,13 @@ async def _step_token() -> AsyncIterator[str | None]:
         yield token
 
 
+def _failure_reason(resource: str, status: dict[str, Any]) -> str:
+    """Velero's failure reason, else the error of the failed step; empty once Velero completed."""
+    if status.get("phase") == "Completed":
+        return ""
+    return status.get("failureReason") or failure_message(resource, status)
+
+
 # ---------------------------------------------------------------------------
 # Shared task (pure Python, no K8s access needed)
 # ---------------------------------------------------------------------------
@@ -194,7 +201,7 @@ async def execute_velero_backup_flow(
             value={
                 "status": {
                     "phase": status.get("phase", ""),
-                    "failureReason": status.get("failureReason", ""),
+                    "failureReason": _failure_reason("backup", status),
                     "backupItemOperationsCompleted": status.get(
                         "backupItemOperationsCompleted"
                     ),
@@ -408,7 +415,7 @@ async def execute_velero_restore_flow(
             value={
                 "status": {
                     "phase": velero_phase,
-                    "failureReason": velero_status.get("failureReason", ""),
+                    "failureReason": _failure_reason("restore", velero_status),
                 },
                 "recovery": recovery_status,
             },
@@ -697,8 +704,8 @@ async def execute_backup_workflow(
                     )
                 logger.info(f"Backup {backup_uuid} completed successfully")
             else:
-                error_msg = status.get(
-                    "failureReason", f"Velero backup phase: {velero_phase}"
+                error_msg = status.get("failureReason") or (
+                    f"Velero backup phase: {velero_phase}"
                 )
                 await update_backup_status(
                     backup_id=backup_uuid,
@@ -962,8 +969,8 @@ async def execute_restore_workflow(
                         or "Velero completed but post-restore reapply failed"
                     )
                 else:
-                    error_msg = status.get(
-                        "failureReason", f"Velero restore phase: {velero_phase}"
+                    error_msg = status.get("failureReason") or (
+                        f"Velero restore phase: {velero_phase}"
                     )
                 await update_restore_status(
                     restore_id=restore_uuid,

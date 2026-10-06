@@ -490,7 +490,7 @@ type Task {
 }
 ```
 
-`type` and `status` are exposed as `String!` (not GraphQL enums), but they always carry one of the database enum values — see "Status strings" below. `status` follows only the Prefect flow run; `result` is what users view, calculated from the steps of the task and of the tasks its hook steps started, at any depth (`services/steps/results.py`; rules in [data-models.md](data-models.md#task-result) and [ADR-060](../../adr/0060-steps-and-derived-task-result.md)).
+`type` and `status` are exposed as `String!` (not GraphQL enums), but they always carry one of the database enum values — see "Status strings" below. `status` follows only the Prefect flow run; `result` is what users view, calculated from the steps and `status` of the task and of the tasks its hook steps started, at any depth (`services/steps/results.py`; rules in [data-models.md](data-models.md#task-result) and [ADR-060](../../adr/0060-steps-and-derived-task-result.md)).
 
 ### Step
 

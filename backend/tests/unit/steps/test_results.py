@@ -165,6 +165,65 @@ def test_task_without_steps_falls_back_to_its_status(
     assert _result(_task(status=status), []) is expected
 
 
+def test_flow_that_failed_after_its_last_step_fails_the_task() -> None:
+    # ``action_api_token`` or ``remediation.apply`` can raise after the plan step
+    # succeeded, before the remediation flow opens a step.
+    task = _task(status=TaskStatus.FAILED)
+
+    assert _result(task, [_step(task, SUCCEEDED, steps.PLAN)]) is TaskResult.FAILED
+
+
+@pytest.mark.parametrize("status", [TaskStatus.PENDING, TaskStatus.RUNNING])
+def test_running_flow_between_two_steps_keeps_the_task_running(
+    status: TaskStatus,
+) -> None:
+    # Prefect schedules the remediation flow seconds after the plan step ended.
+    task = _task(status=status)
+
+    assert _result(task, [_step(task, SUCCEEDED, steps.PLAN)]) is TaskResult.RUNNING
+
+
+@pytest.mark.parametrize(
+    ("status", "step_statuses", "expected"),
+    [
+        (TaskStatus.RUNNING, [SUCCEEDED, FAILED], TaskResult.RUNNING),
+        (TaskStatus.FAILED, [SUCCEEDED, RUNNING], TaskResult.RUNNING),
+        (TaskStatus.FAILED, [FAILED, PENDING], TaskResult.FAILED),
+        (TaskStatus.FAILED, [SUCCEEDED, SUPERSEDED], TaskResult.FAILED),
+        (TaskStatus.SUCCESS, [SUCCEEDED, RUNNING], TaskResult.RUNNING),
+    ],
+    ids=[
+        "running-flow-before-failed-step",
+        "running-step-before-failed-flow",
+        "failed-flow-and-pending-behind-failed-step",
+        "failed-flow-before-superseded-step",
+        "finished-flow-with-running-operator-step",
+    ],
+)
+def test_task_status_and_steps_follow_the_rule_order(
+    status: TaskStatus, step_statuses: list[StepStatus], expected: TaskResult
+) -> None:
+    task = _task(status=status)
+    outside = _task()
+    task_steps = [
+        _step(task, step, superseded_by=outside if step is SUPERSEDED else None)
+        for step in step_statuses
+    ]
+
+    assert _result(task, task_steps) is expected
+
+
+def test_delete_task_runs_until_the_operator_ends_the_teardown() -> None:
+    # ``delete_deployment`` creates the task with ``Task.status`` success.
+    task = _task(TaskType.DELETE_DEPLOYMENT, status=TaskStatus.SUCCESS)
+    request = _step(task, SUCCEEDED, steps.DELETE_REQUEST)
+
+    teardown = _step(task, PENDING, steps.OPERATOR_TEARDOWN)
+    assert _result(task, [request, teardown]) is TaskResult.RUNNING
+    teardown = _step(task, SUCCEEDED, steps.OPERATOR_TEARDOWN)
+    assert _result(task, [request, teardown]) is TaskResult.SUCCEEDED
+
+
 def test_step_superseded_by_a_removed_task_counts_as_outside() -> None:
     # ``superseded_by_task_id`` is set to null when the superseding task is deleted.
     task = _task()
@@ -221,6 +280,14 @@ class Upgrade:
             for step in self.steps
         ]
 
+    def set_status(self, task: Task, status: TaskStatus) -> None:
+        self.tasks = [
+            member.model_copy(update={"status": status})
+            if member.id == task.id
+            else member
+            for member in self.tasks
+        ]
+
     def results(self) -> dict[UUID, TaskResult]:
         return {task.id: _result(task, self.steps, self.tasks) for task in self.tasks}
 
@@ -262,6 +329,27 @@ def test_failed_started_task_fails_the_family() -> None:
 
     assert results[upgrade.upgrade.id] is TaskResult.FAILED
     assert results[upgrade.start.id] is TaskResult.FAILED
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (TaskStatus.RUNNING, TaskResult.RUNNING),
+        (TaskStatus.FAILED, TaskResult.FAILED),
+    ],
+)
+def test_started_task_status_counts_alongside_its_succeeded_steps(
+    status: TaskStatus, expected: TaskResult
+) -> None:
+    upgrade = Upgrade()
+    upgrade.set_status(upgrade.start, status)
+
+    results = upgrade.results()
+
+    assert results[upgrade.upgrade.id] is expected
+    assert results[upgrade.start.id] is expected
+    # The interrupted siblings keep their own result.
+    assert results[upgrade.stop.id] is TaskResult.SUPERSEDED
 
 
 def test_running_started_task_keeps_the_family_running() -> None:
