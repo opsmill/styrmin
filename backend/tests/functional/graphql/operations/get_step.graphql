@@ -1,0 +1,35 @@
+query GetStep($stepId: UUID!) {
+    step(stepId: $stepId) {
+        id
+        key
+        name
+        kind
+        status
+        startedAt
+        endedAt
+        durationSeconds
+        attemptCount
+        errors {
+            attempt
+            message
+            occurredAt
+        }
+        error
+        detail
+        rolledBackAt
+        rollbackMessage
+        hasOutput
+        output
+        outputTruncated
+        supersededBy {
+            id
+        }
+        startedTasks {
+            id
+        }
+        noReportSince
+        taskId
+        backupId
+        restoreId
+    }
+}

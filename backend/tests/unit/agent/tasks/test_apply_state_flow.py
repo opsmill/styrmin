@@ -7,7 +7,8 @@ The flow must:
 - Build a DiffReport via Comparator.
 - Generate a Remediation via Remediator.
 - Call `remediation.apply()` (the existing sub-flow chain) with a
-  freshly minted driver action token (ADR-059), after the UoW closes.
+  freshly minted driver action token (ADR-059) and the task id, after the
+  UoW closes.
 """
 
 from contextlib import asynccontextmanager
@@ -78,7 +79,7 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     fake_remediation = MagicMock()
     flow_info = MagicMock(state=MagicMock(name="Completed"))
 
-    def _apply(*, api_token: str) -> MagicMock:
+    def _apply(*, api_token: str, task_id) -> MagicMock:
         events.append("remediation applied")
         return flow_info
 
@@ -97,7 +98,9 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
     fake_uow.deployments.find.assert_awaited_with(id=deployment_id)
     mock_comparator_cls.assert_called_once()
     mock_remediator_cls.assert_called_once()
-    fake_remediation.apply.assert_awaited_once_with(api_token="action-token")
+    fake_remediation.apply.assert_awaited_once_with(
+        api_token="action-token", task_id=task_id
+    )
     # The UoW's connection must be released before the token and the remediation.
     assert events == [
         "uow closed",

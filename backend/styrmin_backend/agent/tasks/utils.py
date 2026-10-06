@@ -1,5 +1,6 @@
 import os
 from typing import Any
+from uuid import UUID
 
 from prefect.client.schemas.objects import FlowRun
 from prefect.deployments.flow_runs import arun_deployment
@@ -7,11 +8,35 @@ from prefect.deployments.flow_runs import arun_deployment
 #: Carries a reconcile's API token into the jobs it starts (ADR-059). The SDK
 #: reads the same variable, so a driver action using it is authenticated too.
 API_TOKEN_ENV = "STYRMIN_TOKEN"
+#: The parent of the steps a Job records; exactly one is set (019 research D3).
+TASK_ID_ENV = "STYRMIN_TASK_ID"
+BACKUP_ID_ENV = "STYRMIN_BACKUP_ID"
+RESTORE_ID_ENV = "STYRMIN_RESTORE_ID"
+#: The hook step that runs a driver action's Job.
+STEP_ID_ENV = "STYRMIN_STEP_ID"
 
 
-def api_token_job_variables(token: str | None) -> dict[str, Any]:
-    """Prefect job variables that set ``API_TOKEN_ENV`` in the flow run's job."""
-    return {"env": {API_TOKEN_ENV: token}} if token else {}
+def action_job_variables(
+    token: str | None,
+    *,
+    task_id: UUID | str | None = None,
+    backup_id: UUID | str | None = None,
+    restore_id: UUID | str | None = None,
+    step_id: UUID | str | None = None,
+) -> dict[str, Any]:
+    """Prefect job variables that set the action token and the step parent in the flow run's job."""
+    env = {
+        name: str(value)
+        for name, value in (
+            (API_TOKEN_ENV, token),
+            (TASK_ID_ENV, task_id),
+            (BACKUP_ID_ENV, backup_id),
+            (RESTORE_ID_ENV, restore_id),
+            (STEP_ID_ENV, step_id),
+        )
+        if value
+    }
+    return {"env": env} if env else {}
 
 
 async def run_deployment_or_fail(**kwargs: Any) -> FlowRun:
@@ -30,9 +55,18 @@ async def run_deployment_or_fail(**kwargs: Any) -> FlowRun:
     return flow_run
 
 
-async def run_driver_action_or_fail(**kwargs: Any) -> FlowRun:
-    """``run_deployment_or_fail`` for a driver action: forwards this job's API token."""
+async def run_driver_action_or_fail(
+    *, step_id: UUID | None = None, **kwargs: Any
+) -> FlowRun:
+    """``run_deployment_or_fail`` for a driver action run by the hook step ``step_id``.
+
+    Forwards this job's API token and task id, and adds the hook step.
+    """
     return await run_deployment_or_fail(
-        job_variables=api_token_job_variables(os.environ.get(API_TOKEN_ENV)),
+        job_variables=action_job_variables(
+            os.environ.get(API_TOKEN_ENV),
+            task_id=os.environ.get(TASK_ID_ENV),
+            step_id=step_id,
+        ),
         **kwargs,
     )

@@ -1,3 +1,5 @@
+directive @isActionsServiceAccount on FIELD_DEFINITION
+
 directive @isSelfOrRole on FIELD_DEFINITION
 
 directive @requiresRole on FIELD_DEFINITION
@@ -897,6 +899,11 @@ type Mutation {
   updateBackupSchedule(scheduleId: UUID!, name: String = null, cronExpression: String = null, retentionCount: Int = null, enabled: Boolean = null): BackupSchedule @requiresRole
   deleteBackupSchedule(scheduleId: UUID!): String @requiresRole
   callback(taskId: UUID!, stateName: String!, stateMessage: String, stateType: String!): CallbackResponse!
+
+  """
+  Record a step event. Called by Styrmin's own flows and actions with the action token.
+  """
+  recordStep(input: RecordStepInput!): Step! @requiresRole @isActionsServiceAccount
   stopComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
   startComponents(deploymentId: UUID!, components: [String!]!): Task @requiresRole
   runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task @requiresRole
@@ -984,6 +991,9 @@ type Query {
   backupStorageLocations: [BackupStorageLocation!]!
   backupStorageLocation(backupStorageLocationId: UUID!): BackupStorageLocation
   task(taskId: UUID!): Task
+
+  """One step, for example to load its output. Any signed-in user."""
+  step(stepId: UUID!): Step
   tasks: [Task!]!
   environments: [Environment!]!
   environment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): Environment
@@ -1009,6 +1019,32 @@ type Query {
 
   """Health check probe"""
   ok: Boolean!
+}
+
+input RecordStepInput {
+  """Address an existing step. Use instead of a parent and key."""
+  stepId: UUID = null
+  taskId: UUID = null
+  backupId: UUID = null
+  restoreId: UUID = null
+  key: String = null
+
+  """Required with STARTED when the step does not exist yet."""
+  name: String = null
+  kind: StepKind = null
+  event: StepEvent!
+
+  """Required with FAILED."""
+  error: String = null
+
+  """Used with OUTPUT, and allowed with FAILED."""
+  output: String = null
+  outputTruncated: Boolean! = false
+
+  """
+  When the event happened, in the writer's clock. Defaults to the server's time.
+  """
+  occurredAt: DateTime = null
 }
 
 type ReportDeploymentStatusesResponse {
@@ -1116,6 +1152,84 @@ input StandardStorageInput {
   The Kubernetes storage class name used as the standard storage option for this cluster.
   """
   storageClass: String!
+}
+
+"""One unit of work inside a task, a backup or a restore."""
+type Step {
+  id: UUID!
+  key: String!
+  name: String!
+  kind: StepKind!
+  status: StepStatus!
+  startedAt: DateTime
+  endedAt: DateTime
+  attemptCount: Int!
+
+  """The error of each failed attempt, oldest first."""
+  errors: [StepError!]!
+
+  """FluxCD's current reason and message, HelmRelease step only."""
+  detail: String
+  rolledBackAt: DateTime
+  rollbackMessage: String
+
+  """
+  End of a failed command's output. Request it only for one step at a time.
+  """
+  output: String
+  outputTruncated: Boolean!
+  taskId: UUID
+  backupId: UUID
+  restoreId: UUID
+
+  """Seconds between startedAt and endedAt; null until both are set."""
+  durationSeconds: Float
+
+  """The newest error, or null."""
+  error: String
+  hasOutput: Boolean!
+
+  """The later task that interrupted this step."""
+  supersededBy: Task
+
+  """Tasks that this hook step started."""
+  startedTasks: [Task!]!
+
+  """
+  Set while a running operator-phase step has had no agent report for more than 60 seconds.
+  """
+  noReportSince: DateTime
+}
+
+type StepError {
+  attempt: Int!
+  message: String!
+  occurredAt: DateTime!
+}
+
+enum StepEvent {
+  STARTED
+  SUCCEEDED
+  FAILED
+  OUTPUT
+}
+
+enum StepKind {
+  PLAN
+  HOOK
+  RESOURCE_WRITE
+  OPERATOR_PHASE
+  COMMAND
+  RESTORE
+  BACKUP_COMPONENT
+}
+
+enum StepStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SUPERSEDED
 }
 
 type Task {

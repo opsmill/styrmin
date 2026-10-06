@@ -85,6 +85,31 @@ class Role(str, Enum):
     ADMIN = "ADMIN"
 
 
+class StepEvent(str, Enum):
+    STARTED = "STARTED"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    OUTPUT = "OUTPUT"
+
+
+class StepKind(str, Enum):
+    PLAN = "PLAN"
+    HOOK = "HOOK"
+    RESOURCE_WRITE = "RESOURCE_WRITE"
+    OPERATOR_PHASE = "OPERATOR_PHASE"
+    COMMAND = "COMMAND"
+    RESTORE = "RESTORE"
+    BACKUP_COMPONENT = "BACKUP_COMPONENT"
+
+
+class StepStatus(str, Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    SUPERSEDED = "SUPERSEDED"
+
+
 class TolerationEffect(str, Enum):
     NO_SCHEDULE = "NO_SCHEDULE"
     PREFER_NO_SCHEDULE = "PREFER_NO_SCHEDULE"

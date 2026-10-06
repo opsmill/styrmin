@@ -1,0 +1,22 @@
+mutation RecordStep($input: RecordStepInput!) {
+    recordStep(input: $input) {
+        id
+        key
+        name
+        kind
+        status
+        startedAt
+        endedAt
+        attemptCount
+        errors {
+            attempt
+            message
+            occurredAt
+        }
+        output
+        outputTruncated
+        taskId
+        backupId
+        restoreId
+    }
+}

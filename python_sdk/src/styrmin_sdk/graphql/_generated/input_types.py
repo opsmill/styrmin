@@ -14,6 +14,8 @@ from .enums import (
     LabelSelectorOperator,
     PodPhase,
     Role,
+    StepEvent,
+    StepKind,
     TolerationEffect,
     TolerationOperator,
     WhenUnsatisfiable,
@@ -250,6 +252,26 @@ class PostRenderInjectionInput(BaseModel):
     resources: Optional[bool] = None
     tolerations: Optional[bool] = None
     runtime_class: Optional[bool] = Field(alias="runtimeClass", default=None)
+
+
+class RecordStepInput(BaseModel):
+    step_id: Optional[UUID] = Field(alias="stepId", default=None)
+    "Address an existing step. Use instead of a parent and key."
+    task_id: Optional[UUID] = Field(alias="taskId", default=None)
+    backup_id: Optional[UUID] = Field(alias="backupId", default=None)
+    restore_id: Optional[UUID] = Field(alias="restoreId", default=None)
+    key: Optional[str] = None
+    name: Optional[str] = None
+    "Required with STARTED when the step does not exist yet."
+    kind: Optional[StepKind] = None
+    event: StepEvent
+    error: Optional[str] = None
+    "Required with FAILED."
+    output: Optional[str] = None
+    "Used with OUTPUT, and allowed with FAILED."
+    output_truncated: bool = Field(alias="outputTruncated", default=False)
+    occurred_at: Optional[datetime] = Field(alias="occurredAt", default=None)
+    "When the event happened, in the writer's clock. Defaults to the server's time."
 
 
 class ResourceRequirementsInput(BaseModel):
