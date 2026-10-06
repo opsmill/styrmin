@@ -8,7 +8,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 import httpx
 import kr8s.asyncio
@@ -1080,6 +1080,26 @@ async def velero_ready(
     )
 
 
+# Rejection while an emptied environment's ingress controller is torn down (#252).
+_INGRESS_TEARDOWN_ERROR = "dedicated ingress controller is being removed"
+
+
+async def create_deployment_after_ingress_teardown(
+    scenario_driver: ScenarioDriver, *, timeout: float = 300.0, **kwargs: Any
+) -> DeploymentRef:
+    """Call ``create_deployment``, retrying only while the environment's ingress
+    controller is being removed because an earlier test deleted its last app."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return await scenario_driver.create_deployment(**kwargs)
+        except ScenarioActionError as exc:
+            if _INGRESS_TEARDOWN_ERROR not in str(exc) or time.monotonic() > deadline:
+                raise
+            _LOG.warning("Deploy rejected during ingress teardown, retrying: %s", exc)
+        await asyncio.sleep(5.0)
+
+
 # ---------------------------------------------------------------------------
 # Fixture: deployed_simple_app
 # ---------------------------------------------------------------------------
@@ -1100,8 +1120,12 @@ async def deployed_simple_app(
     picking "the" Traefik service.
     """
     driver, _ = session_scenario_driver
-    deployment = await driver.create_deployment(
-        driver="simple-app", version="0.1.0", environment_id=scenario_environment_id
+    # test_delete_deployment_{api,ui} can leave this env without an app just before.
+    deployment = await create_deployment_after_ingress_teardown(
+        driver,
+        driver="simple-app",
+        version="0.1.0",
+        environment_id=scenario_environment_id,
     )
     deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
 

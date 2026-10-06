@@ -81,7 +81,13 @@ class DeployFormPage:
         # Deterministic success signal: success card renders with a "View
         # Deployment" link whose href carries the new deployment id.
         view_link = self._page.get_by_role("link", name="View Deployment")
-        await view_link.wait_for()
+        # A rejected mutation renders this alert instead; surface its message.
+        failure = self._page.get_by_role("alert").filter(has_text="Deployment failed")
+        await view_link.or_(failure).first.wait_for()
+        if await failure.is_visible():
+            raise ScenarioActionError(
+                f"deploy form rejected the deployment: {await failure.inner_text()}"
+            )
         href = await view_link.get_attribute("href")
         if not href:
             raise ScenarioActionError(
