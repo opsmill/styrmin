@@ -1,6 +1,7 @@
 """The step recorder: the only code that creates or changes steps (spec 019, research D2).
 
-The primitives (``open_step``, ``succeed_step``, ``fail_step``, ``record_output``,
+The primitives (``open_step``, ``start_step``, ``succeed_step``, ``fail_step``,
+``record_output``, ``add_pending_steps``, ``ensure_operator_steps``,
 ``fail_open_flow_steps``) run inside the caller's transaction and do not commit.
 ``record_event`` is the ``recordStep`` entry point and commits.
 
@@ -12,7 +13,7 @@ logged and returns the step unchanged, because a late write is not an error.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -26,6 +27,12 @@ from styrmin_backend.domain.models import (
     StepKind,
     StepParent,
     StepStatus,
+    Task,
+)
+from styrmin_backend.domain.steps import (
+    ROLLOUT_OPERATOR_STEPS,
+    STYRMIN_DEPLOYMENT_WRITE,
+    StepDefinition,
 )
 from styrmin_backend.services.exceptions import (
     BackupNotFoundError,
@@ -39,6 +46,8 @@ from styrmin_backend.services.steps.exceptions import (
 from styrmin_backend.services.steps.reads import steps_of_parent
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from styrmin_backend.services.unit_of_work import UnitOfWork
 
 #: The server keeps at most the end of a command's output (spec FR-003).
@@ -160,6 +169,46 @@ async def open_step(
     if existing is None:
         raise StepNotFoundError(f"Step {key} not found.")
     return await _start(existing, at, uow)
+
+
+async def start_step(step: Step, at: datetime, *, uow: UnitOfWork) -> Step:
+    """Start a pending step; a failed operator-phase step starts a new attempt."""
+    return await _start(await _lock(step.id, uow), _utc(at), uow)
+
+
+async def add_pending_steps(
+    parent: StepParent,
+    definitions: Sequence[StepDefinition],
+    at: datetime,
+    *,
+    uow: UnitOfWork,
+) -> None:
+    """Create steps that are expected but not started, keeping any the parent already has.
+
+    Their ``created_on`` follows the order of ``definitions``, which lists them.
+    """
+    at = _utc(at)
+    for index, definition in enumerate(definitions):
+        step = Step.create(parent, *definition).model_copy(
+            update={"created_on": at + timedelta(microseconds=index)}
+        )
+        await uow.steps.insert_if_absent(step)
+
+
+async def ensure_operator_steps(task: Task, at: datetime, *, uow: UnitOfWork) -> None:
+    """Create the operator-phase steps of a rollout task once its CR write succeeded.
+
+    The prerequisites step starts at ``at``; the others wait for the operator.
+    An internal deployment gets none, because the agent does not report its status.
+    """
+    deployment = await uow.deployments.find(task.deployment_id)
+    if deployment is None or deployment.internal:
+        return
+    parent = StepParent.of_task(task.id)
+    first, *others = ROLLOUT_OPERATOR_STEPS
+    started = Step.create(parent, *first, StepStatus.RUNNING, _utc(at))
+    await uow.steps.insert_if_absent(started)
+    await add_pending_steps(parent, others, at, uow=uow)
 
 
 async def succeed_step(step: Step, at: datetime, *, uow: UnitOfWork) -> Step:
@@ -309,6 +358,20 @@ async def _start_by_key(
     return await _start(existing, at, uow)
 
 
+async def _after_success(step: Step, uow: UnitOfWork) -> None:
+    """A succeeded CR write hands the task's rollout to the operator."""
+    if (
+        step.status is not StepStatus.SUCCEEDED
+        or step.key != STYRMIN_DEPLOYMENT_WRITE.key
+        or step.task_id is None
+        or step.ended_at is None
+    ):
+        return
+    task = await uow.tasks.find(step.task_id)
+    if task is not None:
+        await ensure_operator_steps(task, step.ended_at, uow=uow)
+
+
 async def _apply(record: StepRecord, at: datetime, uow: UnitOfWork) -> Step:
     if record.step_id is not None:
         step = await _step_by_id(record, record.step_id, uow)
@@ -329,7 +392,9 @@ async def _apply(record: StepRecord, at: datetime, uow: UnitOfWork) -> Step:
             raise StepNotFoundError(f"Step {key} not found.")
         step = found
     if record.event is StepEvent.SUCCEEDED:
-        return await succeed_step(step, at, uow=uow)
+        succeeded = await succeed_step(step, at, uow=uow)
+        await _after_success(succeeded, uow)
+        return succeeded
     if record.event is StepEvent.FAILED:
         return await fail_step(
             step,

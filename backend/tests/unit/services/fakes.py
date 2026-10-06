@@ -1,3 +1,4 @@
+import contextlib
 from typing import TypeVar
 from uuid import UUID
 
@@ -752,6 +753,10 @@ class FakeUtilityRepository(FakeRepository[Utility], UtilityRepository):
 class _FakeSession:
     async def refresh(self, obj: object) -> None:
         pass
+
+    def begin_nested(self) -> contextlib.nullcontext[None]:
+        # The services open savepoints on the real session; the fakes have none.
+        return contextlib.nullcontext()
 
 
 class FakeUnitOfWork(UnitOfWork):

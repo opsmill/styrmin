@@ -40,3 +40,36 @@ SERVICE_ALIASES = StepDefinition(
     "resource:service-aliases", "Create service aliases", StepKind.RESOURCE_WRITE
 )
 COMMAND = StepDefinition("command", "Run the job's command", StepKind.COMMAND)
+DELETE_REQUEST = StepDefinition(
+    "resource:delete-request", "Request the deletion", StepKind.RESOURCE_WRITE
+)
+
+OPERATOR_PREREQUISITES = StepDefinition(
+    "operator:prerequisites",
+    "Create network policies and secrets",
+    StepKind.OPERATOR_PHASE,
+)
+OPERATOR_HELMRELEASE = StepDefinition(
+    "operator:helmrelease",
+    "Install or upgrade the HelmRelease",
+    StepKind.OPERATOR_PHASE,
+)
+OPERATOR_SERVICES = StepDefinition(
+    "operator:services", "Create services and middlewares", StepKind.OPERATOR_PHASE
+)
+OPERATOR_READY = StepDefinition(
+    "operator:ready", "Wait for the deployment to be ready", StepKind.OPERATOR_PHASE
+)
+OPERATOR_TEARDOWN = StepDefinition(
+    "operator:teardown",
+    "Remove the deployment's resources and namespace",
+    StepKind.OPERATOR_PHASE,
+)
+
+#: The operator-phase steps of a rollout, in the order the operator runs them.
+ROLLOUT_OPERATOR_STEPS = (
+    OPERATOR_PREREQUISITES,
+    OPERATOR_HELMRELEASE,
+    OPERATOR_SERVICES,
+    OPERATOR_READY,
+)

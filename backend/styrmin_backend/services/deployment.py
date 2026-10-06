@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -9,10 +10,12 @@ from styrmin_backend.agent.service.kubernetes.primitives import patch_custom_res
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.exceptions import InvalidDeploymentContextError
 from styrmin_backend.context.validators import validate_deployment_config
+from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import (
     Component,
     Deployment,
     DeploymentState,
+    StepParent,
     Task,
     TaskStatus,
     TaskType,
@@ -68,6 +71,11 @@ from styrmin_backend.services.services_discovery import (
     create_services_for_deployment,
     parse_service_definitions,
     reconcile_services_on_upgrade,
+)
+from styrmin_backend.services.steps.recorder import (
+    add_pending_steps,
+    open_step,
+    succeed_step,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
@@ -1556,9 +1564,10 @@ async def delete_deployment(
 
     Patches ``spec.deletionRequested = true`` on the cluster-side
     StyrminDeployment CRD and creates a born-complete ``DELETE_DEPLOYMENT``
-    task as the audit record. The operator drives teardown asynchronously;
-    callers observe ``Deployment.status`` transition through ``DELETING``
-    to ``DELETED`` via the existing reconciliation status reporter.
+    task with a succeeded "Request the deletion" step and a pending teardown
+    step. The operator drives teardown asynchronously; callers observe
+    ``Deployment.status`` transition through ``DELETING`` to ``DELETED`` via
+    the existing reconciliation status reporter.
 
     Idempotent: a second call while the deployment is already ``DELETING``
     returns the most recent existing ``DELETE_DEPLOYMENT`` task without
@@ -1613,6 +1622,7 @@ async def delete_deployment(
         # `styrmin-{deployment_id}` convention (CR name == namespace for
         # platform-managed deployments).
         crd_name = get_kubernetes_reference(deployment_id)
+        requested_at = datetime.now(UTC)
         await patch_custom_resource(
             plural=CRD_PLURAL,
             reference=crd_name,
@@ -1621,11 +1631,11 @@ async def delete_deployment(
             namespace=crd_name,
             patch=[{"op": "add", "path": "/spec/deletionRequested", "value": True}],
         )
+        patched_at = datetime.now(UTC)
 
-        # Create a born-complete DELETE_DEPLOYMENT task. This is the audit
-        # record on the deployment timeline, not a progress channel — the
-        # mutation acks immediately; cluster-side teardown is observed via
-        # the status reporter (see services/deployment_status.py).
+        # Create a born-complete DELETE_DEPLOYMENT task. The mutation acks
+        # immediately; the status reporter's reports move its teardown step
+        # (see services/deployment_status.py).
         task = Task(
             id=uuid4(),
             type=TaskType.DELETE_DEPLOYMENT,
@@ -1634,11 +1644,22 @@ async def delete_deployment(
             prefect_flow_run_id=None,
         )
         await uow.tasks.save(task=task)
+        await _record_delete_steps(task, requested_at, patched_at, uow)
         await uow.commit()
 
         result = await uow.tasks.find(id=task.id)
         assert result is not None, "Task not found"
         return result
+
+
+async def _record_delete_steps(
+    task: Task, requested_at: datetime, patched_at: datetime, uow: UnitOfWork
+) -> None:
+    """Record the CR patch as done; the operator's teardown waits for its first report."""
+    parent = StepParent.of_task(task.id)
+    request = await open_step(parent, *steps.DELETE_REQUEST, requested_at, uow=uow)
+    await succeed_step(request, patched_at, uow=uow)
+    await add_pending_steps(parent, [steps.OPERATOR_TEARDOWN], patched_at, uow=uow)
 
 
 async def request_cluster_teardown(deployment_id: UUID) -> bool:

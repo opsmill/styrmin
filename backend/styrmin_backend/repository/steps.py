@@ -186,6 +186,8 @@ class SQLModelStepRepository(StepRepository):
         return await self._one(statement, for_update)
 
     async def insert_if_absent(self, step: StepEntity) -> bool:
+        # A core insert does not autoflush; the parent may be pending in this session.
+        await self.session.flush()
         column, _ = _parent_column(step.parent)
         dialect = self.session.bind.dialect.name  # type: ignore[union-attr]
         insert = pg_insert if dialect == "postgresql" else sqlite_insert

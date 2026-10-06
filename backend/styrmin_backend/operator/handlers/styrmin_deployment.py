@@ -6,6 +6,8 @@ orchestrates the ordered deployment pipeline.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -42,6 +44,20 @@ from styrmin_backend.services.component_container.exceptions import (
 def _is_internal(spec: dict[str, Any]) -> bool:
     """Check if a StyrminDeployment is an internal deployment (e.g., ingress controller)."""
     return spec.get("internal", False)
+
+
+@contextmanager
+def _recording_instance(spec: dict[str, Any], patch: Any) -> Iterator[None]:
+    """Write the handled ``spec.instanceId`` to ``status.instanceId``, also when the handler raises.
+
+    The status reporter sends it, so a report names the instance the operator acted on.
+    """
+    try:
+        yield
+    finally:
+        instance_id = spec.get("instanceId")
+        if instance_id:
+            patch.status["instanceId"] = instance_id
 
 
 async def _fail_on_component_container_guard(
@@ -318,15 +334,16 @@ async def kopf_on_styrmin_deployment_create(
     logger: kopf.Logger,
     **kwargs: Any,
 ) -> None:
-    await on_styrmin_deployment_create(
-        spec=dict(spec),
-        status=dict(status),
-        name=name,
-        namespace=namespace or "",
-        patch=patch,
-        logger=logger,
-        **kwargs,
-    )
+    with _recording_instance(dict(spec), patch):
+        await on_styrmin_deployment_create(
+            spec=dict(spec),
+            status=dict(status),
+            name=name,
+            namespace=namespace or "",
+            patch=patch,
+            logger=logger,
+            **kwargs,
+        )
 
 
 @kopf.on.resume(CRD_GROUP, CRD_VERSION, CRD_PLURAL)
@@ -339,15 +356,16 @@ async def kopf_on_styrmin_deployment_resume(
     logger: kopf.Logger,
     **kwargs: Any,
 ) -> None:
-    await on_styrmin_deployment_resume(
-        spec=dict(spec),
-        status=dict(status),
-        name=name,
-        namespace=namespace or "",
-        patch=patch,
-        logger=logger,
-        **kwargs,
-    )
+    with _recording_instance(dict(spec), patch):
+        await on_styrmin_deployment_resume(
+            spec=dict(spec),
+            status=dict(status),
+            name=name,
+            namespace=namespace or "",
+            patch=patch,
+            logger=logger,
+            **kwargs,
+        )
 
 
 @kopf.on.update(CRD_GROUP, CRD_VERSION, CRD_PLURAL, field="spec")
@@ -379,6 +397,27 @@ async def kopf_on_styrmin_deployment_update(
         )
         return
 
+    with _recording_instance(crd_spec, patch):
+        await _roll_out_spec_update(
+            crd_spec=crd_spec,
+            status=status,
+            name=name,
+            ns=ns,
+            patch=patch,
+            logger=logger,
+        )
+
+
+async def _roll_out_spec_update(
+    *,
+    crd_spec: dict[str, Any],
+    status: Any,
+    name: str,
+    ns: str,
+    patch: Any,
+    logger: Any,
+) -> None:
+    """Re-run the ordered pipeline for a changed spec."""
     logger.info("StyrminDeployment spec updated: %s/%s, re-reconciling", ns, name)
 
     patch.status["displayState"] = DisplayState.DEPLOYING.value

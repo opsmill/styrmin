@@ -106,6 +106,16 @@ spec:
                     - Deleted
                 message:
                   type: string
+                instanceId:
+                  type: string
+                  description: |
+                    UUID of the ApplicationInstance whose spec the operator last handled.
+                    Written by the create, update and resume handlers; the status reporter
+                    sends it in place of spec.instanceId.
+                rolloutStartedAt:
+                  type: string
+                  format: date-time
+                  description: When the current rollout started; the readiness timeout counts from it
                 conditions:
                   type: array
                   items:
