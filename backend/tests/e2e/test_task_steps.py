@@ -11,9 +11,9 @@ the target version:
   exits with 3 (the hook step keeps the end of the output).
 
 The prerequisites scenario fills a ``ResourceQuota`` so the operator cannot
-re-create a network policy, and the HelmRelease scenario sets an image override
-whose image cannot be pulled. The HelmRelease scenario runs last in the module,
-because it leaves the deployment failed.
+re-create a network policy, and the HelmRelease scenario applies a manifest
+with ``apply(wait=True)`` whose image override cannot be pulled. The HelmRelease
+scenario runs last in the module, because it leaves the deployment failed.
 
 The first three tests are ``api_only``: they read the steps through the SDK,
 and the frontend component tests (``StepListFailures.test.tsx``) cover how each
@@ -26,6 +26,7 @@ import asyncio
 import logging
 import time
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 import pytest
@@ -35,7 +36,8 @@ from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import StyrminError
 from styrmin_sdk.graphql._generated import GetStepOutput, GetStepOutputStep
 from styrmin_sdk.graphql._generated.enums import Role
-from styrmin_sdk.models import EnvVarInput, UpdateDeploymentInput
+from styrmin_sdk.models import EnvVarInput, ResolvedManifest, UpdateDeploymentInput
+from styrmin_sdk.resources import deployments as sdk_deployments
 
 from tests.e2e.drivers.api_driver import ApiScenarioDriver
 
@@ -249,6 +251,33 @@ def _steps_by_task(timeline: list[TimelineEntry]) -> dict[str, tuple[StepRef, ..
     return {entry.task_id: entry.steps for entry in timeline}
 
 
+async def _manifest_with_image(
+    client: StyrminClient, deployment: dict[str, Any], image: str
+) -> ResolvedManifest:
+    """The deployment's current state as an apply manifest, with ``image`` on the server component."""
+    stored = await client.deployments.get(deployment["deployment_id"])
+    environment = await client.environments.get(
+        environment_id=deployment["environment_id"]
+    )
+    config = stored.config or {}
+    # The manifest replaces the whole config, so it must carry every stored key.
+    assert set(config) <= {"env_vars", "components"}, config
+    env_vars = config.get("env_vars") or {}
+    return ResolvedManifest(
+        name=stored.name,
+        driver="failing-actions",
+        version=stored.application_version,
+        environment=environment.name,
+        config={
+            "env_vars": [
+                {"name": name, "value": value} for name, value in env_vars.items()
+            ],
+            "components": [{"name": "server", "image": image}],
+        },
+        source_path=Path("task-steps.yaml"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -392,13 +421,15 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
     scenario_driver: ScenarioDriver,
     failing_actions_deployment: dict[str, Any],
     read_only_client: StyrminClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SC-001 (c): FluxCD cannot roll out an image that does not exist (US2 scenario 1, SC-004).
+    """SC-001 (c): FluxCD cannot roll out an image that does not exist (US2 scenario 1, SC-004, US5 scenario 3).
 
-    Runs last in the module: it leaves an image override that cannot be pulled. The
-    HelmRelease step fails at the operator's readiness timeout with FluxCD's reason as
-    its detail and the pods' ``ImagePullBackOff`` in its error. A ``READ_ONLY`` user
-    then reads the same steps, errors and command output as the admin.
+    Runs last in the module: it applies an image override that cannot be pulled with
+    ``apply(wait=True)``. The HelmRelease step fails at the operator's readiness
+    timeout with FluxCD's reason as its detail and the pods' ``ImagePullBackOff`` in
+    its error, and the apply's ``failure_reason`` names that step. A ``READ_ONLY``
+    user then reads the same steps, errors and command output as the admin.
     """
     admin: StyrminClient = failing_actions_deployment["client"]
     deployment_id = failing_actions_deployment["deployment_id"]
@@ -409,21 +440,33 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
     admin_timeline = _timeline_reader(admin, deployment_id)
     earlier_tasks = {entry.task_id for entry in await admin_timeline()}
 
+    manifest = await _manifest_with_image(
+        admin, failing_actions_deployment, MISSING_IMAGE
+    )
+    # The 270-second readiness timeout leaves too little of the SDK's 300-second wait.
+    monkeypatch.setattr(
+        sdk_deployments, "WAIT_TIMEOUT_SECONDS", HELMRELEASE_FAILURE_BUDGET
+    )
     started = time.monotonic()
-    await scenario_driver.set_component_image(
-        deployment_id=deployment_id, component="server", image=MISSING_IMAGE
-    )
-    entry, step = await _wait_for_step(
-        lambda: scenario_driver.get_deployment_timeline(deployment_id=deployment_id),
-        lambda entry: (
-            entry.task_type == "update_instance" and entry.task_id not in earlier_tasks
-        ),
-        HELMRELEASE,
-        # The UI reads the result and the steps one after the other, so both must agree.
-        lambda entry, step: step.status == "FAILED" and entry.result != "RUNNING",
-        timeout=HELMRELEASE_FAILURE_BUDGET - (time.monotonic() - started),
-        interval=5.0,
-    )
+    applying = asyncio.create_task(admin.deployments.apply(manifest, wait=True))
+    try:
+        entry, step = await _wait_for_step(
+            lambda: scenario_driver.get_deployment_timeline(
+                deployment_id=deployment_id
+            ),
+            lambda entry: (
+                entry.task_type == "update_instance"
+                and entry.task_id not in earlier_tasks
+            ),
+            HELMRELEASE,
+            # The UI reads the result and the steps one after the other, so both must agree.
+            lambda entry, step: step.status == "FAILED" and entry.result != "RUNNING",
+            timeout=HELMRELEASE_FAILURE_BUDGET - (time.monotonic() - started),
+            interval=5.0,
+        )
+        outcome = await applying
+    finally:
+        applying.cancel()
 
     # US3 scenario 1: the HelmRelease failure fails the task whose flow succeeded.
     assert entry.result == "FAILED", entry
@@ -434,6 +477,19 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
     )
     steps = {s.key: s.status for s in entry.steps}
     assert steps[PREREQUISITES] == "SUCCEEDED", steps
+
+    # US5 scenario 3: the wait read the failed step when it saw the failure.
+    assert outcome.action == "failed", outcome
+    assert str(outcome.task_id) == entry.task_id, outcome
+    # Errors are only ever appended, so the reason's error is in a later read.
+    errors = next(
+        s.errors
+        for s in _steps_by_task(await admin_timeline())[entry.task_id]
+        if s.id == step.id
+    )
+    assert outcome.failure_reason in {
+        f'step "{step.name}" failed: {error.message}' for error in errors
+    }, (outcome.failure_reason, errors)
 
     # SC-004: a READ_ONLY user reads the same steps, errors and output. A step can
     # change between two reads, so the views are read again until they match.
@@ -454,6 +510,3 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
             assert await _step_output(
                 read_only_client, with_output.id
             ) == await _step_output(admin, with_output.id)
-
-    # TODO(T086): once the SDK names the failed step in ``failure_reason``, assert that
-    # ``client.deployments.apply(manifest, wait=True)`` reports this HelmRelease step.

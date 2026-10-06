@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 from styrmin_sdk import (
@@ -1152,16 +1152,167 @@ async def test_apply_wait_marks_outcome_failed_on_terminal_failure(
         _missing_deployment_response(),
         _deploy_response(),
         _get_deployment_response(deployment_status="failed"),
+        # No step of the task failed, so the status reason stays.
+        _get_task_response(TASK_ID, [_task_step("Plan the changes", "SUCCEEDED")]),
     ]
 
     outcome = await client.deployments.apply(_resolved_manifest(), wait=True)
 
     assert outcome.action == "failed"
-    assert outcome.failure_reason is not None
-    assert "deployment reconciliation failed" in outcome.failure_reason
-    assert "failed" in outcome.failure_reason.lower()
+    assert outcome.failure_reason == "deployment reconciliation failed (status: failed)"
     # ``deployment_id`` must survive the flip so callers can re-apply.
     assert outcome.deployment_id is not None
+
+
+HELMRELEASE_STEP = "Install or upgrade the HelmRelease"
+HELMRELEASE_ERROR = "UpgradeFailed: Helm upgrade failed. Pods not ready: my-app-6d9 (app: ImagePullBackOff)"
+STARTED_TASK_ID = "cccccccc-dddd-eeee-ffff-000000000000"
+
+
+def _task_step(name: str, status: str, error: str | None = None) -> dict[str, Any]:
+    return {
+        "id": str(uuid5(NAMESPACE_URL, name)),
+        "key": name.lower().replace(" ", "-"),
+        "name": name,
+        "kind": "OPERATOR_PHASE",
+        "status": status,
+        "startedAt": "2026-10-06T10:00:00+00:00",
+        "endedAt": "2026-10-06T10:04:30+00:00",
+        "durationSeconds": 270.0,
+        "attemptCount": 1,
+        "errors": []
+        if error is None
+        else [{"attempt": 1, "message": error, "occurredAt": "2026-10-06T10:04:30+00:00"}],
+        "error": error,
+        "detail": None,
+        "rolledBackAt": None,
+        "rollbackMessage": None,
+        "hasOutput": False,
+        "output": None,
+        "outputTruncated": False,
+        "supersededBy": None,
+        "startedTasks": [],
+        "noReportSince": None,
+    }
+
+
+def _get_task_response(
+    task_id: str, steps: list[dict[str, Any]], started_task_ids: tuple[str, ...] = ()
+) -> dict[str, Any]:
+    return {
+        "data": {
+            "task": {
+                "id": task_id,
+                "type": "deploy",
+                "status": "completed",
+                "message": None,
+                "deploymentId": DEPLOYMENT_ID,
+                "createdOn": "2026-10-06T10:00:00+00:00",
+                "result": "FAILED",
+                "startedByStepId": None,
+                "startedBy": None,
+                "startedTasks": [
+                    {"id": started, "type": "deploy", "status": "completed", "result": "FAILED"}
+                    for started in started_task_ids
+                ],
+                "steps": steps,
+            }
+        }
+    }
+
+
+async def _apply_until_failed(
+    client: StyrminClient, mock_transport: AsyncMock, monkeypatch: pytest.MonkeyPatch, *task_reads: dict[str, Any]
+) -> ApplyOutcome:
+    from styrmin_sdk.resources import deployments as deployments_module
+
+    async def _no_sleep(_seconds: float) -> None:  # noqa: RUF029 — must mirror asyncio.sleep signature
+        return None
+
+    monkeypatch.setattr(deployments_module.asyncio, "sleep", _no_sleep)
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+        _deploy_response(),
+        _get_deployment_response(deployment_status="deploying"),
+        _get_deployment_response(deployment_status="failed"),
+        *task_reads,
+    ]
+    return await client.deployments.apply(_resolved_manifest(), wait=True)
+
+
+async def test_apply_wait_failure_reason_names_the_failed_step(
+    client: StyrminClient,
+    mock_transport: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A terminal failure names the task's failed step and its newest error (FR-012)."""
+    outcome = await _apply_until_failed(
+        client,
+        mock_transport,
+        monkeypatch,
+        _get_task_response(
+            TASK_ID,
+            [
+                _task_step("Create network policies and secrets", "SUCCEEDED"),
+                _task_step(HELMRELEASE_STEP, "FAILED", HELMRELEASE_ERROR),
+            ],
+        ),
+    )
+
+    assert outcome.action == "failed"
+    assert outcome.failure_reason == f'step "{HELMRELEASE_STEP}" failed: {HELMRELEASE_ERROR}'
+    # The task is read right after the poll that saw the failure.
+    ops = _operation_names(mock_transport)
+    assert ops[-2:] == ["query GetDeployment($deploymentId: UUID!) {", "query GetTask($taskId: UUID!) {"]
+
+
+async def test_apply_wait_failure_reason_names_a_failed_step_of_a_started_task(
+    client: StyrminClient,
+    mock_transport: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcome = await _apply_until_failed(
+        client,
+        mock_transport,
+        monkeypatch,
+        _get_task_response(TASK_ID, [_task_step("Run the upgrade hook", "SUCCEEDED")], (STARTED_TASK_ID,)),
+        _get_task_response(STARTED_TASK_ID, [_task_step(HELMRELEASE_STEP, "FAILED", HELMRELEASE_ERROR)]),
+    )
+
+    assert outcome.failure_reason == f'step "{HELMRELEASE_STEP}" failed: {HELMRELEASE_ERROR}'
+
+
+async def test_apply_wait_failure_reason_without_an_error_message(
+    client: StyrminClient,
+    mock_transport: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcome = await _apply_until_failed(
+        client,
+        mock_transport,
+        monkeypatch,
+        _get_task_response(TASK_ID, [_task_step(HELMRELEASE_STEP, "FAILED")]),
+    )
+
+    assert outcome.failure_reason == f'step "{HELMRELEASE_STEP}" failed'
+
+
+async def test_apply_wait_failure_reason_falls_back_when_the_task_cannot_be_read(
+    client: StyrminClient,
+    mock_transport: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server without ``Task.steps`` rejects the read; the status reason stays."""
+    outcome = await _apply_until_failed(
+        client,
+        mock_transport,
+        monkeypatch,
+        {"data": None, "errors": [{"message": "Cannot query field 'steps' on type 'Task'."}]},
+    )
+
+    assert outcome.action == "failed"
+    assert outcome.failure_reason == "deployment reconciliation failed (status: failed)"
 
 
 async def test_apply_wait_marks_outcome_failed_on_timeout(

@@ -214,7 +214,16 @@ from .get_group import GetGroup, GetGroupGroup
 from .get_pod_statuses import GetPodStatuses, GetPodStatusesPodStatuses
 from .get_restore import GetRestore, GetRestoreRestore
 from .get_step_output import GetStepOutput, GetStepOutputStep
-from .get_task import GetTask, GetTaskTask
+from .get_task import (
+    GetTask,
+    GetTaskTask,
+    GetTaskTaskStartedBy,
+    GetTaskTaskStartedTasks,
+    GetTaskTaskSteps,
+    GetTaskTaskStepsErrors,
+    GetTaskTaskStepsStartedTasks,
+    GetTaskTaskStepsSupersededBy,
+)
 from .get_user import GetUser, GetUserUser, GetUserUserGroups
 from .input_types import (
     AffinityBlockInput,
@@ -525,6 +534,12 @@ __all__ = [
     "GetStepOutputStep",
     "GetTask",
     "GetTaskTask",
+    "GetTaskTaskStartedBy",
+    "GetTaskTaskStartedTasks",
+    "GetTaskTaskSteps",
+    "GetTaskTaskStepsErrors",
+    "GetTaskTaskStepsStartedTasks",
+    "GetTaskTaskStepsSupersededBy",
     "GetUser",
     "GetUserUser",
     "GetUserUserGroups",

@@ -28,6 +28,7 @@ from styrmin_sdk.exceptions import (
     EnvironmentNotFoundError,
     ManifestValidationError,
     ResourceAlreadyExistsError,
+    StyrminError,
 )
 from styrmin_sdk.graphql._generated.delete_deployment import (
     DeleteDeployment,
@@ -76,6 +77,7 @@ from styrmin_sdk.models.deployment_manifest import (
 )
 from styrmin_sdk.models.image_reference import pinned_image_components
 from styrmin_sdk.resources._base import BaseResource, JsonValue
+from styrmin_sdk.resources.tasks import TaskResource
 
 
 def _expand_paths(paths: Sequence[Path | str]) -> list[Path]:
@@ -721,7 +723,9 @@ class DeploymentResource(BaseResource):
 
         On terminal success the original ``outcome`` is returned untouched.
         On terminal failure or wait timeout the action is flipped to
-        ``"failed"`` and ``failure_reason`` is populated.
+        ``"failed"`` and ``failure_reason`` is populated. A terminal failure
+        names the failed step of the outcome's task (or of a task it started),
+        read in the same poll, because a later report can end that step.
         """
         deployment_id = outcome.deployment_id
         if deployment_id is None:
@@ -734,13 +738,24 @@ class DeploymentResource(BaseResource):
                 return outcome
             if is_terminal_failure(status):
                 return outcome.model_copy(
-                    update={
-                        "action": "failed",
-                        "failure_reason": f"deployment reconciliation failed (status: {status})",
-                    }
+                    update={"action": "failed", "failure_reason": await self._failure_reason(outcome, status)}
                 )
             await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
         return outcome.model_copy(update={"action": "failed", "failure_reason": "wait timeout"})
+
+    async def _failure_reason(self, outcome: ApplyOutcome, status: str) -> str:
+        """Name the failed step of the outcome's task, or fall back to the deployment status."""
+        fallback = f"deployment reconciliation failed (status: {status})"
+        if outcome.task_id is None:
+            return fallback
+        try:
+            step = await TaskResource(self._transport).failed_step(outcome.task_id)
+        except StyrminError:
+            # A server without task steps, or a read error, keeps the status reason.
+            return fallback
+        if step is None:
+            return fallback
+        return f'step "{step.name}" failed: {step.error}' if step.error else f'step "{step.name}" failed'
 
     async def apply_files(
         self,

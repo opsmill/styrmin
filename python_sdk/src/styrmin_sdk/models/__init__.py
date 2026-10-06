@@ -5,6 +5,9 @@ from styrmin_sdk.graphql._generated.enums import (
     EnvironmentCloneDeploymentOutcome,
     EnvironmentCloneStatus,
     EnvironmentRestoreStatus,
+    StepKind,
+    StepStatus,
+    TaskResult,
 )
 from styrmin_sdk.graphql._generated.get_backup import GetBackupBackup as Backup
 from styrmin_sdk.graphql._generated.get_backup_schedule import (
@@ -52,6 +55,7 @@ from styrmin_sdk.graphql._generated.get_environment_restore import (
 )
 from styrmin_sdk.graphql._generated.get_restore import GetRestoreRestore as Restore
 from styrmin_sdk.graphql._generated.get_task import GetTaskTask as Task
+from styrmin_sdk.graphql._generated.get_task import GetTaskTaskSteps as TaskStep
 from styrmin_sdk.graphql._generated.input_types import (
     ComponentConfigInput,
     DeploymentConfigInput,
@@ -87,6 +91,7 @@ from styrmin_sdk.models.deployment_manifest import (
 )
 from styrmin_sdk.models.driver import ApplicationDriver, ApplicationDriverVersionSummary
 from styrmin_sdk.models.image_reference import has_app_version_token, pinned_image_components
+from styrmin_sdk.models.task import FailedStep
 
 __all__ = [
     "Action",
@@ -121,6 +126,7 @@ __all__ = [
     "EnvironmentCloneStatus",
     "EnvironmentRestore",
     "EnvironmentRestoreStatus",
+    "FailedStep",
     "HelmChart",
     "ParameterValueInput",
     "ResolvedManifest",
@@ -130,7 +136,11 @@ __all__ = [
     "SchedulingInput",
     "SkippedConstituent",
     "StandardStorageInput",
+    "StepKind",
+    "StepStatus",
     "Task",
+    "TaskResult",
+    "TaskStep",
     "UpdateDeploymentInput",
     "UpdateEnvironmentInput",
     "has_app_version_token",

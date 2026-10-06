@@ -67,13 +67,17 @@ class GetDeploymentTimelineDeploymentTimelineTaskSteps(BaseModel):
     errors: list["GetDeploymentTimelineDeploymentTimelineTaskStepsErrors"]
     error: Optional[str]
     detail: Optional[str]
+    rolled_back_at: Optional[datetime] = Field(alias="rolledBackAt")
+    rollback_message: Optional[str] = Field(alias="rollbackMessage")
     has_output: bool = Field(alias="hasOutput")
+    output_truncated: bool = Field(alias="outputTruncated")
     superseded_by: Optional[
         "GetDeploymentTimelineDeploymentTimelineTaskStepsSupersededBy"
     ] = Field(alias="supersededBy")
     started_tasks: list[
         "GetDeploymentTimelineDeploymentTimelineTaskStepsStartedTasks"
     ] = Field(alias="startedTasks")
+    no_report_since: Optional[datetime] = Field(alias="noReportSince")
 
 
 class GetDeploymentTimelineDeploymentTimelineTaskStepsErrors(BaseModel):

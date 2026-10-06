@@ -191,11 +191,11 @@ Run each E2E node with `--pdb` (in a non-interactive shell: `sleep infinity | uv
 
 **Independent Test**: `sdk.tasks.get` returns steps and result; `styrminctl tasks get` prints the step table; the `apply --wait` failed line names the step.
 
-- [ ] T084 [P] [US5] Extend `python_sdk/src/styrmin_sdk/graphql/get_task.graphql` and `get_deployment_timeline.graphql` per [contracts/client-surfaces.md](contracts/client-surfaces.md); run `uv run invoke generate`
-- [ ] T085 [US5] Add `failed_step(task_id) -> FailedStep | None` (searches the task's steps, then its started tasks) to `python_sdk/src/styrmin_sdk/resources/tasks.py`; tests in `python_sdk/tests/test_tasks.py`
-- [ ] T086 [US5] Set `failure_reason` to `step "<name>" failed: <error>` in `_wait_for_terminal` in `python_sdk/src/styrmin_sdk/resources/deployments.py` when `failed_step` finds one; tests in `python_sdk/tests/test_deployments.py`; replace the `TODO(T086)` in `test_helmrelease_failure_shows_fluxcd_reason` (`backend/tests/e2e/test_task_steps.py`) with the `apply(wait=True)` assertion and run it
-- [ ] T087 [US5] Print the result column, the "Steps" table (step, status, duration, attempts, error) or "No steps recorded for this task.", and the "Started tasks" table in `get` in `cli/src/styrminctl/commands/tasks.py`; tests in `cli/tests/test_tasks.py`
-- [ ] T088 [US5] Add a test for the `failed` line with a step reason in `cli/tests/test_deployments.py`
+- [X] T084 [P] [US5] Extend `python_sdk/src/styrmin_sdk/graphql/get_task.graphql` and `get_deployment_timeline.graphql` per [contracts/client-surfaces.md](contracts/client-surfaces.md); run `uv run invoke generate`
+- [X] T085 [US5] Add `failed_step(task_id) -> FailedStep | None` (searches the task's steps, then its started tasks) to `python_sdk/src/styrmin_sdk/resources/tasks.py`; tests in `python_sdk/tests/test_tasks.py`
+- [X] T086 [US5] Set `failure_reason` to `step "<name>" failed: <error>` in `_wait_for_terminal` in `python_sdk/src/styrmin_sdk/resources/deployments.py` when `failed_step` finds one; tests in `python_sdk/tests/test_deployments.py`; replace the `TODO(T086)` in `test_helmrelease_failure_shows_fluxcd_reason` (`backend/tests/e2e/test_task_steps.py`) with the `apply(wait=True)` assertion and run it
+- [X] T087 [US5] Print the result column, the "Steps" table (step, status, duration, attempts, error) or "No steps recorded for this task.", and the "Started tasks" table in `get` in `cli/src/styrminctl/commands/tasks.py`; tests in `cli/tests/test_tasks.py`
+- [X] T088 [US5] Add a test for the `failed` line with a step reason in `cli/tests/test_deployments.py`
 
 **Checkpoint**: CI logs and scripts explain failures.
 
