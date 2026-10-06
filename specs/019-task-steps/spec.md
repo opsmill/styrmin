@@ -240,4 +240,4 @@ Any signed-in user opens a restore of one deployment and views its steps: delete
 - Authentication or authorization change: a new `READ_WRITE` mutation called with the action token, and an action token for `run_job`.
 - No new dependency and no CI/CD workflow change are expected.
 
-The PRD records these gates as discussed and accepted during the grilling session of 2026-10-05 and 2026-10-06.
+The PRD records these gates as discussed and accepted during the grilling session of 2026-10-05 and 2026-10-06. The FluxCD reason change also changes the operator's status output.
