@@ -240,10 +240,10 @@ Run each E2E node with `--pdb` (in a non-interactive shell: `sleep infinity | uv
 - [X] T105 [P] Update `docs/docs/concepts-and-architecture/status-reporting.md`, `operator-and-crds.md`, `hooks-and-actions.md`, `backups-and-restores.md`, `glossary.md`, and `docs/docs/reference/styrmindeployment.md`, `driver-api.md` (failed command output is visible to every signed-in user, so commands must not print secrets; SDK calls from actions are not linked as started tasks), `styrminctl.md` (`tasks get` steps, `apply --wait` failed line)
 - [X] T106 [P] Update `CONTEXT.md`: Action token now also created by `run_job`, backups and restores; `status.instanceId` meaning; re-check the Step and Task result entries against the final design (family result, `SUPERSEDED` rule); update `dev/guides/users-and-groups.md` about the extra `styrmin-actions` sessions
 - [X] T107 Create changelog fragments with towncrier: `uv run towncrier create -c "…" 2.added.md` (steps, task results, command output, SDK and CLI), `2.fixed.md` (updates and upgrades are no longer reported ready before FluxCD applies the new release; failed upgrades end `FAILED`), `2.changed.md` (reconcile tasks get their real type instead of `noop`; `run_job` runs through an internal flow)
-- [ ] T108 Run `uv run invoke format lint`, `cd frontend && pnpm lint && pnpm build`, and fix every finding
-- [ ] T109 Run the local merge gate: `uv run invoke test`, `cd frontend && pnpm test`, `uv run pytest python_sdk/tests cli/tests`
-- [ ] T110 Run the whole `shard_general` and `shard_backup` E2E shards locally (the operator change in D5 affects every rollout), fix regressions, and record evidence for every changed node in `specs/019-task-steps/e2e-evidence.md`
-- [ ] T111 Walk through `specs/019-task-steps/quickstart.md` sections 1 to 3 and update it to match what was built
+- [X] T108 Run `uv run invoke format lint`, `cd frontend && pnpm lint && pnpm build`, and fix every finding
+- [X] T109 Run the local merge gate: `uv run invoke test`, `cd frontend && pnpm test`, `uv run pytest python_sdk/tests cli/tests`
+- [X] T110 Run the whole `shard_general` and `shard_backup` E2E shards locally (the operator change in D5 affects every rollout), fix regressions, and record evidence for every changed node in `specs/019-task-steps/e2e-evidence.md`
+- [X] T111 Walk through `specs/019-task-steps/quickstart.md` sections 1 to 3 and update it to match what was built
 
 ---
 
