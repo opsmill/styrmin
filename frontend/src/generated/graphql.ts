@@ -1480,7 +1480,10 @@ export type Task = {
   deploymentId?: Maybe<Scalars['UUID']['output']>;
   id: Scalars['UUID']['output'];
   message?: Maybe<Scalars['String']['output']>;
+  startedByStepId?: Maybe<Scalars['UUID']['output']>;
   status: Scalars['String']['output'];
+  /** The steps of the task by start time, pending steps last. */
+  steps: Array<Step>;
   type: Scalars['String']['output'];
   updatedOn?: Maybe<Scalars['DateTime']['output']>;
 };

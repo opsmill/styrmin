@@ -1,0 +1,41 @@
+query GetDeploymentTimelineReadModel($deploymentId: UUID!) {
+    deploymentTimeline(deploymentId: $deploymentId) {
+        applicationVersion
+        contextDiff {
+            changes {
+                path
+            }
+        }
+        task {
+            id
+            type
+            status
+            startedByStepId
+            steps {
+                id
+                key
+                name
+                kind
+                status
+                startedAt
+                endedAt
+                durationSeconds
+                attemptCount
+                errors {
+                    attempt
+                    message
+                    occurredAt
+                }
+                error
+                detail
+                rolledBackAt
+                rollbackMessage
+                hasOutput
+                outputTruncated
+                taskId
+                backupId
+                restoreId
+            }
+        }
+    }
+}
