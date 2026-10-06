@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 import toml
-from pydantic import AliasChoices, Field, SecretStr, ValidationError, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from styrmin_backend.db.constants import DatabaseType
@@ -174,6 +181,11 @@ class AgentSettings(BaseSettings):
         exclude=True,
         description="Token of the running reconcile, set by Styrmin on its jobs (ADR-059).",
     )
+
+    @field_validator("api_token", mode="before")
+    @classmethod
+    def empty_api_token_is_unset(cls, value: Any) -> Any:
+        return value or None
 
 
 class OperatorSettings(BaseSettings):

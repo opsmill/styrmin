@@ -101,17 +101,21 @@ def test_zero_intervals_are_rejected(
         settings_class()
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"), [("action-token", "action-token"), ("", None)]
-)
 def test_agent_api_token_reads_styrmin_token(
-    monkeypatch: pytest.MonkeyPatch, value: str, expected: str | None
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("STYRMIN_TOKEN", value)
+    monkeypatch.setenv("STYRMIN_TOKEN", "action-token")
 
     token = AgentSettings().api_token
 
-    assert (token.get_secret_value() if token else None) == expected
+    assert token is not None
+    assert token.get_secret_value() == "action-token"
+
+
+def test_empty_styrmin_token_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STYRMIN_TOKEN", "")
+
+    assert AgentSettings().api_token is None
 
 
 def test_agent_api_token_is_left_out_of_the_settings_dump(
