@@ -826,6 +826,21 @@ async def _namespace_exists(kr8s_api: kr8s.asyncio.Api, namespace: str) -> bool:
     return True
 
 
+async def _wait_for_namespace_gone(
+    kr8s_api: kr8s.asyncio.Api, namespace: str, timeout: float = 300.0
+) -> None:
+    # The synthetic Deleted report fires once the CR is gone, which can be
+    # before the namespace finishes terminating.
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not await _namespace_exists(kr8s_api, namespace):
+            return
+        await asyncio.sleep(5)
+    raise AssertionError(
+        f"Namespace {namespace!r} (Traefik release) still present after {timeout}s"
+    )
+
+
 @pytest.mark.e2e
 @pytest.mark.ci
 @pytest.mark.api_only(
@@ -881,9 +896,7 @@ async def test_deleting_last_app_tears_down_dedicated_ingress(
             )
         # The default list hides tombstones, so absence proves deleted_at is set.
         assert await _ingress_controller_ids(client, environment_id) == {}
-        assert not await _namespace_exists(kr8s_api, ingress_namespace), (
-            f"Namespace {ingress_namespace!r} (Traefik release) still present"
-        )
+        await _wait_for_namespace_gone(kr8s_api, ingress_namespace)
 
         task = await client.deployments.create(
             driver="simple-app", version="0.1.0", environment_id=environment_id
