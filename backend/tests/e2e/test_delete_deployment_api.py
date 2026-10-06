@@ -50,6 +50,7 @@ from kubernetes_asyncio.client.api_client import ApiException
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import ResourceNotFoundError
 
+from tests.e2e.conftest import create_deployment_after_ingress_teardown
 from tests.e2e.drivers import ScenarioDriver
 
 pytestmark = [
@@ -237,8 +238,10 @@ async def test_delete_deployment_api(
         f"observed types: {[e.task.type_ for e in timeline]}"
     )
 
-    # 10. The freed service name can be claimed again in the same env.
-    redeployed = await scenario_driver.create_deployment(
+    # 10. The freed service name can be claimed again in the same env. The
+    # deletion may have emptied the env, so wait out its ingress teardown.
+    redeployed = await create_deployment_after_ingress_teardown(
+        scenario_driver,
         driver="simple-app",
         version="0.1.0",
         environment_id=scenario_environment_id,
