@@ -40,7 +40,7 @@ class KubernetesConfigMode(str, Enum):
 
 
 class KubernetesSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="STYRMIN_K8S_")
+    model_config = SettingsConfigDict(env_prefix="STYRMIN_K8S_", populate_by_name=True)
     default_resource_prefix: str = "styrmin"
     service_account: str = "styrmin-service-account"
     worker_image: str = "registry.opsmill.io/opsmill/styrmin"
@@ -137,7 +137,7 @@ class DriverSettings(BaseSettings):
 
 
 class DatabaseSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="STYRMIN_DB_")
+    model_config = SettingsConfigDict(env_prefix="STYRMIN_DB_", populate_by_name=True)
 
     db_type: DatabaseType = Field(default=DatabaseType.SQLITE, alias="STYRMIN_DB_TYPE")
     db_name: str = Field(default="styrmin.db", alias="STYRMIN_DB_NAME")
@@ -185,7 +185,7 @@ class OperatorSettings(BaseSettings):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="STYRMIN_")
+    model_config = SettingsConfigDict(env_prefix="STYRMIN_", populate_by_name=True)
     # default_factory reads the sub-settings' env vars at load time, not import time.
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     workflow: WorkflowSettings = Field(default_factory=WorkflowSettings)

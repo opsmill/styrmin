@@ -27,8 +27,8 @@ def show(
     """
     settings = config.SETTINGS.active_settings
 
-    # Convert settings to dict
-    settings_dict = settings.model_dump()
+    # mode="json": the toml library writes str enums as lists of characters.
+    settings_dict = settings.model_dump(mode="json")
 
     # markup=False: Rich would otherwise strip TOML section headers like [database].
     if format == "json":

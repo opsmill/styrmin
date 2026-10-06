@@ -9,10 +9,12 @@ from styrmin_backend import config
 from styrmin_backend.config import (
     AgentSettings,
     ConfiguredSettings,
+    KubernetesConfigMode,
     OperatorSettings,
     Settings,
     load,
 )
+from styrmin_backend.db.constants import DatabaseType
 from styrmin_backend.exceptions import InitializationError
 from styrmin_backend.workflows.catalogue import PrefectCatalogue
 from styrmin_backend.workflows.models import PrefectWorkPool
@@ -112,6 +114,24 @@ def test_agent_and_operator_settings_load_from_toml(tmp_path: Path) -> None:
 
     assert settings.agent.poll_retries == 3
     assert settings.operator.deleted_cr_ttl_hours == 24
+
+
+def test_aliased_settings_load_from_toml_by_field_name(tmp_path: Path) -> None:
+    path = tmp_path / "styrmin.toml"
+    path.write_text(
+        "session_cookie_secure = false\n\n"
+        '[database]\ndb_type = "postgres"\ndb_host = "db.example"\n\n'
+        '[kubernetes]\nconfig_mode = "kubeconfig"\nhost = "https://k8s.example"\n',
+        encoding="utf-8",
+    )
+
+    settings = load(str(path))
+
+    assert settings.session_cookie_secure is False
+    assert settings.database.db_type == DatabaseType.POSTGRES
+    assert settings.database.db_host == "db.example"
+    assert settings.kubernetes.config_mode == KubernetesConfigMode.KUBECONFIG
+    assert settings.kubernetes.host == "https://k8s.example"
 
 
 def test_catalogue_forwards_agent_poll_settings_to_jobs(
