@@ -29,9 +29,9 @@ Run each E2E node with `--pdb` (in a non-interactive shell: `sleep infinity | uv
 
 **Purpose**: Packages and baseline for the feature
 
-- [ ] T001 Confirm the environment: run `uv sync`, `cd frontend && pnpm install`, `uv run invoke pre-commit-install`; record the current Alembic head revision id (from `backend/styrmin_backend/db/migrations/versions/`) as the `down_revision` for T005
-- [ ] T002 [P] Create empty packages: `backend/styrmin_backend/services/steps/__init__.py`, `backend/styrmin_backend/agent/steps/__init__.py`, `backend/styrmin_backend/api/definitions/step/__init__.py`, `backend/tests/unit/steps/__init__.py`
-- [ ] T003 [P] Create `specs/019-task-steps/e2e-evidence.md` with a header and an empty table (columns: node id, command, passing time, vCluster id and kubeconfig, PASSED line)
+- [X] T001 Confirm the environment: run `uv sync`, `cd frontend && pnpm install`, `uv run invoke pre-commit-install`; record the current Alembic head revision id (from `backend/styrmin_backend/db/migrations/versions/`) as the `down_revision` for T005
+- [X] T002 [P] Create empty packages: `backend/styrmin_backend/services/steps/__init__.py`, `backend/styrmin_backend/agent/steps/__init__.py`, `backend/styrmin_backend/api/definitions/step/__init__.py`, `backend/tests/unit/steps/__init__.py`
+- [X] T003 [P] Create `specs/019-task-steps/e2e-evidence.md` with a header and an empty table (columns: node id, command, passing time, vCluster id and kubeconfig, PASSED line)
 
 ---
 
