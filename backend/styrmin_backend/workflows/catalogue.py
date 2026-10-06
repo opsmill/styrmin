@@ -155,13 +155,25 @@ class PrefectCatalogue:
             ),
         )
 
+        # ``run_job`` holds the action token; ``run_job_command`` runs the Job.
         self.add_workflow_definition(
             action=PrefectAction.RUN_JOB,
             workflow=LocalSourceWorkflowDefinition(
                 name="run_job",
-                type=WorkflowType.USER,
+                type=WorkflowType.INTERNAL,
                 module="styrmin_backend.agent.tasks.orchestration",
                 function="run_job",
+                set_directory="/source/backend/",
+            ),
+        )
+
+        self.add_workflow_definition(
+            action=PrefectAction.RUN_JOB_COMMAND,
+            workflow=LocalSourceWorkflowDefinition(
+                name="run_job_command",
+                type=WorkflowType.USER,
+                module="styrmin_backend.agent.tasks.orchestration",
+                function="run_job_command",
                 set_directory="/source/backend/",
             ),
         )

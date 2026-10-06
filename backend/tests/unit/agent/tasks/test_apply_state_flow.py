@@ -1,109 +1,146 @@
 """Pin the post-#237 Prefect-side apply_state behaviour.
 
 The flow must:
+- Open the "Plan the changes" step (spec 019).
 - Open a UoW.
 - Load the deployment, new instance, and (if provided) current
   instance from the freshly-committed DB.
 - Build a DiffReport via Comparator.
-- Generate a Remediation via Remediator.
+- Generate a Remediation via Remediator, then end the plan step.
 - Call `remediation.apply()` (the existing sub-flow chain) with a
   freshly minted driver action token (ADR-059) and the task id, after the
-  UoW closes.
+  UoW closes; when it fails, fail the task's open flow steps before raising.
 """
 
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
-from uuid import uuid4
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from tests.helpers.unit_of_work import yield_unit_of_work
 
+from styrmin_backend.domain import steps
+from styrmin_backend.domain.models import StepParent
+from styrmin_backend.services.reconciliation.exceptions import ReconciliationError
 
-@pytest.mark.asyncio
-@patch("styrmin_backend.agent.tasks.orchestration.action_api_token")
-@patch(
-    "styrmin_backend.agent.tasks.orchestration._build_instance_entity",
-    create=True,
-)
-@patch(
-    "styrmin_backend.agent.tasks.orchestration.get_unit_of_work",
-    create=True,
-)
-@patch(
-    "styrmin_backend.agent.tasks.orchestration.Comparator",
-    create=True,
-)
-@patch(
-    "styrmin_backend.agent.tasks.orchestration.Remediator",
-    create=True,
-)
-async def test_apply_state_flow_loads_fresh_and_remediates(
-    mock_remediator_cls,
-    mock_comparator_cls,
-    mock_get_uow,
-    mock_build_entity,
-    mock_action_api_token,
-) -> None:
-    from styrmin_backend.agent.tasks.orchestration import apply_state
+MODULE = "styrmin_backend.agent.tasks.orchestration"
 
-    deployment_id = uuid4()
-    new_instance_id = uuid4()
-    current_instance_id = uuid4()
-    task_id = uuid4()
+
+@pytest.fixture
+def flow() -> Iterator[SimpleNamespace]:
+    """The flow's collaborators, logging into one ordered event list."""
+    events: list[str] = []
+    plan_step_id = uuid4()
 
     fake_uow = AsyncMock()
-    fake_uow.deployments.find = AsyncMock(return_value=MagicMock(id=deployment_id))
+    fake_uow.deployments.find = AsyncMock(return_value=MagicMock())
     fake_uow.application_instances = AsyncMock()
     fake_uow.application_instances.get = AsyncMock(
         side_effect=lambda *, id: MagicMock(id=id)
     )
-    events: list[str] = []
     fake_uow.__aexit__.side_effect = lambda *_: events.append("uow closed")
-    mock_get_uow.side_effect = yield_unit_of_work(fake_uow)
 
     @asynccontextmanager
     async def _fake_action_api_token():
         events.append("token created")
-        yield "action-token"
-        events.append("token revoked")
+        try:
+            yield "action-token"
+        finally:
+            events.append("token revoked")
 
-    mock_action_api_token.side_effect = _fake_action_api_token
+    async def _open_task_step(task_id, step):
+        events.append(f"{step.key} step opened")
+        return plan_step_id
 
-    mock_build_entity.side_effect = lambda model: (
-        MagicMock(id=model.id) if model is not None else None
-    )
+    async def _end_step(step_id, error=None):
+        events.append("plan step failed" if error else "plan step succeeded")
 
-    diff_report = MagicMock()
-    mock_comparator_cls.return_value.compare = MagicMock(return_value=diff_report)
+    async def _fail_open_steps(parent, message):
+        events.append("open steps failed")
 
     fake_remediation = MagicMock()
-    flow_info = MagicMock(state=MagicMock(name="Completed"))
-
-    def _apply(*, api_token: str, task_id) -> MagicMock:
-        events.append("remediation applied")
-        return flow_info
-
-    fake_remediation.apply = AsyncMock(side_effect=_apply)
-    mock_remediator_cls.return_value.generate_remediation = AsyncMock(
-        return_value=fake_remediation
+    fake_remediation.apply = AsyncMock(
+        side_effect=lambda **_: (
+            events.append("remediation applied")
+            or MagicMock(state=MagicMock(name="Completed"))
+        )
     )
+
+    with (
+        patch(f"{MODULE}.get_unit_of_work", yield_unit_of_work(fake_uow)),
+        patch(f"{MODULE}._build_instance_entity") as build_entity,
+        patch(f"{MODULE}.Comparator") as comparator_cls,
+        patch(f"{MODULE}.Remediator") as remediator_cls,
+        patch(f"{MODULE}.action_api_token", side_effect=_fake_action_api_token),
+        patch(f"{MODULE}.open_task_step", side_effect=_open_task_step) as open_step,
+        patch(f"{MODULE}.end_step", side_effect=_end_step) as end_step,
+        patch(f"{MODULE}.fail_open_steps", side_effect=_fail_open_steps) as fail_open,
+    ):
+        build_entity.side_effect = lambda model: (
+            MagicMock(id=model.id) if model is not None else None
+        )
+        comparator_cls.return_value.compare = MagicMock(return_value=MagicMock())
+        remediator_cls.return_value.generate_remediation = AsyncMock(
+            return_value=fake_remediation
+        )
+        yield SimpleNamespace(
+            events=events,
+            uow=fake_uow,
+            plan_step_id=plan_step_id,
+            comparator_cls=comparator_cls,
+            remediator_cls=remediator_cls,
+            remediation=fake_remediation,
+            open_step=open_step,
+            end_step=end_step,
+            fail_open=fail_open,
+        )
+
+
+async def _apply_state(task_id=None, **options):
+    from styrmin_backend.agent.tasks.orchestration import apply_state
+
+    return await apply_state(
+        task_id=task_id or uuid4(),
+        deployment_id=uuid4(),
+        new_instance_id=uuid4(),
+        current_instance_id=None,
+        **options,
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_state_flow_loads_fresh_and_remediates(
+    flow: SimpleNamespace,
+) -> None:
+    from styrmin_backend.agent.tasks.orchestration import apply_state
+
+    deployment_id = uuid4()
+    task_id = uuid4()
 
     await apply_state(
         task_id=task_id,
         deployment_id=deployment_id,
-        new_instance_id=new_instance_id,
-        current_instance_id=current_instance_id,
+        new_instance_id=uuid4(),
+        current_instance_id=uuid4(),
     )
 
-    fake_uow.deployments.find.assert_awaited_with(id=deployment_id)
-    mock_comparator_cls.assert_called_once()
-    mock_remediator_cls.assert_called_once()
-    fake_remediation.apply.assert_awaited_once_with(
+    flow.uow.deployments.find.assert_awaited_with(id=deployment_id)
+    flow.comparator_cls.assert_called_once()
+    flow.remediator_cls.assert_called_once()
+    flow.remediation.apply.assert_awaited_once_with(
         api_token="action-token", task_id=task_id
     )
-    # The UoW's connection must be released before the token and the remediation.
-    assert events == [
+    flow.open_step.assert_awaited_once_with(task_id, steps.PLAN)
+    flow.end_step.assert_awaited_once_with(flow.plan_step_id)
+    flow.fail_open.assert_not_awaited()
+    # The plan step covers the planning; the UoW's connection is released
+    # before the token and the remediation.
+    assert flow.events == [
+        "plan step opened",
         "uow closed",
+        "plan step succeeded",
         "token created",
         "remediation applied",
         "token revoked",
@@ -111,50 +148,62 @@ async def test_apply_state_flow_loads_fresh_and_remediates(
 
 
 @pytest.mark.asyncio
-@patch(
-    "styrmin_backend.agent.tasks.orchestration._build_instance_entity",
-    create=True,
-)
-@patch(
-    "styrmin_backend.agent.tasks.orchestration.get_unit_of_work",
-    create=True,
-)
-@patch(
-    "styrmin_backend.agent.tasks.orchestration.Comparator",
-    create=True,
-)
-@patch(
-    "styrmin_backend.agent.tasks.orchestration.Remediator",
-    create=True,
-)
 async def test_apply_state_flow_handles_no_remediation_needed(
-    mock_remediator_cls,
-    mock_comparator_cls,
-    mock_get_uow,
-    mock_build_entity,
+    flow: SimpleNamespace,
 ) -> None:
     """If Remediator returns None, the flow should not error."""
-    from styrmin_backend.agent.tasks.orchestration import apply_state
+    flow.remediator_cls.return_value.generate_remediation = AsyncMock(return_value=None)
 
-    fake_uow = AsyncMock()
-    fake_uow.deployments.find = AsyncMock(return_value=MagicMock())
-    fake_uow.application_instances = AsyncMock()
-    fake_uow.application_instances.get = AsyncMock(return_value=MagicMock())
-    mock_get_uow.side_effect = yield_unit_of_work(fake_uow)
+    state = await _apply_state(return_state=True)
 
-    mock_build_entity.side_effect = lambda model: (
-        MagicMock(id=model.id) if model is not None else None
+    assert state.is_completed()
+    assert state.message == "No remediation needed"
+    flow.end_step.assert_awaited_once_with(flow.plan_step_id)
+    assert flow.events == ["plan step opened", "uow closed", "plan step succeeded"]
+
+
+@pytest.mark.asyncio
+async def test_apply_state_flow_fails_the_plan_step_with_the_planning_error(
+    flow: SimpleNamespace,
+) -> None:
+    flow.remediator_cls.return_value.generate_remediation = AsyncMock(
+        side_effect=ReconciliationError("No upgrade hook for 2.0.0")
     )
 
-    mock_comparator_cls.return_value.compare = MagicMock(return_value=MagicMock())
-    mock_remediator_cls.return_value.generate_remediation = AsyncMock(return_value=None)
+    with pytest.raises(ReconciliationError, match="No upgrade hook"):
+        await _apply_state()
 
-    result = await apply_state(
-        task_id=uuid4(),
-        deployment_id=uuid4(),
-        new_instance_id=uuid4(),
-        current_instance_id=None,
+    flow.end_step.assert_awaited_once_with(
+        flow.plan_step_id, error="ReconciliationError: No upgrade hook for 2.0.0"
     )
-    # Either returns a Completed state or None — pin to the contract
-    # the flow exposes after Task 2.4.
-    assert result is None or "Completed" in (getattr(result, "name", "") or "")
+    flow.remediation.apply.assert_not_awaited()
+    assert flow.events == ["plan step opened", "uow closed", "plan step failed"]
+
+
+@pytest.mark.asyncio
+async def test_apply_state_flow_fails_open_steps_when_the_remediation_fails(
+    flow: SimpleNamespace,
+) -> None:
+    task_id = uuid4()
+    error = RuntimeError("Deployment flow run 1234 crashed: exit code 137")
+    flow.remediation.apply = AsyncMock(side_effect=error)
+
+    with pytest.raises(RuntimeError, match="crashed: exit code 137"):
+        await _apply_state(task_id=task_id)
+
+    flow.fail_open.assert_awaited_once_with(StepParent.of_task(task_id), str(error))
+    assert flow.events[-3:] == ["token created", "open steps failed", "token revoked"]
+
+
+@pytest.mark.asyncio
+async def test_apply_state_flow_plans_without_a_plan_step(
+    flow: SimpleNamespace,
+) -> None:
+    """When the plan step cannot be written, the reconcile still runs."""
+    flow.open_step.side_effect = None
+    flow.open_step.return_value = None
+
+    await _apply_state()
+
+    flow.end_step.assert_awaited_once_with(None)
+    flow.remediation.apply.assert_awaited_once()
