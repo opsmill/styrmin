@@ -17,7 +17,9 @@ The approach, from [research.md](research.md):
   - the operator's CR status reaches the server through the existing status reports, and an operator phase history turns each report into step changes (D4, D6).
 - The operator must judge the HelmRelease on its current generation and copy FluxCD's reason and rollbacks into the CR status (D5). Today it reports updates `Ready` without waiting for FluxCD, which is why a task can show success while its HelmRelease fails.
 - Command output is read from the failed Job's pod before anything can remove it (D10).
-- The frontend, the SDK and `styrminctl` read the new fields (D15, D16).
+- The task result is calculated over the task's family, so the tasks that one upgrade hook started count as the upgrade's work (D8).
+- Tasks that a reconcile runs are stored with the type their caller means instead of `noop`, so users can find "the upgrade" (D19, FR-019).
+- The frontend, the SDK and `styrminctl` read the new fields (D15, D16). The timeline uses a precomputed read model so it stays at a fixed number of queries (D14).
 
 ## Technical Context
 
@@ -33,7 +35,7 @@ The approach, from [research.md](research.md):
 
 **Project Type**: Web service with an in-cluster agent, an SDK and a CLI.
 
-**Performance Goals**: A step change appears on the deployment page within 15 seconds of being recorded (FR-005: 5-second reports plus the 10-second page refresh). The timeline query loads steps, started tasks and the deployment status for all tasks of a deployment in three database queries.
+**Performance Goals**: A step change appears on the deployment page within 15 seconds of being recorded (FR-005: 5-second reports plus the 10-second page refresh). The timeline query runs a fixed number of database queries whatever the number of tasks and steps: the timeline service loads the steps, started tasks and deployment status in three queries and hands them to the GraphQL objects as private fields (research D14). The phase history returns without locking rows for tasks whose operator-phase steps are final.
 
 **Constraints**:
 
@@ -98,21 +100,22 @@ backend/styrmin_backend/
 │   ├── operator_history.py                   # apply_operator_report
 │   ├── reads.py                              # step reads, no_report_since
 │   └── exceptions.py                         # StepNotFoundError, InvalidStepRecordError
-├── services/reconciliation/__init__.py       # Task.instance_id, started_by_step_id
-├── services/primitives.py                    # stop/start: started_by_step_id
-├── services/deployment.py                    # update_deployment_version started_by; delete request step
+├── services/reconciliation/__init__.py       # Task.instance_id, started_by_step_id, task_type argument
+├── services/primitives.py                    # stop/start: started_by_step_id, task types
+├── services/deployment.py                    # task types per caller; update_deployment_version started_by; delete request step
 ├── services/deployment_status.py             # call apply_operator_report
-├── services/deployment_timeline.py           # bulk steps and results
+├── services/deployment_timeline.py           # read model: steps, started tasks, family results, last report
 ├── services/tasks.py                         # callback closes open flow steps
 ├── services/unit_of_work.py                  # steps repository
 ├── api/definitions/step/model.py             # new: Step, StepError, enums, RecordStepInput
 ├── api/definitions/task/model.py             # steps, result, startedBy, startedTasks
 ├── api/definitions/backup/{backup,restore}.py# steps
 ├── api/schema/{query,mutation}.py            # step, recordStep, startedByStepId
+├── api/auth/permissions.py                   # IsActionsServiceAccount
 ├── agent/steps/                              # new: reporter.py, record_step.graphql, queries.py
 ├── agent/service/kubernetes/job_logs.py      # new: read_job_output_tail
 ├── agent/service/kubernetes/primitives.py    # run_job, run_kubernetes_job read output on failure
-├── agent/service/kubernetes/velero/client.py # list_pod_volume_backups, on_poll
+├── agent/service/kubernetes/velero/client.py # list_pod_volume_backups, on_poll, FailedValidation terminal
 ├── agent/status/reporter.py                  # instanceId from status
 ├── agent/tasks/orchestration.py              # plan step, env, remediation flow steps, run_job wrapper, run_job_command
 ├── agent/tasks/utils.py                      # action_job_variables, run_driver_action_or_fail(step_id)
@@ -155,27 +158,30 @@ schema.graphql                                # regenerated
 
 Each phase leaves the system working. Phases 1 to 6 deliver P1; phase 7 delivers P2.
 
-1. **Storage and recorder.** Migration, models, repository, recorder, result calculation, reads, errors. Unit tests for the recorder and the result calculation.
-2. **GraphQL.** `Step` type and enums, `Task` and `Backup`/`Restore` fields, `Query.step`, `recordStep`, `startedByStepId`; services wired (`apply_state` sets `instance_id`, the three mutations set `started_by_step_id`, `deleteDeployment` records its request step, the callback closes open steps). Schema and SDK regeneration. Propagation tests.
+1. **Storage and recorder.** Migration (with a reversible downgrade), models, repository, recorder, family result calculation, reads, errors. Unit tests for the recorder and the result calculation; a migration test.
+2. **GraphQL.** `Step` type and enums, `Task` and `Backup`/`Restore` fields, `Query.step`, `recordStep` (restricted to `styrmin-actions`), `startedByStepId`; services wired (`apply_state` sets `instance_id` and takes the task type, each caller passes its type, the three mutations set `started_by_step_id`, `deleteDeployment` records its request step, the callback closes open steps). Timeline read model with a query-count test. Schema and SDK regeneration. Propagation tests.
 3. **Flow steps.** Reporter and job variables; `apply_state` plan step and crash handling; remediation flow steps; `run_job` wrapper and `run_job_command`; job output in `execute_commands` and `run_job_command`; started-by link in the action primitives. Unit tests.
 4. **Operator and phase history.** Operator changes (D5) and `status.instanceId`; reporter `instanceId`; phase history. Unit tests, including the existing operator handler tests.
 5. **Frontend.** Queries, `StepList`, `TaskResultBadge`, timeline changes. Component tests.
 6. **SDK and CLI.** Queries, `failed_step`, `_wait_for_terminal`, `tasks get`. Tests. Then the P1 E2E scenarios.
-7. **Restores and backups (P2).** Tokens and steps in the backup and restore flows, PodVolumeBackup mapping, RBAC, crash handling, backup and restore rows in the frontend, SDK queries. Unit and E2E tests.
+7. **Restores and backups (P2).** Tokens and steps in the backup and restore flows, PodVolumeBackup mapping, RBAC, crash handling, `FailedValidation` as a terminal Velero phase, backup and restore rows in the frontend, SDK queries. Unit and E2E tests.
 8. **Documentation and changelog** (see below), then the full local merge gate.
 
 ## E2E coverage
 
 Following "reuse before you boot" ([`dev/guides/e2e-deployment-sharing.md`](../../dev/guides/e2e-deployment-sharing.md)):
 
-- **Extend** `test_upgrade_simple_app` (`shard_general`, both variants): after the upgrade, assert the upgrade task's steps in order, the three started tasks with links both ways, and the result `SUCCEEDED` for the upgrade and its started tasks.
-- **Extend** `test_deployment_timeline_has_entries`: every task of the shared deployment has a result, and the create task has the plan, CR-write and operator-phase steps.
-- **New** `test_task_steps.py` (`shard_general`), with one module-scoped deployment of a test driver `failing-actions` (served by the existing git-server fixture; it reuses the simple-app chart). Its upgrade action reads the target version to choose a failure:
+- **Extend** `test_upgrade_simple_app` (`shard_general`, both variants): after the upgrade, assert:
+  - the upgrade task has the type `upgrade_instance` and its steps in order (plan, CR write, upgrade hook, operator phases);
+  - the upgrade hook step lists the three started tasks, and each links back;
+  - the upgrade's result is `SUCCEEDED`, the last started task (`start_components`) is `SUCCEEDED`, and each earlier started task is `SUCCEEDED` or `SUPERSEDED` by one of its siblings (they interrupt each other's rollouts, research D8).
+- **Extend** `test_deployment_timeline_has_entries`: every task of the shared deployment has a result, and the create task has the type `create_instance` and the plan, CR-write and operator-phase steps.
+- **New** `test_task_steps.py` (`shard_general`), with one module-scoped deployment of a test driver `failing-actions` (served by the existing git-server fixture; it reuses the simple-app chart). No existing deployment can host these scenarios: failing the shared simple-app deployment would break every later test in the shard. Its upgrade action reads the target version to choose a failure:
   - `test_hook_action_error_shows_failed_step` (`api_only`): the action raises; the hook step is failed with the error; the result is `FAILED`.
   - `test_command_output_on_failed_step` (`api_only`): the action's command exits non-zero after printing known lines; the hook step has the end of the output.
-  - `test_helmrelease_failure_shows_fluxcd_reason` (both variants): an image override with a tag that does not exist; the HelmRelease step is failed with FluxCD's reason and `ImagePullBackOff`; a `READ_ONLY` user reads the same data (SC-004); `apply --wait` through the SDK reports the step.
-  - `test_prerequisite_failure_shows_attempts` (`api_only`): a ValidatingAdmissionPolicy (or, if the vCluster version lacks it, a validating webhook from the test fixtures) rejects updates to the deployment's network policies; an update fails the prerequisites step with the rejection message and more than one attempt.
-- **Extend** `test_backup_restore.py` (`shard_backup`): a completed restore lists its three steps in order with durations; a restore of a backup whose Velero object was deleted fails the "Run the Velero restore" step with Velero's reason; a backup lists one step per component.
+  - `test_prerequisite_failure_shows_attempts` (`api_only`): delete one of the operator's network policies in the deployment namespace, add a `ResourceQuota` whose `count/networkpolicies.networking.k8s.io` equals the remaining count, then update the deployment; the prerequisites step fails with the quota message and more than one attempt. The test removes the quota afterwards.
+  - `test_helmrelease_failure_shows_fluxcd_reason` (both variants, runs last in the module): an image override with a tag that does not exist; within a 420-second budget (the operator's 300-second readiness timeout plus margin) the HelmRelease step is failed with FluxCD's reason and `ImagePullBackOff`; a `READ_ONLY` user reads the same data (SC-004); `apply --wait` through the SDK reports the step.
+- **Extend** `test_backup_restore.py` (`shard_backup`): a completed restore lists its three steps in order with durations; a backup lists one step per component; for a failed restore, the test removes the Velero backup with a `DeleteBackupRequest`, waits until the `Backup` object is gone (so Velero's backup sync cannot bring it back), then restores it, and asserts that "Run the Velero restore" failed with Velero's validation error.
 
 Markers follow [`dev/knowledge/backend/e2e-testing.md`](../../dev/knowledge/backend/e2e-testing.md): the SC-001 scenarios other than the HelmRelease one are `api_only`, because component tests cover how each failure appears on the page.
 
@@ -189,7 +195,9 @@ Markers follow [`dev/knowledge/backend/e2e-testing.md`](../../dev/knowledge/back
 | A remediation flow dies without closing its step | A task stays `RUNNING` | `apply_state`, the `run_job` wrapper, the backup and restore flows and the callback close open flow-kind steps |
 | Forged reports through the unauthenticated `reportDeploymentStatuses` | Forged operator-phase steps | Same exposure as `Deployment.status` today; tracked by [#396](https://github.com/opsmill/styrmin/issues/396) |
 | FluxCD attempts faster than the operator's 60-second check | Attempts undercounted | Documented limit (research D6) |
-| Timeline payload grows | Slower page refresh | No output in the timeline query; bulk loading; output loaded per step |
+| FluxCD rolls back after each failed attempt, then retries | Treating a rollback as final would leave the CR `Failed` after a successful retry | Only `Stalled=True` is final; the readiness timeout is the safety net (research D5) |
+| Timeline payload and query count grow | Slower page refresh | No output in the timeline query; precomputed read model with a query-count test; output loaded per step |
+| New task types for reconcile tasks | Consumers that expected `noop` see `create_instance`, `update_instance`, `upgrade_instance` and the component types | The values already exist in the enum and in the frontend labels; E2E `VALID_TASK_TYPES` already accepts them; changelog fragment |
 
 High-risk areas touched (AGENTS.md): database, operator, agent status reporter, Prefect flow dispatch, authentication (new `READ_WRITE` mutation and new action-token users). The PR description calls each out.
 
@@ -197,7 +205,7 @@ High-risk areas touched (AGENTS.md): database, operator, agent status reporter, 
 
 - **Database schema**: `step` table; `task.instance_id`; `task.started_by_step_id`.
 - **GraphQL schema**: new types, enums, `Query.step`, `recordStep`, `startedByStepId` on three mutations.
-- **Authentication and authorization**: `recordStep` requires `READ_WRITE` and is called with the action token; `run_job` gets an action token (PRD); backup and restore flows get an action token (research D13, beyond the PRD's implementation note).
+- **Authentication and authorization**: `recordStep` requires `READ_WRITE`, accepts only the `styrmin-actions` user, and is called with the action token; `run_job` gets an action token (PRD); backup and restore flows get an action token (research D13, beyond the PRD's implementation note).
 - **Operator behaviour**: the CR status gains `instanceId`, `rolloutStartedAt` and `HelmReleaseRemediated`, and updates wait for FluxCD (research D5).
 - **Helm chart RBAC**: the agent can `get` and `list` `podvolumebackups`.
 - No new dependency. No CI/CD workflow change: the new E2E file uses the existing `shard_general` marker.
@@ -215,7 +223,7 @@ High-risk areas touched (AGENTS.md): database, operator, agent status reporter, 
 | `dev/knowledge/backend/orchestration-flows.md`, `hooks-and-actions.md`, `data-models.md`, `api.md`, `backup-restore.md`; `dev/knowledge/agent/operator.md`, `overview.md`; `dev/knowledge/frontend/data-fetching.md` (if the output query pattern is new) | The path from flows and the operator to steps; the new tables; the operator changes |
 | `dev/adr/0060-steps-and-derived-task-result.md` (new) | Steps as records written through one recorder, the derived task result, the three writers, the operator's current-generation rule |
 | `CONTEXT.md` | Step and Task result (drafted in the specify phase); `instanceId` meaning on the CR status |
-| `changelog/2.added.md`, `changelog/2.fixed.md` | The feature; updates no longer reported ready before FluxCD applies them |
+| `changelog/2.added.md`, `changelog/2.fixed.md`, `changelog/2.changed.md` | The feature; updates no longer reported ready before FluxCD applies them; reconcile tasks get their real type instead of `noop` |
 | `dev/guides/users-and-groups.md` | `styrmin-actions` sessions are also created by `run_job`, backups and restores |
 
 ## Complexity Tracking

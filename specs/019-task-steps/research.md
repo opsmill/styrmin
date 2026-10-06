@@ -44,6 +44,7 @@ These facts come from the code and decide most of the design.
   - **From the operator**, indirectly: the operator writes the CR status, the status reporter sends it, and the operator phase history (D6) turns each report into recorder calls.
 - **Rationale**: The process that does the work is the one that knows when it starts and ends. A USER flow has no database access, so it uses the API like the action primitives already do (ADR-059).
 - **Failure policy**: A failed step write never fails the work. The flow step reporter logs a warning and continues. Recording a step has no effect on the cluster (Constitution §I).
+- **Task row not committed yet**: `apply_state` dispatches the flow before its caller commits the task row (`services/reconciliation/__init__.py:84`, `services/primitives.py:144-151`); the callback already tolerates this by returning `success: false`. The "Plan the changes" write therefore retries on `TaskNotFoundError` for up to 10 seconds before it logs and gives up.
 
 ## D3. USER flows find their step parent through environment variables
 
@@ -79,11 +80,11 @@ These facts come from the code and decide most of the design.
 The P1 acceptance scenario is an upgrade whose HelmRelease does not become Ready. With fact 5, the operator reports that upgrade as `Ready` within a minute, so the HelmRelease step would succeed and the task result would be `SUCCEEDED`. The operator must change.
 
 - **Decision**: The StyrminDeployment handlers change in five ways.
-  1. **Reset on each rollout.** The create, update and resume handlers set `HelmReleaseReady` to `Unknown` with reason `Progressing`, and record `status.rolloutStartedAt`.
+  1. **Reset on each rollout.** The create and update handlers set `HelmReleaseReady` to `Unknown` with reason `Progressing`, and record `status.rolloutStartedAt`. The resume handler continues a rollout: it records `status.rolloutStartedAt` only when it is missing, so an operator restart does not extend the readiness timeout, and it does not reset `HelmReleaseReady`.
   2. **Judge the current generation.** In `CreatingHelmRelease`, the timer reads the HelmRelease once per tick. It counts FluxCD's `Ready=True` only when that condition's `observedGeneration` equals the HelmRelease's `metadata.generation`, the same rule as the component-container guard (`operator/reconciler.py:409`).
   3. **Copy FluxCD's state.** While the current generation is not Ready, the timer copies FluxCD's `Ready` reason, message and transition time into `HelmReleaseReady`. When FluxCD's `Remediated` condition is `True` for the current generation, the timer copies it into a new `HelmReleaseRemediated` condition.
-  4. **Stop on FluxCD's final failure.** When FluxCD's `Remediated` is `True` (a rollback or an uninstall) or `Stalled` is `True` for the current generation, the timer sets the phase `Failed` and `displayState: Error` with FluxCD's message.
-  5. **Time out from the rollout start.** The readiness timeout counts from `status.rolloutStartedAt`, and falls back to `creationTimestamp`.
+  4. **Stop on FluxCD's final failure.** When FluxCD's `Stalled` condition is `True` for the current generation (FluxCD has used all its retries), the timer sets the phase `Failed` and `displayState: Error` with FluxCD's message. `Remediated=True` alone is not final: with `remediation.retries: 3` (`agent/service/kubernetes/resources/builders/application.py:231`), FluxCD rolls back after each failed attempt and then tries again, and a later attempt can succeed.
+  5. **Time out from the rollout start.** The readiness timeout counts from `status.rolloutStartedAt`, and falls back to `creationTimestamp`. It stays the safety net when FluxCD never reports `Stalled`.
 - **Consequences**:
   - An update or upgrade reaches `RUNNING` only after FluxCD reports the new release Ready. With `spec.timeout: 5m` and Helm's wait enabled by default ([FluxCD documentation](https://fluxcd.io/flux/components/helm/helmreleases/)), that is after the new pods are ready.
   - A failed update or upgrade ends `FAILED` instead of `RUNNING`. This is a visible change in behaviour and gets a `fix` changelog fragment.
@@ -102,8 +103,9 @@ The P1 acceptance scenario is an upgrade whose HelmRelease does not become Ready
   - **Creation**: When a remediation flow reports that its "Write the StyrminDeployment resource" step succeeded, the recorder creates the four operator-phase steps of that task: "Create network policies and secrets" (running), "Install or upgrade the HelmRelease", "Create services and middlewares" and "Wait for the deployment to be ready" (pending). Pending steps keep the task result `RUNNING` in the gap between the end of the flow and the first operator report (FR-006: "not started"). An internal deployment gets no operator-phase steps, because the status reporter does not report internal deployments (`reporter.py:205`).
   - **Mapping**: For each report of the task's instance, the phase history moves the steps forward by phase: `CreatingPrerequisites`, `CreatingHelmRelease`, `CreatingServices`, `Ready`. A report can skip phases between two polls; every earlier step then succeeds. A step's end time is the transition time of its condition when the report carries one, and the report time otherwise.
   - **Failures**: Phase `Failed` or `displayState: Error` fails the running step with the CR message. When the step is the HelmRelease step or "Wait for the deployment to be ready", the error also lists the pods of the deployment whose containers wait or ended with an error reason (for example `ImagePullBackOff`), read from the stored pod statuses. This names the cause of SC-001's third failure type: FluxCD's message after a Helm wait timeout does not say why the pods are not ready.
-  - **Attempts**: A failed step becomes running again, with one more attempt, when a later report shows the operator working on it again (the operator retries after 30 seconds). On the HelmRelease step, each FluxCD failure reason (`InstallFailed`, `UpgradeFailed` and the other `*Failed` reasons) with a new message or transition time adds the error to the current attempt and starts the next one. The operator reads FluxCD every 60 seconds, so attempts that fail faster than that are counted as one. This limit is documented.
-  - **FluxCD's reason and rollbacks**: While the HelmRelease step runs or has failed, its `detail` holds FluxCD's current reason and message. The `HelmReleaseRemediated` condition sets `rolledBackAt` and `rollbackMessage` (FR-004).
+  - **Attempts**: A failed step becomes running again, with one more attempt, when a later report shows the operator working on it again (the operator retries after 30 seconds). When a report shows a later phase, every earlier failed step gets a new attempt and succeeds: this happens when the readiness timeout failed the HelmRelease step and a later FluxCD attempt then succeeded. On the HelmRelease step, each FluxCD failure reason (`InstallFailed`, `UpgradeFailed` and the other `*Failed` reasons) with a new message or transition time adds the error to the current attempt and starts the next one. The operator reads FluxCD every 60 seconds, so attempts that fail faster than that are counted as one. This limit is documented.
+  - **FluxCD's reason and rollbacks**: While the HelmRelease step runs or has failed, its `detail` holds FluxCD's current reason and message. The `HelmReleaseRemediated` condition sets `rolledBackAt` and `rollbackMessage` (FR-004); a newer rollback replaces the older one.
+  - **Cost**: The phase history runs for every report, every 5 seconds. It returns before locking any row when the task's operator-phase steps are all final.
   - **Deletes**: A `delete_deployment` task has two steps: "Request the deletion", recorded by the service when it patches the CR, and "Remove the deployment's resources and namespace", which runs during the operator's `Deleting` phase and succeeds at `Deleted`. The operator's teardown runs in one handler call, so it has no finer phases to report.
 - **Kopf extension points evaluated**: kopf records handler progress in annotations and can post Kubernetes Events. Kubernetes keeps Events for one hour by default, and the server does not read them. Neither gives a durable phase history, so the server keeps it.
 
@@ -118,15 +120,18 @@ The P1 acceptance scenario is an upgrade whose HelmRelease does not become Ready
 
 [CLAUDE RECOMMENDED – based on PRD FR-006 and the edge cases]
 
-- **Decision**: `compute_task_result` is a pure function in `services/steps/results.py`. For a task with steps, it applies the PRD's rules in the PRD's order:
-  1. `RUNNING` when a step is pending or running, or a task its hook steps started is `RUNNING`.
-  2. `FAILED` when a step failed, or a started task is `FAILED`.
-  3. `SUPERSEDED` when a step was superseded by a task that this task's hook steps did not start.
-  4. `SUCCEEDED` otherwise: every step succeeded or was superseded by a task this task started, and every started task succeeded.
+- **Decision**: `compute_task_result` is a pure function in `services/steps/results.py`. It works on the task's **family**: the task and every task its hook steps started, transitively. It applies the PRD's rules in the PRD's order:
+  1. `RUNNING` when a step of the family is pending or running.
+  2. `FAILED` when a step of the family failed.
+  3. `SUPERSEDED` when a step of the family was superseded by a task outside the family.
+  4. `SUCCEEDED` otherwise.
 
-  A task with no steps gets its result from `Task.status`: `pending` and `running` give `RUNNING`, `success` gives `SUCCEEDED`, `failed` gives `FAILED`. The deployment page shows "no steps recorded for this task" for a finished task with no steps (FR-010).
+  For a task that started no task, the family is the task itself, and the rules read exactly as FR-006.
+
+  A task with no steps gets its result from `Task.status`: `pending` and `running` give `RUNNING`, `success` gives `SUCCEEDED`, `failed` gives `FAILED`. The deployment page shows "no steps recorded for this task" for a finished task with no steps (FR-010), and "waiting for the first step" for an unfinished one.
+- **Why the family**: The tasks that one hook starts interrupt each other. In the simple-app upgrade (`driver/examples/simple-app/actions.py`), `stop_components` and `upgrade_deployment_version` each write the CR before the operator finishes the previous rollout, and only `start_components` completes. With rules that look only at the upgrade's own steps and its direct results, the upgrade could never be `SUCCEEDED`, and an outside task interrupting `start_components` would not make the upgrade `SUPERSEDED`. With the family, the upgrade is `SUCCEEDED` when the last rollout succeeds, and each interrupted started task still shows `SUPERSEDED` on its own entry.
 - **Order**: `RUNNING` comes before `FAILED`, as in the PRD's list. A task whose post-hook failed after the CR write stays `RUNNING` until the operator finishes, because the work is not over. The failed step is visible in the step list at once.
-- **Recursion**: Started tasks are evaluated with a visited set, so a cycle cannot loop. In practice the depth is 1, because tasks started by `stop_components`, `start_components` and `upgrade_deployment_version` have no hook steps.
+- **Recursion**: The family is collected with a visited set, so a cycle cannot loop. In practice the depth is 1, because tasks started by `stop_components`, `start_components` and `upgrade_deployment_version` have no hook steps.
 
 ## D9. "No report from the agent" is derived on read
 
@@ -174,6 +179,7 @@ The P1 acceptance scenario is an upgrade whose HelmRelease does not become Ready
   - **Restore**: `execute_velero_restore_flow` records "Delete the namespace", "Run the Velero restore" and "Run the recovery" through the flow step reporter. The INTERNAL flow `execute_restore_workflow` creates an action token with `action_api_token()` and passes it with `STYRMIN_RESTORE_ID`.
   - **Backup**: `execute_velero_backup_flow` records one step per component, "Back up <component>". On each poll it lists the `PodVolumeBackup` objects of the backup, maps each pod to its component through the pod's `styrmin/component` label, and sets the step's start time, end time and result from them. A component with no `PodVolumeBackup` when the backup ends gets the Velero backup's result and times. The agent's RBAC gains `get` and `list` on `podvolumebackups`.
   - **Crash handling**: When the USER flow fails or crashes, the INTERNAL flow fails every step of the backup or restore that is still pending or running, with the flow's state message, through the recorder directly.
+  - **Velero's `FailedValidation` phase**: `poll_backup_status` and `poll_restore_status` return only on `Completed`, `PartiallyFailed` and `Failed` (`velero/client.py:253, 272`). A restore of a backup that Velero cannot find ends in `FailedValidation` and would be polled until the 7,200-second timeout. Both functions treat `FailedValidation` as terminal, and the step fails with Velero's `status.validationErrors`.
 - **Difference from the PRD**: The PRD's implementation decisions say that backup and restore flows "write their steps through the step recorder directly, because they run as INTERNAL flows with database access". The three restore steps and the per-component backup work run in the USER flow (facts 9 and 10). Recording them only after the USER flow ends would hide a stuck step for up to two hours (the restore timeout) and lose the step that a crash interrupted. FR-014 already requires Prefect flows to write steps with the action token. The INTERNAL flows still write the steps they own directly.
 - **Velero extension points evaluated**: Velero has no per-component concept. `PodVolumeBackup` objects carry the pod, the volume, the phase and the start and end times, which is enough to build per-component steps without an upstream change.
 
@@ -188,8 +194,13 @@ The P1 acceptance scenario is an upgrade whose HelmRelease does not become Ready
   - `Mutation.recordStep(input)`, which requires `READ_WRITE`.
   - The optional `startedByStepId` argument on three existing mutations (D12).
   - No change to `reportDeploymentStatuses` (D4).
-- **Read cost**: The timeline query requests steps without `output`. `Step.hasOutput` tells the page whether to offer the output, which it loads with `Query.step`. The timeline service loads the steps, started tasks and deployment status of all tasks in three queries.
-- **Strawberry**: Supports enums, input types, permission extensions and per-field resolvers as used today. No extension is needed.
+- **Read cost**: Styrmin's resolvers query per object (`api/resolvers.py:13`) and there are no data loaders, so per-field resolvers for `Task.steps`, `Task.result`, `Step.supersededBy` and `Step.startedTasks` would run about a thousand queries for a 50-task timeline on every 10-second refresh. Instead:
+  - The timeline service builds a read model in three queries: the steps of all the deployment's tasks, the tasks started by those steps (with their steps), and the deployment's `DeploymentStatus`. It calculates every family result and `noReportSince` in memory.
+  - The GraphQL `Task` and `Step` objects carry their part of the read model in `strawberry.Private` fields. Their resolvers use it when present and query only for single reads such as `Query.task` and `Query.step`.
+  - A unit test counts the queries of a timeline read and fails above a fixed number.
+  - The timeline query requests steps without `output`. `Step.hasOutput` tells the page whether to offer the output, which it loads with `Query.step`.
+- **Who may call `recordStep`**: `READ_WRITE` and, in addition, only the built-in `styrmin-actions` user (`services/auth/bootstrap.py:31`). Other users get `FORBIDDEN`, so a person cannot change the record of what happened.
+- **Strawberry**: Supports enums, input types, permission extensions, private fields and per-field resolvers as used today. No extension is needed.
 
 ## D15. Frontend
 
@@ -224,9 +235,29 @@ The P1 acceptance scenario is an upgrade whose HelmRelease does not become Ready
 [CLAUDE RECOMMENDED – based on PRD Assumptions and fact 11]
 
 - Every signed-in user, including `READ_ONLY`, can read command output. The PRD records that the team accepted this. The driver-author documentation says that action commands must not print secrets.
-- `recordStep` requires `READ_WRITE` and is not on the allow-list (FR-014).
+- `recordStep` requires `READ_WRITE`, accepts only the built-in `styrmin-actions` user (D14), and is not on the allow-list (FR-014).
 - The phase history writes operator-phase steps from `reportDeploymentStatuses`, which accepts unauthenticated calls. A caller who can reach the API can already set `Deployment.status` through it; after this feature it can also change operator-phase steps. [#396](https://github.com/opsmill/styrmin/issues/396) tracks authentication for that mutation, which is out of scope.
 - Backups and restores now create one `styrmin-actions` session each, like reconciles (ADR-059).
+
+## D19. Tasks are stored with the type their caller means
+
+[CLAUDE RECOMMENDED – based on fact 2, User Story 1 and spec FR-019]
+
+- **Decision**: The `apply_state` service function takes a `task_type` argument, and each caller passes the operation it starts:
+
+  | Caller | Task type |
+  |---|---|
+  | `deploy_application` (`createDeployment`); `_ensure_ingress_controller` when the deployment has no instance yet | `create_instance` |
+  | `update_deployment`, `refresh_deployment`, `redeploy_for_environment_update`; `_ensure_ingress_controller` otherwise | `update_instance` |
+  | `updateDeploymentVersion` | `upgrade_instance` |
+  | `stopComponents`, `startComponents` | `stop_components`, `start_components` |
+
+  The frontend gains the label "Delete" for `delete_deployment`, which it lacks today.
+- **Rationale**: Users read the timeline by operation. A version change is an upgrade from the user's point of view even when the driver has no upgrade hook and the flow updates the CR instead; the step list shows which flow ran.
+- **Alternatives rejected**:
+  - Setting the type inside the `apply_state` flow from the remediation: the hook-started `stop_components` task would show "Update".
+  - Deriving the type from the steps on read: the type would change while the task runs.
+- `Task.status` is not touched (FR-015). Existing rows keep `noop`.
 
 ## Resolved clarifications
 

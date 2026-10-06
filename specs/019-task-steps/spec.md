@@ -129,6 +129,7 @@ Any signed-in user opens a restore of one deployment and views its steps: delete
 
 - **An upgrade hook starts other tasks.** For example, `stop_components`, `upgrade_deployment_version` and `start_components` each create their own task. They stay separate entries in the timeline, link to the upgrade, and the upgrade links to them (FR-008).
 - **A later task interrupts the operator phases of an earlier task.** The interrupted steps become superseded. The earlier task is `SUPERSEDED` if it did not start the later task, and `FAILED` if a task that it started has failed (FR-006, FR-007).
+- **Tasks started by the same hook interrupt each other.** For example, the `upgrade_deployment_version` task writes the StyrminDeployment before the operator has finished the `stop_components` task. The `stop_components` task then shows `SUPERSEDED`, with a link to the task that interrupted it. The upgrade's own result treats the work of all the tasks its hook started as its own: only an interruption by a task outside that group makes the upgrade `SUPERSEDED` (FR-006, FR-008).
 - **The operator or FluxCD retries a phase.** The operator retries after 30 seconds, and FluxCD retries an install or an upgrade up to 3 times. The step stays one step, with the number of attempts and each error (FR-002).
 - **FluxCD rolls back a failed upgrade.** This is FluxCD's default ([FluxCD documentation](https://fluxcd.io/flux/components/helm/helmreleases/#upgrade-remediation)). The HelmRelease step says so (FR-004).
 - **The agent stops reporting** because of a pod restart, an unreachable cluster or a network failure. The running step shows the time of the last report after 60 seconds, and stays running (FR-009).
@@ -177,6 +178,7 @@ Any signed-in user opens a restore of one deployment and views its steps: delete
 - **FR-016**: Steps MUST be kept as long as their task, backup or restore exists, and MUST be deleted with that record. [CLAUDE RECOMMENDED – based on the PRD's open question about retention and on [ADR-028](../../dev/adr/0028-deployment-history-derived-from-existing-data.md), which keeps the tasks of tombstoned deployments]
 - **FR-017**: A write to a step that does not exist, or for a task, backup or restore that does not exist, MUST be rejected with a typed error and MUST NOT create a step. [CLAUDE RECOMMENDED – based on Constitution §IV]
 - **FR-018**: Recording a step MUST NOT change reconciliation: no new driver capability, no new component, and no change to how desired and current state are compared. Each run of a hook mode becomes a step without changes to drivers.
+- **FR-019**: Each task in the deployment timeline MUST show its type: create, update, upgrade, stop components, start components, run a job or delete. [CLAUDE RECOMMENDED – based on User Story 1 and the PRD's P1 journey, which name these types; today every task that a reconcile runs is stored with the type `noop` and shown as "No-op"]
 
 ### Key Entities *(include if feature involves data)*
 
@@ -208,7 +210,7 @@ Any signed-in user opens a restore of one deployment and views its steps: delete
 - Every signed-in user, including `READ_ONLY`, can view command output. The team accepts that the output can contain secret values that are otherwise hidden. The driver-author documentation states that action commands must not print secrets.
 - [#381](https://github.com/opsmill/styrmin/issues/381) is fixed by [#397](https://github.com/opsmill/styrmin/pull/397), so driver upgrade hooks can call the API with an action token.
 - FluxCD rolls back failed upgrades by default.
-- The agent reports every 5 seconds, and the deployment page refreshes every 10 seconds.
+- The agent reports every 5 seconds, and the deployment page refreshes every 10 seconds. The 15 seconds of FR-005 and SC-002 start when a flow, an action or the operator records the change. The operator checks FluxCD every 60 seconds, so a change that FluxCD makes is recorded up to 60 seconds later. [CLAUDE RECOMMENDED – based on the operator's 60-second timer in `config.py`]
 - FluxCD's reason travels to the server in the existing StyrminDeployment conditions, so the input of the agent's status report does not change.
 - The parts of the backup and restore flows that run with database access write their steps directly. The restore steps and the per-component backup work run in the cluster, so those parts write their steps with an action token, like every other Prefect flow (FR-014). [CLAUDE RECOMMENDED – based on where the code runs today; the PRD expected all backup and restore steps to be written directly; see [research.md](research.md) D13]
 

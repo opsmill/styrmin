@@ -66,8 +66,8 @@ uv run invoke dev
 ```
 
 1. Deploy `simple-app` 0.1.0, then upgrade to 0.2.0 from the deployment page.
-2. Open the Timeline tab while the upgrade runs. Expected: the upgrade entry is expanded with result `RUNNING`; steps appear within 15 seconds of each change; three started tasks appear under "Run the upgrade hook".
-3. When the deployment is `RUNNING`, every task of the upgrade shows `SUCCEEDED`.
+2. Open the Timeline tab while the upgrade runs. Expected: the entry labelled "Upgrade" is expanded with result `RUNNING`; steps appear within 15 seconds of each change; three started tasks appear under "Run the upgrade hook".
+3. When the deployment is `RUNNING`, the upgrade and its last started task (`start_components`) show `SUCCEEDED`. The earlier started tasks show `SUCCEEDED`, or `SUPERSEDED` with a link to the sibling that interrupted them.
 4. Set an image override with a tag that does not exist and apply. Expected: within about five minutes the entry shows `FAILED`, the step "Install or upgrade the HelmRelease" shows FluxCD's reason and "Pods not ready: … ImagePullBackOff".
 5. `styrminctl tasks get <task id>` prints the same steps. `styrminctl deployments apply -f <manifest> --wait` prints `failed <name>: step "Install or upgrade the HelmRelease" failed: …`.
 6. Log in as a `READ_ONLY` user and open the same deployment. Expected: the same steps, errors and output.

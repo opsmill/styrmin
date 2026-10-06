@@ -43,7 +43,11 @@ Constraints and indexes:
 | `instance_id` | UUID | yes | FK `applicationinstance.id`, `ON DELETE SET NULL`. Set by `apply_state` (research D4). Indexed. |
 | `started_by_step_id` | UUID | yes | FK `step.id`, `ON DELETE SET NULL`, created with `use_alter` because `step.task_id` points back at `task`. Indexed. |
 
-`Task.status`, `Task.type` and `Task.message` keep their meaning (FR-015). Existing rows get nulls.
+`Task.status` and `Task.message` keep their meaning (FR-015). Existing rows get nulls.
+
+`Task.type` keeps its values. New tasks that a reconcile runs get the type their caller means instead of `noop` (research D19, spec FR-019); existing rows keep `noop`.
+
+The revision's downgrade drops `task.started_by_step_id` and `task.instance_id` (with their foreign keys) before it drops the `step` table, because the two tables reference each other. A migration test applies the revision and reverts it.
 
 ## Unchanged tables
 
@@ -128,26 +132,30 @@ Steps are listed by `started_at`, pending steps last, then by `created_on`.
 Rules the recorder enforces:
 
 - `succeeded` and `superseded` are final.
-- `failed` is final for flow kinds. An `operator_phase` step goes from `failed` back to `running` when a later report shows the operator working on it again; `attempt_count` increases by one.
+- `failed` is final for flow kinds. An `operator_phase` step goes from `failed` back to `running` when a later report shows the operator working on it again; `attempt_count` increases by one. When a report shows a later phase, a `failed` earlier step gets a new attempt and goes straight to `succeeded`.
 - Opening a step that already exists and is running returns it unchanged, so a retried `STARTED` event is harmless.
 - Each transition locks the step row (`SELECT … FOR UPDATE`). Two writers serialize on the row.
 - Times: a writer can send `occurredAt`; otherwise the server's time is used. `ended_at` is never earlier than `started_at`.
 
 ## Task result calculation
 
-Inputs: the task's steps, the tasks started by its hook steps (with their own results), and the task's `status`.
+Inputs: the task, its steps, the tasks started by its hook steps (transitively, with their steps), and the task's `status`. See [research.md](research.md) D8 for why the calculation uses the family.
 
 ```text
-if no steps:
+if the task has no steps:
     RUNNING if status in (pending, running); SUCCEEDED if success; FAILED if failed
-started_ids   = ids of tasks whose started_by_step_id is one of the task's steps
-if any step pending or running, or any started task RUNNING:   RUNNING
-if any step failed, or any started task FAILED:                FAILED
-if any step superseded by a task not in started_ids:           SUPERSEDED
-otherwise:                                                     SUCCEEDED
+
+family       = {task} ∪ every task whose started_by_step_id is a step of a family member (visited set)
+family_ids   = ids of family
+family_steps = steps of every family member
+
+if any family step is pending or running:                          RUNNING
+if any family step failed:                                         FAILED
+if any family step is superseded by a task not in family_ids:      SUPERSEDED
+otherwise:                                                         SUCCEEDED
 ```
 
-Started tasks are evaluated depth-first with a visited set.
+Each started task also has its own result, calculated the same way on its own family. A `stop_components` task interrupted by its sibling `upgrade_deployment_version` task is `SUPERSEDED` on its own entry, while the upgrade that started both counts that interruption as its own work.
 
 ## Closing open steps
 
@@ -174,5 +182,6 @@ Started tasks are evaluated depth-first with a visited set.
 | `recordStep` names a `stepId` that does not exist | `StepNotFoundError` (`NOT_FOUND`) |
 | `recordStep` names a task, backup or restore that does not exist | `TaskNotFoundError`, `BackupNotFoundError`, `RestoreNotFoundError` (`NOT_FOUND`) |
 | `recordStep` gives neither a `stepId` nor exactly one parent with a `key`, or a `STARTED` event without `name` and `kind` | `InvalidStepRecordError` (`VALIDATION_ERROR`) |
+| `recordStep` called by a user other than `styrmin-actions` | Permission error `FORBIDDEN` (research D14) |
 | `startedByStepId` names a step that does not exist | `StepNotFoundError` |
 | A transition the rules above forbid (for example `SUCCEEDED` on a superseded step) | Ignored and logged; returns the step unchanged. A late write from a slow writer is not an error. |
