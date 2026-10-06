@@ -386,24 +386,77 @@ async def _get_helmrelease(
     return None
 
 
-async def _check_helmrelease_ready(
-    namespace: str,
-    release_reference: str,
-) -> bool:
-    """Check if a HelmRelease has reached Ready state via FluxCD.
+@dataclass(frozen=True)
+class FluxCondition:
+    """One FluxCD condition of a HelmRelease."""
 
-    Returns True if the HelmRelease has a Ready=True condition.
+    status: str
+    reason: str
+    message: str
+    last_transition_time: str
+
+    @classmethod
+    def from_dict(cls, condition: dict[str, Any]) -> FluxCondition:
+        return cls(
+            status=str(condition.get("status") or ""),
+            reason=str(condition.get("reason") or ""),
+            message=str(condition.get("message") or ""),
+            last_transition_time=str(condition.get("lastTransitionTime") or ""),
+        )
+
+    @property
+    def is_true(self) -> bool:
+        return self.status == "True"
+
+
+@dataclass(frozen=True)
+class HelmReleaseObservation:
+    """FluxCD's conditions for the HelmRelease's current generation (spec 019, research D5).
+
+    A field is ``None`` when FluxCD has no such condition for ``metadata.generation``.
     """
-    helmrelease = await _get_helmrelease(
-        namespace=namespace, release_reference=release_reference
-    )
-    if helmrelease is None:
-        return False
-    conditions = (helmrelease.get("status") or {}).get("conditions") or []
-    return any(
-        condition.get("type") == "Ready" and condition.get("status") == "True"
-        for condition in conditions
-    )
+
+    ready: FluxCondition | None = None
+    released: FluxCondition | None = None
+    remediated: FluxCondition | None = None
+    stalled: FluxCondition | None = None
+    guard_failure: tuple[str, str] | None = None
+
+    @property
+    def is_ready(self) -> bool:
+        return self.ready is not None and self.ready.is_true
+
+    @property
+    def failure(self) -> FluxCondition | None:
+        """Why the current generation is not Ready: the failed install or upgrade, else ``Ready=False``.
+
+        After a rollback ``Ready`` repeats the remediation, so ``Released=False`` names the cause.
+        """
+        if self.ready is None or self.ready.status != "False":
+            return None
+        if self.released is not None and self.released.status == "False":
+            return self.released
+        return self.ready
+
+
+def _is_current_generation(
+    condition: dict[str, Any], generation: object, status: dict[str, Any]
+) -> bool:
+    """True when ``condition``'s ``observedGeneration``, else ``status.lastAttemptedGeneration``, is ``generation``."""
+    observed = condition.get("observedGeneration")
+    if observed is None:
+        observed = status.get("lastAttemptedGeneration")
+    return generation is not None and observed == generation
+
+
+def _current_generation_conditions(helmrelease: dict[str, Any]) -> list[dict[str, Any]]:
+    generation = (helmrelease.get("metadata") or {}).get("generation")
+    status = helmrelease.get("status") or {}
+    return [
+        condition
+        for condition in status.get("conditions") or []
+        if _is_current_generation(condition, generation, status)
+    ]
 
 
 def _helmrelease_guard_failure(helmrelease: dict[str, Any]) -> tuple[str, str] | None:
@@ -412,24 +465,51 @@ def _helmrelease_guard_failure(helmrelease: dict[str, Any]) -> tuple[str, str] |
     Ready must not be True, and the guard key must be in the message of a condition observed for
     ``metadata.generation`` (its ``observedGeneration``, else ``status.lastAttemptedGeneration``).
     """
-    generation = (helmrelease.get("metadata") or {}).get("generation")
-    status = helmrelease.get("status") or {}
-    conditions = status.get("conditions") or []
-    if generation is None or any(
+    conditions = (helmrelease.get("status") or {}).get("conditions") or []
+    if any(
         condition.get("type") == "Ready" and condition.get("status") == "True"
         for condition in conditions
     ):
         return None
-    for condition in conditions:
-        observed = condition.get("observedGeneration")
-        if observed is None:
-            observed = status.get("lastAttemptedGeneration")
-        if observed != generation:
-            continue
+    for condition in _current_generation_conditions(helmrelease):
         failure = parse_guard_failure(condition.get("message") or "")
         if failure is not None:
             return failure
     return None
+
+
+def observe_helmrelease_conditions(
+    helmrelease: dict[str, Any],
+) -> HelmReleaseObservation:
+    """Read FluxCD's ``Ready``, ``Released``, ``Remediated=True`` and ``Stalled=True`` of the current generation."""
+    current = {
+        str(condition.get("type")): FluxCondition.from_dict(condition)
+        for condition in _current_generation_conditions(helmrelease)
+    }
+    remediated = current.get("Remediated")
+    stalled = current.get("Stalled")
+    return HelmReleaseObservation(
+        ready=current.get("Ready"),
+        released=current.get("Released"),
+        remediated=remediated
+        if remediated is not None and remediated.is_true
+        else None,
+        stalled=stalled if stalled is not None and stalled.is_true else None,
+        guard_failure=_helmrelease_guard_failure(helmrelease),
+    )
+
+
+async def observe_helmrelease(
+    namespace: str,
+    release_reference: str,
+) -> HelmReleaseObservation | None:
+    """Read the HelmRelease once; ``None`` when it is missing or unreadable."""
+    helmrelease = await _get_helmrelease(
+        namespace=namespace, release_reference=release_reference
+    )
+    if helmrelease is None:
+        return None
+    return observe_helmrelease_conditions(helmrelease)
 
 
 async def read_helmrelease_guard_failure(

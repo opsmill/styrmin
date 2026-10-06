@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 import kopf
 
@@ -27,6 +27,8 @@ from styrmin_backend.operator.crd.schema import (
 )
 from styrmin_backend.operator.crd.status import (
     is_condition_true,
+    remove_condition,
+    replace_condition,
     set_condition,
     set_phase,
 )
@@ -40,10 +42,58 @@ from styrmin_backend.services.component_container.exceptions import (
     ComponentContainerNotFoundError,
 )
 
+if TYPE_CHECKING:
+    from styrmin_backend.operator.reconciler import HelmReleaseObservation
+
+#: Phases of a rollout in progress, which the readiness timeout watches.
+_ROLLOUT_PHASES = frozenset(
+    {
+        DeploymentPhase.PENDING.value,
+        DeploymentPhase.CREATING_PREREQUISITES.value,
+        DeploymentPhase.CREATING_HELM_RELEASE.value,
+        DeploymentPhase.CREATING_SERVICES.value,
+    }
+)
+
 
 def _is_internal(spec: dict[str, Any]) -> bool:
     """Check if a StyrminDeployment is an internal deployment (e.g., ingress controller)."""
     return spec.get("internal", False)
+
+
+def _now() -> str:
+    return datetime.now(tz=UTC).isoformat()
+
+
+def _start_rollout(conditions: list[dict[str, str]], patch: Any) -> None:
+    """Forget the previous rollout's HelmRelease state and record when this one started (research D5)."""
+    set_condition(
+        conditions,
+        ConditionType.HELM_RELEASE_READY,
+        ConditionStatus.UNKNOWN,
+        "Progressing",
+        "Waiting for FluxCD to apply the HelmRelease",
+    )
+    remove_condition(conditions, ConditionType.HELM_RELEASE_REMEDIATED)
+    patch.status["conditions"] = conditions
+    patch.status["rolloutStartedAt"] = _now()
+
+
+def _parse_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _rollout_started_at(status: Any, body: Any) -> datetime | None:
+    """``status.rolloutStartedAt``, else the CR's creation time for a CR from an older operator."""
+    return _parse_time(status.get("rolloutStartedAt")) or _parse_time(
+        body.get("metadata", {}).get("creationTimestamp")
+    )
 
 
 @contextmanager
@@ -81,7 +131,26 @@ async def _fail_on_component_container_guard(
     )
     if failure is None:
         return False
+    _fail_on_guard(
+        failure,
+        conditions=conditions,
+        namespace=namespace,
+        name=name,
+        patch=patch,
+        logger=logger,
+    )
+    return True
 
+
+def _fail_on_guard(
+    failure: tuple[str, str],
+    *,
+    conditions: list[dict[str, str]],
+    namespace: str,
+    name: str,
+    patch: Any,
+    logger: Any,
+) -> None:
     component_name, container = failure
     message = str(
         ComponentContainerNotFoundError(
@@ -107,7 +176,6 @@ async def _fail_on_component_container_guard(
     set_phase(patch.status, DeploymentPhase.FAILED, message)
     patch.status["displayState"] = DisplayState.ERROR.value
     logger.warning("Deployment %s/%s failed: %s", namespace, name, message)
-    return True
 
 
 async def on_styrmin_deployment_create(
@@ -124,7 +192,8 @@ async def on_styrmin_deployment_create(
 
     patch.status["displayState"] = DisplayState.DEPLOYING.value
 
-    conditions: list[dict[str, str]] = status.get("conditions", [])
+    conditions: list[dict[str, str]] = list(status.get("conditions", []))
+    _start_rollout(conditions, patch)
 
     # Internal deployments (e.g., ingress controller) skip prerequisites
     # and go straight to HelmRelease creation.
@@ -251,6 +320,10 @@ async def on_styrmin_deployment_resume(
 
     if phase == DeploymentPhase.READY.value:
         return  # Already complete
+
+    # Continues the rollout: keep its start so a restart does not extend the readiness timeout.
+    if phase in _ROLLOUT_PHASES and not status.get("rolloutStartedAt"):
+        patch.status["rolloutStartedAt"] = _now()
 
     # Internal deployments skip prerequisites — resume straight to HelmRelease
     if _is_internal(spec):
@@ -423,6 +496,7 @@ async def _roll_out_spec_update(
     patch.status["displayState"] = DisplayState.DEPLOYING.value
 
     conditions: list[dict[str, str]] = list(status.get("conditions", []))
+    _start_rollout(conditions, patch)
 
     # Internal deployments skip prerequisites — go straight to HelmRelease
     if _is_internal(crd_spec):
@@ -503,6 +577,224 @@ async def _roll_out_spec_update(
         raise kopf.TemporaryError(f"Phase 1 update failed: {result.errors}", delay=30)
 
 
+# --- The HelmRelease's current generation (spec 019, research D5) ---
+
+
+async def _wait_for_helm_release(
+    *,
+    crd_spec: dict[str, Any],
+    conditions: list[dict[str, str]],
+    namespace: str,
+    name: str,
+    patch: Any,
+    logger: Any,
+) -> bool:
+    """Return True once FluxCD reports the HelmRelease's current generation Ready.
+
+    An internal deployment is also ready when one of its pods is. Until then, copy FluxCD's
+    readiness and remediation into the CR conditions, writing them only when they change, and
+    fail the CR when FluxCD stalled.
+    """
+    from styrmin_backend.operator.reconciler import (
+        _check_any_pod_ready,
+        observe_helmrelease,
+    )
+
+    observation = await observe_helmrelease(
+        namespace=namespace, release_reference=crd_spec.get("releaseReference", "")
+    )
+    if observation is not None and observation.guard_failure is not None:
+        _fail_on_guard(
+            observation.guard_failure,
+            conditions=conditions,
+            namespace=namespace,
+            name=name,
+            patch=patch,
+            logger=logger,
+        )
+        return False
+
+    changed = observation is not None and _copy_remediation(conditions, observation)
+    ready = observation is not None and observation.is_ready
+    # For internal deployments (e.g., ingress controller), also accept running pods as "ready" — the
+    # HelmRelease may stay in Unknown/Progressing if a LoadBalancer can't get an external IP.
+    if not ready and _is_internal(crd_spec):
+        ready = await _check_any_pod_ready(namespace=namespace)
+
+    if ready:
+        if not is_condition_true(conditions, ConditionType.HELM_RELEASE_READY):
+            set_condition(
+                conditions,
+                ConditionType.HELM_RELEASE_READY,
+                ConditionStatus.TRUE,
+                "FluxReady",
+                "HelmRelease is Ready",
+            )
+            changed = True
+    elif observation is not None:
+        changed = _copy_readiness(conditions, observation) or changed
+        if observation.stalled is not None:
+            _fail_on_stalled(
+                observation,
+                conditions=conditions,
+                namespace=namespace,
+                name=name,
+                patch=patch,
+                logger=logger,
+            )
+            return False
+    if changed:
+        patch.status["conditions"] = conditions
+    return ready
+
+
+def _copy_readiness(
+    conditions: list[dict[str, str]], observation: HelmReleaseObservation
+) -> bool:
+    """Copy FluxCD's ``Ready`` of the current generation into ``HelmReleaseReady``.
+
+    The reason and message name the failure when there is one. Nothing is copied before
+    FluxCD has observed the generation.
+    """
+    ready = observation.ready
+    if ready is None:
+        return False
+    source = observation.failure or ready
+    return replace_condition(
+        conditions,
+        {
+            "type": ConditionType.HELM_RELEASE_READY.value,
+            "status": ready.status,
+            "reason": source.reason,
+            "message": source.message,
+            "lastTransitionTime": ready.last_transition_time,
+        },
+    )
+
+
+def _copy_remediation(
+    conditions: list[dict[str, str]], observation: HelmReleaseObservation
+) -> bool:
+    """Copy FluxCD's ``Remediated=True`` of the current generation into ``HelmReleaseRemediated``."""
+    remediated = observation.remediated
+    if remediated is None:
+        return False
+    return replace_condition(
+        conditions,
+        {
+            "type": ConditionType.HELM_RELEASE_REMEDIATED.value,
+            "status": remediated.status,
+            "reason": remediated.reason,
+            "message": remediated.message,
+            "lastTransitionTime": remediated.last_transition_time,
+        },
+    )
+
+
+def _fail_on_stalled(
+    observation: HelmReleaseObservation,
+    *,
+    conditions: list[dict[str, str]],
+    namespace: str,
+    name: str,
+    patch: Any,
+    logger: Any,
+) -> None:
+    """FluxCD used all its retries on the current generation, so the rollout failed."""
+    stalled = observation.stalled
+    if stalled is None:
+        return
+    message = stalled.message
+    failure = observation.failure
+    if failure is not None and failure.message and failure.message != stalled.message:
+        message = f"{stalled.message}: {failure.message}"
+    # Phase Failed must not sit next to Ready=True of the previous rollout.
+    set_condition(
+        conditions,
+        ConditionType.READY,
+        ConditionStatus.FALSE,
+        stalled.reason or "Stalled",
+        message,
+    )
+    patch.status["conditions"] = conditions
+    set_phase(patch.status, DeploymentPhase.FAILED, message)
+    patch.status["displayState"] = DisplayState.ERROR.value
+    logger.warning("Deployment %s/%s failed: %s", namespace, name, message)
+
+
+async def _advance_past_helm_release(
+    *,
+    crd_spec: dict[str, Any],
+    conditions: list[dict[str, str]],
+    namespace: str,
+    name: str,
+    patch: Any,
+    logger: Any,
+) -> None:
+    """Create the services once the HelmRelease is Ready; an internal deployment is then Ready."""
+    if _is_internal(crd_spec):
+        set_condition(
+            conditions,
+            ConditionType.SERVICES_READY,
+            ConditionStatus.TRUE,
+            "Skipped",
+            "Internal deployment — no services needed",
+        )
+        set_condition(
+            conditions,
+            ConditionType.MIDDLEWARES_READY,
+            ConditionStatus.TRUE,
+            "Skipped",
+            "Internal deployment — no middlewares needed",
+        )
+        set_condition(
+            conditions,
+            ConditionType.READY,
+            ConditionStatus.TRUE,
+            "AllPhasesComplete",
+            "Internal deployment is healthy",
+        )
+        patch.status["conditions"] = conditions
+        set_phase(patch.status, DeploymentPhase.READY, "All resources deployed")
+        patch.status["displayState"] = DisplayState.RUNNING.value
+        logger.info("Internal deployment %s/%s reached Ready state", namespace, name)
+        return
+
+    set_phase(
+        patch.status,
+        DeploymentPhase.CREATING_SERVICES,
+        "HelmRelease ready, creating Services",
+    )
+
+    result = await execute_phase_services(crd_spec=crd_spec, namespace=namespace)
+    if result.success:
+        set_condition(
+            conditions,
+            ConditionType.SERVICES_READY,
+            ConditionStatus.TRUE,
+            "AllApplied",
+            f"{result.resource_details.get('services', 0)} Services",
+        )
+        set_condition(
+            conditions,
+            ConditionType.MIDDLEWARES_READY,
+            ConditionStatus.TRUE,
+            "AllApplied",
+            f"{result.resource_details.get('middlewares', 0)} Middlewares",
+        )
+        set_condition(
+            conditions,
+            ConditionType.READY,
+            ConditionStatus.TRUE,
+            "AllPhasesComplete",
+            "Deployment is healthy",
+        )
+        patch.status["conditions"] = conditions
+        set_phase(patch.status, DeploymentPhase.READY, "All resources deployed")
+        patch.status["displayState"] = DisplayState.RUNNING.value
+        logger.info("Deployment %s/%s reached Ready state", namespace, name)
+
+
 # --- Timer for drift detection and phase advancement (US3) ---
 
 
@@ -565,10 +857,9 @@ async def kopf_styrmin_deployment_timer(
         DeploymentPhase.FAILED.value,
         DeploymentPhase.DELETING.value,
     ):
-        creation_ts = body.get("metadata", {}).get("creationTimestamp")
-        if creation_ts:
-            created_at = datetime.fromisoformat(creation_ts)
-            elapsed = (datetime.now(tz=timezone.utc) - created_at).total_seconds()
+        started_at = _rollout_started_at(status, body)
+        if started_at is not None:
+            elapsed = (datetime.now(tz=UTC) - started_at).total_seconds()
             ready_timeout = config.SETTINGS.operator.deployment_ready_timeout
             if elapsed > ready_timeout:
                 current_display = status.get(
@@ -586,8 +877,7 @@ async def kopf_styrmin_deployment_timer(
 
     # Phase advancement for in-progress deployments
     if phase == DeploymentPhase.CREATING_HELM_RELEASE.value:
-        # Checked first: on an update, HelmReleaseReady is still True from the previous rollout.
-        if await _fail_on_component_container_guard(
+        if await _wait_for_helm_release(
             crd_spec=crd_spec,
             conditions=conditions,
             namespace=ns,
@@ -595,107 +885,14 @@ async def kopf_styrmin_deployment_timer(
             patch=patch,
             logger=logger,
         ):
-            return
-
-        hr_already_ready = is_condition_true(
-            conditions, ConditionType.HELM_RELEASE_READY
-        )
-
-        if not hr_already_ready:
-            # Check if HelmRelease is Ready via FluxCD
-            from styrmin_backend.operator.reconciler import (
-                _check_helmrelease_ready,
-                _check_any_pod_ready,
-            )
-
-            hr_ready = await _check_helmrelease_ready(
+            await _advance_past_helm_release(
+                crd_spec=crd_spec,
+                conditions=conditions,
                 namespace=ns,
-                release_reference=crd_spec.get("releaseReference", ""),
+                name=name,
+                patch=patch,
+                logger=logger,
             )
-
-            # For internal deployments (e.g., ingress controller), also accept
-            # running pods as "ready" — the HelmRelease may stay in
-            # Unknown/Progressing if a LoadBalancer can't get an external IP.
-            if not hr_ready and _is_internal(crd_spec):
-                hr_ready = await _check_any_pod_ready(namespace=ns)
-
-            if not hr_ready:
-                return
-
-            hr_already_ready = True
-            set_condition(
-                conditions,
-                ConditionType.HELM_RELEASE_READY,
-                ConditionStatus.TRUE,
-                "FluxReady",
-                "HelmRelease is Ready",
-            )
-            patch.status["conditions"] = conditions
-
-        if hr_already_ready:
-            # Internal deployments skip Phase 3 — go straight to Ready
-            if _is_internal(crd_spec):
-                set_condition(
-                    conditions,
-                    ConditionType.SERVICES_READY,
-                    ConditionStatus.TRUE,
-                    "Skipped",
-                    "Internal deployment — no services needed",
-                )
-                set_condition(
-                    conditions,
-                    ConditionType.MIDDLEWARES_READY,
-                    ConditionStatus.TRUE,
-                    "Skipped",
-                    "Internal deployment — no middlewares needed",
-                )
-                set_condition(
-                    conditions,
-                    ConditionType.READY,
-                    ConditionStatus.TRUE,
-                    "AllPhasesComplete",
-                    "Internal deployment is healthy",
-                )
-                patch.status["conditions"] = conditions
-                set_phase(patch.status, DeploymentPhase.READY, "All resources deployed")
-                patch.status["displayState"] = DisplayState.RUNNING.value
-                logger.info("Internal deployment %s/%s reached Ready state", ns, name)
-                return
-
-            set_phase(
-                patch.status,
-                DeploymentPhase.CREATING_SERVICES,
-                "HelmRelease ready, creating Services",
-            )
-
-            # Execute phase 3
-            result = await execute_phase_services(crd_spec=crd_spec, namespace=ns)
-            if result.success:
-                set_condition(
-                    conditions,
-                    ConditionType.SERVICES_READY,
-                    ConditionStatus.TRUE,
-                    "AllApplied",
-                    f"{result.resource_details.get('services', 0)} Services",
-                )
-                set_condition(
-                    conditions,
-                    ConditionType.MIDDLEWARES_READY,
-                    ConditionStatus.TRUE,
-                    "AllApplied",
-                    f"{result.resource_details.get('middlewares', 0)} Middlewares",
-                )
-                set_condition(
-                    conditions,
-                    ConditionType.READY,
-                    ConditionStatus.TRUE,
-                    "AllPhasesComplete",
-                    "Deployment is healthy",
-                )
-                patch.status["conditions"] = conditions
-                set_phase(patch.status, DeploymentPhase.READY, "All resources deployed")
-                patch.status["displayState"] = DisplayState.RUNNING.value
-                logger.info("Deployment %s/%s reached Ready state", ns, name)
         return
 
     if phase == DeploymentPhase.CREATING_PREREQUISITES.value:
