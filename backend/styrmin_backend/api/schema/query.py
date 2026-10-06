@@ -43,6 +43,7 @@ from styrmin_backend.api.definitions.environment.model import Environment
 from styrmin_backend.api.definitions.service.model import (
     DeployedService as DeployedServiceType,
 )
+from styrmin_backend.api.definitions.step.model import Step as StepType
 from styrmin_backend.api.definitions.task.model import Task
 from styrmin_backend.api.definitions.user.model import (
     Group as GroupType,
@@ -104,6 +105,7 @@ from styrmin_backend.api.definitions.pod_status.model import (
     PodStatus as PodStatusType,
 )
 from styrmin_backend.services.pod_status import get_pod_statuses
+from styrmin_backend.services.steps.reads import get_step
 from styrmin_backend.services.tasks import get_task, get_tasks
 
 
@@ -232,6 +234,14 @@ class Query:
         uow = info.context["uow"]
         task = await get_task(task_id=task_id, uow=uow)
         return Task.from_instance(task)
+
+    @strawberry.field(
+        description="One step, for example to load its output. Any signed-in user."
+    )
+    async def step(self, step_id: UUID, info: strawberry.Info) -> StepType | None:
+        uow = info.context["uow"]
+        step = await get_step(step_id=step_id, uow=uow)
+        return StepType.from_instance(step)
 
     @strawberry.field
     async def tasks(self, info: strawberry.Info) -> list[Task]:

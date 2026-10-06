@@ -13,6 +13,7 @@ from strawberry import Info
 from strawberry.permission import BasePermission
 
 from styrmin_backend.db.models import Role, User
+from styrmin_backend.services.auth.bootstrap import ACTIONS_SERVICE_ACCOUNT_USERNAME
 from styrmin_backend.services.auth.roles import effective_role
 
 
@@ -89,3 +90,32 @@ class IsSelfOrRole(BasePermission):
         if source_id is not None and source_id == current_user.id:
             return True
         return effective_role(current_user) >= self.required_role
+
+
+class IsActionsServiceAccount(BasePermission):
+    """Permit only the built-in ``styrmin-actions`` user (ADR-059).
+
+    Used after ``RequiresRole(Role.READ_WRITE)`` on ``recordStep``, so that
+    no person, admins included, can change the record of what happened.
+    Every other caller gets ``FORBIDDEN``; the role gate before it rejects
+    unauthenticated callers with ``UNAUTHENTICATED``.
+    """
+
+    message = "Only the actions service account can record steps"
+    error_extensions = {"code": "FORBIDDEN"}
+
+    def has_permission(
+        self,
+        source: Any,
+        info: Info,
+        **kwargs: Any,
+    ) -> bool:
+        del source, kwargs
+        context = info.context
+        current_user: User | None = (
+            context.get("current_user") if isinstance(context, dict) else None
+        )
+        return (
+            current_user is not None
+            and current_user.username == ACTIONS_SERVICE_ACCOUNT_USERNAME
+        )

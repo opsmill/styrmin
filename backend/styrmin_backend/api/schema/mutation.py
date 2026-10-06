@@ -11,7 +11,7 @@ import strawberry
 from loguru import logger
 from strawberry.permission import PermissionExtension
 
-from styrmin_backend.api.auth.permissions import RequiresRole
+from styrmin_backend.api.auth.permissions import IsActionsServiceAccount, RequiresRole
 from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
 from styrmin_backend.api.definitions.backup.environment_backup import (
     EnvironmentBackup as EnvironmentBackupType,
@@ -68,6 +68,10 @@ from styrmin_backend import config
 from styrmin_backend.api.dependency import SESSION_COOKIE_NAME
 from styrmin_backend.db.models import Role
 from styrmin_backend.api.definitions.service.model import ServiceNameOverride
+from styrmin_backend.api.definitions.step.model import (
+    RecordStepInput,
+    Step as StepType,
+)
 from styrmin_backend.api.definitions.task.model import Task
 from styrmin_backend.api.scalars import JSON
 from styrmin_backend.services.applications import (
@@ -152,6 +156,7 @@ from styrmin_backend.services.deployment_status import (
     report_deployment_statuses,
 )
 from styrmin_backend.services.pod_status import report_pod_statuses
+from styrmin_backend.services.steps.recorder import record_event
 from styrmin_backend.services.tasks import update_task_state
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.models import PrefectAction
@@ -1225,6 +1230,24 @@ class Mutation:
         return CallbackResponse(
             message=f"Callback triggered from {task_id} with state {state_name}: {state_message} ({state_type})..."
         )
+
+    @strawberry.mutation(
+        description=(
+            "Record a step event. Called by Styrmin's own flows and actions "
+            "with the action token."
+        ),
+        extensions=[
+            PermissionExtension(
+                [RequiresRole(Role.READ_WRITE), IsActionsServiceAccount()]
+            )
+        ],
+    )
+    async def record_step(
+        self, input: RecordStepInput, info: strawberry.Info
+    ) -> StepType:
+        uow = info.context["uow"]
+        step = await record_event(input.to_record(), uow=uow)
+        return StepType.from_instance(step)
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def stop_components(
