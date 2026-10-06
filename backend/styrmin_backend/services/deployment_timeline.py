@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from styrmin_backend.domain.models import Task
+from styrmin_backend.domain.models import Step, Task
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 
@@ -28,12 +29,40 @@ class ContextDiff:
 
 
 @dataclass
+class TimelineReadModel:
+    """What the timeline shows of its tasks, loaded with a fixed number of queries.
+
+    Each part comes from one bulk query or is calculated in memory, so the
+    GraphQL types read it instead of querying per task or per step (019 D14).
+    """
+
+    steps_by_task: dict[UUID, list[Step]] = field(default_factory=dict)
+
+    def steps_of(self, task_id: UUID) -> list[Step]:
+        """The steps of a task by start time, pending steps last."""
+        return self.steps_by_task.get(task_id, [])
+
+
+async def load_timeline_read_model(
+    tasks: Sequence[Task], uow: UnitOfWork
+) -> TimelineReadModel:
+    """Load the read model of ``tasks`` inside the caller's transaction."""
+    steps_by_task: dict[UUID, list[Step]] = {task.id: [] for task in tasks}
+    for step in await uow.steps.list_by_task_ids([task.id for task in tasks]):
+        if step.task_id is not None:
+            steps_by_task.setdefault(step.task_id, []).append(step)
+    return TimelineReadModel(steps_by_task=steps_by_task)
+
+
+@dataclass
 class TimelineEntry:
     """A task enriched with version and diff data for the deployment timeline."""
 
     task: Task
     application_version: str | None = None
     context_diff: ContextDiff | None = None
+    # Shared by every entry of one timeline.
+    read_model: TimelineReadModel = field(default_factory=TimelineReadModel)
 
 
 async def build_deployment_timeline(
@@ -44,11 +73,12 @@ async def build_deployment_timeline(
     Fetches tasks (newest-first) and application instances for a deployment,
     then correlates each task with the application version that was active
     at the time of that operation and computes context diffs between consecutive
-    operations.
+    operations. The steps of every task come from one query (the read model).
     """
     async with uow:
         tasks = await uow.tasks.find_by_deployment(deployment_id)
         instances = await uow.application_instances.find_by_deployment(deployment_id)
+        read_model = await load_timeline_read_model(tasks, uow)
 
     # Build version and context data sorted chronologically
     instance_data: list[tuple[float, str, dict[str, Any] | None]] = []
@@ -67,6 +97,7 @@ async def build_deployment_timeline(
                 task=task,
                 application_version=version,
                 context_diff=context_diff,
+                read_model=read_model,
             )
         )
 

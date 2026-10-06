@@ -1,0 +1,42 @@
+query GetDeploymentTimelineSteps($deploymentId: UUID!) {
+    deploymentTimeline(deploymentId: $deploymentId) {
+        task {
+            id
+            type
+            startedByStepId
+            steps {
+                id
+                key
+                name
+                kind
+                status
+                startedAt
+                endedAt
+                durationSeconds
+                attemptCount
+                errors {
+                    attempt
+                    message
+                    occurredAt
+                }
+                error
+                detail
+                rolledBackAt
+                rollbackMessage
+                hasOutput
+                output
+                outputTruncated
+                supersededBy {
+                    id
+                }
+                startedTasks {
+                    id
+                }
+                noReportSince
+                taskId
+                backupId
+                restoreId
+            }
+        }
+    }
+}

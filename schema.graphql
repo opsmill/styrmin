@@ -1238,9 +1238,13 @@ type Task {
   status: String!
   message: String
   deploymentId: UUID
+  startedByStepId: UUID
   createdOn: DateTime
   updatedOn: DateTime
   deployment: Deployment
+
+  """The steps of the task by start time, pending steps last."""
+  steps: [Step!]!
 }
 
 enum TolerationEffect {
