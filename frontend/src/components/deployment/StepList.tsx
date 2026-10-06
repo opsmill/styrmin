@@ -7,8 +7,19 @@ import {
   LoaderCircle,
   type LucideIcon,
 } from "lucide-react";
-import type { StepKind, StepStatus } from "@/generated/graphql";
+import { Button } from "@/components/ui/button";
+import {
+  useGetStepOutputQuery,
+  type StepKind,
+  type StepStatus,
+} from "@/generated/graphql";
 import { cn } from "@/lib/utils";
+
+export interface StepErrorItem {
+  attempt: number;
+  message: string;
+  occurredAt?: string | null;
+}
 
 export interface StepListItem {
   id: string;
@@ -20,7 +31,12 @@ export interface StepListItem {
   endedAt?: string | null;
   durationSeconds?: number | null;
   attemptCount: number;
+  errors?: StepErrorItem[];
+  detail?: string | null;
+  rolledBackAt?: string | null;
+  rollbackMessage?: string | null;
   hasOutput?: boolean;
+  outputTruncated?: boolean;
 }
 
 interface StepStatusConfig {
@@ -66,6 +82,11 @@ function formatDuration(totalSeconds: number): string {
   return `${rest}s`;
 }
 
+function formatTimestamp(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
 function useNow(intervalMs: number): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -84,6 +105,128 @@ function RunningFor({ startedAt }: { startedAt: string }) {
   return <>running for {formatDuration(elapsed)}</>;
 }
 
+// Newest error first: the latest attempt is the likely cause.
+function StepErrors({ errors }: { errors: StepErrorItem[] }) {
+  return (
+    <ol className="flex flex-col gap-1.5" data-testid="step-errors">
+      {[...errors].reverse().map((error, index) => (
+        <li
+          key={`${error.attempt}-${index}`}
+          className="border-l-2 border-destructive/60 pl-2"
+          data-testid="step-error"
+          data-attempt={error.attempt}
+          data-occurred-at={error.occurredAt ?? ""}
+        >
+          <p className="text-xs text-muted-foreground">
+            Attempt {error.attempt} failed
+            {error.occurredAt ? ` at ${formatTimestamp(error.occurredAt)}` : ""}
+          </p>
+          <p
+            className="whitespace-pre-wrap break-words text-xs text-foreground"
+            data-testid="step-error-message"
+          >
+            {error.message}
+          </p>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// Fetched only on demand: output can be long, so the timeline query leaves it out.
+function StepOutput({ stepId }: { stepId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, error } = useGetStepOutputQuery(
+    { stepId },
+    { enabled: open },
+  );
+  const output = data?.step?.output;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="h-auto self-start px-0"
+        aria-expanded={open}
+        data-testid="show-output"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Hide output" : "Show output"}
+      </Button>
+      {open &&
+        (isLoading ? (
+          <p className="text-xs text-muted-foreground">Loading output…</p>
+        ) : error ? (
+          <p className="text-xs text-destructive" role="alert">
+            The output could not be loaded: {error.message}
+          </p>
+        ) : output ? (
+          <>
+            {data?.step?.outputTruncated && (
+              <p
+                className="text-xs text-muted-foreground"
+                data-testid="output-truncated"
+              >
+                Earlier output was cut
+              </p>
+            )}
+            <pre
+              className="max-h-80 overflow-auto rounded-md border bg-muted p-2 font-mono text-xs whitespace-pre"
+              data-testid="step-output"
+            >
+              {output}
+            </pre>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            No output was recorded for this step.
+          </p>
+        ))}
+    </div>
+  );
+}
+
+function StepFailureDetails({ step }: { step: StepListItem }) {
+  const errors = step.errors ?? [];
+  if (
+    errors.length === 0 &&
+    !step.detail &&
+    !step.rolledBackAt &&
+    !step.hasOutput
+  ) {
+    return null;
+  }
+  return (
+    <div className="flex flex-col gap-2 sm:pl-31">
+      {errors.length > 0 && <StepErrors errors={errors} />}
+      {step.detail && (
+        <p className="text-xs">
+          <span className="font-medium text-muted-foreground">FluxCD: </span>
+          <span
+            className="whitespace-pre-wrap break-words"
+            data-testid="step-detail"
+          >
+            {step.detail}
+          </span>
+        </p>
+      )}
+      {step.rolledBackAt && (
+        <p
+          className="text-xs text-foreground"
+          data-testid="step-rollback"
+          data-rolled-back-at={step.rolledBackAt}
+        >
+          FluxCD rolled back the release at {formatTimestamp(step.rolledBackAt)}
+          {step.rollbackMessage ? `: ${step.rollbackMessage}` : ""}
+        </p>
+      )}
+      {step.hasOutput && <StepOutput stepId={step.id} />}
+    </div>
+  );
+}
+
 function StepRow({ step }: { step: StepListItem }) {
   const status = STEP_STATUS[step.status] ?? {
     label: step.status,
@@ -100,7 +243,7 @@ function StepRow({ step }: { step: StepListItem }) {
 
   return (
     <li
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm"
+      className="flex flex-col gap-2 px-3 py-2 text-sm"
       data-testid="step-row"
       data-step-id={step.id}
       data-step-key={step.key}
@@ -111,44 +254,47 @@ function StepRow({ step }: { step: StepListItem }) {
       data-step-attempts={step.attemptCount}
       data-step-has-output={step.hasOutput ? "true" : "false"}
     >
-      <span
-        className={cn(
-          "flex w-28 shrink-0 items-center gap-1.5 text-xs font-medium",
-          status.className,
-        )}
-        data-testid="step-status"
-      >
-        <Icon
-          aria-hidden="true"
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span
           className={cn(
-            "h-3.5 w-3.5 shrink-0",
-            step.status === "RUNNING" && "animate-spin",
+            "flex w-28 shrink-0 items-center gap-1.5 text-xs font-medium",
+            status.className,
           )}
-        />
-        {status.label}
-      </span>
-      <span
-        className="min-w-0 flex-1 break-words text-foreground"
-        data-testid="step-name"
-      >
-        {step.name}
-      </span>
-      {step.attemptCount > 1 && (
-        <span
-          className="text-xs text-muted-foreground"
-          data-testid="step-attempts"
+          data-testid="step-status"
         >
-          {step.attemptCount} attempts
+          <Icon
+            aria-hidden="true"
+            className={cn(
+              "h-3.5 w-3.5 shrink-0",
+              step.status === "RUNNING" && "animate-spin",
+            )}
+          />
+          {status.label}
         </span>
-      )}
-      {timing != null && (
         <span
-          className="text-xs tabular-nums text-muted-foreground"
-          data-testid="step-duration"
+          className="min-w-0 flex-1 break-words text-foreground"
+          data-testid="step-name"
         >
-          {timing}
+          {step.name}
         </span>
-      )}
+        {step.attemptCount > 1 && (
+          <span
+            className="text-xs text-muted-foreground"
+            data-testid="step-attempts"
+          >
+            {step.attemptCount} attempts
+          </span>
+        )}
+        {timing != null && (
+          <span
+            className="text-xs tabular-nums text-muted-foreground"
+            data-testid="step-duration"
+          >
+            {timing}
+          </span>
+        )}
+      </div>
+      <StepFailureDetails step={step} />
     </li>
   );
 }

@@ -1806,7 +1806,7 @@ export type GetDeploymentTimelineQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentTimelineQuery = { __typename?: 'Query', deploymentTimeline: Array<{ __typename?: 'DeploymentTimelineEntry', applicationVersion?: string | null, task: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, createdOn?: any | null, updatedOn?: any | null, startedByStepId?: string | null, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, detail?: string | null, hasOutput: boolean }> }, contextDiff?: { __typename?: 'ContextDiff', changes: Array<{ __typename?: 'ContextChange', path: string, action: string, oldValue?: Record<string, unknown> | null, newValue?: Record<string, unknown> | null }> } | null }> };
+export type GetDeploymentTimelineQuery = { __typename?: 'Query', deploymentTimeline: Array<{ __typename?: 'DeploymentTimelineEntry', applicationVersion?: string | null, task: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, createdOn?: any | null, updatedOn?: any | null, startedByStepId?: string | null, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, detail?: string | null, rolledBackAt?: any | null, rollbackMessage?: string | null, hasOutput: boolean, outputTruncated: boolean, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }> }> }, contextDiff?: { __typename?: 'ContextDiff', changes: Array<{ __typename?: 'ContextChange', path: string, action: string, oldValue?: Record<string, unknown> | null, newValue?: Record<string, unknown> | null }> } | null }> };
 
 export type GetDriverQueryVariables = Exact<{
   applicationDriverId: Scalars['UUID']['input'];
@@ -1841,6 +1841,13 @@ export type GetRestoreQueryVariables = Exact<{
 
 
 export type GetRestoreQuery = { __typename?: 'Query', restore?: { __typename?: 'Restore', id: string, name: string, status: string, createdOn: any, startedAt?: any | null, completedAt?: any | null, targetNamespace: string, errorMessage?: string | null, backupId: string, targetInstanceId?: string | null, componentStatuses?: Array<{ __typename?: 'ComponentRestoreStatus', componentName: string, status: string, errorMessage?: string | null }> | null } | null };
+
+export type GetStepOutputQueryVariables = Exact<{
+  stepId: Scalars['UUID']['input'];
+}>;
+
+
+export type GetStepOutputQuery = { __typename?: 'Query', step?: { __typename?: 'Step', id: string, output?: string | null, outputTruncated: boolean } | null };
 
 export type GetTaskQueryVariables = Exact<{
   taskId: Scalars['UUID']['input'];
@@ -2767,9 +2774,17 @@ export const GetDeploymentTimelineDocument = `
         endedAt
         durationSeconds
         attemptCount
+        errors {
+          attempt
+          message
+          occurredAt
+        }
         error
         detail
+        rolledBackAt
+        rollbackMessage
         hasOutput
+        outputTruncated
       }
     }
     applicationVersion
@@ -3055,6 +3070,34 @@ export const useGetRestoreQuery = <
     )};
 
 useGetRestoreQuery.getKey = (variables: GetRestoreQueryVariables) => ['GetRestore', variables];
+
+export const GetStepOutputDocument = `
+    query GetStepOutput($stepId: UUID!) {
+  step(stepId: $stepId) {
+    id
+    output
+    outputTruncated
+  }
+}
+    `;
+
+export const useGetStepOutputQuery = <
+      TData = GetStepOutputQuery,
+      TError = Error
+    >(
+      variables: GetStepOutputQueryVariables,
+      options?: Omit<UseQueryOptions<GetStepOutputQuery, TError, TData>, 'queryKey'> & { queryKey?: UseQueryOptions<GetStepOutputQuery, TError, TData>['queryKey'] }
+    ) => {
+    
+    return useQuery<GetStepOutputQuery, TError, TData>(
+      {
+    queryKey: ['GetStepOutput', variables],
+    queryFn: graphqlFetcher<GetStepOutputQuery, GetStepOutputQueryVariables>(GetStepOutputDocument, variables),
+    ...options
+  }
+    )};
+
+useGetStepOutputQuery.getKey = (variables: GetStepOutputQueryVariables) => ['GetStepOutput', variables];
 
 export const GetTaskDocument = `
     query GetTask($taskId: UUID!) {
