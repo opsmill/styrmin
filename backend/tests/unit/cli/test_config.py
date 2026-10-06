@@ -1,10 +1,23 @@
 """Tests for the configuration management commands."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import BaseModel, ValidationError
 from pytest_mock import MockerFixture
 
+from styrmin_backend import config
 from styrmin_backend.cli.config_cmd import config_app
+from styrmin_backend.config import (
+    ConfiguredSettings,
+    DatabaseSettings,
+    KubernetesConfigMode,
+    KubernetesSettings,
+    Settings,
+    WorkflowDriver,
+    WorkflowSettings,
+)
+from styrmin_backend.db.constants import DatabaseType
 
 
 def test_config_show_help(capsys: pytest.CaptureFixture[str]) -> None:
@@ -127,3 +140,25 @@ def test_config_validate_file_not_found(
     assert exc_info.value.code == 2
     output = capsys.readouterr().out
     assert "not found" in output
+
+
+def test_config_show_output_loads_back_as_a_config_file(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Aliased fields and enums are written in a form that styrmin.toml accepts."""
+    settings = Settings(
+        session_cookie_secure=False,
+        database=DatabaseSettings(db_type=DatabaseType.POSTGRES, db_host="db.example"),
+        workflow=WorkflowSettings(driver=WorkflowDriver.LOCAL),
+        kubernetes=KubernetesSettings(config_mode=KubernetesConfigMode.KUBECONFIG),
+    )
+    monkeypatch.setattr(config, "SETTINGS", ConfiguredSettings(settings=settings))
+
+    with pytest.raises(SystemExit):
+        config_app(["show"])
+    path = tmp_path / "styrmin.toml"
+    path.write_text(capsys.readouterr().out, encoding="utf-8")
+
+    assert config.load(str(path)) == settings
