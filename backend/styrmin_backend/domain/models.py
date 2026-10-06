@@ -346,6 +346,15 @@ class TaskResult(str, Enum):
     SUPERSEDED = "superseded"
 
 
+class StepEvent(str, Enum):
+    """An event a writer records on a step through ``recordStep``."""
+
+    STARTED = "started"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    OUTPUT = "output"
+
+
 class StepError(BaseModel):
     """The error of one failed attempt of a step."""
 
