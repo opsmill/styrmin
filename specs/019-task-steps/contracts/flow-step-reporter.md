@@ -59,12 +59,15 @@ Each hook step's id is passed to the action's Job as `STYRMIN_STEP_ID`.
 
 ## Job output
 
-`agent/service/kubernetes/job_logs.py::read_job_output_tail(namespace, job_name, container) -> JobOutput | None`
+`agent/service/kubernetes/job_logs.py::read_job_output_tail(namespace, job_name, container) -> JobOutput`
 
-- Lists the Job's pods by label `batch.kubernetes.io/job-name=<job>`, then `job-name=<job>`, and takes the newest by creation time.
-- Calls `read_namespaced_pod_log(name, namespace, container=…, tail_lines=201, limit_bytes=65537)`.
-- Returns the text without its first line when 201 lines came back, with `truncated=True`; the same when 65,537 bytes came back, cutting to the last full line.
-- Returns `None` when no pod exists or the API call fails; the caller adds "The output could not be read: <reason>" to the step error.
+- Lists the Job's pods by label `batch.kubernetes.io/job-name=<job>`, then `job-name=<job>`, and takes the newest by creation time. A failed pod comes before a newer retry that has not ended, because the retry has no output yet.
+- Calls `read_namespaced_pod_log(name, namespace, container=…, tail_lines=201, limit_bytes=65537)` and reads the raw bytes, because the client otherwise decodes strictly and parses a one-line JSON log as JSON.
+- Returns the text without its first line when 201 lines came back, with `truncated=True`.
+- When 65,537 bytes came back, Kubernetes kept the start of the 201 lines, not their end. The reader then asks for half as many lines until the answer fits, so the text always ends with the last line of the output, with `truncated=True`. Styrmin keeps at most the last 64 KiB of one line that is longer than that.
+- Raises `JobOutputUnreadableError` with the reason when no pod exists or an API call fails (constitution IV: no union return for errors). `JobFailedError` then says "The output could not be read: <reason>", and the Job's failure is still raised.
+
+`JobFailedError(message, *, output=None, truncated=False)` carries the output to the caller, which records it with `OUTPUT` before it re-raises.
 
 Callers:
 
@@ -86,7 +89,7 @@ Both read the output before they raise, so a later Job cleanup ([#374](https://g
 
 - Reporter: no-op without token or parent; one call per event with the right variables; `occurredAt` sent; network and GraphQL errors logged, not raised; `step()` records `FAILED` with the exception and re-raises.
 - `action_job_variables` and `run_driver_action_or_fail`: variables forwarded and added.
-- `read_job_output_tail`: newest pod chosen; line and byte cuts set `truncated`; no pod and API errors return `None`.
+- `read_job_output_tail`: newest pod chosen; line and byte cuts set `truncated`; no pod and API errors raise `JobOutputUnreadableError`.
 - `execute_commands`: output recorded on `STYRMIN_STEP_ID` before the error is raised.
 - Remediation flows: steps opened in the documented order for each flow, with and without hooks and aliases; a failing hook records `FAILED`.
 - Backup step mapping: `PodVolumeBackup` lists to component steps, including a component without items.

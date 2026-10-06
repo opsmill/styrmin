@@ -14,7 +14,8 @@ from kubernetes_asyncio.client import (
 from kubernetes_asyncio.client.api_client import ApiClient, ApiException
 
 from .dependency import get_api_client
-from .exceptions import CustomResourceNotFound, JobFailedError
+from .exceptions import CustomResourceNotFound, JobFailedError, JobOutputUnreadableError
+from .job_logs import read_job_output_tail
 
 
 def _prune_none(value: Any) -> Any:
@@ -110,21 +111,39 @@ async def run_kubernetes_job(
     except ApiException:
         raise
 
-    # Wait for the job to complete
+    # The manifest may only set generateName, so use the created Job's name.
+    job_name = job.metadata.name
     while True:
         read_job = await batch_api.read_namespaced_job_status(
-            name=job.metadata.name, namespace=namespace
+            name=job_name, namespace=namespace
         )
         for condition in read_job.status.conditions or []:
             if condition.type in ["Complete", "Failed"] and condition.status == "True":
                 if condition.type == "Complete":
                     return read_job
-                else:
-                    raise JobFailedError(
-                        f"Job {manifest['metadata']['name']} failed in namespace {namespace}"
-                    )
+                raise await _job_failed_error(
+                    namespace, job_name, _first_container(manifest), client
+                )
 
         await asyncio.sleep(5)
+
+
+def _first_container(manifest: dict) -> str:
+    return manifest["spec"]["template"]["spec"]["containers"][0]["name"]
+
+
+async def _job_failed_error(
+    namespace: str, job_name: str, container: str, client: ApiClient
+) -> JobFailedError:
+    """The Job's failure with the end of its output, read before the Job can be removed."""
+    message = f"Job {job_name} failed in namespace {namespace}"
+    try:
+        output = await read_job_output_tail(
+            namespace=namespace, job_name=job_name, container=container, client=client
+        )
+    except JobOutputUnreadableError as exc:
+        return JobFailedError(f"{message}. The output could not be read: {exc}")
+    return JobFailedError(message, output=output.text, truncated=output.truncated)
 
 
 @inject
@@ -561,6 +580,7 @@ async def run_job(
             # Job completed successfully
             break
         if job.status.failed:
-            # Job failed
-            raise RuntimeError(f"Job {job_name} failed in namespace {namespace}")
+            raise await _job_failed_error(
+                namespace, job_name, _first_container(body), client
+            )
         await asyncio.sleep(5)  # Poll every 5 seconds
