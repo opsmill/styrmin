@@ -5,6 +5,11 @@ A report finds its task by the instance the operator acted on, or, in the
 (contracts/operator-status.md "Finding the task"). Each reported phase moves
 the task's operator-phase steps forward; a later phase succeeds every earlier
 step. Only operator-phase steps change; other steps only give start times.
+
+A ``Failed`` phase or an ``Error`` display state fails the first unfinished
+step with the CR message, and a retry of the operator adds an attempt. FluxCD's
+state of the HelmRelease gives the HelmRelease step its reason, its failed
+attempts and its rollbacks (contracts/operator-status.md "HelmRelease details").
 """
 
 from __future__ import annotations
@@ -14,7 +19,14 @@ from typing import TYPE_CHECKING, Any
 
 from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import Step, StepKind, StepStatus, Task, TaskType
-from styrmin_backend.services.steps.recorder import start_step, succeed_step
+from styrmin_backend.services.steps.recorder import (
+    add_attempt_error,
+    fail_step,
+    record_detail,
+    record_rollback,
+    start_step,
+    succeed_step,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -24,6 +36,7 @@ if TYPE_CHECKING:
 
 _DELETE_PHASES = frozenset({"Deleting", "Deleted"})
 _FINAL_STATUSES = frozenset({StepStatus.SUCCEEDED, StepStatus.SUPERSEDED})
+_IN_PROGRESS = frozenset({StepStatus.RUNNING, StepStatus.FAILED})
 
 _DELETE_STEPS = (steps.DELETE_REQUEST, steps.OPERATOR_TEARDOWN)
 
@@ -44,6 +57,28 @@ _END_CONDITIONS: dict[str, tuple[str, ...]] = {
     steps.OPERATOR_READY.key: ("Ready",),
     steps.OPERATOR_TEARDOWN.key: ("Deleted",),
 }
+
+_HELMRELEASE_READY = "HelmReleaseReady"
+_HELMRELEASE_REMEDIATED = "HelmReleaseRemediated"
+_DEFAULT_FAILURE = "The operator reported a failure"
+
+#: Container reasons that explain why a pod is not ready (contracts "Pod reasons on failure").
+_POD_FAILURE_REASONS = frozenset(
+    {
+        "ImagePullBackOff",
+        "ErrImagePull",
+        "InvalidImageName",
+        "CrashLoopBackOff",
+        "CreateContainerConfigError",
+        "CreateContainerError",
+        "Error",
+        "OOMKilled",
+    }
+)
+_MAX_PODS = 5
+_POD_REASON_STEPS = frozenset(
+    {steps.OPERATOR_HELMRELEASE.key, steps.OPERATOR_READY.key}
+)
 
 
 async def apply_operator_report(
@@ -74,13 +109,20 @@ async def apply_operator_report(
             _DELETE_STEPS, _DELETE_PROGRESS[phase], by_key, report, now, uow
         )
         return
-    if _reports_failure(report):
-        return  # Failing a step follows contracts/operator-status.md; not built yet.
+    failing = _reports_failure(report)
+    # Before the step can succeed, so a rollback reported with the ready release is kept.
+    detailed = await _detail_helmrelease(report, by_key, now, uow, failing=failing)
+    if failing:
+        await _apply_failure(report, by_key, now, uow)
+        return
     progress = _ROLLOUT_PROGRESS.get(phase or "")
-    if progress is not None:
-        await _move_forward(
-            steps.ROLLOUT_OPERATOR_STEPS, progress, by_key, report, now, uow
-        )
+    if progress is None:
+        return
+    await _move_forward(
+        steps.ROLLOUT_OPERATOR_STEPS, progress, by_key, report, now, uow
+    )
+    if not detailed:
+        await _detail_helmrelease(report, by_key, now, uow, failing=False)
 
 
 async def _find_task(report: Mapping[str, Any], uow: UnitOfWork) -> Task | None:
@@ -110,10 +152,13 @@ async def _move_forward(
     report: Mapping[str, Any],
     now: datetime,
     uow: UnitOfWork,
+    *,
+    start_current: bool = True,
 ) -> None:
     """Succeed the steps of ``sequence`` before ``progress`` and run the step at it.
 
     A step starts when the step before it ended, or at the report time.
+    ``by_key`` receives the changed steps.
     """
     previous_end: datetime | None = None
     for index, definition in enumerate(sequence[: progress + 1]):
@@ -126,8 +171,9 @@ async def _move_forward(
                 step = await _finish(
                     step, start, _end_time(step, start, report, now), uow
                 )
-            else:
+            elif start_current:
                 step = await _begin(step, start, uow)
+            by_key[definition.key] = step
         previous_end = step.ended_at
 
 
@@ -169,14 +215,308 @@ def _end_time(
     return latest if latest >= started_at else now
 
 
-def _true_since(report: Mapping[str, Any], condition_type: str) -> datetime | None:
-    for condition in report.get("conditions") or ():
-        if condition.get("type") != condition_type:
+# --- Failures and attempts -------------------------------------------------------
+
+
+async def _apply_failure(
+    report: Mapping[str, Any],
+    by_key: dict[str, Step],
+    now: datetime,
+    uow: UnitOfWork,
+) -> None:
+    """Fail the first unfinished rollout step with the CR message.
+
+    The steps the operator finished first succeed. A step that already failed
+    gets a new attempt when the operator restarted the rollout since its newest
+    error, and otherwise only a CR message it does not have yet.
+    """
+    sequence = steps.ROLLOUT_OPERATOR_STEPS
+    progress = max(_phase_progress(report), _finished_by_conditions(report, by_key))
+    await _move_forward(
+        sequence, progress, by_key, report, now, uow, start_current=False
+    )
+    target, start = _first_unfinished(by_key, now)
+    if target is None:
+        return
+    if target.status is StepStatus.PENDING:
+        by_key[target.key] = await start_step(target, start, uow=uow)
+        if target.key == steps.OPERATOR_HELMRELEASE.key:
+            await _detail_helmrelease(report, by_key, now, uow, failing=True)
+        target = by_key[target.key]
+
+    message = report.get("message") or _DEFAULT_FAILURE
+    at = _failure_time(report, now)
+    if target.status is StepStatus.RUNNING:
+        error = await _with_pod_reasons(message, target, report, uow)
+        await fail_step(target, error, at, uow=uow)
+        return
+    if target.status is not StepStatus.FAILED:
+        return
+    restarted = _restarted_at(report)
+    newest = _newest_error_time(target)
+    if restarted is not None and (newest is None or restarted > newest):
+        target = await start_step(target, restarted, uow=uow)
+        error = await _with_pod_reasons(message, target, report, uow)
+        await fail_step(target, error, at, uow=uow)
+    elif not _has_message(target, message):
+        error = await _with_pod_reasons(message, target, report, uow)
+        await add_attempt_error(target, error, at, uow=uow)
+
+
+def _phase_progress(report: Mapping[str, Any]) -> int:
+    """How far the phase of a failure report has come; ``Ready`` with an error says nothing."""
+    progress = _ROLLOUT_PROGRESS.get(report.get("phase") or "", 0)
+    return progress if progress < len(steps.ROLLOUT_OPERATOR_STEPS) else 0
+
+
+def _finished_by_conditions(report: Mapping[str, Any], by_key: dict[str, Step]) -> int:
+    """How many leading rollout steps have all their end conditions True since they started.
+
+    A handler that fails after the prerequisites reports ``Failed`` without a phase in between.
+    """
+    bound: datetime | None = None
+    for index, definition in enumerate(steps.ROLLOUT_OPERATOR_STEPS):
+        step = by_key.get(definition.key)
+        if step is None:
+            return index
+        if step.status in _FINAL_STATUSES:
+            bound = step.ended_at or bound
             continue
-        if condition.get("status") != "True":
-            return None
-        return _parse_time(condition.get("lastTransitionTime"))
+        times = [
+            _true_since(report, condition_type)
+            for condition_type in _END_CONDITIONS[definition.key]
+        ]
+        ended = [time for time in times if time is not None]
+        if len(ended) != len(times):
+            return index
+        start = step.started_at or bound
+        if start is not None and max(ended) < start:
+            return index
+        bound = max(ended)
+    return len(steps.ROLLOUT_OPERATOR_STEPS)
+
+
+def _first_unfinished(
+    by_key: dict[str, Step], now: datetime
+) -> tuple[Step | None, datetime]:
+    """The first rollout step that is not final, and when it starts if it is pending."""
+    previous_end: datetime | None = None
+    for definition in steps.ROLLOUT_OPERATOR_STEPS:
+        step = by_key.get(definition.key)
+        if step is None:
+            continue
+        if step.status not in _FINAL_STATUSES:
+            return step, previous_end or now
+        previous_end = step.ended_at
+    return None, now
+
+
+def _failure_time(report: Mapping[str, Any], now: datetime) -> datetime:
+    """The operator's last condition write for a ``Failed`` phase, else the report time.
+
+    A ``Failed`` phase keeps its conditions until the operator works again, so their
+    newest time is when it failed, on the operator's clock.
+    """
+    if report.get("phase") != "Failed":
+        return now
+    times = [
+        time
+        for time in (
+            _parse_time(condition.get("lastTransitionTime"))
+            for condition in report.get("conditions") or ()
+        )
+        if time is not None
+    ]
+    return max(times, default=now)
+
+
+def _restarted_at(report: Mapping[str, Any]) -> datetime | None:
+    """When a ``Failed`` CR's handler last ran: it resets ``HelmReleaseReady`` to Progressing."""
+    if report.get("phase") != "Failed":
+        return None
+    condition = _find_condition(report, _HELMRELEASE_READY)
+    if (
+        condition is None
+        or condition.get("status") != "Unknown"
+        or condition.get("reason") != "Progressing"
+    ):
+        return None
+    return _parse_time(condition.get("lastTransitionTime"))
+
+
+def _newest_error_time(step: Step) -> datetime | None:
+    return max((error.occurred_at for error in step.errors), default=None)
+
+
+def _has_message(step: Step, message: str) -> bool:
+    """Whether an error of the step starts with ``message``; pod reasons follow it."""
+    return any(
+        error.message == message or error.message.startswith(f"{message}\n")
+        for error in step.errors
+    )
+
+
+async def _with_pod_reasons(
+    message: str, step: Step, report: Mapping[str, Any], uow: UnitOfWork
+) -> str:
+    """Append the pods that are not ready to a HelmRelease or ready-wait error."""
+    if step.key not in _POD_REASON_STEPS:
+        return message
+    reasons = await _pod_reasons(report["deployment_id"], uow)
+    return f"{message}\n{reasons}" if reasons else message
+
+
+async def _pod_reasons(deployment_id: Any, uow: UnitOfWork) -> str | None:
+    """``Pods not ready: <pod> (<container>: <reason>), …`` from the stored pod statuses."""
+    entries: list[str] = []
+    pods = await uow.pod_statuses.find_by_deployment(deployment_id)
+    for pod in sorted(pods, key=lambda pod: pod.pod_name):
+        containers = [
+            f"{container.get('name')}: {reason}"
+            for container in pod.container_statuses or ()
+            if (reason := _container_reason(container.get("state")))
+            in _POD_FAILURE_REASONS
+        ]
+        if containers:
+            entries.append(f"{pod.pod_name} ({'; '.join(containers)})")
+        if len(entries) == _MAX_PODS:
+            break
+    return f"Pods not ready: {', '.join(entries)}" if entries else None
+
+
+def _container_reason(state: object) -> str | None:
+    """The reason of a stored ``waiting:<reason>`` or ``terminated:<reason>`` state."""
+    if not isinstance(state, str):
+        return None
+    kind, _, reason = state.partition(":")
+    return reason if kind in ("waiting", "terminated") and reason else None
+
+
+# --- HelmRelease details -----------------------------------------------------------
+
+
+async def _detail_helmrelease(
+    report: Mapping[str, Any],
+    by_key: dict[str, Step],
+    now: datetime,
+    uow: UnitOfWork,
+    *,
+    failing: bool,
+) -> bool:
+    """Apply FluxCD's state to a running or failed HelmRelease step; False when there is none."""
+    step = by_key.get(steps.OPERATOR_HELMRELEASE.key)
+    if step is None or step.status not in _IN_PROGRESS:
+        return False
+    ready = _find_condition(report, _HELMRELEASE_READY)
+    if ready is not None and ready.get("status") != "True":
+        detail = _reason_and_message(ready)
+        if detail and detail != step.detail:
+            step = await record_detail(step, detail, uow=uow)
+        step = await _record_fluxcd_failure(ready, step, now, uow, failing=failing)
+    remediated = _find_condition(report, _HELMRELEASE_REMEDIATED)
+    if remediated is not None:
+        step = await _record_remediation(remediated, step, uow, failing=failing)
+    by_key[step.key] = step
+    return True
+
+
+async def _record_fluxcd_failure(
+    ready: Mapping[str, Any],
+    step: Step,
+    now: datetime,
+    uow: UnitOfWork,
+    *,
+    failing: bool,
+) -> Step:
+    """Record a ``*Failed`` reason the step does not have yet as a failed attempt.
+
+    On a running step the error joins the current attempt and, unless the operator
+    reports a failure, FluxCD's retry starts the next one. On a failed step it joins
+    the failed attempt, unless FluxCD rolled that attempt back: then it is a later one.
+    """
+    if not str(ready.get("reason") or "").endswith("Failed"):
+        return step
+    at = _parse_time(ready.get("lastTransitionTime"))
+    if at is not None and step.started_at is not None and at < step.started_at:
+        return step  # An earlier rollout.
+    error = _reason_and_message(ready) or ""
+    if any(
+        recorded.message == error and (at is None or recorded.occurred_at == at)
+        for recorded in step.errors
+    ):
+        return step
+    at = at or now
+    if step.status is StepStatus.RUNNING:
+        return await add_attempt_error(
+            step, error, at, uow=uow, next_attempt=not failing
+        )
+    newest = _newest_error_time(step)
+    rolled_back_at = step.rolled_back_at
+    if (
+        rolled_back_at is not None
+        and (newest is None or rolled_back_at > newest)
+        and at > rolled_back_at
+    ):
+        step = await start_step(step, at, uow=uow)
+        return await fail_step(step, error, at, uow=uow)
+    return await add_attempt_error(step, error, at, uow=uow)
+
+
+async def _record_remediation(
+    remediated: Mapping[str, Any],
+    step: Step,
+    uow: UnitOfWork,
+    *,
+    failing: bool,
+) -> Step:
+    """Record a rollback newer than the step's; it ends an attempt no error ended yet."""
+    if remediated.get("status") != "True":
+        return step
+    at = _parse_time(remediated.get("lastTransitionTime"))
+    if at is None or (step.started_at is not None and at < step.started_at):
+        return step  # Remediated before this rollout started.
+    previous = step.rolled_back_at
+    if previous is not None and at <= previous:
+        return step
+    ended = any(
+        (previous is None or error.occurred_at > previous) and error.occurred_at <= at
+        for error in step.errors
+    )
+    return await record_rollback(
+        step,
+        at,
+        remediated.get("message") or None,
+        uow=uow,
+        next_attempt=not ended and not failing,
+    )
+
+
+# --- Conditions ----------------------------------------------------------------------
+
+
+def _find_condition(
+    report: Mapping[str, Any], condition_type: str
+) -> Mapping[str, Any] | None:
+    for condition in report.get("conditions") or ():
+        if condition.get("type") == condition_type:
+            return condition
     return None
+
+
+def _reason_and_message(condition: Mapping[str, Any]) -> str | None:
+    parts = [
+        str(part)
+        for part in (condition.get("reason"), condition.get("message"))
+        if part
+    ]
+    return ": ".join(parts) or None
+
+
+def _true_since(report: Mapping[str, Any], condition_type: str) -> datetime | None:
+    condition = _find_condition(report, condition_type)
+    if condition is None or condition.get("status") != "True":
+        return None
+    return _parse_time(condition.get("lastTransitionTime"))
 
 
 def _parse_time(value: object) -> datetime | None:
