@@ -10,4 +10,17 @@ class CustomResourceNotFound(KubernetesError):
 
 
 class JobFailedError(AgentServiceError):
-    """Exception raised when a job fails to complete successfully."""
+    """A Kubernetes Job failed; carries the end of its output when it could be read."""
+
+    def __init__(
+        self, message: str, *, output: str | None = None, truncated: bool = False
+    ) -> None:
+        super().__init__(message)
+        #: The end of the Job's output, or None when it could not be read.
+        self.output = output
+        #: True when earlier output was cut.
+        self.truncated = truncated
+
+
+class JobOutputUnreadableError(KubernetesError):
+    """The output of a Job's pod could not be read; the message gives the reason."""

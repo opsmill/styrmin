@@ -309,6 +309,34 @@ async def test_run_job_command_records_a_failed_job_and_raises(
     )
 
 
+async def test_run_job_command_records_the_job_output_on_the_command_step(
+    step_api: tuple[FakeStepApi, UUID],
+    kubernetes_job: AsyncMock,
+    events: list[Event],
+) -> None:
+    api, task_id = step_api
+    kubernetes_job.side_effect = JobFailedError(
+        "Job job-run-1 failed in namespace x",
+        output="Traceback: boom\n",
+        truncated=True,
+    )
+
+    with pytest.raises(JobFailedError):
+        await run_job_command(**_job(task_id))
+
+    assert events == [
+        ("STARTED", "command"),
+        ("OUTPUT", "command"),
+        ("FAILED", "command"),
+    ]
+    output = next(r for r in api.records if r["event"] == "OUTPUT")
+    assert output["stepId"] == str(api.ids["command"])
+    assert (output["output"], output["outputTruncated"]) == ("Traceback: boom\n", True)
+    assert api.failed("command")["error"] == (
+        "JobFailedError: Job job-run-1 failed in namespace x"
+    )
+
+
 async def test_run_job_command_without_runtime_class_keeps_the_default(
     step_api: tuple[FakeStepApi, UUID], kubernetes_job: AsyncMock
 ) -> None:

@@ -22,16 +22,18 @@ from styrmin_backend.services.steps.exceptions import (
     InvalidStepRecordError,
     StepNotFoundError,
 )
-from styrmin_backend.services.steps.recorder import (
+from styrmin_backend.domain.steps import (
     MAX_OUTPUT_BYTES,
     MAX_OUTPUT_LINES,
+    truncate_output,
+)
+from styrmin_backend.services.steps.recorder import (
     StepRecord,
     fail_open_flow_steps,
     fail_step,
     open_step,
     record_event,
     succeed_step,
-    truncate_output,
 )
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 from tests.unit.steps.conftest import Parents

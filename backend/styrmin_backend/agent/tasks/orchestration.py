@@ -9,6 +9,7 @@ from prefect.logging import get_run_logger
 from prefect.states import Completed, format_exception
 from prefect.client.schemas.objects import State
 
+from styrmin_backend.agent.service.kubernetes.exceptions import JobFailedError
 from styrmin_backend.agent.service.kubernetes.primitives import (
     patch_custom_resource,
     run_kubernetes_job,
@@ -313,8 +314,13 @@ async def run_job_command(
         image=image,
     )
     reporter = StepReporter.from_env()
-    async with reporter.step(*steps.COMMAND):
-        await run_kubernetes_job(manifest=manifest, namespace=namespace)
+    async with reporter.step(*steps.COMMAND) as step:
+        try:
+            await run_kubernetes_job(manifest=manifest, namespace=namespace)
+        except JobFailedError as exc:
+            if exc.output is not None:
+                await reporter.record_output(step.id, exc.output, exc.truncated)
+            raise
 
 
 def _build_job_manifest(

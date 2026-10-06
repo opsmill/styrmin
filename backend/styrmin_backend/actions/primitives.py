@@ -25,12 +25,14 @@ from loguru import logger
 from prefect import task
 
 from styrmin_backend import config
+from styrmin_backend.agent.service.kubernetes.exceptions import JobFailedError
 from styrmin_backend.agent.service.kubernetes.primitives import (
     get_component_env,
     get_component_images as _k8s_get_component_images,
     get_component_labels as _k8s_get_component_labels,
     run_job,
 )
+from styrmin_backend.agent.steps.reporter import StepReporter
 from styrmin_backend.agent.tasks.utils import API_TOKEN_ENV
 from styrmin_backend.context.models.contexts import GlobalContext
 
@@ -233,6 +235,8 @@ async def execute_commands(
 
     Raises:
         ValueError: If a component is not found or no matching K8s resource exists.
+        JobFailedError: If the Job fails. The end of its output is first recorded
+            on the hook step that runs this action (``STYRMIN_STEP_ID``).
     """
     container_spec: dict = {
         "name": "user-job",
@@ -283,7 +287,13 @@ async def execute_commands(
     if template_metadata:
         body["spec"]["template"]["metadata"] = template_metadata
 
-    await run_job(namespace=context.instance.namespace, body=body)
+    try:
+        await run_job(namespace=context.instance.namespace, body=body)
+    except JobFailedError as exc:
+        if exc.output is not None:
+            reporter = StepReporter.from_env()
+            await reporter.record_output(reporter.step_id, exc.output, exc.truncated)
+        raise
 
 
 @task(task_run_name="Upgrade Deployment Version to {target_version}")

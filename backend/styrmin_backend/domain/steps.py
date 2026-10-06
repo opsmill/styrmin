@@ -73,3 +73,32 @@ ROLLOUT_OPERATOR_STEPS = (
     OPERATOR_SERVICES,
     OPERATOR_READY,
 )
+
+#: The server keeps at most the end of a command's output (spec FR-003).
+MAX_OUTPUT_LINES = 200
+MAX_OUTPUT_BYTES = 64 * 1024
+
+
+def truncate_output(output: str) -> tuple[str, bool]:
+    """Keep the last ``MAX_OUTPUT_LINES`` lines and ``MAX_OUTPUT_BYTES`` bytes.
+
+    Returns the kept text and whether earlier output was cut. A byte cut drops
+    the partial first line, unless that line is all that is left.
+    """
+    truncated = False
+    trailing_newline = output.endswith("\n")
+    lines = (output[:-1] if trailing_newline else output).split("\n")
+    if len(lines) > MAX_OUTPUT_LINES:
+        output = "\n".join(lines[-MAX_OUTPUT_LINES:]) + (
+            "\n" if trailing_newline else ""
+        )
+        truncated = True
+    encoded = output.encode()
+    if len(encoded) > MAX_OUTPUT_BYTES:
+        starts_on_line = encoded[-MAX_OUTPUT_BYTES - 1] == ord("\n")
+        output = encoded[-MAX_OUTPUT_BYTES:].decode(errors="ignore")
+        first_newline = output.find("\n")
+        if not starts_on_line and 0 <= first_newline < len(output) - 1:
+            output = output[first_newline + 1 :]
+        truncated = True
+    return output, truncated
