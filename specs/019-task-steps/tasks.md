@@ -161,8 +161,8 @@ Run each E2E node with `--pdb` (in a non-interactive shell: `sleep infinity | uv
 - [X] T073 [US3] Regenerate `schema.graphql` and generated types (T020 commands)
 - [X] T074 [US3] Create `frontend/src/components/deployment/TaskResultBadge.tsx`; use it in `DeploymentTimeline.tsx` instead of `StatusBadge(task.status)` with `data-task-result`; show "Started by <type>" links, "Superseded by <type>" links on steps and started tasks with results under hook steps; use it in the Overview "Recent Timeline" in `frontend/src/pages/deployments/DeploymentDetailPage.tsx`; extend the timeline query and run `pnpm codegen`
 - [X] T075 [P] [US3] Write `frontend/src/__tests__/deployment-detail/TaskResult.test.tsx`: badge for each result; started-by and superseded links; started tasks list; Overview uses the result
-- [ ] T076 [US3] Extend `test_upgrade_simple_app` in `backend/tests/e2e/test_deploy_app.py` per [plan.md](plan.md) "E2E coverage": type `upgrade_instance`, step order, three started tasks with links both ways, upgrade `SUCCEEDED`, `start_components` `SUCCEEDED`, earlier started tasks `SUCCEEDED` or `SUPERSEDED` by a sibling
-- [ ] T077 [US3] Run `backend/tests/e2e/test_deploy_app.py::test_upgrade_simple_app` (both variants) and record evidence in `specs/019-task-steps/e2e-evidence.md`
+- [X] T076 [US3] Extend `test_upgrade_simple_app` in `backend/tests/e2e/test_deploy_app.py` per [plan.md](plan.md) "E2E coverage": type `upgrade_instance`, step order, three started tasks with links both ways, upgrade `SUCCEEDED`, `start_components` `SUCCEEDED`, earlier started tasks `SUCCEEDED` or `SUPERSEDED` by a sibling
+- [X] T077 [US3] Run `backend/tests/e2e/test_deploy_app.py::test_upgrade_simple_app` (both variants) and record evidence in `specs/019-task-steps/e2e-evidence.md`
 
 **Checkpoint**: Results include the operator's work; upgrades read as one family.
 

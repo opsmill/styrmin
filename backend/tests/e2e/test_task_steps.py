@@ -169,12 +169,12 @@ async def _wait_for_step(
             step = next((step for step in entry.steps if step.key == key), None)
             if step is not None and done(entry, step):
                 return entry, step
-            seen = [
+            seen = [f"result {entry.result}"] + [
                 f"{s.key}={s.status} (attempts {s.attempt_count})" for s in entry.steps
             ]
         if time.monotonic() >= deadline:
             raise AssertionError(
-                f"step {key} not done within {timeout}s; the task's steps: {seen or 'no task yet'}"
+                f"step {key} not done within {timeout}s; the task: {seen or 'no task yet'}"
             )
         await asyncio.sleep(interval)
 
@@ -199,19 +199,26 @@ async def _step_output(client: StyrminClient, step_id: str) -> GetStepOutputStep
 async def _upgrade_hook_failure(
     client: StyrminClient, deployment_id: str, version: str
 ) -> StepRef:
-    """Upgrade through the SDK and return the upgrade's failed hook step once its task failed."""
+    """Upgrade through the SDK and return the upgrade's failed hook step once its task failed.
+
+    The task result stays ``RUNNING`` until the operator has finished the rollout
+    of the CR that the upgrade wrote before its hook (research D8).
+    """
     task = await client.deployments.update_version(deployment_id, version)
     assert task is not None, f"upgrade to {version} dispatched no task"
     entry, hook = await _wait_for_step(
         _timeline_reader(client, deployment_id),
         lambda entry: entry.task_id == str(task.id),
         UPGRADE_HOOK,
-        lambda entry, step: step.status == "FAILED" and entry.task_status == "failed",
+        lambda entry, step: (
+            step.status == "FAILED"
+            and entry.task_status == "failed"
+            and entry.result != "RUNNING"
+        ),
         timeout=HOOK_FAILURE_TIMEOUT,
     )
     assert entry.task_type == "upgrade_instance", entry
-    # TODO(T076): require result FAILED once T071/T074 expose Task.result to the drivers.
-    assert entry.result in (None, "FAILED"), entry
+    assert entry.result == "FAILED", entry
     assert hook.name == "Run the upgrade hook", hook
     assert hook.kind == "HOOK", hook
     assert hook.attempt_count == 1, hook
@@ -412,13 +419,14 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
             entry.task_type == "update_instance" and entry.task_id not in earlier_tasks
         ),
         HELMRELEASE,
-        lambda _, step: step.status == "FAILED",
+        # The UI reads the result and the steps one after the other, so both must agree.
+        lambda entry, step: step.status == "FAILED" and entry.result != "RUNNING",
         timeout=HELMRELEASE_FAILURE_BUDGET - (time.monotonic() - started),
         interval=5.0,
     )
 
-    # TODO(T076): require result FAILED once T071/T074 expose Task.result to the drivers.
-    assert entry.result in (None, "FAILED"), entry
+    # US3 scenario 1: the HelmRelease failure fails the task whose flow succeeded.
+    assert entry.result == "FAILED", entry
     assert step.name == "Install or upgrade the HelmRelease", step
     assert step.detail, f"the HelmRelease step has no FluxCD reason: {step}"
     assert any("ImagePullBackOff" in error.message for error in step.errors), (

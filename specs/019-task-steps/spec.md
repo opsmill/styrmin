@@ -162,7 +162,7 @@ Any signed-in user opens a restore of one deployment and views its steps: delete
 - **FR-004**: The HelmRelease step MUST show FluxCD's reason while the HelmRelease is not Ready. It MUST also show when FluxCD rolled back the release.
 - **FR-005**: While a task runs, the deployment page MUST show a step change within 15 seconds, without a manual reload.
 - **FR-006**: The system MUST calculate the task result on each read, and MUST NOT store it. The rules:
-  - `RUNNING` while any step is running or not started, or while any task that the task's hook started is running;
+  - `RUNNING` while any step is running or not started, or while any task that the task's hook started is running. A step that waits behind a failed step of its task does not count as not started;
   - `FAILED` when any step, or any task that its hook started, has failed;
   - `SUCCEEDED` when all steps have succeeded;
   - `SUPERSEDED` when a task that it did not start interrupted its operator phases.

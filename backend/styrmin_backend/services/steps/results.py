@@ -31,7 +31,6 @@ _RESULT_OF_STATUS = {
     TaskStatus.SUCCESS: TaskResult.SUCCEEDED,
     TaskStatus.FAILED: TaskResult.FAILED,
 }
-_OPEN_STATUSES = frozenset({StepStatus.PENDING, StepStatus.RUNNING})
 #: The rules in the order they apply; a family that matches none succeeded.
 _RULE_ORDER = (TaskResult.RUNNING, TaskResult.FAILED, TaskResult.SUPERSEDED)
 
@@ -70,9 +69,13 @@ def _signals(
     member_steps = steps_by_task.get(member.id, ())
     if not member_steps:
         return {_RESULT_OF_STATUS[member.status]}
+    # Pending steps wait behind a failed step until it runs again (SC-003).
+    blocked = any(step.status is StepStatus.FAILED for step in member_steps)
     signals: set[TaskResult] = set()
     for step in member_steps:
-        if step.status in _OPEN_STATUSES:
+        if step.status is StepStatus.RUNNING or (
+            step.status is StepStatus.PENDING and not blocked
+        ):
             signals.add(TaskResult.RUNNING)
         elif step.status is StepStatus.FAILED:
             signals.add(TaskResult.FAILED)

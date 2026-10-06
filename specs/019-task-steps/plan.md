@@ -172,8 +172,8 @@ Each phase leaves the system working. Phases 1 to 6 deliver P1; phase 7 delivers
 Following "reuse before you boot" ([`dev/guides/e2e-deployment-sharing.md`](../../dev/guides/e2e-deployment-sharing.md)):
 
 - **Extend** `test_upgrade_simple_app` (`shard_general`, both variants): after the upgrade, assert:
-  - the upgrade task has the type `upgrade_instance` and its steps in order (plan, CR write, upgrade hook, operator phases);
-  - the upgrade hook step lists the three started tasks, and each links back;
+  - the upgrade task has the type `upgrade_instance` and its steps in order: plan, CR write and upgrade hook, and the operator phases in their own order. The operator phases start when the CR write ends, so the prerequisites step is listed before the upgrade hook;
+  - the upgrade hook step lists the tasks it started, and each links back. These are `stop_components` and `start_components`: the action's `upgrade_deployment_version` asks for the version that the upgrade already set, which is a no-op that starts no task (observed in the T076 run);
   - the upgrade's result is `SUCCEEDED`, the last started task (`start_components`) is `SUCCEEDED`, and each earlier started task is `SUCCEEDED` or `SUPERSEDED` by one of its siblings (they interrupt each other's rollouts, research D8).
 - **Extend** `test_deployment_timeline_has_entries`: every task of the shared deployment has a result, and the create task has the type `create_instance` and the plan, CR-write and operator-phase steps.
 - **New** `test_task_steps.py` (`shard_general`), with one module-scoped deployment of a test driver `failing-actions` (served by the existing git-server fixture; it reuses the simple-app chart). No existing deployment can host these scenarios: failing the shared simple-app deployment would break every later test in the shard. Its upgrade action reads the target version to choose a failure:

@@ -94,6 +94,7 @@ def _step_ref_from_row(row: dict[str, Any], *, context: str) -> StepRef:
         ),
         detail=row.get("detail"),
         has_output=row.get("stepHasOutput") == "true",
+        superseded_by=row.get("supersededByTaskId") or None,
     )
 
 

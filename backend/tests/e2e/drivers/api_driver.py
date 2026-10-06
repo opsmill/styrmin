@@ -141,6 +141,7 @@ def _step_ref(step: GetDeploymentTimelineDeploymentTimelineTaskSteps) -> StepRef
         ),
         detail=step.detail,
         has_output=step.has_output,
+        superseded_by=str(step.superseded_by.id) if step.superseded_by else None,
     )
 
 
