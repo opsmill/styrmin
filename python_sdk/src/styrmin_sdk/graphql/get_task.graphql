@@ -5,5 +5,51 @@ query GetTask($taskId: UUID!) {
         status
         message
         deploymentId
+        createdOn
+        result
+        startedByStepId
+        startedBy {
+            id
+            type
+        }
+        startedTasks {
+            id
+            type
+            status
+            result
+        }
+        steps {
+            id
+            key
+            name
+            kind
+            status
+            startedAt
+            endedAt
+            durationSeconds
+            attemptCount
+            errors {
+                attempt
+                message
+                occurredAt
+            }
+            error
+            detail
+            rolledBackAt
+            rollbackMessage
+            hasOutput
+            output
+            outputTruncated
+            supersededBy {
+                id
+                type
+            }
+            startedTasks {
+                id
+                type
+                result
+            }
+            noReportSince
+        }
     }
 }

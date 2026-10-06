@@ -1293,7 +1293,10 @@ class Client(AsyncBaseClient):
                     }
                     error
                     detail
+                    rolledBackAt
+                    rollbackMessage
                     hasOutput
+                    outputTruncated
                     supersededBy {
                       id
                       type
@@ -1303,6 +1306,7 @@ class Client(AsyncBaseClient):
                       type
                       result
                     }
+                    noReportSince
                   }
                 }
                 applicationVersion
@@ -1772,6 +1776,52 @@ class Client(AsyncBaseClient):
                 status
                 message
                 deploymentId
+                createdOn
+                result
+                startedByStepId
+                startedBy {
+                  id
+                  type
+                }
+                startedTasks {
+                  id
+                  type
+                  status
+                  result
+                }
+                steps {
+                  id
+                  key
+                  name
+                  kind
+                  status
+                  startedAt
+                  endedAt
+                  durationSeconds
+                  attemptCount
+                  errors {
+                    attempt
+                    message
+                    occurredAt
+                  }
+                  error
+                  detail
+                  rolledBackAt
+                  rollbackMessage
+                  hasOutput
+                  output
+                  outputTruncated
+                  supersededBy {
+                    id
+                    type
+                  }
+                  startedTasks {
+                    id
+                    type
+                    result
+                  }
+                  noReportSince
+                }
               }
             }
             """)

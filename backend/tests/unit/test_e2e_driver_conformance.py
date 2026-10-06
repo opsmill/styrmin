@@ -420,6 +420,10 @@ def test_step_refs_use_the_values_the_step_rows_publish() -> None:
             "hasOutput": False,
             "supersededBy": None,
             "startedTasks": [],
+            "rolledBackAt": None,
+            "rollbackMessage": None,
+            "outputTruncated": False,
+            "noReportSince": None,
         }
     )
     ref = _step_ref(step)
@@ -470,6 +474,10 @@ def test_ui_step_rows_with_failures_match_the_api_step_refs() -> None:
             "hasOutput": True,
             "supersededBy": None,
             "startedTasks": [],
+            "rolledBackAt": None,
+            "rollbackMessage": None,
+            "outputTruncated": False,
+            "noReportSince": None,
         }
     )
     # What _READ_STEP_ROWS_JS returns for the row StepList renders.
@@ -530,6 +538,10 @@ def test_superseded_step_names_the_interrupting_task_on_both_entrypoints() -> No
             "hasOutput": False,
             "supersededBy": {"id": task_id, "type": "start_components"},
             "startedTasks": [],
+            "rolledBackAt": None,
+            "rollbackMessage": None,
+            "outputTruncated": False,
+            "noReportSince": None,
         }
     )
     row = {

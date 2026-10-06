@@ -801,6 +801,35 @@ def test_deployments_apply_wait_terminal_failure_streams_failure_and_exits_one(
     assert lines[-1] == "0 created, 0 updated, 0 unchanged, 1 failed"
 
 
+def test_deployments_apply_wait_failed_line_names_the_failed_step(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """``--wait`` + a failed step → the ``failed`` line keeps its shape and carries the SDK's step reason (FR-012)."""
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    reason = (
+        'step "Install or upgrade the HelmRelease" failed: UpgradeFailed: Helm upgrade failed. '
+        "Pods not ready: my-app-6d9 (app: ImagePullBackOff)"
+    )
+    mock_client.deployments.apply_files = _wait_apply_files_stub(
+        [
+            ("submitted", _outcome("my-app", "updated")),
+            ("terminal", _outcome("my-app", "failed", reason=reason)),
+        ]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest), "--wait"])
+    assert exc.value.code == 1
+
+    output = capsys.readouterr().out
+    lines = [line for line in output.splitlines() if line]
+    assert lines[0] == "submitted my-app"
+    assert lines[1] == f"failed my-app: {reason}"
+    assert lines[-1] == "0 created, 0 updated, 0 unchanged, 1 failed"
+
+
 def test_deployments_apply_wait_partial_update_failure_message_format(
     mock_client: MagicMock,
     capsys: pytest.CaptureFixture[str],
