@@ -168,6 +168,14 @@ rules:
   - "backupstoragelocations"
   verbs:
   - "*"
+# Backup flows read PodVolumeBackups to record one step per component
+- apiGroups:
+  - "velero.io"
+  resources:
+  - "podvolumebackups"
+  verbs:
+  - get
+  - list
 - apiGroups:
   - "batch"
   verbs:

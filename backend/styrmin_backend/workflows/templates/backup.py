@@ -7,11 +7,15 @@ INTERNAL flows (styrmin-work-pool): DB operations, CRD spec building,
 dispatching USER flows, and updating status from results.
 
 USER flows (user-work-pool / K8s Job): K8s operations only (create CRD,
-poll Velero status, return result).
+poll Velero status, return result). They record their steps with the action
+token that the INTERNAL flow passes them (spec 019, research D13).
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
+from functools import partial
 from typing import Any
 from uuid import UUID
 
@@ -20,6 +24,7 @@ from prefect.logging import get_run_logger
 from prefect.client.schemas.objects import StateType
 from prefect.deployments.flow_runs import arun_deployment
 from prefect.runtime import flow_run as flow_run_ctx
+from prefect.states import format_exception
 from prefect.variables import Variable
 
 from styrmin_backend import config
@@ -27,11 +32,21 @@ from styrmin_backend.agent.service.kubernetes.resources.builders.backup import (
     build_velero_backup,
     build_velero_restore,
 )
+from styrmin_backend.agent.service.kubernetes.velero.client import failure_message
 from styrmin_backend.agent.service.kubernetes.velero.resources import (
     VeleroBackupHook,
     VeleroRestoreHook,
 )
+from styrmin_backend.agent.steps.backup_components import (
+    BackupComponentSteps,
+    PodComponents,
+)
+from styrmin_backend.agent.steps.reporter import StepReporter
+from styrmin_backend.agent.tasks.utils import action_job_variables
 from styrmin_backend.db.models import BackupStatus, RestoreStatus
+from styrmin_backend.domain import steps
+from styrmin_backend.domain.models import StepParent
+from styrmin_backend.services.auth.action_token import action_api_token
 from styrmin_backend.services.backup.metadata import (
     BackupMetadata,
     read_backup_metadata,
@@ -50,7 +65,25 @@ from styrmin_backend.services.exceptions import (
     BackupNotFoundError,
     RestoreNotFoundError,
 )
+from styrmin_backend.services.steps.internal_flows import fail_open_steps
 from styrmin_backend.services.unit_of_work import get_unit_of_work
+
+
+@asynccontextmanager
+async def _step_token() -> AsyncIterator[str | None]:
+    """An action token for the USER flow's step writes; None when it cannot be created.
+
+    A step write never fails a backup or restore (spec 019, research D2).
+    """
+    async with AsyncExitStack() as stack:
+        try:
+            token = await stack.enter_async_context(action_api_token())
+        except Exception as exc:  # noqa: BLE001
+            get_run_logger().warning(
+                f"No action token, so the Velero flow records no steps: {exc}"
+            )
+            token = None
+        yield token
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +134,7 @@ async def execute_velero_backup_flow(
     velero_backup_name: str,
     velero_namespace: str,
     timeout: int = 3600,
+    components: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a Velero Backup CRD and poll until completion.
 
@@ -111,6 +145,7 @@ async def execute_velero_backup_flow(
         velero_backup_name: Name of the Velero backup resource.
         velero_namespace: Namespace where Velero resources live.
         timeout: Maximum seconds to wait for backup completion.
+        components: The backup's components; each one is recorded as a step.
 
     Returns:
         The final Velero Backup resource dict from the K8s API.
@@ -128,6 +163,16 @@ async def execute_velero_backup_flow(
     try:
         logger = get_run_logger()
         client = VeleroClient(api_client=api_client)
+        component_steps = BackupComponentSteps(
+            StepReporter.from_env(),
+            components or [],
+            list_items=partial(
+                client.list_pod_volume_backups, velero_namespace, velero_backup_name
+            ),
+            component_of_pod=PodComponents(
+                k8s_client.CoreV1Api(api_client)
+            ).component_of,
+        )
         await client.create_backup_from_dict(crd_body)
         logger.info(
             f"Created Velero Backup CRD {velero_backup_name} "
@@ -138,7 +183,9 @@ async def execute_velero_backup_flow(
             namespace=velero_namespace,
             timeout=timeout,
             interval=config.SETTINGS.agent.poll_retry_delay_seconds,
+            on_poll=component_steps.on_poll,
         )
+        await component_steps.finish(result)
 
         # Store result for cross-worker retrieval via Prefect Variable
         status = result.get("status", {})
@@ -222,55 +269,62 @@ async def execute_velero_restore_flow(
 
     try:
         logger = get_run_logger()
+        reporter = StepReporter.from_env()
 
         # Delete target namespace to ensure a clean restore
         core_v1 = k8s_client.CoreV1Api(api_client)
-        try:
-            await core_v1.delete_namespace(name=target_namespace)
-            logger.info(f"Requested deletion of namespace {target_namespace}")
-        except k8s_client.ApiException as exc:
-            if exc.status != 404:
-                raise
-            logger.info(
-                f"Namespace {target_namespace} does not exist, skipping deletion"
-            )
-
-        # Poll until the namespace is gone (404) or timeout. Heavy
-        # multi-component deployments (e.g. the Infrahub stack: Neo4j alone
-        # ships a 3600s terminationGracePeriod, plus several StatefulSets and
-        # PVCs whose volume teardown adds up) can take well over 5 minutes to
-        # fully terminate, so allow generous headroom — the overall restore
-        # flow budget is 7200s.
-        ns_timeout = 600
-        poll_interval = config.SETTINGS.agent.poll_retry_delay_seconds
-        elapsed = 0
-        while elapsed < ns_timeout:
+        async with reporter.step(*steps.RESTORE_NAMESPACE):
             try:
-                await core_v1.read_namespace(name=target_namespace)
+                await core_v1.delete_namespace(name=target_namespace)
+                logger.info(f"Requested deletion of namespace {target_namespace}")
             except k8s_client.ApiException as exc:
-                if exc.status == 404:
-                    logger.info(f"Namespace {target_namespace} deleted")
-                    break
-                raise
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-        else:
-            raise RuntimeError(
-                f"Namespace {target_namespace} was not deleted within {ns_timeout}s"
-            )
+                if exc.status != 404:
+                    raise
+                logger.info(
+                    f"Namespace {target_namespace} does not exist, skipping deletion"
+                )
+
+            # Poll until the namespace is gone (404) or timeout. Heavy
+            # multi-component deployments (e.g. the Infrahub stack: Neo4j alone
+            # ships a 3600s terminationGracePeriod, plus several StatefulSets and
+            # PVCs whose volume teardown adds up) can take well over 5 minutes to
+            # fully terminate, so allow generous headroom — the overall restore
+            # flow budget is 7200s.
+            ns_timeout = 600
+            poll_interval = config.SETTINGS.agent.poll_retry_delay_seconds
+            elapsed = 0
+            while elapsed < ns_timeout:
+                try:
+                    await core_v1.read_namespace(name=target_namespace)
+                except k8s_client.ApiException as exc:
+                    if exc.status == 404:
+                        logger.info(f"Namespace {target_namespace} deleted")
+                        break
+                    raise
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+            else:
+                raise RuntimeError(
+                    f"Namespace {target_namespace} was not deleted within {ns_timeout}s"
+                )
 
         client = VeleroClient(api_client=api_client)
-        await client.create_restore_from_dict(crd_body)
-        logger.info(
-            f"Created Velero Restore CRD {velero_restore_name} "
-            f"in namespace {velero_namespace}"
-        )
-        result = await client.poll_restore_status(
-            name=velero_restore_name,
-            namespace=velero_namespace,
-            timeout=timeout,
-            interval=config.SETTINGS.agent.poll_retry_delay_seconds,
-        )
+        await reporter.start_step(*steps.RESTORE_VELERO)
+        try:
+            await client.create_restore_from_dict(crd_body)
+            logger.info(
+                f"Created Velero Restore CRD {velero_restore_name} "
+                f"in namespace {velero_namespace}"
+            )
+            result = await client.poll_restore_status(
+                name=velero_restore_name,
+                namespace=velero_namespace,
+                timeout=timeout,
+                interval=config.SETTINGS.agent.poll_retry_delay_seconds,
+            )
+        except Exception as exc:
+            await reporter.fail_step(steps.RESTORE_VELERO.key, format_exception(exc))
+            raise
 
         # Post-velero recovery: claim the CRD's lifecycle, strip kopf
         # state annotations so on.create/on.resume can fire correctly in
@@ -288,6 +342,12 @@ async def execute_velero_restore_flow(
 
         velero_status = result.get("status", {})
         velero_phase = velero_status.get("phase", "")
+        if velero_phase == "Completed":
+            await reporter.succeed_step(steps.RESTORE_VELERO.key)
+        else:
+            await reporter.fail_step(
+                steps.RESTORE_VELERO.key, failure_message("restore", velero_status)
+            )
         # The recreated CR's name, passed in explicitly: for an in-place
         # restore it equals the target namespace (one StyrminDeployment per
         # deployment namespace), but a cross-target restore recreates the
@@ -308,6 +368,7 @@ async def execute_velero_restore_flow(
 
         recovery_status: dict[str, Any] = {"recovered": False, "error": None}
         if velero_phase == "Completed":
+            await reporter.start_step(*steps.RESTORE_RECOVERY)
             try:
                 await mark_restoring(api_client, target_namespace, crd_name)
                 if counterpart_crd_body is None:
@@ -323,9 +384,12 @@ async def execute_velero_restore_flow(
             except Exception as exc:
                 error_msg = f"Restore reapply failed: {exc}"
                 logger.error(error_msg)
+                await reporter.fail_step(steps.RESTORE_RECOVERY.key, error_msg)
                 for name in failure_crd_names:
                     await mark_failed(api_client, target_namespace, name, error_msg)
                 recovery_status["error"] = error_msg
+            else:
+                await reporter.succeed_step(steps.RESTORE_RECOVERY.key)
         else:
             failure_reason = velero_status.get("failureReason") or (
                 f"Velero restore phase: {velero_phase}"
@@ -546,17 +610,27 @@ async def execute_backup_workflow(
         if backup.metadata_ and isinstance(backup.metadata_, dict):
             timeout = read_backup_metadata(backup.metadata_).get("timeout", 3600)
 
-        # Dispatch to USER flow (K8s Job with in-cluster access)
-        flow_run = await arun_deployment(
-            name="execute_velero_backup/execute_velero_backup",
-            parameters={
-                "crd_body": crd_body,
-                "velero_backup_name": velero_backup_name,
-                "velero_namespace": velero_namespace,
-                "timeout": timeout,
-            },
-            poll_interval=config.SETTINGS.agent.poll_interval,
-        )
+        components = [
+            name
+            for name, data in (backup.component_statuses or {}).items()
+            if isinstance(data, dict)
+        ]
+
+        # Dispatch to USER flow (K8s Job with in-cluster access), which records
+        # one step per component with the action token.
+        async with _step_token() as api_token:
+            flow_run = await arun_deployment(
+                name="execute_velero_backup/execute_velero_backup",
+                parameters={
+                    "crd_body": crd_body,
+                    "velero_backup_name": velero_backup_name,
+                    "velero_namespace": velero_namespace,
+                    "timeout": timeout,
+                    "components": components,
+                },
+                job_variables=action_job_variables(api_token, backup_id=backup_uuid),
+                poll_interval=config.SETTINGS.agent.poll_interval,
+            )
 
         # Read result from the USER flow
         if not flow_run.state:
@@ -637,6 +711,8 @@ async def execute_backup_workflow(
 
     except Exception as e:
         logger.error(f"Backup {backup_uuid} failed: {e}")
+        # A failed or crashed USER flow cannot end the steps it was running.
+        await fail_open_steps(StepParent.of_backup(backup_uuid), str(e))
         async with get_unit_of_work() as uow:
             try:
                 await update_backup_status(
@@ -822,20 +898,23 @@ async def execute_restore_workflow(
         if restore.metadata_ and isinstance(restore.metadata_, dict):
             timeout = restore.metadata_.get("timeout", 7200)
 
-        # Dispatch to USER flow (K8s Job with in-cluster access)
-        flow_run = await arun_deployment(
-            name="execute_velero_restore/execute_velero_restore",
-            parameters={
-                "crd_body": crd_body,
-                "velero_restore_name": velero_restore_name,
-                "velero_namespace": velero_namespace,
-                "target_namespace": target_namespace,
-                "timeout": timeout,
-                "restored_crd_name": restored_crd_name,
-                "counterpart_crd_body": counterpart_crd_body,
-            },
-            poll_interval=config.SETTINGS.agent.poll_interval,
-        )
+        # Dispatch to USER flow (K8s Job with in-cluster access), which records
+        # the restore steps with the action token.
+        async with _step_token() as api_token:
+            flow_run = await arun_deployment(
+                name="execute_velero_restore/execute_velero_restore",
+                parameters={
+                    "crd_body": crd_body,
+                    "velero_restore_name": velero_restore_name,
+                    "velero_namespace": velero_namespace,
+                    "target_namespace": target_namespace,
+                    "timeout": timeout,
+                    "restored_crd_name": restored_crd_name,
+                    "counterpart_crd_body": counterpart_crd_body,
+                },
+                job_variables=action_job_variables(api_token, restore_id=restore_uuid),
+                poll_interval=config.SETTINGS.agent.poll_interval,
+            )
 
         # Read result from the USER flow
         if not flow_run.state:
@@ -901,6 +980,8 @@ async def execute_restore_workflow(
 
     except Exception as e:
         logger.error(f"Restore {restore_uuid} failed: {e}")
+        # A failed or crashed USER flow cannot end the steps it was running.
+        await fail_open_steps(StepParent.of_restore(restore_uuid), str(e))
         async with get_unit_of_work() as uow:
             try:
                 await update_restore_status(

@@ -25,6 +25,8 @@ module under test.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -37,6 +39,13 @@ from styrmin_backend.services.backup.ttl import DEFAULT_BACKUP_TTL
 from styrmin_backend.services.exceptions import BackupNotFoundError
 from styrmin_backend.workflows.templates.backup import execute_backup_workflow
 from tests.helpers.unit_of_work import yield_unit_of_work
+
+
+@asynccontextmanager
+async def _fake_action_api_token() -> AsyncIterator[str]:
+    """The action token the flow hands its USER flow for step writes (spec 019)."""
+    yield "action-token"
+
 
 MODULE = "styrmin_backend.workflows.templates.backup"
 
@@ -209,6 +218,8 @@ async def _run_backup_workflow(
         patch(f"{MODULE}.build_velero_backup", MagicMock(side_effect=_record_build)),
         patch(f"{MODULE}.arun_deployment", AsyncMock(return_value=flow_run)),
         patch(f"{MODULE}.Variable", variable),
+        patch(f"{MODULE}.action_api_token", _fake_action_api_token),
+        patch(f"{MODULE}.fail_open_steps", AsyncMock()),
     ):
         if capture_exception:
             try:

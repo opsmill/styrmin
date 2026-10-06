@@ -85,9 +85,7 @@ class StepReporter:
     ) -> AsyncIterator[ReportedStep]:
         """Record the block as a step: started, then succeeded, or failed and re-raised."""
         step = ReportedStep(key=key)
-        step.id = await self._send(
-            StepEvent.STARTED, key=key, fields={"name": name, "kind": kind.name}
-        )
+        step.id = await self.start_step(key, name, kind)
         try:
             yield step
         except Exception as exc:
@@ -99,6 +97,23 @@ class StepReporter:
             )
             raise
         await self._send(StepEvent.SUCCEEDED, key=key, step_id=step.id)
+
+    async def start_step(
+        self, key: str, name: str, kind: StepKind, *, at: datetime | None = None
+    ) -> UUID | None:
+        """Record ``STARTED`` for a step of this parent; returns its id, or None when not written."""
+        return await self._send(
+            StepEvent.STARTED,
+            key=key,
+            fields={"name": name, "kind": kind.name},
+            at=at,
+        )
+
+    async def succeed_step(
+        self, key: str, *, at: datetime | None = None
+    ) -> UUID | None:
+        """Record ``SUCCEEDED`` for a step of this parent that was opened earlier."""
+        return await self._send(StepEvent.SUCCEEDED, key=key, at=at)
 
     async def record_output(
         self, step_id: UUID | None, output: str, truncated: bool
@@ -120,12 +135,13 @@ class StepReporter:
         output: str | None = None,
         *,
         output_truncated: bool = False,
-    ) -> None:
+        at: datetime | None = None,
+    ) -> UUID | None:
         """Record ``FAILED`` for a step of this parent that was opened earlier."""
         fields: dict[str, Any] = {"error": error}
         if output is not None:
             fields |= {"output": output, "outputTruncated": output_truncated}
-        await self._send(StepEvent.FAILED, key=key, fields=fields)
+        return await self._send(StepEvent.FAILED, key=key, fields=fields, at=at)
 
     async def _send(
         self,
@@ -134,8 +150,9 @@ class StepReporter:
         key: str | None = None,
         step_id: UUID | None = None,
         fields: dict[str, Any] | None = None,
+        at: datetime | None = None,
     ) -> UUID | None:
-        """Send one event, addressed by step id when known, else by parent and key."""
+        """Send one event at ``at`` (default now), addressed by step id when known, else by parent and key."""
         if self._token is None or self._parent is None:
             return None
         address = (
@@ -146,7 +163,7 @@ class StepReporter:
         record = {
             **address,
             "event": event.name,
-            "occurredAt": datetime.now(UTC).isoformat(),
+            "occurredAt": (at or datetime.now(UTC)).isoformat(),
             **(fields or {}),
         }
         try:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from loguru import logger
@@ -17,6 +19,34 @@ VELERO_API_VERSION = "v1"
 VELERO_BACKUP_PLURAL = "backups"
 VELERO_RESTORE_PLURAL = "restores"
 VELERO_BSL_PLURAL = "backupstoragelocations"
+VELERO_PVB_PLURAL = "podvolumebackups"
+#: Label Velero puts on the objects it creates for a backup.
+VELERO_BACKUP_NAME_LABEL = "velero.io/backup-name"
+#: Phases after which Velero no longer changes a backup or a restore.
+TERMINAL_PHASES = frozenset(
+    {"Completed", "PartiallyFailed", "Failed", "FailedValidation"}
+)
+_MAX_LABEL_LENGTH = 63
+
+
+def velero_label_value(name: str) -> str:
+    """The label value Velero writes for ``name``, which it cuts and hashes past 63 characters."""
+    if len(name) <= _MAX_LABEL_LENGTH:
+        return name
+    digest = hashlib.sha256(name.encode()).hexdigest()
+    return name[: _MAX_LABEL_LENGTH - 6] + digest[:6]
+
+
+def failure_message(resource: str, status: dict[str, Any]) -> str:
+    """Why Velero did not complete a backup or restore: its validation errors, failure reason or phase."""
+    if errors := status.get("validationErrors"):
+        return f"Velero {resource} failed validation: " + "; ".join(errors)
+    if reason := status.get("failureReason"):
+        return reason
+    message = f"Velero {resource} phase: {status.get('phase', '')}"
+    if count := status.get("errors"):
+        message += f" ({count} errors)"
+    return message
 
 
 class VeleroClientError(Exception):
@@ -240,17 +270,47 @@ class VeleroClient:
                 f"Failed to update BSL credential Secret {secret_name}: {e}"
             ) from e
 
+    async def list_pod_volume_backups(
+        self, namespace: str, backup_name: str
+    ) -> list[dict[str, Any]]:
+        """List the PodVolumeBackups of a Velero Backup, one per backed-up pod volume."""
+        try:
+            result = await self.custom_api.list_namespaced_custom_object(
+                group=VELERO_API_GROUP,
+                version=VELERO_API_VERSION,
+                namespace=namespace,
+                plural=VELERO_PVB_PLURAL,
+                label_selector=(
+                    f"{VELERO_BACKUP_NAME_LABEL}={velero_label_value(backup_name)}"
+                ),
+            )
+        except Exception as e:
+            raise VeleroClientError(
+                f"Failed to list PodVolumeBackups of Velero Backup {backup_name}: {e}"
+            ) from e
+        return result.get("items", [])
+
     async def poll_backup_status(
-        self, name: str, namespace: str, timeout: int = 3600, interval: int = 10
+        self,
+        name: str,
+        namespace: str,
+        timeout: int = 3600,
+        interval: int = 10,
+        on_poll: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
-        """Poll Velero Backup status until completion or timeout."""
+        """Poll Velero Backup status until completion or timeout.
+
+        ``on_poll`` receives the Backup after each poll, the last one included.
+        """
         elapsed = 0
         while elapsed < timeout:
             backup = await self.get_backup(name, namespace)
+            if on_poll is not None:
+                await on_poll(backup)
             status = backup.get("status", {})
             phase = status.get("phase", "")
 
-            if phase in ("Completed", "PartiallyFailed", "Failed"):
+            if phase in TERMINAL_PHASES:
                 return backup
 
             logger.debug(f"Backup {name} phase: {phase}, waiting...")
@@ -269,7 +329,7 @@ class VeleroClient:
             status = restore.get("status", {})
             phase = status.get("phase", "")
 
-            if phase in ("Completed", "PartiallyFailed", "Failed"):
+            if phase in TERMINAL_PHASES:
                 return restore
 
             logger.debug(f"Restore {name} phase: {phase}, waiting...")
