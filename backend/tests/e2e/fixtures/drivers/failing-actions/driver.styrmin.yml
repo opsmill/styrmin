@@ -1,0 +1,47 @@
+---
+# E2E test driver for spec 019 (backend/tests/e2e/test_task_steps.py): the
+# simple-app chart with an upgrade action that fails on purpose for two
+# target versions (see actions.py). The git-server fixture points
+# `helm.main.location` at the in-cluster chart server.
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: failing-actions
+spec:
+  version: "2"
+  supported_versions: ">=0.1,<1.0"
+  info:
+    description: Test driver whose upgrade action fails on purpose
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: simple-app
+      version: 0.1.0
+
+  components:
+    server:
+      container: simple-app
+      identifier:
+        label:
+          app.kubernetes.io/name: simple-app
+
+    database:
+      container: postgresql
+      identifier:
+        label:
+          app.kubernetes.io/name: postgresql
+
+  services:
+    - name: simple-app
+      kind: http
+      scope: internal
+      port: 8000
+      component: server
+
+  actions:
+    - name: upgrade
+      hook: upgrade
+      mode: core
+      description: Fail on purpose for the target versions that ask for it
+      location: "actions.py::upgrade"

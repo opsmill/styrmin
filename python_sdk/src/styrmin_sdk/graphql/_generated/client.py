@@ -60,6 +60,7 @@ from .get_environment_services import GetEnvironmentServices
 from .get_group import GetGroup
 from .get_pod_statuses import GetPodStatuses
 from .get_restore import GetRestore
+from .get_step_output import GetStepOutput
 from .get_task import GetTask
 from .get_user import GetUser
 from .input_types import (
@@ -1725,6 +1726,23 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetBackupSchedule.model_validate(data)
+
+    async def get_step_output(self, step_id: UUID, **kwargs: Any) -> GetStepOutput:
+        query = gql("""
+            query GetStepOutput($stepId: UUID!) {
+              step(stepId: $stepId) {
+                id
+                output
+                outputTruncated
+              }
+            }
+            """)
+        variables: dict[str, object] = {"stepId": step_id}
+        response = await self.execute(
+            query=query, operation_name="GetStepOutput", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return GetStepOutput.model_validate(data)
 
     async def get_task(self, task_id: UUID, **kwargs: Any) -> GetTask:
         query = gql("""
