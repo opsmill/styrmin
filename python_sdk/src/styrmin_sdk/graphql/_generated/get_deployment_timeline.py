@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import Field
 
 from .base_model import BaseModel
+from .enums import StepKind, StepStatus
 
 
 class GetDeploymentTimeline(BaseModel):
@@ -31,6 +32,30 @@ class GetDeploymentTimelineDeploymentTimelineTask(BaseModel):
     message: Optional[str]
     created_on: Optional[datetime] = Field(alias="createdOn")
     updated_on: Optional[datetime] = Field(alias="updatedOn")
+    started_by_step_id: Optional[UUID] = Field(alias="startedByStepId")
+    steps: list["GetDeploymentTimelineDeploymentTimelineTaskSteps"]
+
+
+class GetDeploymentTimelineDeploymentTimelineTaskSteps(BaseModel):
+    id: UUID
+    key: str
+    name: str
+    kind: StepKind
+    status: StepStatus
+    started_at: Optional[datetime] = Field(alias="startedAt")
+    ended_at: Optional[datetime] = Field(alias="endedAt")
+    duration_seconds: Optional[float] = Field(alias="durationSeconds")
+    attempt_count: int = Field(alias="attemptCount")
+    errors: list["GetDeploymentTimelineDeploymentTimelineTaskStepsErrors"]
+    error: Optional[str]
+    detail: Optional[str]
+    has_output: bool = Field(alias="hasOutput")
+
+
+class GetDeploymentTimelineDeploymentTimelineTaskStepsErrors(BaseModel):
+    attempt: int
+    message: str
+    occurred_at: datetime = Field(alias="occurredAt")
 
 
 class GetDeploymentTimelineDeploymentTimelineContextDiff(BaseModel):
@@ -46,4 +71,6 @@ class GetDeploymentTimelineDeploymentTimelineContextDiffChanges(BaseModel):
 
 GetDeploymentTimeline.model_rebuild()
 GetDeploymentTimelineDeploymentTimeline.model_rebuild()
+GetDeploymentTimelineDeploymentTimelineTask.model_rebuild()
+GetDeploymentTimelineDeploymentTimelineTaskSteps.model_rebuild()
 GetDeploymentTimelineDeploymentTimelineContextDiff.model_rebuild()

@@ -1264,6 +1264,26 @@ class Client(AsyncBaseClient):
                   message
                   createdOn
                   updatedOn
+                  startedByStepId
+                  steps {
+                    id
+                    key
+                    name
+                    kind
+                    status
+                    startedAt
+                    endedAt
+                    durationSeconds
+                    attemptCount
+                    errors {
+                      attempt
+                      message
+                      occurredAt
+                    }
+                    error
+                    detail
+                    hasOutput
+                  }
                 }
                 applicationVersion
                 contextDiff {

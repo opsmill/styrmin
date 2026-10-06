@@ -24,6 +24,9 @@ from tests.e2e.drivers.refs import (
     EnvironmentRestoreRef,
     EnvironmentRestoreSkipRef,
     RestoreRef,
+    StepErrorRef,
+    StepRef,
+    TaskLinkRef,
     TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
     TimelineEntry,
 )
@@ -45,6 +48,9 @@ __all__ = [
     "RestoreRef",
     "ScenarioActionError",
     "ScenarioDriver",
+    "StepErrorRef",
+    "StepRef",
     "TERMINAL_ENVIRONMENT_OPERATION_STATUSES",
+    "TaskLinkRef",
     "TimelineEntry",
 ]

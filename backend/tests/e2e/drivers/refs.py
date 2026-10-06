@@ -201,9 +201,55 @@ class EnvironmentCloneRef:
 
 
 @dataclass(frozen=True, slots=True)
+class StepErrorRef:
+    """The error of one failed attempt of a step."""
+
+    attempt: int
+    message: str
+    occurred_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class StepRef:
+    """One step of a task, in the order the API lists them (spec 019).
+
+    ``kind`` and ``status`` are the raw GraphQL enum names (``OPERATOR_PHASE``,
+    ``SUCCEEDED`` …); timestamps are ISO 8601 strings.
+    """
+
+    id: str
+    key: str
+    name: str
+    kind: str
+    status: str
+    started_at: str | None
+    ended_at: str | None
+    attempt_count: int
+    errors: tuple[StepErrorRef, ...]
+    detail: str | None
+    has_output: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TaskLinkRef:
+    """A task that started, or was started by, a timeline entry's task."""
+
+    id: str
+    type: str
+    result: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class TimelineEntry:
     task_id: str
     task_type: str
     task_status: str
     application_version: str | None
     created_on: str | None
+    steps: tuple[StepRef, ...] = ()
+    started_by_step_id: str | None = None
+    # Task.result, Task.startedBy and Task.startedTasks arrive with T071/T074;
+    # both drivers leave these at their defaults until then.
+    result: str | None = None
+    started_by: TaskLinkRef | None = None
+    started_tasks: tuple[TaskLinkRef, ...] = ()

@@ -208,7 +208,16 @@ class ScenarioDriver(Protocol):
 
     async def get_deployment_timeline(
         self, *, deployment_id: str
-    ) -> list[TimelineEntry]: ...
+    ) -> list[TimelineEntry]:
+        """Timeline entries newest first, each with its task's steps in API order.
+
+        API driver: maps ``deploymentTimeline`` from the SDK, steps included.
+
+        UI driver: reads the ``timeline-entry`` and ``step-row`` data attributes
+        of the Timeline tab; collapsed entries keep their steps in the DOM.
+        ``StepRef.errors`` and ``detail`` stay empty there until the step list
+        renders them (T060).
+        """
 
     # --- Environments -----------------------------------------------------
 
