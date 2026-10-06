@@ -2,9 +2,9 @@
 
 The primitives (``open_step``, ``start_step``, ``succeed_step``, ``fail_step``,
 ``record_output``, ``add_pending_steps``, ``ensure_operator_steps``,
-``fail_open_flow_steps``, and the operator-phase ``add_attempt_error``,
-``record_detail`` and ``record_rollback``) run inside the caller's transaction
-and do not commit.
+``supersede_operator_steps``, ``fail_open_flow_steps``, and the operator-phase
+``add_attempt_error``, ``record_detail`` and ``record_rollback``) run inside the
+caller's transaction and do not commit.
 ``record_event`` is the ``recordStep`` entry point and commits.
 
 State rules (data-model "State transitions of a step"): ``succeeded`` and
@@ -184,6 +184,32 @@ async def ensure_operator_steps(task: Task, at: datetime, *, uow: UnitOfWork) ->
     started = Step.create(parent, *first, StepStatus.RUNNING, _utc(at))
     await uow.steps.insert_if_absent(started)
     await add_pending_steps(parent, others, at, uow=uow)
+
+
+async def supersede_operator_steps(
+    deployment_id: UUID, by_task_id: UUID, at: datetime, *, uow: UnitOfWork
+) -> list[Step]:
+    """Supersede the pending and running operator-phase steps of the deployment's other tasks.
+
+    A CR write or a deletion request of ``by_task_id`` interrupts them (research D7).
+    Failed steps keep their failure. Returns the steps this call superseded.
+    """
+    at = _utc(at)
+    open_steps = await uow.steps.list_open_operator_steps_for_deployment(
+        deployment_id, exclude_task_id=by_task_id, for_update=True
+    )
+    return [
+        await _save(
+            step,
+            {
+                "status": StepStatus.SUPERSEDED,
+                "ended_at": _end_time(step, at),
+                "superseded_by_task_id": by_task_id,
+            },
+            uow,
+        )
+        for step in open_steps
+    ]
 
 
 async def succeed_step(step: Step, at: datetime, *, uow: UnitOfWork) -> Step:
@@ -402,7 +428,7 @@ async def _start_by_key(
 
 
 async def _after_success(step: Step, uow: UnitOfWork) -> None:
-    """A succeeded CR write hands the task's rollout to the operator."""
+    """A succeeded CR write interrupts earlier rollouts and hands this one to the operator."""
     if (
         step.status is not StepStatus.SUCCEEDED
         or step.key != STYRMIN_DEPLOYMENT_WRITE.key
@@ -412,6 +438,9 @@ async def _after_success(step: Step, uow: UnitOfWork) -> None:
         return
     task = await uow.tasks.find(step.task_id)
     if task is not None:
+        await supersede_operator_steps(
+            task.deployment_id, task.id, step.ended_at, uow=uow
+        )
         await ensure_operator_steps(task, step.ended_at, uow=uow)
 
 
@@ -436,7 +465,9 @@ async def _apply(record: StepRecord, at: datetime, uow: UnitOfWork) -> Step:
         step = found
     if record.event is StepEvent.SUCCEEDED:
         succeeded = await succeed_step(step, at, uow=uow)
-        await _after_success(succeeded, uow)
+        # A repeated event must not interrupt a rollout that started after the first.
+        if step.status is not StepStatus.SUCCEEDED:
+            await _after_success(succeeded, uow)
         return succeeded
     if record.event is StepEvent.FAILED:
         return await fail_step(
